@@ -78,9 +78,9 @@
   };
 
   CRM.inserir = async (t, obj) => { const r = await store.inserir(t, obj); troca(t, r); reindexa(); CRM.render(); return r; };
-  CRM.inserirVarios = async (t, lista, prog) => {
+  CRM.inserirVarios = async (t, lista, prog, aoErro) => {
     if (!lista.length) return [];
-    const rs = await store.inserirVarios(t, lista, prog);
+    const rs = await store.inserirVarios(t, lista, prog, aoErro);
     rs.forEach(r => troca(t, r)); reindexa(); CRM.render(); return rs;
   };
   CRM.atualizar = async (t, id, patch) => { const r = await store.atualizar(t, id, patch); troca(t, r); reindexa(); CRM.render(); return r; };

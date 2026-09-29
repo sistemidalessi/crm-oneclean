@@ -244,13 +244,27 @@
   };
 
   Supa.prototype.inserir = async function (t, obj) {
-    return unwrap(await this.sb.from(tab(t)).insert(obj).select().single());
+    return unwrap(await this.sb.from(tab(t)).insert(obj, { defaultToNull: false }).select().single());
   };
 
-  Supa.prototype.inserirVarios = async function (t, lista, aoProgresso) {
+  // aoErro(registro, erro): se vier, um lote recusado é regravado um a um e só os registros com
+  // problema ficam de fora (a importação não para por causa de uma linha ruim).
+  Supa.prototype.inserirVarios = async function (t, lista, aoProgresso, aoErro) {
     const out = [];
+    const grava = l => this.sb.from(tab(t)).insert(l, { defaultToNull: false }).select();
     for (let i = 0; i < lista.length; i += LOTE) {
-      out.push(...unwrap(await this.sb.from(tab(t)).insert(lista.slice(i, i + LOTE)).select()));
+      const lote = lista.slice(i, i + LOTE);
+      // defaultToNull: false → campo ausente num registro do lote usa o valor padrão da coluna
+      // (sem isso o PostgREST grava null quando outro registro do mesmo lote tem o campo).
+      const r = await grava(lote);
+      if (!r.error) out.push(...r.data);
+      else if (!aoErro) unwrap(r);
+      else {
+        for (const o of lote) {
+          const u = await grava([o]);
+          if (u.error) aoErro(o, u.error); else out.push(...u.data);
+        }
+      }
       if (aoProgresso) aoProgresso(Math.min(i + LOTE, lista.length), lista.length);
     }
     return out;

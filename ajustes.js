@@ -388,9 +388,11 @@
     CRM.render();
   }
 
+  const NOMES_IMPORT = { opcoes: 'itens de lista', etapas: 'etapas do funil', produtos: 'produtos', empresas: 'empresas', contatos: 'pessoas', negocios: 'negócios', negocio_itens: 'itens de negócio', atividades: 'tarefas/histórico' };
+
   function telaConferir() {
     const pl = imp.plano;
-    const nomes = { opcoes: 'itens de lista', etapas: 'etapas do funil', produtos: 'produtos', empresas: 'empresas', contatos: 'pessoas', negocios: 'negócios', negocio_itens: 'itens de negócio', atividades: 'tarefas/histórico' };
+    const nomes = NOMES_IMPORT;
     const linhas = Object.keys(nomes).map(t => {
       const c = pl.contagem[t] || { criados: pl.criar[t] ? pl.criar[t].length : 0, atualizados: 0, ignorados: 0 };
       const criar = pl.criar[t] ? pl.criar[t].length : 0;
@@ -422,8 +424,9 @@
       for (const t of ordem) {
         const l = pl.criar[t] || [];
         if (!l.length) continue;
-        await CRM.inserirVarios(t, l, (i, tot) => prog('Gravando ' + t + ': ' + i + ' de ' + tot));
-        imp.resultado.criados[t] = l.length;
+        const gravados = await CRM.inserirVarios(t, l, (i, tot) => prog('Gravando ' + (NOMES_IMPORT[t] || t) + ': ' + i + ' de ' + tot),
+          (o, e) => imp.resultado.erros.push((NOMES_IMPORT[t] || t) + ' "' + (o.nome || o.titulo || o.descricao || o.id || '') + '": ' + (e.message || e)));
+        imp.resultado.criados[t] = gravados.length;
       }
       let i = 0;
       const fila = pl.atualizar.slice();
@@ -448,7 +451,7 @@
   function telaFim() {
     const r = imp.resultado;
     return '<section class="cartao"><h2>' + (r.erros.length ? 'Importação terminou com problemas' : 'Importação concluída ✔') + '</h2><ul>' +
-      Object.keys(r.criados).map(t => '<li>' + r.criados[t] + ' ' + esc(t) + ' criados</li>').join('') + '<li>' + r.atualizados + ' cadastros completados</li>' +
+      Object.keys(r.criados).map(t => '<li>' + esc(NOMES_IMPORT[t] || t) + ': ' + r.criados[t] + ' gravados</li>').join('') + '<li>' + r.atualizados + ' cadastros completados</li>' +
       '<li>' + imp.plano.ignorados.length + ' linhas ignoradas</li><li>' + r.segundos + ' segundos</li></ul>' +
       (r.erros.length ? '<h3>Erros</h3><pre class="erros">' + esc(r.erros.slice(0, 50).join('\n')) + '</pre><p class="dica">Rodar a mesma importação de novo é seguro: o que já entrou não duplica.</p>' : '') +
       '<p><button type="button" class="btn" data-acao="import-cancelar">Fazer outra importação</button> <button type="button" class="btn sec" data-acao="aba" data-id="empresas">Ver empresas</button></p></section>';
