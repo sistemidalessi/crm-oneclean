@@ -31,6 +31,33 @@ dados precisavam vir de lá. A migração é o caminho mais sensível do sistema
 - Esta é a cópia viva do código. A origem foi `sistemi-dalessi/crm/`, que fica só
   como histórico; mudança nova entra aqui.
 
+## ONDE PARAMOS (29/09/2026, noite) — retomar daqui
+
+- **Importação do Agendor feita** no banco real: 2.045 empresas, 28 pessoas, 3.141
+  negócios, 5.537 tarefas. Conferida com o relatório do Agendor de setembro (Funil de
+  Vendas): ganhos 104 / R$ 122.502,16 e perdidos 66 / R$ 150.302,78 batem; "iniciados"
+  deu 493 × 521 e "em andamento" 2.342 × 2.340, provavelmente pelo que mudou no Agendor
+  depois da extração.
+- **Esperando o Anderson decidir:** avisos inflados no Início (943 "leads sem
+  atendimento", porque o histórico com mais de 31 dias não sai pela API; 851 "negócios
+  parados"). Proposta: "leads sem atendimento" só para empresas cadastradas a partir de
+  01/10/2026, ou trazer o histórico por planilha (Importar → Planilha → Tarefas e histórico).
+- **Lições da importação real (já corrigidas, não reintroduzir):**
+  - Insert em lote precisa de `defaultToNull: false`: sem isso o PostgREST grava null
+    no campo que falta num registro quando outro do mesmo lote o tem (quebrou em
+    `criado_em`). Lote recusado agora é regravado um a um (`aoErro`).
+  - Negócio/pessoa sem empresa procura a empresa pelo nome de reserva antes de criar
+    (`nomeDeReserva`: tira "1096 - " do começo e " - NOME" em maiúsculas do fim). Antes
+    cada negócio virava uma empresa; o banco foi acertado por SQL com a mesma regra.
+  - **Nunca pôr nome real de cliente em teste nem em commit** (repositório público):
+    os testes usam nomes fictícios no mesmo formato.
+- **Visual:** `config.js` → `cores` (principal `#175b6d`, destaque `#a9c451`, do logo),
+  `logo`/`logoIcone` (assets/oneclean-*.png, recortados do logo enviado) e
+  `logoNoMenu: 'completo'`. Menu "Atividades" (era "Agenda"), abas de funil, painel dos
+  Relatórios por funil com os nomes do Agendor.
+- Pendências do Anderson e próximos passos: seção "Pendente" do `CLAUDE.md` do
+  `sistemi-dalessi`.
+
 ## Arquitetura
 
 - **Estático, sem build, sem npm.** Scripts clássicos (não módulos) carregados em
