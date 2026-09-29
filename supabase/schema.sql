@@ -1,0 +1,503 @@
+-- CRM Sistemi Dalessi — esquema completo + RLS (v2: equipe de vendas).
+--
+-- Rodar num projeto Supabase PRÓPRIO de cada cliente (um banco por empresa;
+-- nunca misturar com o banco de outro sistema). SQL Editor -> colar -> Run.
+-- Pode rodar de novo: "if not exists" nas tabelas/colunas, "or replace" nas
+-- funções, drop/create nas políticas e triggers. Não apaga dado.
+--
+-- Papéis (crm_usuarios.papel):
+--   admin    - tudo, inclusive usuários e configurações;
+--   gestor   - vê e edita a base inteira, redistribui carteira, relatórios, configurações;
+--   vendedor - vê só a PRÓPRIA carteira: empresas em que é responsável, ou em que
+--              tem negócio. Não troca o responsável, não apaga empresa nem negócio.
+-- Quem não está em crm_usuarios (ou está com ativo = false) não vê nada.
+--
+-- Lições da auditoria de 11/09/2026 aplicadas: nenhuma política "using (true)";
+-- SECURITY DEFINER sempre com search_path fixo e sem execute para anon; anon
+-- sem privilégio em tabela nenhuma; desligar o cadastro público do Auth na tela
+-- (Authentication -> Sign In / Providers -> "Allow new users to sign up" = off).
+
+-- =================================================================== usuários
+create table if not exists public.crm_usuarios (
+  user_id      uuid primary key references auth.users(id) on delete cascade,
+  nome         text not null check (length(btrim(nome)) > 0),
+  email        text,
+  papel        text not null default 'vendedor' check (papel in ('admin','gestor','vendedor')),
+  equipe       text,
+  ativo        boolean not null default true,
+  recebe_leads boolean not null default true,
+  criado_em    timestamptz not null default now(),
+  atualizado_em timestamptz not null default now()
+);
+
+create or replace function public.crm_papel()
+returns text language sql stable security definer set search_path = public as $$
+  select papel from public.crm_usuarios where user_id = auth.uid() and ativo;
+$$;
+create or replace function public.crm_eh_membro()
+returns boolean language sql stable security definer set search_path = public as $$
+  select public.crm_papel() is not null;
+$$;
+create or replace function public.crm_eh_gestor()
+returns boolean language sql stable security definer set search_path = public as $$
+  select coalesce(public.crm_papel() in ('admin','gestor'), false);
+$$;
+create or replace function public.crm_eh_admin()
+returns boolean language sql stable security definer set search_path = public as $$
+  select coalesce(public.crm_papel() = 'admin', false);
+$$;
+
+create or replace function public.crm_toca_atualizado_em()
+returns trigger language plpgsql set search_path = public as $$
+begin
+  new.atualizado_em := now();
+  return new;
+end;
+$$;
+
+-- =================================================================== configuração
+create table if not exists public.crm_config (
+  id            int primary key default 1 check (id = 1),
+  dados         jsonb not null default '{}'::jsonb,
+  atualizado_em timestamptz not null default now()
+);
+insert into public.crm_config (id) values (1) on conflict (id) do nothing;
+
+create table if not exists public.crm_etapas (
+  id            uuid primary key default gen_random_uuid(),
+  funil         text not null default 'Vendas',
+  nome          text not null check (length(btrim(nome)) > 0),
+  ordem         int not null default 0,
+  probabilidade int not null default 0 check (probabilidade between 0 and 100),
+  externo_id    text,
+  criado_em     timestamptz not null default now(),
+  atualizado_em timestamptz not null default now()
+);
+
+-- Listas editáveis: origem, segmento, motivo_perda.
+create table if not exists public.crm_opcoes (
+  id            uuid primary key default gen_random_uuid(),
+  tipo          text not null check (tipo in ('origem','segmento','motivo_perda')),
+  nome          text not null check (length(btrim(nome)) > 0),
+  ordem         int not null default 0,
+  criado_em     timestamptz not null default now(),
+  atualizado_em timestamptz not null default now(),
+  unique (tipo, nome)
+);
+
+create table if not exists public.crm_produtos (
+  id            uuid primary key default gen_random_uuid(),
+  nome          text not null check (length(btrim(nome)) > 0),
+  codigo        text,
+  unidade       text,
+  categoria     text,
+  preco         numeric(14,2) not null default 0 check (preco >= 0),
+  ativo         boolean not null default true,
+  externo_id    text,
+  criado_em     timestamptz not null default now(),
+  atualizado_em timestamptz not null default now()
+);
+
+create table if not exists public.crm_modelos (
+  id            uuid primary key default gen_random_uuid(),
+  nome          text not null check (length(btrim(nome)) > 0),
+  canal         text not null default 'whatsapp' check (canal in ('whatsapp','email')),
+  assunto       text,
+  corpo         text not null default '',
+  criado_em     timestamptz not null default now(),
+  atualizado_em timestamptz not null default now()
+);
+
+create table if not exists public.crm_metas (
+  id            uuid primary key default gen_random_uuid(),
+  usuario_id    uuid not null references public.crm_usuarios(user_id) on delete cascade,
+  mes           date not null check (extract(day from mes) = 1),
+  valor         numeric(14,2) not null default 0 check (valor >= 0),
+  criado_em     timestamptz not null default now(),
+  atualizado_em timestamptz not null default now(),
+  unique (usuario_id, mes)
+);
+
+create table if not exists public.crm_filtros (
+  id            uuid primary key default gen_random_uuid(),
+  usuario_id    uuid not null default auth.uid() references public.crm_usuarios(user_id) on delete cascade,
+  tela          text not null,
+  nome          text not null check (length(btrim(nome)) > 0),
+  filtros       jsonb not null default '{}'::jsonb,
+  criado_em     timestamptz not null default now(),
+  atualizado_em timestamptz not null default now()
+);
+
+-- =================================================================== base comercial
+create table if not exists public.crm_empresas (
+  id                  uuid primary key default gen_random_uuid(),
+  nome                text not null check (length(btrim(nome)) > 0),
+  razao_social        text,
+  cnpj                text,
+  situacao            text not null default 'lead' check (situacao in ('lead','prospect','cliente','inativo')),
+  segmento            text,
+  origem              text,
+  qualificacao        int not null default 0 check (qualificacao between 0 and 5),
+  responsavel_id      uuid references public.crm_usuarios(user_id) on delete set null,
+  telefone            text,
+  whatsapp            text,
+  email               text,
+  site                text,
+  cep                 text,
+  logradouro          text,
+  numero              text,
+  complemento         text,
+  bairro              text,
+  cidade              text,
+  uf                  text,
+  tags                text[] not null default '{}',
+  observacoes         text,
+  ciclo_recompra_dias int check (ciclo_recompra_dias is null or ciclo_recompra_dias > 0),
+  externo_id          text,
+  criado_por          uuid default auth.uid(),
+  criado_em           timestamptz not null default now(),
+  atualizado_em       timestamptz not null default now()
+);
+
+create table if not exists public.crm_contatos (
+  id            uuid primary key default gen_random_uuid(),
+  empresa_id    uuid not null references public.crm_empresas(id) on delete cascade,
+  nome          text not null check (length(btrim(nome)) > 0),
+  cargo         text,
+  telefone      text,
+  celular       text,
+  whatsapp      text,
+  email         text,
+  principal     boolean not null default false,
+  aniversario   date,
+  tags          text[] not null default '{}',
+  observacoes   text,
+  externo_id    text,
+  criado_por    uuid default auth.uid(),
+  criado_em     timestamptz not null default now(),
+  atualizado_em timestamptz not null default now()
+);
+
+create table if not exists public.crm_negocios (
+  id                  uuid primary key default gen_random_uuid(),
+  empresa_id          uuid not null references public.crm_empresas(id) on delete cascade,
+  contato_id          uuid references public.crm_contatos(id) on delete set null,
+  titulo              text not null check (length(btrim(titulo)) > 0),
+  etapa_id            uuid references public.crm_etapas(id) on delete set null,
+  status              text not null default 'aberto' check (status in ('aberto','ganho','perdido')),
+  valor               numeric(14,2) not null default 0 check (valor >= 0),
+  probabilidade       int check (probabilidade is null or probabilidade between 0 and 100),
+  previsao_fechamento date,
+  responsavel_id      uuid references public.crm_usuarios(user_id) on delete set null,
+  origem              text,
+  motivo_perda        text,
+  fechado_em          date,
+  etapa_desde         timestamptz not null default now(),
+  observacoes         text,
+  externo_id          text,
+  criado_por          uuid default auth.uid(),
+  criado_em           timestamptz not null default now(),
+  atualizado_em       timestamptz not null default now()
+);
+
+create table if not exists public.crm_negocio_itens (
+  id            uuid primary key default gen_random_uuid(),
+  negocio_id    uuid not null references public.crm_negocios(id) on delete cascade,
+  produto_id    uuid references public.crm_produtos(id) on delete set null,
+  descricao     text not null check (length(btrim(descricao)) > 0),
+  quantidade    numeric(14,3) not null default 1 check (quantidade > 0),
+  preco         numeric(14,2) not null default 0 check (preco >= 0),
+  desconto      numeric(5,2) not null default 0 check (desconto between 0 and 100),
+  ordem         int not null default 0,
+  criado_em     timestamptz not null default now(),
+  atualizado_em timestamptz not null default now()
+);
+
+create table if not exists public.crm_propostas (
+  id            uuid primary key default gen_random_uuid(),
+  numero        bigint generated by default as identity,
+  negocio_id    uuid not null references public.crm_negocios(id) on delete cascade,
+  status        text not null default 'rascunho' check (status in ('rascunho','enviada','aprovada','recusada')),
+  enviada_em    date,
+  validade      date,
+  respondida_em date,
+  itens         jsonb not null default '[]'::jsonb,
+  valor_total   numeric(14,2) not null default 0,
+  condicoes     text,
+  observacoes   text,
+  link_anexo    text,
+  criado_por    uuid default auth.uid(),
+  criado_em     timestamptz not null default now(),
+  atualizado_em timestamptz not null default now()
+);
+
+-- Atividade: registro (concluida = true) ou tarefa agendada (concluida = false).
+create table if not exists public.crm_atividades (
+  id             uuid primary key default gen_random_uuid(),
+  empresa_id     uuid not null references public.crm_empresas(id) on delete cascade,
+  contato_id     uuid references public.crm_contatos(id) on delete set null,
+  negocio_id     uuid references public.crm_negocios(id) on delete set null,
+  tipo           text not null default 'tarefa'
+                 check (tipo in ('tarefa','ligacao','reuniao','visita','email','whatsapp','proposta','nota','ocorrencia','sistema')),
+  descricao      text not null check (length(btrim(descricao)) > 0),
+  data_hora      timestamptz not null default now(),
+  concluida      boolean not null default false,
+  concluida_em   timestamptz,
+  responsavel_id uuid references public.crm_usuarios(user_id) on delete set null,
+  recorrencia    text check (recorrencia is null or recorrencia in ('diaria','semanal','quinzenal','mensal')),
+  automatica     boolean not null default false,
+  externo_id     text,
+  criado_por     uuid default auth.uid(),
+  criado_em      timestamptz not null default now(),
+  atualizado_em  timestamptz not null default now()
+);
+
+-- Histórico de alterações (só o trigger escreve; só gestor lê).
+create table if not exists public.crm_historico (
+  id          bigint generated always as identity primary key,
+  tabela      text not null,
+  registro_id uuid,
+  empresa_id  uuid,
+  acao        text not null,
+  usuario_id  uuid default auth.uid(),
+  quando      timestamptz not null default now(),
+  mudancas    jsonb
+);
+
+-- =================================================================== índices
+create index if not exists crm_empresas_resp_idx     on public.crm_empresas (responsavel_id);
+create index if not exists crm_empresas_cnpj_idx     on public.crm_empresas (cnpj) where cnpj is not null;
+create unique index if not exists crm_empresas_ext_uq on public.crm_empresas (externo_id) where externo_id is not null;
+create index if not exists crm_contatos_empresa_idx  on public.crm_contatos (empresa_id);
+create unique index if not exists crm_contatos_ext_uq on public.crm_contatos (externo_id) where externo_id is not null;
+create index if not exists crm_negocios_empresa_idx  on public.crm_negocios (empresa_id);
+create index if not exists crm_negocios_resp_idx     on public.crm_negocios (responsavel_id);
+create unique index if not exists crm_negocios_ext_uq on public.crm_negocios (externo_id) where externo_id is not null;
+create index if not exists crm_itens_negocio_idx     on public.crm_negocio_itens (negocio_id);
+create index if not exists crm_propostas_negocio_idx on public.crm_propostas (negocio_id);
+create index if not exists crm_atividades_empresa_idx on public.crm_atividades (empresa_id);
+create index if not exists crm_atividades_resp_idx   on public.crm_atividades (responsavel_id, concluida, data_hora);
+create unique index if not exists crm_atividades_ext_uq on public.crm_atividades (externo_id) where externo_id is not null;
+create unique index if not exists crm_etapas_ext_uq  on public.crm_etapas (externo_id) where externo_id is not null;
+create unique index if not exists crm_produtos_ext_uq on public.crm_produtos (externo_id) where externo_id is not null;
+create index if not exists crm_historico_empresa_idx on public.crm_historico (empresa_id, quando desc);
+
+-- =================================================================== visibilidade
+create or replace function public.crm_ve_empresa(e uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select public.crm_eh_gestor()
+      or (public.crm_eh_membro() and (
+            exists (select 1 from public.crm_empresas where id = e and responsavel_id = auth.uid())
+         or exists (select 1 from public.crm_negocios where empresa_id = e and responsavel_id = auth.uid())));
+$$;
+
+create or replace function public.crm_ve_negocio(n uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.crm_negocios x where x.id = n
+                 and (public.crm_eh_gestor() or x.responsavel_id = auth.uid() or public.crm_ve_empresa(x.empresa_id)));
+$$;
+
+create or replace function public.crm_edita_negocio(n uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select public.crm_eh_membro() and exists (select 1 from public.crm_negocios x where x.id = n
+                 and (public.crm_eh_gestor() or x.responsavel_id = auth.uid()));
+$$;
+
+-- Rodízio de leads: o vendedor ativo (que recebe leads) com menos empresas
+-- recebidas nos últimos 30 dias. Precisa ser no servidor porque o vendedor
+-- não enxerga a carteira dos outros.
+create or replace function public.crm_proximo_vendedor()
+returns uuid language sql stable security definer set search_path = public as $$
+  select u.user_id
+    from public.crm_usuarios u
+   where public.crm_eh_membro() and u.ativo and u.recebe_leads
+   order by (select count(*) from public.crm_empresas e
+              where e.responsavel_id = u.user_id and e.criado_em > now() - interval '30 days'),
+            u.nome
+   limit 1;
+$$;
+
+-- =================================================================== triggers
+create or replace function public.crm_marca_etapa()
+returns trigger language plpgsql set search_path = public as $$
+begin
+  if new.etapa_id is distinct from old.etapa_id or new.status is distinct from old.status then
+    new.etapa_desde := now();
+  end if;
+  return new;
+end;
+$$;
+
+create or replace function public.crm_audita()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  antes jsonb := case when tg_op in ('UPDATE','DELETE') then to_jsonb(old) end;
+  depois jsonb := case when tg_op in ('INSERT','UPDATE') then to_jsonb(new) end;
+  linha jsonb := coalesce(depois, antes);
+  mud jsonb;
+  emp uuid;
+begin
+  if tg_op = 'UPDATE' then
+    select jsonb_object_agg(k, jsonb_build_array(antes -> k, depois -> k)) into mud
+      from jsonb_object_keys(depois) k
+     where k not in ('atualizado_em','etapa_desde') and (antes -> k) is distinct from (depois -> k);
+    if mud is null then return new; end if;
+  elsif tg_op = 'DELETE' then
+    mud := antes;
+  end if;
+  emp := case when tg_table_name = 'crm_empresas' then (linha ->> 'id')::uuid
+              else nullif(linha ->> 'empresa_id', '')::uuid end;
+  insert into public.crm_historico (tabela, registro_id, empresa_id, acao, mudancas)
+  values (tg_table_name, nullif(coalesce(linha ->> 'id', linha ->> 'user_id'), '')::uuid, emp, lower(tg_op), mud);
+  return coalesce(new, old);
+end;
+$$;
+revoke all on function public.crm_audita() from public, anon, authenticated;
+
+do $$
+declare
+  t text;
+begin
+  foreach t in array array['crm_usuarios','crm_config','crm_etapas','crm_opcoes','crm_produtos','crm_modelos',
+                           'crm_metas','crm_filtros','crm_empresas','crm_contatos','crm_negocios',
+                           'crm_negocio_itens','crm_propostas','crm_atividades']
+  loop
+    execute format('drop trigger if exists %I on public.%I', t || '_atualizado_em', t);
+    execute format('create trigger %I before update on public.%I for each row execute function public.crm_toca_atualizado_em()',
+                   t || '_atualizado_em', t);
+    execute format('alter table public.%I enable row level security', t);
+    execute format('revoke all on public.%I from anon, public', t);
+    execute format('grant select, insert, update, delete on public.%I to authenticated', t);
+  end loop;
+
+  foreach t in array array['crm_empresas','crm_contatos','crm_negocios','crm_propostas','crm_usuarios','crm_etapas','crm_produtos']
+  loop
+    execute format('drop trigger if exists %I on public.%I', t || '_audita', t);
+    execute format('create trigger %I after insert or update or delete on public.%I for each row execute function public.crm_audita()',
+                   t || '_audita', t);
+  end loop;
+end;
+$$;
+
+drop trigger if exists crm_negocios_etapa on public.crm_negocios;
+create trigger crm_negocios_etapa before update on public.crm_negocios
+  for each row execute function public.crm_marca_etapa();
+
+alter table public.crm_historico enable row level security;
+revoke all on public.crm_historico from anon, public, authenticated;
+grant select on public.crm_historico to authenticated;
+
+-- =================================================================== políticas
+do $$
+declare
+  t text;
+  p record;
+begin
+  -- Recomeça do zero as políticas das tabelas do CRM (rodar de novo não acumula).
+  for p in select policyname, tablename from pg_policies where schemaname = 'public' and tablename like 'crm\_%'
+  loop
+    execute format('drop policy %I on public.%I', p.policyname, p.tablename);
+  end loop;
+
+  -- Cadastros de configuração: todo membro lê; gestor/admin escreve.
+  foreach t in array array['crm_config','crm_etapas','crm_opcoes','crm_produtos','crm_modelos']
+  loop
+    execute format('create policy le on public.%I for select to authenticated using (public.crm_eh_membro())', t);
+    execute format('create policy grava on public.%I for insert to authenticated with check (public.crm_eh_gestor())', t);
+    execute format('create policy altera on public.%I for update to authenticated using (public.crm_eh_gestor()) with check (public.crm_eh_gestor())', t);
+    execute format('create policy apaga on public.%I for delete to authenticated using (public.crm_eh_gestor())', t);
+  end loop;
+end;
+$$;
+
+-- usuários: membro vê a equipe (para nomes e filtros); só admin mexe.
+create policy le on public.crm_usuarios for select to authenticated using (public.crm_eh_membro());
+create policy grava on public.crm_usuarios for insert to authenticated with check (public.crm_eh_admin());
+create policy altera on public.crm_usuarios for update to authenticated using (public.crm_eh_admin()) with check (public.crm_eh_admin());
+create policy apaga on public.crm_usuarios for delete to authenticated using (public.crm_eh_admin());
+
+-- metas: vendedor vê a própria; gestor vê e define todas.
+create policy le on public.crm_metas for select to authenticated using (public.crm_eh_gestor() or (public.crm_eh_membro() and usuario_id = auth.uid()));
+create policy grava on public.crm_metas for insert to authenticated with check (public.crm_eh_gestor());
+create policy altera on public.crm_metas for update to authenticated using (public.crm_eh_gestor()) with check (public.crm_eh_gestor());
+create policy apaga on public.crm_metas for delete to authenticated using (public.crm_eh_gestor());
+
+-- filtros salvos: cada um os seus.
+create policy proprios on public.crm_filtros for all to authenticated
+  using (public.crm_eh_membro() and usuario_id = auth.uid())
+  with check (public.crm_eh_membro() and usuario_id = auth.uid());
+
+-- empresas: carteira própria.
+create policy le on public.crm_empresas for select to authenticated using (public.crm_ve_empresa(id));
+create policy grava on public.crm_empresas for insert to authenticated
+  with check (public.crm_eh_gestor() or (public.crm_eh_membro() and responsavel_id = auth.uid()));
+create policy altera on public.crm_empresas for update to authenticated
+  using (public.crm_eh_gestor() or (public.crm_eh_membro() and responsavel_id = auth.uid()))
+  with check (public.crm_eh_gestor() or (public.crm_eh_membro() and responsavel_id = auth.uid()));
+create policy apaga on public.crm_empresas for delete to authenticated using (public.crm_eh_gestor());
+
+-- contatos: acompanham a empresa.
+create policy tudo on public.crm_contatos for all to authenticated
+  using (public.crm_ve_empresa(empresa_id)) with check (public.crm_ve_empresa(empresa_id));
+
+-- negócios: dono do negócio ou quem vê a empresa enxerga; só dono/gestor altera.
+create policy le on public.crm_negocios for select to authenticated
+  using (public.crm_eh_gestor() or (public.crm_eh_membro() and responsavel_id = auth.uid()) or public.crm_ve_empresa(empresa_id));
+create policy grava on public.crm_negocios for insert to authenticated
+  with check (public.crm_eh_gestor() or (public.crm_eh_membro() and responsavel_id = auth.uid() and public.crm_ve_empresa(empresa_id)));
+create policy altera on public.crm_negocios for update to authenticated
+  using (public.crm_eh_gestor() or (public.crm_eh_membro() and responsavel_id = auth.uid()))
+  with check (public.crm_eh_gestor() or (public.crm_eh_membro() and responsavel_id = auth.uid()));
+create policy apaga on public.crm_negocios for delete to authenticated using (public.crm_eh_gestor());
+
+-- itens e propostas: acompanham o negócio.
+create policy le on public.crm_negocio_itens for select to authenticated using (public.crm_ve_negocio(negocio_id));
+create policy grava on public.crm_negocio_itens for insert to authenticated with check (public.crm_edita_negocio(negocio_id));
+create policy altera on public.crm_negocio_itens for update to authenticated using (public.crm_edita_negocio(negocio_id)) with check (public.crm_edita_negocio(negocio_id));
+create policy apaga on public.crm_negocio_itens for delete to authenticated using (public.crm_edita_negocio(negocio_id));
+create policy le on public.crm_propostas for select to authenticated using (public.crm_ve_negocio(negocio_id));
+create policy grava on public.crm_propostas for insert to authenticated with check (public.crm_edita_negocio(negocio_id));
+create policy altera on public.crm_propostas for update to authenticated using (public.crm_edita_negocio(negocio_id)) with check (public.crm_edita_negocio(negocio_id));
+create policy apaga on public.crm_propostas for delete to authenticated using (public.crm_edita_negocio(negocio_id));
+
+-- atividades: quem vê a empresa vê o histórico; pode agendar para colega.
+create policy le on public.crm_atividades for select to authenticated
+  using (public.crm_eh_gestor() or (public.crm_eh_membro() and responsavel_id = auth.uid()) or public.crm_ve_empresa(empresa_id));
+create policy grava on public.crm_atividades for insert to authenticated with check (public.crm_ve_empresa(empresa_id));
+create policy altera on public.crm_atividades for update to authenticated
+  using (public.crm_eh_gestor() or (public.crm_eh_membro() and (responsavel_id = auth.uid() or criado_por = auth.uid())))
+  with check (public.crm_ve_empresa(empresa_id));
+create policy apaga on public.crm_atividades for delete to authenticated
+  using (public.crm_eh_gestor() or (public.crm_eh_membro() and (responsavel_id = auth.uid() or criado_por = auth.uid())));
+
+-- histórico: só gestor lê.
+create policy le on public.crm_historico for select to authenticated using (public.crm_eh_gestor());
+
+-- =================================================================== permissões de função
+revoke all on function public.crm_papel(), public.crm_eh_membro(), public.crm_eh_gestor(), public.crm_eh_admin(),
+  public.crm_ve_empresa(uuid), public.crm_ve_negocio(uuid), public.crm_edita_negocio(uuid),
+  public.crm_proximo_vendedor() from public, anon;
+grant execute on function public.crm_papel(), public.crm_eh_membro(), public.crm_eh_gestor(), public.crm_eh_admin(),
+  public.crm_ve_empresa(uuid), public.crm_ve_negocio(uuid), public.crm_edita_negocio(uuid),
+  public.crm_proximo_vendedor() to authenticated;
+revoke all on function public.crm_toca_atualizado_em(), public.crm_marca_etapa() from public, anon, authenticated;
+
+-- =================================================================== dados iniciais
+-- Só entram se a lista estiver vazia (instalação nova). A importação do Agendor
+-- traz as etapas e listas de lá.
+insert into public.crm_etapas (funil, nome, ordem, probabilidade)
+select 'Vendas', x.nome, x.ordem, x.prob
+  from (values ('Prospecção', 1, 10), ('Contato feito', 2, 20), ('Qualificação', 3, 40),
+               ('Proposta enviada', 4, 60), ('Negociação', 5, 80)) as x(nome, ordem, prob)
+ where not exists (select 1 from public.crm_etapas);
+
+insert into public.crm_opcoes (tipo, nome, ordem)
+select x.tipo, x.nome, x.ordem
+  from (values
+    ('origem','Indicação',1), ('origem','Site',2), ('origem','Google',3), ('origem','Instagram',4),
+    ('origem','WhatsApp',5), ('origem','Prospecção ativa',6), ('origem','Feira/Evento',7), ('origem','Cliente antigo',8),
+    ('motivo_perda','Preço',1), ('motivo_perda','Comprou do concorrente',2), ('motivo_perda','Prazo de entrega',3),
+    ('motivo_perda','Sem orçamento',4), ('motivo_perda','Sem retorno do cliente',5), ('motivo_perda','Produto não atende',6),
+    ('motivo_perda','Não era o momento',7)
+  ) as x(tipo, nome, ordem)
+ where not exists (select 1 from public.crm_opcoes);

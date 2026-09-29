@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- CSP: nada inline (nem <script>, nem onclick=, nem style=). Script externo só o
+     supabase-js do jsDelivr, com SRI (app.js). Conexões: Supabase; links de
+     WhatsApp/Maps/Agenda abrem em outra aba e não precisam estar aqui. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self'; img-src 'self' data:; connect-src 'self' https://*.supabase.co wss://*.supabase.co; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<title>CRM</title>
+<link rel="icon" href="assets/logo.jpg">
+<link rel="stylesheet" href="crm.css">
+</head>
+<body>
+<div id="tela"></div>
+
+<div id="app" class="app" hidden>
+  <aside class="lateral">
+    <div class="marca"><img id="logoTopo" src="assets/logo.jpg" alt="" class="logo"><div><strong id="nomeTopo">CRM</strong><span>CRM</span></div></div>
+    <nav id="menuLateral" class="menu-lateral" aria-label="Seções"></nav>
+    <p class="assinatura">Sistemi Dalessi</p>
+  </aside>
+  <div class="principal">
+    <header class="topo">
+      <div class="busca">
+        <input type="search" id="buscaGlobal" placeholder="Buscar empresa, pessoa, telefone, e-mail, negócio, nº da proposta…  (Ctrl+K)" autocomplete="off" aria-label="Busca">
+        <div id="resultadosBusca" class="resultados-busca" hidden></div>
+      </div>
+      <select id="visao" aria-label="Carteira" title="Ver a equipe toda ou a carteira de um vendedor" hidden></select>
+      <button type="button" class="btn ouro" data-acao="novo-menu">+ Novo</button>
+      <button type="button" id="sino" class="sino" data-acao="sino" aria-label="Alertas"></button>
+      <button type="button" id="usuarioTopo" class="usuario-topo" data-acao="menu-usuario"></button>
+    </header>
+    <div id="faixaModo" class="faixa" hidden>Modo local: os dados ficam só neste navegador. Para a equipe usar de qualquer computador, ligue o Supabase (crm/README.md).</div>
+    <main id="conteudo" class="conteudo"></main>
+  </div>
+</div>
+
+<dialog id="dlgEmpresa" class="dlg ficha-dlg"></dialog>
+<dialog id="dlgNegocio" class="dlg ficha-dlg media"></dialog>
+<dialog id="dlgForm" class="dlg"></dialog>
+<div id="impressao" class="impressao"></div>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<script src="config.js"></script>
+<script src="regras.js"></script>
+<script src="dados.js"></script>
+<script src="planilha.js"></script>
+<script src="xlsx-leitor.js"></script>
+<script src="ui.js"></script>
+<script src="app.js"></script>
+<script src="telas.js"></script>
+<script src="fichas.js"></script>
+<script src="ajustes.js"></script>
+</body>
+</html>

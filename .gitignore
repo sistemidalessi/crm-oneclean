@@ -1,0 +1,7 @@
+# Exportação do Agendor: tem dados pessoais de clientes. NUNCA versionar.
+agendor-exportado-*.json
+*.json.bak
+# Backups baixados do CRM
+crm-backup-*.json
+node_modules/
+.DS_Store
