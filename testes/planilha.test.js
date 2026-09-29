@@ -169,3 +169,70 @@ test('conversão do Agendor (API v3)', () => {
   assert.equal(wpp.empresa_id, avulsa.id);
   assert.equal(wpp.concluida, false);
 });
+
+test('formato real do Agendor da OneClean (conferência de 29/09/2026)', () => {
+  assert.equal(P.situacao('Primeira compra'), 'cliente');
+  assert.equal(P.situacao('Cliente recorrente'), 'cliente');
+  assert.equal(P.situacao('Cliente em potencial'), 'prospect');
+  assert.equal(P.tipoAtividade('Ligação'), 'ligacao');
+  assert.equal(P.tipoAtividade('Email'), 'email');
+  assert.equal(P.tipoAtividade('WhatsApp'), 'whatsapp');
+  const bruto = {
+    users: [{ id: 1, name: 'Vendedora Um', contact: { email: 'um@oneclean.com.br', whatsapp: '11999990000' } }],
+    funnels: [
+      { id: 869737, name: 'Funil de Vendas', dealStages: [{ id: 3665823, name: 'LDR', sequence: 1 }, { id: 3665824, name: 'CONTATO FEITO', sequence: 2 }, { id: 3665826, name: 'ORÇAMENTO ENVIADO', sequence: 4 }] },
+      { id: 869740, name: 'Funil de Pós-Vendas', dealStages: [{ id: 3665829, name: 'Contato', sequence: 1 }] }
+    ],
+    organizations: [
+      { id: 10, name: 'Cliente A', legalName: 'Cliente A Ltda', email: 'a@x.com', contact: { email: 'a@x.com', whatsapp: '(11) 98888-7777', work: '(11) 3333-4444' },
+        category: { id: 4054282, name: 'Primeira compra' }, ownerUser: { id: 1, name: 'Vendedora Um' }, ranking: 0, createdAt: '2024-02-01T12:00:00Z' },
+      { id: 11, name: 'Cliente B', email: null, contact: {}, category: null, ownerUser: { id: 1, name: 'Vendedora Um' } }
+    ],
+    people: [{ id: 5, name: 'Comprador', email: 'c@x.com', contact: { email: 'c@x.com' }, organization: { id: 10, name: 'Cliente A' }, ownerUser: { id: 1, name: 'Vendedora Um' } }],
+    deals: [
+      { id: 100, title: 'Pedido ganho', value: 1500, dealStage: { id: 3665826, name: 'ORÇAMENTO ENVIADO', sequence: 4, funnel: { id: 869737, name: 'Funil de Vendas' } },
+        dealStatus: { id: 2, name: 'Ganho' }, organization: { id: 11, name: 'Cliente B' }, owner: { id: 1, name: 'Vendedora Um' },
+        startTime: '2026-08-01T10:00:00Z', endTime: '2026-08-20T10:00:00Z', wonAt: '2026-08-19T15:00:00Z' },
+      { id: 101, title: 'Pedido perdido', value: 900, dealStage: { id: 3665824, name: 'CONTATO FEITO', funnel: { id: 869737, name: 'Funil de Vendas' } },
+        dealStatus: { id: 3, name: 'Perdido' }, organization: { id: 10, name: 'Cliente A' }, owner: { id: 1, name: 'Vendedora Um' },
+        lossReason: { id: 3272327, name: 'Preço acima da concorrência', description: 'pediu 10% a menos' }, lostAt: '2026-09-02T10:00:00Z', startTime: '2026-08-10T10:00:00Z' },
+      { id: 102, title: 'Negócio avulso sem empresa', value: 50, dealStatus: { id: 1, name: 'Em andamento' },
+        dealStage: { id: 3665829, name: 'Contato', funnel: { id: 869740, name: 'Funil de Pós-Vendas' } }, owner: { id: 1, name: 'Vendedora Um' }, startTime: '2026-09-01T10:00:00Z' }
+    ],
+    tasks: [
+      { id: 900, text: 'Ligar', type: 'Ligação', dueDate: '2026-09-10T13:00:00Z', finishedAt: '2026-09-10T13:20:00Z', assignedUsers: [{ id: 1, name: 'Vendedora Um' }], user: { id: 1, name: 'Vendedora Um' }, deal: { id: 100, title: 'Pedido ganho' } },
+      { id: 901, text: 'Mandar orçamento', type: null, dueDate: '2026-10-02T13:00:00Z', assignedUsers: [{ id: 1, name: 'Vendedora Um' }], organization: { id: 10, name: 'Cliente A' } }
+    ]
+  };
+  const D = base();
+  D.usuarios = [{ user_id: 'u1', nome: 'Vendedora Um', email: 'um@oneclean.com.br' }];
+  const plano = P.planeja(D, P.converteAgendor(bruto), {});
+  const a = plano.criar.empresas.find(e => e.nome === 'Cliente A');
+  assert.equal(a.situacao, 'cliente', 'Primeira compra = cliente');
+  assert.equal(a.razao_social, 'Cliente A Ltda');
+  assert.equal(a.whatsapp, '(11) 98888-7777');
+  assert.equal(a.telefone, '(11) 3333-4444');
+  assert.equal(a.responsavel_id, 'u1');
+  const b = plano.criar.empresas.find(e => e.nome === 'Cliente B');
+  assert.equal(b.situacao, 'cliente', 'quem tem negócio ganho vira cliente');
+  const avulso = plano.criar.empresas.find(e => e.nome === 'Negócio avulso sem empresa');
+  assert.ok(avulso, 'negócio sem empresa cria empresa com o nome do negócio');
+  assert.equal(plano.criar.negocios.length, 3);
+  const ganho = plano.criar.negocios.find(n => n.titulo === 'Pedido ganho');
+  assert.equal(ganho.status, 'ganho');
+  assert.equal(ganho.fechado_em, R.diaLocal('2026-08-19T15:00:00Z'), 'usa wonAt');
+  const perd = plano.criar.negocios.find(n => n.titulo === 'Pedido perdido');
+  assert.equal(perd.status, 'perdido');
+  assert.equal(perd.motivo_perda, 'Preço acima da concorrência');
+  assert.match(perd.observacoes, /pediu 10% a menos/);
+  const etapasPos = plano.criar.etapas.filter(e => e.funil === 'Funil de Pós-Vendas');
+  assert.deepEqual(etapasPos.map(e => e.nome), ['Contato']);
+  const etOrc = plano.criar.etapas.find(e => e.nome === 'ORÇAMENTO ENVIADO');
+  assert.equal(ganho.etapa_id, etOrc.id);
+  const t1 = plano.criar.atividades.find(t => t.externo_id === 'agendor:tarefa:900');
+  assert.equal(t1.tipo, 'ligacao'); assert.equal(t1.concluida, true); assert.equal(t1.empresa_id, b.id); assert.equal(t1.negocio_id, ganho.id);
+  const t2 = plano.criar.atividades.find(t => t.externo_id === 'agendor:tarefa:901');
+  assert.equal(t2.concluida, false); assert.equal(t2.tipo, 'tarefa'); assert.equal(t2.empresa_id, a.id); assert.equal(t2.responsavel_id, 'u1');
+  assert.equal(plano.criar.contatos[0].empresa_id, a.id);
+  assert.equal(plano.semResponsavel.length, 0);
+});

@@ -133,9 +133,10 @@
   function situacao(v) {
     const s = R.normaliza(v);
     if (!s) return null;
-    if (/^(cliente|client|customer|ativo|cliente ativo)/.test(s)) return 'cliente';
-    if (/(inativo|ex cliente|ex-cliente|antigo)/.test(s)) return 'inativo';
+    // "Cliente em potencial" (Agendor da OneClean) é prospect, não cliente: testar antes.
     if (/(prospect|prospec|potencial|oportunidade|qualificad)/.test(s)) return 'prospect';
+    if (/(inativo|ex cliente|ex-cliente|antigo)/.test(s)) return 'inativo';
+    if (/^(cliente|client|customer|ativo)/.test(s) || /(primeira compra|recorrente|comprou)/.test(s)) return 'cliente';
     return 'lead';
   }
 
@@ -547,18 +548,24 @@
       if (p) { const o = empresaDaPessoa(p); return o ? { externo: ext('org', o.id), nome: o.name } : { externo: null, nome: p.name }; }
       return { externo: null, nome: g(d, 'person.name') || null };
     };
+    // Motivo da perda: o Agendor guarda o nome e, às vezes, um detalhe à parte.
+    const detalhePerda = d => g(d, 'lossReason.description') || null;
 
     const negocios = deals.map(d => {
       const emp = empresaDoNegocio(d);
       const st = d.dealStatus;
       const statusTxt = st == null ? null : typeof st === 'object' ? (st.name || st.id) : st;
       return {
+        // Negócio sem empresa nem pessoa no Agendor (~2% na OneClean): vira uma empresa
+        // com o nome do próprio negócio, para não se perder na importação.
+        empresa_nome_fallback: d.title,
         titulo: d.title, empresa: emp.nome, empresa_externo: emp.externo, contato_externo: g(d, 'person.id') != null ? ext('pessoa', d.person.id) : null,
         valor: d.value, funil: nomeDe(g(d, 'dealStage.funnel')), etapa: g(d, 'dealStage.name'), etapa_externo: g(d, 'dealStage.id') != null ? ext('etapa', d.dealStage.id) : null,
         status: statusTxt, criado_em: d.startTime || d.createdAt || null,
         previsao_fechamento: d.estimatedCloseDate || d.expectedCloseDate || null,
-        fechado_em: d.endTime || d.closedAt || null, motivo_perda: nomeDe(d.lossReason) || nomeDe(d.reasonForLoss),
-        responsavel: usu(d.owner || d.ownerUser), origem: nomeDe(d.leadOrigin), observacoes: d.description || null,
+        fechado_em: d.wonAt || d.lostAt || d.endTime || d.closedAt || null, motivo_perda: nomeDe(d.lossReason) || nomeDe(d.reasonForLoss),
+        responsavel: usu(d.owner || d.ownerUser), origem: nomeDe(d.leadOrigin),
+        observacoes: [d.description, detalhePerda(d) ? 'Sobre a perda: ' + detalhePerda(d) : null].filter(Boolean).join('\n') || null,
         externo_id: ext('negocio', d.id),
         itens: (d.products || []).map(p => ({
           descricao: nomeDe(p) || nomeDe(p.product), quantidade: p.quantity || p.amount || 1,
