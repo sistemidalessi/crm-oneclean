@@ -167,6 +167,28 @@ test('dashboard do mês', () => {
   assert.equal(ana.porVendedor.length, 1);
 });
 
+test('painel por funil, como o do Agendor (ganhos, iniciados, perdidos, taxa em valor)', () => {
+  const D = base();
+  D.etapas = [{ id: 'v1', funil: 'Funil de Vendas', nome: 'LDR', ordem: 1, probabilidade: 10 },
+    { id: 'p1', funil: 'Funil de Pós-Vendas', nome: 'Contato', ordem: 1, probabilidade: 50 }];
+  D.empresas = [{ id: 'e1', nome: 'A' }];
+  const neg = (id, et, status, valor, criado, fechado) => ({ id, empresa_id: 'e1', titulo: id, etapa_id: et, status, valor, criado_em: iso(criado), fechado_em: fechado || null });
+  D.negocios = [neg('n1', 'v1', 'ganho', 300, '2026-09-02', '2026-09-05'), neg('n2', 'v1', 'perdido', 100, '2026-08-20', '2026-09-10'),
+    neg('n3', 'v1', 'ganho', 200, '2026-09-03', '2026-09-12'), neg('n4', 'p1', 'ganho', 999, '2026-09-04', '2026-09-06'), neg('n5', 'v1', 'aberto', 50, '2026-09-20')];
+  const ix = R.indexa(D);
+  const d = R.dashboard(D, ix, R.config({}), HOJE, { periodo: R.periodo('mes', HOJE), funil: 'Funil de Vendas' });
+  assert.equal(d.realizadas.qtd, 2);
+  assert.equal(d.realizadas.valor, 500);
+  assert.equal(d.iniciados.qtd, 3, 'n1, n3 e n5 começaram em setembro');
+  assert.equal(d.iniciados.valor, 550);
+  assert.equal(d.perdidas.qtd, 1);
+  assert.equal(Math.round(d.conversao * 10) / 10, 66.7);
+  assert.equal(Math.round(d.conversaoValor * 10) / 10, 83.3);
+  assert.deepEqual(d.porEtapa.map(x => x.etapa.id), ['v1']);
+  const todos = R.dashboard(D, ix, R.config({}), HOJE, { periodo: R.periodo('mes', HOJE) });
+  assert.equal(todos.realizadas.qtd, 3);
+});
+
 test('duplicados e mescla', () => {
   const g = R.duplicadosEmpresas([
     { id: 1, nome: 'Limpa Tudo Ltda', cnpj: '11.222.333/0001-81' },

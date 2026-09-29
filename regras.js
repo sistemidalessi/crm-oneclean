@@ -361,8 +361,10 @@
     const p = filtro.periodo;
     const resp = filtro.responsavel_id || null;
     const meu = r => !resp || r.responsavel_id === resp;
-    const negs = D.negocios.filter(meu);
     const etapa = id => ix.porId.etapas.get(id);
+    // Funil escolhido (como no Agendor, o painel é por funil; vazio = todos).
+    const doFunil = n => !filtro.funil || ((etapa(n.etapa_id) || {}).funil || 'Vendas') === filtro.funil;
+    const negs = D.negocios.filter(n => meu(n) && doFunil(n));
 
     const ganhos = negs.filter(n => n.status === 'ganho' && noPeriodo(n.fechado_em, p));
     const perdidos = negs.filter(n => n.status === 'perdido' && noPeriodo(n.fechado_em, p));
@@ -436,7 +438,7 @@
       porProduto.set(k, r);
     }));
 
-    const porEtapa = D.etapas.slice().sort((a, b) => a.ordem - b.ordem).map(e => {
+    const porEtapa = D.etapas.filter(e => !filtro.funil || (e.funil || 'Vendas') === filtro.funil).sort((a, b) => a.ordem - b.ordem).map(e => {
       const l = abertos.filter(n => n.etapa_id === e.id);
       return { etapa: e, qtd: l.length, valor: soma(l), ponderado: ponderado(l) };
     });
@@ -454,7 +456,11 @@
     });
 
     const decididos = ganhos.length + perdidos.length;
+    const iniciados = negs.filter(n => noPeriodo(diaLocal(n.criado_em), p));
+    const valorDecidido = soma(ganhos) + soma(perdidos);
     return {
+      iniciados: { qtd: iniciados.length, valor: soma(iniciados) },
+      conversaoValor: valorDecidido ? soma(ganhos) / valorDecidido * 100 : null,
       realizadas: { qtd: ganhos.length, valor: soma(ganhos) },
       perdidas: { qtd: perdidos.length, valor: soma(perdidos) },
       abertas: { qtd: abertos.length, valor: soma(abertos), ponderado: ponderado(abertos) },

@@ -18,8 +18,8 @@ qual é o próximo passo.** Feito para uso no computador.
 | **Empresas** | Lista com busca (nome, CNPJ, telefone, e-mail, pessoa), filtros (situação, responsável, segmento, origem, etiqueta, UF, cidade, qualificação, último contato, cadastro, sem tarefa), **filtros salvos**, ordenação, **ações em massa** (trocar responsável levando negócios e tarefas, situação, etiquetas, criar tarefa, excluir) e exportar para Excel. |
 | **Pessoas** | Contatos de todas as empresas, com aniversariantes do mês e WhatsApp/Ligar. |
 | **Negócios** | Todos os negócios com filtro por status, etapa, vendedor, origem, motivo de perda e período (criação, fechamento ou previsão). |
-| **Agenda** | Semana com as tarefas por dia e hora; atrasadas em destaque; "+" em cada dia. |
-| **Relatórios** | Vendas realizadas e previstas, pipeline, ticket médio, conversão, ciclo médio, leads novos, clientes novos × recorrentes, vendas por mês e previsão, **por vendedor com meta**, funil agora, origem dos leads (e quantos viraram cliente), motivos de perda, vendas por produto e por origem, atividades. Cada tabela exporta CSV. |
+| **Atividades** | Agenda da semana com as tarefas por dia e hora; atrasadas em destaque; "+" em cada dia. |
+| **Relatórios** | Por funil, com os nomes do painel do Agendor: negócios ganhos, iniciados e perdidos, taxa ganhos vs perdidos (em quantidade e em valor); vendas previstas, pipeline, ticket médio, conversão, ciclo médio, leads novos, clientes novos × recorrentes, vendas por mês e previsão, **por vendedor com meta**, funil agora, origem dos leads (e quantos viraram cliente), motivos de perda, vendas por produto e por origem, atividades. Cada tabela exporta CSV. |
 | **Configurações** | Automações e alertas, funil/etapas, origens/segmentos/motivos, produtos, **equipe e permissões**, metas, modelos de mensagem, importar, exportar/backup, **duplicados** (mesclar), **histórico de alterações**. |
 
 **Ficha do cliente — tudo em uma tela:** dados, pessoas (com WhatsApp, ligar,

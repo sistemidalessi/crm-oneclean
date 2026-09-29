@@ -6,6 +6,7 @@
   --marinho-3: #2a4a7a;
   --ouro: #c9a15a;
   --ouro-escuro: #a8823d;
+  --sobre-ouro: #231a08;
   --fundo: #f3f4f7;
   --papel: #ffffff;
   --texto: #1a2130;
@@ -66,7 +67,7 @@ code, kbd { background: var(--realce); border: 1px solid var(--borda); border-ra
 .btn:disabled { opacity: .55; cursor: not-allowed; }
 .btn.sec { background: var(--papel); color: var(--texto); border-color: var(--borda); }
 .btn.sec:hover { background: var(--realce); }
-.btn.ouro { background: var(--ouro); border-color: var(--ouro); color: #231a08; }
+.btn.ouro { background: var(--ouro); border-color: var(--ouro); color: var(--sobre-ouro); }
 .btn.ouro:hover { background: var(--ouro-escuro); }
 .btn.verde { background: var(--verde); border-color: var(--verde); }
 .btn.perigo { background: transparent; color: var(--vermelho); border-color: var(--vermelho); }
@@ -103,7 +104,7 @@ input.curto { width: 120px; }
 .avatar.vazio { background: var(--cinza-fundo); color: var(--suave); }
 .ico-tipo { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; background: var(--realce); color: var(--marinho-3); font-size: .8rem; flex: none; }
 .ico-tipo.t-whatsapp { color: var(--verde); } .ico-tipo.t-ocorrencia { color: var(--vermelho); } .ico-tipo.t-proposta { color: var(--roxo); } .ico-tipo.t-sistema { color: var(--suave); }
-.bolinha { display: inline-block; min-width: 18px; padding: 0 5px; border-radius: 9px; background: var(--ouro); color: #231a08; font-size: .7rem; font-weight: 700; text-align: center; line-height: 18px; }
+.bolinha { display: inline-block; min-width: 18px; padding: 0 5px; border-radius: 9px; background: var(--ouro); color: var(--sobre-ouro); font-size: .7rem; font-weight: 700; text-align: center; line-height: 18px; }
 .bolinha.vermelha { background: #d64541; color: #fff; }
 
 /* ---------- estrutura ---------- */
@@ -142,8 +143,14 @@ input.curto { width: 120px; }
 
 .cabecalho { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .cabecalho select, .cabecalho input { width: auto; }
+.cabecalho #fBuscaFunil { width: 190px; }
 .cabecalho .total { color: var(--suave); }
 .cabecalho .total strong { color: var(--texto); }
+.abas-funil { display: inline-flex; border: 1px solid var(--borda); border-radius: 8px; overflow: hidden; background: var(--papel); }
+.abas-funil button { appearance: none; border: 0; background: transparent; padding: 7px 14px; font: inherit; font-weight: 600; color: var(--suave); cursor: pointer; }
+.abas-funil button + button { border-left: 1px solid var(--borda); }
+.abas-funil button:hover { background: var(--realce); color: var(--texto); }
+.abas-funil button.ativo { background: var(--marinho); color: #fff; }
 .filtros { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; background: var(--papel); border: 1px solid var(--borda); border-radius: 10px; padding: 8px; }
 .filtros input[type=search] { flex: 1 1 260px; }
 .filtros select { max-width: 190px; }

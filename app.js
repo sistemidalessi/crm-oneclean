@@ -53,7 +53,14 @@
   CRM.resumo = id => E.ix.resumo.get(id) || {};
   CRM.situacao = e => R.situacaoEfetiva(e, E.ix.resumo.get(e.id), E.cfg, CRM.hoje());
   CRM.opcoes = tipo => E.D.opcoes.filter(o => o.tipo === tipo).sort((a, b) => a.ordem - b.ordem || a.nome.localeCompare(b.nome, 'pt-BR')).map(o => o.nome);
-  CRM.funis = () => [...new Set(E.D.etapas.map(e => e.funil || 'Vendas'))];
+  // Funis em ordem de uso: o que tem mais negócios primeiro (o principal abre por padrão).
+  CRM.funis = () => {
+    const nomes = [...new Set(E.D.etapas.map(e => e.funil || 'Vendas'))];
+    if (nomes.length < 2) return nomes;
+    const qtd = new Map(nomes.map(f => [f, 0]));
+    E.D.negocios.forEach(n => { const et = CRM.etapa(n.etapa_id); if (et) qtd.set(et.funil || 'Vendas', qtd.get(et.funil || 'Vendas') + 1); });
+    return nomes.sort((a, b) => qtd.get(b) - qtd.get(a) || a.localeCompare(b, 'pt-BR'));
+  };
   CRM.etapas = funil => E.D.etapas.filter(e => !funil || (e.funil || 'Vendas') === funil).sort((a, b) => a.ordem - b.ordem);
   CRM.usuariosAtivos = () => E.D.usuarios.filter(u => u.ativo !== false).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
   CRM.opcoesUsuarios = vazio => (vazio ? [['', vazio]] : []).concat(CRM.usuariosAtivos().map(u => [u.user_id, u.nome]));
@@ -237,7 +244,7 @@
   // ------------------------------------------------------------ render
   const ABAS = [
     ['inicio', 'Início', '⌂'], ['funil', 'Funil', '▥'], ['empresas', 'Empresas', '▦'], ['pessoas', 'Pessoas', '☺'],
-    ['negocios', 'Negócios', '$'], ['agenda', 'Agenda', '▣'], ['relatorios', 'Relatórios', '▲'], ['ajustes', 'Configurações', '⚙']
+    ['negocios', 'Negócios', '$'], ['agenda', 'Atividades', '▣'], ['relatorios', 'Relatórios', '▲'], ['ajustes', 'Configurações', '⚙']
   ];
   CRM.ABAS = ABAS;
 
@@ -403,7 +410,7 @@
       htmlAntes: '<table class="tabela atalhos"><tbody>' + [
         ['Ctrl + K  ou  /', 'Buscar qualquer coisa (empresa, pessoa, telefone, e-mail, negócio, nº da proposta)'],
         ['N', 'Novo lead'], ['T', 'Nova tarefa'], ['R', 'Registrar atividade'],
-        ['1 a 8', 'Ir para Início, Funil, Empresas, Pessoas, Negócios, Agenda, Relatórios, Configurações'],
+        ['1 a 8', 'Ir para Início, Funil, Empresas, Pessoas, Negócios, Atividades, Relatórios, Configurações'],
         ['Esc', 'Fechar a janela aberta'], ['?', 'Esta ajuda']
       ].map(l => '<tr><td><kbd>' + esc(l[0]) + '</kbd></td><td>' + esc(l[1]) + '</td></tr>').join('') + '</tbody></table>',
       aoSalvar: () => true
@@ -539,9 +546,31 @@
     });
   }
 
+  // Paleta da instalação (config.js → cores: { principal, destaque }). Os tons intermediários saem
+  // da mistura com branco/preto; o texto sobre o destaque fica preto ou branco conforme o contraste.
+  function aplicaCores(c) {
+    if (!c) return;
+    const hex = h => /^#[0-9a-f]{6}$/i.test(h || '') ? [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16)) : null;
+    const mistura = (rgb, alvo, t) => '#' + rgb.map((v, i) => Math.round(v + (alvo[i] - v) * t).toString(16).padStart(2, '0')).join('');
+    const luz = rgb => (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]) / 255;
+    const raiz = document.documentElement.style;
+    const p = hex(c.principal), d = hex(c.destaque);
+    if (p) {
+      raiz.setProperty('--marinho', c.principal);
+      raiz.setProperty('--marinho-2', mistura(p, [255, 255, 255], 0.12));
+      raiz.setProperty('--marinho-3', mistura(p, [255, 255, 255], 0.25));
+    }
+    if (d) {
+      raiz.setProperty('--ouro', c.destaque);
+      raiz.setProperty('--ouro-escuro', mistura(d, [0, 0, 0], 0.15));
+      raiz.setProperty('--sobre-ouro', luz(d) > 0.6 ? '#1a1a1a' : '#ffffff');
+    }
+  }
+
   async function iniciar() {
     ligarEventos();
     const cfg = window.CRM_CONFIG || {};
+    aplicaCores(cfg.cores);
     $('#logoTopo').src = logo();
     if (!cfg.supabaseUrl || !cfg.supabaseAnonKey) {
       store = new DD.Local();

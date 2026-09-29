@@ -1,5 +1,5 @@
 /* CRM Sistemi Dalessi — telas principais (Início, Funil, Empresas, Pessoas,
-   Negócios, Agenda, Relatórios). Cada tela: render(alertas) -> HTML; depois(el). */
+   Negócios, Atividades, Relatórios). Cada tela: render(alertas) -> HTML; depois(el). */
 (function () {
   'use strict';
   const R = window.CRMRegras, CRM = window.CRM;
@@ -126,7 +126,8 @@
       const total = ops.reduce((s, n) => s + R.num(n.valor), 0);
       const pond = ops.reduce((s, n) => s + R.num(n.valor) * R.probabilidade(n, CRM.etapa(n.etapa_id)) / 100, 0);
       return '<div class="cabecalho"><h1>Funil</h1>' +
-        (funis.length > 1 ? '<select id="fFunil" aria-label="Funil">' + CRM.opcoesHTML(funis.map(x => [x, x]), f.funil) + '</select>' : '') +
+        (funis.length > 1 ? '<div class="abas-funil" role="tablist" aria-label="Funil">' + funis.map(x => '<button type="button" role="tab" data-funil="' + esc(x) + '" aria-selected="' + (x === f.funil) + '"' +
+          (x === f.funil ? ' class="ativo"' : '') + '>' + esc(x) + '</button>').join('') + '</div>' : '') +
         '<input type="search" id="fBuscaFunil" placeholder="Filtrar negócio ou empresa…" value="' + esc(f.busca || '') + '">' +
         '<select id="fOrigemFunil" aria-label="Origem">' + CRM.opcoesHTML(CRM.lista(CRM.opcoes('origem'), 'Todas as origens'), f.origem || '') + '</select>' +
         '<label class="check"><input type="checkbox" id="fSemTarefa"' + (f.semTarefa ? ' checked' : '') + '> só sem próximo passo</label>' +
@@ -144,7 +145,8 @@
     depois() {
       const f = F('funil');
       const liga = (id, k, tipo) => { const el = $('#' + id); if (el) el.addEventListener(tipo || 'change', () => { f[k] = el.type === 'checkbox' ? el.checked : el.value; CRM.render(); }); };
-      liga('fFunil', 'funil'); liga('fOrigemFunil', 'origem'); liga('fSemTarefa', 'semTarefa'); liga('fBuscaFunil', 'busca', 'input');
+      document.querySelectorAll('.abas-funil [data-funil]').forEach(b => b.addEventListener('click', () => { f.funil = b.dataset.funil; CRM.render(); }));
+      liga('fOrigemFunil', 'origem'); liga('fSemTarefa', 'semTarefa'); liga('fBuscaFunil', 'busca', 'input');
     }
   };
 
@@ -425,7 +427,7 @@
     depois() { ligaFiltros('negocios'); ligaFiltrosSalvos('negocios'); }
   };
 
-  // ================================================================ Agenda
+  // ================================================================ Atividades (agenda da semana)
   const agenda = {
     render() {
       const f = F('agenda');
@@ -438,7 +440,7 @@
       const daSemana = ats.filter(a => { const d = R.diaLocal(a.data_hora); return d >= f.semana && d <= fim; });
       const atrasadas = ats.filter(a => !a.concluida && R.diaLocal(a.data_hora) < f.semana && f.semana <= hoje);
       const nomeDia = d => new Date(d + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' });
-      return '<div class="cabecalho"><h1>Agenda</h1>' +
+      return '<div class="cabecalho"><h1>Atividades</h1>' +
         '<button type="button" class="btn sec" data-acao="agenda-mover" data-id="-7">‹ Semana anterior</button>' +
         '<button type="button" class="btn sec" data-acao="agenda-mover" data-id="0">Hoje</button>' +
         '<button type="button" class="btn sec" data-acao="agenda-mover" data-id="7">Próxima ›</button>' +
@@ -471,7 +473,9 @@
       const hoje = CRM.hoje();
       const p = R.periodo(f.periodo, hoje, f.de, f.ate);
       const resp = f.responsavel || CRM.carteira();
-      const d = R.dashboard(E().D, E().ix, E().cfg, hoje, { periodo: p, responsavel_id: resp });
+      const funis = CRM.funis();
+      if (f.funil == null || (f.funil && funis.indexOf(f.funil) === -1)) f.funil = funis.length > 1 ? funis[0] : '';
+      const d = R.dashboard(E().D, E().ix, E().cfg, hoje, { periodo: p, responsavel_id: resp, funil: f.funil });
       const k = (t, v, s, cls) => '<div class="kpi ' + (cls || '') + '"><span>' + esc(t) + '</span><strong>' + esc(v) + '</strong><small>' + esc(s || '') + '</small></div>';
       const maxMes = Math.max(1, ...d.porMes.map(m => m.valor));
       const maxPrev = Math.max(1, ...d.previsao.map(m => m.valor));
@@ -486,16 +490,20 @@
       return '<div class="cabecalho"><h1>Relatórios</h1>' +
         sel('periodo', [['hoje', 'Hoje'], ['semana', 'Esta semana'], ['mes', 'Este mês'], ['mes_passado', 'Mês passado'], ['trimestre', 'Últimos 3 meses'], ['ano', 'Este ano'], ['12meses', 'Últimos 12 meses'], ['tudo', 'Tudo'], ['personalizado', 'Escolher datas…']], f.periodo) +
         (f.periodo === 'personalizado' ? '<input type="date" id="fDe" value="' + esc(f.de || '') + '" aria-label="De"><input type="date" id="fAte" value="' + esc(f.ate || '') + '" aria-label="Até">' : '') +
+        (funis.length > 1 ? sel('funil', [['', 'Todos os funis']].concat(funis.map(x => [x, x])), f.funil) : '') +
         (CRM.ehGestor() ? sel('responsavel', CRM.opcoesUsuarios('Conforme o topo'), f.responsavel) : '') +
         '<span class="sub">' + (p.de > '0001' ? esc(R.dataBR(p.de)) + ' a ' + esc(R.dataBR(p.ate)) : 'todo o histórico') + (resp ? ' · ' + esc(CRM.nomeUsuario(resp)) : ' · equipe toda') + '</span>' +
         '<span class="flex"></span><button type="button" class="btn sec" data-acao="imprimir">Imprimir</button></div>' +
         '<section class="kpis">' +
-        k('Vendas realizadas', R.moeda(d.realizadas.valor), d.realizadas.qtd + ' negócio(s) ganho(s)', 'verde') +
-        k('Vendas previstas', R.moeda(d.previstas.valor), d.previstas.qtd + ' com previsão no período · ponderado ' + R.moeda(d.previstas.ponderado)) +
-        k('Pipeline aberto', R.moeda(d.abertas.valor), d.abertas.qtd + ' abertos · ponderado ' + R.moeda(d.abertas.ponderado)) +
+        // Mesmos nomes do painel do Agendor, que a equipe já conhece.
+        k('Negócios ganhos', String(d.realizadas.qtd), R.moeda(d.realizadas.valor) + ' em vendas', 'verde') +
+        k('Negócios iniciados', String(d.iniciados.qtd), R.moeda(d.iniciados.valor)) +
+        k('Negócios perdidos', String(d.perdidas.qtd), R.moeda(d.perdidas.valor), d.perdidas.qtd ? 'alerta' : '') +
+        k('Taxa ganhos vs perdidos', R.pct(d.conversao), R.pct(d.conversaoValor) + ' em valor') +
         k('Ticket médio', R.moeda(d.ticket), 'por venda no período') +
-        k('Conversão', R.pct(d.conversao), d.realizadas.qtd + ' ganhos × ' + d.perdidas.qtd + ' perdidos') +
-        k('Ciclo médio', d.ciclo == null ? '—' : Math.round(d.ciclo) + ' dias', 'da criação ao fechamento') +
+        k('Ciclo médio de vendas', d.ciclo == null ? '—' : Math.round(d.ciclo) + ' dias', 'da criação ao fechamento') +
+        k('Em andamento', R.moeda(d.abertas.valor), d.abertas.qtd + ' negócios · ponderado ' + R.moeda(d.abertas.ponderado)) +
+        k('Vendas previstas', R.moeda(d.previstas.valor), d.previstas.qtd + ' com previsão no período · ponderado ' + R.moeda(d.previstas.ponderado)) +
         k('Leads novos', String(d.leadsNovos), 'empresas cadastradas no período') +
         k('Clientes', d.clientesNovos + ' novos', d.clientesRecorrentes + ' recorrentes compraram') +
         k('Atividades', String(d.atividadesRealizadas), d.atividadesPendentes + ' pendentes · ' + d.atividadesAtrasadas + ' atrasadas', d.atividadesAtrasadas ? 'alerta' : '') +
