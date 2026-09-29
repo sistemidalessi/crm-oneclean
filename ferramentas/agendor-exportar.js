@@ -4,7 +4,8 @@
 
    Uso (Node 18 ou mais novo, nada para instalar):
      node agendor-exportar.js SEU_TOKEN
-     node agendor-exportar.js SEU_TOKEN --completo      (mais lento; ver abaixo)
+     node agendor-exportar.js SEU_TOKEN --completo
+     node agendor-exportar.js --estrutura agendor-exportado-AAAA-MM-DD.json
 
    O token fica no Agendor em Menu -> Integrações. Ele dá acesso à conta toda:
    não mande por e-mail/WhatsApp, não salve em arquivo do repositório, e revogue
@@ -14,25 +15,39 @@
    (com produtos) e tarefas/histórico. Cada lista é paginada (100 por página)
    seguindo o "links.next" da API. Se a API mandar esperar (429), espera.
 
-   --completo: além das listas gerais, busca negócios e tarefas empresa por
-   empresa e pessoa por pessoa, e junta sem repetir. Use se o total de negócios
-   ou tarefas não bater com o que aparece no Agendor.
+   Tarefas: a lista geral /tasks do Agendor exige filtro de data e NÃO volta mais
+   de 31 dias ("The difference between createdDateGt and today must be less than or
+   equal to 31 days" — visto na extração real da OneClean em 29/09/2026). Então:
+     1) recentes/pendentes: /tasks com criadas, com prazo, concluídas e alteradas
+        nos últimos 30 dias (juntas, sem repetir);
+     2) histórico antigo: tarefas de cada empresa, de cada pessoa e de cada negócio
+        (/organizations/ID/tasks etc.), 4 pedidos de cada vez. É a parte demorada.
 
-   Saída: agendor-exportado-AAAA-MM-DD.json na pasta atual. É o arquivo "bruto":
-   a conversão para o CRM acontece na tela de importação (dá para rodar de novo
-   sem duplicar nada). O arquivo tem dados pessoais de clientes: guarde com
-   cuidado e apague quando a migração estiver conferida. */
+   --completo: também busca os negócios empresa por empresa (se o total de
+   negócios não bater com o Agendor).
+
+   --estrutura ARQUIVO: não fala com o Agendor. Lê um arquivo já exportado e mostra
+   só os NOMES dos campos e quantos registros têm cada um preenchido — nenhum dado
+   de cliente — mais os valores de campos de lista (etapas, status, tipos de
+   tarefa, categorias, origens, motivos). Serve para conferir a importação.
+
+   Saída: agendor-exportado-AAAA-MM-DD.json na pasta atual (gravado também no meio
+   do caminho, para não perder o que já veio). O arquivo tem dados pessoais de
+   clientes: guarde com cuidado e apague quando a migração estiver conferida. */
 'use strict';
 const fs = require('fs');
 const path = require('path');
 
 const BASE = process.env.AGENDOR_BASE || 'https://api.agendor.com.br/v3'; // AGENDOR_BASE só para teste
 const args = process.argv.slice(2);
-const token = args.find(a => !a.startsWith('--')) || process.env.AGENDOR_TOKEN;
 const completo = args.includes('--completo');
+const iEstrutura = args.indexOf('--estrutura');
+const token = args.find((a, i) => !a.startsWith('--') && (iEstrutura === -1 || i !== iEstrutura + 1)) || process.env.AGENDOR_TOKEN;
+const PARALELO = 4;
 
+if (iEstrutura !== -1) { estrutura(args[iEstrutura + 1]); process.exit(0); }
 if (!token) {
-  console.error('Uso: node agendor-exportar.js SEU_TOKEN [--completo]\n(o token fica no Agendor em Menu -> Integrações)');
+  console.error('Uso: node agendor-exportar.js SEU_TOKEN [--completo]\n     node agendor-exportar.js --estrutura ARQUIVO.json\n(o token fica no Agendor em Menu -> Integrações)');
   process.exit(1);
 }
 if (typeof fetch !== 'function') {
@@ -86,18 +101,11 @@ async function tudo(caminho, rotulo) {
       // Resposta sem "links": pede a próxima página pelo número enquanto vier cheia.
       url = lista.length === 100 ? BASE + caminho + sep + 'per_page=100&page=' + (paginas + 1) : null;
     }
-    await espera(120); // gentileza com a API
+    await espera(60); // gentileza com a API
   }
   if (rotulo) console.log(itens.length);
   return itens;
 }
-
-// A API exige um filtro de data em /tasks ("dueDateGt, finishedDateGt, updatedDateGt,
-// createdDateGt ... at least one parameter must be provided"). Criada depois de
-// 2000 = todas. Vale também para as listas de tarefas por empresa/pessoa/negócio.
-const DESDE = encodeURIComponent('2000-01-01T00:00:00Z');
-const TAREFAS = '/tasks?createdDateGt=' + DESDE;
-const tarefasDe = base => base + '/tasks?createdDateGt=' + DESDE;
 
 // Uma lista que falha não pode derrubar as outras: registra o erro, segue e
 // grava o arquivo com o que veio (importar de novo depois não duplica).
@@ -111,11 +119,35 @@ async function seguro(rotulo, fn) {
 }
 
 function junta(destino, novos) {
-  const ids = new Set(destino.map(x => x.id));
+  const ids = destino.__ids || (Object.defineProperty(destino, '__ids', { value: new Set(destino.map(x => x.id)) }), destino.__ids);
   let n = 0;
-  for (const x of novos) if (x && x.id != null && !ids.has(x.id)) { destino.push(x); ids.add(x.id); n++; }
+  for (const x of novos || []) if (x && x.id != null && !ids.has(x.id)) { destino.push(x); ids.add(x.id); n++; }
   return n;
 }
+
+// Roda "fn" para cada item, PARALELO de cada vez, com contagem na tela.
+async function emLote(itens, rotulo, fn) {
+  let i = 0, feitos = 0;
+  const t0 = Date.now();
+  const trabalhador = async () => {
+    while (i < itens.length) {
+      const it = itens[i++];
+      await fn(it);
+      feitos++;
+      if (feitos % 100 === 0 || feitos === itens.length) {
+        const min = (Date.now() - t0) / 60000;
+        const falta = feitos ? Math.max(0, Math.round(min / feitos * (itens.length - feitos))) : 0;
+        process.stdout.write('\r  ' + rotulo + ': ' + feitos + ' de ' + itens.length + (falta ? ' (faltam ~' + falta + ' min)   ' : '        '));
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: PARALELO }, trabalhador));
+  if (itens.length) process.stdout.write('\n');
+}
+
+const nomeArquivo = 'agendor-exportado-' + new Date().toISOString().slice(0, 10) + '.json';
+const arquivo = path.resolve(process.cwd(), nomeArquivo);
+function grava(saida) { saida.erros = erros; fs.writeFileSync(arquivo, JSON.stringify(saida)); }
 
 (async () => {
   const inicio = Date.now();
@@ -128,45 +160,110 @@ function junta(destino, novos) {
   saida.organizations = await seguro('empresas', () => tudo('/organizations?withCustomFields=true', 'Empresas'));
   saida.people = await seguro('pessoas', () => tudo('/people?withCustomFields=true', 'Pessoas'));
   saida.deals = await seguro('negócios', () => tudo('/deals?withCustomFields=true', 'Negócios'));
-  saida.tasks = await seguro('tarefas', () => tudo(TAREFAS, 'Tarefas e histórico'));
+  grava(saida);
+
+  // ---- tarefas recentes e pendentes (limite de 31 dias da lista geral)
+  saida.tasks = [];
+  const ha30 = encodeURIComponent(new Date(Date.now() - 30 * 86400000).toISOString());
+  for (const [filtro, rotulo] of [['createdDateGt', 'criadas'], ['dueDateGt', 'com prazo'], ['finishedDateGt', 'concluídas'], ['updatedDateGt', 'alteradas']]) {
+    junta(saida.tasks, await seguro('tarefas ' + rotulo + ' (30 dias)', () => tudo('/tasks?' + filtro + '=' + ha30, 'Tarefas ' + rotulo + ' nos últimos 30 dias')));
+  }
+  console.log('  → ' + saida.tasks.length + ' tarefas recentes/pendentes (sem repetir)');
+  grava(saida);
+
+  // ---- histórico antigo: por empresa, pessoa e negócio
+  console.log('\nHistórico antigo (tarefas de cada empresa, pessoa e negócio). Pode levar alguns minutos…');
+  let indisponivel = null;
+  const antes = saida.tasks.length;
+  async function tarefasDe(base) {
+    if (indisponivel) return;
+    try {
+      junta(saida.tasks, await tudo(base + '/tasks'));
+    } catch (e) {
+      if (/at least one parameter|must be provided|31 days/i.test(e.message)) {
+        indisponivel = e.message;
+      } else erros.push('tarefas de ' + base + ': ' + e.message);
+    }
+  }
+  const alvos = [].concat(
+    saida.organizations.map(o => '/organizations/' + o.id),
+    saida.people.map(p => '/people/' + p.id),
+    saida.deals.map(d => '/deals/' + d.id)
+  );
+  let desdeGravar = 0;
+  await emLote(alvos, 'histórico', async b => { await tarefasDe(b); if (++desdeGravar % 500 === 0) grava(saida); });
+  if (indisponivel) {
+    console.log('  AVISO: o Agendor não entrega o histórico antigo por empresa/negócio: ' + indisponivel.slice(0, 200));
+    erros.push('histórico antigo indisponível pela API: ' + indisponivel.slice(0, 300));
+  } else {
+    console.log('  → +' + (saida.tasks.length - antes) + ' tarefas do histórico (total ' + saida.tasks.length + ')');
+  }
+  grava(saida);
 
   if (completo) {
-    console.log('\nModo completo: conferindo empresa por empresa (' + saida.organizations.length + ') e pessoa por pessoa (' + saida.people.length + ')…');
-    let nd = 0, nt = 0, i = 0;
-    for (const o of saida.organizations) {
+    console.log('\nModo completo: negócios empresa por empresa…');
+    let nd = 0;
+    await emLote(saida.organizations, 'empresas', async o => {
       nd += junta(saida.deals, await seguro('negócios da empresa ' + o.id, () => tudo('/organizations/' + o.id + '/deals')));
-      nt += junta(saida.tasks, await seguro('tarefas da empresa ' + o.id, () => tudo(tarefasDe('/organizations/' + o.id))));
-      if (++i % 50 === 0) console.log('  ' + i + ' empresas… (+' + nd + ' negócios, +' + nt + ' tarefas achados)');
-    }
-    i = 0;
-    for (const p of saida.people) {
-      nd += junta(saida.deals, await seguro('negócios da pessoa ' + p.id, () => tudo('/people/' + p.id + '/deals')));
-      nt += junta(saida.tasks, await seguro('tarefas da pessoa ' + p.id, () => tudo(tarefasDe('/people/' + p.id))));
-      if (++i % 50 === 0) console.log('  ' + i + ' pessoas…');
-    }
-    i = 0;
-    for (const d of saida.deals) {
-      nt += junta(saida.tasks, await seguro('tarefas do negócio ' + d.id, () => tudo(tarefasDe('/deals/' + d.id))));
-      if (++i % 200 === 0) console.log('  ' + i + ' negócios…');
-    }
-    console.log('Modo completo acrescentou ' + nd + ' negócio(s) e ' + nt + ' tarefa(s).');
+    });
+    console.log('  → +' + nd + ' negócio(s) que não vieram na lista geral');
   }
-  saida.erros = erros;
 
-  const nome = 'agendor-exportado-' + new Date().toISOString().slice(0, 10) + '.json';
-  const arq = path.resolve(process.cwd(), nome);
-  fs.writeFileSync(arq, JSON.stringify(saida));
+  grava(saida);
   const min = ((Date.now() - inicio) / 60000).toFixed(1);
   console.log('\nPronto em ' + min + ' min (' + requisicoes + ' requisições).');
-  console.log('Arquivo: ' + arq + ' (' + (fs.statSync(arq).size / 1048576).toFixed(1) + ' MB)');
+  console.log('Arquivo: ' + arquivo + ' (' + (fs.statSync(arquivo).size / 1048576).toFixed(1) + ' MB)');
   console.log('\nConfira os totais com o que aparece no Agendor:');
   console.log('  empresas ' + saida.organizations.length + ' · pessoas ' + saida.people.length + ' · negócios ' + saida.deals.length + ' · tarefas ' + saida.tasks.length + ' · produtos ' + saida.products.length);
   console.log('\nAgora: CRM -> Configurações -> Importar -> "Do Agendor" -> escolha este arquivo.');
   console.log('Lembrete: o arquivo tem dados de clientes. Guarde com cuidado e apague depois de conferir.');
   if (erros.length) {
-    console.log('\nATENÇÃO: ' + erros.length + ' lista(s) não vieram (o resto foi gravado):');
-    erros.slice(0, 10).forEach(e => console.log('  - ' + e));
+    console.log('\nATENÇÃO: ' + erros.length + ' aviso(s) (o resto foi gravado):');
+    erros.slice(0, 10).forEach(e => console.log('  - ' + e.slice(0, 220)));
     console.log('Mande um print desta tela para o suporte (Sistemi Dalessi).');
     process.exitCode = 2;
   }
 })().catch(e => { console.error('\nERRO: ' + e.message); process.exit(1); });
+
+// ============================================================ --estrutura
+// Mostra a "forma" do arquivo sem nenhum dado de cliente.
+function estrutura(arq) {
+  if (!arq || !fs.existsSync(arq)) { console.error('Arquivo não encontrado: ' + arq); process.exit(1); }
+  const d = JSON.parse(fs.readFileSync(arq, 'utf8'));
+  // Campos de lista (não pessoais): mostra os valores distintos.
+  const LISTAS = /(^|\.)(dealStatus|dealStage|funnel|category|sector|leadOrigin|origin|lossReason|reasonForLoss|type|ranking|status|state)(\.(id|name|sequence|abbreviation))?$/;
+  const NUNCA = /(email|phone|mobile|work|whatsapp|fax|cpf|cnpj|name|legalName|nickname|description|text|street|postal|district|website|facebook|instagram|linkedin|twitter|skype|birthday|contact|address|customFields)/i;
+  console.log('Estrutura de ' + path.basename(arq) + ' (extraído em ' + (d.extraido_em || '?') + ')\n');
+  for (const chave of ['users', 'funnels', 'products', 'organizations', 'people', 'deals', 'tasks']) {
+    const lista = Array.isArray(d[chave]) ? d[chave] : [];
+    console.log('== ' + chave + ': ' + lista.length + ' registro(s)');
+    if (!lista.length) { console.log(''); continue; }
+    const cont = new Map(), valores = new Map();
+    const anda = (o, pre, prof) => {
+      if (o == null || typeof o !== 'object' || prof > 3) return;
+      if (Array.isArray(o)) { const k = pre + '[]'; cont.set(k, (cont.get(k) || 0) + (o.length ? 1 : 0)); o.slice(0, 3).forEach(x => anda(x, k, prof + 1)); return; }
+      for (const [k, v] of Object.entries(o)) {
+        const p = pre ? pre + '.' + k : k;
+        const cheio = v != null && v !== '' && !(Array.isArray(v) && !v.length);
+        cont.set(p, (cont.get(p) || 0) + (cheio ? 1 : 0));
+        if (v && typeof v === 'object') anda(v, p, prof + 1);
+        else if (cheio && LISTAS.test(p) && !(NUNCA.test(p) && !/(dealStage|dealStatus|funnel|category|sector|leadOrigin|origin|lossReason|reasonForLoss|type|status)\.name$/.test(p))) {
+          const s = valores.get(p) || new Map();
+          const val = String(v).slice(0, 40);
+          s.set(val, (s.get(val) || 0) + 1);
+          valores.set(p, s);
+        }
+      }
+    };
+    lista.forEach(x => anda(x, '', 0));
+    [...cont.entries()].sort((a, b) => a[0].localeCompare(b[0])).forEach(([k, n]) => {
+      const pct = Math.round(n / lista.length * 100);
+      let extra = '';
+      const vs = valores.get(k);
+      if (vs && chave !== 'users') extra = '  → ' + [...vs.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12).map(([v, q]) => v + ' (' + q + ')').join(', ') + (vs.size > 12 ? ', …' : '');
+      console.log('  ' + k + ': ' + pct + '%' + extra);
+    });
+    console.log('');
+  }
+  if (d.erros && d.erros.length) console.log('Avisos gravados na extração:\n  - ' + d.erros.join('\n  - '));
+}

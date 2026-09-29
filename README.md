@@ -73,8 +73,12 @@ usuário, etapa e produto fica no **histórico de alterações** (quem, quando, 
    ```
    O token fica no Agendor em **Menu → Integrações**. O script baixa usuários,
    funis, produtos, empresas, pessoas, negócios (com produtos) e tarefas, e
-   mostra os totais para conferir com o Agendor. Se negócios ou tarefas vierem a
-   menos, rode de novo com `--completo` (busca empresa por empresa; mais lento).
+   mostra os totais para conferir com o Agendor. As tarefas antigas vêm empresa
+   por empresa e negócio por negócio (a lista geral do Agendor só volta 31 dias),
+   por isso essa parte leva alguns minutos. Se o total de negócios vier a menos,
+   rode de novo com `--completo`.
+   Para conferir o arquivo **sem mostrar dados de clientes**:
+   `node ferramentas/agendor-exportar.js --estrutura agendor-exportado-AAAA-MM-DD.json`
 4. **Por garantia**, exporte também as planilhas do Agendor (Empresas, Pessoas,
    Negócios) em Excel. Se algo não vier pela API, entra por "Planilha".
 5. **Importar:** Configurações → Importar → "Do Agendor" → escolher o arquivo →
