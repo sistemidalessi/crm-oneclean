@@ -238,7 +238,7 @@ function estrutura(arq) {
     const lista = Array.isArray(d[chave]) ? d[chave] : [];
     console.log('== ' + chave + ': ' + lista.length + ' registro(s)');
     if (!lista.length) { console.log(''); continue; }
-    const cont = new Map(), valores = new Map();
+    const cont = new Map(), valores = new Map(), datas = new Map();
     const anda = (o, pre, prof) => {
       if (o == null || typeof o !== 'object' || prof > 3) return;
       if (Array.isArray(o)) { const k = pre + '[]'; cont.set(k, (cont.get(k) || 0) + (o.length ? 1 : 0)); o.slice(0, 3).forEach(x => anda(x, k, prof + 1)); return; }
@@ -247,6 +247,14 @@ function estrutura(arq) {
         const cheio = v != null && v !== '' && !(Array.isArray(v) && !v.length);
         cont.set(p, (cont.get(p) || 0) + (cheio ? 1 : 0));
         if (v && typeof v === 'object') anda(v, p, prof + 1);
+        else if (cheio && typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v) && !/birth/i.test(p)) {
+          // Datas não são dado pessoal: guarda só o mês mais antigo e o mais novo.
+          const mes = v.slice(0, 7);
+          const f = datas.get(p) || { de: mes, ate: mes, meses: new Map() };
+          if (mes < f.de) f.de = mes; if (mes > f.ate) f.ate = mes;
+          f.meses.set(mes.slice(0, 4), (f.meses.get(mes.slice(0, 4)) || 0) + 1);
+          datas.set(p, f);
+        }
         else if (cheio && LISTAS.test(p) && !(NUNCA.test(p) && !/(dealStage|dealStatus|funnel|category|sector|leadOrigin|origin|lossReason|reasonForLoss|type|status)\.name$/.test(p))) {
           const s = valores.get(p) || new Map();
           const val = String(v).slice(0, 40);
@@ -261,6 +269,8 @@ function estrutura(arq) {
       let extra = '';
       const vs = valores.get(k);
       if (vs && chave !== 'users') extra = '  → ' + [...vs.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12).map(([v, q]) => v + ' (' + q + ')').join(', ') + (vs.size > 12 ? ', …' : '');
+      const dt = datas.get(k);
+      if (dt) extra += '  (de ' + dt.de + ' a ' + dt.ate + '; por ano: ' + [...dt.meses.entries()].sort().map(([a, q]) => a + ': ' + q).join(', ') + ')';
       console.log('  ' + k + ': ' + pct + '%' + extra);
     });
     console.log('');
