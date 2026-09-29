@@ -98,8 +98,8 @@ usuário, etapa e produto fica no **histórico de alterações** (quem, quando, 
 3. **Primeiro administrador:** Authentication → Users → Add user (e-mail e senha),
    depois no SQL Editor:
    ```sql
-   insert into public.crm_usuarios (user_id, nome, email, papel)
-   select id, 'Seu nome', email, 'admin' from auth.users where email = 'SEU-EMAIL';
+   insert into public.crm_usuarios (user_id, nome, email, papel, recebe_leads)
+   select id, 'Seu nome', email, 'admin', false from auth.users where email = 'SEU-EMAIL';
    ```
    Os outros usuários o administrador cria pela tela (Configurações → Equipe).
 4. **Função de usuários:** `supabase functions deploy crm-usuarios` (pasta

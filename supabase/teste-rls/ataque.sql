@@ -7,7 +7,7 @@ create or replace function pg_temp.como(u text) returns void language sql as $$ 
 set role authenticated;
 -- vendedora Ana
 select pg_temp.como('c0000000-0000-0000-0000-000000000003');
-insert into crm_empresas (nome, responsavel_id) values ('Da Ana','c0000000-0000-0000-0000-000000000003');
+insert into crm_empresas (nome, responsavel_id) values ('Da Ana','c0000000-0000-0000-0000-000000000003') returning 'Ana criou a própria empresa com RETURNING (como o app faz)' as ok;
 insert into crm_empresas (nome, responsavel_id) values ('Ana tentando por no Bruno','d0000000-0000-0000-0000-000000000004'); -- FALHA
 insert into crm_empresas (nome) values ('sem dono pela Ana'); -- FALHA
 -- vendedor Bruno

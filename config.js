@@ -6,6 +6,6 @@
 window.CRM_CONFIG = {
   nomeEmpresa: 'OneClean', // aparece no login, no topo e nas propostas
   logo: '',               // caminho da imagem (vazio = logo da Sistemi Dalessi)
-  supabaseUrl: '',
-  supabaseAnonKey: ''
+  supabaseUrl: 'https://udhigavckigciqnicgyy.supabase.co',
+  supabaseAnonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkaGlnYXZja2lnY2lxbmljZ3l5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA3MDQzNjcsImV4cCI6MjEwNjI4MDM2N30.vQQcV9RIWI5ZBDUreKWoWPNEE9JcSM33XHUWUHYJqlY'
 };

@@ -427,8 +427,12 @@ create policy proprios on public.crm_filtros for all to authenticated
   using (public.crm_eh_membro() and usuario_id = auth.uid())
   with check (public.crm_eh_membro() and usuario_id = auth.uid());
 
--- empresas: carteira própria.
-create policy le on public.crm_empresas for select to authenticated using (public.crm_ve_empresa(id));
+-- empresas: carteira própria. O teste direto do responsável na própria linha é
+-- necessário: no INSERT ... RETURNING (que o app usa) a subconsulta dentro de
+-- crm_ve_empresa() ainda não enxerga a linha recém-inserida (achado no banco real
+-- em 29/09/2026: vendedor não conseguia cadastrar lead).
+create policy le on public.crm_empresas for select to authenticated
+  using (public.crm_eh_gestor() or (public.crm_eh_membro() and responsavel_id = auth.uid()) or public.crm_ve_empresa(id));
 create policy grava on public.crm_empresas for insert to authenticated
   with check (public.crm_eh_gestor() or (public.crm_eh_membro() and responsavel_id = auth.uid()));
 create policy altera on public.crm_empresas for update to authenticated
