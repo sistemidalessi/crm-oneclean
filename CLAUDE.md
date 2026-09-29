@@ -4,6 +4,13 @@ Guia para o Claude Code. Falar em **português** com o Anderson; UI, comentário
 commits em pt-BR. O que o sistema faz, do ponto de vista de quem usa, está no
 `README.md` — ler antes.
 
+> **REGRA Nº 1 — IDIOMA: com o Anderson, TUDO em português do Brasil.** Toda
+> mensagem, inclusive os avisos curtos de andamento ("vou fazer X", "deu certo",
+> "achei um erro"), perguntas, resumos e explicações. **Nunca escrever em inglês**,
+> nem uma frase. Ele já pediu isso mais de quatro vezes; escorregar para o inglês
+> no meio do trabalho é o erro que mais o incomoda. Termos técnicos sem tradução
+> comum (commit, push, token, API) podem ficar, mas a frase é em português.
+
 ## O que é
 
 CRM de equipe de vendas no estilo do Agendor, feito como **produto** da Sistemi

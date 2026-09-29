@@ -92,6 +92,24 @@ async function tudo(caminho, rotulo) {
   return itens;
 }
 
+// A API exige um filtro de data em /tasks ("dueDateGt, finishedDateGt, updatedDateGt,
+// createdDateGt ... at least one parameter must be provided"). Criada depois de
+// 2000 = todas. Vale também para as listas de tarefas por empresa/pessoa/negócio.
+const DESDE = encodeURIComponent('2000-01-01T00:00:00Z');
+const TAREFAS = '/tasks?createdDateGt=' + DESDE;
+const tarefasDe = base => base + '/tasks?createdDateGt=' + DESDE;
+
+// Uma lista que falha não pode derrubar as outras: registra o erro, segue e
+// grava o arquivo com o que veio (importar de novo depois não duplica).
+const erros = [];
+async function seguro(rotulo, fn) {
+  try { return await fn(); } catch (e) {
+    console.log('\n  AVISO: ' + rotulo + ' falhou: ' + e.message);
+    erros.push(rotulo + ': ' + e.message);
+    return [];
+  }
+}
+
 function junta(destino, novos) {
   const ids = new Set(destino.map(x => x.id));
   let n = 0;
@@ -104,31 +122,36 @@ function junta(destino, novos) {
   console.log('Exportando do Agendor' + (completo ? ' (modo completo)' : '') + '…\n');
   const saida = { origem: 'agendor-api-v3', extraido_em: new Date().toISOString(), modo: completo ? 'completo' : 'padrao' };
 
-  saida.users = await tudo('/users', 'Usuários');
-  saida.funnels = await tudo('/funnels', 'Funis');
-  saida.products = await tudo('/products', 'Produtos');
-  saida.organizations = await tudo('/organizations?withCustomFields=true', 'Empresas');
-  saida.people = await tudo('/people?withCustomFields=true', 'Pessoas');
-  saida.deals = await tudo('/deals?withCustomFields=true', 'Negócios');
-  saida.tasks = await tudo('/tasks', 'Tarefas e histórico');
+  saida.users = await seguro('usuários', () => tudo('/users', 'Usuários'));
+  saida.funnels = await seguro('funis', () => tudo('/funnels', 'Funis'));
+  saida.products = await seguro('produtos', () => tudo('/products', 'Produtos'));
+  saida.organizations = await seguro('empresas', () => tudo('/organizations?withCustomFields=true', 'Empresas'));
+  saida.people = await seguro('pessoas', () => tudo('/people?withCustomFields=true', 'Pessoas'));
+  saida.deals = await seguro('negócios', () => tudo('/deals?withCustomFields=true', 'Negócios'));
+  saida.tasks = await seguro('tarefas', () => tudo(TAREFAS, 'Tarefas e histórico'));
 
   if (completo) {
     console.log('\nModo completo: conferindo empresa por empresa (' + saida.organizations.length + ') e pessoa por pessoa (' + saida.people.length + ')…');
     let nd = 0, nt = 0, i = 0;
     for (const o of saida.organizations) {
-      nd += junta(saida.deals, await tudo('/organizations/' + o.id + '/deals'));
-      nt += junta(saida.tasks, await tudo('/organizations/' + o.id + '/tasks'));
+      nd += junta(saida.deals, await seguro('negócios da empresa ' + o.id, () => tudo('/organizations/' + o.id + '/deals')));
+      nt += junta(saida.tasks, await seguro('tarefas da empresa ' + o.id, () => tudo(tarefasDe('/organizations/' + o.id))));
       if (++i % 50 === 0) console.log('  ' + i + ' empresas… (+' + nd + ' negócios, +' + nt + ' tarefas achados)');
     }
     i = 0;
     for (const p of saida.people) {
-      nd += junta(saida.deals, await tudo('/people/' + p.id + '/deals'));
-      nt += junta(saida.tasks, await tudo('/people/' + p.id + '/tasks'));
+      nd += junta(saida.deals, await seguro('negócios da pessoa ' + p.id, () => tudo('/people/' + p.id + '/deals')));
+      nt += junta(saida.tasks, await seguro('tarefas da pessoa ' + p.id, () => tudo(tarefasDe('/people/' + p.id))));
       if (++i % 50 === 0) console.log('  ' + i + ' pessoas…');
     }
-    for (const d of saida.deals) nt += junta(saida.tasks, (await tudo('/deals/' + d.id + '/tasks')));
+    i = 0;
+    for (const d of saida.deals) {
+      nt += junta(saida.tasks, await seguro('tarefas do negócio ' + d.id, () => tudo(tarefasDe('/deals/' + d.id))));
+      if (++i % 200 === 0) console.log('  ' + i + ' negócios…');
+    }
     console.log('Modo completo acrescentou ' + nd + ' negócio(s) e ' + nt + ' tarefa(s).');
   }
+  saida.erros = erros;
 
   const nome = 'agendor-exportado-' + new Date().toISOString().slice(0, 10) + '.json';
   const arq = path.resolve(process.cwd(), nome);
@@ -140,4 +163,10 @@ function junta(destino, novos) {
   console.log('  empresas ' + saida.organizations.length + ' · pessoas ' + saida.people.length + ' · negócios ' + saida.deals.length + ' · tarefas ' + saida.tasks.length + ' · produtos ' + saida.products.length);
   console.log('\nAgora: CRM -> Configurações -> Importar -> "Do Agendor" -> escolha este arquivo.');
   console.log('Lembrete: o arquivo tem dados de clientes. Guarde com cuidado e apague depois de conferir.');
+  if (erros.length) {
+    console.log('\nATENÇÃO: ' + erros.length + ' lista(s) não vieram (o resto foi gravado):');
+    erros.slice(0, 10).forEach(e => console.log('  - ' + e));
+    console.log('Mande um print desta tela para o suporte (Sistemi Dalessi).');
+    process.exitCode = 2;
+  }
 })().catch(e => { console.error('\nERRO: ' + e.message); process.exit(1); });
