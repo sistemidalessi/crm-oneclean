@@ -114,6 +114,9 @@ input.curto { width: 120px; }
 .marca .logo { width: 38px; height: 38px; border-radius: 50%; object-fit: cover; background: #fff; }
 .marca strong { display: block; font-size: .95rem; max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .marca span { display: block; font-size: .66rem; color: var(--ouro); letter-spacing: 2px; text-transform: uppercase; }
+.marca.completa { background: #fff; border-radius: 10px; margin: 12px 10px 6px; padding: 10px 12px; justify-content: center; }
+.marca.completa .logo, .marca.completa div { display: none; }
+.marca .logo-menu { display: block; width: 100%; height: auto; }
 .menu-lateral { display: grid; gap: 2px; padding: 6px 8px; }
 .nav { appearance: none; border: 0; background: none; color: rgba(255, 255, 255, .78); font: inherit; padding: 9px 10px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; gap: 10px; text-align: left; }
 .nav:hover { background: rgba(255, 255, 255, .08); color: #fff; }
@@ -419,6 +422,10 @@ body.arrastando-card .zonas-fim { display: grid; grid-template-columns: 1fr 1fr;
 @media (max-width: 1000px) {
   .lateral { width: 64px; }
   .nav-txt, .marca div, .assinatura { display: none; }
+  /* Menu encolhido: volta o ícone quadrado no lugar do logo completo. */
+  .marca.completa { background: none; margin: 0; padding: 14px; }
+  .marca.completa .logo { display: block; }
+  .marca.completa .logo-menu { display: none; }
   .zonas-fim { left: 80px; }
   .ajustes { grid-template-columns: 1fr; }
   .ajustes-menu { position: static; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }

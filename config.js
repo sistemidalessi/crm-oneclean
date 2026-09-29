@@ -6,10 +6,11 @@
 window.CRM_CONFIG = {
   nomeEmpresa: 'OneClean', // aparece no login, no topo e nas propostas
   logo: 'assets/oneclean-logo.png',        // logo completo: login e propostas (vazio = logo da Sistemi Dalessi)
-  logoIcone: 'assets/oneclean-icone.png',  // versão quadrada: menu e aba do navegador
-  // Paleta do logo da OneClean: azul #2592ae e verde #a9c451. O principal é o mesmo azul um
-  // tom mais fechado, para o texto branco do menu e dos botões ficar legível (contraste 4,6:1).
-  cores: { principal: '#1d7f99', destaque: '#a9c451' },
+  logoIcone: 'assets/oneclean-icone.png',  // versão quadrada: aba do navegador e menu encolhido
+  logoNoMenu: 'completo',                  // logo completo no alto do menu, num cartão branco
+  // Paleta do logo da OneClean: azul #2592ae e verde #a9c451. O principal é o mesmo azul bem
+  // mais escuro (pedido do Anderson), o que também deixa o texto branco do menu bem legível.
+  cores: { principal: '#175b6d', destaque: '#a9c451' },
   supabaseUrl: 'https://udhigavckigciqnicgyy.supabase.co',
   supabaseAnonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkaGlnYXZja2lnY2lxbmljZ3l5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA3MDQzNjcsImV4cCI6MjEwNjI4MDM2N30.vQQcV9RIWI5ZBDUreKWoWPNEE9JcSM33XHUWUHYJqlY'
 };

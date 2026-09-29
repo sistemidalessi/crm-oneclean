@@ -574,6 +574,11 @@
     const cfg = window.CRM_CONFIG || {};
     aplicaCores(cfg.cores);
     $('#logoTopo').src = logoIcone();
+    // Logo completo no alto do menu, num cartão branco (config.js → logoNoMenu: 'completo').
+    if (cfg.logoNoMenu === 'completo' && cfg.logo) {
+      $('#logoMenu').src = logo(); $('#logoMenu').alt = nomeInstalacao(); $('#logoMenu').hidden = false;
+      document.querySelector('.marca').classList.add('completa');
+    }
     const icone = document.querySelector('link[rel=icon]'); if (icone) icone.href = logoIcone();
     if (!cfg.supabaseUrl || !cfg.supabaseAnonKey) {
       store = new DD.Local();
