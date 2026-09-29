@@ -14,6 +14,16 @@ inativo). Uso só no computador (desktop primeiro; abaixo de 1000 px o menu enco
 Nasceu em 29/09/2026 com prazo: o Agendor da OneClean vencia em 01/10/2026 e os
 dados precisavam vir de lá. A migração é o caminho mais sensível do sistema.
 
+## Instalação OneClean (este repositório)
+
+- Endereço: https://sistemidalessi.github.io/crm-oneclean/ (GitHub Pages, branch `main`, raiz).
+- Supabase: organização **OneClean**, projeto **OneClean CRM**, ref `udhigavckigciqnicgyy`
+  (sa-east-1), criado em 29/09/2026. Schema aplicado (migrations `crm_schema_v2` e
+  `crm_empresas_le_propria_linha`), Edge Function `crm-usuarios` publicada (verify_jwt ligado).
+  Permissões atacadas no banco real (vendedor A × vendedor B × de fora × anon), tudo barrado.
+- Esta é a cópia viva do código. A origem foi `sistemi-dalessi/crm/`, que fica só
+  como histórico; mudança nova entra aqui.
+
 ## Arquitetura
 
 - **Estático, sem build, sem npm.** Scripts clássicos (não módulos) carregados em
