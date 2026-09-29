@@ -443,6 +443,8 @@
   // ------------------------------------------------------------ entrada
   const nomeInstalacao = () => (window.CRM_CONFIG && window.CRM_CONFIG.nomeEmpresa) || E.cfg.nome_empresa || 'CRM';
   const logo = () => (window.CRM_CONFIG && window.CRM_CONFIG.logo) || 'assets/logo.jpg';
+  // Versão quadrada para o menu e a aba do navegador (sem ela, usa o logo normal).
+  const logoIcone = () => (window.CRM_CONFIG && window.CRM_CONFIG.logoIcone) || logo();
   CRM.nomeInstalacao = nomeInstalacao;
   CRM.logo = logo;
 
@@ -571,7 +573,8 @@
     ligarEventos();
     const cfg = window.CRM_CONFIG || {};
     aplicaCores(cfg.cores);
-    $('#logoTopo').src = logo();
+    $('#logoTopo').src = logoIcone();
+    const icone = document.querySelector('link[rel=icon]'); if (icone) icone.href = logoIcone();
     if (!cfg.supabaseUrl || !cfg.supabaseAnonKey) {
       store = new DD.Local();
       await store.carregar();

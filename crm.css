@@ -1,5 +1,5 @@
 /* CRM Sistemi Dalessi — visual. Desktop primeiro (uso no computador).
-   Azul-marinho e dourado do logo; modo escuro automático. */
+   Azul-marinho e dourado do logo da Sistemi Dalessi (cada cliente troca em config.js → cores); modo escuro automático. */
 :root {
   --marinho: #0f2340;
   --marinho-2: #1c3862;
@@ -111,7 +111,7 @@ input.curto { width: 120px; }
 .app { display: flex; height: 100vh; }
 .lateral { width: 200px; flex: none; background: var(--marinho); color: #fff; display: flex; flex-direction: column; border-right: 2px solid var(--ouro); }
 .marca { display: flex; align-items: center; gap: 10px; padding: 14px; }
-.marca .logo { width: 38px; height: 38px; border-radius: 50%; object-fit: cover; }
+.marca .logo { width: 38px; height: 38px; border-radius: 50%; object-fit: cover; background: #fff; }
 .marca strong { display: block; font-size: .95rem; max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .marca span { display: block; font-size: .66rem; color: var(--ouro); letter-spacing: 2px; text-transform: uppercase; }
 .menu-lateral { display: grid; gap: 2px; padding: 6px 8px; }
@@ -375,7 +375,7 @@ body.arrastando-card .zonas-fim { display: grid; grid-template-columns: 1fr 1fr;
 .grade-login .link { justify-self: center; }
 .entrada-cartao p { margin: 0; color: var(--suave); }
 .entrada-cartao .erro-form { margin: 0; }
-.logo-grande { width: 130px; justify-self: center; border-radius: 12px; }
+.logo-grande { width: auto; max-width: min(260px, 100%); max-height: 140px; justify-self: center; border-radius: 12px; }
 .rodape-entrada { color: rgba(255, 255, 255, .5); font-size: .75rem; margin: 0; }
 
 .toast { position: fixed; left: 50%; bottom: 20px; transform: translate(-50%, 20px); opacity: 0; pointer-events: none; background: var(--marinho); color: #fff; padding: 10px 16px; border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, .25); transition: opacity .2s, transform .2s; z-index: 100; max-width: calc(100vw - 32px); }
@@ -393,8 +393,8 @@ body.arrastando-card .zonas-fim { display: grid; grid-template-columns: 1fr 1fr;
   body.imprimindo .impressao { display: block; }
 }
 .proposta-doc { font: 11pt/1.4 system-ui, sans-serif; color: #111; padding: 10mm; }
-.proposta-doc header { display: flex; gap: 14px; align-items: center; border-bottom: 3px solid #c9a15a; padding-bottom: 10px; margin-bottom: 14px; }
-.proposta-doc header img { width: 60px; height: 60px; object-fit: contain; }
+.proposta-doc header { display: flex; gap: 14px; align-items: center; border-bottom: 3px solid var(--ouro); padding-bottom: 10px; margin-bottom: 14px; }
+.proposta-doc header img { width: auto; max-width: 200px; height: 60px; object-fit: contain; }
 .proposta-doc header h1 { font-size: 16pt; }
 .proposta-doc header p { margin: 0; }
 .proposta-doc header .dir { margin-left: auto; text-align: right; }
