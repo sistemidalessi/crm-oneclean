@@ -283,12 +283,15 @@
       return e;
     }
 
-    // Empresa referenciada por contato/negócio/atividade: acha ou cria.
+    // Empresa referenciada por contato/negócio/atividade: acha ou cria. Sem empresa informada,
+    // o nome de reserva (título do negócio, nome da pessoa) também é procurado antes de criar —
+    // senão cada negócio de um mesmo cliente sem empresa virava uma empresa nova.
     function empresaDe(r, resp) {
-      const e = achaEmpresa(r.empresa_externo, r.empresa_cnpj, r.empresa);
+      const reserva = !texto(r.empresa) ? nomeDeReserva(r.empresa_nome_fallback) : null;
+      const e = achaEmpresa(r.empresa_externo, r.empresa_cnpj, r.empresa) || (reserva && achaEmpresa(null, null, reserva));
       if (e) return e;
-      if (!op.criarEmpresas || !(texto(r.empresa) || texto(r.empresa_nome_fallback))) return null;
-      return criaEmpresa({ nome: texto(r.empresa) || texto(r.empresa_nome_fallback), cnpj: r.empresa_cnpj ? R.formataCNPJ(r.empresa_cnpj) : null,
+      if (!op.criarEmpresas || !(texto(r.empresa) || reserva)) return null;
+      return criaEmpresa({ nome: texto(r.empresa) || reserva, cnpj: r.empresa_cnpj ? R.formataCNPJ(r.empresa_cnpj) : null,
         externo_id: texto(r.empresa_externo) }, resp, null);
     }
 
@@ -478,6 +481,16 @@
   }
 
   // Tira nulos (deixa o banco pôr o padrão), exceto as chaves pedidas.
+  // Título de negócio usado como nome de empresa: tira o nº do pedido do começo ("1096 - ") e o
+  // nome do contato em maiúsculas do fim (" - MARIA"), como o pós-venda do Agendor da OneClean escreve.
+  function nomeDeReserva(t) {
+    const orig = t == null ? '' : String(t).trim();
+    let s = orig.replace(/^\d*\s*-\s*/, '').trim();
+    const m = s.match(/^(.+?)\s+-\s+([A-ZÀ-Ú]+(?:\s+[A-ZÀ-Ú]+){0,2})$/);
+    if (m) s = m[1].trim();
+    return s || orig || null;
+  }
+
   function limpa(o, manter) {
     const m = new Set(manter || []);
     const r = {};

@@ -236,3 +236,34 @@ test('formato real do Agendor da OneClean (conferência de 29/09/2026)', () => {
   assert.equal(plano.criar.contatos[0].empresa_id, a.id);
   assert.equal(plano.semResponsavel.length, 0);
 });
+
+test('negócios sem empresa do mesmo cliente não viram empresas repetidas (formato do pós-venda da OneClean)', () => {
+  const org = { id: 20, name: 'ESCOLA MODELO | JOAO', ownerUser: { id: 1, name: 'Vendedora Um' } };
+  const semEmpresa = (id, title) => ({ id, title, dealStatus: { id: 1 }, owner: { id: 1, name: 'Vendedora Um' } });
+  const bruto = {
+    users: [{ id: 1, name: 'Vendedora Um' }],
+    organizations: [org],
+    deals: [
+      semEmpresa(1, '1261 - ESCOLA MODELO | JOAO'), semEmpresa(2, '901 - ESCOLA MODELO | JOAO'),
+      semEmpresa(3, '1096 - Indústria Química Exemplo - MARIA'), semEmpresa(4, '2024 - Indústria Química Exemplo - ANA'),
+      semEmpresa(5, '989 - Atendimento - COLEGIO TESTE - BIA'), semEmpresa(6, '825 - Atendimento - COLEGIO TESTE | Carla'),
+      semEmpresa(7, '- CENTRO EDUCACIONAL AURORA'), semEmpresa(8, 'Colégio Horizonte - Ensino Fundamental / Médio')
+    ],
+    people: [{ id: 9, name: 'ESCOLA MODELO | JOAO' }]
+  };
+  const D = base();
+  D.usuarios = [{ user_id: 'u1', nome: 'Vendedora Um' }];
+  const plano = P.planeja(D, P.converteAgendor(bruto), {});
+  const nomes = plano.criar.empresas.map(e => e.nome).sort();
+  assert.deepEqual(nomes, ['Atendimento - COLEGIO TESTE', 'Atendimento - COLEGIO TESTE | Carla', 'CENTRO EDUCACIONAL AURORA',
+    'Colégio Horizonte - Ensino Fundamental / Médio', 'ESCOLA MODELO | JOAO', 'Indústria Química Exemplo'].sort());
+  const escola = plano.criar.empresas.find(e => e.nome === org.name);
+  assert.equal(plano.criar.negocios.filter(n => n.empresa_id === escola.id).length, 2, 'negócios vão para a empresa que já existe');
+  assert.equal(plano.criar.contatos[0].empresa_id, escola.id, 'pessoa sem empresa acha a empresa de mesmo nome');
+  // Reimportar não cria nada de novo.
+  const D2 = base(); D2.usuarios = D.usuarios;
+  Object.keys(plano.criar).forEach(t => { D2[t] = (D2[t] || []).concat(plano.criar[t]); });
+  const plano2 = P.planeja(D2, P.converteAgendor(bruto), {});
+  assert.equal(plano2.criar.empresas.length, 0);
+  assert.equal(plano2.criar.negocios.length, 0);
+});
