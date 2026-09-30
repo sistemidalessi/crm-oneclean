@@ -451,3 +451,4 @@ body.arrastando-card .zonas-fim { display: grid; grid-template-columns: 1fr 1fr;
 .vendedores-notas small { color: var(--suave); }
 .contato-negocio { margin-top: 10px; }
 .contato-negocio .dados dd { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.motivo-dup { margin: 0 0 4px; font-size: .85rem; color: var(--suave); }

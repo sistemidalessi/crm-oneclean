@@ -35,7 +35,7 @@
       ['tags', 'Etiquetas (separadas por vírgula)', ['etiquetas', 'tags', 'etiqueta', 'marcadores']],
       ['qualificacao', 'Qualificação (0 a 5)', ['ranking', 'qualificacao', 'estrelas', 'classificacao']],
       ['observacoes', 'Observações', ['descricao', 'observacoes', 'observacao', 'obs', 'anotacoes', 'notas']],
-      ['externo_id', 'Código no sistema antigo', ['id', 'codigo', 'cod', 'id empresa', 'codigo do cliente']],
+      ['externo_id', 'Código no sistema antigo', ['codigo da empresa', 'id', 'codigo', 'cod', 'id empresa', 'codigo do cliente']],
       ['criado_em', 'Data de cadastro', ['data de cadastro', 'criado em', 'data de criacao', 'cadastrado em', 'data cadastro']]
     ],
     contatos: [
@@ -54,8 +54,9 @@
       ['externo_id', 'Código no sistema antigo', ['id', 'codigo']]
     ],
     negocios: [
-      ['titulo', 'Título do negócio', ['titulo', 'negocio', 'nome do negocio', 'oportunidade', 'nome']],
-      ['empresa', 'Empresa', ['empresa', 'organizacao', 'cliente', 'nome da empresa']],
+      ['titulo', 'Título do negócio', ['titulo', 'titulo do negocio', 'negocio', 'nome do negocio', 'oportunidade', 'nome']],
+      ['empresa', 'Empresa', ['empresa', 'empresa relacionada', 'organizacao', 'cliente', 'nome da empresa']],
+      ['empresa_externo', 'Código da empresa (sistema antigo)', ['codigo da empresa']],
       ['contato', 'Pessoa', ['pessoa', 'contato']],
       ['valor', 'Valor', ['valor', 'valor total', 'total', 'valor do negocio']],
       ['funil', 'Funil', ['funil', 'pipeline']],
@@ -68,20 +69,22 @@
       ['responsavel', 'Responsável', ['responsavel', 'vendedor', 'dono']],
       ['origem', 'Origem', ['origem']],
       ['observacoes', 'Descrição', ['descricao', 'observacoes', 'obs']],
-      ['externo_id', 'Código no sistema antigo', ['id', 'codigo']]
+      ['externo_id', 'Código no sistema antigo', ['codigo do negocio', 'id', 'codigo']]
     ],
     atividades: [
       ['descricao', 'Descrição / texto', ['texto', 'descricao', 'assunto', 'tarefa', 'atividade', 'comentario', 'anotacao']],
       ['tipo', 'Tipo', ['tipo', 'tipo de tarefa', 'tipo de atividade']],
-      ['data_hora', 'Data', ['data', 'data da tarefa', 'data agendada', 'prazo', 'vencimento', 'data e hora', 'agendada para']],
+      ['data_hora', 'Data', ['data', 'data de agendamento', 'data da tarefa', 'data agendada', 'prazo', 'vencimento', 'data e hora', 'agendada para']],
       ['hora', 'Hora', ['hora', 'horario']],
       ['concluida', 'Concluída? (sim/não)', ['concluida', 'realizada', 'feita', 'finalizada', 'status']],
-      ['concluida_em', 'Data de conclusão', ['data de conclusao', 'concluida em', 'finalizada em', 'realizada em']],
-      ['responsavel', 'Responsável', ['responsavel', 'usuario', 'vendedor', 'atribuida a']],
-      ['empresa', 'Empresa', ['empresa', 'organizacao', 'cliente']],
-      ['contato', 'Pessoa', ['pessoa', 'contato']],
-      ['negocio', 'Negócio', ['negocio', 'titulo do negocio']],
-      ['externo_id', 'Código no sistema antigo', ['id', 'codigo']]
+      ['concluida_em', 'Data de conclusão', ['data de conclusao', 'data de finalizacao', 'concluida em', 'finalizada em', 'realizada em']],
+      ['responsavel', 'Responsável', ['responsavel', 'usuarios responsaveis', 'usuario', 'vendedor', 'atribuida a']],
+      ['empresa', 'Empresa', ['empresa', 'empresa relacionada', 'organizacao', 'cliente']],
+      ['empresa_externo', 'Código da empresa (sistema antigo)', ['codigo da empresa']],
+      ['contato', 'Pessoa', ['pessoa', 'pessoa relacionada', 'contato']],
+      ['negocio', 'Negócio', ['negocio', 'negocio relacionado', 'titulo do negocio']],
+      ['negocio_externo', 'Código do negócio (sistema antigo)', ['codigo do negocio']],
+      ['externo_id', 'Código no sistema antigo', ['codigo da atividade', 'id', 'codigo']]
     ],
     produtos: [
       ['nome', 'Nome do produto', ['nome', 'produto', 'descricao', 'nome do produto']],
@@ -103,9 +106,12 @@
     const usado = new Set();
     const mapa = {};
     const cabs = cabecalhos.map(normCab);
-    cabs.forEach((c, i) => {
-      for (const [campo, , sin] of campos) {
-        if (!usado.has(campo) && sin.indexOf(c) !== -1) { mapa[i] = campo; usado.add(campo); return; }
+    // 1º: nome exato, na ordem de preferência dos sinônimos (com "Celular" e "WhatsApp" na mesma
+    // planilha, a coluna WhatsApp fica com o WhatsApp).
+    campos.forEach(([campo, , sin]) => {
+      for (const s of sin) {
+        const i = cabs.findIndex((c, j) => c === s && mapa[j] == null);
+        if (i !== -1) { mapa[i] = campo; usado.add(campo); return; }
       }
     });
     cabs.forEach((c, i) => {
@@ -115,6 +121,21 @@
       }
     });
     return mapa;
+  }
+
+  // Planilha exportada do Agendor ("Código da empresa", "Código do Negócio", "Código da
+  // atividade"): os códigos viram os mesmos ids da importação pela API (agendor:org:123 etc.),
+  // para reimportar sem duplicar o que já veio de lá.
+  const PREFIXO_AGENDOR = { empresas: 'org', contatos: 'pessoa', negocios: 'negocio', atividades: 'tarefa' };
+  function ehPlanilhaAgendor(cabecalhos) {
+    const c = cabecalhos.map(normCab);
+    return ['codigo da empresa', 'codigo do negocio', 'codigo da atividade', 'codigo da pessoa'].some(x => c.indexOf(x) !== -1);
+  }
+  function prefixaAgendor(tipo, registros) {
+    const id = (p, v) => (v == null || v === '' ? v : /^agendor:/.test(String(v)) ? v : 'agendor:' + p + ':' + String(Math.round(Number(v)) || v).trim());
+    return registros.map(r => Object.assign(r, {
+      externo_id: id(PREFIXO_AGENDOR[tipo], r.externo_id), empresa_externo: id('org', r.empresa_externo), negocio_externo: id('negocio', r.negocio_externo)
+    }));
   }
 
   function registrosDaPlanilha(linhas, mapa) {
@@ -463,7 +484,8 @@
       const negocioTitulo = !negocio && texto(r.negocio) ? negPorTitulo.get(e.id + ':' + R.normaliza(r.negocio)) : null;
       let quando = R.dataPlanilha(r.data_hora);
       if (quando && r.hora && /^\d{1,2}:\d{2}/.test(String(r.hora))) quando = R.momento(R.diaLocal(quando), String(r.hora).slice(0, 5));
-      const concluida = r.concluida != null ? simNao(r.concluida) : !!r.concluida_em;
+      // Nota (anotação) é histórico: entra concluída mesmo sem data de finalização.
+      const concluida = r.concluida != null ? simNao(r.concluida) : !!r.concluida_em || tipoAtividade(r.tipo) === 'nota';
       const concluidaEm = concluida ? (R.dataPlanilha(r.concluida_em) || quando || agora) : null;
       quando = quando || concluidaEm || agora;
       const a = {
@@ -617,7 +639,7 @@
     return { empresas, contatos, etapas, produtos, negocios, atividades, usuarios };
   }
 
-  const api = { CAMPOS, OBRIGATORIO, normCab, adivinhaMapeamento, registrosDaPlanilha, planeja, converteAgendor,
+  const api = { CAMPOS, OBRIGATORIO, normCab, adivinhaMapeamento, registrosDaPlanilha, ehPlanilhaAgendor, prefixaAgendor, planeja, converteAgendor,
     situacao, statusNegocio, tipoAtividade, simNao };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else raiz.CRMPlanilha = api;

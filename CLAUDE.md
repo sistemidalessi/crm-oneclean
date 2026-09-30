@@ -123,6 +123,13 @@ dados precisavam vir de lá. A migração é o caminho mais sensível do sistema
   acento/pontuação/"Ltda"), e-mail e telefone (últimos 9 dígitos). Grafia
   diferente do mesmo cadastro vira apelido (negócio que cita "Cond. X" acha "Condomínio X").
 - Padrão é **completar só o vazio**; sobrescrever é opção explícita.
+- **Planilha exportada do Agendor** (cabeçalhos "Código da empresa/do Negócio/da atividade"):
+  `P.ehPlanilhaAgendor` + `P.prefixaAgendor` transformam os códigos nos mesmos ids da API
+  (`agendor:org:…`, `agendor:negocio:…`, `agendor:tarefa:…`), então reimportar a planilha não
+  duplica o que veio pela API. Mapeamento exato respeita a ordem dos sinônimos (a coluna
+  "WhatsApp" fica com o WhatsApp mesmo havendo "Celular" antes). Conferido em 30/09 com as
+  4 planilhas reais: mesmos dados da API; só 36 atividades novas (do dia) e "E-mail 2" (3%)
+  a mais. **Não trazem o histórico concluído antigo** (só pendentes e a última semana).
 - Tarefa do Agendor **sem tipo e sem prazo é "Nota"** (anotação): entra como histórico
   (`nota`, concluída), não como tarefa pendente. Na 1ª importação 54 entraram como tarefa
   atrasada; corrigidas no banco em 30/09 (eram as de `data_hora` com segundos = criação).
@@ -147,7 +154,10 @@ dados precisavam vir de lá. A migração é o caminho mais sensível do sistema
   `R.chaveDoc/chaveTelefone/chaveEmail` e `crm_doc/crm_tel/crm_mail`; mudar um, mudar o outro.
 - Só confere o que **mudou**: os repetidos que vieram do Agendor (55 grupos por e-mail e
   82 por telefone em 30/09) continuam editáveis; juntar em Configurações → Duplicados (que
-  agora agrupa também por telefone e e-mail). A mescla apaga os repetidos **antes** de
+  agora agrupa também por telefone e e-mail, mostra o motivo — `R.motivoDuplicado`: "quase
+  certo" = mesmo CNPJ ou mesmo e-mail E telefone — e a carteira de cada um, pré-marca o
+  cadastro com mais negócios/histórico e tem "Mesclar os quase certos"). Em 30/09 havia 144
+  pares (86 e-mail+telefone, 46 só telefone, 12 só e-mail; 54 em carteiras diferentes). A mescla apaga os repetidos **antes** de
   completar o que fica, senão a trava recusaria.
 - Dado de **pessoa de contato** igual só **avisa** (síndico/comprador atende várias empresas).
 - `crm_duplicado_empresa()` (RPC, só membro) devolve nome + responsável para o aviso
@@ -168,7 +178,11 @@ dados precisavam vir de lá. A migração é o caminho mais sensível do sistema
   depois só marca `cancelada`. Emitente = CNPJ mais frequente nas notas de saída; nota de
   entrada, de outra empresa, de devolução (finNFe 4) ou não autorizada fica de fora.
 - Cliente: CNPJ/CPF → razão social → nome → nome antes do " | " (o Agendor da OneClean
-  grava "Empresa | Contato"). Achou: completa CNPJ/razão social e vira "cliente". Não
+  grava "Empresa | Contato"). Achou: **completa o cadastro com a nota** (regra do Anderson):
+  CNPJ, razão social, e-mail, telefone (se não tiver nenhum) e endereço (inteiro, se não
+  tiver CEP nem rua), sempre só o vazio, e vira "cliente". Dado da nota que já é de **outro**
+  cliente não entra (a trava de duplicado recusaria o cadastro inteiro); conta em
+  `dadosDeOutroCadastro` e aparece na conferência como possível duplicado. Não
   achou: cria como cliente, com `criado_em` = data da 1ª nota e segmento sugerido
   (`R.sugereSegmento`, por palavras do nome). Produto do catálogo por código ou nome
   (opcional; só itens de CFOP de venda).

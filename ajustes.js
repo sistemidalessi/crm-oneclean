@@ -388,7 +388,8 @@
       $$('[data-mapa]').forEach(s => { if (s.value) imp.mapa[s.dataset.mapa] = s.value; else delete imp.mapa[s.dataset.mapa]; });
       const obrig = P.OBRIGATORIO[imp.tipo];
       if (!Object.values(imp.mapa).includes(obrig)) { CRM.toast('Diga qual coluna é "' + P.CAMPOS[imp.tipo].find(c => c[0] === obrig)[1] + '".', true); return; }
-      imp.tipos = { [imp.tipo]: P.registrosDaPlanilha(imp.linhas, imp.mapa) };
+      const regs = P.registrosDaPlanilha(imp.linhas, imp.mapa);
+      imp.tipos = { [imp.tipo]: P.ehPlanilhaAgendor(imp.cab) ? P.prefixaAgendor(imp.tipo, regs) : regs };
       planejar();
     });
     const bi = $('#btnImportar');
@@ -452,6 +453,8 @@
       (r.emitente ? '<br><small>Emitente: ' + esc(r.emitente.nome) + ' · ' + esc(r.emitente.doc) + ' · ' + imp.arquivosLidos + ' arquivo(s) lido(s)' +
         (imp.arquivosOutros ? ', ' + imp.arquivosOutros + ' sem NF-e' : '') + '</small>' : '') + '</p><ul>' +
       '<li>' + r.empresasLigadas + ' cliente(s) já cadastrado(s) reconhecido(s)' + (r.cnpjsCompletados ? ', ' + r.cnpjsCompletados + ' com o CNPJ completado agora' : '') + '</li>' +
+      (r.camposCompletados ? '<li>' + r.camposCompletados + ' dado(s) de cadastro completados com a nota (CNPJ, razão social, e-mail, telefone, endereço — só o que estava vazio)</li>' : '') +
+      (r.dadosDeOutroCadastro ? '<li>' + r.dadosDeOutroCadastro + ' dado(s) da nota não usados porque já são de outro cliente (possível duplicado: veja Configurações → Duplicados)</li>' : '') +
       '<li>' + r.empresasNovas + ' cliente(s) novo(s) serão cadastrados como "cliente", com o segmento sugerido pelo nome</li>' +
       (r.produtosNovos ? '<li>' + r.produtosNovos + ' produto(s) novo(s) no catálogo (código, nome e último preço)</li>' : '') +
       fora.map(x => '<li>' + x[0] + ' ' + esc(x[1]) + '</li>').join('') + '</ul>' +
@@ -558,17 +561,59 @@
   }
 
   // ================================================================ Duplicados
+  // O cadastro que fica, por padrão: o que tem mais negócios, histórico e notas.
+  const pesoEmpresa = x => CRM.doEmpresa('negocios', x.id).length * 3 + CRM.doEmpresa('atividades', x.id).length + (E().ix.porEmpresa.notas.get(x.id) || []).length * 2 +
+    ['cnpj', 'razao_social', 'email', 'telefone', 'whatsapp', 'cidade'].filter(k => x[k]).length;
+  function gruposEmpresas() {
+    return R.duplicadosEmpresas(E().D.empresas).map(g => ({ g: g.slice().sort((a, b) => pesoEmpresa(b) - pesoEmpresa(a)), m: R.motivoDuplicado(g) }))
+      .sort((a, b) => b.m.forca - a.m.forca || b.g.length - a.g.length);
+  }
+
   TELAS.duplicados = () => {
-    const ge = R.duplicadosEmpresas(E().D.empresas);
+    const ge = gruposEmpresas();
     const gc = R.duplicadosContatos(E().D.contatos);
-    const bloco = (g, tipo) => '<div class="grupo-dup" data-grupo>' + g.map((x, i) => '<label class="check"><input type="radio" name="dup_' + tipo + '_' + esc(g[0].id) + '" value="' + esc(x.id) + '"' + (i === 0 ? ' checked' : '') + '> ' +
-      (tipo === 'e' ? '<strong>' + esc(x.nome) + '</strong> <small>' + esc([x.cnpj, x.cidade, CRM.nomeUsuario(x.responsavel_id), CRM.doEmpresa('negocios', x.id).length + ' negócio(s)', CRM.doEmpresa('atividades', x.id).length + ' atividade(s)'].filter(Boolean).join(' · ')) + '</small>'
+    const certos = ge.filter(x => x.m.forca === 3);
+    const selo = m => m.forca === 3 ? CRM.selo('quase certo', 'verde') : m.forca === 2 ? CRM.selo('confira', 'ambar') : CRM.selo('só o nome', 'azul');
+    const bloco = (g, tipo, m) => '<div class="grupo-dup" data-grupo>' + (m ? '<p class="motivo-dup">' + selo(m) + ' ' + esc(m.texto) + (m.carteirasDiferentes ? ' ' + CRM.selo('carteiras diferentes', 'vermelho') : '') + '</p>' : '') +
+      g.map((x, i) => '<label class="check"><input type="radio" name="dup_' + tipo + '_' + esc(g[0].id) + '" value="' + esc(x.id) + '"' + (i === 0 ? ' checked' : '') + '> ' +
+      (tipo === 'e' ? '<strong>' + esc(x.nome) + '</strong> <small>' + esc([x.cnpj, x.email, x.whatsapp || x.telefone, x.cidade, 'carteira: ' + CRM.nomeUsuario(x.responsavel_id), CRM.doEmpresa('negocios', x.id).length + ' negócio(s)', CRM.doEmpresa('atividades', x.id).length + ' atividade(s)'].filter(Boolean).join(' · ')) + '</small>'
         : '<strong>' + esc(x.nome) + '</strong> <small>' + esc([CRM.nomeEmpresa(x.empresa_id), x.email, x.whatsapp || x.celular || x.telefone].filter(Boolean).join(' · ')) + '</small>') + '</label>').join('') +
       '<button type="button" class="btn sec" data-acao="mesclar" data-id="' + tipo + ':' + g.map(x => x.id).join(',') + '">Mesclar no marcado</button></div>';
-    return '<p class="dica">Encontrados pelo mesmo CNPJ, nome parecido (sem acento, sem "Ltda/ME"), e-mail ou telefone. Mesclar junta tudo no cadastro marcado (pessoas, negócios, histórico) e apaga os outros. Confira antes: não tem volta.</p>' +
-      '<section class="cartao"><h2>Empresas <small>' + ge.length + ' grupo(s)</small></h2>' + (ge.length ? ge.slice(0, 60).map(g => bloco(g, 'e')).join('') : '<p class="vazio">Nenhuma empresa duplicada. 👍</p>') + '</section>' +
+    return '<p class="dica">Encontrados pelo mesmo CNPJ/CPF, e-mail, telefone (com ou sem DDD) ou nome parecido (sem acento, sem "Ltda/ME"). Mesclar junta tudo no cadastro marcado ' +
+      '(pessoas, negócios, histórico, notas; já vem marcado o que tem mais coisa) e apaga os outros. Confira antes: não tem volta. O cadastro que fica mantém a carteira dele.</p>' +
+      '<section class="cartao"><h2>Empresas <small>' + ge.length + ' grupo(s) · ' + certos.length + ' quase certo(s)</small>' +
+        (certos.length ? '<button type="button" class="btn sec" data-acao="mesclar-certos">Mesclar os ' + certos.length + ' quase certos</button>' : '') + '</h2>' +
+        (ge.length ? ge.map(x => bloco(x.g, 'e', x.m)).join('') : '<p class="vazio">Nenhuma empresa duplicada. 👍</p>') + '</section>' +
       '<section class="cartao"><h2>Pessoas <small>' + gc.length + ' grupo(s)</small></h2>' + (gc.length ? gc.slice(0, 60).map(g => bloco(g, 'c')).join('') : '<p class="vazio">Nenhuma pessoa duplicada. 👍</p>') + '</section>';
   };
+
+  // Junta um grupo de empresas no cadastro "fica" (move pessoas, negócios, histórico e notas).
+  async function mesclaEmpresas(marcado, outros) {
+    const alvo = CRM.empresa(marcado);
+    const s = new Set(outros);
+    const patch = R.mesclaCampos(alvo, outros.map(CRM.empresa), ['nome', 'responsavel_id', 'situacao']);
+    for (const t of ['contatos', 'negocios', 'atividades', 'notas']) await CRM.atualizarVarios(t, E().D[t].filter(x => s.has(x.empresa_id)).map(x => x.id), { empresa_id: marcado });
+    // Apaga os repetidos antes de completar o que fica: senão a trava de duplicado recusaria
+    // o telefone/e-mail que ainda está no cadastro que vai sumir.
+    await CRM.removerVarios('empresas', outros);
+    if (Object.keys(patch).length) await CRM.atualizar('empresas', marcado, patch);
+    await CRM.auto.sistema(marcado, null, 'Cadastros mesclados neste: ' + outros.length);
+  }
+
+  async function mesclarCertos() {
+    const certos = gruposEmpresas().filter(x => x.m.forca === 3);
+    const dif = certos.filter(x => x.m.carteirasDiferentes).length;
+    if (!confirm('Mesclar ' + certos.length + ' grupo(s) com o mesmo CNPJ ou o mesmo e-mail e telefone?\n\nEm cada grupo fica o cadastro com mais negócios e histórico, na carteira dele.' +
+      (dif ? '\n' + dif + ' grupo(s) estão em carteiras diferentes: os negócios continuam com quem já é responsável por eles.' : '') + '\n\nNão tem volta.')) return;
+    let feitos = 0;
+    const erros = [];
+    for (const x of certos) {
+      try { await mesclaEmpresas(x.g[0].id, x.g.slice(1).map(e => e.id)); feitos++; } catch (e) { erros.push(x.g[0].nome + ': ' + e.message); }
+      if (feitos % 10 === 0) CRM.toast('Mesclando… ' + feitos + ' de ' + certos.length);
+    }
+    CRM.toast(feitos + ' grupo(s) mesclado(s)' + (erros.length ? '; ' + erros.length + ' com erro (veja o console)' : '') + '.', !!erros.length);
+    if (erros.length) console.error(erros);
+  }
 
   async function mesclar(id, el) {
     const [tipo, lista] = id.split(':');
@@ -577,15 +622,8 @@
     const outros = ids.filter(x => x !== marcado);
     if (tipo === 'e') {
       const alvo = CRM.empresa(marcado);
-      if (!confirm('Juntar ' + outros.length + ' cadastro(s) em "' + alvo.nome + '" e apagar os outros?')) return;
-      const s = new Set(outros);
-      const patch = R.mesclaCampos(alvo, outros.map(CRM.empresa), ['nome', 'responsavel_id', 'situacao']);
-      for (const t of ['contatos', 'negocios', 'atividades', 'notas']) await CRM.atualizarVarios(t, E().D[t].filter(x => s.has(x.empresa_id)).map(x => x.id), { empresa_id: marcado });
-      // Apaga os repetidos antes de completar o que fica: senão a trava de duplicado recusaria
-      // o telefone/e-mail que ainda está no cadastro que vai sumir.
-      await CRM.removerVarios('empresas', outros);
-      if (Object.keys(patch).length) await CRM.atualizar('empresas', marcado, patch);
-      await CRM.auto.sistema(marcado, null, 'Cadastros mesclados neste: ' + outros.length);
+      if (!confirm('Juntar ' + outros.length + ' cadastro(s) em "' + alvo.nome + '" (carteira: ' + CRM.nomeUsuario(alvo.responsavel_id) + ') e apagar os outros?')) return;
+      await mesclaEmpresas(marcado, outros);
     } else {
       const alvo = CRM.contato(marcado);
       if (!confirm('Juntar ' + outros.length + ' pessoa(s) em "' + alvo.nome + '"?')) return;
@@ -725,6 +763,7 @@
       E().filtros[t] = f;
     },
     mesclar: (id, el) => mesclar(id, el).catch(CRM.falhou),
+    'mesclar-certos': () => mesclarCertos().catch(CRM.falhou),
     'historico-atualizar': () => { historico = null; CRM.render(); }
   });
 })();

@@ -19,7 +19,7 @@ function xml({ n, dest, cnpjDest, itens, tpNF = '1', finNFe = '1', cStat = '100'
   const nfe = '<' + prefixo + 'NFe xmlns="http://www.portalfiscal.inf.br/nfe"><' + prefixo + 'infNFe versao="4.00" Id="NFe' + chave(n) + '">' +
     t('ide', t('cUF', '35') + t('natOp', 'VENDA DE MERCADORIA') + t('mod', '55') + t('serie', '1') + t('nNF', n) + t('dhEmi', data) + t('tpNF', tpNF) + t('finNFe', finNFe)) +
     t('emit', t('CNPJ', emit) + t('xNome', 'DISTRIBUIDORA EXEMPLO LTDA') + t('enderEmit', t('xMun', 'São Bernardo do Campo') + t('UF', 'SP'))) +
-    t('dest', (cnpjDest ? t('CNPJ', cnpjDest) : t('CPF', '12345678909')) + t('xNome', dest) + t('enderDest', t('xLgr', 'Rua Um') + t('nro', '10') + t('xBairro', 'Centro') + t('xMun', 'Santo André') + t('UF', 'SP') + t('CEP', '09000000') + t('fone', '1140000000')) + t('email', 'Compras@Exemplo.com.br')) +
+    t('dest', (cnpjDest ? t('CNPJ', cnpjDest) : t('CPF', '12345678909')) + t('xNome', dest) + t('enderDest', t('xLgr', 'Rua Um') + t('nro', '10') + t('xBairro', 'Centro') + t('xMun', 'Santo André') + t('UF', 'SP') + t('CEP', '09000000') + t('fone', '1140000000')) + t('email', 'Compras@' + (cnpjDest || 'cpf') + '.com.br')) +
     det + t('total', t('ICMSTot', t('vProd', vProd.toFixed(2)) + t('vNF', (vProd - itens.reduce((s, it) => s + (it.desc0 || 0), 0)).toFixed(2)))) +
     (adic ? t('infAdic', t('infCpl', adic)) : '') + '</' + prefixo + 'infNFe></' + prefixo + 'NFe>';
   return '<?xml version="1.0" encoding="UTF-8"?><nfeProc versao="4.00" xmlns="http://www.portalfiscal.inf.br/nfe">' + nfe +
@@ -96,7 +96,11 @@ test('planeja: liga pela razão social ou pelo nome antes do "|", completa o CNP
   assert.equal(cond.segmento, 'Condomínio');
   assert.equal(cond.situacao, 'cliente');
   assert.equal(cond.responsavel_id, 'u1');
-  assert.equal(cond.email, 'compras@exemplo.com.br');
+  assert.equal(cond.email, 'compras@12121212000112.com.br');
+  // Cliente que já existia ganha o que faltava no cadastro (só o vazio).
+  assert.deepEqual([pe1.email, pe1.telefone, pe1.cidade, pe1.uf, pe1.cep, pe1.logradouro, pe1.bairro],
+    ['compras@44555666000199.com.br', '1140000000', 'Santo André', 'SP', '09000000', 'Rua Um', 'Centro']);
+  assert.ok(r.camposCompletados >= 14);
   assert.equal(R.diaLocal(cond.criado_em), '2026-09-15', 'cadastro na data da primeira compra');
   assert.deepEqual(pl.criar.opcoes.map(o => o.nome), ['Condomínio']);
   assert.equal(pl.criar.nota_itens.find(i => i.codigo === 'DET5').produto_id, 'p1', 'produto do catálogo pelo código');
@@ -187,4 +191,17 @@ test('filtro por vendedor escrito na nota e pela carteira da equipe', () => {
 
   const pt = N.planeja(D, docs, {});
   assert.equal(pt.criar.notas.length, 5);
+});
+
+test('completar cadastro pela nota: não usa telefone/e-mail que já é de outro cliente', () => {
+  const D = base();
+  D.empresas = [{ id: 'e1', nome: 'ESCOLA MODELO', telefone: null, email: null, cidade: 'São Paulo' },
+    { id: 'e2', nome: 'Outra Empresa', telefone: '(11) 4000-0000', email: 'compras@44555666000199.com.br' }];
+  const pl = N.planeja(D, [N.lerXml(xml({ n: 1, dest: 'ESCOLA MODELO', cnpjDest: '44555666000199', itens: [{ cod: 'A', desc: 'A', q: 1, p: 1 }] }))], {});
+  const p = pl.atualizar.find(a => a.id === 'e1').patch;
+  assert.equal(p.cnpj, '44.555.666/0001-99');
+  assert.equal(p.email, undefined, 'e-mail é da Outra Empresa');
+  assert.equal(p.telefone, undefined, 'telefone (últimos 8 dígitos) é da Outra Empresa');
+  assert.equal(p.cidade, undefined, 'cidade já estava preenchida');
+  assert.equal(pl.resumoNotas.dadosDeOutroCadastro, 2);
 });

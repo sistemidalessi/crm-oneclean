@@ -644,6 +644,20 @@
     return unirGrupos([...grupos.values()].filter(s => s.size > 1));
   }
 
+  // Por que um grupo de empresas parece o mesmo cliente, do mais certo para o menos:
+  // forca 3 = mesmo CNPJ ou mesmo e-mail E telefone; 2 = só telefone ou só e-mail; 1 = só o nome.
+  function motivoDuplicado(grupo) {
+    const par = (f) => grupo.some((a, i) => grupo.some((b, j) => j > i && f(a, b)));
+    const tels = e => [e.telefone, e.whatsapp].map(chaveTelefone).filter(Boolean);
+    const doc = par((a, b) => chaveDoc(a.cnpj) && chaveDoc(a.cnpj) === chaveDoc(b.cnpj));
+    const tel = par((a, b) => tels(a).some(t => tels(b).indexOf(t) !== -1));
+    const mail = par((a, b) => chaveEmail(a.email) && chaveEmail(a.email) === chaveEmail(b.email));
+    const nome = par((a, b) => chaveNome(a.nome).length >= 3 && chaveNome(a.nome) === chaveNome(b.nome));
+    const itens = [doc && 'mesmo CNPJ/CPF', mail && tel ? 'mesmo e-mail e telefone' : null, !mail && tel && 'mesmo telefone', mail && !tel && 'mesmo e-mail', nome && 'mesmo nome'].filter(Boolean);
+    return { texto: itens.join(' · '), forca: doc || (mail && tel) ? 3 : tel || mail ? 2 : 1,
+      carteirasDiferentes: new Set(grupo.map(e => e.responsavel_id || '')).size > 1 };
+  }
+
   function duplicadosContatos(contatos) {
     const grupos = new Map();
     const junta = (k, c) => { if (!k) return; if (!grupos.has(k)) grupos.set(k, new Set()); grupos.get(k).add(c); };
@@ -802,7 +816,7 @@
     primeiroNome, aplicaModelo, linkGoogleAgenda, totalItem, totalItens, indexa, probabilidade,
     situacaoEfetiva, situacaoTarefa, alertas, dashboard, duplicadosEmpresas, duplicadosContatos, mesclaCampos,
     buscaGlobal, csvParse, csvGera, numeroBR, dataPlanilha,
-    cfopDeVenda, notaDeVenda, sugereSegmento, NOMES_SEGMENTO, faturamento, chaveDoc, chaveTelefone, chaveEmail, achaDuplicados
+    cfopDeVenda, notaDeVenda, sugereSegmento, NOMES_SEGMENTO, faturamento, chaveDoc, chaveTelefone, chaveEmail, achaDuplicados, motivoDuplicado
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

@@ -166,6 +166,17 @@
     };
     (D.empresas || []).forEach(indexaEmpresa);
     const novas = new Set(), ligadas = new Set(), patches = new Map();
+    // Dono de cada CNPJ, telefone e e-mail já cadastrado: dado que é de outra empresa não entra
+    // (a trava de duplicado do banco recusaria o cadastro inteiro).
+    const dono = new Map();
+    const marcaDono = e => {
+      [R.chaveDoc(e.cnpj) && 'd' + R.chaveDoc(e.cnpj), R.chaveTelefone(e.telefone) && 't' + R.chaveTelefone(e.telefone),
+        R.chaveTelefone(e.whatsapp) && 't' + R.chaveTelefone(e.whatsapp), R.chaveEmail(e.email) && 'm' + R.chaveEmail(e.email)]
+        .forEach(k => { if (k && !dono.has(k)) dono.set(k, e.id); });
+    };
+    (D.empresas || []).forEach(marcaDono);
+    const livre = (e, k) => !k || !dono.has(k) || dono.get(k) === e.id;
+    resumo.camposCompletados = 0; resumo.dadosDeOutroCadastro = 0;
     const completa = (e, campos) => {
       if (novas.has(e.id)) { Object.keys(campos).forEach(k => { if (e[k] == null || e[k] === '') e[k] = campos[k]; }); return; }
       const p = patches.get(e.id) || {};
@@ -181,8 +192,25 @@
         if (novas.has(e.id)) { completa(e, { cnpj: doc ? R.formataCNPJ(doc) : null }); return e; }
         if (!ligadas.has(e.id)) { ligadas.add(e.id); resumo.empresasLigadas++; }
         const tinhaCnpj = !!(patches.get(e.id) || {}).cnpj;
-        completa(e, { cnpj: doc ? R.formataCNPJ(doc) : null, razao_social: texto(c.nome) });
-        if (!tinhaCnpj && (patches.get(e.id) || {}).cnpj) { resumo.cnpjsCompletados++; porDoc.set(doc, e); }
+        // Completa o cadastro com o que a nota traz (só o que está vazio): documento, razão social,
+        // e-mail, telefone e endereço (o endereço inteiro só se a empresa não tiver nenhum).
+        const campos = { razao_social: texto(c.nome) };
+        const oferece = (campo, valor, chave) => {
+          if (!valor) return;
+          if (!livre(e, chave)) { resumo.dadosDeOutroCadastro++; return; }
+          campos[campo] = valor;
+        };
+        oferece('cnpj', doc ? R.formataCNPJ(doc) : null, R.chaveDoc(doc) && 'd' + R.chaveDoc(doc));
+        oferece('email', texto(c.email) && c.email.trim().toLowerCase(), R.chaveEmail(c.email) && 'm' + R.chaveEmail(c.email));
+        if (!e.telefone && !e.whatsapp) oferece('telefone', texto(c.telefone), R.chaveTelefone(c.telefone) && 't' + R.chaveTelefone(c.telefone));
+        if (!e.cep && !e.logradouro) Object.assign(campos, { cep: texto(c.cep), logradouro: texto(c.logradouro), numero: texto(c.numero), complemento: texto(c.complemento), bairro: texto(c.bairro) });
+        Object.assign(campos, { cidade: texto(c.cidade), uf: texto(c.uf) && c.uf.toUpperCase() });
+        const antes = Object.keys(patches.get(e.id) || {}).length;
+        completa(e, campos);
+        const p = patches.get(e.id) || {};
+        resumo.camposCompletados += Object.keys(p).length - antes;
+        marcaDono(Object.assign({ id: e.id }, p));
+        if (!tinhaCnpj && p.cnpj) { resumo.cnpjsCompletados++; porDoc.set(doc, e); }
         if (e.situacao !== 'cliente') { const p = patches.get(e.id) || {}; p.situacao = 'cliente'; patches.set(e.id, p); }
         return e;
       }
@@ -192,15 +220,18 @@
         plano.criar.opcoes.push({ id: uuid(), tipo: 'segmento', nome: segmento, ordem: R.NOMES_SEGMENTO.indexOf(segmento) + 1 });
         conta('opcoes', 'criados');
       }
+      const idNovo = uuid();
+      const seLivre = (v, k) => (livre({ id: idNovo }, k) ? v : null);
       e = {
-        id: uuid(), nome: texto(c.nome) || 'Cliente sem nome (NF ' + (d.numero || '') + ')', razao_social: texto(c.nome), cnpj: doc ? R.formataCNPJ(doc) : null,
-        email: texto(c.email) && c.email.toLowerCase(), telefone: texto(c.telefone), cep: texto(c.cep), logradouro: texto(c.logradouro),
+        id: idNovo, nome: texto(c.nome) || 'Cliente sem nome (NF ' + (d.numero || '') + ')', razao_social: texto(c.nome), cnpj: doc ? R.formataCNPJ(doc) : null,
+        email: seLivre(texto(c.email) && c.email.trim().toLowerCase(), R.chaveEmail(c.email) && 'm' + R.chaveEmail(c.email)),
+        telefone: seLivre(texto(c.telefone), R.chaveTelefone(c.telefone) && 't' + R.chaveTelefone(c.telefone)), cep: texto(c.cep), logradouro: texto(c.logradouro),
         numero: texto(c.numero), complemento: texto(c.complemento), bairro: texto(c.bairro), cidade: texto(c.cidade), uf: texto(c.uf) && c.uf.toUpperCase(),
         situacao: 'cliente', qualificacao: 0, tags: [], segmento, responsavel_id: responsavel || op.responsavelPadrao || null,
         criado_em: d.emitida_em ? new Date(d.emitida_em).toISOString() : undefined
       };
       Object.keys(e).forEach(k => { if (e[k] == null || e[k] === undefined) delete e[k]; });
-      plano.criar.empresas.push(e); novas.add(e.id); indexaEmpresa(e); conta('empresas', 'criados'); resumo.empresasNovas++;
+      plano.criar.empresas.push(e); novas.add(e.id); indexaEmpresa(e); marcaDono(e); conta('empresas', 'criados'); resumo.empresasNovas++;
       return e;
     }
 
