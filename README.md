@@ -154,13 +154,19 @@ entregar notas e pode ser desligada a qualquer momento no CRM.
    pedidos e inutilizações são ignorados.
 4. **Testar uma vez:** `node vigia-notas.js --uma-vez` — o resultado aparece na tela, em
    `vigia-notas.log` e no CRM em Configurações → Integrações → "Últimas entregas".
-5. **Deixar rodando sempre** (Agendador de Tarefas do Windows, inicia junto com o servidor):
+5. **Deixar rodando sempre** (Agendador de Tarefas do Windows, inicia junto com o servidor;
+   no **PowerShell como administrador**). O `ExecutionTimeLimit` zero é obrigatório: o
+   padrão do Windows mata a tarefa depois de 3 dias.
    ```
-   schtasks /Create /TN "CRM - vigia de notas" /SC ONSTART /RU SYSTEM /TR "\"C:\Program Files\nodejs\node.exe\" C:\CRM\vigia-notas.js"
-   schtasks /Run /TN "CRM - vigia de notas"
+   $acao = New-ScheduledTaskAction -Execute "C:\Program Files\nodejs\node.exe" -Argument "C:\CRM\vigia-notas.js" -WorkingDirectory "C:\CRM"
+   $inicio = New-ScheduledTaskTrigger -AtStartup
+   $ajustes = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1)
+   Register-ScheduledTask -TaskName "CRM - vigia de notas" -Action $acao -Trigger $inicio -Settings $ajustes -User "SYSTEM" -RunLevel Highest
+   Start-ScheduledTask -TaskName "CRM - vigia de notas"
    ```
-   Se a pasta for de rede, trocar `/RU SYSTEM` por um usuário com acesso a ela
-   (`/RU USUARIO /RP *`, pede a senha).
+   Conferir: `Get-Content C:\CRM\vigia-notas.log -Tail 5` (deve ter "vigia ligado"). Se a
+   pasta for de rede, a conta SYSTEM pode não enxergá-la: usar o caminho local no servidor
+   ou trocar `-User "SYSTEM"` por um usuário com acesso (`-User USUARIO -Password SENHA`).
 
 O que já foi enviado fica em `vigia-notas-estado.json` (apagar esse arquivo = reenviar
 tudo, sem duplicar); `vigia-notas.json` guarda a chave — **não copiar para outro lugar**.
