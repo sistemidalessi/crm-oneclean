@@ -443,3 +443,9 @@ body.arrastando-card .zonas-fim { display: grid; grid-template-columns: 1fr 1fr;
 .notas-cliente summary strong { margin-left: auto; }
 .notas-cliente ul { margin: 4px 0 2px; padding-left: 16px; font-size: .8rem; color: var(--suave); }
 .tabela td .link { text-align: left; }
+.filtro-notas { border: 1px solid var(--borda); border-radius: 10px; padding: 8px 14px 10px; margin: 0 0 14px; }
+.filtro-notas legend { font-weight: 700; padding: 0 6px; }
+.opcao-filtro { display: flex; gap: 8px; align-items: flex-start; padding: 5px 0; cursor: pointer; }
+.opcao-filtro small { display: block; color: var(--suave); font-size: .8rem; }
+.vendedores-notas { display: grid; gap: 3px; padding: 0 0 6px 26px; }
+.vendedores-notas small { color: var(--suave); }

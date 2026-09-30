@@ -396,6 +396,11 @@
     const rp = $('#respPadrao'); if (rp) rp.addEventListener('change', () => { imp.op.responsavelPadrao = rp.value || null; planejar(); });
     const so = $('#sobrescrever'); if (so) so.addEventListener('change', () => { imp.op.sobrescrever = so.checked; planejar(); });
     const cp = $('#cadastrarProdutos'); if (cp) cp.addEventListener('change', () => { imp.op.cadastrarProdutos = cp.checked; planejar(); });
+    $$('[name=filtroNotas]').forEach(r => r.addEventListener('change', () => { imp.op.filtro = r.value; planejar(); }));
+    $$('[data-vend-nota]').forEach(c => c.addEventListener('change', () => {
+      imp.op.vendedoresIncluidos = $$('[data-vend-nota]').filter(x => x.checked).map(x => x.dataset.vendNota);
+      planejar();
+    }));
   };
 
   function telaMapear() {
@@ -422,7 +427,9 @@
       } else le(await f.text());
     }
     if (!docs.length) throw new Error('nenhuma NF-e encontrada (' + lidos + ' arquivo(s) lido(s)). Confira se são os XML das notas.');
-    imp = { origem: 'Notas fiscais', notas: docs, arquivosLidos: lidos, arquivosOutros: outros, op: { responsavelPadrao: null, cadastrarProdutos: true, mapaResponsaveis: {} } };
+    // Padrão: só a equipe do CRM (pelo vendedor escrito na nota; sem isso, pela carteira do cliente).
+    const filtro = docs.some(d => d.tipo === 'nota' && d.vendedor) ? 'vendedores' : 'carteira';
+    imp = { origem: 'Notas fiscais', notas: docs, arquivosLidos: lidos, arquivosOutros: outros, op: { responsavelPadrao: null, cadastrarProdutos: true, mapaResponsaveis: {}, filtro } };
     planejar();
   }
 
@@ -447,7 +454,27 @@
       '<li>' + r.empresasNovas + ' cliente(s) novo(s) serão cadastrados como "cliente", com o segmento sugerido pelo nome</li>' +
       (r.produtosNovos ? '<li>' + r.produtosNovos + ' produto(s) novo(s) no catálogo (código, nome e último preço)</li>' : '') +
       fora.map(x => '<li>' + x[0] + ' ' + esc(x[1]) + '</li>').join('') + '</ul>' +
-      '<label class="campo check"><input type="checkbox" id="cadastrarProdutos"' + (imp.op.cadastrarProdutos !== false ? ' checked' : '') + '> Cadastrar no catálogo de produtos os itens que ainda não estão lá</label></div>';
+      '<label class="campo check"><input type="checkbox" id="cadastrarProdutos"' + (imp.op.cadastrarProdutos !== false ? ' checked' : '') + '> Cadastrar no catálogo de produtos os itens que ainda não estão lá</label></div>' +
+      filtroNotas();
+  }
+
+  // Quais notas entram: todas, só a carteira da equipe, ou só os vendedores escritos na nota.
+  function filtroNotas() {
+    const pl = imp.plano, f = imp.op.filtro || 'todas', r = pl.resumoNotas;
+    const vend = (pl.vendedoresNotas || []).filter(v => v.chave);
+    const inc = new Set(pl.vendedoresIncluidos || []);
+    const semVend = (pl.vendedoresNotas || []).find(v => !v.chave);
+    const opcao = (v, titulo, dica) => '<label class="opcao-filtro"><input type="radio" name="filtroNotas" value="' + v + '"' + (f === v ? ' checked' : '') + '> <span><strong>' + esc(titulo) + '</strong>' +
+      (dica ? '<small>' + esc(dica) + '</small>' : '') + '</span></label>';
+    return '<fieldset class="filtro-notas"><legend>Quais notas importar</legend>' +
+      (vend.length ? opcao('vendedores', 'Só dos vendedores marcados', 'pelo nome do vendedor escrito na nota (informações complementares)') +
+        '<div class="vendedores-notas">' + vend.map(v => '<label class="check"><input type="checkbox" data-vend-nota="' + esc(v.chave) + '"' + (inc.has(v.chave) ? ' checked' : '') + (f !== 'vendedores' ? ' disabled' : '') + '> ' +
+          esc(v.nome) + ' <small>' + v.qtd + ' nota(s) · ' + esc(R.moeda(v.valor)) + (v.usuario_nome ? ' · é ' + esc(v.usuario_nome) + ' no CRM' : ' · não está na equipe') + '</small></label>').join('') +
+          (semVend ? '<label class="check"><input type="checkbox" data-vend-nota=""' + (inc.has('') ? ' checked' : '') + (f !== 'vendedores' ? ' disabled' : '') + '> ' + esc(semVend.nome) +
+            ' <small>' + semVend.qtd + ' nota(s) · ' + esc(R.moeda(semVend.valor)) + '</small></label>' : '') + '</div>' : '') +
+      opcao('carteira', 'Só de clientes da carteira da equipe', 'o cliente já está no CRM com um vendedor da equipe; venda direta e de vendedor externo ficam de fora' + (vend.length ? '' : ' (as notas não trazem o nome do vendedor)')) +
+      opcao('todas', 'Todas as notas de venda', 'inclusive venda direta e de vendedor externo') +
+      (r.foraDoFiltro ? '<p class="dica">' + r.foraDoFiltro + ' nota(s) · ' + esc(R.moeda(r.valorForaDoFiltro)) + ' ficam de fora por essa escolha.</p>' : '') + '</fieldset>';
   }
 
   function telaConferir() {

@@ -9,7 +9,7 @@ const EMIT = '11222333000181';
 const base = () => ({ usuarios: [], etapas: [], opcoes: [], produtos: [], metas: [], empresas: [], contatos: [], negocios: [], negocio_itens: [], propostas: [], atividades: [], notas: [], nota_itens: [] });
 const chave = n => ('3526091122233300018155001' + String(n).padStart(9, '0') + '1').padEnd(44, '0').slice(0, 44);
 
-function xml({ n, dest, cnpjDest, itens, tpNF = '1', finNFe = '1', cStat = '100', emit = EMIT, data = '2026-09-15T10:30:00-03:00', prefixo = '' }) {
+function xml({ n, dest, cnpjDest, itens, tpNF = '1', finNFe = '1', cStat = '100', emit = EMIT, data = '2026-09-15T10:30:00-03:00', prefixo = '', adic = '' }) {
   const t = (tag, v) => '<' + prefixo + tag + '>' + v + '</' + prefixo + tag + '>';
   const det = itens.map((it, i) => '<' + prefixo + 'det nItem="' + (i + 1) + '">' + t('prod',
     t('cProd', it.cod) + t('cEAN', 'SEM GTIN') + t('xProd', it.desc) + t('NCM', '34022000') + t('CFOP', it.cfop || '5102') + t('uCom', it.un || 'UN') +
@@ -21,7 +21,7 @@ function xml({ n, dest, cnpjDest, itens, tpNF = '1', finNFe = '1', cStat = '100'
     t('emit', t('CNPJ', emit) + t('xNome', 'DISTRIBUIDORA EXEMPLO LTDA') + t('enderEmit', t('xMun', 'São Bernardo do Campo') + t('UF', 'SP'))) +
     t('dest', (cnpjDest ? t('CNPJ', cnpjDest) : t('CPF', '12345678909')) + t('xNome', dest) + t('enderDest', t('xLgr', 'Rua Um') + t('nro', '10') + t('xBairro', 'Centro') + t('xMun', 'Santo André') + t('UF', 'SP') + t('CEP', '09000000') + t('fone', '1140000000')) + t('email', 'Compras@Exemplo.com.br')) +
     det + t('total', t('ICMSTot', t('vProd', vProd.toFixed(2)) + t('vNF', (vProd - itens.reduce((s, it) => s + (it.desc0 || 0), 0)).toFixed(2)))) +
-    '</' + prefixo + 'infNFe></' + prefixo + 'NFe>';
+    (adic ? t('infAdic', t('infCpl', adic)) : '') + '</' + prefixo + 'infNFe></' + prefixo + 'NFe>';
   return '<?xml version="1.0" encoding="UTF-8"?><nfeProc versao="4.00" xmlns="http://www.portalfiscal.inf.br/nfe">' + nfe +
     '<protNFe versao="4.00"><infProt><chNFe>' + chave(n) + '</chNFe><cStat>' + cStat + '</cStat><xMotivo>Autorizado o uso da NF-e</xMotivo></infProt></protNFe></nfeProc>';
 }
@@ -151,4 +151,40 @@ test('segmento sugerido pelo nome', () => {
   assert.equal(R.sugereSegmento('Condomínio Edifício Solar'), 'Condomínio');
   assert.equal(R.sugereSegmento('Restaurante Sabor da Casa'), 'Alimentação');
   assert.equal(R.sugereSegmento('Empresa Genérica'), null);
+});
+
+test('filtro por vendedor escrito na nota e pela carteira da equipe', () => {
+  const D = base();
+  D.usuarios = [{ user_id: 'u1', nome: 'Isabela', ativo: true }, { user_id: 'u2', nome: 'Alysson Vinicius', ativo: true }];
+  D.empresas = [{ id: 'e1', nome: 'ESCOLA MODELO | Joana', responsavel_id: 'u1' }, { id: 'e2', nome: 'Cliente Sem Dono' }];
+  const item = [{ cod: 'A', desc: 'A', q: 1, p: 100 }];
+  const docs = [
+    xml({ n: 1, dest: 'ESCOLA MODELO', cnpjDest: '44555666000199', itens: item, adic: 'PEDIDO 10; VENDEDOR: 003 - ISABELA; PGTO 28 DD' }),
+    xml({ n: 2, dest: 'Hotel Novo', cnpjDest: '11111111000111', itens: item, adic: 'Vendedor: ALYSSON - pedido 99' }),
+    xml({ n: 3, dest: 'Condominio Externo', cnpjDest: '22222222000122', itens: item, adic: 'VENDEDOR: SILMARA' }),
+    xml({ n: 4, dest: 'Cliente Sem Dono', cnpjDest: '33333333000133', itens: item, adic: 'VENDEDOR: VENDA DIRETA' }),
+    xml({ n: 5, dest: 'Consumidor', cnpjDest: '55555555000155', itens: item })
+  ].map(N.lerXml);
+  assert.equal(docs[0].vendedor, 'ISABELA');
+  assert.equal(docs[1].vendedor, 'ALYSSON');
+  assert.equal(docs[4].vendedor, null);
+
+  const pv = N.planeja(D, docs, { filtro: 'vendedores' });
+  assert.deepEqual(pv.criar.notas.map(n => n.numero), [1, 2], 'só Isabela e Alysson (batem com a equipe pelo primeiro nome)');
+  assert.equal(pv.resumoNotas.foraDoFiltro, 3);
+  assert.equal(pv.resumoNotas.valorForaDoFiltro, 300);
+  assert.equal(pv.criar.empresas.find(e => e.nome === 'Hotel Novo').responsavel_id, 'u2', 'cliente novo fica com o vendedor da nota');
+  const silmara = pv.vendedoresNotas.find(v => v.nome === 'SILMARA');
+  assert.equal(silmara.usuario_id, null);
+  assert.deepEqual(pv.vendedoresIncluidos.sort(), ['alysson', 'isabela']);
+  // marcar a Silmara também
+  const pv2 = N.planeja(D, docs, { filtro: 'vendedores', vendedoresIncluidos: ['isabela', 'alysson', 'silmara'] });
+  assert.deepEqual(pv2.criar.notas.map(n => n.numero), [1, 2, 3]);
+
+  const pc = N.planeja(D, docs, { filtro: 'carteira' });
+  assert.deepEqual(pc.criar.notas.map(n => n.numero), [1], 'só o cliente já cadastrado com vendedor da equipe');
+  assert.equal(pc.criar.empresas.length, 0, 'carteira não cadastra cliente novo');
+
+  const pt = N.planeja(D, docs, {});
+  assert.equal(pt.criar.notas.length, 5);
 });

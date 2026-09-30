@@ -150,6 +150,13 @@ dados precisavam vir de lá. A migração é o caminho mais sensível do sistema
   (top clientes, segmento, produtos por valor e quantidade, vendedor = responsável pelo
   cliente, cidades, por mês); `R.indexa` passa as "compras anteriores" da empresa a vir
   das notas quando ela tem nota (senão, dos negócios ganhos).
+- **Quais notas entram** (pedido do Anderson: só a equipe do CRM, sem venda direta nem
+  vendedor externo): `op.filtro` = `vendedores` (nome do vendedor escrito na nota — a NF-e
+  não tem campo próprio; lemos `<obsCont xCampo="Vendedor">` ou "Vendedor: 012 - NOME" no
+  `infCpl`; batem com a equipe por nome completo ou primeiro nome único), `carteira` (cliente
+  já cadastrado com responsável da equipe; não cria cliente) ou `todas`. Padrão: `vendedores`
+  se as notas trazem o nome, senão `carteira`. Cliente novo fica com o vendedor da nota.
+  O formato real do XML da OneClean ainda não foi visto: conferir com uma nota de verdade.
 - RLS: gestor importa e corrige; vendedor lê as notas das empresas que vê (`crm_ve_nota`
   para os itens). Mesclar empresas leva as notas junto.
 - Volume: as notas e os itens também carregam na memória no login. Com dezenas de

@@ -34,6 +34,19 @@
   const arred = v => Math.round(v * 100) / 100;
   const tem = (xml, tag) => new RegExp('<' + PREF + tag + '[\\s>]').test(xml);
 
+  // Vendedor: a NF-e não tem campo próprio; os sistemas costumam escrever nas informações
+  // complementares ("Vendedor: 012 - SILMARA") ou num campo livre <obsCont xCampo="Vendedor">.
+  function vendedorNoXml(adic) {
+    const campo = blocos(adic, 'obsCont').find(b => /vend/i.test(atributo(b.attrs, 'xCampo')));
+    let v = campo ? valor(campo.corpo, 'xTexto') : '';
+    if (!v) {
+      const m = /\bvend(?:edor(?:\(a\)|a)?|\.)?\s*[:=]\s*([^|;\n\r]{1,60})/i.exec(valor(adic, 'infCpl'));
+      v = m ? m[1] : '';
+    }
+    v = v.replace(/^\s*\d+\s*[-–]?\s*/, '').split(/\s[-–]\s|\s{2,}|,/)[0].replace(/[.\s]+$/, '').trim();
+    return v && /[a-zà-ú]/i.test(v) ? v.slice(0, 40) : null;
+  }
+
   function lerXml(texto) {
     const x = String(texto || '').replace(/^﻿/, '');
     // Evento de cancelamento: procEventoNFe / evento com tpEvento 110111.
@@ -76,18 +89,22 @@
         telefone: valor(end, 'fone'), cep: valor(end, 'CEP'), logradouro: valor(end, 'xLgr'), numero: valor(end, 'nro'),
         complemento: valor(end, 'xCpl'), bairro: valor(end, 'xBairro'), cidade: valor(end, 'xMun'), uf: valor(end, 'UF')
       },
+      vendedor: vendedorNoXml(bloco(c, 'infAdic')),
       valor_produtos: numero(valor(tot, 'vProd')), valor_total: numero(valor(tot, 'vNF')), itens
     };
   }
 
   // ------------------------------------------------------------ planejamento
-  // op: { responsavelPadrao, cadastrarProdutos (padrão sim), cnpjEmpresa (padrão: o emitente mais frequente) }
+  // op: { responsavelPadrao, cadastrarProdutos (padrão sim), cnpjEmpresa (padrão: o emitente mais frequente),
+  //       filtro: 'todas' | 'carteira' (só clientes já cadastrados com responsável da equipe)
+  //               | 'vendedores' (só os vendedores escritos na nota que estão em vendedoresIncluidos;
+  //                 sem a lista, os que batem com alguém da equipe) }
   function planeja(D, docs, op) {
     op = op || {};
     const texto = v => (v == null || String(v).trim() === '' ? null : String(v).trim());
     const plano = { criar: { opcoes: [], produtos: [], empresas: [], notas: [], nota_itens: [] }, atualizar: [], contagem: {}, ignorados: [], semResponsavel: [] };
     const conta = (t, k) => { plano.contagem[t] = plano.contagem[t] || { criados: 0, atualizados: 0, ignorados: 0 }; plano.contagem[t][k]++; };
-    const resumo = { lidas: 0, novas: 0, valor: 0, de: null, ate: null, jaImportadas: 0, canceladas: 0, deOutraEmpresa: 0, entradas: 0,
+    const resumo = { lidas: 0, novas: 0, valor: 0, foraDoFiltro: 0, valorForaDoFiltro: 0, de: null, ate: null, jaImportadas: 0, canceladas: 0, deOutraEmpresa: 0, entradas: 0,
       devolucoes: 0, naoAutorizadas: 0, empresasLigadas: 0, empresasNovas: 0, cnpjsCompletados: 0, produtosNovos: 0, emitente: null };
     plano.resumoNotas = resumo;
     const ignora = (d, motivo) => {
@@ -117,6 +134,29 @@
       if (ex && !ex.cancelada) { plano.atualizar.push({ tabela: 'notas', id: ex.id, patch: { cancelada: true } }); conta('notas', 'atualizados'); resumo.canceladas++; }
     });
 
+    // ---- vendedor da nota -> usuário do CRM (nome completo ou primeiro nome, se só um tiver)
+    const equipe = (D.usuarios || []).filter(u => u.ativo !== false);
+    const time = new Set(equipe.map(u => u.user_id));
+    const primeiro = n => R.normaliza(n).split(/\s+/)[0];
+    const usuarioDoVendedor = nome => {
+      if (!nome) return null;
+      const k = R.normaliza(nome).replace(/\s+/g, ' ');
+      return equipe.find(u => R.normaliza(u.nome).replace(/\s+/g, ' ') === k) ||
+        (equipe.filter(u => primeiro(u.nome) === primeiro(nome)).length === 1 ? equipe.find(u => primeiro(u.nome) === primeiro(nome)) : null);
+    };
+    const chaveVend = d => d.vendedor ? R.normaliza(d.vendedor).replace(/\s+/g, ' ') : '';
+    const vendedores = new Map();
+    notas.forEach(d => {
+      const k = chaveVend(d);
+      const v = vendedores.get(k) || { chave: k, nome: d.vendedor || '(nota sem vendedor escrito)', qtd: 0, valor: 0, usuario: k ? usuarioDoVendedor(d.vendedor) : null };
+      v.qtd++; v.valor += d.valor_total; vendedores.set(k, v);
+    });
+    plano.vendedoresNotas = [...vendedores.values()].sort((a, b) => b.valor - a.valor)
+      .map(v => ({ chave: v.chave, nome: v.nome, qtd: v.qtd, valor: Math.round(v.valor * 100) / 100, usuario_id: v.usuario ? v.usuario.user_id : null, usuario_nome: v.usuario ? v.usuario.nome : null }));
+    const filtro = op.filtro || 'todas';
+    const incluidos = new Set(op.vendedoresIncluidos || plano.vendedoresNotas.filter(v => v.usuario_id).map(v => v.chave));
+    plano.vendedoresIncluidos = [...incluidos];
+
     // ---- empresas: por CNPJ/CPF, razão social, nome e nome antes do " | " (o Agendor da OneClean usa "Empresa | Contato").
     const porDoc = new Map(), porNome = new Map();
     const guarda = (m, k, e) => { if (k && !m.has(k)) m.set(k, e); };
@@ -133,9 +173,10 @@
       patches.set(e.id, p);
     };
     const segmentos = new Set((D.opcoes || []).filter(o => o.tipo === 'segmento').map(o => o.nome));
-    function empresaDaNota(d) {
+    const achaEmpresa = d => ((d.cliente.doc.length === 11 || d.cliente.doc.length === 14) && porDoc.get(d.cliente.doc)) || porNome.get(R.chaveNome(d.cliente.nome)) || null;
+    function empresaDaNota(d, responsavel) {
       const c = d.cliente, doc = c.doc;
-      let e = ((doc.length === 11 || doc.length === 14) && porDoc.get(doc)) || porNome.get(R.chaveNome(c.nome)) || null;
+      let e = achaEmpresa(d);
       if (e) {
         if (novas.has(e.id)) { completa(e, { cnpj: doc ? R.formataCNPJ(doc) : null }); return e; }
         if (!ligadas.has(e.id)) { ligadas.add(e.id); resumo.empresasLigadas++; }
@@ -155,7 +196,7 @@
         id: uuid(), nome: texto(c.nome) || 'Cliente sem nome (NF ' + (d.numero || '') + ')', razao_social: texto(c.nome), cnpj: doc ? R.formataCNPJ(doc) : null,
         email: texto(c.email) && c.email.toLowerCase(), telefone: texto(c.telefone), cep: texto(c.cep), logradouro: texto(c.logradouro),
         numero: texto(c.numero), complemento: texto(c.complemento), bairro: texto(c.bairro), cidade: texto(c.cidade), uf: texto(c.uf) && c.uf.toUpperCase(),
-        situacao: 'cliente', qualificacao: 0, tags: [], segmento, responsavel_id: op.responsavelPadrao || null,
+        situacao: 'cliente', qualificacao: 0, tags: [], segmento, responsavel_id: responsavel || op.responsavelPadrao || null,
         criado_em: d.emitida_em ? new Date(d.emitida_em).toISOString() : undefined
       };
       Object.keys(e).forEach(k => { if (e[k] == null || e[k] === undefined) delete e[k]; });
@@ -184,7 +225,11 @@
       if (d.finalidade === '4') { resumo.devolucoes++; return ignora(d, 'nota de devolução'); }
       if (!d.autorizada) { resumo.naoAutorizadas++; return ignora(d, 'não autorizada pela SEFAZ (situação ' + d.situacao_sefaz + ')'); }
       if (!d.emitida_em || isNaN(new Date(d.emitida_em))) return ignora(d, 'sem data de emissão');
-      const e = empresaDaNota(d);
+      const vend = vendedores.get(chaveVend(d));
+      const fora = motivo => { resumo.foraDoFiltro++; resumo.valorForaDoFiltro += d.valor_total; return ignora(d, motivo); };
+      if (filtro === 'vendedores' && !incluidos.has(chaveVend(d))) return fora(d.vendedor ? 'vendedor(a) ' + d.vendedor + ' não marcado(a)' : 'nota sem vendedor escrito');
+      if (filtro === 'carteira') { const ex = achaEmpresa(d); if (!ex || !time.has(ex.responsavel_id)) return fora('cliente fora da carteira da equipe'); }
+      const e = empresaDaNota(d, vend && vend.usuario ? vend.usuario.user_id : null);
       const cancelada = cancelar.has(d.chave);
       const n = {
         id: uuid(), chave: d.chave, numero: d.numero, serie: d.serie, emitida_em: new Date(d.emitida_em).toISOString(), empresa_id: e ? e.id : null,
@@ -213,6 +258,7 @@
       plano.atualizar.push({ tabela: 'empresas', id, patch }); conta('empresas', 'atualizados');
     });
     resumo.valor = Math.round(resumo.valor * 100) / 100;
+    resumo.valorForaDoFiltro = Math.round(resumo.valorForaDoFiltro * 100) / 100;
     return plano;
   }
 
