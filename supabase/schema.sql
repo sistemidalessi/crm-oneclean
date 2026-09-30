@@ -292,6 +292,34 @@ create table if not exists public.crm_nota_itens (
   atualizado_em  timestamptz not null default now()
 );
 
+-- Integrações: o vigia da pasta de XML (ferramentas/vigia-notas.js) entrega as notas pela Edge
+-- Function crm-notas com uma chave própria, que só serve para isso. Aqui fica só o hash SHA-256
+-- da chave (ela aparece uma vez, na hora de gerar). Só o administrador vê e mexe.
+create table if not exists public.crm_integracoes (
+  id            uuid primary key default gen_random_uuid(),
+  nome          text not null check (length(btrim(nome)) > 0),
+  token_hash    text not null unique check (token_hash ~ '^[0-9a-f]{64}$'),
+  filtro        text not null default 'auto' check (filtro in ('auto','vendedores','carteira','todas')),
+  ativo         boolean not null default true,
+  ultimo_uso    timestamptz,
+  criado_por    uuid default auth.uid(),
+  criado_em     timestamptz not null default now(),
+  atualizado_em timestamptz not null default now()
+);
+
+-- Registro de cada entrega do vigia (só a Edge Function escreve; gestor lê).
+create table if not exists public.crm_integracao_log (
+  id            bigint generated always as identity primary key,
+  integracao_id uuid references public.crm_integracoes(id) on delete cascade,
+  quando        timestamptz not null default now(),
+  arquivos      int not null default 0,
+  notas_novas   int not null default 0,
+  valor         numeric(14,2) not null default 0,
+  fora          int not null default 0,
+  erros         int not null default 0,
+  resumo        jsonb
+);
+
 -- Histórico de alterações (só o trigger escreve; só gestor lê).
 create table if not exists public.crm_historico (
   id          bigint generated always as identity primary key,
@@ -324,6 +352,7 @@ create index if not exists crm_historico_empresa_idx on public.crm_historico (em
 create unique index if not exists crm_notas_chave_uq  on public.crm_notas (chave);
 create index if not exists crm_notas_empresa_idx     on public.crm_notas (empresa_id, emitida_em);
 create index if not exists crm_nota_itens_nota_idx   on public.crm_nota_itens (nota_id);
+create index if not exists crm_integracao_log_idx    on public.crm_integracao_log (quando desc);
 
 -- =================================================================== visibilidade
 create or replace function public.crm_ve_empresa(e uuid)
@@ -482,7 +511,7 @@ declare
 begin
   foreach t in array array['crm_usuarios','crm_config','crm_etapas','crm_opcoes','crm_produtos','crm_modelos',
                            'crm_metas','crm_filtros','crm_empresas','crm_contatos','crm_negocios',
-                           'crm_negocio_itens','crm_propostas','crm_atividades','crm_notas','crm_nota_itens']
+                           'crm_negocio_itens','crm_propostas','crm_atividades','crm_notas','crm_nota_itens','crm_integracoes']
   loop
     execute format('drop trigger if exists %I on public.%I', t || '_atualizado_em', t);
     execute format('create trigger %I before update on public.%I for each row execute function public.crm_toca_atualizado_em()',
@@ -508,6 +537,10 @@ create trigger crm_empresas_duplicado before insert or update of cnpj, telefone,
 drop trigger if exists crm_negocios_etapa on public.crm_negocios;
 create trigger crm_negocios_etapa before update on public.crm_negocios
   for each row execute function public.crm_marca_etapa();
+
+alter table public.crm_integracao_log enable row level security;
+revoke all on public.crm_integracao_log from anon, public, authenticated;
+grant select on public.crm_integracao_log to authenticated;
 
 alter table public.crm_historico enable row level security;
 revoke all on public.crm_historico from anon, public, authenticated;
@@ -610,6 +643,10 @@ create policy le on public.crm_nota_itens for select to authenticated using (pub
 create policy grava on public.crm_nota_itens for insert to authenticated with check (public.crm_eh_gestor());
 create policy altera on public.crm_nota_itens for update to authenticated using (public.crm_eh_gestor()) with check (public.crm_eh_gestor());
 create policy apaga on public.crm_nota_itens for delete to authenticated using (public.crm_eh_gestor());
+
+-- integrações: só o administrador; o registro das entregas o gestor também lê.
+create policy tudo on public.crm_integracoes for all to authenticated using (public.crm_eh_admin()) with check (public.crm_eh_admin());
+create policy le on public.crm_integracao_log for select to authenticated using (public.crm_eh_gestor());
 
 -- histórico: só gestor lê.
 create policy le on public.crm_historico for select to authenticated using (public.crm_eh_gestor());

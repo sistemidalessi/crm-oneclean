@@ -96,7 +96,8 @@
 
   // ------------------------------------------------------------ planejamento
   // op: { responsavelPadrao, cadastrarProdutos (padrão sim), cnpjEmpresa (padrão: o emitente mais frequente),
-  //       filtro: 'todas' | 'carteira' (só clientes já cadastrados com responsável da equipe)
+  //       filtro: 'todas' | 'auto' (por nota: vendedor escrito, senão carteira)
+  //               | 'carteira' (só clientes já cadastrados com responsável da equipe)
   //               | 'vendedores' (só os vendedores escritos na nota que estão em vendedoresIncluidos;
   //                 sem a lista, os que batem com alguém da equipe) }
   function planeja(D, docs, op) {
@@ -258,8 +259,10 @@
       if (!d.emitida_em || isNaN(new Date(d.emitida_em))) return ignora(d, 'sem data de emissão');
       const vend = vendedores.get(chaveVend(d));
       const fora = motivo => { resumo.foraDoFiltro++; resumo.valorForaDoFiltro += d.valor_total; return ignora(d, motivo); };
-      if (filtro === 'vendedores' && !incluidos.has(chaveVend(d))) return fora(d.vendedor ? 'vendedor(a) ' + d.vendedor + ' não marcado(a)' : 'nota sem vendedor escrito');
-      if (filtro === 'carteira') { const ex = achaEmpresa(d); if (!ex || !time.has(ex.responsavel_id)) return fora('cliente fora da carteira da equipe'); }
+      // 'auto' (o vigia da pasta de XML usa): nota com vendedor escrito vale pelo vendedor; sem, pela carteira.
+      const modo = filtro === 'auto' ? (d.vendedor ? 'vendedores' : 'carteira') : filtro;
+      if (modo === 'vendedores' && !incluidos.has(chaveVend(d))) return fora(d.vendedor ? 'vendedor(a) ' + d.vendedor + ' não marcado(a)' : 'nota sem vendedor escrito');
+      if (modo === 'carteira') { const ex = achaEmpresa(d); if (!ex || !time.has(ex.responsavel_id)) return fora('cliente fora da carteira da equipe'); }
       const e = empresaDaNota(d, vend && vend.usuario ? vend.usuario.user_id : null);
       const cancelada = cancelar.has(d.chave);
       const n = {

@@ -17,6 +17,12 @@ insert into crm_contatos (empresa_id, nome) select id,'Contato do Bruno' from cr
 insert into crm_atividades (empresa_id, descricao, responsavel_id) select id,'tarefa do Bruno','d0000000-0000-0000-0000-000000000004' from crm_empresas where nome='Do Bruno';
 select 'Bruno vê' t, string_agg(nome, ', ') from crm_empresas;
 select crm_proximo_vendedor() is not null as rodizio_ok;
+-- admin gera chave de integração (só o hash); gestora não
+reset role; set role authenticated; select pg_temp.como('a0000000-0000-0000-0000-000000000001');
+insert into crm_integracoes (nome, token_hash) values ('Vigia do escritório', repeat('b',64)) returning 'admin criou chave de integração' as ok;
+select pg_temp.como('b0000000-0000-0000-0000-000000000002');
+insert into crm_integracoes (nome, token_hash) values ('gestora tentando', repeat('c',64)); -- FALHA
+select 'Gestora vê integrações (NÃO devia)' t, count(*) from crm_integracoes having count(*) > 0;
 -- gestora cria negócio da Ana dentro da empresa do Bruno
 reset role; set role authenticated; select pg_temp.como('b0000000-0000-0000-0000-000000000002');
 select 'Gestora vê' t, string_agg(nome, ', ' order by nome) from crm_empresas;
@@ -57,6 +63,10 @@ update crm_empresas set whatsapp='11 9 8888 7777' where nome='Da Ana'; -- FALHA 
 select 'Ana vê o aviso (só nome e carteira)' t, nome, responsavel, campo from crm_duplicado_empresa(null, array['988887777'], null);
 update crm_empresas set cidade='Santo André', telefone=telefone where nome='Da Ana' returning 'Ana editou a própria empresa sem mexer nos dados' as ok;
 select * from crm_acha_duplicado('11222333000181', null, null, null); -- FALHA (interna)
+-- integrações: vendedora não vê nem cria chave; não escreve no registro
+insert into crm_integracoes (nome, token_hash) values ('invasão', repeat('a',64)); -- FALHA
+select 'Ana vê integrações/registro' t, (select count(*) from crm_integracoes) i, (select count(*) from crm_integracao_log) l;
+insert into crm_integracao_log (arquivos) values (1); -- FALHA
 -- Bruno: vê a própria empresa, não vê a da Ana
 select pg_temp.como('d0000000-0000-0000-0000-000000000004');
 select 'Bruno vê empresas' t, string_agg(nome, ', ' order by nome) from crm_empresas;

@@ -191,6 +191,10 @@ test('filtro por vendedor escrito na nota e pela carteira da equipe', () => {
 
   const pt = N.planeja(D, docs, {});
   assert.equal(pt.criar.notas.length, 5);
+
+  // auto: nota com vendedor vale pelo vendedor; sem vendedor (a 5ª, cliente fora da carteira) fica de fora.
+  const pa = N.planeja(D, docs, { filtro: 'auto' });
+  assert.deepEqual(pa.criar.notas.map(n => n.numero), [1, 2]);
 });
 
 test('completar cadastro pela nota: não usa telefone/e-mail que já é de outro cliente', () => {
