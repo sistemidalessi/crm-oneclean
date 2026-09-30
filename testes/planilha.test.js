@@ -269,3 +269,62 @@ test('negócios sem empresa do mesmo cliente não viram empresas repetidas (form
   assert.equal(plano2.criar.empresas.length, 0);
   assert.equal(plano2.criar.negocios.length, 0);
 });
+
+// Reextração do Agendor (30/09/2026): o que mudou lá desde a 1ª importação tem que chegar ao CRM.
+test('reextração: atualiza negócios e tarefas que mudaram, sem desfazer o resto', () => {
+  const D = base();
+  D.etapas = [{ id: 'e1', funil: 'Vendas', nome: 'Contato', ordem: 1, externo_id: 'agendor:etapa:11' }, { id: 'e2', funil: 'Vendas', nome: 'Proposta', ordem: 2, externo_id: 'agendor:etapa:12' }];
+  const v1 = {
+    empresas: [{ nome: 'Padaria Exemplo', externo_id: 'agendor:org:1', telefone: '(11) 3333-0001', situacao: 'Lead' }],
+    negocios: [{ titulo: 'Pedido 10', empresa_externo: 'agendor:org:1', externo_id: 'agendor:negocio:10', etapa_externo: 'agendor:etapa:11', status: 'Em andamento', valor: 100, criado_em: '2026-09-20T10:00:00Z' }],
+    atividades: [{ descricao: 'Ligar amanhã', tipo: 'LIGACAO', empresa_externo: 'agendor:org:1', externo_id: 'agendor:tarefa:5', data_hora: '2026-09-30T13:00:00Z', concluida: false }]
+  };
+  const p1 = P.planeja(D, v1, {});
+  // Como o banco devolve: datas com "+00:00" e números como texto.
+  D.empresas.push(...p1.criar.empresas.map(e => Object.assign({}, e, { situacao: 'cliente', cnpj: '11.222.333/0001-81' }))); // completada depois pelas notas
+  D.negocios.push(...p1.criar.negocios.map(n => Object.assign({}, n, { valor: '100.00', criado_em: '2026-09-20T10:00:00+00:00' })));
+  D.atividades.push(...p1.criar.atividades.map(a => Object.assign({}, a, { data_hora: '2026-09-30T13:00:00+00:00' })));
+  const op = { atualizarTabelas: ['negocios', 'atividades'] };
+
+  const igual = P.planeja(D, v1, op);
+  assert.equal(igual.atualizar.length, 0, 'nada mudou no Agendor: nada a atualizar (formato de data/número não conta)');
+
+  const v2 = JSON.parse(JSON.stringify(v1));
+  Object.assign(v2.negocios[0], { etapa_externo: 'agendor:etapa:12', status: 'Ganho', valor: 150, fechado_em: '2026-09-30T15:00:00Z' });
+  Object.assign(v2.atividades[0], { concluida: true, concluida_em: '2026-09-30T13:20:00Z' });
+  v2.empresas[0].situacao = 'Lead';
+  const sem = P.planeja(D, v2, {});
+  const mexido = sem.atualizar.flatMap(a => Object.keys(a.patch));
+  assert.ok(!['status', 'etapa_id', 'valor', 'concluida'].some(k => mexido.includes(k)), 'sem a opção, só completa o vazio');
+
+  const plano = P.planeja(D, v2, op);
+  const neg = plano.atualizar.find(a => a.tabela === 'negocios');
+  assert.deepEqual(neg.patch, { etapa_id: 'e2', status: 'ganho', valor: 150, fechado_em: '2026-09-30' });
+  const atv = plano.atualizar.find(a => a.tabela === 'atividades');
+  assert.equal(atv.patch.concluida, true);
+  assert.equal(atv.patch.concluida_em, '2026-09-30T13:20:00.000Z');
+  assert.ok(!('data_hora' in atv.patch), 'a data não mudou');
+  const emp = plano.atualizar.filter(a => a.tabela === 'empresas');
+  assert.equal(emp.length, 0, 'empresa já era cliente e o "Lead" do Agendor não desfaz isso');
+  assert.equal(plano.criar.negocios.length + plano.criar.atividades.length + plano.criar.empresas.length, 0);
+  assert.equal(D.negocios[0].status, 'aberto', 'o plano não mexe nos registros originais');
+  assert.equal(P.planeja(D, v2, op).atualizar.length, plano.atualizar.length, 'replanejar dá a mesma conta');
+
+  // Reaberto no Agendor: sai a data de fechamento.
+  D.negocios[0] = Object.assign({}, D.negocios[0], { status: 'perdido', fechado_em: '2026-09-29', motivo_perda: 'Preço' });
+  const reaberto = P.planeja(D, v1, op).atualizar.find(a => a.tabela === 'negocios');
+  assert.deepEqual(reaberto.patch, { status: 'aberto', fechado_em: null, motivo_perda: null });
+});
+
+test('reextração: cadastro mesclado não volta e empresa repetida por telefone vai para a existente', () => {
+  const D = base();
+  D.empresas = [{ id: 'fica', nome: 'Condomínio Exemplo', externo_id: 'agendor:org:1', externos_mesclados: ['agendor:org:2'], telefone: '(11) 3333-0001', email: 'sindico@exemplo.com' }];
+  const plano = P.planeja(D, {
+    empresas: [{ nome: 'Cond. Exemplo Bloco A', externo_id: 'agendor:org:2' }, { nome: 'Exemplo Condomínio (novo)', externo_id: 'agendor:org:3', telefone: '11 3333-0001' }],
+    negocios: [{ titulo: 'Pedido 20', empresa_externo: 'agendor:org:2', externo_id: 'agendor:negocio:20' }, { titulo: 'Pedido 30', empresa_externo: 'agendor:org:3', externo_id: 'agendor:negocio:30' }],
+    atividades: [{ descricao: 'Visita', empresa_externo: 'agendor:org:3', externo_id: 'agendor:tarefa:7' }]
+  }, {});
+  assert.equal(plano.criar.empresas.length, 0);
+  assert.deepEqual(plano.criar.negocios.map(n => n.empresa_id), ['fica', 'fica']);
+  assert.equal(plano.criar.atividades[0].empresa_id, 'fica');
+});

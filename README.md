@@ -89,6 +89,9 @@ usuário, etapa e produto fica no **histórico de alterações** (quem, quando, 
 5. **Importar:** Configurações → Importar → "Do Agendor" → escolher o arquivo →
    conferir o resumo (criar / completar / ignorar e responsáveis) → Importar.
    Rodar de novo o mesmo arquivo **não duplica** (cada registro guarda o id do Agendor).
+   Numa **extração nova** (o Agendor continuou em uso), deixe marcado "Atualizar negócios e
+   tarefas com o que mudou na origem": etapa, ganho/perdido, valor e tarefas concluídas ou
+   remarcadas passam a valer como no Agendor; empresas e pessoas só são completadas.
 6. **Conferir:** totais em Empresas/Negócios, abrir 5 clientes conhecidos e ver
    histórico, negócios e tarefas. Configurações → Duplicados para limpar o que o
    Agendor já tinha repetido.

@@ -207,9 +207,17 @@
 
   // ------------------------------------------------------------ planejador
   // D: dados atuais; tipos: { empresas: [...], contatos: [...], ... } (registros normalizados)
-  // op: { responsavelPadrao, sobrescrever, criarEmpresas (true), usuarioAtual }
+  // op: { responsavelPadrao, sobrescrever, criarEmpresas (true), usuarioAtual,
+  //       atualizarTabelas: ['negocios', 'atividades'] = nessas tabelas o que veio no arquivo
+  //       vale mais que o que está no CRM (reextração do Agendor: etapa, ganho/perdido, tarefa
+  //       concluída ou remarcada); nas outras, só completa o vazio }
   function planeja(D, tipos, op) {
     op = Object.assign({ criarEmpresas: true, sobrescrever: false }, op || {});
+    const atualiza = new Set(op.atualizarTabelas || []);
+    // Trabalha em cópias: o plano marca nos registros o que vai mudar, e a tela replaneja a cada
+    // opção trocada — mexer nos originais faria a segunda conta não ver mais as mudanças.
+    D = Object.assign({}, D);
+    ['empresas', 'contatos', 'negocios', 'atividades', 'produtos'].forEach(t => { D[t] = (D[t] || []).map(x => Object.assign({}, x)); });
     const plano = {
       criar: { etapas: [], opcoes: [], produtos: [], empresas: [], contatos: [], negocios: [], negocio_itens: [], atividades: [] },
       atualizar: [], ignorados: [], semResponsavel: new Map(), contagem: {}
@@ -251,36 +259,60 @@
     }
 
     // ---- empresas: índices (existentes + planejadas)
-    const emp = { ext: new Map(), doc: new Map(), nome: new Map() };
+    const emp = { ext: new Map(), doc: new Map(), nome: new Map(), contato: new Map() };
     const indexaEmpresa = e => {
       if (e.externo_id) emp.ext.set(e.externo_id, e);
+      // Códigos de origem dos cadastros que foram mesclados neste: reimportar não os recria.
+      (e.externos_mesclados || []).forEach(x => { if (!emp.ext.has(x)) emp.ext.set(x, e); });
       const d = R.digitos(e.cnpj); if (d.length >= 11) emp.doc.set(d, e);
       const n = R.chaveNome(e.nome); if (n && !emp.nome.has(n)) emp.nome.set(n, e);
+      [R.chaveTelefone(e.telefone), R.chaveTelefone(e.whatsapp), R.chaveEmail(e.email)].forEach(k => { if (k && !emp.contato.has(k)) emp.contato.set(k, e); });
     };
     D.empresas.forEach(indexaEmpresa);
     const achaEmpresa = (ext, doc, nome) =>
       (ext && emp.ext.get(ext)) || (R.digitos(doc).length >= 11 && emp.doc.get(R.digitos(doc))) || (nome && emp.nome.get(R.chaveNome(nome))) || null;
+    // Empresa nova com telefone ou e-mail de uma que já existe: o banco recusaria o cadastro
+    // (trava de duplicado), e os negócios e tarefas dela se perderiam. Vai para a existente.
+    const achaPorContato = d => [R.chaveEmail(d.email), R.chaveTelefone(d.telefone), R.chaveTelefone(d.whatsapp)].filter(Boolean).map(k => emp.contato.get(k)).find(Boolean) || null;
+    const empPorId = new Map(D.empresas.map(e => [e.id, e]));
+
+    // O banco devolve datas e números num formato diferente do planejado ("…+00:00" × "….000Z").
+    function mesmoValor(a, b) {
+      if (a === b) return true;
+      const vazio = x => x == null || x === '';
+      if (vazio(a) || vazio(b)) return vazio(a) && vazio(b);
+      if (typeof a === 'number' || typeof b === 'number') return Number(a) === Number(b);
+      const ehData = x => typeof x === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(x);
+      if (ehData(a) && ehData(b)) return Date.parse(a) === Date.parse(b);
+      return String(a) === String(b);
+    }
 
     const novos = new Set(); // ids criados neste plano (atualizar = mexer no objeto em "criar")
     function preenche(tabela, alvo, dados) {
       const patch = {};
+      const sobre = op.sobrescrever || atualiza.has(tabela);
       Object.keys(dados).forEach(k => {
         const v = dados[k];
         if (v == null || v === '' || (Array.isArray(v) && !v.length)) return;
         if (k === 'tags') {
           const t = [...new Set([].concat(alvo.tags || [], v))];
           if (t.length !== (alvo.tags || []).length) patch.tags = t;
-        } else if (op.sobrescrever ? alvo[k] !== v : (alvo[k] == null || alvo[k] === '' || (k === 'qualificacao' && !alvo[k]))) patch[k] = v;
+        } else if (sobre ? !mesmoValor(alvo[k], v) : (alvo[k] == null || alvo[k] === '' || (k === 'qualificacao' && !alvo[k]))) patch[k] = v;
       });
+      return aplica(tabela, alvo, patch);
+    }
+    function aplica(tabela, alvo, patch) {
       if (!Object.keys(patch).length) return false;
       if (novos.has(alvo.id)) Object.assign(alvo, patch);
       else {
-        const ja = plano.atualizar.find(a => a.tabela === tabela && a.id === alvo.id);
-        if (ja) Object.assign(ja.patch, patch); else plano.atualizar.push({ tabela, id: alvo.id, patch });
+        const ja = pendentes.get(tabela + ':' + alvo.id);
+        if (ja) Object.assign(ja.patch, patch);
+        else { const a = { tabela, id: alvo.id, patch }; plano.atualizar.push(a); pendentes.set(tabela + ':' + alvo.id, a); }
         Object.assign(alvo, patch);
       }
       return true;
     }
+    const pendentes = new Map(); // tabela:id -> item de plano.atualizar
 
     function dadosEmpresa(r) {
       const q = r.qualificacao != null ? Math.max(0, Math.min(5, Math.round(R.numeroBR(r.qualificacao) || 0))) : null;
@@ -319,7 +351,11 @@
     (tipos.empresas || []).forEach(r => {
       const d = dadosEmpresa(r);
       if (!d.nome) return ignora('empresas', r, 'sem nome');
-      const existente = achaEmpresa(d.externo_id, d.cnpj, d.nome);
+      let existente = achaEmpresa(d.externo_id, d.cnpj, d.nome);
+      if (!existente && (existente = achaPorContato(d)) && d.externo_id) {
+        if (!emp.ext.has(d.externo_id)) emp.ext.set(d.externo_id, existente); // negócios e tarefas dela acham a existente
+        d.externo_id = null; // a existente fica com o código que já tem
+      }
       const resp = responsavel(r.responsavel);
       if (existente) {
         // Grafia diferente do mesmo cadastro vira apelido (negócio/contato que citar esse nome acha a empresa).
@@ -442,7 +478,15 @@
       const ex = exExt || (criado && neg.chave.get(chaveNeg({ empresa_id: e.id, titulo, criado_em: criado })));
       if (ex) {
         const extra = Object.assign({}, d); delete extra.empresa_id; delete extra.titulo;
-        if (preenche('negocios', ex, extra) && !novos.has(ex.id)) conta('negocios', 'atualizados'); else if (!novos.has(ex.id)) conta('negocios', 'ignorados');
+        const antes = ex.status;
+        let mudou = preenche('negocios', ex, extra);
+        if (atualiza.has('negocios') && !novos.has(ex.id)) {
+          // Reaberto no Agendor: tira a data de fechamento e o motivo de perda.
+          if (status === 'aberto' && (ex.fechado_em || ex.motivo_perda)) mudou = aplica('negocios', ex, { fechado_em: null, motivo_perda: null }) || mudou;
+          const empresa = empPorId.get(ex.empresa_id);
+          if (status === 'ganho' && antes !== 'ganho' && empresa && empresa.situacao !== 'cliente') marcaCliente(empresa);
+        }
+        if (mudou && !novos.has(ex.id)) conta('negocios', 'atualizados'); else if (!novos.has(ex.id)) conta('negocios', 'ignorados');
         return;
       }
       const n = limpa(Object.assign({ id: uuid() }, d));
@@ -458,15 +502,10 @@
       });
     });
 
-    function marcaCliente(e) {
-      const ja = plano.atualizar.find(a => a.tabela === 'empresas' && a.id === e.id);
-      if (ja) ja.patch.situacao = 'cliente'; else plano.atualizar.push({ tabela: 'empresas', id: e.id, patch: { situacao: 'cliente' } });
-      e.situacao = 'cliente';
-      return true;
-    }
+    function marcaCliente(e) { return aplica('empresas', e, { situacao: 'cliente' }); }
 
     // ---- atividades
-    const atvExt = new Set(D.atividades.filter(a => a.externo_id).map(a => a.externo_id));
+    const atvExt = new Map(D.atividades.filter(a => a.externo_id).map(a => [a.externo_id, a]));
     const negPorTitulo = new Map();
     [...neg.ext.values(), ...neg.chave.values()].forEach(n => negPorTitulo.set(n.empresa_id + ':' + R.normaliza(n.titulo), n));
     const agora = new Date().toISOString();
@@ -475,7 +514,23 @@
       const desc = texto(r.descricao);
       if (!desc) return ignora('atividades', r, 'sem descrição');
       const ext = texto(r.externo_id);
-      if (ext && atvExt.has(ext)) return ignora('atividades', r, 'já importada');
+      if (ext && atvExt.has(ext)) {
+        const ex = atvExt.get(ext);
+        if (!atualiza.has('atividades') || novos.has(ex.id)) return ignora('atividades', r, 'já importada');
+        // Reextração: concluída, remarcada ou reescrita no Agendor. Só o que o arquivo traz de
+        // fato (sem data no arquivo não mexe na data; sem tipo não mexe no tipo).
+        const concl = r.concluida != null ? simNao(r.concluida) : !!r.concluida_em || tipoAtividade(r.tipo) === 'nota';
+        let quando = R.dataPlanilha(r.data_hora);
+        if (quando && r.hora && /^\d{1,2}:\d{2}/.test(String(r.hora))) quando = R.momento(R.diaLocal(quando), String(r.hora).slice(0, 5));
+        const dados = { descricao: desc, data_hora: quando, concluida: concl, responsavel_id: responsavel(r.responsavel) };
+        if (texto(r.tipo)) dados.tipo = tipoAtividade(r.tipo);
+        const antes = ex.concluida;
+        let mudou = preenche('atividades', ex, dados);
+        if (concl && !antes) mudou = aplica('atividades', ex, { concluida_em: R.dataPlanilha(r.concluida_em) || agora }) || mudou;
+        else if (!concl && antes) mudou = aplica('atividades', ex, { concluida_em: null }) || mudou;
+        if (mudou) conta('atividades', 'atualizados'); else ignora('atividades', r, 'já importada');
+        return;
+      }
       const resp = responsavel(r.responsavel);
       const negocio = r.negocio_externo && neg.ext.get(r.negocio_externo);
       const contato = r.contato_externo && cont.ext.get(r.contato_externo);
@@ -493,7 +548,8 @@
         tipo: tipoAtividade(r.tipo || (concluida ? 'nota' : 'tarefa')), descricao: desc, data_hora: quando, concluida,
         concluida_em: concluidaEm, responsavel_id: resp, automatica: false, externo_id: ext
       };
-      if (ext) atvExt.add(ext);
+      if (ext) atvExt.set(ext, a);
+      novos.add(a.id);
       plano.criar.atividades.push(limpa(a, ['contato_id', 'negocio_id', 'responsavel_id', 'concluida_em', 'externo_id']));
       conta('atividades', 'criados');
     });

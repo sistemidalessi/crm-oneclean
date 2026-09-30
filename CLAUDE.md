@@ -147,6 +147,20 @@ dados precisavam vir de lá. A migração é o caminho mais sensível do sistema
   acento/pontuação/"Ltda"), e-mail e telefone (últimos 9 dígitos). Grafia
   diferente do mesmo cadastro vira apelido (negócio que cita "Cond. X" acha "Condomínio X").
 - Padrão é **completar só o vazio**; sobrescrever é opção explícita.
+- **Reextração do Agendor** (30/09/2026): `op.atualizarTabelas = ['negocios', 'atividades']`
+  (padrão ao abrir um arquivo do Agendor; caixa "Atualizar negócios e tarefas com o que mudou
+  na origem") faz o arquivo valer mais que o CRM **só** nessas tabelas: etapa, ganho/perdido,
+  valor, fechamento (reaberto limpa `fechado_em`/`motivo_perda`; ganho novo marca a empresa
+  como cliente), tarefa concluída/remarcada. Empresas e pessoas seguem "completar o vazio"
+  (senão o "Lead" do Agendor desfaria o "cliente" e o CNPJ vindos das notas). Comparação com
+  `mesmoValor` (o banco devolve `…+00:00` e números como texto: sem isso tudo "mudaria").
+- `planeja` trabalha em **cópias** de `D` (a tela replaneja a cada opção trocada; antes o
+  1º plano marcava os registros e o 2º não via mais as mudanças).
+- Mesclar empresas guarda o `externo_id` dos cadastros apagados em
+  `crm_empresas.externos_mesclados` (preenchido para as 31 mescladas de 30/09 a partir de
+  `crm_backup`); o planejador acha a empresa por esses códigos, então reimportar não recria.
+- Empresa nova do arquivo com telefone/e-mail de uma que já existe (a trava do banco recusaria
+  e os negócios/tarefas dela se perderiam) vai para a existente (`achaPorContato`).
 - **Planilha exportada do Agendor** (cabeçalhos "Código da empresa/do Negócio/da atividade"):
   `P.ehPlanilhaAgendor` + `P.prefixaAgendor` transformam os códigos nos mesmos ids da API
   (`agendor:org:…`, `agendor:negocio:…`, `agendor:tarefa:…`), então reimportar a planilha não

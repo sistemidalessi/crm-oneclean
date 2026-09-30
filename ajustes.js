@@ -352,7 +352,8 @@
       const bruto = JSON.parse(await f.text());
       if (!bruto || !(bruto.organizations || bruto.deals || bruto.people)) throw new Error('este arquivo não parece o do exportador do Agendor');
       const tipos = P.converteAgendor(bruto);
-      imp = { origem: 'Agendor', tipos, usuariosAgendor: tipos.usuarios, op: { responsavelPadrao: null, sobrescrever: false, mapaResponsaveis: {} } };
+      // Reextração: negócios e tarefas ficam como estão no Agendor (etapa, ganho/perdido, concluída).
+      imp = { origem: 'Agendor', tipos, usuariosAgendor: tipos.usuarios, op: { responsavelPadrao: null, sobrescrever: false, mapaResponsaveis: {}, atualizarTabelas: ['negocios', 'atividades'] } };
       planejar();
     });
     const arqNotas = $('#arqNotas');
@@ -397,6 +398,7 @@
     $$('[data-resp]').forEach(s => s.addEventListener('change', () => { imp.op.mapaResponsaveis[s.dataset.resp] = s.value; planejar(); }));
     const rp = $('#respPadrao'); if (rp) rp.addEventListener('change', () => { imp.op.responsavelPadrao = rp.value || null; planejar(); });
     const so = $('#sobrescrever'); if (so) so.addEventListener('change', () => { imp.op.sobrescrever = so.checked; planejar(); });
+    const at = $('#atualizarMudancas'); if (at) at.addEventListener('change', () => { imp.op.atualizarTabelas = at.checked ? ['negocios', 'atividades'] : []; planejar(); });
     const cp = $('#cadastrarProdutos'); if (cp) cp.addEventListener('change', () => { imp.op.cadastrarProdutos = cp.checked; planejar(); });
     $$('[name=filtroNotas]').forEach(r => r.addEventListener('change', () => { imp.op.filtro = r.value; planejar(); }));
     $$('[data-vend-nota]').forEach(c => c.addEventListener('change', () => {
@@ -493,9 +495,10 @@
     }).join('');
     const opts = CRM.opcoesUsuarios();
     return '<section class="cartao"><h2>O que vai acontecer · ' + esc(imp.origem) + '</h2>' + resumoNotas() +
-      '<table class="tabela"><thead><tr><th></th><th class="num">Criar</th><th class="num">Completar existentes</th><th class="num">Ignorar</th></tr></thead><tbody>' + (linhas || '<tr><td colspan="4">Nada a fazer (tudo já existe).</td></tr>') + '</tbody></table>' +
+      '<table class="tabela"><thead><tr><th></th><th class="num">Criar</th><th class="num">Completar / atualizar</th><th class="num">Ignorar</th></tr></thead><tbody>' + (linhas || '<tr><td colspan="4">Nada a fazer (tudo já existe).</td></tr>') + '</tbody></table>' +
       '<div class="campos"><label class="campo"><span>' + (imp.notas ? 'Clientes novos (que ainda não estão no CRM) ficam com' : 'Quem não tiver responsável (ou não for reconhecido) fica com') + '</span><select id="respPadrao">' + CRM.opcoesHTML([['', '(sem responsável — só gestores veem)']].concat(opts), imp.op.responsavelPadrao || '') + '</select></label>' +
-      (imp.notas ? '' : '<label class="campo check"><input type="checkbox" id="sobrescrever"' + (imp.op.sobrescrever ? ' checked' : '') + '> Sobrescrever dados já preenchidos (padrão: só completa o que está vazio)</label>') + '</div>' +
+      (imp.notas ? '' : '<label class="campo check"><input type="checkbox" id="atualizarMudancas"' + ((imp.op.atualizarTabelas || []).length ? ' checked' : '') + '> Atualizar negócios e tarefas com o que mudou na origem (etapa, ganho/perdido, valor, tarefa concluída ou remarcada)</label>' +
+        '<label class="campo check"><input type="checkbox" id="sobrescrever"' + (imp.op.sobrescrever ? ' checked' : '') + '> Sobrescrever também empresas e pessoas (padrão: só completa o que está vazio)</label>') + '</div>' +
       (pl.semResponsavel.length ? '<h3>Responsáveis que não reconheci</h3><p class="dica">Crie os usuários antes (Equipe e permissões) ou diga para quem vai a carteira de cada um:</p><table class="tabela"><tbody>' +
         pl.semResponsavel.map(s => '<tr><td>' + esc(s.nome) + ' <small>(' + s.qtd + ' registro(s))</small></td><td><select data-resp="' + esc(R.normaliza(s.nome)) + '">' +
           CRM.opcoesHTML([['', '(responsável padrão acima)']].concat(opts), imp.op.mapaResponsaveis[R.normaliza(s.nome)] || '') + '</select></td></tr>').join('') + '</tbody></table>' : '') +
@@ -591,7 +594,10 @@
   async function mesclaEmpresas(marcado, outros) {
     const alvo = CRM.empresa(marcado);
     const s = new Set(outros);
-    const patch = R.mesclaCampos(alvo, outros.map(CRM.empresa), ['nome', 'responsavel_id', 'situacao']);
+    const patch = R.mesclaCampos(alvo, outros.map(CRM.empresa), ['nome', 'responsavel_id', 'situacao', 'externos_mesclados']);
+    // Guarda os códigos de origem (Agendor) dos que somem: reimportar não os recria.
+    const ext = [...new Set([].concat(alvo.externos_mesclados || [], ...outros.map(id => { const o = CRM.empresa(id) || {}; return [o.externo_id].concat(o.externos_mesclados || []); })).filter(Boolean))];
+    if (ext.length !== (alvo.externos_mesclados || []).length) patch.externos_mesclados = ext;
     for (const t of ['contatos', 'negocios', 'atividades', 'notas']) await CRM.atualizarVarios(t, E().D[t].filter(x => s.has(x.empresa_id)).map(x => x.id), { empresa_id: marcado });
     // Apaga os repetidos antes de completar o que fica: senão a trava de duplicado recusaria
     // o telefone/e-mail que ainda está no cadastro que vai sumir.

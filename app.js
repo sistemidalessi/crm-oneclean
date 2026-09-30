@@ -311,7 +311,8 @@
     if (foco && document.getElementById(foco)) {
       const el = document.getElementById(foco);
       el.focus();
-      if (el.setSelectionRange && typeof el.value === 'string' && el.type !== 'date') el.setSelectionRange(el.value.length, el.value.length);
+      // Só campos de texto aceitam cursor (caixa de marcar, data, número etc. dão erro).
+      if (el.setSelectionRange && /^(text|textarea|search|tel|url|email|password|)$/.test(el.type || '') && typeof el.value === 'string') { try { el.setSelectionRange(el.value.length, el.value.length); } catch (e) { /* sem cursor */ } }
     }
     if (CRM.fichas) CRM.fichas.renderAbertas();
   }
