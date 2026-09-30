@@ -449,3 +449,5 @@ body.arrastando-card .zonas-fim { display: grid; grid-template-columns: 1fr 1fr;
 .opcao-filtro small { display: block; color: var(--suave); font-size: .8rem; }
 .vendedores-notas { display: grid; gap: 3px; padding: 0 0 6px 26px; }
 .vendedores-notas small { color: var(--suave); }
+.contato-negocio { margin-top: 10px; }
+.contato-negocio .dados dd { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }

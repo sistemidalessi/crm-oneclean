@@ -595,10 +595,14 @@
         : g(t, 'person.id') != null && pessoaPorId.get(t.person.id) ? empresaDoNegocio({ person: t.person }) : { externo: null, nome: null };
       const tipo = t.type == null ? null : typeof t.type === 'object' ? (t.type.name || t.type.id) : t.type;
       const resp = (t.assignedUsers && t.assignedUsers[0]) || t.user || t.owner;
+      // Sem tipo e sem prazo = "Nota" do Agendor (anotação): é histórico, não tarefa pendente.
+      // (Na 1ª importação, de 29/09/2026, 54 notas entraram como tarefa atrasada.)
+      const prazo = t.dueDate || t.due_date || null;
+      const nota = !tipo && !prazo;
       return {
-        descricao: t.text || t.description || '(sem texto)', tipo: tipo || (t.done ? 'nota' : 'tarefa'),
-        data_hora: t.dueDate || t.due_date || t.createdAt || null, concluida: !!(t.done || t.finishedAt),
-        concluida_em: t.finishedAt || (t.done ? (t.updatedAt || t.dueDate) : null), responsavel: usu(resp),
+        descricao: t.text || t.description || '(sem texto)', tipo: tipo || (t.done || nota ? 'nota' : 'tarefa'),
+        data_hora: prazo || t.createdAt || null, concluida: !!(t.done || t.finishedAt || nota),
+        concluida_em: t.finishedAt || (t.done ? (t.updatedAt || t.dueDate) : nota ? t.createdAt || null : null), responsavel: usu(resp),
         empresa: emp.nome, empresa_externo: emp.externo, negocio_externo: t.deal && t.deal.id != null ? ext('negocio', t.deal.id) : null,
         contato_externo: g(t, 'person.id') != null ? ext('pessoa', t.person.id) : null, externo_id: ext('tarefa', t.id)
       };

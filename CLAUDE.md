@@ -123,6 +123,9 @@ dados precisavam vir de lá. A migração é o caminho mais sensível do sistema
   acento/pontuação/"Ltda"), e-mail e telefone (últimos 9 dígitos). Grafia
   diferente do mesmo cadastro vira apelido (negócio que cita "Cond. X" acha "Condomínio X").
 - Padrão é **completar só o vazio**; sobrescrever é opção explícita.
+- Tarefa do Agendor **sem tipo e sem prazo é "Nota"** (anotação): entra como histórico
+  (`nota`, concluída), não como tarefa pendente. Na 1ª importação 54 entraram como tarefa
+  atrasada; corrigidas no banco em 30/09 (eram as de `data_hora` com segundos = criação).
 - Reimportar o mesmo arquivo tem que dar zero criações (teste cobre).
 - `converteAgendor` lê a API v3 **defensivamente** (campo ausente = vazio). Os nomes
   de campo foram confirmados nos exemplos oficiais (`agendor/agendor-api-docs`) só

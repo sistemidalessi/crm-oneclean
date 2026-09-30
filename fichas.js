@@ -127,7 +127,7 @@
         '<section><h3>Pessoas <button type="button" class="mini" data-acao="novo-contato">+ pessoa</button></h3>' +
         (contatos.length ? '<ul class="lista contatos">' + contatos.map(c => '<li><button type="button" class="linha" data-acao="editar-contato" data-id="' + esc(c.id) + '">' +
           '<strong>' + esc(c.nome) + (c.principal ? ' ★' : '') + '</strong><small>' + esc([c.cargo, c.whatsapp || c.celular, c.telefone, c.email].filter(Boolean).join(' · ')) + '</small></button>' +
-          CRM.acoesRapidas(e.id, c.id) + (c.email ? '<button type="button" class="mini" data-acao="email" data-id="' + esc(e.id) + '" data-contato="' + esc(c.id) + '">E-mail</button>' : '') + '</li>').join('') + '</ul>'
+          CRM.acoesRapidas(e.id, c.id) + '</li>').join('') + '</ul>'
           : '<p class="vazio">Nenhuma pessoa cadastrada.</p>') + '</section>' +
       '</div>' +
       // ---- coluna 2: registrar + histórico
@@ -268,6 +268,7 @@
           (n.status === 'aberto' ? '<dt>Na etapa</dt><dd>' + dias + ' dia(s)</dd>' : '<dt>Fechado</dt><dd>' + esc(R.dataBR(n.fechado_em)) + '</dd>') +
           (n.motivo_perda ? '<dt>Motivo</dt><dd>' + esc(n.motivo_perda) + '</dd>' : '') +
         '</dl>' + (n.observacoes ? '<p class="obs">' + esc(n.observacoes) + '</p>' : '') +
+        dadosContatoNegocio(n, contato) +
         '<section><h3>Produtos / serviços ' + (pode ? '<button type="button" class="mini" data-acao="novo-item">+ item</button>' : '') + '</h3>' +
           (itens.length ? '<table class="tabela itens"><thead><tr><th>Item</th><th class="num">Qtd.</th><th class="num">Preço</th><th class="num">Desc.</th><th class="num">Total</th></tr></thead><tbody>' +
             itens.map(it => '<tr' + (pode ? ' data-acao="editar-item" data-id="' + esc(it.id) + '" tabindex="0" class="clicavel"' : '') + '><td>' + esc(it.descricao) + '</td><td class="num">' + esc(R.numero(it.quantidade)) +
@@ -289,6 +290,37 @@
         '<section><h3>Histórico do negócio <button type="button" class="mini" data-acao="registro-negocio">+ registrar</button></h3>' +
           (hist.length ? '<ol class="linha-tempo">' + hist.map(itemHistorico).join('') + '</ol>' : '<p class="vazio">Nada ainda.</p>') + '</section>' +
       '</div></div></div>';
+  }
+
+  // Dados do contato na ficha do negócio (como no Agendor): e-mail, WhatsApp e telefone da
+  // pessoa do negócio (ou a principal da empresa) e da empresa, cada um clicável.
+  function dadosContatoNegocio(n, contatoNeg) {
+    const e = CRM.empresa(n.empresa_id); if (!e) return '';
+    const l = CRM.doEmpresa('contatos', e.id);
+    const c = contatoNeg || l.find(x => x.principal) || l[0] || null;
+    const linhas = [], vistos = new Set();
+    const novo = v => { const k = R.chaveEmail(v) || R.chaveTelefone(v); if (!k || vistos.has(k)) return false; vistos.add(k); return true; };
+    const email = (para, contatoId, rot) => novo(para) && linhas.push([rot, '<button type="button" class="link" data-acao="email" data-id="' + esc(e.id) + '"' +
+      CRM.attr('data-contato', contatoId) + CRM.attr('data-para', para) + ' title="Escrever e-mail">' + esc(para) + '</button>']);
+    const tel = (numero, contatoId, rot) => {
+      if (!novo(numero)) return;
+      const zap = R.linkWhatsApp(numero) ? ' <button type="button" class="mini wa" data-acao="whatsapp" data-id="' + esc(e.id) + '"' + CRM.attr('data-contato', contatoId) + '>WhatsApp</button>' : '';
+      linhas.push([rot, esc(numero) + ' <button type="button" class="mini" data-acao="ligar" data-id="' + esc(e.id) + '"' + CRM.attr('data-contato', contatoId) + '>Ligar</button>' + zap]);
+    };
+    if (c) {
+      linhas.push(['Pessoa', '<button type="button" class="link" data-acao="editar-contato" data-id="' + esc(c.id) + '">' + esc(c.nome) + '</button>' + (c.cargo ? ' <small>' + esc(c.cargo) + '</small>' : '')]);
+      email(c.email, c.id, 'E-mail');
+      tel(c.whatsapp, c.id, 'WhatsApp');
+      tel(c.celular, c.id, 'Celular');
+      tel(c.telefone, c.id, 'Telefone');
+    }
+    const daEmpresa = r => (c ? r + ' da empresa' : r);
+    email(e.email, null, daEmpresa('E-mail'));
+    tel(e.whatsapp, null, daEmpresa('WhatsApp'));
+    tel(e.telefone, null, daEmpresa('Telefone'));
+    return '<section class="contato-negocio"><h3>Dados do contato <button type="button" class="mini" data-acao="abrir-empresa" data-id="' + esc(e.id) + '">ficha do cliente</button></h3>' +
+      (linhas.length > (c ? 1 : 0) ? '<dl class="dados">' + linhas.map(x => '<dt>' + esc(x[0]) + '</dt><dd>' + x[1] + '</dd>').join('') + '</dl>'
+        : (c ? '<dl class="dados"><dt>Pessoa</dt><dd>' + linhas[0][1] + '</dd></dl>' : '') + '<p class="vazio">Nenhum e-mail ou telefone cadastrado para este cliente.</p>') + '</section>';
   }
 
   // Valor do negócio acompanha os itens (quando há itens).
@@ -785,7 +817,7 @@
   fichas.email = (empresaId, el) => {
     const e = CRM.empresa(empresaId); if (!e) return;
     const c = escolheContato(e, el && el.dataset.contato, x => x.email);
-    const para = (c && c.email) || e.email;
+    const para = (el && el.dataset.para) || (c && c.email) || e.email;
     if (!para) { CRM.toast('Sem e-mail cadastrado.', true); return; }
     comModelo(el, 'email', m => {
       const v = variaveis(e, c);

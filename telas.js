@@ -24,6 +24,8 @@
     return '<span class="acoes-rapidas">' +
       (R.linkWhatsApp(tel) ? '<button type="button" class="mini wa" data-acao="whatsapp" data-id="' + esc(empresaId) + '"' + CRM.attr('data-contato', c && c.id) + ' title="WhatsApp">WhatsApp</button>' : '') +
       (R.linkTelefone(tel) ? '<button type="button" class="mini" data-acao="ligar" data-id="' + esc(empresaId) + '"' + CRM.attr('data-contato', c && c.id) + ' title="Ligar">Ligar</button>' : '') +
+      ((c && c.email) || e.email ? '<button type="button" class="mini" data-acao="email" data-id="' + esc(empresaId) + '"' + CRM.attr('data-contato', c && c.email ? c.id : null) +
+        CRM.attr('data-para', (c && c.email) || e.email) + ' title="' + esc((c && c.email) || e.email) + '">E-mail</button>' : '') +
       '</span>';
   }
   CRM.acoesRapidas = acoesRapidas;

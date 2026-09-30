@@ -231,6 +231,8 @@ test('formato real do Agendor da OneClean (conferência de 29/09/2026)', () => {
   assert.equal(ganho.etapa_id, etOrc.id);
   const t1 = plano.criar.atividades.find(t => t.externo_id === 'agendor:tarefa:900');
   assert.equal(t1.tipo, 'ligacao'); assert.equal(t1.concluida, true); assert.equal(t1.empresa_id, b.id); assert.equal(t1.negocio_id, ganho.id);
+  const t3 = P.converteAgendor({ tasks: [{ id: 902, text: 'Cliente informou que ainda não recebeu a lista', type: null, dueDate: null, createdAt: '2026-09-23T17:56:12Z' }] }).atividades[0];
+  assert.deepEqual([t3.tipo, t3.concluida, t3.concluida_em], ['nota', true, '2026-09-23T17:56:12Z'], 'nota do Agendor (sem tipo e sem prazo) é histórico');
   const t2 = plano.criar.atividades.find(t => t.externo_id === 'agendor:tarefa:901');
   assert.equal(t2.concluida, false); assert.equal(t2.tipo, 'tarefa'); assert.equal(t2.empresa_id, a.id); assert.equal(t2.responsavel_id, 'u1');
   assert.equal(plano.criar.contatos[0].empresa_id, a.id);
