@@ -5,3 +5,8 @@ agendor-exportado-*.json
 crm-backup-*.json
 node_modules/
 .DS_Store
+
+# vigia de notas: configuração (tem a chave), estado e registro ficam só no computador onde roda
+ferramentas/vigia-notas.json
+ferramentas/vigia-notas-estado.json
+ferramentas/vigia-notas.log

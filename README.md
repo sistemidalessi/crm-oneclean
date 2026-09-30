@@ -122,6 +122,50 @@ usuário, etapa e produto fica no **histórico de alterações** (quem, quando, 
 5. **`config.js`:** nome da empresa, logo, *Project URL* e chave *anon public*
    (Settings → API). A chave anon é pública por natureza — quem protege é a RLS.
 6. **Publicar:** GitHub Pages do repositório (Settings → Pages → branch `main`, raiz).
+7. **Notas automáticas (opcional):** `supabase functions deploy crm-notas --no-verify-jwt`
+   e o vigia no servidor da pasta de XML (seção abaixo).
+
+## Vigia de notas (importação automática dos XML)
+
+Um programa pequeno ([`ferramentas/vigia-notas.js`](ferramentas/vigia-notas.js), Node 18+,
+sem pacote nenhum) roda no computador onde fica a pasta de XML do emissor (UniNFe/FKM),
+olha a pasta a cada minuto e manda as notas novas para a Edge Function `crm-notas`. Lá elas
+passam pelas **mesmas regras da importação manual** (`nfe.js`): só as notas da equipe, o
+cadastro do cliente é completado, nada duplica (a chave de 44 dígitos é única). O vigia não
+tem senha nem acesso ao banco: só uma **chave de integração**, que serve apenas para
+entregar notas e pode ser desligada a qualquer momento no CRM.
+
+1. **Chave:** no CRM, como administrador, Configurações → Integrações → **Gerar chave para
+   o vigia**. A chave aparece **uma vez só** (o banco guarda só o SHA-256 dela), junto com o
+   comando pronto do passo 3. Em "Quais notas entram", o padrão é *Automático*: nota com
+   vendedor escrito entra se o vendedor é da equipe; nota sem vendedor entra se o cliente é
+   da carteira da equipe. "Venda direta" e vendedor externo ficam de fora.
+2. **No servidor:** instalar o Node.js LTS (nodejs.org) e copiar `vigia-notas.js` para uma
+   pasta própria, por exemplo `C:\CRM\`.
+3. **Configurar** (no Prompt de Comando, dentro de `C:\CRM`):
+   ```
+   node vigia-notas.js --configurar --url https://SEU-PROJETO.supabase.co --chave CHAVE --pasta "C:\...\uninfe30\CNPJ\Enviados\Autorizados" --desde 202601
+   ```
+   `--pasta` é a pasta **Autorizados** (a que tem as subpastas por mês, `202609`,
+   `202610`…); vale o caminho local ou o de rede (`\\servidor\...`), desde que a conta que
+   roda o vigia enxergue a pasta. `--desde AAAAMM` = primeiro mês a enviar (padrão: janeiro
+   do ano atual); meses já importados à mão não duplicam, só aparecem como "já importada".
+   Do par que o UniNFe grava (`…-nfe.xml` e `…-procNFe.xml`) vai só o com protocolo;
+   pedidos e inutilizações são ignorados.
+4. **Testar uma vez:** `node vigia-notas.js --uma-vez` — o resultado aparece na tela, em
+   `vigia-notas.log` e no CRM em Configurações → Integrações → "Últimas entregas".
+5. **Deixar rodando sempre** (Agendador de Tarefas do Windows, inicia junto com o servidor):
+   ```
+   schtasks /Create /TN "CRM - vigia de notas" /SC ONSTART /RU SYSTEM /TR "\"C:\Program Files\nodejs\node.exe\" C:\CRM\vigia-notas.js"
+   schtasks /Run /TN "CRM - vigia de notas"
+   ```
+   Se a pasta for de rede, trocar `/RU SYSTEM` por um usuário com acesso a ela
+   (`/RU USUARIO /RP *`, pede a senha).
+
+O que já foi enviado fica em `vigia-notas-estado.json` (apagar esse arquivo = reenviar
+tudo, sem duplicar); `vigia-notas.json` guarda a chave — **não copiar para outro lugar**.
+Se o CRM ou a internet cair, o vigia tenta de novo na volta seguinte. Chave vazou ou o
+servidor foi trocado: desligar/excluir a chave no CRM e gerar outra.
 
 ## Arquivos
 
@@ -138,6 +182,9 @@ usuário, etapa e produto fica no **histórico de alterações** (quem, quando, 
 | `telas.js`, `fichas.js`, `ajustes.js` | Telas; fichas e formulários; configurações e importação. |
 | `supabase/schema.sql` | Tabelas, índices, triggers (histórico), RLS, rodízio. |
 | `supabase/functions/crm-usuarios/` | Edge Function do administrador (criar usuário, senha). |
+| `supabase/functions/crm-notas/` | Edge Function que recebe os XML do vigia (chave de integração, regras do `nfe.js` num commit fixo). |
 | `supabase/teste-rls/` | Ensaio das permissões num Postgres local (`sh supabase/teste-rls/roda.sh`). |
 | `ferramentas/agendor-exportar.js` | Extrator da API v3 do Agendor. |
+| `ferramentas/vigia-notas.js` | Vigia da pasta de XML das notas (roda no servidor do emissor). |
+| `ferramentas/fixa-motor-notas.js` | Fixa na `crm-notas` o commit e os hashes de `regras.js`/`nfe.js`. |
 | `testes/` | Testes das regras e do importador (`node --test testes/*.test.js`). |

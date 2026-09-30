@@ -452,3 +452,4 @@ body.arrastando-card .zonas-fim { display: grid; grid-template-columns: 1fr 1fr;
 .contato-negocio { margin-top: 10px; }
 .contato-negocio .dados dd { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .motivo-dup { margin: 0 0 4px; font-size: .85rem; color: var(--suave); }
+.comando { background: var(--realce); border: 1px solid var(--borda); border-radius: 8px; padding: 8px 10px; white-space: pre-wrap; word-break: break-all; font-size: .8rem; }

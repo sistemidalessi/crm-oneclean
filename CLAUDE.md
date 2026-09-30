@@ -31,9 +31,26 @@ dados precisavam vir de lá. A migração é o caminho mais sensível do sistema
 - Esta é a cópia viva do código. A origem foi `sistemi-dalessi/crm/`, que fica só
   como histórico; mudança nova entra aqui.
 
-## ONDE PARAMOS (30/09/2026, manhã) — retomar daqui
+## ONDE PARAMOS (30/09/2026, tarde) — retomar daqui
 
-- **Feito hoje:** Relatórios com "Total vendido" e linha "Total da equipe" na tabela por
+- **Vigia de notas pronto** (seção "Vigia de notas" abaixo e no README): Edge Function
+  `crm-notas` publicada no banco real e testada (chave errada 401, chave certa 200; os
+  registros de teste foram apagados), tabelas `crm_integracoes`/`crm_integracao_log`
+  (migration `crm_integracoes_vigia_notas`), tela Configurações → Integrações e
+  `ferramentas/vigia-notas.js` testado contra um servidor falso com os XML reais de setembro.
+  **Falta o Anderson:** gerar a chave na tela, instalar o Node no servidor e configurar a
+  pasta `...\uninfe30\63237702000103\Enviados\Autorizados` (subpastas AAAAMM).
+- Setembro nos XML reais: 303 notas; com o filtro da equipe entram **119 (R$ 125.254,36)** —
+  Isabela 50, Renata 32, Alysson 28, Sarah 9 —; ficam de fora DIRETO (130) e SILMARA
+  (vendedora externa, 54). Bate com o Agendor de setembro (R$ 122.502,16). O FKM escreve
+  o vendedor no `infCpl` ("…;VENDEDOR: ALYSSON;COD. CLIENTE: 01153;").
+- Duplicados: 31 grupos "quase certos" mesclados com autorização (2.045 → 2.011 empresas),
+  backup em `crm_backup.mescla_empresas` (schema fora da API). Os demais ficam para
+  conferência manual em Configurações → Duplicados.
+
+## Registro de 30/09/2026, manhã
+
+- **Feito:** Relatórios com "Total vendido" e linha "Total da equipe" na tabela por
   vendedor; **importação de notas fiscais (XML/ZIP da NF-e)** e seção **Faturamento** nos
   Relatórios (top 10 clientes e produtos, segmento, vendedor, cidade, por mês); notas na
   ficha do cliente; "Preencher segmento pelo nome" em Configurações → Origens, segmentos,
@@ -202,13 +219,37 @@ dados precisavam vir de lá. A migração é o caminho mais sensível do sistema
   não tem campo próprio; lemos `<obsCont xCampo="Vendedor">` ou "Vendedor: 012 - NOME" no
   `infCpl`; batem com a equipe por nome completo ou primeiro nome único), `carteira` (cliente
   já cadastrado com responsável da equipe; não cria cliente) ou `todas`. Padrão: `vendedores`
-  se as notas trazem o nome, senão `carteira`. Cliente novo fica com o vendedor da nota.
-  O formato real do XML da OneClean ainda não foi visto: conferir com uma nota de verdade.
+  se as notas trazem o nome, senão `carteira`; `auto` decide **nota a nota** (com vendedor
+  escrito → `vendedores`; sem → `carteira`) e é o padrão do vigia. Cliente novo fica com o
+  vendedor da nota. O FKM da OneClean escreve "VENDEDOR: NOME;" no `infCpl` (conferido
+  com os XML reais de setembro de 2026).
 - RLS: gestor importa e corrige; vendedor lê as notas das empresas que vê (`crm_ve_nota`
   para os itens). Mesclar empresas leva as notas junto.
 - Volume: as notas e os itens também carregam na memória no login. Com dezenas de
   milhares de itens ainda vai; se passar de ~100 mil itens, agregar no servidor (view)
   em vez de trazer item a item.
+
+## Vigia de notas (importação automática) — não quebrar
+
+- `ferramentas/vigia-notas.js` roda no servidor do emissor, lê a pasta `Autorizados`
+  (subpastas AAAAMM ≥ `desde`), manda lotes de até 50 arquivos / 8 MB para
+  `/functions/v1/crm-notas` com o header `x-crm-chave`. Estado local em
+  `vigia-notas-estado.json` (tamanho + data de cada arquivo); os três arquivos locais estão
+  no `.gitignore` (o `.json` tem a chave).
+- `crm_integracoes` guarda **só o SHA-256** da chave (gerada no navegador em
+  Configurações → Integrações, 32 bytes aleatórios, mostrada uma vez); RLS: só admin mexe;
+  gestor lê `crm_integracao_log`; ninguém insere log pelo app (só a função, com a service
+  role, que fica no servidor).
+- A função é publicada com **verify_jwt desligado** (`--no-verify-jwt`): quem autentica é a
+  chave de integração. Ela **não copia as regras**: baixa `regras.js` e `nfe.js` do
+  raw.githubusercontent num COMMIT fixo e confere o SHA-256 antes de rodar. Mexeu em
+  `regras.js` ou `nfe.js`? commit + push → `node ferramentas/fixa-motor-notas.js` →
+  publicar a função de novo. `testes/motor.test.js` falha se os hashes fixados não
+  baterem com os arquivos atuais — é o lembrete.
+- Resposta por arquivo: `importada`, `já importada`, `fora: motivo`, `cancelamento`, `não é
+  NF-e (ignorado)`, `erro`, `repetida no envio`; o vigia marca como enviado tudo que teve
+  resposta (erro de gravação vai para o log do CRM, não se repete sozinho) e, se o envio
+  falhar (rede, 5xx), para a volta e tenta de novo na próxima.
 
 ## Segurança (lições da auditoria de 11/09/2026 aplicadas)
 

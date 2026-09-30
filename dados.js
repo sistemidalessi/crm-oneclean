@@ -315,6 +315,15 @@
     return unwrap(await this.sb.rpc('crm_proximo_vendedor'));
   };
 
+  // Integrações (vigia de notas): chaves (só admin vê, pela RLS) e registro das entregas.
+  Supa.prototype.integracoes = async function () {
+    const [c, l] = await Promise.all([
+      this.sb.from('crm_integracoes').select('id,nome,filtro,ativo,ultimo_uso,criado_em').order('criado_em'),
+      this.sb.from('crm_integracao_log').select('*').order('quando', { ascending: false }).limit(40)
+    ]);
+    return { chaves: c.error ? [] : c.data, registro: unwrap(l) };
+  };
+
   Supa.prototype.historico = async function (filtro) {
     let q = this.sb.from('crm_historico').select('*').order('quando', { ascending: false }).limit(filtro.limite || 200);
     if (filtro.empresa_id) q = q.eq('empresa_id', filtro.empresa_id);

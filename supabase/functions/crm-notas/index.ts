@@ -1,5 +1,5 @@
 // Edge Function: recebe os XML de NF-e do vigia da pasta (ferramentas/vigia-notas.js) e importa
-// com as MESMAS regras da importação manual (nfe.js, via motor.js gerado): só as notas da equipe
+// com as MESMAS regras da importação manual (nfe.js): só as notas da equipe
 // (vendedor escrito na nota; sem ele, a carteira do cliente), completa o cadastro do cliente e não
 // duplica (a chave de 44 dígitos é única). Quem chama não faz login: manda a chave de integração
 // gerada em Configurações → Integrações, que só serve para isto. Aqui guardamos só o hash dela.

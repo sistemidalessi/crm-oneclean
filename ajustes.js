@@ -10,7 +10,7 @@
   const SECOES = [
     ['geral', 'Geral e automações'], ['funil', 'Funil e etapas'], ['listas', 'Origens, segmentos, motivos'], ['produtos', 'Produtos'],
     ['equipe', 'Equipe e permissões'], ['metas', 'Metas'], ['modelos', 'Modelos de mensagem'], ['importar', 'Importar'],
-    ['exportar', 'Exportar e backup'], ['duplicados', 'Duplicados'], ['historico', 'Histórico de alterações']
+    ['exportar', 'Exportar e backup'], ['duplicados', 'Duplicados'], ['integracoes', 'Integrações'], ['historico', 'Histórico de alterações']
   ];
   let secao = CRM.pref('ajustes', 'geral');
   let imp = null; // estado da importação em andamento
@@ -637,6 +637,61 @@
     CRM.toast('Mesclado.');
   }
 
+  // ================================================================ Integrações (vigia de notas)
+  let integ = null;       // { chaves, registro } carregado do banco
+  let chaveNova = null;   // { nome, chave } recém-gerada: aparece uma vez só
+  const FILTROS_INTEG = [['auto', 'Automático: pelo vendedor escrito na nota; sem ele, pela carteira'], ['vendedores', 'Só pelo vendedor escrito na nota'],
+    ['carteira', 'Só clientes da carteira da equipe'], ['todas', 'Todas as notas de venda']];
+
+  TELAS.integracoes = () => {
+    if (CRM.store().modo === 'local') return '<div class="cartao"><p class="vazio">As integrações precisam do banco (Supabase). No modo local não existem.</p></div>';
+    if (!integ) { setTimeout(carregaIntegracoes, 0); return '<div class="cartao"><p class="vazio">Carregando…</p></div>'; }
+    const admin = CRM.ehAdmin();
+    const url = (window.CRM_CONFIG && window.CRM_CONFIG.supabaseUrl) || 'https://SEU-PROJETO.supabase.co';
+    const quando = v => (v ? esc(R.dataBR(R.diaLocal(v)) + ' ' + R.horaLocal(v)) : '—');
+    return '<section class="cartao"><h2>Vigia de notas fiscais</h2>' +
+      '<p>Um programinha no servidor onde fica a pasta de XML do emissor (UniNFe) olha a pasta a cada minuto e manda as notas novas para cá. ' +
+      'Elas passam pelas mesmas regras da importação manual: <strong>só as da equipe</strong> (pelo vendedor escrito na nota), o cadastro do cliente é completado e nada duplica.</p>' +
+      '<p class="dica">O programa não recebe senha nem acesso ao banco: só uma <strong>chave de integração</strong>, que serve apenas para entregar notas. Instalação: <code>ferramentas/vigia-notas.js</code> (README, "Vigia de notas").</p>' +
+      (chaveNova ? '<div class="aviso-notas"><p><strong>Chave gerada para "' + esc(chaveNova.nome) + '".</strong> Copie agora: ela não aparece de novo (o CRM guarda só uma impressão digital dela).</p>' +
+        '<p><code id="chaveGerada">' + esc(chaveNova.chave) + '</code> <button type="button" class="mini" data-acao="copiar-chave">copiar</button></p>' +
+        '<p class="dica">No servidor, na pasta onde colocou o vigia-notas.js:</p><pre class="comando">node vigia-notas.js --configurar --url ' + esc(url) + ' --chave ' + esc(chaveNova.chave) +
+        ' --pasta "D:\\...\\Enviados\\Autorizados"</pre></div>' : '') +
+      (integ.chaves.length ? '<table class="tabela"><thead><tr><th>Chave</th><th>Quais notas entram</th><th>Último envio</th><th>Criada</th><th></th></tr></thead><tbody>' +
+        integ.chaves.map(c => '<tr><td><strong>' + esc(c.nome) + '</strong> ' + (c.ativo ? CRM.selo('ativa', 'verde') : CRM.selo('desligada', 'vermelho')) + '</td>' +
+          '<td>' + (admin ? '<select data-integ-filtro="' + esc(c.id) + '">' + CRM.opcoesHTML(FILTROS_INTEG, c.filtro) + '</select>' : esc(R.rotulo(FILTROS_INTEG, c.filtro))) + '</td>' +
+          '<td>' + quando(c.ultimo_uso) + '</td><td>' + quando(c.criado_em) + '</td>' +
+          '<td>' + (admin ? '<button type="button" class="mini" data-acao="integ-ativar" data-id="' + esc(c.id) + '">' + (c.ativo ? 'desligar' : 'ligar') + '</button> ' +
+            '<button type="button" class="mini" data-acao="integ-excluir" data-id="' + esc(c.id) + '">excluir</button>' : '') + '</td></tr>').join('') + '</tbody></table>'
+        : '<p class="vazio">' + (admin ? 'Nenhuma chave ainda.' : 'Só o administrador vê e gera as chaves.') + '</p>') +
+      (admin ? '<p><button type="button" class="btn ouro" data-acao="integ-nova">Gerar chave para o vigia</button></p>' : '') + '</section>' +
+      '<section class="cartao"><h2>Últimas entregas <button type="button" class="mini" data-acao="integ-atualizar">atualizar</button></h2>' +
+      (integ.registro.length ? '<table class="tabela"><thead><tr><th>Quando</th><th class="num">Arquivos</th><th class="num">Notas novas</th><th class="num">Valor</th><th class="num">Fora</th><th>Detalhes</th></tr></thead><tbody>' +
+        integ.registro.map(l => {
+          const v = ((l.resumo && l.resumo.vendedores) || []).filter(x => x.chave).map(x => x.nome + ' ' + x.qtd + (x.usuario_nome ? '' : ' (fora)')).join(', ');
+          const er = (l.resumo && l.resumo.erros) || [];
+          return '<tr><td>' + quando(l.quando) + '</td><td class="num">' + l.arquivos + '</td><td class="num">' + l.notas_novas + '</td><td class="num">' + esc(R.moeda(l.valor)) + '</td><td class="num">' + l.fora + '</td>' +
+            '<td><small>' + esc(v) + '</small>' + (er.length ? ' <details><summary>' + CRM.selo(er.length + ' erro(s)', 'vermelho') + '</summary><small>' + er.map(esc).join('<br>') + '</small></details>' : '') + '</td></tr>';
+        }).join('') + '</tbody></table>' : '<p class="vazio">Nenhuma entrega ainda.</p>') + '</section>';
+  };
+  async function carregaIntegracoes() { try { integ = await CRM.store().integracoes(); CRM.render(); } catch (e) { CRM.falhou(e); } }
+  DEPOIS.integracoes = () => {
+    $$('[data-integ-filtro]').forEach(s => s.addEventListener('change', async () => {
+      try { await CRM.store().atualizar('integracoes', s.dataset.integFiltro, { filtro: s.value }); CRM.toast('Filtro da integração salvo.'); integ = null; CRM.render(); } catch (e) { CRM.falhou(e); }
+    }));
+  };
+  async function novaChave() {
+    const nome = (prompt('Nome da chave (onde o vigia vai rodar):', 'Vigia de notas — servidor') || '').trim();
+    if (!nome) return;
+    const b = crypto.getRandomValues(new Uint8Array(32));
+    const chave = btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    const h = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(chave));
+    const token_hash = [...new Uint8Array(h)].map(x => x.toString(16).padStart(2, '0')).join('');
+    await CRM.store().inserir('integracoes', { nome, token_hash, filtro: 'auto' });
+    chaveNova = { nome, chave };
+    integ = null; CRM.render();
+  }
+
   // ================================================================ Histórico
   let historico = null;
   TELAS.historico = () => {
@@ -764,6 +819,14 @@
     },
     mesclar: (id, el) => mesclar(id, el).catch(CRM.falhou),
     'mesclar-certos': () => mesclarCertos().catch(CRM.falhou),
-    'historico-atualizar': () => { historico = null; CRM.render(); }
+    'historico-atualizar': () => { historico = null; CRM.render(); },
+    'integ-atualizar': () => { integ = null; CRM.render(); },
+    'integ-nova': () => novaChave().catch(CRM.falhou),
+    'integ-ativar': async id => { const c = integ.chaves.find(x => x.id === id); try { await CRM.store().atualizar('integracoes', id, { ativo: !c.ativo }); integ = null; CRM.render(); } catch (e) { CRM.falhou(e); } },
+    'integ-excluir': async id => {
+      if (!confirm('Excluir esta chave? O vigia que usa ela para de entregar notas (o registro das entregas também some).')) return;
+      try { await CRM.store().remover('integracoes', id); integ = null; CRM.render(); } catch (e) { CRM.falhou(e); }
+    },
+    'copiar-chave': () => { const t = $('#chaveGerada'); if (t && navigator.clipboard) navigator.clipboard.writeText(t.textContent).then(() => CRM.toast('Chave copiada.')); }
   });
 })();
