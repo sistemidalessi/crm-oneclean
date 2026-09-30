@@ -181,7 +181,13 @@ entregar notas e pode ser desligada a qualquer momento no CRM.
 O que já foi enviado fica em `vigia-notas-estado.json` (apagar esse arquivo = reenviar
 tudo, sem duplicar); `vigia-notas.json` guarda a chave — **não copiar para outro lugar**.
 Se o CRM ou a internet cair, o vigia tenta de novo na volta seguinte. Chave vazou ou o
-servidor foi trocado: desligar/excluir a chave no CRM e gerar outra.
+servidor foi trocado: gerar outra no CRM, `node vigia-notas.js --configurar --chave NOVA`
+(o vigia rodando passa a usar sozinho) e excluir a antiga. Testar a chave sem esperar nota
+(PowerShell; resposta `ok : True`):
+```
+$c = (Get-Content C:\CRM\vigia-notas.json -Raw | ConvertFrom-Json).chave
+Invoke-RestMethod -Method Post -Uri https://SEU-PROJETO.supabase.co/functions/v1/crm-notas -Headers @{'x-crm-chave'=$c} -ContentType 'application/json' -Body '{"arquivos":[]}'
+```
 
 ## Arquivos
 

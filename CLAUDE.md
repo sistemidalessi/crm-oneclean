@@ -45,8 +45,8 @@ dados precisavam vir de lá. A migração é o caminho mais sensível do sistema
   "CRM - vigia de notas" (ao iniciar, SYSTEM, sem limite de tempo). 1ª volta: 2.558 XML
   de 2026 → **857 notas da equipe, R$ 1.015.485,30**, zero erro (setembro: 119 notas,
   R$ 125.254,36 — igual à conta feita com o .rar); 137 empresas completadas, 86 clientes
-  novos, CNPJ em 184 empresas (eram 59), 943 produtos no catálogo. Falta o Anderson
-  trocar a chave (apareceu em fotos): gerar outra, `--configurar --chave NOVA`, excluir a antiga.
+  novos, CNPJ em 184 empresas (eram 59), 943 produtos no catálogo. Chave trocada às 13:51
+  (a primeira apareceu em fotos) e conferida; excluir a chave apaga o registro de entregas dela (cascade), as notas ficam.
 - Setembro nos XML reais: 303 notas; com o filtro da equipe entram **119 (R$ 125.254,36)** —
   Isabela 50, Renata 32, Alysson 28, Sarah 9 —; ficam de fora DIRETO (130) e SILMARA
   (vendedora externa, 54). Bate com o Agendor de setembro (R$ 122.502,16). O FKM escreve
