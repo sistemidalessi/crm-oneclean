@@ -12,8 +12,8 @@
 // Deploy: verify_jwt DESLIGADO (a chave de integração é conferida aqui).
 import { createClient } from 'npm:@supabase/supabase-js@2.116.0';
 
-const COMMIT = 'PENDENTE';
-const HASHES: Record<string, string> = { 'regras.js': 'PENDENTE', 'nfe.js': 'PENDENTE' };
+const COMMIT = '48fd64d92f072ead0a0859787658ba7e327210d1';
+const HASHES: Record<string, string> = { 'regras.js': 'eacfc9eaccdaf3c27c145b35ef6e6680b42511b12577741fc6827aa22aa7bb18', 'nfe.js': '789bdfc637d82ec5dfaac7e8046c20892c9949da487d381e0c7e47e3ea3641a6' };
 const FONTE = 'https://raw.githubusercontent.com/sistemidalessi/crm-oneclean/' + COMMIT + '/';
 
 // deno-lint-ignore no-explicit-any
