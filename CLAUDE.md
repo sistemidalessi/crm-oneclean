@@ -64,8 +64,15 @@ dados precisavam vir de lá. A migração é o caminho mais sensível do sistema
      `exp_estoque.csv` sozinho quando o arquivo muda (alguém ainda exporta à mão no FKM) +
      lembrete para quem exporta (ex.: aviso na Gestão quando o estoque tiver mais de 3 dias, já
      existe o selo "desatualizado"; e/ou tarefa recorrente para o comprador).
-- A extração final do Agendor foi iniciada em 30/09 ~16:40 no computador do Anderson (roteiro na
-  seção de reextração abaixo e no README).
+- **Extração final do Agendor feita e importada em 30/09 ~17h** (reextração com "Atualizar
+  negócios e tarefas"): Agendor 2.029 empresas / 28 pessoas / 3.172 negócios / 5.420 tarefas
+  recentes; importou 1 empresa nova + 2 completadas, 31 negócios novos + 10 atualizados, 143
+  tarefas novas + 114 atualizadas. CRM ficou com 2.098 empresas, 3.172 negócios (= Agendor),
+  5.720 atividades. Setembro no CRM: ganhos 111 / R$ 127.871,57, perdidos 68 / R$ 151.088,92.
+  A API do Agendor passou a recusar o histórico por empresa (erro 400 pedindo filtro de data):
+  sem efeito, o histórico antigo já tinha entrado em 29/09. **Falta o Anderson:** revogar o
+  token do Agendor, apagar `C:\Migracao\agendor-exportado-*.json` e tirar o backup do CRM da
+  pasta de rede `\\servidor\Financeiro\Recepção de Documentos`.
 
 ## Registro de 30/09/2026, manhã
 
