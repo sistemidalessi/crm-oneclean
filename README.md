@@ -141,7 +141,17 @@ entregar notas e pode ser desligada a qualquer momento no CRM.
    vendedor escrito entra se o vendedor é da equipe; nota sem vendedor entra se o cliente é
    da carteira da equipe. "Venda direta" e vendedor externo ficam de fora.
 2. **No servidor:** instalar o Node.js LTS (nodejs.org) e copiar `vigia-notas.js` para uma
-   pasta própria, por exemplo `C:\CRM\`.
+   pasta própria, por exemplo `C:\CRM\`. **Windows Server 2012 R2 / Windows 8.1** (é o caso
+   da OneClean): o Node novo não instala; usar o 18, e no PowerShell ligar o TLS 1.2 antes
+   de baixar (não tem `curl.exe`). Abrir o PowerShell de novo depois de instalar o Node:
+   ```
+   [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+   Invoke-WebRequest https://nodejs.org/dist/v18.20.8/node-v18.20.8-x64.msi -OutFile C:\node18.msi
+   Start-Process msiexec -ArgumentList '/i C:\node18.msi' -Wait
+   mkdir C:\CRM
+   Invoke-WebRequest https://raw.githubusercontent.com/sistemidalessi/crm-oneclean/main/ferramentas/vigia-notas.js -OutFile C:\CRM\vigia-notas.js
+   ```
+   Colar uma linha por vez (coladas juntas, o PowerShell gruda uma na outra).
 3. **Configurar** (no Prompt de Comando, dentro de `C:\CRM`):
    ```
    node vigia-notas.js --configurar --url https://SEU-PROJETO.supabase.co --chave CHAVE --pasta "C:\...\uninfe30\CNPJ\Enviados\Autorizados" --desde 202601
