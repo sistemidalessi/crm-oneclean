@@ -459,3 +459,17 @@ body.arrastando-card .zonas-fim { display: grid; grid-template-columns: 1fr 1fr;
 .itens-habituais h3 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .itens-habituais ul { margin: 4px 0 10px; padding-left: 18px; }
 .itens-habituais li small { color: var(--suave); }
+/* Fila do dia */
+.fila-progresso { display: grid; gap: 4px; margin: 0 0 12px; }
+.fila-atual { display: grid; gap: 12px; border: 2px solid var(--marinho); }
+.fila-tipo { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; margin: 0; font-weight: 600; }
+.fila-outros { margin: 0; color: var(--suave); font-size: .9rem; }
+.fila-atual h2 { margin: 0; font-size: 1.5rem; }
+.fila-atual h2 .link { font: inherit; }
+.fila-atual h2 small { font-size: .85rem; font-weight: 400; color: var(--suave); }
+.fila-contexto { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+.fila-contatar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.fila-contatar > span:first-child { color: var(--suave); }
+.fila-botoes { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.fila-botoes .flex { flex: 1; }
+.fila-vazia p { margin: 0; }

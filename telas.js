@@ -148,6 +148,84 @@
       '<button type="button" class="btn sec" data-acao="encerrar-esquecidos">Encerrar os ' + lista.length + ' como perdidos</button></p></details></section>';
   }
 
+  // ================================================================ Fila do dia
+  // Um cliente por vez, na ordem do que pesa mais: tarefas atrasadas, de hoje, recompra, lead
+  // novo, cliente sem contato, negócio parado. O que foi resolvido sai sozinho (tarefa concluída,
+  // contato registrado, retorno agendado); "Pular" só vale até recarregar a página.
+  const pulados = new Set();
+  let maiorFila = { dia: '', total: 0 }; // tamanho da fila no começo do dia (nesta página), para o progresso
+  function montaFila(al, hoje) {
+    const itens = [], porEmpresa = new Map();
+    const poe = (chave, empresaId, tipo, motivo, extra) => {
+      if (!empresaId || !CRM.empresa(empresaId)) return;
+      const ja = porEmpresa.get(empresaId);
+      if (ja) { ja.outros.push(motivo); return; }
+      const it = Object.assign({ chave, empresaId, tipo, motivo, outros: [] }, extra || {});
+      porEmpresa.set(empresaId, it); itens.push(it);
+    };
+    const porHora = (a, b) => (a.data_hora < b.data_hora ? -1 : 1);
+    al.atrasadas.slice().sort(porHora).forEach(a => poe('t:' + a.id, a.empresa_id, 'tarefa', 'Tarefa atrasada desde ' + R.dataBR(a.data_hora).slice(0, 5) + ': ' + a.descricao, { atividade: a }));
+    al.deHoje.slice().sort(porHora).forEach(a => poe('t:' + a.id, a.empresa_id, 'tarefa', 'Tarefa de hoje às ' + R.horaLocal(a.data_hora) + ': ' + a.descricao, { atividade: a }));
+    al.recompra.forEach(e => poe('r:' + e.id, e.id, 'recompra', 'Hora da recompra'));
+    al.leadsSemAtendimento.slice().sort((a, b) => (a.criado_em < b.criado_em ? -1 : 1)).forEach(e => poe('l:' + e.id, e.id, 'lead', 'Lead novo sem atendimento (chegou ' + R.dataBR(e.criado_em) + ')'));
+    al.clientesSemContato.forEach(e => { const r = CRM.resumo(e.id), u = r.ultimoContato || r.ultimaCompra;
+      poe('c:' + e.id, e.id, 'contato', u ? 'Cliente sem contato há ' + R.diasEntre(R.diaLocal(u), hoje) + ' dias' : 'Cliente sem nenhum contato registrado'); });
+    al.negociosParados.forEach(n => poe('n:' + n.id, n.empresa_id, 'parado', 'Negócio parado há ' + R.diasEntre(R.ultimoMovimento(n, E().ix), hoje) + ' dias: ' + n.titulo + ' (' + R.moeda(n.valor) + ')', { negocio: n }));
+    return itens;
+  }
+  const ROTULO_FILA = { tarefa: ['Tarefa', 'azul'], recompra: ['Recompra', 'verde'], lead: ['Lead novo', 'roxo'], contato: ['Sem contato', 'ambar'], parado: ['Negócio parado', 'ambar'] };
+
+  function contextoFila(it) {
+    const e = CRM.empresa(it.empresaId), r = CRM.resumo(e.id), hoje = CRM.hoje();
+    const linhas = [];
+    const c = contatoPrincipal(e.id);
+    if (c) linhas.push('Falar com <strong>' + esc(c.nome) + '</strong>' + (c.cargo ? ' · ' + esc(c.cargo) : ''));
+    linhas.push(r.ultimoContato ? 'Último contato ' + esc(R.dataBR(r.ultimoContato)) + ' (' + R.diasEntre(R.diaLocal(r.ultimoContato), hoje) + ' dias)' : 'Nenhum contato registrado ainda');
+    if (r.compras) linhas.push(esc(R.moeda(r.totalComprado)) + ' em ' + r.compras + ' compra(s) · última ' + esc(R.dataBR(r.ultimaCompra)) +
+      (r.ritmo ? ' · compra a cada ~' + R.cicloRecompra(e, r, E().cfg) + ' dias' : ''));
+    const itens = R.itensHabituais(E().ix, e.id, 4);
+    if (itens.length) linhas.push('Costuma levar: ' + esc(itens.map(x => R.nomeDeItem(x.descricao)).join(', ')));
+    const ult = E().D.atividades.filter(a => a.empresa_id === e.id && a.concluida && a.tipo !== 'sistema').sort((a, b) => ((a.concluida_em || a.data_hora) < (b.concluida_em || b.data_hora) ? 1 : -1))[0];
+    if (ult) linhas.push('Última anotação: <em>' + esc(String(ult.descricao).slice(0, 160)) + '</em>');
+    return linhas.map(l => '<li>' + l + '</li>').join('');
+  }
+
+  const fila = {
+    render(al) {
+      const hoje = CRM.hoje();
+      const itens = montaFila(al, hoje);
+      const resta = itens.filter(it => !pulados.has(it.chave));
+      const eu = CRM.meuId();
+      const feitosHoje = E().D.atividades.filter(a => a.concluida && a.tipo !== 'sistema' && a.responsavel_id === eu && R.diaLocal(a.concluida_em || a.data_hora) === hoje).length;
+      const cab = '<div class="cabecalho"><div><h1>Fila do dia</h1><p class="sub">' + (CRM.carteira() && CRM.ehGestor() ? 'carteira de ' + esc(CRM.nomeUsuario(CRM.carteira())) + ' · ' : CRM.ehGestor() && !CRM.carteira() ? 'equipe toda · ' : '') +
+        resta.length + ' para fazer' + (pulados.size ? ' · ' + pulados.size + ' pulado(s)' : '') + ' · você já registrou <strong>' + feitosHoje + '</strong> contato(s) hoje</p></div>' +
+        (pulados.size ? '<button type="button" class="btn sec" data-acao="fila-voltar-pulados">Voltar os pulados</button>' : '') + '</div>';
+      if (!resta.length) return cab + '<section class="cartao fila-vazia"><h2>Fila zerada 🎉</h2><p>Nada atrasado, nenhuma recompra, lead ou cliente esperando. Bom momento para prospectar: veja os leads antigos em Empresas.</p></section>';
+      const it = resta[0], e = CRM.empresa(it.empresaId), rot = ROTULO_FILA[it.tipo];
+      if (maiorFila.dia !== hoje || itens.length > maiorFila.total) maiorFila = { dia: hoje, total: Math.max(itens.length, maiorFila.dia === hoje ? maiorFila.total : 0) };
+      const total = maiorFila.total, resolvidos = total - itens.length;
+      const botoes = [];
+      if (it.tipo === 'recompra') botoes.push('<button type="button" class="btn ouro" data-acao="whatsapp-recompra" data-id="' + esc(e.id) + '">WhatsApp de recompra</button>');
+      if (it.tipo === 'tarefa') botoes.push('<button type="button" class="btn ouro" data-acao="fila-concluir" data-id="' + esc(it.atividade.id) + '">✓ Concluir a tarefa</button>',
+        '<button type="button" class="btn sec" data-acao="fila-adiar" data-id="' + esc(it.atividade.id) + '">Adiar para amanhã</button>');
+      else botoes.push('<button type="button" class="btn' + (it.tipo === 'recompra' ? ' sec' : ' ouro') + '" data-acao="fila-registrar" data-id="' + esc(e.id) + '">Registrar contato</button>',
+        '<button type="button" class="btn sec" data-acao="fila-agendar" data-id="' + esc(e.id) + '">Agendar tarefa</button>');
+      return cab +
+        '<div class="fila-progresso">' + CRM.barra(resolvidos, total, resolvidos + ' de ' + total + ' resolvidos desde que você abriu a fila') + '</div>' +
+        '<section class="cartao fila-atual">' +
+          '<p class="fila-tipo">' + CRM.selo(rot[0], rot[1]) + ' <span>' + esc(it.motivo) + '</span></p>' +
+          (it.outros.length ? '<p class="fila-outros">Também: ' + esc(it.outros.join(' · ')) + '</p>' : '') +
+          '<h2><button type="button" class="link" data-acao="abrir-empresa" data-id="' + esc(e.id) + '">' + esc(e.nome) + '</button> <small>' + esc(R.rotulo(R.SITUACOES || [], e.situacao) || e.situacao) + ' · ' + esc(CRM.nomeUsuario(e.responsavel_id)) + '</small></h2>' +
+          '<ul class="fila-contexto">' + contextoFila(it) + '</ul>' +
+          '<div class="fila-contatar"><span>Contatar:</span>' + acoesRapidas(e.id, it.atividade && it.atividade.contato_id) + '</div>' +
+          '<div class="fila-botoes">' + botoes.join('') + '<span class="flex"></span><button type="button" class="btn sec" data-acao="fila-pular" data-id="' + esc(it.chave) + '">Pular →</button></div>' +
+        '</section>' +
+        (resta.length > 1 ? '<section class="cartao"><h2>Depois vêm <small>' + (resta.length - 1) + '</small></h2><ul class="lista">' + resta.slice(1, 8).map(x => '<li><button type="button" class="linha" data-acao="abrir-empresa" data-id="' + esc(x.empresaId) + '"><strong>' +
+          esc(CRM.nomeEmpresa(x.empresaId)) + '</strong><small>' + CRM.selo(ROTULO_FILA[x.tipo][0], ROTULO_FILA[x.tipo][1]) + ' ' + esc(x.motivo) + '</small></button></li>').join('') + '</ul>' +
+          (resta.length > 8 ? '<p class="mais">e mais ' + (resta.length - 8) + '…</p>' : '') + '</section>' : '');
+    }
+  };
+
   // ================================================================ Funil
   const funil = {
     render() {
@@ -655,6 +733,16 @@
       else CRM.baixarCSV('faturamento-produtos', ['Produto', 'Código', 'Unidade', 'Quantidade', 'Valor', 'Notas', 'Clientes'],
         f.topProdutosValor.map(x => [x.descricao, x.codigo, x.unidade, String(x.quantidade).replace('.', ','), String(x.valor.toFixed(2)).replace('.', ','), x.notas, x.clientes]));
     },
+    'fila-pular': k => { pulados.add(k); CRM.render(); },
+    'fila-voltar-pulados': () => { pulados.clear(); CRM.render(); },
+    'fila-concluir': id => CRM.concluirTarefa(id, true),
+    'fila-adiar': async id => {
+      const a = E().ix.porId.atividades.get(id); if (!a) return;
+      const hora = R.horaLocal(a.data_hora) || '09:00';
+      try { await CRM.atualizar('atividades', id, { data_hora: R.momento(R.somaDias(CRM.hoje(), 1), hora) }); CRM.toast('Adiada para amanhã às ' + hora + '.'); } catch (e) { CRM.falhou(e); }
+    },
+    'fila-registrar': id => CRM.fichas.formRegistro(null, { empresa_id: id }),
+    'fila-agendar': id => CRM.fichas.formTarefa(null, { empresa_id: id }),
     'encerrar-esquecidos': async () => {
       const lista = R.alertas(E().D, E().ix, E().cfg, CRM.hoje(), CRM.carteira()).negociosEsquecidos;
       const sel = $('#motivoEsquecidos'), motivo = sel ? sel.value : null;
@@ -757,5 +845,5 @@
     if (et && et !== n.etapa_id) CRM.auto.mudarNegocio(n, { etapa_id: et }).catch(CRM.falhou);
   });
 
-  CRM.telas = { inicio, funil, empresas, pessoas, negocios, agenda, relatorios, ajustes: { render: () => CRM.ajustes.render(), depois: el => CRM.ajustes.depois(el) } };
+  CRM.telas = { inicio, fila, funil, empresas, pessoas, negocios, agenda, relatorios, ajustes: { render: () => CRM.ajustes.render(), depois: el => CRM.ajustes.depois(el) } };
 })();

@@ -279,6 +279,14 @@ dados precisavam vir de lá. A migração é o caminho mais sensível do sistema
   histórico e agenda "Retorno da oferta de recompra" em 2 dias (tira o cliente da lista).
 - Em 30/09: 103 clientes com 3+ compras nas notas = 90% das notas; ritmo médio ~32 dias.
 
+## Fila do dia (30/09/2026)
+
+- Aba "Fila do dia" (2ª do menu; as teclas 2–9 andaram uma casa): um cliente por vez, montado
+  de `R.alertas` na ordem atrasadas → de hoje → recompra → lead novo → sem contato → parado,
+  uma entrada por empresa (os outros motivos aparecem em "Também"). O item sai sozinho quando
+  resolvido (tarefa concluída, contato registrado, retorno agendado); "Pular" vale só até
+  recarregar. Conta "contatos registrados hoje" e o progresso desde que a fila foi aberta.
+
 ## Vigia de notas (importação automática) — não quebrar
 
 - `ferramentas/vigia-notas.js` roda no servidor do emissor, lê a pasta `Autorizados`
