@@ -32,6 +32,8 @@
     { tipo: 'secao', rotulo: 'Alertas' },
     { nome: 'dias_sem_contato', rotulo: 'Cliente sem contato há mais de (dias)', tipo: 'numero', passo: '1', min: 1 },
     { nome: 'dias_parado', rotulo: 'Negócio parado há mais de (dias)', tipo: 'numero', passo: '1', min: 1 },
+    { nome: 'dias_esquecido', rotulo: 'Parado há mais de (dias) vira "esquecido": sai dos avisos e vai para a limpeza', tipo: 'numero', passo: '1', min: 0, ajuda: '0 = nunca' },
+    { nome: 'leads_desde', rotulo: '"Leads sem atendimento" conta só os cadastrados a partir de', tipo: 'data', ajuda: 'vazio = todos; a base antiga importada fica como lista de prospecção' },
     { nome: 'dias_inativo', rotulo: 'Cliente inativo sem comprar há (dias)', tipo: 'numero', passo: '1', min: 1 },
     { nome: 'ciclo_recompra_padrao', rotulo: 'Ciclo de recompra padrão (dias)', tipo: 'numero', passo: '1', min: 1, ajuda: 'cada empresa pode ter o seu' },
     { tipo: 'secao', rotulo: 'Automações' },

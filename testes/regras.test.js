@@ -253,3 +253,24 @@ test('duplicado "quase certo" exige nome compatível: síndica de vários condom
   assert.equal(R.nomesCompativeis('Hotel Sol | João', 'Hotel Sol | Julia'), true, 'mesmo hotel, contatos diferentes');
   assert.equal(R.nomesCompativeis('Ana Colégio Novo Rumo', 'NOVO RUMO | Ana'), true);
 });
+
+test('avisos sem a base antiga: leads a partir de uma data e negócios esquecidos fora do sino', () => {
+  const D = cenario();
+  const ix = R.indexa(D);
+  // Lead A chegou em 20/09: conta sem data de corte e com corte anterior; sai com corte depois.
+  assert.deepEqual(R.alertas(D, ix, R.config({ leads_desde: '2026-09-01' }), HOJE, null).leadsSemAtendimento.map(x => x.id), ['A']);
+  assert.deepEqual(R.alertas(D, ix, R.config({ leads_desde: '2026-10-01' }), HOJE, null).leadsSemAtendimento, []);
+  // n3 parado desde 01/08: parado até 60 dias; depois disso é "esquecido" (sai do aviso).
+  const cfg = R.config({});
+  const depois = R.alertas(D, ix, cfg, '2026-10-05', null);
+  assert.deepEqual(depois.negociosParados, []);
+  assert.deepEqual(depois.negociosEsquecidos.map(x => x.id), ['n3']);
+  assert.equal(R.ultimoMovimento(D.negocios[2], ix), '2026-08-01');
+  // dias_esquecido = 0 desliga: continua parado para sempre.
+  assert.deepEqual(R.alertas(D, ix, R.config({ dias_esquecido: 0 }), '2026-10-05', null).negociosParados.map(x => x.id), ['n3']);
+  // Contato com a empresa conta como movimento.
+  D.atividades.push({ id: 'a9', empresa_id: 'D', tipo: 'ligacao', descricao: 'liguei', concluida: true, concluida_em: iso('2026-09-10'), data_hora: iso('2026-09-10'), responsavel_id: 'u2' });
+  const ix2 = R.indexa(D);
+  assert.equal(R.ultimoMovimento(D.negocios[2], ix2), '2026-09-10');
+  assert.deepEqual(R.alertas(D, ix2, cfg, '2026-10-05', null).negociosEsquecidos, []);
+});

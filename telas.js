@@ -98,11 +98,12 @@
             '<p><strong>' + esc(R.moeda(vendido)) + '</strong> de ' + esc(R.moeda(meta)) + ' · ' + esc(R.pct(vendido / meta * 100)) + '</p></div></section>' : '') +
           '<section class="cartao" id="alerta-leads-sem-atendimento"><h2>Leads sem atendimento <small>nenhum contato registrado</small></h2>' +
             listaEmpresasCurta(al.leadsSemAtendimento, e => esc(CRM.nomeUsuario(e.responsavel_id)) + ' · chegou ' + esc(R.dataBR(e.criado_em)) + (e.origem ? ' · ' + esc(e.origem) : '')) + '</section>' +
-          '<section class="cartao" id="alerta-negocios-parados"><h2>Negócios parados <small>sem movimento há ' + E().cfg.dias_parado + '+ dias e sem tarefa</small></h2>' +
+          '<section class="cartao" id="alerta-negocios-parados"><h2>Negócios parados <small>sem movimento há ' + E().cfg.dias_parado +
+            (R.num(E().cfg.dias_esquecido) > 0 ? ' a ' + Math.max(R.num(E().cfg.dias_esquecido), E().cfg.dias_parado) : '+') + ' dias e sem tarefa</small></h2>' +
             (al.negociosParados.length ? '<ul class="lista">' + al.negociosParados.slice(0, 8).map(n => '<li><button type="button" class="linha" data-acao="abrir-negocio" data-id="' + esc(n.id) + '">' +
               '<strong>' + esc(n.titulo) + '</strong><small>' + esc(CRM.nomeEmpresa(n.empresa_id)) + ' · ' + esc(R.moeda(n.valor)) + ' · ' +
               esc((CRM.etapa(n.etapa_id) || {}).nome || '') + ' há ' + R.diasEntre(R.diaLocal(n.etapa_desde || n.criado_em), hoje) + ' dias</small></button>' + acoesRapidas(n.empresa_id) + '</li>').join('') + '</ul>' : vazio('Todos os negócios abertos estão andando.')) +
-          '</section>' +
+          '</section>' + esquecidos(al.negociosEsquecidos, hoje) +
           '<section class="cartao" id="alerta-recompra"><h2>Hora da recompra <small>ciclo de compra vencendo</small></h2>' +
             listaEmpresasCurta(al.recompra, e => 'última compra ' + esc(R.dataBR(CRM.resumo(e.id).ultimaCompra)) + ' · ciclo ' + (R.num(e.ciclo_recompra_dias) || E().cfg.ciclo_recompra_padrao) + ' dias') + '</section>' +
           '<section class="cartao" id="alerta-clientes-sem-contato"><h2>Clientes sem contato <small>há ' + E().cfg.dias_sem_contato + '+ dias</small></h2>' +
@@ -110,6 +111,25 @@
         '</div></div>';
     }
   };
+
+  // Negócios esquecidos (parados há mais de "dias_esquecido"): não entram no sino; ficam aqui,
+  // fechados, para a limpeza — abrir um a um ou encerrar todos como perdidos de uma vez.
+  function esquecidos(lista, hoje) {
+    if (!lista.length) return '';
+    const dias = Math.max(R.num(E().cfg.dias_esquecido), E().cfg.dias_parado);
+    const motivos = E().D.opcoes.filter(o => o.tipo === 'motivo_perda').map(o => o.nome);
+    const padrao = motivos.find(m => /retorno/i.test(m)) || motivos[0] || '';
+    const total = lista.reduce((s, n) => s + R.num(n.valor), 0);
+    return '<section class="cartao" id="alerta-negocios-esquecidos"><details><summary><h2>Negócios esquecidos <small>' + lista.length + ' · ' + esc(R.moeda(total)) +
+      ' · parados há mais de ' + dias + ' dias — fora dos avisos</small></h2></summary>' +
+      '<p class="dica">Ninguém mexeu neles (nem etapa, nem contato) há mais de ' + dias + ' dias. Abra os que ainda valem a pena e crie uma tarefa; o resto pode ser encerrado de uma vez como perdido, com a data do último movimento.</p>' +
+      '<ul class="lista">' + lista.slice().sort((a, b) => R.num(b.valor) - R.num(a.valor)).slice(0, 15).map(n => '<li><button type="button" class="linha" data-acao="abrir-negocio" data-id="' + esc(n.id) + '">' +
+        '<strong>' + esc(n.titulo) + '</strong><small>' + esc(CRM.nomeEmpresa(n.empresa_id)) + ' · ' + esc(R.moeda(n.valor)) + ' · ' + esc(CRM.nomeUsuario(n.responsavel_id)) +
+        ' · parado desde ' + esc(R.dataBR(R.ultimoMovimento(n, E().ix))) + '</small></button></li>').join('') + '</ul>' +
+      (lista.length > 15 ? '<p class="dica">Mostrando os 15 de maior valor.</p>' : '') +
+      '<p class="acoes">Motivo: <select id="motivoEsquecidos">' + CRM.opcoesHTML(motivos.map(m => [m, m]), padrao) + '</select> ' +
+      '<button type="button" class="btn sec" data-acao="encerrar-esquecidos">Encerrar os ' + lista.length + ' como perdidos</button></p></details></section>';
+  }
 
   // ================================================================ Funil
   const funil = {
@@ -617,6 +637,23 @@
         f.topClientes.map(c => [c.nome, c.notas, String(c.valor.toFixed(2)).replace('.', ','), R.dataBR(c.ultima), c.novo ? 'sim' : 'não']));
       else CRM.baixarCSV('faturamento-produtos', ['Produto', 'Código', 'Unidade', 'Quantidade', 'Valor', 'Notas', 'Clientes'],
         f.topProdutosValor.map(x => [x.descricao, x.codigo, x.unidade, String(x.quantidade).replace('.', ','), String(x.valor.toFixed(2)).replace('.', ','), x.notas, x.clientes]));
+    },
+    'encerrar-esquecidos': async () => {
+      const lista = R.alertas(E().D, E().ix, E().cfg, CRM.hoje(), CRM.carteira()).negociosEsquecidos;
+      const sel = $('#motivoEsquecidos'), motivo = sel ? sel.value : null;
+      if (!lista.length || !confirm('Encerrar ' + lista.length + ' negócio(s) esquecido(s) como PERDIDOS' + (motivo ? ' (motivo: ' + motivo + ')' : '') +
+        '?\n\nCada um fica com a data do último movimento. Dá para reabrir qualquer um depois, pela ficha do negócio.')) return;
+      // Um pedido por data de fechamento (a data é a do último movimento de cada negócio).
+      const porDia = new Map();
+      lista.forEach(n => { const d = R.ultimoMovimento(n, E().ix) || CRM.hoje(); if (!porDia.has(d)) porDia.set(d, []); porDia.get(d).push(n.id); });
+      let feitos = 0;
+      try {
+        for (const [dia, ids] of porDia) {
+          await CRM.atualizarVarios('negocios', ids, { status: 'perdido', fechado_em: dia, motivo_perda: motivo || null });
+          feitos += ids.length;
+        }
+        CRM.toast(feitos + ' negócio(s) encerrado(s).');
+      } catch (e) { CRM.falhou(e); if (feitos) CRM.toast(feitos + ' encerrado(s) antes do erro.', true); }
     },
     'ir-alerta': id => {
       const alvo = document.getElementById('alerta-' + id);

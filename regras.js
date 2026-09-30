@@ -35,6 +35,8 @@
     nome_empresa: '',
     dias_sem_contato: 30,       // cliente sem contato há mais que isso = alerta
     dias_parado: 15,            // negócio aberto sem mudar de etapa nem ter contato = parado
+    dias_esquecido: 60,         // parado há mais que isso sai do aviso e vai para a "limpeza" (0 = nunca)
+    leads_desde: '',            // AAAA-MM-DD: só lead cadastrado a partir daí conta como "sem atendimento" (vazio = todos)
     dias_inativo: 90,           // cliente sem compra há mais que isso = inativo
     ciclo_recompra_padrao: 30,  // dias até lembrar de recompra (a empresa pode ter o seu)
     rodizio: true,              // lead sem responsável vai para o próximo vendedor
@@ -333,10 +335,12 @@
     const deHoje = tarefas.filter(a => diaLocal(a.data_hora) === hoje);
 
     const empresas = D.empresas.filter(meu);
-    const leadsSemAtendimento = empresas.filter(e => e.situacao === 'lead' && !ix.resumo.get(e.id).ultimoContato);
+    // Base antiga importada (leads que ninguém atendeu em anos) não é aviso: é lista de prospecção.
+    const leadsSemAtendimento = empresas.filter(e => e.situacao === 'lead' && !ix.resumo.get(e.id).ultimoContato &&
+      (!cfg.leads_desde || (diaLocal(e.criado_em) || '') >= cfg.leads_desde));
 
     const limiteParado = somaDias(hoje, -cfg.dias_parado);
-    const negociosParados = D.negocios.filter(n => {
+    const parados = D.negocios.filter(n => {
       if (n.status !== 'aberto' || !meu(n)) return false;
       if (diaLocal(n.etapa_desde || n.criado_em) > limiteParado) return false;
       const ats = ix.porNegocio.atividades.get(n.id) || [];
@@ -346,6 +350,12 @@
       const ult = r && r.ultimoContato;
       return !ult || diaLocal(ult) <= limiteParado;
     });
+    // Parado há muito tempo (sem mudar de etapa nem ter contato) = esquecido: sai do aviso e
+    // fica para a limpeza (encerrar como perdido). O aviso fica com o que ainda dá para salvar.
+    const esq = num(cfg.dias_esquecido);
+    const limiteEsquecido = esq > 0 ? somaDias(hoje, -Math.max(esq, num(cfg.dias_parado))) : '';
+    const negociosEsquecidos = parados.filter(n => ultimoMovimento(n, ix) < limiteEsquecido);
+    const negociosParados = parados.filter(n => !(ultimoMovimento(n, ix) < limiteEsquecido));
 
     const clientesSemContato = empresas.filter(e => {
       if (e.situacao !== 'cliente') return false;
@@ -366,7 +376,15 @@
 
     const inativos = empresas.filter(e => situacaoEfetiva(e, ix.resumo.get(e.id), cfg, hoje) === 'inativo');
 
-    return { atrasadas, deHoje, leadsSemAtendimento, negociosParados, clientesSemContato, recompra, inativos };
+    return { atrasadas, deHoje, leadsSemAtendimento, negociosParados, negociosEsquecidos, clientesSemContato, recompra, inativos };
+  }
+
+  // Dia do último movimento de um negócio: mudança de etapa ou último contato com a empresa.
+  function ultimoMovimento(n, ix) {
+    const etapa = diaLocal(n.etapa_desde || n.criado_em) || '';
+    const r = ix.resumo.get(n.empresa_id);
+    const contato = r && r.ultimoContato ? diaLocal(r.ultimoContato) : '';
+    return contato > etapa ? contato : etapa;
   }
 
   // ------------------------------------------------------------ notas fiscais
@@ -844,7 +862,7 @@
     inicioSemana, periodo, noPeriodo, proximaRecorrencia,
     normaliza, digitos, chaveNome, linkWhatsApp, linkTelefone, formataCNPJ, cnpjValido, casaBusca, iniciais,
     primeiroNome, aplicaModelo, linkGoogleAgenda, totalItem, totalItens, indexa, probabilidade,
-    situacaoEfetiva, situacaoTarefa, alertas, dashboard, duplicadosEmpresas, duplicadosContatos, mesclaCampos,
+    situacaoEfetiva, situacaoTarefa, alertas, ultimoMovimento, dashboard, duplicadosEmpresas, duplicadosContatos, mesclaCampos,
     buscaGlobal, csvParse, csvGera, numeroBR, dataPlanilha,
     cfopDeVenda, notaDeVenda, sugereSegmento, NOMES_SEGMENTO, faturamento, chaveDoc, chaveTelefone, chaveEmail, achaDuplicados, motivoDuplicado, nomesCompativeis, mesmoCliente
   };

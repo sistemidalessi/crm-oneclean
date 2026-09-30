@@ -250,6 +250,19 @@ dados precisavam vir de lá. A migração é o caminho mais sensível do sistema
   milhares de itens ainda vai; se passar de ~100 mil itens, agregar no servidor (view)
   em vez de trazer item a item.
 
+## Avisos do sino (30/09/2026)
+
+- Base antiga importada não é aviso. `cfg.leads_desde` (Configurações → Geral; na OneClean
+  `2026-10-01`, gravado em `crm_config`): só lead cadastrado a partir dessa data conta como
+  "sem atendimento"; os 910 leads antigos sem contato ficam como lista de prospecção.
+- `cfg.dias_esquecido` (padrão 60; 0 desliga): negócio parado há mais que isso (sem mudar de
+  etapa nem ter contato com a empresa — `R.ultimoMovimento`) sai de "Negócios parados" e do
+  sino e vai para o cartão fechado "Negócios esquecidos" do Início, com o botão de encerrar
+  todos como perdidos (motivo à escolha; `fechado_em` = data do último movimento, para não
+  inflar os perdidos do mês atual). Em 30/09: 864 parados → ~156 no aviso, 602+ esquecidos.
+- Sino esperado depois disso: ~440 na equipe toda (atrasadas 141, parados ~156, clientes sem
+  contato 83, recompra 59), antes ~2.050.
+
 ## Vigia de notas (importação automática) — não quebrar
 
 - `ferramentas/vigia-notas.js` roda no servidor do emissor, lê a pasta `Autorizados`
