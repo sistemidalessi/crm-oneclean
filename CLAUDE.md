@@ -304,6 +304,20 @@ dados precisavam vir de lá. A migração é o caminho mais sensível do sistema
   pelo menos 10 unidades). Não conhece estoque (fica no FKM): próximo passo seria importar o
   estoque/custo do FKM para sugerir o pedido ao fornecedor. Exporta demanda e ABC em CSV.
 
+## Sequência do lead novo (30/09/2026)
+
+- `sequencia.js` (depois de `ajustes.js`) embrulha `CRM.auto.aoCriarEmpresa` e
+  `aoConcluirTarefa`: lead cadastrado pela tela ganha o passo 1 (no lugar de "Fazer o primeiro
+  contato"); concluir um passo agenda o seguinte (hoje + diferença de dias entre os passos).
+  O passo é reconhecido pela descrição "[Sequência n/total] …" (não há coluna própria).
+  Para quando o lead deixa de ser lead ou ganha negócio aberto/ganho (`continua`).
+  Importação (Agendor, planilha, notas) não dispara a sequência.
+- Passos em `cfg.sequencia_lead` (Configurações → Sequência do lead; na OneClean já gravados
+  com o texto de limpeza/descartáveis), `cfg.sequencia_ativa`. Botão "Enviar WhatsApp/e-mail
+  do passo" (tarefas e Fila do dia) abre com o texto, registra no histórico e conclui o passo.
+- `CRM.ajustes.secao(id, rótulo, tela, depois, antesDe)` deixa módulo externo pôr seção em
+  Configurações; `CRM.fichas.{variaveis, telDe, escolheContato, registraAuto}` estão expostos.
+
 ## Vigia de notas (importação automática) — não quebrar
 
 - `ferramentas/vigia-notas.js` roda no servidor do emissor, lê a pasta `Autorizados`

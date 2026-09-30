@@ -808,6 +808,9 @@
     } catch (x) { CRM.falhou(x); }
   }
 
+  // Para outros módulos (sequencia.js) montarem mensagens do mesmo jeito.
+  Object.assign(fichas, { variaveis, telDe, escolheContato, registraAuto });
+
   fichas.whatsapp = (empresaId, el) => {
     const e = CRM.empresa(empresaId); if (!e) return;
     const c = escolheContato(e, el && el.dataset.contato, x => R.linkWhatsApp(x.whatsapp || x.celular || x.telefone));

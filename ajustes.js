@@ -24,6 +24,12 @@
       '</nav><div class="ajustes-corpo">' + (TELAS[secao] || TELAS.geral)() + '</div></div>';
   };
   ajustes.depois = el => { const f = DEPOIS[secao]; if (f) f(el); };
+  // Outros módulos (sequencia.js) acrescentam a própria seção aqui.
+  ajustes.secao = (id, rotulo, tela, depois, antesDe) => {
+    const i = SECOES.findIndex(s => s[0] === antesDe);
+    if (!SECOES.some(s => s[0] === id)) SECOES.splice(i === -1 ? SECOES.length : i, 0, [id, rotulo]);
+    TELAS[id] = tela; if (depois) DEPOIS[id] = depois;
+  };
 
   // ================================================================ Geral
   const CAMPOS_GERAL = [

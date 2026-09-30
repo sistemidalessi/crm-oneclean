@@ -43,7 +43,7 @@
       ((opts && opts.resp) || CRM.ehGestor() && !CRM.carteira() ? ' · ' + esc(CRM.nomeUsuario(a.responsavel_id)) : '') +
       (a.recorrencia ? ' · ↻ ' + esc(R.rotulo(R.RECORRENCIAS, a.recorrencia)) : '') +
       (sit === 'atrasada' ? ' ' + CRM.selo('atrasada', 'vermelho') : '') + '</small></button>' +
-      acoesRapidas(a.empresa_id, a.contato_id) + '</li>';
+      (CRM.sequencia ? CRM.sequencia.botao(a) : '') + acoesRapidas(a.empresa_id, a.contato_id) + '</li>';
   }
   CRM.itemTarefa = itemTarefa;
 
@@ -206,7 +206,9 @@
       const total = maiorFila.total, resolvidos = total - itens.length;
       const botoes = [];
       if (it.tipo === 'recompra') botoes.push('<button type="button" class="btn ouro" data-acao="whatsapp-recompra" data-id="' + esc(e.id) + '">WhatsApp de recompra</button>');
-      if (it.tipo === 'tarefa') botoes.push('<button type="button" class="btn ouro" data-acao="fila-concluir" data-id="' + esc(it.atividade.id) + '">✓ Concluir a tarefa</button>',
+      const envio = it.tipo === 'tarefa' && CRM.sequencia ? CRM.sequencia.botao(it.atividade).replace('class="mini wa"', 'class="btn ouro"') : '';
+      if (envio) botoes.push(envio);
+      if (it.tipo === 'tarefa') botoes.push('<button type="button" class="btn ' + (envio ? 'sec' : 'ouro') + '" data-acao="fila-concluir" data-id="' + esc(it.atividade.id) + '">✓ Concluir a tarefa</button>',
         '<button type="button" class="btn sec" data-acao="fila-adiar" data-id="' + esc(it.atividade.id) + '">Adiar para amanhã</button>');
       else botoes.push('<button type="button" class="btn' + (it.tipo === 'recompra' ? ' sec' : ' ouro') + '" data-acao="fila-registrar" data-id="' + esc(e.id) + '">Registrar contato</button>',
         '<button type="button" class="btn sec" data-acao="fila-agendar" data-id="' + esc(e.id) + '">Agendar tarefa</button>');
