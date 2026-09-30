@@ -82,3 +82,14 @@ test('estoque do FKM: leitura do CSV e sugestão de pedido', () => {
   assert.equal(c.estoque.produtos, 4); assert.equal(c.estoque.negativos, 1); assert.equal(c.estoque.valor, 1325);
   assert.equal(c.estoque.valorSugestao, 125);
 });
+
+test('gestão: negócios abertos e conversão só do funil de vendas (pós-venda fora)', () => {
+  const D = base();
+  D.etapas = [{ id: 'v1', funil: 'Funil de Vendas', nome: 'Orçamento', ordem: 1, probabilidade: 50 }, { id: 'p1', funil: 'Funil de Pós-Vendas', nome: 'Contato', ordem: 1, probabilidade: 0 }];
+  D.negocios = [{ id: 'a', empresa_id: 'P', status: 'aberto', valor: 100, etapa_id: 'v1', responsavel_id: 'u1', criado_em: '2026-09-01T12:00:00Z' },
+    { id: 'b', empresa_id: 'P', status: 'aberto', valor: 900, etapa_id: 'p1', responsavel_id: 'u1', criado_em: '2026-09-01T12:00:00Z' }];
+  const p = G.painel(D, R.indexa(D), R.config({}), HOJE);
+  assert.equal(p.funilVendas, 'Funil de Vendas');
+  assert.equal(p.funil.abertas.valor, 100);
+  assert.equal(p.funil.abertas.ponderado, 50);
+});

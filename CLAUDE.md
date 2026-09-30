@@ -55,6 +55,11 @@ dados precisavam vir de lá. A migração é o caminho mais sensível do sistema
   backup em `crm_backup.mescla_empresas` (schema fora da API). Os demais ficam para
   conferência manual em Configurações → Duplicados.
 
+- **Etapas ajustadas em 30/09 (pedido do Anderson):** Funil de Vendas — LDR 10%, CONTATO FEITO 20%,
+  LISTA SOLICITADA 40%, ORÇAMENTO ENVIADO 55% (histórico: 207 ganhos × 168 perdidos), COMPRA
+  FUTURA 30%, CARTEIRA 80%; Funil de Pós-Vendas fica 0% (pedido já vendido, 306 abertos /
+  R$ 371 mil — não é previsão de venda). Funil padrão "Vendas" (sem negócio) apagado. A Gestão
+  conta "negócios abertos" e conversão só do funil de vendas (o primeiro que não é pós-venda).
 - **Compras — em pausa por decisão do Anderson (30/09, fim da tarde), retomar depois:**
   1. Papel novo **comprador**: vê só a parte de compras (demanda, sugestão de pedido, falta,
      parado, ABC, tendência), com filtros e pesquisa (por produto, código, curva, fornecedor/grupo

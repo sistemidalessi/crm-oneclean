@@ -64,8 +64,11 @@
         contatos, contatosHoje, atrasadas, clientesAtivos: (D.empresas || []).filter(e => e.responsavel_id === u.user_id && compraram90.has(e.id)).length };
     }).sort((a, b) => b.valorMes - a.valorMes || b.valorAno - a.valorAno);
 
-    // Funil do mês (negócios) e o que está aberto.
-    const funil = R.dashboard(D, ix, cfg, hoje, { periodo: R.periodo('mes', hoje) });
+    // Funil do mês (negócios) e o que está aberto — só o funil de vendas: o de pós-venda
+    // acompanha pedido já vendido e inflaria "abertos" e a conversão.
+    const funis = [...new Set((D.etapas || []).map(e => e.funil || 'Vendas'))];
+    const funilVendas = funis.find(f => !/p[óo]s[\s-]*vendas?/i.test(f)) || '';
+    const funil = R.dashboard(D, ix, cfg, hoje, { periodo: R.periodo('mes', hoje), funil: funilVendas });
 
     // Clientes fiéis sumidos: têm ritmo, passaram de 2 ciclos sem comprar. "Em risco" = o que
     // costumavam comprar por mês.
@@ -83,7 +86,7 @@
     return {
       mes: { de: mes, ate: fimMes, atual, anterior, anteriorMesmoDia, variacao: variacao(atual.valor, anteriorMesmoDia.valor),
         projecao: diaDoMes ? atual.valor / diaDoMes * diasNoMes : 0, novos: novosMes },
-      ano, porMes: fat12.porMes, equipe, funil,
+      ano, porMes: fat12.porMes, equipe, funil, funilVendas,
       base: { clientes: (D.empresas || []).filter(e => e.situacao === 'cliente').length, ativos: compraram90.size,
         leads: (D.empresas || []).filter(e => e.situacao === 'lead').length },
       topClientes: fat.topClientes.slice(0, 10), topProdutos: fat.topProdutosValor.slice(0, 10),
@@ -259,8 +262,8 @@
           kpi('Projeção do mês', R.moeda(m.projecao), 'no ritmo atual · mês passado fechou em ' + esc(R.moeda(m.anterior.valor))) +
           kpi('Faturamento no ano', R.moeda(p.ano.valor), p.ano.notas + ' notas · ' + p.ano.clientes + ' clientes') +
           kpi('Clientes que compraram', String(m.atual.clientes), m.novos + ' novo(s) no mês · ticket ' + esc(R.moeda(m.atual.ticket)), 'verde') +
-          kpi('Negócios abertos', R.moeda(f.abertas.valor), f.abertas.qtd + ' negócios · ponderado ' + esc(R.moeda(f.abertas.ponderado))) +
-          kpi('Conversão do mês', f.conversao == null ? '—' : R.pct(f.conversao), f.realizadas.qtd + ' ganhos · ' + f.perdidas.qtd + ' perdidos') +
+          kpi('Negócios abertos', R.moeda(f.abertas.valor), f.abertas.qtd + ' negócios · ponderado pela chance ' + esc(R.moeda(f.abertas.ponderado)) + (p.funilVendas ? ' · ' + esc(p.funilVendas) : '')) +
+          kpi('Conversão do mês', f.conversao == null ? '—' : R.pct(f.conversao), f.realizadas.qtd + ' ganhos · ' + f.perdidas.qtd + ' perdidos' + (p.funilVendas ? ' · ' + esc(p.funilVendas) : '')) +
         '</section>' +
         // ---- 12 meses + base
         '<div class="g-duas">' +
