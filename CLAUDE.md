@@ -40,6 +40,9 @@ dados precisavam vir de lá. A migração é o caminho mais sensível do sistema
   motivos. Tabelas `crm_notas`/`crm_nota_itens` no banco real, RLS atacada localmente e
   gravação testada no banco real (desfeita). **Nenhuma nota importada ainda** — o
   Anderson vai trazer os XML.
+- Também em 30/09: **trava de cadastro duplicado** (CNPJ, telefone, e-mail) no banco real
+  (migration `crm_trava_cadastro_duplicado`) e telefone + e-mail obrigatórios no cadastro
+  novo; filtro de notas só da equipe (vendedor escrito na nota ou carteira).
 - Na base real nenhuma empresa tem segmento e só 59 têm CNPJ: a importação das notas é
   o que vai completar o CNPJ; depois, rodar o "Preencher pelo nome".
 
@@ -130,6 +133,27 @@ dados precisavam vir de lá. A migração é o caminho mais sensível do sistema
   **Não trocar pelo SheetJS do npm**: a 0.18.5 tem vulnerabilidades conhecidas e a
   versão corrigida só existe no CDN deles. CSV: tenta UTF-8, cai para Windows-1252
   (CSV salvo pelo Excel brasileiro).
+
+## Cadastro sem duplicado (pedido do Anderson em 30/09/2026)
+
+- **Trava no banco** (`crm_barra_duplicado`, trigger em `crm_empresas`): empresa nova, ou
+  CNPJ/CPF, telefone, WhatsApp ou e-mail alterado, que já seja de **outra empresa** é
+  recusada — em qualquer carteira (o vendedor não enxerga a dos outros, por isso tem que
+  ser no servidor). Chaves: documento só dígitos (11/14), telefone pelos **8 últimos
+  dígitos** (pega com/sem DDD, com/sem o 9, com +55), e-mail minúsculo. Iguais em
+  `R.chaveDoc/chaveTelefone/chaveEmail` e `crm_doc/crm_tel/crm_mail`; mudar um, mudar o outro.
+- Só confere o que **mudou**: os repetidos que vieram do Agendor (55 grupos por e-mail e
+  82 por telefone em 30/09) continuam editáveis; juntar em Configurações → Duplicados (que
+  agora agrupa também por telefone e e-mail). A mescla apaga os repetidos **antes** de
+  completar o que fica, senão a trava recusaria.
+- Dado de **pessoa de contato** igual só **avisa** (síndico/comprador atende várias empresas).
+- `crm_duplicado_empresa()` (RPC, só membro) devolve nome + responsável para o aviso
+  enquanto digita; `crm_acha_duplicado()` é interna (sem execute para ninguém).
+- Cadastro novo (Novo lead / Nova empresa) exige **telefone com DDD e e-mail**
+  (`exigir_contato_cadastro`, desliga em Configurações → Geral). **CNPJ não é obrigatório**
+  (no primeiro contato quase nunca se tem), mas se vier, entra na trava.
+- Importações: a trava também vale. Registro repetido não para a importação; aparece na
+  lista de erros do resultado (o lote é regravado um a um).
 
 ## Notas fiscais (NF-e) e faturamento
 

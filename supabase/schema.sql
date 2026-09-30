@@ -352,6 +352,79 @@ returns boolean language sql stable security definer set search_path = public as
                  and (public.crm_eh_gestor() or x.responsavel_id = auth.uid()));
 $$;
 
+-- =================================================================== cadastro sem duplicado
+-- Chaves de comparação (as mesmas do app, R.chaveTelefone etc.): documento só com dígitos
+-- (CPF 11 ou CNPJ 14), telefone pelos 8 últimos dígitos (pega com e sem DDD, com e sem o 9
+-- do celular), e-mail em minúsculas.
+create or replace function public.crm_doc(t text) returns text language sql immutable set search_path = public as $$
+  select case when length(regexp_replace(coalesce(t, ''), '\D', '', 'g')) in (11, 14) then regexp_replace(t, '\D', '', 'g') end;
+$$;
+create or replace function public.crm_tel(t text) returns text language sql immutable set search_path = public as $$
+  select case when length(regexp_replace(coalesce(t, ''), '\D', '', 'g')) >= 8 then right(regexp_replace(t, '\D', '', 'g'), 8) end;
+$$;
+create or replace function public.crm_mail(t text) returns text language sql immutable set search_path = public as $$
+  select case when btrim(coalesce(t, '')) like '%_@_%' then lower(btrim(t)) end;
+$$;
+
+-- Empresas (de qualquer carteira) que já usam este CNPJ/CPF, telefone ou e-mail. "de_empresa"
+-- = o dado é da própria empresa (trava); falso = é de uma pessoa de contato dela (só avisa:
+-- um síndico ou comprador pode atender várias empresas).
+create or replace function public.crm_acha_duplicado(p_doc text, p_tels text[], p_mails text[], p_ignorar uuid)
+returns table (empresa_id uuid, nome text, responsavel text, campo text, de_empresa boolean)
+language sql stable security definer set search_path = public as $$
+  with alvo as (
+    select public.crm_doc(p_doc) doc,
+           array(select distinct public.crm_tel(x) from unnest(coalesce(p_tels, '{}'::text[])) x where public.crm_tel(x) is not null) tels,
+           array(select distinct public.crm_mail(x) from unnest(coalesce(p_mails, '{}'::text[])) x where public.crm_mail(x) is not null) mails
+  ), achados as (
+    select e.id, 'CNPJ/CPF' campo, true de_empresa from public.crm_empresas e, alvo where alvo.doc is not null and public.crm_doc(e.cnpj) = alvo.doc
+    union all select e.id, 'telefone', true from public.crm_empresas e, alvo where public.crm_tel(e.telefone) = any(alvo.tels) or public.crm_tel(e.whatsapp) = any(alvo.tels)
+    union all select e.id, 'e-mail', true from public.crm_empresas e, alvo where public.crm_mail(e.email) = any(alvo.mails)
+    union all select c.empresa_id, 'telefone de uma pessoa', false from public.crm_contatos c, alvo
+      where public.crm_tel(c.telefone) = any(alvo.tels) or public.crm_tel(c.celular) = any(alvo.tels) or public.crm_tel(c.whatsapp) = any(alvo.tels)
+    union all select c.empresa_id, 'e-mail de uma pessoa', false from public.crm_contatos c, alvo where public.crm_mail(c.email) = any(alvo.mails)
+  )
+  select e.id, e.nome, coalesce(u.nome, 'sem responsável'), string_agg(distinct a.campo, ', '), bool_or(a.de_empresa)
+    from achados a join public.crm_empresas e on e.id = a.id left join public.crm_usuarios u on u.user_id = e.responsavel_id
+   where p_ignorar is null or e.id <> p_ignorar
+   group by e.id, e.nome, u.nome
+   order by bool_or(a.de_empresa) desc, e.nome
+   limit 5;
+$$;
+
+-- Para o app avisar enquanto digita (o vendedor não enxerga a carteira dos outros).
+-- Devolve só nome e responsável.
+create or replace function public.crm_duplicado_empresa(p_doc text, p_tels text[], p_mails text[], p_ignorar uuid default null)
+returns table (empresa_id uuid, nome text, responsavel text, campo text, de_empresa boolean)
+language sql stable security definer set search_path = public as $$
+  select * from public.crm_acha_duplicado(p_doc, p_tels, p_mails, p_ignorar) where public.crm_eh_membro();
+$$;
+
+-- Trava no banco: empresa nova (ou dado alterado) com CNPJ/CPF, telefone ou e-mail de outra
+-- empresa é recusada. Só confere o que mudou: cadastro antigo repetido (veio do Agendor)
+-- continua editável; para juntar, Configurações -> Duplicados.
+create or replace function public.crm_barra_duplicado()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  novo boolean := tg_op = 'INSERT';
+  d record;
+begin
+  select * into d from public.crm_acha_duplicado(
+      case when novo or public.crm_doc(new.cnpj) is distinct from public.crm_doc(old.cnpj) then new.cnpj end,
+      array_remove(array[case when novo or public.crm_tel(new.telefone) is distinct from public.crm_tel(old.telefone) then new.telefone end,
+                         case when novo or public.crm_tel(new.whatsapp) is distinct from public.crm_tel(old.whatsapp) then new.whatsapp end], null),
+      array_remove(array[case when novo or public.crm_mail(new.email) is distinct from public.crm_mail(old.email) then new.email end], null),
+      new.id) x
+   where x.de_empresa
+   limit 1;
+  if found then
+    raise exception 'Cadastro duplicado: o % já é de "%" (carteira: %). Abra o cadastro que já existe em vez de criar outro.', d.campo, d.nome, d.responsavel
+      using errcode = 'P0001';
+  end if;
+  return new;
+end;
+$$;
+
 -- Rodízio de leads: o vendedor ativo (que recebe leads) com menos empresas
 -- recebidas nos últimos 30 dias. Precisa ser no servidor porque o vendedor
 -- não enxerga a carteira dos outros.
@@ -427,6 +500,10 @@ begin
   end loop;
 end;
 $$;
+
+drop trigger if exists crm_empresas_duplicado on public.crm_empresas;
+create trigger crm_empresas_duplicado before insert or update of cnpj, telefone, whatsapp, email on public.crm_empresas
+  for each row execute function public.crm_barra_duplicado();
 
 drop trigger if exists crm_negocios_etapa on public.crm_negocios;
 create trigger crm_negocios_etapa before update on public.crm_negocios
@@ -544,6 +621,9 @@ revoke all on function public.crm_papel(), public.crm_eh_membro(), public.crm_eh
 grant execute on function public.crm_papel(), public.crm_eh_membro(), public.crm_eh_gestor(), public.crm_eh_admin(),
   public.crm_ve_empresa(uuid), public.crm_ve_negocio(uuid), public.crm_ve_nota(uuid), public.crm_edita_negocio(uuid),
   public.crm_proximo_vendedor() to authenticated;
+revoke all on function public.crm_acha_duplicado(text, text[], text[], uuid), public.crm_duplicado_empresa(text, text[], text[], uuid),
+  public.crm_barra_duplicado() from public, anon, authenticated;
+grant execute on function public.crm_duplicado_empresa(text, text[], text[], uuid) to authenticated;
 revoke all on function public.crm_toca_atualizado_em(), public.crm_marca_etapa() from public, anon, authenticated;
 
 -- =================================================================== dados iniciais

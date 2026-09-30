@@ -37,6 +37,7 @@
     { tipo: 'secao', rotulo: 'Automações' },
     { nome: 'rodizio', rotulo: 'Lead cadastrado pelo gestor sem responsável vai para o próximo vendedor (rodízio)', tipo: 'checkbox', largo: true },
     { nome: 'auto_tarefa_lead', rotulo: 'Lead novo ganha a tarefa "Fazer o primeiro contato"', tipo: 'checkbox', largo: true },
+    { nome: 'exigir_contato_cadastro', rotulo: 'Cadastro novo só com telefone (com DDD) e e-mail — base da trava contra cliente duplicado', tipo: 'checkbox', largo: true },
     { nome: 'auto_pos_venda', rotulo: 'Venda ganha cria tarefa de pós-venda', tipo: 'checkbox' },
     { nome: 'dias_pos_venda', rotulo: '… depois de (dias)', tipo: 'numero', passo: '1', min: 1 },
     { nome: 'auto_recompra', rotulo: 'Venda ganha cria lembrete de recompra (no ciclo da empresa)', tipo: 'checkbox', largo: true },
@@ -579,9 +580,11 @@
       if (!confirm('Juntar ' + outros.length + ' cadastro(s) em "' + alvo.nome + '" e apagar os outros?')) return;
       const s = new Set(outros);
       const patch = R.mesclaCampos(alvo, outros.map(CRM.empresa), ['nome', 'responsavel_id', 'situacao']);
-      if (Object.keys(patch).length) await CRM.atualizar('empresas', marcado, patch);
       for (const t of ['contatos', 'negocios', 'atividades', 'notas']) await CRM.atualizarVarios(t, E().D[t].filter(x => s.has(x.empresa_id)).map(x => x.id), { empresa_id: marcado });
+      // Apaga os repetidos antes de completar o que fica: senão a trava de duplicado recusaria
+      // o telefone/e-mail que ainda está no cadastro que vai sumir.
       await CRM.removerVarios('empresas', outros);
+      if (Object.keys(patch).length) await CRM.atualizar('empresas', marcado, patch);
       await CRM.auto.sistema(marcado, null, 'Cadastros mesclados neste: ' + outros.length);
     } else {
       const alvo = CRM.contato(marcado);

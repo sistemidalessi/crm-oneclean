@@ -305,6 +305,12 @@
     }
   };
 
+  // Cadastro repetido em qualquer carteira (o vendedor não enxerga a dos outros): só nome e responsável.
+  Supa.prototype.duplicados = async function (q, ignorarId) {
+    return unwrap(await this.sb.rpc('crm_duplicado_empresa', { p_doc: q.cnpj || null, p_tels: (q.telefones || []).filter(Boolean),
+      p_mails: (q.emails || []).filter(Boolean), p_ignorar: ignorarId || null })) || [];
+  };
+
   Supa.prototype.proximoVendedor = async function () {
     return unwrap(await this.sb.rpc('crm_proximo_vendedor'));
   };

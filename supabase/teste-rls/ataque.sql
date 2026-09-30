@@ -48,6 +48,15 @@ update crm_notas set valor_total=1 returning 'Ana alterou nota (NÃO devia)';
 delete from crm_nota_itens returning 'Ana apagou item de nota (NÃO devia)';
 select 'Ana vê histórico' t, count(*) from crm_historico;
 select 'Ana vê usuários' t, count(*) from crm_usuarios;
+-- cadastro duplicado: travado no banco mesmo em carteira que a Ana não vê
+reset role; update crm_empresas set telefone='(11) 98888-7777', email='compras@bruno.com.br', cnpj='11.222.333/0001-81' where nome='Só do Bruno'; set role authenticated; select pg_temp.como('c0000000-0000-0000-0000-000000000003');
+insert into crm_empresas (nome, responsavel_id, telefone) values ('Ana copiando telefone','c0000000-0000-0000-0000-000000000003','98888-7777'); -- FALHA (duplicado)
+insert into crm_empresas (nome, responsavel_id, email) values ('Ana copiando e-mail','c0000000-0000-0000-0000-000000000003',' Compras@Bruno.com.br'); -- FALHA (duplicado)
+insert into crm_empresas (nome, responsavel_id, cnpj) values ('Ana copiando CNPJ','c0000000-0000-0000-0000-000000000003','11222333000181'); -- FALHA (duplicado)
+update crm_empresas set whatsapp='11 9 8888 7777' where nome='Da Ana'; -- FALHA (duplicado)
+select 'Ana vê o aviso (só nome e carteira)' t, nome, responsavel, campo from crm_duplicado_empresa(null, array['988887777'], null);
+update crm_empresas set cidade='Santo André', telefone=telefone where nome='Da Ana' returning 'Ana editou a própria empresa sem mexer nos dados' as ok;
+select * from crm_acha_duplicado('11222333000181', null, null, null); -- FALHA (interna)
 -- Bruno: vê a própria empresa, não vê a da Ana
 select pg_temp.como('d0000000-0000-0000-0000-000000000004');
 select 'Bruno vê empresas' t, string_agg(nome, ', ' order by nome) from crm_empresas;
@@ -67,6 +76,7 @@ reset role; set role anon; select pg_temp.como('');
 select count(*) from crm_empresas; -- FALHA
 select count(*) from crm_notas; -- FALHA
 select crm_proximo_vendedor(); -- FALHA
+select * from crm_duplicado_empresa('11222333000181', null, null); -- FALHA
 reset role;
 select 'historico' t, tabela, acao, mudancas from crm_historico where acao='update';
 select 'etapa_desde mudou' t, (select count(*) from crm_negocios where etapa_desde > criado_em) ;

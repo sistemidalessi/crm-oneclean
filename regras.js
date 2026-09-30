@@ -46,7 +46,8 @@
     dias_retomar_perda: 90,
     etapa_ao_enviar_proposta: '', // id da etapa para onde o negócio vai ao enviar proposta
     proposta_validade_dias: 15,
-    proposta_condicoes: ''
+    proposta_condicoes: '',
+    exigir_contato_cadastro: true // cadastro novo só com telefone e e-mail (base da trava de duplicado)
   };
 
   function config(dados) { return Object.assign({}, CONFIG_PADRAO, dados || {}); }
@@ -592,14 +593,53 @@
   }
 
   // ------------------------------------------------------------ duplicados
+  // Chaves do "mesmo cadastro" — as mesmas da trava do banco (crm_doc / crm_tel / crm_mail no
+  // schema.sql): documento só com dígitos (CPF ou CNPJ), telefone pelos 8 últimos dígitos (com
+  // ou sem DDD, com ou sem o 9 do celular), e-mail em minúsculas.
+  function chaveDoc(v) { const d = digitos(v); return d.length === 11 || d.length === 14 ? d : ''; }
+  function chaveTelefone(v) { const d = digitos(v); return d.length >= 8 ? d.slice(-8) : ''; }
+  function chaveEmail(v) { const s = String(v == null ? '' : v).trim().toLowerCase(); return /.@./.test(s) ? s : ''; }
+
+  // Empresas que já usam o documento, telefone ou e-mail. deEmpresa = o dado é da própria
+  // empresa (trava); falso = de uma pessoa de contato dela (só aviso). Mesmo formato do
+  // crm_duplicado_empresa() do banco.
+  function achaDuplicados(D, q, ignorarId) {
+    const doc = chaveDoc(q.cnpj);
+    const tels = new Set((q.telefones || []).map(chaveTelefone).filter(Boolean));
+    const mails = new Set((q.emails || []).map(chaveEmail).filter(Boolean));
+    const achados = new Map();
+    const marca = (empresaId, campo, deEmpresa) => {
+      if (!empresaId || empresaId === ignorarId) return;
+      const a = achados.get(empresaId) || { empresa_id: empresaId, campos: new Set(), de_empresa: false };
+      a.campos.add(campo); a.de_empresa = a.de_empresa || deEmpresa; achados.set(empresaId, a);
+    };
+    (D.empresas || []).forEach(e => {
+      if (doc && chaveDoc(e.cnpj) === doc) marca(e.id, 'CNPJ/CPF', true);
+      if ([e.telefone, e.whatsapp].some(t => tels.has(chaveTelefone(t)))) marca(e.id, 'telefone', true);
+      if (mails.has(chaveEmail(e.email))) marca(e.id, 'e-mail', true);
+    });
+    (D.contatos || []).forEach(c => {
+      if ([c.telefone, c.celular, c.whatsapp].some(t => tels.has(chaveTelefone(t)))) marca(c.empresa_id, 'telefone de uma pessoa', false);
+      if (mails.has(chaveEmail(c.email))) marca(c.empresa_id, 'e-mail de uma pessoa', false);
+    });
+    const porId = new Map((D.empresas || []).map(e => [e.id, e]));
+    const usu = new Map((D.usuarios || []).map(u => [u.user_id, u.nome]));
+    return [...achados.values()].filter(a => porId.has(a.empresa_id)).map(a => {
+      const e = porId.get(a.empresa_id);
+      return { empresa_id: e.id, nome: e.nome, responsavel: usu.get(e.responsavel_id) || 'sem responsável', campo: [...a.campos].join(', '), de_empresa: a.de_empresa };
+    }).sort((a, b) => (b.de_empresa - a.de_empresa) || a.nome.localeCompare(b.nome)).slice(0, 5);
+  }
+
   function duplicadosEmpresas(empresas) {
     const grupos = new Map();
     const junta = (k, e) => { if (!k) return; if (!grupos.has(k)) grupos.set(k, new Set()); grupos.get(k).add(e); };
     empresas.forEach(e => {
-      const c = digitos(e.cnpj);
-      if (c.length === 14 || c.length === 11) junta('doc:' + c, e);
+      const c = chaveDoc(e.cnpj);
+      if (c) junta('doc:' + c, e);
       const n = chaveNome(e.nome);
       if (n.length >= 3) junta('nome:' + n, e);
+      [e.telefone, e.whatsapp].forEach(t => { const k = chaveTelefone(t); if (k) junta('tel:' + k, e); });
+      const m = chaveEmail(e.email); if (m) junta('mail:' + m, e);
     });
     return unirGrupos([...grupos.values()].filter(s => s.size > 1));
   }
@@ -762,7 +802,7 @@
     primeiroNome, aplicaModelo, linkGoogleAgenda, totalItem, totalItens, indexa, probabilidade,
     situacaoEfetiva, situacaoTarefa, alertas, dashboard, duplicadosEmpresas, duplicadosContatos, mesclaCampos,
     buscaGlobal, csvParse, csvGera, numeroBR, dataPlanilha,
-    cfopDeVenda, notaDeVenda, sugereSegmento, NOMES_SEGMENTO, faturamento
+    cfopDeVenda, notaDeVenda, sugereSegmento, NOMES_SEGMENTO, faturamento, chaveDoc, chaveTelefone, chaveEmail, achaDuplicados
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

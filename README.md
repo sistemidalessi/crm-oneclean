@@ -57,6 +57,10 @@ cliente sem contato e cliente inativo.
 | **Gestor** | a equipe toda (escolhe no topo "Equipe toda" ou um vendedor) | redistribuir carteira, relatórios, configurações, excluir |
 | **Administrador** | tudo | tudo, mais criar/desativar usuários |
 
+**Sem cliente duplicado:** o banco não deixa cadastrar (nem trocar para) um CNPJ/CPF,
+telefone ou e-mail que já é de outra empresa, em qualquer carteira; enquanto digita, o
+cadastro já avisa de quem é. Cadastro novo pede telefone com DDD e e-mail (CNPJ é opcional).
+
 Usuário desativado perde o acesso na hora. Quem tem login mas não está na
 equipe não vê nada. Toda alteração em empresa, pessoa, negócio, proposta,
 usuário, etapa e produto fica no **histórico de alterações** (quem, quando, o quê).

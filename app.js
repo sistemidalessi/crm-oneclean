@@ -84,6 +84,26 @@
     } catch (e) { if (!silencioso) CRM.falhou(e); else console.error(e); }
   };
 
+  // Cadastro repetido: CNPJ/CPF, telefone ou e-mail que já são de outra empresa.
+  CRM.duplicados = (q, ignorarId) => store.duplicados ? store.duplicados(q, ignorarId) : Promise.resolve(R.achaDuplicados(E.D, q, ignorarId));
+  // Antes de gravar: trava se o dado da própria empresa já é de outra (o banco também trava).
+  // Na edição, só confere o que mudou (cadastro antigo repetido continua editável).
+  CRM.barraDuplicado = async (v, antes) => {
+    const mudou = (campo, chave) => !antes || chave(v[campo]) !== chave(antes[campo]);
+    const q = { cnpj: mudou('cnpj', R.chaveDoc) ? v.cnpj : null,
+      telefones: ['telefone', 'whatsapp'].filter(c => mudou(c, R.chaveTelefone)).map(c => v[c]),
+      emails: mudou('email', R.chaveEmail) ? [v.email] : [] };
+    if (!R.chaveDoc(q.cnpj) && !q.telefones.some(R.chaveTelefone) && !q.emails.some(R.chaveEmail)) return;
+    const d = (await CRM.duplicados(q, antes && antes.id)).find(x => x.de_empresa);
+    if (d) throw new Error('este cliente já está cadastrado: o ' + d.campo + ' é de "' + d.nome + '" (carteira: ' + d.responsavel + '). Abra o cadastro que já existe em vez de criar outro.');
+  };
+  // Telefone com DDD e e-mail válido (cadastro novo, se a configuração pedir).
+  CRM.confereContatoCadastro = (telefones, email) => {
+    if (E.cfg.exigir_contato_cadastro === false) return;
+    if (!telefones.some(t => R.digitos(t).replace(/^55(?=\d{10,11}$)/, '').length >= 10)) throw new Error('informe o telefone ou WhatsApp com DDD.');
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(email || '').trim())) throw new Error('informe um e-mail válido.');
+  };
+
   CRM.inserir = async (t, obj) => { const r = await store.inserir(t, obj); troca(t, r); reindexa(); CRM.render(); return r; };
   CRM.inserirVarios = async (t, lista, prog, aoErro) => {
     if (!lista.length) return [];

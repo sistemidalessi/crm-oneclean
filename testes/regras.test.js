@@ -220,3 +220,24 @@ test('busca global acha empresa, pessoa, negócio e proposta', () => {
   assert.ok(R.buscaGlobal(D, ix, 'cotação').some(r => r.id === 'n3'));
   assert.ok(R.buscaGlobal(D, ix, '#42').some(r => r.tipo === 'proposta'));
 });
+
+test('cadastro duplicado: CNPJ, telefone (com ou sem DDD e o 9) e e-mail; pessoa de contato só avisa', () => {
+  const D = base();
+  D.usuarios = [{ user_id: 'u1', nome: 'Renata' }];
+  D.empresas = [{ id: 'e1', nome: 'Condomínio Solar', cnpj: '11.222.333/0001-81', telefone: '(11) 4178-9545', whatsapp: '(11) 98888-7777', email: 'Sindico@Solar.com.br', responsavel_id: 'u1' },
+    { id: 'e2', nome: 'Outra', telefone: '(11) 3333-0000' }];
+  D.contatos = [{ id: 'c1', empresa_id: 'e2', nome: 'Síndico', celular: '11 97777-6666', email: 'joao@gmail.com' }];
+  const q = (o) => R.achaDuplicados(D, o);
+  assert.deepEqual(q({ cnpj: '11222333000181' }).map(x => [x.nome, x.campo, x.de_empresa, x.responsavel]), [['Condomínio Solar', 'CNPJ/CPF', true, 'Renata']]);
+  assert.equal(q({ telefones: ['98888-7777'] })[0].campo, 'telefone', 'sem DDD');
+  assert.equal(q({ telefones: ['+55 11 8888-7777'] })[0].empresa_id, 'e1', 'sem o 9, com +55');
+  assert.equal(q({ emails: [' sindico@solar.com.br '] })[0].campo, 'e-mail');
+  const pessoa = q({ telefones: ['(11) 97777-6666'], emails: ['JOAO@gmail.com'] })[0];
+  assert.deepEqual([pessoa.empresa_id, pessoa.de_empresa], ['e2', false]);
+  assert.equal(R.achaDuplicados(D, { cnpj: '11222333000181' }, 'e1').length, 0, 'a própria empresa não conta');
+  assert.equal(q({ telefones: ['1234567'] }).length, 0, 'menos de 8 dígitos não compara');
+  // Tela de Duplicados junta também por telefone e e-mail.
+  const g = R.duplicadosEmpresas([{ id: 'a', nome: 'Alfa', email: 'x@y.com' }, { id: 'b', nome: 'Beta', email: 'X@Y.com' },
+    { id: 'c', nome: 'Gama', telefone: '(19) 99999-1111' }, { id: 'd', nome: 'Delta', whatsapp: '99999-1111' }, { id: 'e', nome: 'Épsilon' }]);
+  assert.deepEqual(g.map(l => l.map(e => e.id).sort().join('')).sort(), ['ab', 'cd']);
+});

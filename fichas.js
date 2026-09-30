@@ -37,30 +37,28 @@
     if (el) el.setAttribute('list', 'dlEmpresas');
   }
 
-  // Aviso de possível duplicado enquanto digita o cadastro.
+  // Aviso enquanto digita: mesmo CNPJ/CPF, telefone ou e-mail de outra empresa (consulta todas
+  // as carteiras, pelo banco) trava o cadastro; mesmo nome ou dado de uma pessoa de contato só avisa.
+  let timerDup = null;
   function checaDuplicado(form, ignorarId) {
     const v = n => (form.elements[n] ? form.elements[n].value : '');
     const nome = R.chaveNome(v('nome'));
-    const doc = R.digitos(v('cnpj'));
-    const tel = R.digitos(v('telefone') || v('whatsapp') || v('contato_telefone')).slice(-9);
-    const email = R.normaliza(v('email') || v('contato_email'));
-    const achados = [];
-    if (nome.length >= 4 || doc.length >= 11 || tel.length >= 8 || email.indexOf('@') > 0) {
-      E().D.empresas.forEach(e => {
-        if (e.id === ignorarId) return;
-        const m = (nome.length >= 4 && R.chaveNome(e.nome) === nome) || (doc.length >= 11 && R.digitos(e.cnpj) === doc) ||
-          (tel.length >= 8 && [e.telefone, e.whatsapp].some(t => R.digitos(t).slice(-9) === tel)) || (email.indexOf('@') > 0 && R.normaliza(e.email) === email);
-        if (m) achados.push(e);
-      });
-      if (tel.length >= 8 || email.indexOf('@') > 0) E().D.contatos.forEach(c => {
-        if (c.empresa_id === ignorarId) return;
-        const m = (tel.length >= 8 && [c.telefone, c.celular, c.whatsapp].some(t => R.digitos(t).slice(-9) === tel)) || (email.indexOf('@') > 0 && R.normaliza(c.email) === email);
-        const e = m && CRM.empresa(c.empresa_id);
-        if (e && achados.indexOf(e) === -1) achados.push(e);
-      });
-    }
-    CRM.avisoCampo(form, 'nome', achados.length ? '⚠ Já existe: ' + achados.slice(0, 3).map(e => '<button type="button" class="link" data-acao="abrir-empresa" data-id="' + esc(e.id) + '">' +
-      esc(e.nome) + '</button> (' + esc(CRM.nomeUsuario(e.responsavel_id)) + ')').join(', ') : '');
+    const mesmoNome = nome.length >= 4 ? E().D.empresas.filter(e => e.id !== ignorarId && R.chaveNome(e.nome) === nome).slice(0, 3) : [];
+    const daEmpresa = { cnpj: v('cnpj'), telefones: [v('telefone'), v('whatsapp')], emails: [v('email')] };
+    const doContato = { telefones: [v('contato_telefone')], emails: [v('contato_email')] };
+    clearTimeout(timerDup);
+    timerDup = setTimeout(async () => {
+      let a = [], b = [];
+      try { [a, b] = await Promise.all([CRM.duplicados(daEmpresa, ignorarId), v('contato_telefone') || v('contato_email') ? CRM.duplicados(doContato, ignorarId) : []]); } catch (e) { console.error(e); }
+      const nomeDe = x => CRM.empresa(x.empresa_id) ? '<button type="button" class="link" data-acao="abrir-empresa" data-id="' + esc(x.empresa_id) + '">' + esc(x.nome) + '</button>' : '<strong>' + esc(x.nome) + '</strong>';
+      const trava = a.filter(x => x.de_empresa);
+      const vistos = new Set(trava.map(x => x.empresa_id));
+      const avisos = a.filter(x => !x.de_empresa).concat(b).filter(x => !vistos.has(x.empresa_id) && vistos.add(x.empresa_id))
+        .concat(mesmoNome.filter(e => !vistos.has(e.id)).map(e => ({ empresa_id: e.id, nome: e.nome, responsavel: CRM.nomeUsuario(e.responsavel_id), campo: 'mesmo nome' })));
+      const txt = l => l.slice(0, 3).map(x => nomeDe(x) + ' (' + esc(x.campo) + ' · carteira: ' + esc(x.responsavel) + ')').join(', ');
+      CRM.avisoCampo(form, 'nome', trava.length ? '⛔ Já cadastrado: ' + txt(trava) + '. Não dá para salvar outro com o mesmo CNPJ, telefone ou e-mail.'
+        : avisos.length ? '⚠ Parecido: ' + txt(avisos) + '. Confira se não é o mesmo cliente.' : '');
+    }, 350);
   }
 
   // ------------------------------------------------------------ ficha do cliente
@@ -350,6 +348,8 @@
       },
       aoSalvar: async v => {
         if (!g) delete v.responsavel_id;
+        await CRM.barraDuplicado(v, e);
+        if (!e) CRM.confereContatoCadastro([v.telefone, v.whatsapp], v.email);
         if (e) {
           const mudouResp = g && v.responsavel_id !== undefined && v.responsavel_id !== e.responsavel_id;
           await CRM.atualizar('empresas', e.id, v);
@@ -368,14 +368,17 @@
 
   fichas.formLead = () => {
     const g = CRM.ehGestor();
+    const exige = E().cfg.exigir_contato_cadastro !== false;
     const usuarios = CRM.opcoesUsuarios();
     CRM.abrirForm({
       titulo: 'Novo lead', largura: 'largo',
-      intro: 'Só o nome é obrigatório. O resto dá para completar depois.',
+      intro: exige ? 'Obrigatórios: nome, telefone e e-mail — é por eles (e pelo CNPJ, se tiver) que o CRM não deixa o mesmo cliente ser cadastrado duas vezes. O resto dá para completar depois.'
+        : 'Só o nome é obrigatório. O resto dá para completar depois.',
       campos: [
         { nome: 'nome', rotulo: 'Empresa (ou nome da pessoa)', obrigatorio: true, largo: true },
-        { nome: 'telefone', rotulo: 'Telefone / WhatsApp', tipo: 'tel' },
-        { nome: 'email', rotulo: 'E-mail', tipo: 'email' },
+        { nome: 'telefone', rotulo: 'Telefone / WhatsApp (com DDD)', tipo: 'tel', obrigatorio: exige },
+        { nome: 'email', rotulo: 'E-mail', tipo: 'email', obrigatorio: exige },
+        { nome: 'cnpj', rotulo: 'CNPJ ou CPF (se já souber)' },
         { nome: 'cidade', rotulo: 'Cidade' },
         { nome: 'segmento', rotulo: 'Segmento', sugestoes: CRM.opcoes('segmento') },
         { nome: 'origem', rotulo: 'Origem', tipo: 'select', opcoes: CRM.lista(CRM.opcoes('origem'), '—') },
@@ -391,12 +394,21 @@
         { nome: 'observacoes', rotulo: 'Observação', tipo: 'textarea', largo: true, linhas: 2 }
       ],
       salvarTexto: 'Cadastrar',
-      extras: form => ['nome', 'telefone', 'email', 'contato_telefone', 'contato_email'].forEach(n => form.elements[n] && form.elements[n].addEventListener('input', () => checaDuplicado(form))),
+      extras: form => {
+        ['nome', 'telefone', 'email', 'cnpj', 'contato_telefone', 'contato_email'].forEach(n => form.elements[n] && form.elements[n].addEventListener('input', () => checaDuplicado(form)));
+        form.elements.cnpj.addEventListener('blur', () => {
+          const d = R.digitos(form.elements.cnpj.value);
+          if (d.length === 14 || d.length === 11) form.elements.cnpj.value = R.formataCNPJ(d);
+          CRM.avisoCampo(form, 'cnpj', d.length === 14 && !R.cnpjValido(d) ? 'CNPJ parece inválido (confira os dígitos).' : '');
+        });
+      },
       aoSalvar: async v => {
+        await CRM.barraDuplicado({ cnpj: v.cnpj, telefone: v.telefone, email: v.email });
+        CRM.confereContatoCadastro([v.telefone], v.email);
         const resp = await CRM.responsavelParaLead(v.responsavel_id);
         const tel = v.telefone;
         const emp = await CRM.inserir('empresas', {
-          nome: v.nome, telefone: tel, whatsapp: tel && R.digitos(tel).length >= 10 && /^\(?\d{2}\)?\s*9/.test(tel.trim()) ? tel : null, email: v.email,
+          nome: v.nome, cnpj: v.cnpj ? R.formataCNPJ(v.cnpj) : null, telefone: tel, whatsapp: tel && R.digitos(tel).length >= 10 && /^\(?\d{2}\)?\s*9/.test(tel.trim()) ? tel : null, email: v.email,
           cidade: v.cidade, segmento: v.segmento, origem: v.origem, qualificacao: v.qualificacao || 0, situacao: v.situacao || 'lead', responsavel_id: resp, observacoes: v.observacoes
         });
         if (v.contato_nome) await CRM.inserir('contatos', { empresa_id: emp.id, nome: v.contato_nome, cargo: v.contato_cargo, whatsapp: v.contato_telefone, email: v.contato_email, principal: true });
