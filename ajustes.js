@@ -219,7 +219,7 @@
       { nome: 'email', rotulo: 'E-mail (login)', tipo: 'email', obrigatorio: !u && sup, desabilitado: !!u && sup },
       { nome: 'papel', rotulo: 'Papel', tipo: 'select', opcoes: R.PAPEIS, padrao: 'vendedor' },
       { nome: 'equipe', rotulo: 'Equipe', dica: 'ex.: Interno, Externo, Campinas' },
-      { nome: 'recebe_leads', rotulo: 'Recebe leads do rodízio', tipo: 'checkbox', largo: true },
+      { nome: 'recebe_leads', rotulo: 'Recebe leads do rodízio (o comprador nunca recebe)', tipo: 'checkbox', largo: true },
       { nome: 'ativo', rotulo: 'Ativo (desmarcar tira o acesso na hora)', tipo: 'checkbox', largo: true }
     ];
     if (!u && sup) campos.push({ nome: 'senha', rotulo: 'Senha provisória', largo: true, padrao: senhaProvisoria(), ajuda: 'passe para a pessoa; ela troca em "Alterar minha senha"' });

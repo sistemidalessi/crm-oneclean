@@ -12,4 +12,4 @@ grant select on auth.users to authenticated; -- (para as FKs funcionarem)
 alter default privileges in schema public grant all on tables to anon, authenticated;
 alter default privileges in schema public grant all on functions to anon, authenticated;
 alter default privileges in schema public grant all on sequences to anon, authenticated;
-insert into auth.users values ('a0000000-0000-0000-0000-000000000001','admin@x'),('b0000000-0000-0000-0000-000000000002','gestor@x'),('c0000000-0000-0000-0000-000000000003','vendA@x'),('d0000000-0000-0000-0000-000000000004','vendB@x'),('e0000000-0000-0000-0000-000000000005','fora@x');
+insert into auth.users values ('a0000000-0000-0000-0000-000000000001','admin@x'),('b0000000-0000-0000-0000-000000000002','gestor@x'),('c0000000-0000-0000-0000-000000000003','vendA@x'),('d0000000-0000-0000-0000-000000000004','vendB@x'),('e0000000-0000-0000-0000-000000000005','fora@x'),('f0000000-0000-0000-0000-000000000006','compras@x');

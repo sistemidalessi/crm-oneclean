@@ -17,7 +17,7 @@
   const STATUS_NEGOCIO = [['aberto', 'Em andamento'], ['ganho', 'Ganho'], ['perdido', 'Perdido']];
   const STATUS_PROPOSTA = [['rascunho', 'Rascunho'], ['enviada', 'Enviada'], ['aprovada', 'Aprovada'], ['recusada', 'Recusada']];
   const RECORRENCIAS = [['', 'Não repete'], ['diaria', 'Todo dia'], ['semanal', 'Toda semana'], ['quinzenal', 'A cada 15 dias'], ['mensal', 'Todo mês']];
-  const PAPEIS = [['vendedor', 'Vendedor'], ['gestor', 'Gestor'], ['admin', 'Administrador']];
+  const PAPEIS = [['vendedor', 'Vendedor'], ['gestor', 'Gestor'], ['admin', 'Administrador'], ['comprador', 'Comprador (só Compras)']];
   const UFS = 'AC AL AP AM BA CE DF ES GO MA MT MS MG PA PB PR PE PI RJ RN RS RO RR SC SP SE TO'.split(' ');
 
   // Mesmos valores iniciais do schema.sql (instalação nova e modo local).

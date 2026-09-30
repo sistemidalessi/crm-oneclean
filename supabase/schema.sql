@@ -10,6 +10,9 @@
 --   gestor   - vê e edita a base inteira, redistribui carteira, relatórios, configurações;
 --   vendedor - vê só a PRÓPRIA carteira: empresas em que é responsável, ou em que
 --              tem negócio. Não troca o responsável, não apaga empresa nem negócio.
+--   comprador - só a tela Compras: lê notas e itens (para a demanda), produtos, estoque
+--              (lê e atualiza) e, por crm_clientes_compras(), só nome/ritmo dos clientes.
+--              Não vê contatos, negócios, tarefas nem telefone/e-mail de cliente. Não recebe leads.
 -- Quem não está em crm_usuarios (ou está com ativo = false) não vê nada.
 --
 -- Lições da auditoria de 11/09/2026 aplicadas: nenhuma política "using (true)";
@@ -22,7 +25,7 @@ create table if not exists public.crm_usuarios (
   user_id      uuid primary key references auth.users(id) on delete cascade,
   nome         text not null check (length(btrim(nome)) > 0),
   email        text,
-  papel        text not null default 'vendedor' check (papel in ('admin','gestor','vendedor')),
+  papel        text not null default 'vendedor' check (papel in ('admin','gestor','vendedor','comprador')),
   equipe       text,
   ativo        boolean not null default true,
   recebe_leads boolean not null default true,
@@ -34,9 +37,15 @@ create or replace function public.crm_papel()
 returns text language sql stable security definer set search_path = public as $$
   select papel from public.crm_usuarios where user_id = auth.uid() and ativo;
 $$;
-create or replace function public.crm_eh_membro()
+-- Ativo = qualquer usuário do CRM (lê configuração, produtos, a equipe). Membro = equipe de
+-- vendas (admin/gestor/vendedor): só membro cria e mexe em cadastro, negócio e tarefa.
+create or replace function public.crm_eh_ativo()
 returns boolean language sql stable security definer set search_path = public as $$
   select public.crm_papel() is not null;
+$$;
+create or replace function public.crm_eh_membro()
+returns boolean language sql stable security definer set search_path = public as $$
+  select coalesce(public.crm_papel() in ('admin','gestor','vendedor'), false);
 $$;
 create or replace function public.crm_eh_gestor()
 returns boolean language sql stable security definer set search_path = public as $$
@@ -46,6 +55,13 @@ create or replace function public.crm_eh_admin()
 returns boolean language sql stable security definer set search_path = public as $$
   select coalesce(public.crm_papel() = 'admin', false);
 $$;
+create or replace function public.crm_eh_comprador()
+returns boolean language sql stable security definer set search_path = public as $$
+  select coalesce(public.crm_papel() = 'comprador', false);
+$$;
+-- Instalação antiga: a trava de papel nasceu sem o comprador.
+alter table public.crm_usuarios drop constraint if exists crm_usuarios_papel_check;
+alter table public.crm_usuarios add constraint crm_usuarios_papel_check check (papel in ('admin','gestor','vendedor','comprador'));
 
 create or replace function public.crm_toca_atualizado_em()
 returns trigger language plpgsql set search_path = public as $$
@@ -374,7 +390,16 @@ $$;
 create or replace function public.crm_ve_nota(n uuid)
 returns boolean language sql stable security definer set search_path = public as $$
   select exists (select 1 from public.crm_notas x where x.id = n
-                 and (public.crm_eh_gestor() or (x.empresa_id is not null and public.crm_ve_empresa(x.empresa_id))));
+                 and (public.crm_eh_gestor() or public.crm_eh_comprador() or (x.empresa_id is not null and public.crm_ve_empresa(x.empresa_id))));
+$$;
+
+-- Compras: clientes só com o que a demanda precisa (sem contato, telefone nem e-mail).
+create or replace function public.crm_clientes_compras()
+returns table (id uuid, nome text, situacao text, segmento text, ciclo_recompra_dias int, responsavel_id uuid)
+language sql stable security definer set search_path = public as $$
+  select e.id, e.nome, e.situacao, e.segmento, e.ciclo_recompra_dias, e.responsavel_id
+    from public.crm_empresas e
+   where public.crm_eh_admin() or public.crm_eh_comprador();
 $$;
 
 create or replace function public.crm_edita_negocio(n uuid)
@@ -463,7 +488,7 @@ create or replace function public.crm_proximo_vendedor()
 returns uuid language sql stable security definer set search_path = public as $$
   select u.user_id
     from public.crm_usuarios u
-   where public.crm_eh_membro() and u.ativo and u.recebe_leads
+   where public.crm_eh_membro() and u.ativo and u.recebe_leads and u.papel <> 'comprador'
    order by (select count(*) from public.crm_empresas e
               where e.responsavel_id = u.user_id and e.criado_em > now() - interval '30 days'),
             u.nome
@@ -560,10 +585,10 @@ begin
     execute format('drop policy %I on public.%I', p.policyname, p.tablename);
   end loop;
 
-  -- Cadastros de configuração: todo membro lê; gestor/admin escreve.
+  -- Cadastros de configuração: todo usuário ativo lê (inclusive o comprador); gestor/admin escreve.
   foreach t in array array['crm_config','crm_etapas','crm_opcoes','crm_produtos','crm_modelos']
   loop
-    execute format('create policy le on public.%I for select to authenticated using (public.crm_eh_membro())', t);
+    execute format('create policy le on public.%I for select to authenticated using (public.crm_eh_ativo())', t);
     execute format('create policy grava on public.%I for insert to authenticated with check (public.crm_eh_gestor())', t);
     execute format('create policy altera on public.%I for update to authenticated using (public.crm_eh_gestor()) with check (public.crm_eh_gestor())', t);
     execute format('create policy apaga on public.%I for delete to authenticated using (public.crm_eh_gestor())', t);
@@ -571,8 +596,8 @@ begin
 end;
 $$;
 
--- usuários: membro vê a equipe (para nomes e filtros); só admin mexe.
-create policy le on public.crm_usuarios for select to authenticated using (public.crm_eh_membro());
+-- usuários: todo usuário ativo vê a equipe (para nomes e filtros); só admin mexe.
+create policy le on public.crm_usuarios for select to authenticated using (public.crm_eh_ativo());
 create policy grava on public.crm_usuarios for insert to authenticated with check (public.crm_eh_admin());
 create policy altera on public.crm_usuarios for update to authenticated using (public.crm_eh_admin()) with check (public.crm_eh_admin());
 create policy apaga on public.crm_usuarios for delete to authenticated using (public.crm_eh_admin());
@@ -637,7 +662,7 @@ create policy apaga on public.crm_atividades for delete to authenticated
 
 -- notas fiscais: gestor importa e corrige; vendedor lê as das empresas que vê.
 create policy le on public.crm_notas for select to authenticated
-  using (public.crm_eh_gestor() or (empresa_id is not null and public.crm_ve_empresa(empresa_id)));
+  using (public.crm_eh_gestor() or public.crm_eh_comprador() or (empresa_id is not null and public.crm_ve_empresa(empresa_id)));
 create policy grava on public.crm_notas for insert to authenticated with check (public.crm_eh_gestor());
 create policy altera on public.crm_notas for update to authenticated using (public.crm_eh_gestor()) with check (public.crm_eh_gestor());
 create policy apaga on public.crm_notas for delete to authenticated using (public.crm_eh_gestor());
@@ -660,7 +685,7 @@ alter table public.crm_estoque enable row level security;
 revoke all on public.crm_estoque from anon, public;
 grant select, insert, update, delete on public.crm_estoque to authenticated;
 drop policy if exists tudo on public.crm_estoque;
-create policy tudo on public.crm_estoque for all to authenticated using (public.crm_eh_admin()) with check (public.crm_eh_admin());
+create policy tudo on public.crm_estoque for all to authenticated using (public.crm_eh_admin() or public.crm_eh_comprador()) with check (public.crm_eh_admin() or public.crm_eh_comprador());
 
 -- integrações: só o administrador; o registro das entregas o gestor também lê.
 create policy tudo on public.crm_integracoes for all to authenticated using (public.crm_eh_admin()) with check (public.crm_eh_admin());
@@ -670,12 +695,12 @@ create policy le on public.crm_integracao_log for select to authenticated using 
 create policy le on public.crm_historico for select to authenticated using (public.crm_eh_gestor());
 
 -- =================================================================== permissões de função
-revoke all on function public.crm_papel(), public.crm_eh_membro(), public.crm_eh_gestor(), public.crm_eh_admin(),
+revoke all on function public.crm_papel(), public.crm_eh_ativo(), public.crm_eh_membro(), public.crm_eh_gestor(), public.crm_eh_admin(), public.crm_eh_comprador(),
   public.crm_ve_empresa(uuid), public.crm_ve_negocio(uuid), public.crm_ve_nota(uuid), public.crm_edita_negocio(uuid),
-  public.crm_proximo_vendedor() from public, anon;
-grant execute on function public.crm_papel(), public.crm_eh_membro(), public.crm_eh_gestor(), public.crm_eh_admin(),
+  public.crm_proximo_vendedor(), public.crm_clientes_compras() from public, anon;
+grant execute on function public.crm_papel(), public.crm_eh_ativo(), public.crm_eh_membro(), public.crm_eh_gestor(), public.crm_eh_admin(), public.crm_eh_comprador(),
   public.crm_ve_empresa(uuid), public.crm_ve_negocio(uuid), public.crm_ve_nota(uuid), public.crm_edita_negocio(uuid),
-  public.crm_proximo_vendedor() to authenticated;
+  public.crm_proximo_vendedor(), public.crm_clientes_compras() to authenticated;
 revoke all on function public.crm_acha_duplicado(text, text[], text[], uuid), public.crm_duplicado_empresa(text, text[], text[], uuid),
   public.crm_barra_duplicado() from public, anon, authenticated;
 grant execute on function public.crm_duplicado_empresa(text, text[], text[], uuid) to authenticated;

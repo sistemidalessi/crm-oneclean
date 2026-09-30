@@ -34,6 +34,7 @@
   CRM.hoje = () => R.hojeISO();
   CRM.papel = () => (E.eu ? E.eu.papel : null);
   CRM.ehGestor = () => ['admin', 'gestor'].indexOf(CRM.papel()) !== -1;
+  CRM.ehComprador = () => CRM.papel() === 'comprador';
   CRM.ehAdmin = () => CRM.papel() === 'admin';
   CRM.meuId = () => (E.eu ? E.eu.user_id : null);
   CRM.podeEditarEmpresa = e => !!e && (CRM.ehGestor() || e.responsavel_id === CRM.meuId());
@@ -62,7 +63,7 @@
     return nomes.sort((a, b) => qtd.get(b) - qtd.get(a) || a.localeCompare(b, 'pt-BR'));
   };
   CRM.etapas = funil => E.D.etapas.filter(e => !funil || (e.funil || 'Vendas') === funil).sort((a, b) => a.ordem - b.ordem);
-  CRM.usuariosAtivos = () => E.D.usuarios.filter(u => u.ativo !== false).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+  CRM.usuariosAtivos = () => E.D.usuarios.filter(u => u.ativo !== false && u.papel !== 'comprador').sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
   CRM.opcoesUsuarios = vazio => (vazio ? [['', vazio]] : []).concat(CRM.usuariosAtivos().map(u => [u.user_id, u.nome]));
   CRM.todasTags = () => [...new Set([].concat(...E.D.empresas.map(e => e.tags || []), ...E.D.contatos.map(c => c.tags || [])))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
   CRM.lista = (lista, vazio) => (vazio !== undefined ? [['', vazio]] : []).concat(lista.map(x => [x, x]));
@@ -78,6 +79,8 @@
   CRM.recarregar = async function (silencioso) {
     try {
       E.D = await store.carregar();
+      // Comprador não lê empresas (RLS): recebe só nome e ritmo, pela função do banco.
+      if (CRM.ehComprador() && store.clientesCompras) E.D.empresas = await store.clientesCompras();
       E.carregadoEm = Date.now();
       reindexa();
       CRM.render();
@@ -267,7 +270,7 @@
   // ------------------------------------------------------------ render
   const ABAS = [
     ['inicio', 'Início', '⌂'], ['fila', 'Fila do dia', '▶'], ['funil', 'Funil', '▥'], ['empresas', 'Empresas', '▦'], ['pessoas', 'Pessoas', '☺'],
-    ['negocios', 'Negócios', '$'], ['agenda', 'Atividades', '▣'], ['relatorios', 'Relatórios', '▲'], ['ajustes', 'Configurações', '⚙'], ['gestao', 'Gestão', '◆']
+    ['negocios', 'Negócios', '$'], ['agenda', 'Atividades', '▣'], ['relatorios', 'Relatórios', '▲'], ['ajustes', 'Configurações', '⚙'], ['compras', 'Compras', '▤'], ['gestao', 'Gestão', '◆']
   ];
   CRM.ABAS = ABAS;
 
@@ -280,8 +283,11 @@
 
   function renderAgora() {
     if (!E.eu) return;
-    const abas = ABAS.filter(a => (a[0] !== 'ajustes' || CRM.ehGestor()) && (a[0] !== 'gestao' || CRM.ehAdmin()));
-    if (!abas.some(a => a[0] === E.aba)) E.aba = 'inicio';
+    // Comprador: só Compras. Compras e Gestão: administrador. Configurações: gestor.
+    const abas = CRM.ehComprador() ? ABAS.filter(a => a[0] === 'compras')
+      : ABAS.filter(a => (a[0] !== 'ajustes' || CRM.ehGestor()) && ((a[0] !== 'gestao' && a[0] !== 'compras') || CRM.ehAdmin()));
+    if (!abas.some(a => a[0] === E.aba)) E.aba = abas[0][0];
+    ['#buscaGlobal', '[data-acao="novo-menu"]', '#sino'].forEach(s => { const el = $(s); if (el) el.hidden = CRM.ehComprador(); });
     const al = R.alertas(E.D, E.ix, E.cfg, CRM.hoje(), CRM.carteira());
     const nTarefas = al.atrasadas.length + al.deHoje.length;
     $('#menuLateral').innerHTML = abas.map(a => '<button type="button" class="nav' + (E.aba === a[0] ? ' ativa' : '') + '" data-acao="aba" data-id="' + a[0] + '"' +

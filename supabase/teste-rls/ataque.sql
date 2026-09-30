@@ -78,6 +78,30 @@ select pg_temp.como('e0000000-0000-0000-0000-000000000005');
 select 'De fora vê' t, (select count(*) from crm_empresas) e, (select count(*) from crm_usuarios) u, (select count(*) from crm_etapas) et, (select count(*) from crm_config) cfg, (select count(*) from crm_notas) n, (select count(*) from crm_nota_itens) ni;
 select crm_proximo_vendedor() as rodizio_de_fora;
 insert into crm_empresas (nome, responsavel_id) values ('invasor','e0000000-0000-0000-0000-000000000005'); -- FALHA
+-- comprador: só compras (notas, itens, estoque, clientes pela função); nada de cadastro/negócio/contato
+reset role; insert into crm_usuarios (user_id,nome,papel,recebe_leads) values ('f0000000-0000-0000-0000-000000000006','Carlos Compras','comprador',true); set role authenticated; select pg_temp.como('f0000000-0000-0000-0000-000000000006');
+select 'Comprador vê notas/itens/produtos/config/usuários' t, (select count(*) from crm_notas) n, (select count(*) from crm_nota_itens) ni, (select count(*) from crm_config) cfg, (select count(*) from crm_usuarios) u;
+select 'Comprador vê empresas (NÃO devia)' t, count(*) from crm_empresas having count(*) > 0;
+select 'Comprador vê contatos (NÃO devia)' t, count(*) from crm_contatos having count(*) > 0;
+select 'Comprador vê negócios (NÃO devia)' t, count(*) from crm_negocios having count(*) > 0;
+select 'Comprador vê atividades (NÃO devia)' t, count(*) from crm_atividades having count(*) > 0;
+select 'Comprador vê histórico (NÃO devia)' t, count(*) from crm_historico having count(*) > 0;
+select 'Comprador vê clientes pela função (só nome e ritmo)' t, count(*) from crm_clientes_compras();
+insert into crm_estoque (codigo, descricao, quantidade, custo_total) values ('010503','AGUA SANITARIA 2L',68,343.40) returning 'comprador gravou estoque' as ok;
+insert into crm_empresas (nome, responsavel_id) values ('comprador criando cliente','f0000000-0000-0000-0000-000000000006'); -- FALHA
+insert into crm_atividades (empresa_id, descricao, responsavel_id) select id,'comprador','f0000000-0000-0000-0000-000000000006' from crm_notas where empresa_id is not null limit 1; -- FALHA
+update crm_notas set valor_total = 1 returning 'Comprador alterou nota (NÃO devia)';
+update crm_produtos set nome = 'hack' returning 'Comprador alterou produto (NÃO devia)';
+-- vendedora e gestora não veem estoque nem clientes pela função; rodízio nunca cai no comprador
+select pg_temp.como('c0000000-0000-0000-0000-000000000003');
+select 'Ana vê estoque (NÃO devia)' t, count(*) from crm_estoque having count(*) > 0;
+select 'Ana vê clientes de compras (NÃO devia)' t, count(*) from crm_clientes_compras() having count(*) > 0;
+insert into crm_estoque (codigo, descricao) values ('x','x'); -- FALHA
+select pg_temp.como('b0000000-0000-0000-0000-000000000002');
+select 'Gestora vê estoque (NÃO devia)' t, count(*) from crm_estoque having count(*) > 0;
+select 'Rodízio caiu no comprador (NÃO devia)' t from (select crm_proximo_vendedor() r) x where r = 'f0000000-0000-0000-0000-000000000006';
+select pg_temp.como('a0000000-0000-0000-0000-000000000001');
+select 'Admin vê estoque' t, count(*) from crm_estoque;
 -- Bruno desativado perde tudo
 reset role; update crm_usuarios set ativo=false where nome='Bruno'; set role authenticated; select pg_temp.como('d0000000-0000-0000-0000-000000000004');
 select 'Bruno desativado vê' t, count(*) from crm_empresas;

@@ -60,11 +60,21 @@ dados precisavam vir de lá. A migração é o caminho mais sensível do sistema
   FUTURA 30%, CARTEIRA 80%; Funil de Pós-Vendas fica 0% (pedido já vendido, 306 abertos /
   R$ 371 mil — não é previsão de venda). Funil padrão "Vendas" (sem negócio) apagado. A Gestão
   conta "negócios abertos" e conversão só do funil de vendas (o primeiro que não é pós-venda).
-- **Compras — em pausa por decisão do Anderson (30/09, fim da tarde), retomar depois:**
-  1. Papel novo **comprador**: vê só a parte de compras (demanda, sugestão de pedido, falta,
-     parado, ABC, tendência), com filtros e pesquisa (por produto, código, curva, fornecedor/grupo
-     se o FKM exportar). Hoje Compras está dentro da Gestão, só admin; `crm_estoque` é só admin
-     na RLS — o papel novo precisa entrar em `crm_papel`/políticas e no teste de RLS.
+- **Papel comprador (30/09, noite) — feito:** aba **Compras** própria (admin e comprador), com
+  pesquisa por produto/código, "o que mostrar" (sugestão de pedido, em falta, parado, vendidos,
+  todos), curva, prazo (15–90 dias), ordenação e exportação do que está filtrado; clientes com
+  compra prevista e tendência. A Gestão ficou com um resumo de compras e link. Comprador vê só a
+  aba Compras (sem busca, "+ Novo" e sino). Banco (migration `crm_papel_comprador`):
+  `crm_eh_ativo()` (qualquer usuário: lê config/etapas/opções/produtos/modelos/equipe) ×
+  `crm_eh_membro()` (só admin/gestor/vendedor: cria e mexe em cadastro, negócio, tarefa);
+  `crm_eh_comprador()`; notas e itens legíveis pelo comprador; `crm_estoque` admin ou comprador;
+  `crm_clientes_compras()` dá ao comprador só id/nome/situação/segmento/ciclo/responsável das
+  empresas (o app troca `D.empresas` por isso); rodízio nunca cai no comprador; `crm-usuarios`
+  aceita o papel e cria comprador sem receber leads. Ataque de RLS estendido (comprador lê notas,
+  grava estoque, não vê empresa/contato/negócio/tarefa/histórico, não cria cliente nem tarefa;
+  vendedora e gestora não veem estoque) — "OK: nenhuma permissão furada".
+- **Compras — ainda a fazer:**
+  1. Fornecedor/grupo nos filtros, se o FKM exportar essas colunas no CSV.
   2. Estoque automático: o FKM não agenda a exportação. Opções: o vigia manda o
      `exp_estoque.csv` sozinho quando o arquivo muda (alguém ainda exporta à mão no FKM) +
      lembrete para quem exporta (ex.: aviso na Gestão quando o estoque tiver mais de 3 dias, já

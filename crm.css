@@ -499,3 +499,10 @@ body.arrastando-card .zonas-fim { display: grid; grid-template-columns: 1fr 1fr;
 .seq-passo legend { font-weight: 700; padding: 0 6px; }
 label.btn.arquivo { position: relative; overflow: hidden; cursor: pointer; }
 label.btn.arquivo input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.filtros-compras { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
+.filtros-compras input[type=search] { flex: 1 1 240px; min-width: 0; padding: 8px 12px; border-radius: 999px; }
+.filtros-compras select { max-width: 100%; }
+.g-base-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.tabela.compras td small { color: var(--suave); }
+@media (max-width: 860px) { .g-base-4 { grid-template-columns: 1fr 1fr; } }
+.tabela.compras td:first-child { min-width: 220px; }

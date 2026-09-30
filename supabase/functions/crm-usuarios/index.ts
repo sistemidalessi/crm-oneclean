@@ -11,7 +11,7 @@ const CORS = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS'
 };
-const PAPEIS = ['vendedor', 'gestor', 'admin'];
+const PAPEIS = ['vendedor', 'gestor', 'admin', 'comprador'];
 
 function resposta(status: number, corpo: unknown) {
   return new Response(JSON.stringify(corpo), { status, headers: { ...CORS, 'Content-Type': 'application/json' } });
@@ -55,7 +55,7 @@ Deno.serve(async (req) => {
     const { error: e2 } = await admin.from('crm_usuarios').insert({
       user_id: criado.user.id, nome, email, papel,
       equipe: corpo.equipe ? String(corpo.equipe) : null,
-      recebe_leads: corpo.recebe_leads !== false, ativo: corpo.ativo !== false
+      recebe_leads: papel !== 'comprador' && corpo.recebe_leads !== false, ativo: corpo.ativo !== false // comprador nunca entra no rodízio
     });
     if (e2) {
       await admin.auth.admin.deleteUser(criado.user.id); // não deixa login órfão

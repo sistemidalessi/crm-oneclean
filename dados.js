@@ -318,6 +318,14 @@
   // Integrações (vigia de notas): chaves (só admin vê, pela RLS) e registro das entregas.
   // Estoque (CSV do FKM): lido e gravado só pela tela Gestão (administrador). Gravar = retrato
   // novo: atualiza por código e apaga o que saiu do relatório.
+  Supa.prototype.clientesCompras = async function () {
+    const out = [];
+    for (let de = 0; ; de += PAGINA) {
+      const l = unwrap(await this.sb.rpc('crm_clientes_compras').range(de, de + PAGINA - 1));
+      out.push(...l);
+      if (l.length < PAGINA) return out;
+    }
+  };
   Supa.prototype.estoque = async function () {
     const out = [];
     for (let de = 0; ; de += PAGINA) {
