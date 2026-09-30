@@ -671,7 +671,7 @@ create policy grava on public.crm_nota_itens for insert to authenticated with ch
 create policy altera on public.crm_nota_itens for update to authenticated using (public.crm_eh_gestor()) with check (public.crm_eh_gestor());
 create policy apaga on public.crm_nota_itens for delete to authenticated using (public.crm_eh_gestor());
 
--- estoque (CSV do FKM, tela Gestão → Compras): só o administrador.
+-- estoque (CSV do FKN, tela Gestão → Compras): só o administrador.
 create table if not exists public.crm_estoque (
   codigo        text primary key check (length(btrim(codigo)) > 0),
   descricao     text not null,

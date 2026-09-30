@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Vigia da pasta de XML das notas (UniNFe / FKM): a cada minuto procura XML novos e manda para o
+// Vigia da pasta de XML das notas (UniNFe / FKN): a cada minuto procura XML novos e manda para o
 // CRM (Edge Function crm-notas), que aplica as mesmas regras da importação manual — só as notas da
 // equipe, completa o cadastro do cliente, não duplica. Roda no servidor onde fica a pasta.
 // Precisa do Node 18 ou mais novo. Não usa nenhum pacote.

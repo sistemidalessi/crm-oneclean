@@ -131,7 +131,7 @@ usuário, etapa e produto fica no **histórico de alterações** (quem, quando, 
 ## Vigia de notas (importação automática dos XML)
 
 Um programa pequeno ([`ferramentas/vigia-notas.js`](ferramentas/vigia-notas.js), Node 18+,
-sem pacote nenhum) roda no computador onde fica a pasta de XML do emissor (UniNFe/FKM),
+sem pacote nenhum) roda no computador onde fica a pasta de XML do emissor (UniNFe/FKN),
 olha a pasta a cada minuto e manda as notas novas para a Edge Function `crm-notas`. Lá elas
 passam pelas **mesmas regras da importação manual** (`nfe.js`): só as notas da equipe, o
 cadastro do cliente é completado, nada duplica (a chave de 44 dígitos é única). O vigia não

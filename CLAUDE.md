@@ -31,7 +31,24 @@ dados precisavam vir de lá. A migração é o caminho mais sensível do sistema
 - Esta é a cópia viva do código. A origem foi `sistemi-dalessi/crm/`, que fica só
   como histórico; mudança nova entra aqui.
 
-## ONDE PARAMOS (30/09/2026, tarde) — retomar daqui
+## ONDE PARAMOS (30/09/2026, noite) — retomar daqui
+
+**Estado:** CRM no ar e pronto para a equipe começar em 01/10 (Agendor desligado). Extração final
+do Agendor importada; vigia de notas rodando no servidor; no dia 30 entraram também avisos do sino
+sem a base antiga, recompra inteligente, fila do dia, sequência do lead novo, aba Gestão (admin),
+aba Compras + papel comprador, estoque do FKN por CSV, chances das etapas. O sistema de gestão
+da OneClean é o **FKN** (SIFWin, da FKN Informática) — com N; não escrever "FKM".
+
+**Amanhã (01/10), primeiro:**
+1. Anderson: revogar o token do Agendor; apagar `C:\Migracao\agendor-exportado-*.json`; tirar o
+   backup do CRM de `\\servidor\Financeiro\Recepção de Documentos`; criar o usuário comprador
+   (Configurações → Equipe, papel "Comprador (só Compras)") quando quiser.
+2. Acompanhar o primeiro dia da equipe (dúvidas, ajustes de tela); conferir no banco se o vigia
+   está entregando as notas do dia (`crm_integracao_log`).
+3. Compras, a fazer: fornecedor/grupo nos filtros (se o FKN exportar), estoque automático (vigia
+   manda o CSV quando o arquivo muda + lembrete para quem exporta).
+4. Depois: fase 3 (WhatsApp oficial da Meta, e-mail, Google Agenda) e IA.
+
 
 - **Vigia de notas pronto** (seção "Vigia de notas" abaixo e no README): Edge Function
   `crm-notas` publicada no banco real e testada (chave errada 401, chave certa 200; os
@@ -49,7 +66,7 @@ dados precisavam vir de lá. A migração é o caminho mais sensível do sistema
   (a primeira apareceu em fotos) e conferida; excluir a chave apaga o registro de entregas dela (cascade), as notas ficam.
 - Setembro nos XML reais: 303 notas; com o filtro da equipe entram **119 (R$ 125.254,36)** —
   Isabela 50, Renata 32, Alysson 28, Sarah 9 —; ficam de fora DIRETO (130) e SILMARA
-  (vendedora externa, 54). Bate com o Agendor de setembro (R$ 122.502,16). O FKM escreve
+  (vendedora externa, 54). Bate com o Agendor de setembro (R$ 122.502,16). O FKN escreve
   o vendedor no `infCpl` ("…;VENDEDOR: ALYSSON;COD. CLIENTE: 01153;").
 - Duplicados: 31 grupos "quase certos" mesclados com autorização (2.045 → 2.011 empresas),
   backup em `crm_backup.mescla_empresas` (schema fora da API). Os demais ficam para
@@ -74,9 +91,9 @@ dados precisavam vir de lá. A migração é o caminho mais sensível do sistema
   grava estoque, não vê empresa/contato/negócio/tarefa/histórico, não cria cliente nem tarefa;
   vendedora e gestora não veem estoque) — "OK: nenhuma permissão furada".
 - **Compras — ainda a fazer:**
-  1. Fornecedor/grupo nos filtros, se o FKM exportar essas colunas no CSV.
-  2. Estoque automático: o FKM não agenda a exportação. Opções: o vigia manda o
-     `exp_estoque.csv` sozinho quando o arquivo muda (alguém ainda exporta à mão no FKM) +
+  1. Fornecedor/grupo nos filtros, se o FKN exportar essas colunas no CSV.
+  2. Estoque automático: o FKN não agenda a exportação. Opções: o vigia manda o
+     `exp_estoque.csv` sozinho quando o arquivo muda (alguém ainda exporta à mão no FKN) +
      lembrete para quem exporta (ex.: aviso na Gestão quando o estoque tiver mais de 3 dias, já
      existe o selo "desatualizado"; e/ou tarefa recorrente para o comprador).
 - **Extração final do Agendor feita e importada em 30/09 ~17h** (reextração com "Atualizar
@@ -276,7 +293,7 @@ dados precisavam vir de lá. A migração é o caminho mais sensível do sistema
   já cadastrado com responsável da equipe; não cria cliente) ou `todas`. Padrão: `vendedores`
   se as notas trazem o nome, senão `carteira`; `auto` decide **nota a nota** (com vendedor
   escrito → `vendedores`; sem → `carteira`) e é o padrão do vigia. Cliente novo fica com o
-  vendedor da nota. O FKM da OneClean escreve "VENDEDOR: NOME;" no `infCpl` (conferido
+  vendedor da nota. O FKN da OneClean escreve "VENDEDOR: NOME;" no `infCpl` (conferido
   com os XML reais de setembro de 2026).
 - RLS: gestor importa e corrige; vendedor lê as notas das empresas que vê (`crm_ve_nota`
   para os itens). Mesclar empresas leva as notas junto.
@@ -336,7 +353,7 @@ dados precisavam vir de lá. A migração é o caminho mais sensível do sistema
   (clientes com ritmo cuja próxima compra cai em 15/30/45/60 dias, inclusive os atrasados que
   não sumiram, somando os itens habituais) e tendência (90 dias × 90 anteriores, ±25%, com
   pelo menos 10 unidades). Exporta demanda, ABC, pedido e parado em CSV.
-- **Estoque do FKM** (30/09/2026): o FKM (SIFWin, COBOL Micro Focus, dados em .DAT/.IDX — não dá
+- **Estoque do FKN** (30/09/2026): o FKN (SIFWin, COBOL Micro Focus, dados em .DAT/.IDX — não dá
   para ler direto) exporta a posição de estoque em CSV Windows-1252 em
   `\\Servidor\sistema\SIFN\dados\exp_estoque.csv` (`CODIGO;NOME DO PRODUTO;UNIDADE;LOCALIZAÇÃO;CUSTO;ESTOQUE`,
   código "010503.0" = "010503" da nota; CUSTO = custo total do saldo). Botão "Atualizar estoque"

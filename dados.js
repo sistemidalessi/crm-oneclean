@@ -316,7 +316,7 @@
   };
 
   // Integrações (vigia de notas): chaves (só admin vê, pela RLS) e registro das entregas.
-  // Estoque (CSV do FKM): lido e gravado só pela tela Gestão (administrador). Gravar = retrato
+  // Estoque (CSV do FKN): lido e gravado só pela tela Gestão (administrador). Gravar = retrato
   // novo: atualiza por código e apaga o que saiu do relatório.
   Supa.prototype.clientesCompras = async function () {
     const out = [];

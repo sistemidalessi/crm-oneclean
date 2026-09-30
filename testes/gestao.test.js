@@ -62,7 +62,7 @@ test('compras: demanda prevista, curva ABC e tendência', () => {
   assert.equal(G.compras(D, ix, cfg, HOJE, 7).demanda.length, 0);
 });
 
-test('estoque do FKM: leitura do CSV e sugestão de pedido', () => {
+test('estoque do FKN: leitura do CSV e sugestão de pedido', () => {
   const csv = 'CODIGO;NOME DO PRODUTO;UNIDADE;LOCALIZAÇÃO;CUSTO;ESTOQUE\r\n010001.0;DETERGENTE 5L;GL;;25,00;1,000\r\n010002.0;PAPEL TOALHA;FD;;1.000,00;100,000\r\n010003.0;CERA PARADA;GL;;300,00;10,000\r\n010004.0;SEM SALDO;UN;;0,00;-3,000\r\n';
   const est = G.lerEstoque(csv);
   assert.deepEqual(est.map(x => [x.codigo, x.quantidade, x.custo_total]), [['010001', 1, 25], ['010002', 100, 1000], ['010003', 10, 300], ['010004', -3, 0]]);
