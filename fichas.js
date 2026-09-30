@@ -99,6 +99,7 @@
     const dado = (rot, v) => (v ? '<dt>' + esc(rot) + '</dt><dd>' + v + '</dd>' : '');
     const sit = CRM.situacao(e);
     const ganhos = fechados.filter(n => n.status === 'ganho');
+    const notas = (E().ix.porEmpresa.notas.get(e.id) || []).slice().sort((a, b) => String(b.emitida_em).localeCompare(String(a.emitida_em)));
 
     dlg.innerHTML = '<div class="ficha">' +
       '<header class="ficha-topo"><div class="ficha-titulo"><h2>' + esc(e.nome) + '</h2>' + CRM.seloSituacao(sit) + CRM.estrelas(e.qualificacao) +
@@ -157,9 +158,13 @@
           (abertos.length ? abertos.map(n => cartaoNegocio(n)).join('') : '<p class="vazio">Nenhum.</p>') + '</section>' +
         '<section><h3>Compras e negócios anteriores</h3>' +
           (r.compras ? '<p class="resumo-compras"><strong>' + esc(R.moeda(r.totalComprado)) + '</strong> em ' + r.compras + ' compra(s) · ticket ' + esc(R.moeda(r.totalComprado / r.compras)) +
-            '<br>última em ' + esc(R.dataBR(r.ultimaCompra)) + ' (' + R.diasEntre(r.ultimaCompra, CRM.hoje()) + ' dias)' + (ganhos.length > 1 ? ' · compra a cada ~' + intervaloMedio(ganhos) + ' dias' : '') + '</p>' : '') +
+            '<br>última em ' + esc(R.dataBR(r.ultimaCompra)) + ' (' + R.diasEntre(r.ultimaCompra, CRM.hoje()) + ' dias)' +
+            (r.compras > 1 ? ' · compra a cada ~' + intervaloMedio(r.datasCompras || ganhos.map(n => n.fechado_em)) + ' dias' : '') +
+            (r.fonteCompras === 'notas' ? '<br><small>pelas notas fiscais</small>' : '') + '</p>' : '') +
+          (notas.length ? '<div class="notas-cliente"><h3>Notas fiscais <small>' + notas.length + '</small></h3>' + notas.slice(0, 15).map(itemNota).join('') +
+            (notas.length > 15 ? '<p class="mais">mostrando as 15 mais recentes</p>' : '') + '</div>' : '') +
           (fechados.length ? '<ul class="lista">' + fechados.slice(0, 30).map(n => '<li><button type="button" class="linha" data-acao="abrir-negocio" data-id="' + esc(n.id) + '"><strong>' + esc(n.titulo) + '</strong>' +
-            '<small>' + CRM.seloStatus(n.status) + ' ' + esc(R.dataBR(n.fechado_em)) + ' · ' + esc(R.moeda(n.valor)) + (n.motivo_perda ? ' · ' + esc(n.motivo_perda) : '') + '</small></button></li>').join('') + '</ul>' : '<p class="vazio">Nenhum ainda.</p>') + '</section>' +
+            '<small>' + CRM.seloStatus(n.status) + ' ' + esc(R.dataBR(n.fechado_em)) + ' · ' + esc(R.moeda(n.valor)) + (n.motivo_perda ? ' · ' + esc(n.motivo_perda) : '') + '</small></button></li>').join('') + '</ul>' : (notas.length ? '' : '<p class="vazio">Nenhum ainda.</p>')) + '</section>' +
         (props.length ? '<section><h3>Propostas</h3><ul class="lista">' + props.sort((a, b) => b.numero - a.numero).map(p => '<li><button type="button" class="linha" data-acao="abrir-negocio" data-id="' + esc(p.negocio_id) + '">' +
           '<strong>#' + esc(p.numero) + ' · ' + esc(R.moeda(p.valor_total)) + '</strong><small>' + CRM.seloProposta(p.status) + ' ' + esc(p.enviada_em ? 'enviada ' + R.dataBR(p.enviada_em) : '') + '</small></button></li>').join('') + '</ul></section>' : '') +
       '</div></div></div>';
@@ -167,8 +172,15 @@
     $('#formRegistroRapido', dlg).addEventListener('submit', ev => registrarRapido(ev, e));
   }
 
-  function intervaloMedio(ganhos) {
-    const datas = ganhos.map(n => n.fechado_em).filter(Boolean).sort();
+  function itemNota(n) {
+    const itens = (E().ix.porNota.get(n.id) || []).slice().sort((a, b) => a.ordem - b.ordem);
+    return '<details><summary>' + esc(R.dataBR(R.diaLocal(n.emitida_em))) + ' · NF ' + esc(n.numero || '') + (n.cancelada ? ' <span class="selo vermelho">cancelada</span>' : '') +
+      '<strong>' + esc(R.moeda(n.valor_total)) + '</strong></summary><ul>' +
+      itens.map(it => '<li>' + esc(R.numero(it.quantidade)) + ' ' + esc(it.unidade || '') + ' · ' + esc(it.descricao) + ' — ' + esc(R.moeda(it.valor_total)) + '</li>').join('') + '</ul></details>';
+  }
+
+  function intervaloMedio(datasCompras) {
+    const datas = datasCompras.filter(Boolean).sort();
     if (datas.length < 2) return '—';
     return Math.round(R.diasEntre(datas[0], datas[datas.length - 1]) / (datas.length - 1));
   }

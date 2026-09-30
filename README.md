@@ -20,6 +20,7 @@ qual é o próximo passo.** Feito para uso no computador.
 | **Negócios** | Todos os negócios com filtro por status, etapa, vendedor, origem, motivo de perda e período (criação, fechamento ou previsão). |
 | **Atividades** | Agenda da semana com as tarefas por dia e hora; atrasadas em destaque; "+" em cada dia. |
 | **Relatórios** | Por funil, com os nomes do painel do Agendor: negócios ganhos, iniciados e perdidos, taxa ganhos vs perdidos (em quantidade e em valor); vendas previstas, pipeline, ticket médio, conversão, ciclo médio, leads novos, clientes novos × recorrentes, vendas por mês e previsão, **por vendedor com meta**, funil agora, origem dos leads (e quantos viraram cliente), motivos de perda, vendas por produto e por origem, atividades. Cada tabela exporta CSV. |
+| **Faturamento** (dentro de Relatórios) | Pelas **notas fiscais importadas (XML)**: total faturado, clientes que compraram (e quantos pela 1ª vez), ticket por nota, faturamento por mês, **top 10 clientes**, **vendas por segmento** (escola, indústria, condomínio…), **top 10 produtos** por valor e por quantidade, por vendedor e por cidade. Cada tabela exporta CSV; clientes e produtos têm a lista completa. |
 | **Configurações** | Automações e alertas, funil/etapas, origens/segmentos/motivos, produtos, **equipe e permissões**, metas, modelos de mensagem, importar, exportar/backup, **duplicados** (mesclar), **histórico de alterações**. |
 
 **Ficha do cliente — tudo em uma tela:** dados, pessoas (com WhatsApp, ligar,
@@ -87,7 +88,12 @@ usuário, etapa e produto fica no **histórico de alterações** (quem, quando, 
 6. **Conferir:** totais em Empresas/Negócios, abrir 5 clientes conhecidos e ver
    histórico, negócios e tarefas. Configurações → Duplicados para limpar o que o
    Agendor já tinha repetido.
-7. **Depois:** apagar as etapas-padrão que sobraram sem uso (Configurações →
+7. **Notas fiscais:** Configurações → Importar → "Notas fiscais (XML)" → escolher os XML
+   (vários de uma vez) ou o .zip exportado pelo sistema de notas/contabilidade → conferir →
+   Importar. Liga cada nota ao cliente (CNPJ, razão social ou nome), completa o CNPJ que
+   faltava e cadastra quem ainda não estava. Depois, em Configurações → Origens, segmentos,
+   motivos → "Preencher pelo nome das empresas", para o relatório por segmento.
+8. **Depois:** apagar as etapas-padrão que sobraram sem uso (Configurações →
    Funil), apagar o arquivo exportado (tem dados de clientes) e **revogar o token**
    no Agendor.
 
@@ -121,6 +127,7 @@ usuário, etapa e produto fica no **histórico de alterações** (quem, quando, 
 | `config.js` | Instalação: nome, logo, Supabase. Vazio = modo local (demonstração no navegador). |
 | `regras.js` | Regras puras: datas, alertas, painel/relatórios, duplicados, busca, CSV. |
 | `planilha.js` | Importação: mapeamento de colunas, planejador sem duplicar, conversão do Agendor. |
+| `nfe.js` | Notas fiscais: leitor do XML da NF-e (e do cancelamento) e planejador da importação. |
 | `xlsx-leitor.js` | Leitor de .xlsx próprio (sem biblioteca externa). |
 | `dados.js` | Banco: modo local (localStorage) e Supabase (paginado de 1000 em 1000). |
 | `ui.js`, `app.js` | Interface base; núcleo (estado, permissões, automações, busca, atalhos, login). |

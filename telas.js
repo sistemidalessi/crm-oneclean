@@ -476,6 +476,7 @@
       const funis = CRM.funis();
       if (f.funil == null || (f.funil && funis.indexOf(f.funil) === -1)) f.funil = funis.length > 1 ? funis[0] : '';
       const d = R.dashboard(E().D, E().ix, E().cfg, hoje, { periodo: p, responsavel_id: resp, funil: f.funil });
+      const fat = ultimoFat = R.faturamento(E().D, E().ix, hoje, { periodo: p, responsavel_id: resp });
       const k = (t, v, s, cls) => '<div class="kpi ' + (cls || '') + '"><span>' + esc(t) + '</span><strong>' + esc(v) + '</strong><small>' + esc(s || '') + '</small></div>';
       const maxMes = Math.max(1, ...d.porMes.map(m => m.valor));
       const maxPrev = Math.max(1, ...d.previsao.map(m => m.valor));
@@ -496,11 +497,12 @@
         '<span class="flex"></span><button type="button" class="btn sec" data-acao="imprimir">Imprimir</button></div>' +
         '<section class="kpis">' +
         // Mesmos nomes do painel do Agendor, que a equipe já conhece.
-        k('Negócios ganhos', String(d.realizadas.qtd), R.moeda(d.realizadas.valor) + ' em vendas', 'verde') +
+        k('Total vendido', R.moeda(d.realizadas.valor), d.realizadas.qtd + ' negócio(s) ganho(s)' + (resp ? ' · ' + CRM.nomeUsuario(resp) : ' · equipe toda'), 'verde') +
+        (fat.existe ? k('Faturado (notas fiscais)', R.moeda(fat.total), fat.notas + ' nota(s) · ' + fat.clientes + ' cliente(s)', 'verde') : '') +
+        k('Negócios ganhos', String(d.realizadas.qtd), 'ticket médio ' + R.moeda(d.ticket)) +
         k('Negócios iniciados', String(d.iniciados.qtd), R.moeda(d.iniciados.valor)) +
         k('Negócios perdidos', String(d.perdidas.qtd), R.moeda(d.perdidas.valor), d.perdidas.qtd ? 'alerta' : '') +
         k('Taxa ganhos vs perdidos', R.pct(d.conversao), R.pct(d.conversaoValor) + ' em valor') +
-        k('Ticket médio', R.moeda(d.ticket), 'por venda no período') +
         k('Ciclo médio de vendas', d.ciclo == null ? '—' : Math.round(d.ciclo) + ' dias', 'da criação ao fechamento') +
         k('Em andamento', R.moeda(d.abertas.valor), d.abertas.qtd + ' negócios · ponderado ' + R.moeda(d.abertas.ponderado)) +
         k('Vendas previstas', R.moeda(d.previstas.valor), d.previstas.qtd + ' com previsão no período · ponderado ' + R.moeda(d.previstas.ponderado)) +
@@ -517,7 +519,9 @@
         '</div>' +
         '<section class="cartao"><h2>Vendas por vendedor ' + exp('tVend') + '</h2>' + tabela('tVend', [['Vendedor'], ['Vendido', 1], ['Meta', 1], ['Atingido'], ['Ganhos', 1], ['Perdidos', 1], ['Conversão', 1], ['Em aberto', 1], ['Atividades', 1], ['Carteira', 1]],
           d.porVendedor.sort((a, b) => b.valor - a.valor).map(v => [esc(v.usuario.nome), esc(R.moeda(v.valor)), v.meta ? esc(R.moeda(v.meta)) : '—',
-            CRM.barra(v.valor, v.meta || maxVend, v.atingido == null ? '' : R.pct(v.atingido)), v.ganhos, v.perdidos, esc(R.pct(v.conversao)), esc(R.moeda(v.valorAberto)) + ' (' + v.abertos + ')', v.atividades, v.carteira])) + '</section>' +
+            CRM.barra(v.valor, v.meta || maxVend, v.atingido == null ? '' : R.pct(v.atingido)), v.ganhos, v.perdidos, esc(R.pct(v.conversao)), esc(R.moeda(v.valorAberto)) + ' (' + v.abertos + ')', v.atividades, v.carteira])
+            .concat(d.porVendedor.length > 1 ? [linhaTotal(d.porVendedor)] : [])) + '</section>' +
+        secaoFaturamento(fat, exp, tabela) +
         '<div class="colunas">' +
         '<section class="cartao"><h2>Funil agora <small>negócios abertos</small> ' + exp('tEtapa') + '</h2>' + tabela('tEtapa', [['Etapa'], ['Qtd.', 1], ['Valor', 1], [''], ['Ponderado', 1]],
           d.porEtapa.map(x => [esc((CRM.funis().length > 1 ? (x.etapa.funil || '') + ' · ' : '') + x.etapa.nome), x.qtd, esc(R.moeda(x.valor)), CRM.barra(x.valor, maxEt), esc(R.moeda(x.ponderado))])) + '</section>' +
@@ -541,6 +545,62 @@
     }
   };
 
+  let ultimoFat = null;
+
+  // Última linha da tabela por vendedor: o total da equipe.
+  function linhaTotal(l) {
+    const t = l.reduce((a, v) => ({ valor: a.valor + v.valor, meta: a.meta + v.meta, ganhos: a.ganhos + v.ganhos, perdidos: a.perdidos + v.perdidos,
+      abertos: a.abertos + v.abertos, valorAberto: a.valorAberto + v.valorAberto, atividades: a.atividades + v.atividades, carteira: a.carteira + v.carteira }),
+    { valor: 0, meta: 0, ganhos: 0, perdidos: 0, abertos: 0, valorAberto: 0, atividades: 0, carteira: 0 });
+    const b = x => '<strong>' + x + '</strong>';
+    return [b('Total da equipe'), b(esc(R.moeda(t.valor))), t.meta ? b(esc(R.moeda(t.meta))) : '—', t.meta ? CRM.barra(t.valor, t.meta, R.pct(t.valor / t.meta * 100)) : '',
+      b(t.ganhos), b(t.perdidos), b(esc(R.pct(t.ganhos + t.perdidos ? t.ganhos / (t.ganhos + t.perdidos) * 100 : null))),
+      b(esc(R.moeda(t.valorAberto)) + ' (' + t.abertos + ')'), b(t.atividades), b(t.carteira)];
+  }
+
+  // Faturamento pelas notas fiscais importadas: quem comprou, o quê, de que segmento.
+  function secaoFaturamento(fat, exp, tabela) {
+    if (!fat.existe) {
+      return '<section class="cartao"><h2>Faturamento (notas fiscais)</h2><p class="dica">Importe os XML das notas em ' +
+        (CRM.ehGestor() ? '<button type="button" class="link" data-acao="aba" data-id="ajustes">Configurações → Importar</button>' : 'Configurações → Importar (gestor)') +
+        ' para ver aqui quem mais comprou, os produtos que mais saíram e as vendas por segmento (escola, indústria, condomínio…).</p></section>';
+    }
+    const max = l => Math.max(1, ...l.map(x => x.valor));
+    const mc = max(fat.topClientes.slice(0, 10)), ms = max(fat.porSegmento), mp = max(fat.topProdutosValor.slice(0, 10)), mv = max(fat.porVendedor), mcid = max(fat.porCidade.slice(0, 10));
+    const maxQ = Math.max(1, ...fat.topProdutosQtd.slice(0, 10).map(x => x.quantidade));
+    const maxMes = Math.max(1, ...fat.porMes.map(m => m.valor));
+    const pctTotal = v => fat.total ? R.pct(v / fat.total * 100) : '—';
+    const todos = t => '<button type="button" class="mini" data-acao="fat-exportar" data-id="' + t + '" title="Baixar a lista completa (não só o top 10)">todos</button>';
+    const nomeCli = c => c.empresa_id ? '<button type="button" class="link" data-acao="abrir-empresa" data-id="' + esc(c.empresa_id) + '">' + esc(c.nome) + '</button>' : esc(c.nome);
+    return '<h2 class="titulo-secao">Faturamento <small>pelas notas fiscais do período' + (fat.canceladas ? ' · ' + fat.canceladas + ' cancelada(s) fora da conta' : '') + '</small></h2>' +
+      '<section class="kpis">' +
+      '<div class="kpi verde"><span>Faturado</span><strong>' + esc(R.moeda(fat.total)) + '</strong><small>' + fat.notas + ' nota(s) de venda</small></div>' +
+      '<div class="kpi"><span>Clientes que compraram</span><strong>' + fat.clientes + '</strong><small>' + fat.clientesNovos + ' pela 1ª vez · ' + esc(R.moeda(fat.valorClientesNovos)) + '</small></div>' +
+      '<div class="kpi"><span>Ticket por nota</span><strong>' + esc(R.moeda(fat.ticket)) + '</strong><small>valor médio de cada nota</small></div>' +
+      '</section>' +
+      '<section class="cartao"><h2>Faturamento por mês <small>12 meses</small></h2><div class="grafico-colunas">' + fat.porMes.map(m => '<div class="col" title="' + esc(R.mesCurto(m.mes) + ': ' + R.moeda(m.valor) + ' (' + m.qtd + ' notas)') + '">' +
+        '<span class="col-valor">' + (m.valor ? esc(abrevia(m.valor)) : '') + '</span><span class="col-barra"><span data-altura="' + (m.valor / maxMes * 100).toFixed(1) + '"></span></span><span class="col-rot">' + esc(R.mesCurto(m.mes)) + '</span></div>').join('') + '</div></section>' +
+      '<div class="colunas">' +
+      '<section class="cartao"><h2>Top 10 clientes ' + exp('tFatCli') + todos('clientes') + '</h2>' + tabela('tFatCli', [['#'], ['Cliente'], ['Notas', 1], ['Valor', 1], [''], ['% do total', 1]],
+        fat.topClientes.slice(0, 10).map((c, i) => [i + 1, nomeCli(c) + (c.novo ? ' <span class="selo verde">1ª compra</span>' : ''), c.notas, esc(R.moeda(c.valor)), CRM.barra(c.valor, mc), pctTotal(c.valor)])) + '</section>' +
+      '<section class="cartao"><h2>Vendas por segmento ' + exp('tFatSeg') + '</h2>' + tabela('tFatSeg', [['Segmento'], ['Clientes', 1], ['Notas', 1], ['Valor', 1], [''], ['% do total', 1]],
+        fat.porSegmento.map(g => [esc(g.nome), g.clientes, g.notas, esc(R.moeda(g.valor)), CRM.barra(g.valor, ms), pctTotal(g.valor)])) +
+        (fat.porSegmento.some(g => g.nome === '(sem segmento)') && CRM.ehGestor() ? '<p class="dica">Sem segmento: preencha na ficha, em massa na lista de Empresas, ou pelo nome em Configurações → Origens, segmentos, motivos.</p>' : '') + '</section>' +
+      '</div><div class="colunas">' +
+      '<section class="cartao"><h2>Top 10 produtos <small>por valor</small> ' + exp('tFatProd') + todos('produtos') + '</h2>' + tabela('tFatProd', [['#'], ['Produto'], ['Quantidade', 1], ['Valor', 1], [''], ['Clientes', 1]],
+        fat.topProdutosValor.slice(0, 10).map((x, i) => [i + 1, esc(x.descricao) + (x.codigo ? ' <small>' + esc(x.codigo) + '</small>' : ''), esc(R.numero(x.quantidade)) + ' ' + esc(x.unidade), esc(R.moeda(x.valor)), CRM.barra(x.valor, mp), x.clientes]),
+        'Nenhum item de venda nas notas do período.') + '</section>' +
+      '<section class="cartao"><h2>Top 10 produtos <small>por quantidade</small> ' + exp('tFatQtd') + '</h2>' + tabela('tFatQtd', [['#'], ['Produto'], ['Quantidade', 1], [''], ['Valor', 1], ['Notas', 1]],
+        fat.topProdutosQtd.slice(0, 10).map((x, i) => [i + 1, esc(x.descricao) + (x.codigo ? ' <small>' + esc(x.codigo) + '</small>' : ''), esc(R.numero(x.quantidade)) + ' ' + esc(x.unidade), CRM.barra(x.quantidade, maxQ), esc(R.moeda(x.valor)), x.notas]),
+        'Nenhum item de venda nas notas do período.') + '</section>' +
+      '</div><div class="colunas">' +
+      '<section class="cartao"><h2>Faturado por vendedor <small>responsável pelo cliente</small> ' + exp('tFatVend') + '</h2>' + tabela('tFatVend', [['Vendedor'], ['Clientes', 1], ['Notas', 1], ['Valor', 1], [''], ['% do total', 1]],
+        fat.porVendedor.map(g => [esc(g.nome), g.clientes, g.notas, esc(R.moeda(g.valor)), CRM.barra(g.valor, mv), pctTotal(g.valor)])) + '</section>' +
+      '<section class="cartao"><h2>Top 10 cidades ' + exp('tFatCid') + '</h2>' + tabela('tFatCid', [['Cidade'], ['Clientes', 1], ['Notas', 1], ['Valor', 1], ['']],
+        fat.porCidade.slice(0, 10).map(g => [esc(g.nome), g.clientes, g.notas, esc(R.moeda(g.valor)), CRM.barra(g.valor, mcid)])) + '</section>' +
+      '</div>';
+  }
+
   function abrevia(v) {
     if (v >= 1e6) return (v / 1e6).toFixed(1).replace('.', ',') + ' mi';
     if (v >= 1e3) return Math.round(v / 1e3) + ' mil';
@@ -549,6 +609,13 @@
 
   // ================================================================ ações das telas
   Object.assign(CRM.acoes, {
+    'fat-exportar': t => {
+      const f = ultimoFat; if (!f) return;
+      if (t === 'clientes') CRM.baixarCSV('faturamento-clientes', ['Cliente', 'Notas', 'Valor', 'Última compra', '1ª compra no período'],
+        f.topClientes.map(c => [c.nome, c.notas, String(c.valor.toFixed(2)).replace('.', ','), R.dataBR(c.ultima), c.novo ? 'sim' : 'não']));
+      else CRM.baixarCSV('faturamento-produtos', ['Produto', 'Código', 'Unidade', 'Quantidade', 'Valor', 'Notas', 'Clientes'],
+        f.topProdutosValor.map(x => [x.descricao, x.codigo, x.unidade, String(x.quantidade).replace('.', ','), String(x.valor.toFixed(2)).replace('.', ','), x.notas, x.clientes]));
+    },
     'ir-alerta': id => {
       const alvo = document.getElementById('alerta-' + id);
       if (id === 'tarefas-atrasadas' || id === 'tarefas-hoje') { const l = $('.colunas-inicio .tarefas'); if (l) l.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }

@@ -246,12 +246,12 @@
   // Monta mapas por id e por empresa uma vez por carga; o resto usa isso.
   function indexa(D) {
     const porId = {}, porEmpresa = {}, porNegocio = {};
-    const tabelas = ['usuarios', 'etapas', 'produtos', 'empresas', 'contatos', 'negocios', 'negocio_itens', 'propostas', 'atividades'];
+    const tabelas = ['usuarios', 'etapas', 'produtos', 'empresas', 'contatos', 'negocios', 'negocio_itens', 'propostas', 'atividades', 'notas'];
     tabelas.forEach(t => {
       const m = porId[t] = new Map();
       (D[t] || []).forEach(r => m.set(t === 'usuarios' ? r.user_id : r.id, r));
     });
-    ['contatos', 'negocios', 'atividades'].forEach(t => {
+    ['contatos', 'negocios', 'atividades', 'notas'].forEach(t => {
       const m = porEmpresa[t] = new Map();
       (D[t] || []).forEach(r => { if (!m.has(r.empresa_id)) m.set(r.empresa_id, []); m.get(r.empresa_id).push(r); });
     });
@@ -286,7 +286,19 @@
         if (n.fechado_em && (!r.primeiraCompra || n.fechado_em < r.primeiraCompra)) r.primeiraCompra = n.fechado_em;
       } else if (n.status === 'aberto') { r.abertos++; r.valorAberto += num(n.valor); }
     });
-    return { porId, porEmpresa, porNegocio, resumo };
+    // Itens por nota; e quem tem nota fiscal de venda passa a ter as compras contadas pelas notas
+    // (mais fiel que o negócio ganho: cada pedido faturado é uma compra, com a data da nota).
+    const porNota = new Map();
+    (D.nota_itens || []).forEach(it => { if (!porNota.has(it.nota_id)) porNota.set(it.nota_id, []); porNota.get(it.nota_id).push(it); });
+    porEmpresa.notas.forEach((lista, empresaId) => {
+      const r = resumo.get(empresaId); if (!r) return;
+      const vendas = lista.filter(n => notaDeVenda(n, porNota.get(n.id)));
+      if (!vendas.length) return;
+      const datas = vendas.map(n => diaLocal(n.emitida_em)).filter(Boolean).sort();
+      Object.assign(r, { fonteCompras: 'notas', compras: vendas.length, totalComprado: vendas.reduce((s2, n) => s2 + num(n.valor_total), 0),
+        primeiraCompra: datas[0] || null, ultimaCompra: datas[datas.length - 1] || null, datasCompras: datas });
+    });
+    return { porId, porEmpresa, porNegocio, porNota, resumo };
   }
 
   function probabilidade(n, etapa) {
@@ -354,6 +366,106 @@
     const inativos = empresas.filter(e => situacaoEfetiva(e, ix.resumo.get(e.id), cfg, hoje) === 'inativo');
 
     return { atrasadas, deHoje, leadsSemAtendimento, negociosParados, clientesSemContato, recompra, inativos };
+  }
+
+  // ------------------------------------------------------------ notas fiscais
+  // CFOP de venda: saída (5, 6, 7) com grupo 1 (venda) ou 4 (venda com substituição tributária).
+  // Remessa, bonificação, devolução e "outras saídas" (5.9xx etc.) não contam como venda.
+  const cfopDeVenda = cfop => !cfop || /^[567][14]/.test(String(cfop).replace(/\D/g, ''));
+  function notaDeVenda(n, itens) {
+    if (!n || n.cancelada) return false;
+    return !itens || !itens.length || itens.some(it => cfopDeVenda(it.cfop));
+  }
+
+  // Segmento sugerido pelo nome (a base do Agendor veio sem segmento). A ordem importa:
+  // "Casa de repouso" antes de "residencial", "Indústria de alimentos" antes de "alimentos".
+  const SEGMENTOS_PELO_NOME = [
+    ['Saúde', /\b(hospital\w*|clinica\w*|saude|odonto\w*|laborator\w*|casa de repouso|geriatr\w*|residencial senior|senior|medic\w*|farmac\w*|veterinar\w*|terapia\w*)\b/],
+    ['Escola', /\b(escola\w*|colegio\w*|educaciona\w*|educacao|ensino|bercario|creche\w*|kumon|infantil|faculdade\w*|universidade\w*|pedagog\w*|idiomas)\b/],
+    ['Hotelaria', /\b(hote(l|is)|pousada\w*|inn|hostel|resort)\b/],
+    ['Indústria', /\b(industria\w*|ind|metalurg\w*|quimic\w*|fabrica\w*|embalage\w*|plastic\w*|usinage\w*|fundica\w*|fundic|textil\w*|manufatur\w*|grafica\w*|siderurg\w*|moveis|colchoes)\b/],
+    ['Alimentação', /\b(restaurante\w*|lanchonete\w*|padaria\w*|panificadora|buffet|pizzaria|churrascaria|cozinha\w*|refeicoes|alimentos|alimenticios|food|bar|cafeteria)\b/],
+    ['Condomínio', /\b(condominio\w*|edificio\w*|residencial|conjunto habitacional)\b/],
+    ['Igreja / associação', /\b(igreja\w*|paroquia\w*|templo|associacao|sindicato|fundacao|ong|clube|instituto)\b/],
+    ['Serviços', /\b(facilities|servicos?|terceiriza\w*|limpeza|conservacao|seguranca|consultoria|tecnologia|software|engenharia|logistica|transporte\w*|contabil\w*|advocacia|advogados|imobiliaria)\b/],
+    ['Comércio', /\b(comercio|comercial|distribuidora\w*|loja\w*|atacad\w*|varej\w*|supermercado\w*|mercado\w*|magazine|pecas|pneus|autopecas|materiais|eletric\w*|hidraulic\w*|ferrage\w*|madeireira|papelaria)\b/]
+  ];
+  const NOMES_SEGMENTO = SEGMENTOS_PELO_NOME.map(x => x[0]);
+  function sugereSegmento() {
+    const texto = [].slice.call(arguments).filter(Boolean).map(normaliza).join(' ').replace(/[^a-z0-9 ]/g, ' ');
+    if (!texto.trim()) return null;
+    const achou = SEGMENTOS_PELO_NOME.find(x => x[1].test(texto));
+    return achou ? achou[0] : null;
+  }
+
+  // Relatório de faturamento pelas notas: total, clientes, top clientes, segmentos, produtos, por mês e vendedor.
+  function faturamento(D, ix, hoje, filtro) {
+    const p = filtro.periodo;
+    const resp = filtro.responsavel_id || null;
+    const empresa = id => (id && ix.porId.empresas.get(id)) || null;
+    const itensDe = n => ix.porNota.get(n.id) || [];
+    const dono = n => { const e = empresa(n.empresa_id); return e ? e.responsavel_id || null : null; };
+    const chaveCliente = n => n.empresa_id || (n.cliente_doc ? 'doc:' + digitos(n.cliente_doc) : 'nome:' + normaliza(n.cliente_nome));
+    const nomeCliente = n => { const e = empresa(n.empresa_id); return e ? e.nome : n.cliente_nome || '(sem nome)'; };
+    const todas = (D.notas || []).filter(n => notaDeVenda(n, itensDe(n)) && (!resp || dono(n) === resp));
+    const doPeriodo = todas.filter(n => noPeriodo(diaLocal(n.emitida_em), p));
+    const soma = l => l.reduce((s2, n) => s2 + num(n.valor_total), 0);
+    const total = soma(doPeriodo);
+
+    const primeira = new Map();
+    todas.forEach(n => { const k = chaveCliente(n), d = diaLocal(n.emitida_em); if (!primeira.has(k) || d < primeira.get(k)) primeira.set(k, d); });
+
+    const clientes = new Map();
+    doPeriodo.forEach(n => {
+      const k = chaveCliente(n);
+      const c = clientes.get(k) || { chave: k, nome: nomeCliente(n), empresa_id: n.empresa_id || null, notas: 0, valor: 0, ultima: null, novo: false };
+      c.notas++; c.valor += num(n.valor_total);
+      const d = diaLocal(n.emitida_em); if (!c.ultima || d > c.ultima) c.ultima = d;
+      c.novo = noPeriodo(primeira.get(k), p);
+      clientes.set(k, c);
+    });
+    const listaClientes = [...clientes.values()].sort((a, b) => b.valor - a.valor);
+
+    const agrupa = (chave) => {
+      const m = new Map();
+      doPeriodo.forEach(n => {
+        const k = chave(n) || '(não informado)';
+        const g = m.get(k) || { nome: k, notas: 0, valor: 0, clientes: new Set() };
+        g.notas++; g.valor += num(n.valor_total); g.clientes.add(chaveCliente(n));
+        m.set(k, g);
+      });
+      return [...m.values()].map(g => Object.assign(g, { clientes: g.clientes.size })).sort((a, b) => b.valor - a.valor);
+    };
+    const porSegmento = agrupa(n => (empresa(n.empresa_id) || {}).segmento || '(sem segmento)');
+    const porVendedor = agrupa(n => { const u = dono(n); const us = u && ix.porId.usuarios.get(u); return us ? us.nome : '(sem responsável)'; });
+    const porCidade = agrupa(n => n.cidade ? n.cidade + (n.uf ? '/' + n.uf : '') : null);
+
+    const produtos = new Map();
+    doPeriodo.forEach(n => itensDe(n).filter(it => cfopDeVenda(it.cfop)).forEach(it => {
+      const k = it.produto_id || (it.codigo ? 'c:' + normaliza(it.codigo) : 'd:' + normaliza(it.descricao));
+      const g = produtos.get(k) || { descricao: it.descricao, codigo: it.codigo || '', unidade: it.unidade || '', quantidade: 0, valor: 0, notas: new Set(), clientes: new Set() };
+      g.quantidade += num(it.quantidade); g.valor += num(it.valor_total); g.notas.add(n.id); g.clientes.add(chaveCliente(n));
+      produtos.set(k, g);
+    }));
+    const listaProdutos = [...produtos.values()].map(g => Object.assign(g, { notas: g.notas.size, clientes: g.clientes.size }));
+
+    const fimMes = (p.ate < '9999' ? p.ate : hoje).slice(0, 8) + '01';
+    const porMes = [];
+    for (let i = 11; i >= 0; i--) {
+      const m = somaMeses(fimMes, -i).slice(0, 7);
+      const l = todas.filter(n => (diaLocal(n.emitida_em) || '').slice(0, 7) === m);
+      porMes.push({ mes: m + '-01', qtd: l.length, valor: soma(l) });
+    }
+    const novos = listaClientes.filter(c => c.novo);
+    return {
+      existe: (D.notas || []).length > 0,
+      total, notas: doPeriodo.length, ticket: doPeriodo.length ? total / doPeriodo.length : 0,
+      clientes: listaClientes.length, clientesNovos: novos.length, valorClientesNovos: novos.reduce((s2, c) => s2 + c.valor, 0),
+      topClientes: listaClientes, porSegmento, porVendedor, porCidade, porMes,
+      topProdutosValor: listaProdutos.slice().sort((a, b) => b.valor - a.valor),
+      topProdutosQtd: listaProdutos.slice().sort((a, b) => b.quantidade - a.quantidade),
+      canceladas: (D.notas || []).filter(n => n.cancelada && noPeriodo(diaLocal(n.emitida_em), p)).length
+    };
   }
 
   // ------------------------------------------------------------ dashboard / relatórios
@@ -649,7 +761,8 @@
     normaliza, digitos, chaveNome, linkWhatsApp, linkTelefone, formataCNPJ, cnpjValido, casaBusca, iniciais,
     primeiroNome, aplicaModelo, linkGoogleAgenda, totalItem, totalItens, indexa, probabilidade,
     situacaoEfetiva, situacaoTarefa, alertas, dashboard, duplicadosEmpresas, duplicadosContatos, mesclaCampos,
-    buscaGlobal, csvParse, csvGera, numeroBR, dataPlanilha
+    buscaGlobal, csvParse, csvGera, numeroBR, dataPlanilha,
+    cfopDeVenda, notaDeVenda, sugereSegmento, NOMES_SEGMENTO, faturamento
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

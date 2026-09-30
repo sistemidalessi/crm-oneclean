@@ -25,13 +25,25 @@ dados precisavam vir de lá. A migração é o caminho mais sensível do sistema
 
 - Endereço: https://sistemidalessi.github.io/crm-oneclean/ (GitHub Pages, branch `main`, raiz).
 - Supabase: organização **OneClean**, projeto **OneClean CRM**, ref `udhigavckigciqnicgyy`
-  (sa-east-1), criado em 29/09/2026. Schema aplicado (migrations `crm_schema_v2` e
-  `crm_empresas_le_propria_linha`), Edge Function `crm-usuarios` publicada (verify_jwt ligado).
+  (sa-east-1), criado em 29/09/2026. Schema aplicado (migrations `crm_schema_v2`,
+  `crm_empresas_le_propria_linha` e, em 30/09, `crm_notas_fiscais`), Edge Function `crm-usuarios` publicada (verify_jwt ligado).
   Permissões atacadas no banco real (vendedor A × vendedor B × de fora × anon), tudo barrado.
 - Esta é a cópia viva do código. A origem foi `sistemi-dalessi/crm/`, que fica só
   como histórico; mudança nova entra aqui.
 
-## ONDE PARAMOS (29/09/2026, noite) — retomar daqui
+## ONDE PARAMOS (30/09/2026, manhã) — retomar daqui
+
+- **Feito hoje:** Relatórios com "Total vendido" e linha "Total da equipe" na tabela por
+  vendedor; **importação de notas fiscais (XML/ZIP da NF-e)** e seção **Faturamento** nos
+  Relatórios (top 10 clientes e produtos, segmento, vendedor, cidade, por mês); notas na
+  ficha do cliente; "Preencher segmento pelo nome" em Configurações → Origens, segmentos,
+  motivos. Tabelas `crm_notas`/`crm_nota_itens` no banco real, RLS atacada localmente e
+  gravação testada no banco real (desfeita). **Nenhuma nota importada ainda** — o
+  Anderson vai trazer os XML.
+- Na base real nenhuma empresa tem segmento e só 59 têm CNPJ: a importação das notas é
+  o que vai completar o CNPJ; depois, rodar o "Preencher pelo nome".
+
+## Registro de 29/09/2026, noite
 
 - **Importação do Agendor feita** no banco real: 2.045 empresas, 28 pessoas, 3.141
   negócios, 5.537 tarefas. Conferida com o relatório do Agendor de setembro (Funil de
@@ -62,8 +74,8 @@ dados precisavam vir de lá. A migração é o caminho mais sensível do sistema
 
 - **Estático, sem build, sem npm.** Scripts clássicos (não módulos) carregados em
   ordem no `index.html`, compartilhando `window.CRM`, `CRMRegras`, `CRMDados`,
-  `CRMPlanilha`, `CRMXlsx`. Abrir o `index.html` direto já funciona (modo local).
-- **Camadas:** `regras.js` e `planilha.js` são **puras** (rodam no Node, com teste);
+  `CRMPlanilha`, `CRMNfe`, `CRMXlsx`. Abrir o `index.html` direto já funciona (modo local).
+- **Camadas:** `regras.js`, `planilha.js` e `nfe.js` são **puras** (rodam no Node, com teste);
   `dados.js` é a única que fala com banco; `ui.js` só interface genérica;
   `app.js` núcleo; `telas.js`/`fichas.js`/`ajustes.js` as telas.
 - **Dados em memória:** carrega todas as tabelas no login (paginando de 1000 em
@@ -118,6 +130,31 @@ dados precisavam vir de lá. A migração é o caminho mais sensível do sistema
   **Não trocar pelo SheetJS do npm**: a 0.18.5 tem vulnerabilidades conhecidas e a
   versão corrigida só existe no CDN deles. CSV: tenta UTF-8, cai para Windows-1252
   (CSV salvo pelo Excel brasileiro).
+
+## Notas fiscais (NF-e) e faturamento
+
+- `nfe.js` (puro, testado em `testes/nfe.test.js`): `lerXml` lê nfeProc/NFe/NFC-e e o evento
+  de cancelamento (110111) por regex — o XML é gerado por máquina e regular; sem DOMParser
+  para rodar no Node. `planeja` devolve o mesmo formato de plano do importador (a tela de
+  conferência e a gravação são as mesmas).
+- Chave de 44 dígitos é única no banco: reimportar não duplica; cancelamento que chega
+  depois só marca `cancelada`. Emitente = CNPJ mais frequente nas notas de saída; nota de
+  entrada, de outra empresa, de devolução (finNFe 4) ou não autorizada fica de fora.
+- Cliente: CNPJ/CPF → razão social → nome → nome antes do " | " (o Agendor da OneClean
+  grava "Empresa | Contato"). Achou: completa CNPJ/razão social e vira "cliente". Não
+  achou: cria como cliente, com `criado_em` = data da 1ª nota e segmento sugerido
+  (`R.sugereSegmento`, por palavras do nome). Produto do catálogo por código ou nome
+  (opcional; só itens de CFOP de venda).
+- Venda = CFOP 5/6/7 com grupo 1 ou 4 (`R.cfopDeVenda`); remessa, bonificação e "outras
+  saídas" não entram nos totais nem no top de produtos. `R.faturamento` faz o relatório
+  (top clientes, segmento, produtos por valor e quantidade, vendedor = responsável pelo
+  cliente, cidades, por mês); `R.indexa` passa as "compras anteriores" da empresa a vir
+  das notas quando ela tem nota (senão, dos negócios ganhos).
+- RLS: gestor importa e corrige; vendedor lê as notas das empresas que vê (`crm_ve_nota`
+  para os itens). Mesclar empresas leva as notas junto.
+- Volume: as notas e os itens também carregam na memória no login. Com dezenas de
+  milhares de itens ainda vai; se passar de ~100 mil itens, agregar no servidor (view)
+  em vez de trazer item a item.
 
 ## Segurança (lições da auditoria de 11/09/2026 aplicadas)
 

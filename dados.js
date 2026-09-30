@@ -12,7 +12,7 @@
 
   // Ordem importa: pais antes de filhos (importação/upsert respeita as FKs).
   const TABELAS = ['usuarios', 'config', 'etapas', 'opcoes', 'produtos', 'modelos', 'metas', 'filtros',
-    'empresas', 'contatos', 'negocios', 'negocio_itens', 'propostas', 'atividades'];
+    'empresas', 'contatos', 'negocios', 'negocio_itens', 'propostas', 'atividades', 'notas', 'nota_itens'];
   const CHAVE = { usuarios: 'user_id' };
   const chave = t => CHAVE[t] || 'id';
 
@@ -39,18 +39,21 @@
     etapas: { funil: 'Vendas', ordem: 0, probabilidade: 0 },
     opcoes: { ordem: 0 },
     modelos: { canal: 'whatsapp', corpo: '' },
-    metas: { valor: 0 }
+    metas: { valor: 0 },
+    notas: { cancelada: false, valor_total: 0, valor_produtos: 0 },
+    nota_itens: { quantidade: 0, valor_unitario: 0, valor_total: 0, ordem: 0 }
   };
 
   // Filhos apagados junto (no Supabase é o "on delete cascade"/"set null").
   const CASCATA = {
-    empresas: [['contatos', 'empresa_id', 'apaga'], ['negocios', 'empresa_id', 'apaga'], ['atividades', 'empresa_id', 'apaga']],
+    empresas: [['contatos', 'empresa_id', 'apaga'], ['negocios', 'empresa_id', 'apaga'], ['atividades', 'empresa_id', 'apaga'], ['notas', 'empresa_id', 'solta']],
+    notas: [['nota_itens', 'nota_id', 'apaga']],
     negocios: [['negocio_itens', 'negocio_id', 'apaga'], ['propostas', 'negocio_id', 'apaga'], ['atividades', 'negocio_id', 'solta']],
     contatos: [['negocios', 'contato_id', 'solta'], ['atividades', 'contato_id', 'solta']],
     usuarios: [['metas', 'usuario_id', 'apaga'], ['filtros', 'usuario_id', 'apaga'], ['empresas', 'responsavel_id', 'solta'],
       ['negocios', 'responsavel_id', 'solta'], ['atividades', 'responsavel_id', 'solta']],
     etapas: [['negocios', 'etapa_id', 'solta']],
-    produtos: [['negocio_itens', 'produto_id', 'solta']]
+    produtos: [['negocio_itens', 'produto_id', 'solta'], ['nota_itens', 'produto_id', 'solta']]
   };
 
   // ================================================================ Local

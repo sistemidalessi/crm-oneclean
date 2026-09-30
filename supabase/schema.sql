@@ -252,6 +252,46 @@ create table if not exists public.crm_atividades (
   atualizado_em  timestamptz not null default now()
 );
 
+-- Notas fiscais de venda (NF-e importada do XML): base dos relatórios de faturamento
+-- (quem mais comprou, produtos, segmentos) e das "compras anteriores" do cliente.
+-- Só gestor importa; o vendedor vê as notas das empresas que ele vê.
+create table if not exists public.crm_notas (
+  id             uuid primary key default gen_random_uuid(),
+  chave          text not null check (chave ~ '^[0-9]{44}$'),
+  numero         bigint,
+  serie          text,
+  emitida_em     timestamptz not null,
+  empresa_id     uuid references public.crm_empresas(id) on delete set null,
+  cliente_doc    text,
+  cliente_nome   text,
+  cidade         text,
+  uf             text,
+  natureza       text,
+  valor_produtos numeric(14,2) not null default 0,
+  valor_total    numeric(14,2) not null default 0,
+  cancelada      boolean not null default false,
+  criado_por     uuid default auth.uid(),
+  criado_em      timestamptz not null default now(),
+  atualizado_em  timestamptz not null default now()
+);
+
+create table if not exists public.crm_nota_itens (
+  id             uuid primary key default gen_random_uuid(),
+  nota_id        uuid not null references public.crm_notas(id) on delete cascade,
+  ordem          int not null default 0,
+  produto_id     uuid references public.crm_produtos(id) on delete set null,
+  codigo         text,
+  descricao      text not null check (length(btrim(descricao)) > 0),
+  ncm            text,
+  cfop           text,
+  unidade        text,
+  quantidade     numeric(14,4) not null default 0,
+  valor_unitario numeric(16,6) not null default 0,
+  valor_total    numeric(14,2) not null default 0,
+  criado_em      timestamptz not null default now(),
+  atualizado_em  timestamptz not null default now()
+);
+
 -- Histórico de alterações (só o trigger escreve; só gestor lê).
 create table if not exists public.crm_historico (
   id          bigint generated always as identity primary key,
@@ -281,6 +321,9 @@ create unique index if not exists crm_atividades_ext_uq on public.crm_atividades
 create unique index if not exists crm_etapas_ext_uq  on public.crm_etapas (externo_id) where externo_id is not null;
 create unique index if not exists crm_produtos_ext_uq on public.crm_produtos (externo_id) where externo_id is not null;
 create index if not exists crm_historico_empresa_idx on public.crm_historico (empresa_id, quando desc);
+create unique index if not exists crm_notas_chave_uq  on public.crm_notas (chave);
+create index if not exists crm_notas_empresa_idx     on public.crm_notas (empresa_id, emitida_em);
+create index if not exists crm_nota_itens_nota_idx   on public.crm_nota_itens (nota_id);
 
 -- =================================================================== visibilidade
 create or replace function public.crm_ve_empresa(e uuid)
@@ -295,6 +338,12 @@ create or replace function public.crm_ve_negocio(n uuid)
 returns boolean language sql stable security definer set search_path = public as $$
   select exists (select 1 from public.crm_negocios x where x.id = n
                  and (public.crm_eh_gestor() or x.responsavel_id = auth.uid() or public.crm_ve_empresa(x.empresa_id)));
+$$;
+
+create or replace function public.crm_ve_nota(n uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.crm_notas x where x.id = n
+                 and (public.crm_eh_gestor() or (x.empresa_id is not null and public.crm_ve_empresa(x.empresa_id))));
 $$;
 
 create or replace function public.crm_edita_negocio(n uuid)
@@ -360,7 +409,7 @@ declare
 begin
   foreach t in array array['crm_usuarios','crm_config','crm_etapas','crm_opcoes','crm_produtos','crm_modelos',
                            'crm_metas','crm_filtros','crm_empresas','crm_contatos','crm_negocios',
-                           'crm_negocio_itens','crm_propostas','crm_atividades']
+                           'crm_negocio_itens','crm_propostas','crm_atividades','crm_notas','crm_nota_itens']
   loop
     execute format('drop trigger if exists %I on public.%I', t || '_atualizado_em', t);
     execute format('create trigger %I before update on public.%I for each row execute function public.crm_toca_atualizado_em()',
@@ -474,15 +523,26 @@ create policy altera on public.crm_atividades for update to authenticated
 create policy apaga on public.crm_atividades for delete to authenticated
   using (public.crm_eh_gestor() or (public.crm_eh_membro() and (responsavel_id = auth.uid() or criado_por = auth.uid())));
 
+-- notas fiscais: gestor importa e corrige; vendedor lê as das empresas que vê.
+create policy le on public.crm_notas for select to authenticated
+  using (public.crm_eh_gestor() or (empresa_id is not null and public.crm_ve_empresa(empresa_id)));
+create policy grava on public.crm_notas for insert to authenticated with check (public.crm_eh_gestor());
+create policy altera on public.crm_notas for update to authenticated using (public.crm_eh_gestor()) with check (public.crm_eh_gestor());
+create policy apaga on public.crm_notas for delete to authenticated using (public.crm_eh_gestor());
+create policy le on public.crm_nota_itens for select to authenticated using (public.crm_ve_nota(nota_id));
+create policy grava on public.crm_nota_itens for insert to authenticated with check (public.crm_eh_gestor());
+create policy altera on public.crm_nota_itens for update to authenticated using (public.crm_eh_gestor()) with check (public.crm_eh_gestor());
+create policy apaga on public.crm_nota_itens for delete to authenticated using (public.crm_eh_gestor());
+
 -- histórico: só gestor lê.
 create policy le on public.crm_historico for select to authenticated using (public.crm_eh_gestor());
 
 -- =================================================================== permissões de função
 revoke all on function public.crm_papel(), public.crm_eh_membro(), public.crm_eh_gestor(), public.crm_eh_admin(),
-  public.crm_ve_empresa(uuid), public.crm_ve_negocio(uuid), public.crm_edita_negocio(uuid),
+  public.crm_ve_empresa(uuid), public.crm_ve_negocio(uuid), public.crm_ve_nota(uuid), public.crm_edita_negocio(uuid),
   public.crm_proximo_vendedor() from public, anon;
 grant execute on function public.crm_papel(), public.crm_eh_membro(), public.crm_eh_gestor(), public.crm_eh_admin(),
-  public.crm_ve_empresa(uuid), public.crm_ve_negocio(uuid), public.crm_edita_negocio(uuid),
+  public.crm_ve_empresa(uuid), public.crm_ve_negocio(uuid), public.crm_ve_nota(uuid), public.crm_edita_negocio(uuid),
   public.crm_proximo_vendedor() to authenticated;
 revoke all on function public.crm_toca_atualizado_em(), public.crm_marca_etapa() from public, anon, authenticated;
 

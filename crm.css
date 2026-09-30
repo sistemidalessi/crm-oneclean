@@ -434,3 +434,12 @@ body.arrastando-card .zonas-fim { display: grid; grid-template-columns: 1fr 1fr;
   .colunas { grid-template-columns: 1fr; }
   .usu-nome { display: none; }
 }
+.aviso-notas { background: var(--azul-fundo); border-radius: 10px; padding: 10px 14px; margin: 10px 0 14px; }
+.aviso-notas p { margin: 0 0 6px; }
+.aviso-notas ul { margin: 0 0 8px; padding-left: 18px; }
+.titulo-secao { margin: 24px 0 10px; font-size: 1.1rem; }
+.notas-cliente details { border-bottom: 1px solid var(--borda); padding: 5px 0; }
+.notas-cliente summary { cursor: pointer; display: flex; gap: 8px; align-items: baseline; font-size: .88rem; }
+.notas-cliente summary strong { margin-left: auto; }
+.notas-cliente ul { margin: 4px 0 2px; padding-left: 16px; font-size: .8rem; color: var(--suave); }
+.tabela td .link { text-align: left; }

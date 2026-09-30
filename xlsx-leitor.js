@@ -19,7 +19,7 @@
     for (let i = b.length - 22; i >= Math.max(0, b.length - 65557); i--) {
       if (dv.getUint32(i, true) === 0x06054b50) { fim = i; break; }
     }
-    if (fim < 0) throw new Error('arquivo não é um .xlsx válido');
+    if (fim < 0) throw new Error('arquivo não é um .xlsx ou .zip válido');
     const total = dv.getUint16(fim + 10, true);
     let p = dv.getUint32(fim + 16, true);
     const arquivos = {};
@@ -93,5 +93,13 @@
     return { abas: abas.map(a => a.nome), linhas };
   }
 
-  window.CRMXlsx = { lerXlsx };
+  // Todos os arquivos de um .zip cujo nome casa com o filtro: [{ nome, texto }].
+  async function lerZipTextos(arquivo, filtro) {
+    const zip = await lerZip(await arquivo.arrayBuffer());
+    const out = [];
+    for (const nome of zip.nomes) if (!filtro || filtro.test(nome)) out.push({ nome, texto: await zip.texto(nome) });
+    return out;
+  }
+
+  window.CRMXlsx = { lerXlsx, lerZipTextos };
 })();

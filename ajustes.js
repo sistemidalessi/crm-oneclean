@@ -3,7 +3,7 @@
    duplicados e histórico de alterações. */
 (function () {
   'use strict';
-  const R = window.CRMRegras, CRM = window.CRM, P = window.CRMPlanilha, DD = window.CRMDados;
+  const R = window.CRMRegras, CRM = window.CRM, P = window.CRMPlanilha, DD = window.CRMDados, N = window.CRMNfe;
   const { $, $$, esc } = CRM;
   const E = () => CRM.estado;
 
@@ -112,8 +112,26 @@
     const l = E().D.opcoes.filter(o => o.tipo === tipo).sort((a, b) => a.ordem - b.ordem || a.nome.localeCompare(b.nome, 'pt-BR'));
     return '<section class="cartao"><h2>' + esc(titulo) + ' <small>' + l.length + '</small></h2><div class="etiquetas">' +
       l.map(o => '<span class="etiqueta-edit">' + esc(o.nome) + '<button type="button" class="mini" data-acao="opcao-editar" data-id="' + esc(o.id) + '" title="Editar">✎</button></span>').join('') +
-      '</div><p><button type="button" class="btn sec" data-acao="opcao-nova" data-id="' + tipo + '">+ Adicionar</button></p></section>';
+      '</div><p><button type="button" class="btn sec" data-acao="opcao-nova" data-id="' + tipo + '">+ Adicionar</button>' +
+      (tipo === 'segmento' ? ' <button type="button" class="btn sec" data-acao="segmentos-sugerir">Preencher pelo nome das empresas</button>' : '') + '</p>' +
+      (tipo === 'segmento' ? '<p class="dica">Sugere o segmento de quem está sem (escola, indústria, condomínio, saúde…) pelo nome e pela razão social. Mostra quantas de cada antes de gravar; quem já tem segmento não muda.</p>' : '') +
+      '</section>';
   }).join('');
+
+  async function sugerirSegmentos() {
+    const sem = E().D.empresas.filter(e => !e.segmento);
+    const grupos = new Map();
+    sem.forEach(e => { const s = R.sugereSegmento(e.nome, e.razao_social); if (s) { if (!grupos.has(s)) grupos.set(s, []); grupos.get(s).push(e.id); } });
+    if (!grupos.size) { CRM.toast('Nenhuma sugestão: ' + sem.length + ' empresa(s) sem segmento e sem pista no nome.'); return; }
+    const linhas = [...grupos.entries()].sort((a, b) => b[1].length - a[1].length).map(([s, l]) => s + ': ' + l.length);
+    const total = [...grupos.values()].reduce((n, l) => n + l.length, 0);
+    if (!confirm('Preencher o segmento de ' + total + ' de ' + sem.length + ' empresa(s) sem segmento?\n\n' + linhas.join('\n') +
+      '\n\nAs outras ' + (sem.length - total) + ' ficam sem (o nome não dá pista). Dá para corrigir depois na ficha ou em massa na lista de Empresas.')) return;
+    const existentes = new Set(E().D.opcoes.filter(o => o.tipo === 'segmento').map(o => o.nome));
+    for (const s of grupos.keys()) if (!existentes.has(s)) await CRM.inserir('opcoes', { tipo: 'segmento', nome: s, ordem: R.NOMES_SEGMENTO.indexOf(s) + 1 });
+    for (const [s, ids] of grupos) await CRM.atualizarVarios('empresas', ids, { segmento: s });
+    CRM.toast('Segmento preenchido em ' + total + ' empresa(s).');
+  }
 
   function formOpcao(o, tipo) {
     CRM.abrirForm({
@@ -313,11 +331,17 @@
       '<ol class="passos"><li>No computador do escritório, rode <code>node crm/ferramentas/agendor-exportar.js SEU_TOKEN</code> (o token fica no Agendor em Menu → Integrações).</li>' +
       '<li>Ele gera o arquivo <code>agendor-exportado-AAAA-MM-DD.json</code>. Escolha esse arquivo aqui:</li></ol>' +
       '<input type="file" id="arqAgendor" accept=".json,application/json"></section>' +
-      '<section class="cartao"><h2>2. Planilha (Excel ou CSV)</h2><p>Serve para a exportação em Excel do Agendor ou qualquer outra planilha. As colunas são reconhecidas pelo nome e você confere antes de importar.</p>' +
+      '<section class="cartao"><h2>2. Notas fiscais (XML da NF-e)</h2><p>Traz as vendas faturadas: quem comprou, quando, quanto e quais produtos. Alimenta o relatório de faturamento ' +
+      '(top clientes, produtos mais vendidos, vendas por segmento) e as "compras anteriores" de cada cliente.</p>' +
+      '<p>Escolha os <strong>XML</strong> (pode selecionar vários de uma vez) ou o <strong>.zip</strong> que o sistema de notas ou a contabilidade exporta. ' +
+      'Os XML de cancelamento, se vierem juntos, marcam a nota como cancelada.</p>' +
+      '<input type="file" id="arqNotas" multiple accept=".xml,.zip,text/xml,application/xml,application/zip">' +
+      '<p class="dica">O cliente é reconhecido pelo CNPJ, pela razão social ou pelo nome; se ainda não estiver no CRM, é cadastrado como cliente. Notas de entrada, de outra empresa e devoluções ficam de fora. Rodar de novo não duplica.</p></section>' +
+      '<section class="cartao"><h2>3. Planilha (Excel ou CSV)</h2><p>Serve para a exportação em Excel do Agendor ou qualquer outra planilha. As colunas são reconhecidas pelo nome e você confere antes de importar.</p>' +
       '<p>O que tem na planilha: <select id="tipoImport">' + CRM.opcoesHTML(TIPOS_IMPORT, 'empresas') + '</select></p>' +
       '<input type="file" id="arqPlanilha" accept=".xlsx,.csv,.txt,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">' +
       '<p class="dica">Ordem recomendada: produtos → empresas → pessoas → negócios → tarefas. Negócio ou pessoa de empresa que ainda não existe cria a empresa.</p></section>' +
-      '<section class="cartao"><h2>3. Backup deste CRM</h2><p>Arquivo gerado em "Exportar e backup".' + (CRM.store().modo === 'local' ? ' No modo local, restaurar SUBSTITUI tudo o que está neste navegador.' : ' No banco, registros com o mesmo código são atualizados e nada é apagado.') + '</p>' +
+      '<section class="cartao"><h2>4. Backup deste CRM</h2><p>Arquivo gerado em "Exportar e backup".' + (CRM.store().modo === 'local' ? ' No modo local, restaurar SUBSTITUI tudo o que está neste navegador.' : ' No banco, registros com o mesmo código são atualizados e nada é apagado.') + '</p>' +
       '<input type="file" id="arqBackup" accept=".json,application/json"></section>';
   };
 
@@ -330,6 +354,8 @@
       imp = { origem: 'Agendor', tipos, usuariosAgendor: tipos.usuarios, op: { responsavelPadrao: null, sobrescrever: false, mapaResponsaveis: {} } };
       planejar();
     });
+    const arqNotas = $('#arqNotas');
+    if (arqNotas) arqNotas.addEventListener('change', () => lerNotas([...arqNotas.files]).catch(CRM.falhou));
     liga('arqPlanilha', async f => {
       const tipo = $('#tipoImport').value;
       let linhas;
@@ -369,6 +395,7 @@
     $$('[data-resp]').forEach(s => s.addEventListener('change', () => { imp.op.mapaResponsaveis[s.dataset.resp] = s.value; planejar(); }));
     const rp = $('#respPadrao'); if (rp) rp.addEventListener('change', () => { imp.op.responsavelPadrao = rp.value || null; planejar(); });
     const so = $('#sobrescrever'); if (so) so.addEventListener('change', () => { imp.op.sobrescrever = so.checked; planejar(); });
+    const cp = $('#cadastrarProdutos'); if (cp) cp.addEventListener('change', () => { imp.op.cadastrarProdutos = cp.checked; planejar(); });
   };
 
   function telaMapear() {
@@ -382,13 +409,46 @@
       '</tbody></table><p><button type="button" class="btn" id="btnConferir">Conferir o que vai acontecer</button> <button type="button" class="btn sec" data-acao="import-cancelar">Cancelar</button></p></section>';
   }
 
+  async function lerNotas(arquivos) {
+    if (!arquivos.length) return;
+    const docs = [];
+    let lidos = 0, outros = 0;
+    const le = t => { lidos++; const d = N.lerXml(t); if (d) docs.push(d); else outros++; };
+    CRM.toast('Lendo ' + arquivos.length + ' arquivo(s)…');
+    for (const f of arquivos) {
+      if (/\.zip$/i.test(f.name)) {
+        if (typeof DecompressionStream === 'undefined') throw new Error('este navegador não abre .zip; descompacte e escolha os XML');
+        (await window.CRMXlsx.lerZipTextos(f, /\.xml$/i)).forEach(x => le(x.texto));
+      } else le(await f.text());
+    }
+    if (!docs.length) throw new Error('nenhuma NF-e encontrada (' + lidos + ' arquivo(s) lido(s)). Confira se são os XML das notas.');
+    imp = { origem: 'Notas fiscais', notas: docs, arquivosLidos: lidos, arquivosOutros: outros, op: { responsavelPadrao: null, cadastrarProdutos: true, mapaResponsaveis: {} } };
+    planejar();
+  }
+
   function planejar() {
-    imp.plano = P.planeja(E().D, imp.tipos, imp.op);
+    imp.plano = imp.notas ? N.planeja(E().D, imp.notas, imp.op) : P.planeja(E().D, imp.tipos, imp.op);
     imp.etapa = 'conferir';
     CRM.render();
   }
 
-  const NOMES_IMPORT = { opcoes: 'itens de lista', etapas: 'etapas do funil', produtos: 'produtos', empresas: 'empresas', contatos: 'pessoas', negocios: 'negócios', negocio_itens: 'itens de negócio', atividades: 'tarefas/histórico' };
+  const NOMES_IMPORT = { opcoes: 'itens de lista', etapas: 'etapas do funil', produtos: 'produtos', empresas: 'empresas', contatos: 'pessoas', negocios: 'negócios', negocio_itens: 'itens de negócio', atividades: 'tarefas/histórico', notas: 'notas fiscais', nota_itens: 'itens das notas' };
+
+  function resumoNotas() {
+    const r = imp.plano.resumoNotas;
+    if (!r) return '';
+    const fora = [[r.jaImportadas, 'já importada(s) antes'], [r.canceladas, 'cancelada(s) (entram marcadas, fora dos totais)'], [r.entradas, 'de entrada (compra)'],
+      [r.deOutraEmpresa, 'emitida(s) por outra empresa'], [r.devolucoes, 'de devolução'], [r.naoAutorizadas, 'não autorizada(s) pela SEFAZ']].filter(x => x[0]);
+    return '<div class="aviso-notas"><p><strong>' + r.novas + ' nota(s) nova(s)</strong>' + (r.valor ? ' · <strong>' + esc(R.moeda(r.valor)) + '</strong>' : '') +
+      (r.de ? ' · de ' + esc(R.dataBR(r.de)) + ' a ' + esc(R.dataBR(r.ate)) : '') +
+      (r.emitente ? '<br><small>Emitente: ' + esc(r.emitente.nome) + ' · ' + esc(r.emitente.doc) + ' · ' + imp.arquivosLidos + ' arquivo(s) lido(s)' +
+        (imp.arquivosOutros ? ', ' + imp.arquivosOutros + ' sem NF-e' : '') + '</small>' : '') + '</p><ul>' +
+      '<li>' + r.empresasLigadas + ' cliente(s) já cadastrado(s) reconhecido(s)' + (r.cnpjsCompletados ? ', ' + r.cnpjsCompletados + ' com o CNPJ completado agora' : '') + '</li>' +
+      '<li>' + r.empresasNovas + ' cliente(s) novo(s) serão cadastrados como "cliente", com o segmento sugerido pelo nome</li>' +
+      (r.produtosNovos ? '<li>' + r.produtosNovos + ' produto(s) novo(s) no catálogo (código, nome e último preço)</li>' : '') +
+      fora.map(x => '<li>' + x[0] + ' ' + esc(x[1]) + '</li>').join('') + '</ul>' +
+      '<label class="campo check"><input type="checkbox" id="cadastrarProdutos"' + (imp.op.cadastrarProdutos !== false ? ' checked' : '') + '> Cadastrar no catálogo de produtos os itens que ainda não estão lá</label></div>';
+  }
 
   function telaConferir() {
     const pl = imp.plano;
@@ -401,14 +461,14 @@
       return '<tr><td>' + esc(nomes[t]) + '</td><td class="num">' + criar + '</td><td class="num">' + atualiza + '</td><td class="num">' + (c.ignorados || 0) + '</td></tr>';
     }).join('');
     const opts = CRM.opcoesUsuarios();
-    return '<section class="cartao"><h2>O que vai acontecer · ' + esc(imp.origem) + '</h2>' +
+    return '<section class="cartao"><h2>O que vai acontecer · ' + esc(imp.origem) + '</h2>' + resumoNotas() +
       '<table class="tabela"><thead><tr><th></th><th class="num">Criar</th><th class="num">Completar existentes</th><th class="num">Ignorar</th></tr></thead><tbody>' + (linhas || '<tr><td colspan="4">Nada a fazer (tudo já existe).</td></tr>') + '</tbody></table>' +
-      '<div class="campos"><label class="campo"><span>Quem não tiver responsável (ou não for reconhecido) fica com</span><select id="respPadrao">' + CRM.opcoesHTML([['', '(sem responsável — só gestores veem)']].concat(opts), imp.op.responsavelPadrao || '') + '</select></label>' +
-      '<label class="campo check"><input type="checkbox" id="sobrescrever"' + (imp.op.sobrescrever ? ' checked' : '') + '> Sobrescrever dados já preenchidos (padrão: só completa o que está vazio)</label></div>' +
+      '<div class="campos"><label class="campo"><span>' + (imp.notas ? 'Clientes novos (que ainda não estão no CRM) ficam com' : 'Quem não tiver responsável (ou não for reconhecido) fica com') + '</span><select id="respPadrao">' + CRM.opcoesHTML([['', '(sem responsável — só gestores veem)']].concat(opts), imp.op.responsavelPadrao || '') + '</select></label>' +
+      (imp.notas ? '' : '<label class="campo check"><input type="checkbox" id="sobrescrever"' + (imp.op.sobrescrever ? ' checked' : '') + '> Sobrescrever dados já preenchidos (padrão: só completa o que está vazio)</label>') + '</div>' +
       (pl.semResponsavel.length ? '<h3>Responsáveis que não reconheci</h3><p class="dica">Crie os usuários antes (Equipe e permissões) ou diga para quem vai a carteira de cada um:</p><table class="tabela"><tbody>' +
         pl.semResponsavel.map(s => '<tr><td>' + esc(s.nome) + ' <small>(' + s.qtd + ' registro(s))</small></td><td><select data-resp="' + esc(R.normaliza(s.nome)) + '">' +
           CRM.opcoesHTML([['', '(responsável padrão acima)']].concat(opts), imp.op.mapaResponsaveis[R.normaliza(s.nome)] || '') + '</select></td></tr>').join('') + '</tbody></table>' : '') +
-      (pl.ignorados.length ? '<p class="dica">' + pl.ignorados.length + ' linha(s) serão ignoradas (sem nome, sem empresa ou já importadas). <button type="button" class="link" data-acao="import-ignorados">baixar a lista</button></p>' : '') +
+      (pl.ignorados.length ? '<p class="dica">' + pl.ignorados.length + (imp.notas ? ' nota(s) ficam de fora (motivos acima).' : ' linha(s) serão ignoradas (sem nome, sem empresa ou já importadas).') + ' <button type="button" class="link" data-acao="import-ignorados">baixar a lista</button></p>' : '') +
       '<p><button type="button" class="btn ouro" id="btnImportar">Importar agora</button> <button type="button" class="btn sec" data-acao="import-cancelar">Cancelar</button></p></section>';
   }
 
@@ -417,7 +477,7 @@
     imp.etapa = 'rodando';
     CRM.render();
     const prog = t => { imp.progresso = t; const el = $('#progressoImport'); if (el) el.textContent = t; };
-    const ordem = ['opcoes', 'etapas', 'produtos', 'empresas', 'contatos', 'negocios', 'negocio_itens', 'atividades'];
+    const ordem = ['opcoes', 'etapas', 'produtos', 'empresas', 'contatos', 'negocios', 'negocio_itens', 'atividades', 'notas', 'nota_itens'];
     const inicio = Date.now();
     imp.resultado = { criados: {}, atualizados: 0, erros: [] };
     try {
@@ -493,7 +553,7 @@
       const s = new Set(outros);
       const patch = R.mesclaCampos(alvo, outros.map(CRM.empresa), ['nome', 'responsavel_id', 'situacao']);
       if (Object.keys(patch).length) await CRM.atualizar('empresas', marcado, patch);
-      for (const t of ['contatos', 'negocios', 'atividades']) await CRM.atualizarVarios(t, E().D[t].filter(x => s.has(x.empresa_id)).map(x => x.id), { empresa_id: marcado });
+      for (const t of ['contatos', 'negocios', 'atividades', 'notas']) await CRM.atualizarVarios(t, E().D[t].filter(x => s.has(x.empresa_id)).map(x => x.id), { empresa_id: marcado });
       await CRM.removerVarios('empresas', outros);
       await CRM.auto.sistema(marcado, null, 'Cadastros mesclados neste: ' + outros.length);
     } else {
@@ -612,6 +672,7 @@
     'funil-novo': () => CRM.abrirForm({ titulo: 'Novo funil', intro: 'Cria o funil com uma primeira etapa; depois acrescente as outras.', campos: [{ nome: 'funil', rotulo: 'Nome do funil', obrigatorio: true, largo: true }, { nome: 'nome', rotulo: 'Primeira etapa', obrigatorio: true, largo: true }],
       aoSalvar: v => CRM.inserir('etapas', { funil: v.funil, nome: v.nome, ordem: 1, probabilidade: 10 }) }),
     'opcao-nova': t => formOpcao(null, t),
+    'segmentos-sugerir': () => sugerirSegmentos().catch(CRM.falhou),
     'opcao-editar': id => formOpcao(E().D.opcoes.find(o => o.id === id)),
     'produto-novo': () => formProduto(null),
     'produto-editar': id => formProduto(CRM.produto(id)),

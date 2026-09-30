@@ -88,7 +88,10 @@
   CRM.inserirVarios = async (t, lista, prog, aoErro) => {
     if (!lista.length) return [];
     const rs = await store.inserirVarios(t, lista, prog, aoErro);
-    rs.forEach(r => troca(t, r)); reindexa(); CRM.render(); return rs;
+    // Índice por chave: com dezenas de milhares de itens de nota, troca() um a um ficaria quadrático.
+    const k = DD.chave(t), pos = new Map(E.D[t].map((x, i) => [x[k], i]));
+    rs.forEach(r => { const i = pos.get(r[k]); if (i != null) E.D[t][i] = r; else { pos.set(r[k], E.D[t].length); E.D[t].push(r); } });
+    reindexa(); CRM.render(); return rs;
   };
   CRM.atualizar = async (t, id, patch) => { const r = await store.atualizar(t, id, patch); troca(t, r); reindexa(); CRM.render(); return r; };
   CRM.atualizarVarios = async (t, ids, patch) => {
