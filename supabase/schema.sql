@@ -646,6 +646,22 @@ create policy grava on public.crm_nota_itens for insert to authenticated with ch
 create policy altera on public.crm_nota_itens for update to authenticated using (public.crm_eh_gestor()) with check (public.crm_eh_gestor());
 create policy apaga on public.crm_nota_itens for delete to authenticated using (public.crm_eh_gestor());
 
+-- estoque (CSV do FKM, tela Gestão → Compras): só o administrador.
+create table if not exists public.crm_estoque (
+  codigo        text primary key check (length(btrim(codigo)) > 0),
+  descricao     text not null,
+  unidade       text,
+  localizacao   text,
+  quantidade    numeric(14,3) not null default 0,
+  custo_total   numeric(16,2) not null default 0,
+  atualizado_em timestamptz not null default now()
+);
+alter table public.crm_estoque enable row level security;
+revoke all on public.crm_estoque from anon, public;
+grant select, insert, update, delete on public.crm_estoque to authenticated;
+drop policy if exists tudo on public.crm_estoque;
+create policy tudo on public.crm_estoque for all to authenticated using (public.crm_eh_admin()) with check (public.crm_eh_admin());
+
 -- integrações: só o administrador; o registro das entregas o gestor também lê.
 create policy tudo on public.crm_integracoes for all to authenticated using (public.crm_eh_admin()) with check (public.crm_eh_admin());
 create policy le on public.crm_integracao_log for select to authenticated using (public.crm_eh_gestor());

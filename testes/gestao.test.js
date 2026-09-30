@@ -61,3 +61,24 @@ test('compras: demanda prevista, curva ABC e tendência', () => {
   // Previsão curta (7 dias) não pega a padaria (próxima 10/10).
   assert.equal(G.compras(D, ix, cfg, HOJE, 7).demanda.length, 0);
 });
+
+test('estoque do FKM: leitura do CSV e sugestão de pedido', () => {
+  const csv = 'CODIGO;NOME DO PRODUTO;UNIDADE;LOCALIZAÇÃO;CUSTO;ESTOQUE\r\n010001.0;DETERGENTE 5L;GL;;25,00;1,000\r\n010002.0;PAPEL TOALHA;FD;;1.000,00;100,000\r\n010003.0;CERA PARADA;GL;;300,00;10,000\r\n010004.0;SEM SALDO;UN;;0,00;-3,000\r\n';
+  const est = G.lerEstoque(csv);
+  assert.deepEqual(est.map(x => [x.codigo, x.quantidade, x.custo_total]), [['010001', 1, 25], ['010002', 100, 1000], ['010003', 10, 300], ['010004', -3, 0]]);
+  assert.throws(() => G.lerEstoque('A;B\r\n1;2'), /CÓDIGO e ESTOQUE/);
+
+  const D = base();
+  D.nota_itens.forEach(it => { it.codigo = it.descricao === 'DETERGENTE 5L' ? '010001' : '010002'; });
+  const ix = R.indexa(D), cfg = R.config({});
+  const c = G.compras(D, ix, cfg, HOJE, 30, est.map(x => Object.assign({ atualizado_em: '2026-09-30T18:00:00Z' }, x)));
+  // Detergente: previsão 4 (padaria); consumo 90 dias = 4 notas × 4 = 16 → 5,3 em 30 dias (vale o maior);
+  // tem 1 → comprar 5.
+  const det = c.sugestao.find(g => g.codigo === '010001');
+  assert.equal(det.saldo, 1); assert.equal(det.comprar, 5); assert.equal(det.custoUnit, 25);
+  // Papel: tem 100, precisa ~10 → não entra na sugestão.
+  assert.ok(!c.sugestao.some(g => g.codigo === '010002'));
+  assert.deepEqual(c.parado.map(x => x.codigo), ['010003'], 'cera tem saldo e não vendeu em 90 dias');
+  assert.equal(c.estoque.produtos, 4); assert.equal(c.estoque.negativos, 1); assert.equal(c.estoque.valor, 1325);
+  assert.equal(c.estoque.valorSugestao, 125);
+});

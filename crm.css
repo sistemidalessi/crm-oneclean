@@ -497,3 +497,5 @@ body.arrastando-card .zonas-fim { display: grid; grid-template-columns: 1fr 1fr;
 .g-top .link { justify-self: start; text-align: left; padding: 0; }
 .seq-passo { border: 1px solid var(--borda); border-radius: 10px; padding: 8px 12px 4px; margin: 0 0 12px; }
 .seq-passo legend { font-weight: 700; padding: 0 6px; }
+label.btn.arquivo { position: relative; overflow: hidden; cursor: pointer; }
+label.btn.arquivo input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }

@@ -316,6 +316,34 @@
   };
 
   // Integrações (vigia de notas): chaves (só admin vê, pela RLS) e registro das entregas.
+  // Estoque (CSV do FKM): lido e gravado só pela tela Gestão (administrador). Gravar = retrato
+  // novo: atualiza por código e apaga o que saiu do relatório.
+  Supa.prototype.estoque = async function () {
+    const out = [];
+    for (let de = 0; ; de += PAGINA) {
+      const l = unwrap(await this.sb.from('crm_estoque').select('*').order('codigo').range(de, de + PAGINA - 1));
+      out.push(...l);
+      if (l.length < PAGINA) return out;
+    }
+  };
+  Supa.prototype.salvarEstoque = async function (lista, aoProgresso) {
+    const agora = new Date().toISOString();
+    const linhas = lista.map(x => Object.assign({}, x, { atualizado_em: agora }));
+    for (let i = 0; i < linhas.length; i += LOTE) {
+      unwrap(await this.sb.from('crm_estoque').upsert(linhas.slice(i, i + LOTE), { onConflict: 'codigo', defaultToNull: false }));
+      if (aoProgresso) aoProgresso(Math.min(i + LOTE, linhas.length), linhas.length);
+    }
+    unwrap(await this.sb.from('crm_estoque').delete().lt('atualizado_em', agora));
+    return linhas.length;
+  };
+  Local.prototype.estoque = async function () { try { return JSON.parse(localStorage.getItem('crm_estoque') || '[]'); } catch (e) { return this._estoque || []; } };
+  Local.prototype.salvarEstoque = async function (lista) {
+    const l = lista.map(x => Object.assign({}, x, { atualizado_em: new Date().toISOString() }));
+    this._estoque = l;
+    try { localStorage.setItem('crm_estoque', JSON.stringify(l)); } catch (e) { /* só na memória */ }
+    return l.length;
+  };
+
   Supa.prototype.integracoes = async function () {
     const [c, l] = await Promise.all([
       this.sb.from('crm_integracoes').select('id,nome,filtro,ativo,ultimo_uso,criado_em').order('criado_em'),

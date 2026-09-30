@@ -301,8 +301,17 @@ dados precisavam vir de lá. A migração é o caminho mais sensível do sistema
 - Compras: curva ABC de 12 meses (o item que cruza os 80% é A; B até 95%), demanda prevista
   (clientes com ritmo cuja próxima compra cai em 15/30/45/60 dias, inclusive os atrasados que
   não sumiram, somando os itens habituais) e tendência (90 dias × 90 anteriores, ±25%, com
-  pelo menos 10 unidades). Não conhece estoque (fica no FKM): próximo passo seria importar o
-  estoque/custo do FKM para sugerir o pedido ao fornecedor. Exporta demanda e ABC em CSV.
+  pelo menos 10 unidades). Exporta demanda, ABC, pedido e parado em CSV.
+- **Estoque do FKM** (30/09/2026): o FKM (SIFWin, COBOL Micro Focus, dados em .DAT/.IDX — não dá
+  para ler direto) exporta a posição de estoque em CSV Windows-1252 em
+  `\\Servidor\sistema\SIFN\dados\exp_estoque.csv` (`CODIGO;NOME DO PRODUTO;UNIDADE;LOCALIZAÇÃO;CUSTO;ESTOQUE`,
+  código "010503.0" = "010503" da nota; CUSTO = custo total do saldo). Botão "Atualizar estoque"
+  na Gestão → `CRMGestao.lerEstoque` → `store.salvarEstoque` (tabela `crm_estoque`, só admin,
+  retrato: upsert por código e apaga o que saiu). Sugestão de pedido: precisa = max(previsão dos
+  clientes, consumo médio de 90 dias × horizonte); comprar = precisa − saldo (negativo conta 0).
+  Também "Em falta" (vendeu em 90 dias e saldo ≤ 0) e "Estoque parado" (saldo sem venda em 90 dias).
+  Em 30/09: 1.686 produtos, R$ 312,5 mil a custo, 40 com saldo negativo. Próximo passo: o vigia
+  mandar o CSV sozinho quando o arquivo mudar (hoje é pelo botão).
 
 ## Sequência do lead novo (30/09/2026)
 
