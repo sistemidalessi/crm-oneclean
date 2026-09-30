@@ -644,17 +644,47 @@
     return unirGrupos([...grupos.values()].filter(s => s.size > 1));
   }
 
+  // Nome da empresa como conjunto de palavras, sem o contato depois do " | " (o Agendor da
+  // OneClean grava "Empresa | Contato") e sem palavras genéricas ("colégio", "escola", "Ltda"...).
+  const GENERICAS = new Set(['colegio', 'escola', 'centro', 'educacional', 'educacao', 'ens', 'ensino', 'infantil', 'creche', 'bercario', 'hotel',
+    'ltda', 'me', 'epp', 'eireli', 'sa', 'de', 'da', 'do', 'das', 'dos', 'e', 'a', 'o', 'prezados', 'atendimento', 'direcao']);
+  // Palavras que indicam outra unidade do mesmo grupo: nesses casos não é o mesmo cliente.
+  const UNIDADE = new Set(['unidade', 'unid', 'und', 'filial', 'matriz', 'sede', 'junior', 'i', 'ii', 'iii', 'iv', 'v', 'vi', '1', '2', '3', '4', '5']);
+  function palavrasDoNome(nome) {
+    const base = String(nome || '').split('|')[0];
+    return new Set(normaliza(base).replace(/[^a-z0-9]+/g, ' ').split(' ').filter(w => w && !GENERICAS.has(w)));
+  }
+  // Mesmo cliente pelo nome: as palavras de um estão todas no outro, sem marca de unidade na diferença.
+  function nomesCompativeis(a, b) {
+    const A = palavrasDoNome(a), B = palavrasDoNome(b);
+    const [menor, maior] = A.size <= B.size ? [A, B] : [B, A];
+    if (![...menor].some(w => w.length >= 3)) return false;
+    if (![...menor].every(w => maior.has(w))) return false;
+    return ![...maior].some(w => !menor.has(w) && UNIDADE.has(w));
+  }
+  // Par "quase certo": mesmo CNPJ, ou mesmo e-mail E telefone E nome compatível. Só e-mail e
+  // telefone não bastam: aqui uma síndica ou compradora atende vários condomínios e filiais.
+  function mesmoCliente(a, b) {
+    if (chaveDoc(a.cnpj) && chaveDoc(a.cnpj) === chaveDoc(b.cnpj)) return true;
+    const tels = e => [e.telefone, e.whatsapp].map(chaveTelefone).filter(Boolean);
+    return !!chaveEmail(a.email) && chaveEmail(a.email) === chaveEmail(b.email) &&
+      tels(a).some(t => tels(b).indexOf(t) !== -1) && nomesCompativeis(a.nome, b.nome);
+  }
+
   // Por que um grupo de empresas parece o mesmo cliente, do mais certo para o menos:
-  // forca 3 = mesmo CNPJ ou mesmo e-mail E telefone; 2 = só telefone ou só e-mail; 1 = só o nome.
+  // forca 3 = todos os pares são "mesmoCliente"; 2 = mesmo telefone ou e-mail; 1 = só o nome.
   function motivoDuplicado(grupo) {
     const par = (f) => grupo.some((a, i) => grupo.some((b, j) => j > i && f(a, b)));
+    const todos = (f) => grupo.every((a, i) => grupo.every((b, j) => j <= i || f(a, b)));
     const tels = e => [e.telefone, e.whatsapp].map(chaveTelefone).filter(Boolean);
     const doc = par((a, b) => chaveDoc(a.cnpj) && chaveDoc(a.cnpj) === chaveDoc(b.cnpj));
     const tel = par((a, b) => tels(a).some(t => tels(b).indexOf(t) !== -1));
     const mail = par((a, b) => chaveEmail(a.email) && chaveEmail(a.email) === chaveEmail(b.email));
     const nome = par((a, b) => chaveNome(a.nome).length >= 3 && chaveNome(a.nome) === chaveNome(b.nome));
-    const itens = [doc && 'mesmo CNPJ/CPF', mail && tel ? 'mesmo e-mail e telefone' : null, !mail && tel && 'mesmo telefone', mail && !tel && 'mesmo e-mail', nome && 'mesmo nome'].filter(Boolean);
-    return { texto: itens.join(' · '), forca: doc || (mail && tel) ? 3 : tel || mail ? 2 : 1,
+    const certo = todos(mesmoCliente);
+    const itens = [doc && 'mesmo CNPJ/CPF', mail && tel ? 'mesmo e-mail e telefone' : null, !mail && tel && 'mesmo telefone', mail && !tel && 'mesmo e-mail', nome && 'mesmo nome',
+      !certo && mail && tel && !doc ? 'nomes diferentes (outra unidade ou cliente do mesmo contato?)' : null].filter(Boolean);
+    return { texto: itens.join(' · '), forca: certo ? 3 : tel || mail || doc ? 2 : 1,
       carteirasDiferentes: new Set(grupo.map(e => e.responsavel_id || '')).size > 1 };
   }
 
@@ -816,7 +846,7 @@
     primeiroNome, aplicaModelo, linkGoogleAgenda, totalItem, totalItens, indexa, probabilidade,
     situacaoEfetiva, situacaoTarefa, alertas, dashboard, duplicadosEmpresas, duplicadosContatos, mesclaCampos,
     buscaGlobal, csvParse, csvGera, numeroBR, dataPlanilha,
-    cfopDeVenda, notaDeVenda, sugereSegmento, NOMES_SEGMENTO, faturamento, chaveDoc, chaveTelefone, chaveEmail, achaDuplicados, motivoDuplicado
+    cfopDeVenda, notaDeVenda, sugereSegmento, NOMES_SEGMENTO, faturamento, chaveDoc, chaveTelefone, chaveEmail, achaDuplicados, motivoDuplicado, nomesCompativeis, mesmoCliente
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

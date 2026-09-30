@@ -241,3 +241,15 @@ test('cadastro duplicado: CNPJ, telefone (com ou sem DDD e o 9) e e-mail; pessoa
     { id: 'c', nome: 'Gama', telefone: '(19) 99999-1111' }, { id: 'd', nome: 'Delta', whatsapp: '99999-1111' }, { id: 'e', nome: 'Épsilon' }]);
   assert.deepEqual(g.map(l => l.map(e => e.id).sort().join('')).sort(), ['ab', 'cd']);
 });
+
+test('duplicado "quase certo" exige nome compatível: síndica de vários condomínios e filiais não são o mesmo cliente', () => {
+  const e = (id, nome, email, tel) => ({ id, nome, email, whatsapp: tel, responsavel_id: 'u1' });
+  const mesmo = [e('a', '- Colégio Horizonte | Marta', 'marta@x.com', '+5511925463494'), e('b', '- HORIZONTE COLEGIO | Marta', 'marta@x.com', '(11) 2546-3494')];
+  assert.equal(R.motivoDuplicado(mesmo).forca, 3);
+  const condominios = [e('c', 'Condominio Edificio Aurora DEBORA', 'debora@adm.com', '11999990000'), e('d', 'Debora Condominio Edificio Solar', 'debora@adm.com', '11999990000')];
+  assert.equal(R.motivoDuplicado(condominios).forca, 2);
+  assert.equal(R.nomesCompativeis('Loja Exemplo - Diadema', 'Loja Exemplo Canindé'), false, 'filiais');
+  assert.equal(R.nomesCompativeis('- ESCOLA X UNIDADE I | Ana', '- ESCOLA X UNIDADE III | Ana'), false, 'unidades');
+  assert.equal(R.nomesCompativeis('Hotel Sol | João', 'Hotel Sol | Julia'), true, 'mesmo hotel, contatos diferentes');
+  assert.equal(R.nomesCompativeis('Ana Colégio Novo Rumo', 'NOVO RUMO | Ana'), true);
+});

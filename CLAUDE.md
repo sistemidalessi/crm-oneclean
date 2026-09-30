@@ -154,10 +154,16 @@ dados precisavam vir de lá. A migração é o caminho mais sensível do sistema
   `R.chaveDoc/chaveTelefone/chaveEmail` e `crm_doc/crm_tel/crm_mail`; mudar um, mudar o outro.
 - Só confere o que **mudou**: os repetidos que vieram do Agendor (55 grupos por e-mail e
   82 por telefone em 30/09) continuam editáveis; juntar em Configurações → Duplicados (que
-  agora agrupa também por telefone e e-mail, mostra o motivo — `R.motivoDuplicado`: "quase
-  certo" = mesmo CNPJ ou mesmo e-mail E telefone — e a carteira de cada um, pré-marca o
-  cadastro com mais negócios/histórico e tem "Mesclar os quase certos"). Em 30/09 havia 144
-  pares (86 e-mail+telefone, 46 só telefone, 12 só e-mail; 54 em carteiras diferentes). A mescla apaga os repetidos **antes** de
+  agora agrupa também por telefone e e-mail, mostra o motivo e a carteira de cada um,
+  pré-marca o cadastro com mais negócios/histórico e tem "Mesclar os quase certos").
+  **"Quase certo" (`R.mesmoCliente`) = mesmo CNPJ, ou mesmo e-mail E telefone E nome
+  compatível** (`R.nomesCompativeis`: palavras do nome sem o contato após "|" e sem genéricas,
+  uma contida na outra, sem marca de unidade na diferença). **Só e-mail + telefone NÃO basta**:
+  na base da OneClean a mesma síndica/compradora atende vários condomínios, filiais e
+  unidades (achado ao revisar os nomes em 30/09, antes de mesclar). Em 30/09: 144 pares por
+  e-mail/telefone; **31 grupos mesclados (34 cadastros saíram, 2.045 → 2.011)** com backup em
+  `crm_backup.mescla_empresas` (schema fora da API: empresa inteira + ids dos filhos movidos,
+  para desfazer); o resto (unidades, filiais, condomínios) ficou para conferência manual. A mescla apaga os repetidos **antes** de
   completar o que fica, senão a trava recusaria.
 - Dado de **pessoa de contato** igual só **avisa** (síndico/comprador atende várias empresas).
 - `crm_duplicado_empresa()` (RPC, só membro) devolve nome + responsável para o aviso
