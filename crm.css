@@ -473,3 +473,25 @@ body.arrastando-card .zonas-fim { display: grid; grid-template-columns: 1fr 1fr;
 .fila-botoes { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .fila-botoes .flex { flex: 1; }
 .fila-vazia p { margin: 0; }
+/* Gestão (administrador) */
+.g-duas { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.g-duas > .cartao { min-width: 0; }
+.g-base { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 0; }
+.g-base div { display: grid; gap: 2px; }
+.g-base dt { color: var(--suave); font-size: .85rem; }
+.g-base dd { margin: 0; font-size: 1.4rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.g-base dd small { display: block; font-size: .8rem; font-weight: 500; color: var(--suave); }
+.g-top { margin: 0; padding-left: 22px; display: grid; gap: 8px; }
+.g-top li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; align-items: baseline; }
+.g-top li .barra { grid-column: 1 / -1; }
+.g-top li > small { grid-column: 1 / -1; color: var(--suave); }
+.g-top .num { font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
+.g-top .num small { color: var(--suave); font-weight: 400; }
+.g-tend { list-style: none; margin: 0 0 10px; padding: 0; display: grid; gap: 6px; }
+.g-tend li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 10px; }
+.g-tend li small { grid-column: 1 / -1; color: var(--suave); }
+.g-sobe { color: var(--verde); font-weight: 600; white-space: nowrap; }
+.g-desce { color: var(--vermelho); font-weight: 600; white-space: nowrap; }
+.cartao h2 select { font-size: .85rem; }
+@media (max-width: 860px) { .g-duas, .g-base { grid-template-columns: 1fr; } }
+.g-top .link { justify-self: start; text-align: left; padding: 0; }

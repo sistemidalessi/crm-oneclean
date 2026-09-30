@@ -205,6 +205,7 @@ Invoke-RestMethod -Method Post -Uri https://SEU-PROJETO.supabase.co/functions/v1
 | `dados.js` | Banco: modo local (localStorage) e Supabase (paginado de 1000 em 1000). |
 | `ui.js`, `app.js` | Interface base; núcleo (estado, permissões, automações, busca, atalhos, login). |
 | `telas.js`, `fichas.js`, `ajustes.js` | Telas; fichas e formulários; configurações e importação. |
+| `gestao.js` | Aba Gestão (só administrador): resumo do negócio e o braço de compras (demanda prevista, curva ABC, tendência). |
 | `supabase/schema.sql` | Tabelas, índices, triggers (histórico), RLS, rodízio. |
 | `supabase/functions/crm-usuarios/` | Edge Function do administrador (criar usuário, senha). |
 | `supabase/functions/crm-notas/` | Edge Function que recebe os XML do vigia (chave de integração, regras do `nfe.js` num commit fixo). |

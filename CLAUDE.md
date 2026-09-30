@@ -287,6 +287,23 @@ dados precisavam vir de lá. A migração é o caminho mais sensível do sistema
   resolvido (tarefa concluída, contato registrado, retorno agendado); "Pular" vale só até
   recarregar. Conta "contatos registrados hoje" e o progresso desde que a fila foi aberta.
 
+## Gestão — só administrador (30/09/2026)
+
+- `gestao.js` (carregado depois de `telas.js`): parte pura `CRMGestao.painel` / `CRMGestao.compras`
+  (testada em `testes/gestao.test.js`) e a aba "Gestão" (última do menu; o filtro em
+  `renderAgora` esconde de quem não é admin e a tela se recusa a desenhar para os outros).
+  Não mexe em `regras.js` de propósito: mudar `regras.js` obriga a refixar a `crm-notas`.
+- Painel: faturamento do mês pelas notas × o mesmo ponto do mês passado, projeção, ano,
+  clientes (novos = 1ª nota no mês), negócios abertos e conversão (`R.dashboard`), equipe
+  (faturamento pela carteira do cliente, meta, contatos no mês e hoje, atrasadas, clientes
+  ativos 90 dias; admin fora da tabela), tops do ano (`R.faturamento`), fiéis que sumiram
+  (ritmo, mais de 2 ciclos sem comprar; "em risco" = total comprado ÷ meses como cliente).
+- Compras: curva ABC de 12 meses (o item que cruza os 80% é A; B até 95%), demanda prevista
+  (clientes com ritmo cuja próxima compra cai em 15/30/45/60 dias, inclusive os atrasados que
+  não sumiram, somando os itens habituais) e tendência (90 dias × 90 anteriores, ±25%, com
+  pelo menos 10 unidades). Não conhece estoque (fica no FKM): próximo passo seria importar o
+  estoque/custo do FKM para sugerir o pedido ao fornecedor. Exporta demanda e ABC em CSV.
+
 ## Vigia de notas (importação automática) — não quebrar
 
 - `ferramentas/vigia-notas.js` roda no servidor do emissor, lê a pasta `Autorizados`

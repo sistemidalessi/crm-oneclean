@@ -267,7 +267,7 @@
   // ------------------------------------------------------------ render
   const ABAS = [
     ['inicio', 'Início', '⌂'], ['fila', 'Fila do dia', '▶'], ['funil', 'Funil', '▥'], ['empresas', 'Empresas', '▦'], ['pessoas', 'Pessoas', '☺'],
-    ['negocios', 'Negócios', '$'], ['agenda', 'Atividades', '▣'], ['relatorios', 'Relatórios', '▲'], ['ajustes', 'Configurações', '⚙']
+    ['negocios', 'Negócios', '$'], ['agenda', 'Atividades', '▣'], ['relatorios', 'Relatórios', '▲'], ['ajustes', 'Configurações', '⚙'], ['gestao', 'Gestão', '◆']
   ];
   CRM.ABAS = ABAS;
 
@@ -280,7 +280,7 @@
 
   function renderAgora() {
     if (!E.eu) return;
-    const abas = ABAS.filter(a => a[0] !== 'ajustes' || CRM.ehGestor());
+    const abas = ABAS.filter(a => (a[0] !== 'ajustes' || CRM.ehGestor()) && (a[0] !== 'gestao' || CRM.ehAdmin()));
     if (!abas.some(a => a[0] === E.aba)) E.aba = 'inicio';
     const al = R.alertas(E.D, E.ix, E.cfg, CRM.hoje(), CRM.carteira());
     const nTarefas = al.atrasadas.length + al.deHoje.length;
