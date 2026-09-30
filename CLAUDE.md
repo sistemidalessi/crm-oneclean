@@ -55,6 +55,18 @@ dados precisavam vir de lá. A migração é o caminho mais sensível do sistema
   backup em `crm_backup.mescla_empresas` (schema fora da API). Os demais ficam para
   conferência manual em Configurações → Duplicados.
 
+- **Compras — em pausa por decisão do Anderson (30/09, fim da tarde), retomar depois:**
+  1. Papel novo **comprador**: vê só a parte de compras (demanda, sugestão de pedido, falta,
+     parado, ABC, tendência), com filtros e pesquisa (por produto, código, curva, fornecedor/grupo
+     se o FKM exportar). Hoje Compras está dentro da Gestão, só admin; `crm_estoque` é só admin
+     na RLS — o papel novo precisa entrar em `crm_papel`/políticas e no teste de RLS.
+  2. Estoque automático: o FKM não agenda a exportação. Opções: o vigia manda o
+     `exp_estoque.csv` sozinho quando o arquivo muda (alguém ainda exporta à mão no FKM) +
+     lembrete para quem exporta (ex.: aviso na Gestão quando o estoque tiver mais de 3 dias, já
+     existe o selo "desatualizado"; e/ou tarefa recorrente para o comprador).
+- A extração final do Agendor foi iniciada em 30/09 ~16:40 no computador do Anderson (roteiro na
+  seção de reextração abaixo e no README).
+
 ## Registro de 30/09/2026, manhã
 
 - **Feito:** Relatórios com "Total vendido" e linha "Total da equipe" na tabela por
