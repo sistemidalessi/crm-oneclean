@@ -39,6 +39,8 @@
     leads_desde: '',            // AAAA-MM-DD: só lead cadastrado a partir daí conta como "sem atendimento" (vazio = todos)
     dias_inativo: 90,           // cliente sem compra há mais que isso = inativo
     ciclo_recompra_padrao: 30,  // dias até lembrar de recompra (a empresa pode ter o seu)
+    // Mensagem do botão "Recompra" (WhatsApp). {itens} = o que o cliente costuma levar.
+    modelo_recompra: '{saudacao} Aqui é {vendedor_primeiro_nome}, da {minha_empresa}. Pelo seu ritmo de compras, já está chegando a hora de repor:\n{itens}\n\nPosso separar o de sempre para você?',
     rodizio: true,              // lead sem responsável vai para o próximo vendedor
     auto_tarefa_lead: true,     // lead novo ganha tarefa "primeiro contato" para hoje
     auto_pos_venda: true,       // venda ganha tarefa de pós-venda
@@ -281,9 +283,11 @@
         if (!r.proxima || a.data_hora < r.proxima.data_hora) r.proxima = a;
       }
     });
+    const datasGanhos = new Map();
     (D.negocios || []).forEach(n => {
       const r = resumo.get(n.empresa_id); if (!r) return;
       if (n.status === 'ganho') {
+        if (n.fechado_em) { if (!datasGanhos.has(n.empresa_id)) datasGanhos.set(n.empresa_id, []); datasGanhos.get(n.empresa_id).push(n.fechado_em); }
         r.compras++; r.totalComprado += num(n.valor);
         if (n.fechado_em && (!r.ultimaCompra || n.fechado_em > r.ultimaCompra)) r.ultimaCompra = n.fechado_em;
         if (n.fechado_em && (!r.primeiraCompra || n.fechado_em < r.primeiraCompra)) r.primeiraCompra = n.fechado_em;
@@ -301,7 +305,69 @@
       Object.assign(r, { fonteCompras: 'notas', compras: vendas.length, totalComprado: vendas.reduce((s2, n) => s2 + num(n.valor_total), 0),
         primeiraCompra: datas[0] || null, ultimaCompra: datas[datas.length - 1] || null, datasCompras: datas });
     });
+    // Ritmo de compra de cada cliente (pelas notas; sem nota, pelos negócios ganhos).
+    resumo.forEach((r, id) => { r.ritmo = ritmoCompra(r.datasCompras || datasGanhos.get(id)); });
     return { porId, porEmpresa, porNegocio, porNota, resumo };
+  }
+
+  // ------------------------------------------------------------ recompra inteligente
+  // Ritmo = mediana dos intervalos entre as compras (compras a até 3 dias uma da outra contam
+  // como uma só). Precisa de 3 compras; fica entre 7 e 180 dias. Sem ritmo: null.
+  function ritmoCompra(datas) {
+    const d = [...new Set((datas || []).filter(Boolean).map(x => String(x).slice(0, 10)))].sort();
+    const juntas = [];
+    d.forEach(x => { if (!juntas.length || diasEntre(juntas[juntas.length - 1], x) > 3) juntas.push(x); });
+    if (juntas.length < 3) return null;
+    const g = juntas.slice(1).map((x, i) => diasEntre(juntas[i], x)).sort((a, b) => a - b);
+    const med = g.length % 2 ? g[(g.length - 1) / 2] : (g[g.length / 2 - 1] + g[g.length / 2]) / 2;
+    return Math.max(7, Math.min(180, Math.round(med)));
+  }
+
+  // Ciclo usado para lembrar da recompra: o da empresa (se alguém definiu), senão o ritmo
+  // calculado pelas compras, senão o padrão da configuração.
+  function cicloRecompra(e, r, cfg) {
+    return num(e && e.ciclo_recompra_dias) || (r && r.ritmo) || num(cfg.ciclo_recompra_padrao) || 30;
+  }
+
+  // O que o cliente costuma levar: itens de venda das últimas 6 notas; entra o que aparece em
+  // pelo menos metade delas (até 5 itens), com a quantidade mais comum.
+  function itensHabituais(ix, empresaId, max) {
+    const notas = (ix.porEmpresa.notas.get(empresaId) || []).filter(n => notaDeVenda(n, ix.porNota.get(n.id)))
+      .sort((a, b) => (a.emitida_em < b.emitida_em ? 1 : -1)).slice(0, 6);
+    if (!notas.length) return [];
+    const m = new Map();
+    notas.forEach(n => {
+      const vistos = new Set();
+      (ix.porNota.get(n.id) || []).filter(it => cfopDeVenda(it.cfop)).forEach(it => {
+        const k = it.produto_id || normaliza(it.descricao);
+        if (!k) return;
+        const x = m.get(k) || { produto_id: it.produto_id || null, descricao: it.descricao, unidade: it.unidade || '', notas: 0, qtds: [] };
+        if (!vistos.has(k)) { x.notas++; vistos.add(k); x.qtds.push(0); }
+        x.qtds[x.qtds.length - 1] += num(it.quantidade);
+        m.set(k, x);
+      });
+    });
+    const minimo = Math.max(1, Math.ceil(notas.length / 2));
+    const moda = l => {
+      const c = new Map(); l.forEach(q => c.set(q, (c.get(q) || 0) + 1));
+      return [...c.entries()].sort((a, b) => b[1] - a[1] || b[0] - a[0])[0][0];
+    };
+    return [...m.values()].filter(x => x.notas >= minimo).sort((a, b) => b.notas - a.notas || moda(b.qtds) - moda(a.qtds))
+      .slice(0, max || 5).map(x => ({ produto_id: x.produto_id, descricao: x.descricao, unidade: x.unidade, vezes: x.notas, de: notas.length, quantidade: moda(x.qtds) }));
+  }
+
+  // Descrição de nota ("DETERGENTE NEUTRO 5L") em texto de conversa ("Detergente neutro 5L").
+  function nomeDeItem(s) {
+    const t = String(s || '').trim().replace(/\s+/g, ' ');
+    if (t !== t.toUpperCase()) return t;
+    const un = { l: 'L', lt: 'L', lts: 'L', ml: 'ml', kg: 'kg', g: 'g', gr: 'g', grs: 'g', m: 'm', cm: 'cm', mm: 'mm' };
+    const l = t.toLowerCase().replace(/\b(\d+(?:[.,]\d+)?)\s?(lts|lt|l|ml|kg|grs|gr|g|cm|mm|m)\b/g, (m, n, u) => n + un[u]);
+    return l.charAt(0).toUpperCase() + l.slice(1);
+  }
+
+  // Lista de itens para a mensagem de recompra (uma linha por item).
+  function textoItens(itens) {
+    return (itens || []).map(it => '• ' + nomeDeItem(it.descricao) + (it.quantidade ? ' — ' + String(+Number(it.quantidade).toFixed(3)).replace('.', ',') + (it.unidade ? ' ' + String(it.unidade).toUpperCase() : '') : '')).join('\n');
   }
 
   function probabilidade(n, etapa) {
@@ -365,13 +431,18 @@
       return !ult || diasEntre(diaLocal(ult), hoje) > cfg.dias_sem_contato;
     });
 
-    // Recompra: cliente cujo ciclo venceu (ou vence em 3 dias), sem negócio aberto nem tarefa.
+    // Recompra: cliente cujo ciclo (o ritmo dele, calculado pelas compras) venceu ou vence em
+    // 3 dias, sem negócio aberto nem tarefa. Passou de 2 ciclos e do prazo de inativo: já não é
+    // recompra, é cliente sumido (aparece como inativo). Os mais atrasados primeiro.
     const recompra = empresas.filter(e => {
       if (e.situacao !== 'cliente') return false;
       const r = ix.resumo.get(e.id);
       if (!r.ultimaCompra || r.abertos || r.proxima) return false;
-      const ciclo = num(e.ciclo_recompra_dias) || cfg.ciclo_recompra_padrao;
-      return diasEntre(r.ultimaCompra, hoje) >= ciclo - 3;
+      const ciclo = cicloRecompra(e, r, cfg), dias = diasEntre(r.ultimaCompra, hoje);
+      return dias >= ciclo - 3 && dias <= Math.max(2 * ciclo, num(cfg.dias_inativo) || 90);
+    }).sort((a, b) => {
+      const atraso = e => { const r = ix.resumo.get(e.id); return diasEntre(r.ultimaCompra, hoje) - cicloRecompra(e, r, cfg); };
+      return atraso(b) - atraso(a);
     });
 
     const inativos = empresas.filter(e => situacaoEfetiva(e, ix.resumo.get(e.id), cfg, hoje) === 'inativo');
@@ -862,7 +933,7 @@
     inicioSemana, periodo, noPeriodo, proximaRecorrencia,
     normaliza, digitos, chaveNome, linkWhatsApp, linkTelefone, formataCNPJ, cnpjValido, casaBusca, iniciais,
     primeiroNome, aplicaModelo, linkGoogleAgenda, totalItem, totalItens, indexa, probabilidade,
-    situacaoEfetiva, situacaoTarefa, alertas, ultimoMovimento, dashboard, duplicadosEmpresas, duplicadosContatos, mesclaCampos,
+    situacaoEfetiva, situacaoTarefa, alertas, ultimoMovimento, ritmoCompra, cicloRecompra, itensHabituais, nomeDeItem, textoItens, dashboard, duplicadosEmpresas, duplicadosContatos, mesclaCampos,
     buscaGlobal, csvParse, csvGera, numeroBR, dataPlanilha,
     cfopDeVenda, notaDeVenda, sugereSegmento, NOMES_SEGMENTO, faturamento, chaveDoc, chaveTelefone, chaveEmail, achaDuplicados, motivoDuplicado, nomesCompativeis, mesmoCliente
   };

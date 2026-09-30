@@ -104,13 +104,30 @@
               '<strong>' + esc(n.titulo) + '</strong><small>' + esc(CRM.nomeEmpresa(n.empresa_id)) + ' · ' + esc(R.moeda(n.valor)) + ' · ' +
               esc((CRM.etapa(n.etapa_id) || {}).nome || '') + ' há ' + R.diasEntre(R.diaLocal(n.etapa_desde || n.criado_em), hoje) + ' dias</small></button>' + acoesRapidas(n.empresa_id) + '</li>').join('') + '</ul>' : vazio('Todos os negócios abertos estão andando.')) +
           '</section>' + esquecidos(al.negociosEsquecidos, hoje) +
-          '<section class="cartao" id="alerta-recompra"><h2>Hora da recompra <small>ciclo de compra vencendo</small></h2>' +
-            listaEmpresasCurta(al.recompra, e => 'última compra ' + esc(R.dataBR(CRM.resumo(e.id).ultimaCompra)) + ' · ciclo ' + (R.num(e.ciclo_recompra_dias) || E().cfg.ciclo_recompra_padrao) + ' dias') + '</section>' +
+          '<section class="cartao" id="alerta-recompra"><h2>Hora da recompra <small>pelo ritmo de compra de cada cliente</small></h2>' + listaRecompra(al.recompra, hoje) + '</section>' +
           '<section class="cartao" id="alerta-clientes-sem-contato"><h2>Clientes sem contato <small>há ' + E().cfg.dias_sem_contato + '+ dias</small></h2>' +
             listaEmpresasCurta(al.clientesSemContato, e => { const r = CRM.resumo(e.id); const u = r.ultimoContato || r.ultimaCompra; return u ? 'último contato ' + esc(R.dataBR(u)) : 'nenhum contato registrado'; }) + '</section>' +
         '</div></div>';
     }
   };
+
+  // Hora da recompra: ritmo do cliente, quando vence, o que costuma levar e o botão com a
+  // mensagem pronta (os mais atrasados primeiro).
+  function listaRecompra(lista, hoje) {
+    if (!lista.length) return vazio('Nenhum cliente na hora de repor. 👍');
+    return '<ul class="lista recompra">' + lista.slice(0, 10).map(e => {
+      const r = CRM.resumo(e.id), ciclo = R.cicloRecompra(e, r, E().cfg);
+      const falta = R.diasEntre(hoje, R.somaDias(r.ultimaCompra, ciclo));
+      const quando = falta > 0 ? 'vence em ' + falta + ' dia(s)' : falta === 0 ? 'vence hoje' : 'passou ' + (-falta) + ' dia(s)';
+      const itens = R.itensHabituais(E().ix, e.id, 3);
+      return '<li><button type="button" class="linha" data-acao="abrir-empresa" data-id="' + esc(e.id) + '"><strong>' + esc(e.nome) + '</strong>' +
+        '<small>' + (r.ritmo && !R.num(e.ciclo_recompra_dias) ? 'compra a cada ~' + ciclo + ' dias' : 'ciclo de ' + ciclo + ' dias') + ' · última ' + esc(R.dataBR(r.ultimaCompra)) + ' · ' +
+        (falta < 0 ? CRM.selo(quando, 'ambar') : esc(quando)) + (CRM.carteira() ? '' : ' · ' + esc(R.primeiroNome(CRM.nomeUsuario(e.responsavel_id)))) +
+        (itens.length ? '<br>costuma levar: ' + esc(itens.map(it => R.nomeDeItem(it.descricao)).join(', ')) : '') + '</small></button>' +
+        '<span class="acoes-rapidas"><button type="button" class="mini wa" data-acao="whatsapp-recompra" data-id="' + esc(e.id) + '" title="Abre o WhatsApp com a mensagem de recompra e agenda o retorno em 2 dias">Recompra</button></span>' +
+        acoesRapidas(e.id) + '</li>';
+    }).join('') + '</ul>' + (lista.length > 10 ? '<p class="mais">e mais ' + (lista.length - 10) + '…</p>' : '');
+  }
 
   // Negócios esquecidos (parados há mais de "dias_esquecido"): não entram no sino; ficam aqui,
   // fechados, para a limpeza — abrir um a um ou encerrar todos como perdidos de uma vez.

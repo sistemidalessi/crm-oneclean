@@ -263,6 +263,22 @@ dados precisavam vir de lá. A migração é o caminho mais sensível do sistema
 - Sino esperado depois disso: ~440 na equipe toda (atrasadas 141, parados ~156, clientes sem
   contato 83, recompra 59), antes ~2.050.
 
+## Recompra inteligente (30/09/2026)
+
+- `R.ritmoCompra(datas)`: mediana dos intervalos entre compras (compras a até 3 dias contam
+  como uma; precisa de 3; limitado a 7–180 dias). `R.indexa` grava `resumo.ritmo` (pelas
+  notas; sem nota, pelos negócios ganhos). `R.cicloRecompra(e, r, cfg)` = ciclo do cadastro
+  > ritmo > padrão — usado no aviso, no lembrete ao ganhar venda e nas telas.
+- Aviso "Hora da recompra": vence 3 dias antes do ciclo; some depois de 2 ciclos e do prazo de
+  inativo (vira cliente sumido); ordenado pelo atraso.
+- `R.itensHabituais(ix, empresaId)`: itens de venda (CFOP) das últimas 6 notas que aparecem em
+  pelo menos metade delas, até 5, com a quantidade mais comum. `R.textoItens` monta as linhas
+  "• Detergente neutro 5L — 4 GL" (`R.nomeDeItem` tira o caixa-alta da nota).
+- Botão "Recompra" (Início e ficha): WhatsApp com `cfg.modelo_recompra` (Configurações → Geral;
+  variáveis {saudacao} e {itens}, que também valem nos modelos de mensagem), registra no
+  histórico e agenda "Retorno da oferta de recompra" em 2 dias (tira o cliente da lista).
+- Em 30/09: 103 clientes com 3+ compras nas notas = 90% das notas; ritmo médio ~32 dias.
+
 ## Vigia de notas (importação automática) — não quebrar
 
 - `ferramentas/vigia-notas.js` roda no servidor do emissor, lê a pasta `Autorizados`

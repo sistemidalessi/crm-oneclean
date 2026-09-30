@@ -157,8 +157,10 @@
         '<section><h3>Compras e negócios anteriores</h3>' +
           (r.compras ? '<p class="resumo-compras"><strong>' + esc(R.moeda(r.totalComprado)) + '</strong> em ' + r.compras + ' compra(s) · ticket ' + esc(R.moeda(r.totalComprado / r.compras)) +
             '<br>última em ' + esc(R.dataBR(r.ultimaCompra)) + ' (' + R.diasEntre(r.ultimaCompra, CRM.hoje()) + ' dias)' +
-            (r.compras > 1 ? ' · compra a cada ~' + intervaloMedio(r.datasCompras || ganhos.map(n => n.fechado_em)) + ' dias' : '') +
-            (r.fonteCompras === 'notas' ? '<br><small>pelas notas fiscais</small>' : '') + '</p>' : '') +
+            (r.ritmo ? '<br>ritmo: compra a cada <strong>~' + r.ritmo + ' dias</strong> · próxima prevista ' + esc(R.dataBR(R.somaDias(r.ultimaCompra, R.cicloRecompra(e, r, E().cfg)))) +
+              (R.num(e.ciclo_recompra_dias) ? ' <small>(ciclo definido no cadastro: ' + R.num(e.ciclo_recompra_dias) + ' dias)</small>' : '')
+              : r.compras > 1 ? ' · compra a cada ~' + intervaloMedio(r.datasCompras || ganhos.map(n => n.fechado_em)) + ' dias' : '') +
+            (r.fonteCompras === 'notas' ? '<br><small>pelas notas fiscais</small>' : '') + '</p>' + itensDaFicha(e) : '') +
           (notas.length ? '<div class="notas-cliente"><h3>Notas fiscais <small>' + notas.length + '</small></h3>' + notas.slice(0, 15).map(itemNota).join('') +
             (notas.length > 15 ? '<p class="mais">mostrando as 15 mais recentes</p>' : '') + '</div>' : '') +
           (fechados.length ? '<ul class="lista">' + fechados.slice(0, 30).map(n => '<li><button type="button" class="linha" data-acao="abrir-negocio" data-id="' + esc(n.id) + '"><strong>' + esc(n.titulo) + '</strong>' +
@@ -175,6 +177,13 @@
     return '<details><summary>' + esc(R.dataBR(R.diaLocal(n.emitida_em))) + ' · NF ' + esc(n.numero || '') + (n.cancelada ? ' <span class="selo vermelho">cancelada</span>' : '') +
       '<strong>' + esc(R.moeda(n.valor_total)) + '</strong></summary><ul>' +
       itens.map(it => '<li>' + esc(R.numero(it.quantidade)) + ' ' + esc(it.unidade || '') + ' · ' + esc(it.descricao) + ' — ' + esc(R.moeda(it.valor_total)) + '</li>').join('') + '</ul></details>';
+  }
+
+  function itensDaFicha(e) {
+    const itens = R.itensHabituais(E().ix, e.id);
+    if (!itens.length) return '';
+    return '<div class="itens-habituais"><h3>Costuma levar <small>nas últimas ' + itens[0].de + ' compras</small> <button type="button" class="mini wa" data-acao="whatsapp-recompra" data-id="' + esc(e.id) + '">WhatsApp de recompra</button></h3><ul>' +
+      itens.map(it => '<li>' + esc(R.nomeDeItem(it.descricao)) + ' <small>' + esc(String(+Number(it.quantidade).toFixed(3)).replace('.', ',') + ' ' + (it.unidade || '')) + ' · em ' + it.vezes + ' de ' + it.de + '</small></li>').join('') + '</ul></div>';
   }
 
   function intervaloMedio(datasCompras) {
@@ -771,8 +780,13 @@
 
   // ------------------------------------------------------------ comunicação
   function variaveis(e, c) {
-    return { contato: c ? c.nome : '', primeiro_nome: R.primeiroNome(c ? c.nome : ''), empresa: e.nome, vendedor: E().eu.nome,
-      vendedor_primeiro_nome: R.primeiroNome(E().eu.nome), data: R.dataBR(CRM.hoje()), minha_empresa: CRM.nomeInstalacao() };
+    const pn = R.primeiroNome(c ? c.nome : '');
+    // "Sr. Carlos Silva" → "Sr. Carlos" (o tratamento sozinho não serve de saudação).
+    const trat = String(c ? c.nome : '').trim().match(/^((?:sra?|srta|dra?|d)\.?)\s+(\S+)/i);
+    const itens = R.textoItens(R.itensHabituais(E().ix, e.id));
+    return { contato: c ? c.nome : '', primeiro_nome: pn, empresa: e.nome, vendedor: E().eu.nome, saudacao: trat ? 'Olá, ' + trat[1] + ' ' + trat[2] + '!' : pn ? 'Olá, ' + pn + '!' : 'Olá!',
+      vendedor_primeiro_nome: R.primeiroNome(E().eu.nome), data: R.dataBR(CRM.hoje()), minha_empresa: CRM.nomeInstalacao(),
+      itens: itens || 'os produtos de sempre' };
   }
 
   function escolheContato(e, contatoId, pred) {
@@ -804,6 +818,20 @@
       window.open(R.linkWhatsApp(tel, texto), '_blank', 'noopener');
       registraAuto(e, c, 'whatsapp', (m ? 'Mensagem "' + m.nome + '" enviada pelo WhatsApp' : 'Conversa aberta no WhatsApp') + (c ? ' com ' + c.nome : '') + (texto ? ': ' + texto : ''));
     });
+  };
+
+  // Recompra: WhatsApp com a mensagem de recompra (itens habituais pelas notas) e uma tarefa de
+  // retorno em 2 dias — assim o cliente sai de "Hora da recompra" e ninguém esquece de cobrar a resposta.
+  fichas.whatsappRecompra = async (empresaId, el) => {
+    const e = CRM.empresa(empresaId); if (!e) return;
+    const c = escolheContato(e, el && el.dataset.contato, x => R.linkWhatsApp(x.whatsapp || x.celular || x.telefone));
+    const tel = telDe(e, c);
+    if (!R.linkWhatsApp(tel)) { CRM.toast('Sem número de WhatsApp com DDD nesta empresa.', true); return; }
+    const texto = R.aplicaModelo(E().cfg.modelo_recompra, variaveis(e, c));
+    window.open(R.linkWhatsApp(tel, texto), '_blank', 'noopener');
+    await registraAuto(e, c, 'whatsapp', 'Recompra oferecida pelo WhatsApp' + (c ? ' a ' + c.nome : '') + ': ' + texto);
+    await CRM.auto.tarefa({ empresa_id: e.id, contato_id: c ? c.id : null, tipo: 'whatsapp', descricao: 'Retorno da oferta de recompra',
+      data_hora: R.momento(R.somaDias(CRM.hoje(), 2), '09:00'), responsavel_id: e.responsavel_id || CRM.meuId() });
   };
 
   fichas.ligar = (empresaId, el) => {
@@ -926,6 +954,7 @@
     },
     'fechar-alteracoes': () => { $('#alteracoes').innerHTML = ''; },
     whatsapp: (id, el) => fichas.whatsapp(id, el),
+    'whatsapp-recompra': (id, el) => fichas.whatsappRecompra(id, el).catch(CRM.falhou),
     ligar: (id, el) => fichas.ligar(id, el),
     email: (id, el) => fichas.email(id, el),
     ganhar: () => fichas.formGanho(CRM.negocio(abertoNegocio)),

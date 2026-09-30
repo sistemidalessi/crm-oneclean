@@ -456,3 +456,6 @@ body.arrastando-card .zonas-fim { display: grid; grid-template-columns: 1fr 1fr;
 .cartao > details > summary { cursor: pointer; }
 .cartao > details > summary h2 { display: inline; margin: 0; }
 .cartao > details[open] > summary { margin-bottom: 8px; }
+.itens-habituais h3 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.itens-habituais ul { margin: 4px 0 10px; padding-left: 18px; }
+.itens-habituais li small { color: var(--suave); }

@@ -274,3 +274,40 @@ test('avisos sem a base antiga: leads a partir de uma data e negócios esquecido
   assert.equal(R.ultimoMovimento(D.negocios[2], ix2), '2026-09-10');
   assert.deepEqual(R.alertas(D, ix2, cfg, '2026-10-05', null).negociosEsquecidos, []);
 });
+
+test('recompra inteligente: ritmo, itens habituais e mensagem', () => {
+  // Ritmo = mediana dos intervalos; compras a até 3 dias contam como uma; precisa de 3 compras.
+  assert.equal(R.ritmoCompra(['2026-07-01', '2026-07-22', '2026-08-12', '2026-09-02']), 21);
+  assert.equal(R.ritmoCompra(['2026-07-01', '2026-07-02', '2026-07-22', '2026-08-12']), 21, 'entrega dividida conta como uma compra');
+  assert.equal(R.ritmoCompra(['2026-07-01', '2026-08-01']), null, 'duas compras não bastam');
+  assert.equal(R.ritmoCompra(['2026-01-01', '2026-01-05', '2026-01-09']), 7, 'no mínimo 7 dias');
+
+  const D = base();
+  D.empresas = [{ id: 'P', nome: 'Padaria Exemplo', situacao: 'cliente', responsavel_id: 'u1' }];
+  const nota = (id, dia, itens) => {
+    D.notas.push({ id, empresa_id: 'P', emitida_em: dia + 'T10:00:00-03:00', valor_total: 100, cancelada: false });
+    itens.forEach((it, i) => D.nota_itens.push(Object.assign({ id: id + i, nota_id: id, cfop: '5102' }, it)));
+  };
+  D.notas = []; D.nota_itens = [];
+  nota('n1', '2026-08-01', [{ descricao: 'DETERGENTE NEUTRO 5LTS', unidade: 'GL', quantidade: 4 }, { descricao: 'PAPEL TOALHA 1000FLS', unidade: 'FD', quantidade: 10 }]);
+  nota('n2', '2026-08-22', [{ descricao: 'DETERGENTE NEUTRO 5LTS', unidade: 'GL', quantidade: 4 }, { descricao: 'LUVA LATEX M', unidade: 'PR', quantidade: 2 }]);
+  nota('n3', '2026-09-12', [{ descricao: 'DETERGENTE NEUTRO 5LTS', unidade: 'GL', quantidade: 6 }, { descricao: 'PAPEL TOALHA 1000FLS', unidade: 'FD', quantidade: 10 },
+    { descricao: 'BRINDE', unidade: 'UN', quantidade: 1, cfop: '5910' }]);
+  const ix = R.indexa(D);
+  assert.equal(ix.resumo.get('P').ritmo, 21);
+  const itens = R.itensHabituais(ix, 'P');
+  assert.deepEqual(itens.map(i => [i.descricao, i.quantidade, i.vezes]), [['DETERGENTE NEUTRO 5LTS', 4, 3], ['PAPEL TOALHA 1000FLS', 10, 2]], 'luva (1 de 3) e brinde (não é venda) ficam de fora');
+  assert.equal(R.textoItens(itens), '• Detergente neutro 5L — 4 GL\n• Papel toalha 1000fls — 10 FD');
+
+  // Aviso: vence 3 dias antes do ritmo (12/09 + 21 = 03/10); com ciclo no cadastro, vale o cadastro.
+  const cfg = R.config({});
+  assert.deepEqual(R.alertas(D, ix, cfg, '2026-09-29', null).recompra, []);
+  assert.deepEqual(R.alertas(D, ix, cfg, '2026-09-30', null).recompra.map(e => e.id), ['P']);
+  assert.equal(R.cicloRecompra(Object.assign({}, D.empresas[0], { ciclo_recompra_dias: 45 }), ix.resumo.get('P'), cfg), 45);
+  // Sumido há muito tempo (mais de 2 ciclos e do prazo de inativo) não é mais recompra.
+  assert.deepEqual(R.alertas(D, ix, cfg, '2026-12-31', null).recompra, []);
+
+  const msg = R.aplicaModelo(cfg.modelo_recompra, { saudacao: 'Olá, Maria!', vendedor_primeiro_nome: 'Ana', minha_empresa: 'Empresa Exemplo', itens: R.textoItens(itens) });
+  assert.ok(msg.startsWith('Olá, Maria! Aqui é Ana, da Empresa Exemplo.'));
+  assert.ok(msg.includes('• Detergente neutro 5L — 4 GL'));
+});

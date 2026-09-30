@@ -207,7 +207,7 @@
           descricao: 'Pós-venda: confirmar entrega e satisfação (' + n.titulo + ')', data_hora: emDias(E.cfg.dias_pos_venda) });
       }
       if (E.cfg.auto_recompra) {
-        const ciclo = R.num(e && e.ciclo_recompra_dias) || E.cfg.ciclo_recompra_padrao;
+        const ciclo = R.cicloRecompra(e, e && E.ix.resumo.get(e.id), E.cfg);
         await A.tarefa({ empresa_id: n.empresa_id, tipo: 'ligacao', responsavel_id: resp,
           descricao: 'Recompra: oferecer reposição', data_hora: emDias(Math.max(1, ciclo - 3)) });
       }
