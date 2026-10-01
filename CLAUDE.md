@@ -65,8 +65,8 @@ OneClean é o **FKN** (SIFWin, da FKN Informática) — com N; não escrever "FK
 **Feito pelo Anderson em 01/10:** conferência de Duplicados (39 vazios apagados, 65 cadastros
 juntados, 26 marcados "outra empresa", grupos ligados), chave de teste excluída, `pg_net` removido,
 token do Agendor revogado (novo gerado e não usado), `C:\Migracao` apagada; o backup do CRM já não
-estava na pasta do Financeiro. **Falta:** subir o estoque real em Compras; confirmar cadastro público
-desligado e Site URL no Supabase.
+estava na pasta do Financeiro. Supabase conferido (cadastro público e login anônimo desligados, confirmação de e-mail ligada,
+Site URL e Redirect URL = endereço do Pages). **Falta:** subir o estoque real em Compras.
 
 **A fazer:** Compras (fornecedor/grupo, estoque automático); fase 3 (WhatsApp oficial da Meta,
 e-mail, Google Agenda) e IA.
