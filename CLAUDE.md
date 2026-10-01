@@ -221,6 +221,11 @@ e-mail, Google Agenda) e IA.
   carteira **e** as que vendeu (`crm_notas_minhas`, política `le`). Nota já importada sem vendedor é
   completada quando chega de novo (apagar `vigia-notas-estado.json` no servidor reenvia tudo, sem
   duplicar). Silmara (externa) entra quando tiver usuário (casa pelo primeiro nome).
+  **Ex-vendedores** (`cfg.vendedores_antigos`, Configurações → Geral → Notas fiscais; hoje NICOLLY,
+  NICOLI BIANCA, NICOLAS, JULIA): as notas entram com `vendedor_nome` e **sem** `vendedor_id` — contam
+  no total e em Compras como "NOME (ex-vendedor)", não vão para a carteira de ninguém (pedido do
+  Anderson: não misturar com o DIRETO). Os clientes deles sem dono foram divididos como lead entre as
+  vendedoras do rodízio.
 - **Compras:** cabeçalho fixo (`.tabela-fixa`) e ordenação por coluna (clique; de novo inverte).
 - **Tipo de cliente (01/10/2026, pedido da equipe):** `perfil.js` (fora do motor das notas) classifica
   pelas compras (notas de venda + negócios ganhos, a até 3 dias = uma): novo (1ª compra nos últimos

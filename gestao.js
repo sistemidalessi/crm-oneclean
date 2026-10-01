@@ -19,7 +19,7 @@
     });
   }
   // Quem vendeu: o vendedor escrito na nota; sem ele, a carteira do cliente.
-  const donoDe = (ix, n) => { if (n.vendedor_id) return n.vendedor_id; const e = n.empresa_id && ix.porId.empresas.get(n.empresa_id); return e ? e.responsavel_id || null : null; };
+  const donoDe = (ix, n) => { if (n.vendedor_id) return n.vendedor_id; if (n.vendedor_nome) return null; /* ex-vendedor */ const e = n.empresa_id && ix.porId.empresas.get(n.empresa_id); return e ? e.responsavel_id || null : null; };
 
   function resumoPeriodo(D, ix, de, ate) {
     const l = vendas(D, ix, de, ate);

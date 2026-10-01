@@ -718,7 +718,8 @@
         'Nenhum item de venda nas notas do período.') + '</section>' +
       '</div><div class="colunas">' +
       '<section class="cartao"><h2>Faturado por vendedor <small>quem vendeu (o escrito na nota; sem ele, a carteira)</small> ' + exp('tFatVend') + '</h2>' + tabela('tFatVend', [['Vendedor'], ['Clientes', 1], ['Notas', 1], ['Valor', 1], [''], ['% do total', 1]],
-        fat.porVendedor.map(g => [esc(g.nome), g.clientes, g.notas, esc(R.moeda(g.valor)), CRM.barra(g.valor, mv), pctTotal(g.valor)])) + '</section>' +
+        fat.porVendedor.map(g => [esc(g.nome) + ((g.nomesNota || []).length > 1 ? '<small>' + g.nomesNota.map(x => esc(x.nome) + ' ' + esc(R.moeda(x.valor))).join(' · ') + '</small>' : ''),
+          g.clientes, g.notas, esc(R.moeda(g.valor)), CRM.barra(g.valor, mv), pctTotal(g.valor)])) + '</section>' +
       '<section class="cartao"><h2>Top 10 cidades ' + exp('tFatCid') + '</h2>' + tabela('tFatCid', [['Cidade'], ['Clientes', 1], ['Notas', 1], ['Valor', 1], ['']],
         fat.porCidade.slice(0, 10).map(g => [esc(g.nome), g.clientes, g.notas, esc(R.moeda(g.valor)), CRM.barra(g.valor, mcid)])) + '</section>' +
       '</div>';

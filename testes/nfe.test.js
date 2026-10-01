@@ -302,4 +302,22 @@ test('vendedor da nota: "nome na nota" (DIRETO) vira o usuário, a nota guarda q
   const fat = R.faturamento(D, ix, '2026-10-01', { periodo: R.periodo('ano', '2026-10-01') });
   const por = Object.fromEntries(fat.porVendedor.map(v => [v.nome, v.valor]));
   assert.equal(por['Anderson'], 100); assert.equal(por['Silmara Externa'], 100); assert.equal(por['Ana'], 50, 'nota sem vendedor: pela carteira');
+  // Ex-vendedora (Configurações → Geral): a nota entra sem dono e o cliente novo fica sem carteira.
+  const plx = N.planeja(Object.assign(base(), { usuarios: D.usuarios }), [N.lerXml(xml({ n: 21, dest: 'CLIENTE DA NICOLLY LTDA', cnpjDest: '77666555000144', itens: it, adic: 'VENDEDOR: NICOLLY;' }))],
+    { filtro: 'auto', exVendedores: ['NICOLLY', ' Julia '] });
+  assert.equal(plx.criar.notas.length, 1, 'nota de ex-vendedora entra');
+  assert.equal(plx.criar.notas[0].vendedor_id, undefined); assert.equal(plx.criar.notas[0].vendedor_nome, 'NICOLLY');
+  assert.ok(!plx.criar.empresas[0].responsavel_id, 'cliente novo dela fica sem carteira');
+  assert.equal(N.planeja(Object.assign(base(), { usuarios: D.usuarios }), [N.lerXml(xml({ n: 22, dest: 'X LTDA', cnpjDest: '77666555000144', itens: it, adic: 'VENDEDOR: NICOLLY;' }))], { filtro: 'auto' }).criar.notas.length, 0, 'sem a lista, continua de fora');
+  D.notas.push({ id: 'x5', chave: chave(5), emitida_em: '2026-09-22T10:00:00Z', empresa_id: 'c1', valor_total: 70, vendedor_nome: 'NICOLLY' });
+  const fx = R.faturamento(D, R.indexa(D), '2026-10-01', { periodo: R.periodo('ano', '2026-10-01') });
+  const px = Object.fromEntries(fx.porVendedor.map(v => [v.nome, v.valor]));
+  assert.equal(px['NICOLLY (ex-vendedor)'], 70); assert.equal(px['Ana'], 50, 'a venda da ex-vendedora não vai para a dona atual da carteira');
+  D.notas.pop();
+  // Histórico de ex-vendedora no nome do dono: aparece separado dentro da linha dele.
+  D.notas.push({ id: 'x4', chave: chave(6), emitida_em: '2026-09-21T10:00:00Z', empresa_id: 'c1', valor_total: 30, vendedor_id: 'dono', vendedor_nome: 'NICOLLY' });
+  const fat2 = R.faturamento(D, R.indexa(D), '2026-10-01', { periodo: R.periodo('ano', '2026-10-01') });
+  const dono = fat2.porVendedor.find(v => v.nome === 'Anderson');
+  assert.equal(dono.valor, 130);
+  assert.deepEqual(dono.nomesNota.map(x => [x.nome, x.valor]), [['DIRETO', 100], ['NICOLLY', 30]]);
 });

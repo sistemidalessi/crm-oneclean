@@ -495,7 +495,9 @@
     const empresa = id => (id && ix.porId.empresas.get(id)) || null;
     const itensDe = n => ix.porNota.get(n.id) || [];
     // Quem vendeu: o vendedor escrito na nota (DIRETO, externos…); sem ele, a carteira do cliente.
-    const dono = n => { if (n.vendedor_id) return n.vendedor_id; const e = empresa(n.empresa_id); return e ? e.responsavel_id || null : null; };
+    // Nota com vendedor escrito mas sem usuário = ex-vendedor: conta no total, não vai para ninguém.
+    const dono = n => { if (n.vendedor_id) return n.vendedor_id; if (n.vendedor_nome) return null; const e = empresa(n.empresa_id); return e ? e.responsavel_id || null : null; };
+    const nomeVendedor = n => { const u = dono(n), us = u && ix.porId.usuarios.get(u); return us ? us.nome : !n.vendedor_id && n.vendedor_nome ? n.vendedor_nome + ' (ex-vendedor)' : '(sem responsável)'; };
     const chaveCliente = n => n.empresa_id || (n.cliente_doc ? 'doc:' + digitos(n.cliente_doc) : 'nome:' + normaliza(n.cliente_nome));
     const nomeCliente = n => { const e = empresa(n.empresa_id); return e ? e.nome : n.cliente_nome || '(sem nome)'; };
     const todas = (D.notas || []).filter(n => notaDeVenda(n, itensDe(n)) && (!resp || dono(n) === resp));
@@ -528,7 +530,17 @@
       return [...m.values()].map(g => Object.assign(g, { clientes: g.clientes.size })).sort((a, b) => b.valor - a.valor);
     };
     const porSegmento = agrupa(n => (empresa(n.empresa_id) || {}).segmento || '(sem segmento)');
-    const porVendedor = agrupa(n => { const u = dono(n); const us = u && ix.porId.usuarios.get(u); return us ? us.nome : '(sem responsável)'; });
+    const porVendedor = agrupa(nomeVendedor);
+    // Cada vendedor, aberto pelo nome escrito na nota (ex.: o dono = DIRETO + histórico de ex-vendedores).
+    porVendedor.forEach(g => {
+      const m = new Map();
+      doPeriodo.forEach(n => {
+        if (nomeVendedor(n) !== g.nome) return;
+        const k = n.vendedor_nome || '(carteira)';
+        const x = m.get(k) || { nome: k, notas: 0, valor: 0 }; x.notas++; x.valor += num(n.valor_total); m.set(k, x);
+      });
+      g.nomesNota = [...m.values()].sort((a, b) => b.valor - a.valor);
+    });
     const porCidade = agrupa(n => n.cidade ? n.cidade + (n.uf ? '/' + n.uf : '') : null);
 
     const produtos = new Map();

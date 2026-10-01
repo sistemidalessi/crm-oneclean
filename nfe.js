@@ -181,7 +181,11 @@
     plano.vendedoresNotas = [...vendedores.values()].sort((a, b) => b.valor - a.valor)
       .map(v => ({ chave: v.chave, nome: v.nome, qtd: v.qtd, valor: Math.round(v.valor * 100) / 100, usuario_id: v.usuario ? v.usuario.user_id : null, usuario_nome: v.usuario ? v.usuario.nome : null }));
     const filtro = op.filtro || 'todas';
-    const incluidos = new Set(op.vendedoresIncluidos || plano.vendedoresNotas.filter(v => v.usuario_id).map(v => v.chave));
+    // Ex-vendedores (Configurações → Geral): as notas deles entram (contam no faturamento e em
+    // Compras) sem dono — não vão para a carteira nem para o histórico de ninguém.
+    const antigos = new Set([].concat(op.exVendedores || []).map(x => R.normaliza(String(x)).replace(/\s+/g, ' ').trim()).filter(Boolean));
+    plano.vendedoresNotas.forEach(v => { if (!v.usuario_id && antigos.has(v.chave)) v.antigo = true; });
+    const incluidos = new Set(op.vendedoresIncluidos || plano.vendedoresNotas.filter(v => v.usuario_id || v.antigo).map(v => v.chave));
     plano.vendedoresIncluidos = [...incluidos];
 
     // ---- empresas: por CNPJ/CPF, razão social, nome e nome antes do " | " (o Agendor da OneClean usa "Empresa | Contato").

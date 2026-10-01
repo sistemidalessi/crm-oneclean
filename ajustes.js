@@ -43,6 +43,8 @@
     { nome: 'leads_desde', rotulo: '"Leads sem atendimento" conta só os cadastrados a partir de', tipo: 'data', ajuda: 'vazio = todos; a base antiga importada fica como lista de prospecção' },
     { nome: 'dias_inativo', rotulo: 'Cliente inativo sem comprar há (dias)', tipo: 'numero', passo: '1', min: 1 },
     { nome: 'ciclo_recompra_padrao', rotulo: 'Ciclo de recompra padrão (dias)', tipo: 'numero', passo: '1', min: 1, ajuda: 'cada empresa pode ter o seu' },
+    { tipo: 'secao', rotulo: 'Notas fiscais' },
+    { nome: 'vendedores_antigos', rotulo: 'Ex-vendedores (como aparecem na nota, separados por vírgula)', largo: true, dica: 'ex.: NICOLLY, JULIA', ajuda: 'as notas deles contam no faturamento e em Compras, sem ir para a carteira ou o histórico de ninguém' },
     { tipo: 'secao', rotulo: 'Automações' },
     { nome: 'rodizio', rotulo: 'Lead cadastrado pelo gestor sem responsável vai para o próximo vendedor (rodízio)', tipo: 'checkbox', largo: true },
     { nome: 'auto_tarefa_lead', rotulo: 'Lead novo ganha a tarefa "Fazer o primeiro contato"', tipo: 'checkbox', largo: true },
@@ -450,7 +452,7 @@
     if (!docs.length) throw new Error('nenhuma NF-e encontrada (' + lidos + ' arquivo(s) lido(s)). Confira se são os XML das notas.');
     // Padrão: só a equipe do CRM (pelo vendedor escrito na nota; sem isso, pela carteira do cliente).
     const filtro = docs.some(d => d.tipo === 'nota' && d.vendedor) ? 'vendedores' : 'carteira';
-    imp = { origem: 'Notas fiscais', notas: docs, arquivosLidos: lidos, arquivosOutros: outros, op: { responsavelPadrao: null, cadastrarProdutos: true, mapaResponsaveis: {}, filtro } };
+    imp = { origem: 'Notas fiscais', notas: docs, arquivosLidos: lidos, arquivosOutros: outros, op: { responsavelPadrao: null, cadastrarProdutos: true, mapaResponsaveis: {}, filtro, exVendedores: String(E().cfg.vendedores_antigos || '').split(',') } };
     planejar();
   }
 
