@@ -109,7 +109,7 @@
       '<br><small>' + doGrupo.length + ' cadastro(s) · faturado pelo grupo em 12 meses: ' + esc(R.moeda(fatGrupo)) + '</small>';
 
     dlg.innerHTML = '<div class="ficha">' +
-      '<header class="ficha-topo"><div class="ficha-titulo"><h2>' + esc(e.nome) + '</h2>' + CRM.seloSituacao(sit) + CRM.seloTipoCliente(e, true) + CRM.estrelas(e.qualificacao) +
+      '<header class="ficha-topo"><div class="ficha-titulo"><h2>' + esc(e.nome) + '</h2>' + CRM.seloSituacao(sit) + CRM.seloTipoCliente(e, true) + (CRM.seloFinanceiro ? CRM.seloFinanceiro(e.id, true) : '') + CRM.estrelas(e.qualificacao) +
         (e.tags || []).map(t => CRM.selo(t, 'etiqueta')).join('') +
         '<span class="resp">' + CRM.avatar(CRM.usuario(e.responsavel_id)) + esc(CRM.nomeUsuario(e.responsavel_id)) + '</span></div>' +
         '<span class="flex"></span>' +
@@ -161,6 +161,7 @@
       '<div class="ficha-col">' +
         '<section class="' + (pendentes.length ? '' : 'sem-proximo') + '"><h3>Próximo passo <button type="button" class="mini" data-acao="tarefa-empresa">+ tarefa</button></h3>' +
           (pendentes.length ? '<ul class="lista tarefas">' + pendentes.map(a => CRM.itemTarefa(a, { resp: true })).join('') + '</ul>' : '<p class="vazio alerta">Nenhum próximo passo agendado.</p>') + '</section>' +
+        (CRM.fichaFinanceiro ? CRM.fichaFinanceiro(e.id) : '') +
         '<section><h3>Negócios em andamento <button type="button" class="mini" data-acao="negocio-empresa">+ negócio</button></h3>' +
           (abertos.length ? abertos.map(n => cartaoNegocio(n)).join('') : '<p class="vazio">Nenhum.</p>') + '</section>' +
         '<section><h3>Compras e negócios anteriores</h3>' +

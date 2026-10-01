@@ -123,6 +123,7 @@
       return '<li><button type="button" class="linha" data-acao="abrir-empresa" data-id="' + esc(e.id) + '"><strong>' + esc(e.nome) + '</strong>' +
         '<small>' + (r.ritmo && !R.num(e.ciclo_recompra_dias) ? 'compra a cada ~' + ciclo + ' dias' : 'ciclo de ' + ciclo + ' dias') + ' · última ' + esc(R.dataBR(r.ultimaCompra)) + ' · ' +
         (falta < 0 ? CRM.selo(quando, 'ambar') : esc(quando)) + (CRM.carteira() ? '' : ' · ' + esc(R.primeiroNome(CRM.nomeUsuario(e.responsavel_id)))) +
+        (CRM.seloFinanceiro && CRM.seloFinanceiro(e.id) ? ' ' + CRM.seloFinanceiro(e.id) : '') +
         (itens.length ? '<br>costuma levar: ' + esc(itens.map(it => R.nomeDeItem(it.descricao)).join(', ')) : '') + '</small></button>' +
         '<span class="acoes-rapidas"><button type="button" class="mini wa" data-acao="whatsapp-recompra" data-id="' + esc(e.id) + '" title="Abre o WhatsApp com a mensagem de recompra e agenda o retorno em 2 dias">Recompra</button></span>' +
         acoesRapidas(e.id) + '</li>';
@@ -178,6 +179,8 @@
   function contextoFila(it) {
     const e = CRM.empresa(it.empresaId), r = CRM.resumo(e.id), hoje = CRM.hoje();
     const linhas = [];
+    const fin = CRM.avisoFinanceiro ? CRM.avisoFinanceiro(e.id) : '';
+    if (fin) linhas.push(CRM.selo('Financeiro', 'vermelho') + ' <strong>' + esc(fin) + '</strong>');
     const c = contatoPrincipal(e.id);
     if (c) linhas.push('Falar com <strong>' + esc(c.nome) + '</strong>' + (c.cargo ? ' · ' + esc(c.cargo) : ''));
     linhas.push(r.ultimoContato ? 'Último contato ' + esc(R.dataBR(r.ultimoContato)) + ' (' + R.diasEntre(R.diaLocal(r.ultimoContato), hoje) + ' dias)' : 'Nenhum contato registrado ainda');
@@ -215,7 +218,7 @@
       return cab +
         '<div class="fila-progresso">' + CRM.barra(resolvidos, total, resolvidos + ' de ' + total + ' resolvidos desde que você abriu a fila') + '</div>' +
         '<section class="cartao fila-atual">' +
-          '<p class="fila-tipo">' + CRM.selo(rot[0], rot[1]) + ' <span>' + esc(it.motivo) + '</span></p>' +
+          '<p class="fila-tipo">' + CRM.selo(rot[0], rot[1]) + ' <span>' + esc(it.motivo) + '</span>' + (CRM.seloFinanceiro ? ' ' + CRM.seloFinanceiro(e.id) : '') + '</p>' +
           (it.outros.length ? '<p class="fila-outros">Também: ' + esc(it.outros.join(' · ')) + '</p>' : '') +
           '<h2><button type="button" class="link" data-acao="abrir-empresa" data-id="' + esc(e.id) + '">' + esc(e.nome) + '</button> <small>' + esc(R.rotulo(R.SITUACOES || [], e.situacao) || e.situacao) + ' · ' + esc(CRM.nomeUsuario(e.responsavel_id)) + '</small></h2>' +
           '<ul class="fila-contexto">' + contextoFila(it) + '</ul>' +

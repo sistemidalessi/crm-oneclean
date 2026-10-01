@@ -518,3 +518,9 @@ label.btn.arquivo input[type=file] { position: absolute; inset: 0; opacity: 0; c
 .tabela-rolagem.tabela-fixa { max-height: calc(100vh - 230px); overflow: auto; border: 1px solid var(--borda); border-radius: 10px; }
 .tabela-fixa .tabela thead th { position: sticky; top: 0; z-index: 2; background: var(--papel); box-shadow: inset 0 -1px 0 var(--borda); }
 .tabela-fixa .tabela thead th.ordenavel:hover { background: var(--fundo); }
+/* Compras: fornecedor numa linha só (nome inteiro ao passar o mouse) */
+.tabela.compras td.forn { max-width: 11rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Contas a receber na ficha */
+.ficha .financeiro .titulos li { display: flex; flex-wrap: wrap; gap: .25rem .6rem; align-items: baseline; }
+.ficha .financeiro .titulos li strong { margin-left: auto; }
+.resumo-compras.devendo { background: var(--vermelho-fundo); color: var(--vermelho); }

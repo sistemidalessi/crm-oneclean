@@ -68,8 +68,19 @@ token do Agendor revogado (novo gerado e não usado), `C:\Migracao` apagada; o b
 estava na pasta do Financeiro. Supabase conferido (cadastro público e login anônimo desligados, confirmação de e-mail ligada,
 Site URL e Redirect URL = endereço do Pages). **Falta:** subir o estoque real em Compras.
 
-**A fazer:** Compras (fornecedor/grupo, estoque automático); fase 3 (WhatsApp oficial da Meta,
-e-mail, Google Agenda) e IA.
+**01/10, tarde — FKN no CRM (feito):** listagem cadastral de produtos (SIFN108) em Compras
+(fornecedor, linha, família, mínimo/máximo, já pedido, caixa fechada, pedido por fornecedor) e
+**contas a receber** (SIFN016, tabela `crm_titulos`) na ficha, Recompra, Fila do dia e Gestão —
+ver "FKN: listagem de produtos e contas a receber" abaixo. A OneClean tem duas razões sociais no
+FKN (DISTRIBUIDORA e BRASIL): **as duas valem como OneClean** (decisão do Anderson); as notas no CRM
+são todas de um CNPJ só e os números das duplicatas do contas a receber são os
+números dessas notas (174 títulos: 172 ligados pela nota, 2 pelo CNPJ, nenhum sem cliente).
+**Falta o Anderson:** subir a listagem de produtos em Compras e o contas a receber na Gestão
+(os dois botões aceitam o CSV salvo pelo FKN).
+
+**A fazer:** quadros clicáveis em Relatórios/Início/Gestão (pedido da líder: clicar em "Negócios
+iniciados 3" e ver quais são); estoque e contas a receber automáticos pelo vigia (mandar o CSV
+quando o arquivo mudar); fase 3 (WhatsApp oficial da Meta, e-mail, Google Agenda) e IA.
 
 - **Vigia de notas pronto** (seção "Vigia de notas" abaixo e no README): Edge Function
   `crm-notas` publicada no banco real e testada (chave errada 401, chave certa 200; os
@@ -112,7 +123,7 @@ e-mail, Google Agenda) e IA.
   grava estoque, não vê empresa/contato/negócio/tarefa/histórico, não cria cliente nem tarefa;
   vendedora e gestora não veem estoque) — "OK: nenhuma permissão furada".
 - **Compras — ainda a fazer:**
-  1. Fornecedor/grupo nos filtros, se o FKN exportar essas colunas no CSV.
+  1. ~~Fornecedor/grupo nos filtros~~ — feito em 01/10 pela listagem cadastral (SIFN108).
   2. Estoque automático: o FKN não agenda a exportação. Opções: o vigia manda o
      `exp_estoque.csv` sozinho quando o arquivo muda (alguém ainda exporta à mão no FKN) +
      lembrete para quem exporta (ex.: aviso na Gestão quando o estoque tiver mais de 3 dias, já
@@ -431,6 +442,43 @@ e-mail, Google Agenda) e IA.
   Também "Em falta" (vendeu em 90 dias e saldo ≤ 0) e "Estoque parado" (saldo sem venda em 90 dias).
   Em 30/09: 1.686 produtos, R$ 312,5 mil a custo, 40 com saldo negativo. Próximo passo: o vigia
   mandar o CSV sozinho quando o arquivo mudar (hoje é pelo botão).
+
+## FKN: listagem de produtos e contas a receber (01/10/2026)
+
+- **Listagem cadastral de produtos (SIFN108)** — no FKN: Cadastros → Produtos → Listagem
+  cadastral, salvar em CSV (Windows-1252). É relatório, não tabela: um bloco por produto
+  (`código;variante;nome;fantasia;situação;linha;família;`, depois linhas `ESTOQUE:;mín: …`,
+  `IND: … comp: … cus: … ven: …`, `Fornecedor: 00059 NOME`, `localiz:`, `últ.entrada/últ.saída`).
+  `CRMGestao.lerListagemProdutos` (o botão de Compras escolhe sozinho entre ela e o CSV simples
+  `exp_estoque.csv`: `lerArquivoEstoque`). Entra o ativo e o inativo com saldo ou pedido.
+  Colunas novas em `crm_estoque` (situacao, linha, familia, fornecedor_cod, fornecedor,
+  estoque_min/max, pend_cliente/fornecedor, custo_unit, custo_compra, preco_venda, ult_entrada/saida);
+  o CSV simples não mexe nelas (upsert só das colunas que manda).
+- **Saldo × atual:** o FKN dá `atual` e `saldo`; **saldo = atual − pendente de cliente** (já
+  reservado). Usamos o saldo.
+- **Embalagens (variante 1, 2, 3):** o mesmo código tem a unidade (variante 0, a que sai na nota)
+  e caixas fechadas com estoque próprio ("CX C/4", "CX 2"…), gravadas como `010284.1`, `.2`.
+  `juntaVariantes` soma tudo em unidades (fator = custo da caixa ÷ custo da unidade; se não bater,
+  o número do nome) — saldo, pedido, mínimo e máximo — e a sugestão mostra também em caixas (a
+  maior). Na listagem real de 01/10: 2.265 linhas → 1.697 produtos, 495 com caixa, 58 com mais
+  de uma. Não separar de novo: a caixa contada à parte aparecia como "parada" e a unidade como "em falta".
+- **Conta de compra:** comprar = max(precisa, mínimo do FKN) − saldo − já pedido ao fornecedor
+  (saldo negativo conta 0); inativo no FKN não entra; "pelo mínimo" quando foi o mínimo que mandou.
+  **Pedido por fornecedor:** a sugestão agrupada por fornecedor, com exportação de cada pedido;
+  clicar no nome filtra a tabela. Filtros de fornecedor e linha; "Abaixo do mínimo" e "Já pedidos".
+- **Contas a receber (SIFN016)** — no FKN: Contas a receber por cliente → **Em aberto** →
+  "listar os dados cadastrais dos clientes" → salvar em CSV. Blocos `CLIENTE: código NOME;TEL;VEND:`,
+  `CNPJ....:`, títulos `002531/01;28/09/26;453,00;26/10/26;atraso;BOLETO;`, `TOTAL GERAL`.
+  `financeiro.js` (`CRMFinanceiro`, puro e testado): lê, confere a soma com o total geral, liga ao
+  cliente (nota de mesmo número e CNPJ; senão o CNPJ, preferindo o cadastro com mais notas) e
+  resume. Tabela `crm_titulos` (retrato: upsert por duplicata e apaga o que não veio = pago).
+  **RLS:** gestor/admin leem tudo, vendedor só os da carteira (`empresa_id in (select
+  crm_empresas_minhas())`), comprador nada; só admin importa; gestor altera (juntar duplicados
+  leva os títulos). Mostra: selo vermelho e seção na ficha, selo na Recompra e na Fila do dia
+  ("combine o pagamento antes de oferecer pedido novo"), cartão na Gestão (em aberto, vencido,
+  vence em 7 dias, vencidos por cliente, por vendedora, sem cadastro, exportar vencidos).
+  O atraso é contado do vencimento até hoje: entre uma importação e outra, um título pago ainda
+  aparece — por isso a data da atualização vai junto.
 
 ## Sequência do lead novo (30/09/2026)
 

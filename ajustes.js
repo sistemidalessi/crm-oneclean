@@ -663,7 +663,7 @@
     ['telefone', 'whatsapp', 'email', 'segmento', 'ciclo_recompra_dias'].forEach(k => { if ((a[k] == null || a[k] === '') && b[k]) patch[k] = b[k]; });
     if (b.situacao === 'cliente' && a.situacao !== 'cliente') patch.situacao = 'cliente';
     if (b.grupo_id && !a.grupo_id && b.grupo_id !== a.id) patch.grupo_id = b.grupo_id;
-    for (const t of ['contatos', 'negocios', 'atividades', 'notas']) await CRM.atualizarVarios(t, E().D[t].filter(x => x.empresa_id === bId).map(x => x.id), { empresa_id: aId });
+    for (const t of ['contatos', 'negocios', 'atividades', 'notas', 'titulos']) await CRM.atualizarVarios(t, (E().D[t] || []).filter(x => x.empresa_id === bId).map(x => x.id), { empresa_id: aId });
     await CRM.atualizarVarios('empresas', E().D.empresas.filter(x => x.grupo_id === bId && x.id !== aId).map(x => x.id), { grupo_id: aId });
     await CRM.removerVarios('empresas', [bId]); // antes de completar: a trava de duplicado recusaria o CNPJ que ainda está no outro
     if (Object.keys(patch).length) await CRM.atualizar('empresas', aId, patch);
@@ -707,7 +707,7 @@
     // Guarda os códigos de origem (Agendor) dos que somem: reimportar não os recria.
     const ext = [...new Set([].concat(alvo.externos_mesclados || [], ...outros.map(id => { const o = CRM.empresa(id) || {}; return [o.externo_id].concat(o.externos_mesclados || []); })).filter(Boolean))];
     if (ext.length !== (alvo.externos_mesclados || []).length) patch.externos_mesclados = ext;
-    for (const t of ['contatos', 'negocios', 'atividades', 'notas']) await CRM.atualizarVarios(t, E().D[t].filter(x => s.has(x.empresa_id)).map(x => x.id), { empresa_id: marcado });
+    for (const t of ['contatos', 'negocios', 'atividades', 'notas', 'titulos']) await CRM.atualizarVarios(t, (E().D[t] || []).filter(x => s.has(x.empresa_id)).map(x => x.id), { empresa_id: marcado });
     // Unidades do grupo que apontavam para um cadastro que some passam a apontar para o que fica.
     await CRM.atualizarVarios('empresas', E().D.empresas.filter(x => s.has(x.grupo_id) && x.id !== marcado).map(x => x.id), { grupo_id: marcado });
     // Apaga os repetidos antes de completar o que fica: senão a trava de duplicado recusaria

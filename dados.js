@@ -12,7 +12,7 @@
 
   // Ordem importa: pais antes de filhos (importação/upsert respeita as FKs).
   const TABELAS = ['usuarios', 'config', 'etapas', 'opcoes', 'produtos', 'modelos', 'metas', 'filtros',
-    'empresas', 'contatos', 'negocios', 'negocio_itens', 'propostas', 'atividades', 'notas', 'nota_itens'];
+    'empresas', 'contatos', 'negocios', 'negocio_itens', 'propostas', 'atividades', 'notas', 'nota_itens', 'titulos'];
   const CHAVE = { usuarios: 'user_id' };
   const chave = t => CHAVE[t] || 'id';
 
@@ -41,12 +41,13 @@
     modelos: { canal: 'whatsapp', corpo: '' },
     metas: { valor: 0 },
     notas: { cancelada: false, valor_total: 0, valor_produtos: 0 },
-    nota_itens: { quantidade: 0, valor_unitario: 0, valor_total: 0, ordem: 0 }
+    nota_itens: { quantidade: 0, valor_unitario: 0, valor_total: 0, ordem: 0 },
+    titulos: { valor: 0, abono: false }
   };
 
   // Filhos apagados junto (no Supabase é o "on delete cascade"/"set null").
   const CASCATA = {
-    empresas: [['contatos', 'empresa_id', 'apaga'], ['negocios', 'empresa_id', 'apaga'], ['atividades', 'empresa_id', 'apaga'], ['notas', 'empresa_id', 'solta']],
+    empresas: [['contatos', 'empresa_id', 'apaga'], ['negocios', 'empresa_id', 'apaga'], ['atividades', 'empresa_id', 'apaga'], ['notas', 'empresa_id', 'solta'], ['titulos', 'empresa_id', 'solta']],
     notas: [['nota_itens', 'nota_id', 'apaga']],
     negocios: [['negocio_itens', 'negocio_id', 'apaga'], ['propostas', 'negocio_id', 'apaga'], ['atividades', 'negocio_id', 'solta']],
     contatos: [['negocios', 'contato_id', 'solta'], ['atividades', 'contato_id', 'solta']],
@@ -367,6 +368,23 @@
     this._estoque = l;
     try { localStorage.setItem('crm_estoque', JSON.stringify(l)); } catch (e) { /* só na memória */ }
     return l.length;
+  };
+
+  // Contas a receber (listagem do FKN): retrato novo a cada importação — grava por duplicata,
+  // apaga o que não veio (foi pago) e devolve a lista como ficou.
+  Supa.prototype.salvarTitulos = async function (lista) {
+    const agora = new Date().toISOString();
+    const linhas = lista.map(x => { const o = Object.assign({}, x, { atualizado_em: agora }); delete o.id; return o; });
+    for (let i = 0; i < linhas.length; i += LOTE)
+      unwrap(await this.sb.from('crm_titulos').upsert(linhas.slice(i, i + LOTE), { onConflict: 'duplicata', defaultToNull: false }));
+    unwrap(await this.sb.from('crm_titulos').delete().lt('atualizado_em', agora));
+    return tudo(this.sb, 'titulos');
+  };
+  Local.prototype.salvarTitulos = async function (lista) {
+    const d = this.ler(), agora = new Date().toISOString();
+    d.titulos = lista.map(x => Object.assign({ id: uuid(), criado_em: agora }, x, { atualizado_em: agora }));
+    this.gravar(d);
+    return d.titulos;
   };
 
   Supa.prototype.integracoes = async function () {

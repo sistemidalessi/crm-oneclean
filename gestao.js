@@ -118,6 +118,76 @@
   }
   const codigoFKN = v => String(v == null ? '' : v).trim().replace(/\.0+$/, '');
 
+  // Listagem cadastral de produtos do FKN (SIFN108, salva em CSV): um bloco por produto, com
+  // estoque mínimo/máximo, saldo, pendências, custos, fornecedor, linha e família. A variante 1
+  // (caixa fechada do mesmo código) vira "000044.1", como no CSV de estoque. O saldo do FKN já
+  // desconta o que está reservado para cliente (saldo = atual − pendente de cliente).
+  const ehListagemProdutos = t => /LISTAGEM CADASTRAL DE PRODUTOS|ESTOQUE:;\s*m[ií]n:/i.test(String(t).slice(0, 5000));
+  function lerListagemProdutos(texto) {
+    const n = v => R.numeroBR(v) || 0;
+    const data = v => { const m = /^(\d\d)\/(\d\d)\/(\d{4})$/.exec(String(v || '').trim()); return m && m[1] !== '00' ? m[3] + '-' + m[2] + '-' + m[1] : null; };
+    const out = new Map();
+    let p = null;
+    String(texto).split(/\r?\n/).forEach(l => {
+      let m = /^(\d{3,});(\d);([^;]*);([^;]*);([^;]*);([^;]*);([^;]*);?\s*$/.exec(l);
+      if (m) {
+        p = { codigo: m[1] + (m[2] === '0' ? '' : '.' + m[2]), descricao: m[3].trim() || m[1], situacao: m[5].trim() || null, linha: m[6].trim() || null, familia: m[7].trim() || null };
+        out.set(p.codigo, p);
+        return;
+      }
+      if (!p) return;
+      if ((m = /ESTOQUE:;\s*m[ií]n:\s*([-\d.,]+);\s*m[aá]x:\s*([-\d.,]+);\s*atual:\s*([-\d.,]+);\s*saldo:\s*([-\d.,]+);\s*PEND:\s*cli:\s*([-\d.,]+);\s*for:\s*([-\d.,]+)/i.exec(l)))
+        Object.assign(p, { estoque_min: n(m[1]), estoque_max: n(m[2]), quantidade: n(m[4]), pend_cliente: n(m[5]), pend_fornecedor: n(m[6]) });
+      else if ((m = /comp:\s*([-\d.,]+);\s*cus:\s*([-\d.,]+);\s*ven:\s*([-\d.,]+)/i.exec(l)))
+        Object.assign(p, { custo_compra: n(m[1]), custo_unit: n(m[2]), preco_venda: n(m[3]) });
+      else if ((m = /Fornecedor:\s*(\d+)\s*([^;]*)/i.exec(l)))
+        Object.assign(p, { fornecedor_cod: /^0+$/.test(m[1]) ? null : m[1], fornecedor: /^0+$/.test(m[1]) ? null : m[2].trim() || null });
+      else if ((m = /localiz:([^;]*)/i.exec(l))) p.localizacao = m[1].trim() || null;
+      else if ((m = /[úu]lt\.entrada:\s*([\d/]+)\s+[úu]lt\.sa[íi]da:\s*([\d/]+)/i.exec(l))) Object.assign(p, { ult_entrada: data(m[1]), ult_saida: data(m[2]) });
+    });
+    const lista = [...out.values()].filter(x => x.quantidade != null);
+    if (!lista.length) throw new Error('não achei produtos na listagem (é a "Listagem cadastral de produtos" do FKN salva em CSV?)');
+    // Entra o que está ativo e o inativo que ainda tem saldo ou pedido em aberto.
+    return lista.filter(x => x.situacao !== 'INATIVO' || x.quantidade || x.pend_fornecedor).map(x => Object.assign(x, {
+      custo_total: x.quantidade > 0 ? Math.round(x.quantidade * (x.custo_unit || 0) * 100) / 100 : 0 }));
+  }
+  // Qualquer um dos dois arquivos do FKN: listagem cadastral (completa) ou o CSV simples de estoque.
+  const lerArquivoEstoque = t => (ehListagemProdutos(t) ? lerListagemProdutos(t) : lerEstoque(t));
+
+  // Caixa fechada (variante 1) → quantas unidades: pela razão dos custos (caixa de 2 = 2× o custo)
+  // ou, se não bater, pelo nome ("CX C/12", "CX.4X5").
+  function fatorCaixa(u, c) {
+    const cu = num(u.custo_compra) || num(u.custo_unit), cc = num(c.custo_compra) || num(c.custo_unit);
+    const r = cu > 0 ? cc / cu : 0;
+    if (r >= 1.5 && Math.abs(r - Math.round(r)) / r < 0.05) return Math.round(r);
+    const m = /C\/\s*(\d+)/i.exec(c.descricao || '') || /CX\.?\s*(\d+)\s*X/i.exec(c.descricao || '');
+    return m && +m[1] > 1 ? +m[1] : null;
+  }
+  // Junta a caixa fechada na unidade (estoque, pedido e mínimo em unidades) e devolve uma linha
+  // por produto, sem mexer no que veio do banco.
+  function juntaVariantes(estoque) {
+    const porCod = new Map();
+    (estoque || []).forEach(x => porCod.set(codigoFKN(x.codigo), Object.assign({}, x, { codigo: codigoFKN(x.codigo), quantidade: num(x.quantidade), custo_total: num(x.custo_total),
+      pend_fornecedor: num(x.pend_fornecedor), estoque_min: num(x.estoque_min), estoque_max: num(x.estoque_max) })));
+    porCod.forEach((c, cod) => {
+      const m = /^(.+)\.(\d+)$/.exec(cod), u = m && porCod.get(m[1]);
+      if (!u) return;
+      const f = fatorCaixa(u, c);
+      if (!f) return;
+      // Pode ter mais de uma embalagem (caixa com 4, caixa com 2…): todas entram no saldo; a
+      // sugestão de compra em caixas usa a maior.
+      u.embalagens = (u.embalagens || []).concat({ codigo: cod, fator: f, saldo: c.quantidade });
+      if (!u.caixa || f > u.caixa.fator) u.caixa = u.embalagens[u.embalagens.length - 1];
+      u.quantidade += c.quantidade * f;
+      u.custo_total += c.custo_total;
+      u.pend_fornecedor += c.pend_fornecedor * f;
+      u.estoque_min += c.estoque_min * f;
+      u.estoque_max += c.estoque_max * f;
+      porCod.delete(cod);
+    });
+    return [...porCod.values()];
+  }
+
   // ------------------------------------------------------------ compras
   // Curva ABC (12 meses): A = produtos que somam os primeiros 80% do faturamento, B até 95%, C o resto.
   // Demanda prevista: cada cliente com ritmo e compra prevista até "dias" à frente (inclusive os que
@@ -176,56 +246,89 @@
     const comMovimento = lista.filter(g => g.qtd90ant > 0 && g.qtd90 + g.qtd90ant >= 10 && g.tendencia != null);
 
     // Com o estoque do FKN: necessidade no período = o maior entre a previsão dos clientes e o
-    // consumo médio dos últimos 90 dias; comprar = necessidade − saldo (saldo negativo conta zero).
-    const est = new Map((estoque || []).map(x => [codigoFKN(x.codigo), x]));
-    const estPorNome = new Map((estoque || []).map(x => [R.normaliza(x.descricao), x]));
+    // consumo médio dos últimos 90 dias. Comprar = necessidade (com piso no estoque mínimo do FKN)
+    // − saldo − o que já foi pedido ao fornecedor (saldo negativo conta zero). A caixa fechada
+    // entra no saldo da unidade (juntaVariantes).
+    const itensEst = juntaVariantes(estoque);
+    const est = new Map(itensEst.map(x => [x.codigo, x]));
+    const estPorNome = new Map(itensEst.map(x => [R.normaliza(x.descricao), x]));
+    const custoDe = x => (num(x.custo_unit) > 0 ? num(x.custo_unit) : x.quantidade > 0 && x.custo_total > 0 ? x.custo_total / x.quantidade : null);
     const usados = new Set();
+    const aplica = (g, e) => {
+      g.saldo = e.quantidade;
+      g.custoUnit = custoDe(e);
+      g.pedido = e.pend_fornecedor || 0;
+      g.minimo = e.estoque_min || 0;
+      g.maximo = e.estoque_max || 0;
+      g.fornecedor = e.fornecedor || null; g.fornecedorCod = e.fornecedor_cod || null;
+      g.linha = e.linha || null; g.familia = e.familia || null;
+      g.inativo = e.situacao === 'INATIVO';
+      g.caixa = e.caixa || null; g.embalagens = e.embalagens || null;
+      g.precoVenda = num(e.preco_venda) || null;
+      g.ultEntrada = e.ult_entrada || null;
+      g.cobertura = g.consumoDia > 0 ? Math.max(0, g.saldo) / g.consumoDia : null;
+      const alvo = Math.max(g.necessidade, g.minimo);
+      g.comprar = g.inativo ? 0 : Math.max(0, Math.ceil(alvo - Math.max(0, g.saldo) - g.pedido - 1e-9));
+      g.pelaMinimo = g.comprar > 0 && g.minimo > g.necessidade;
+      g.caixas = g.caixa && g.comprar ? Math.ceil(g.comprar / g.caixa.fator) : null;
+    };
     lista.forEach(g => {
       const e = (g.codigo && est.get(codigoFKN(g.codigo))) || estPorNome.get(R.normaliza(g.descricao));
       g.consumoDia = g.qtd90 / 90;
       g.necessidade = Math.max(g.prevista, g.consumoDia * dias);
       if (!e) { g.saldo = null; return; }
-      usados.add(codigoFKN(e.codigo));
+      usados.add(e.codigo);
       g.codigo = g.codigo || e.codigo;
-      g.saldo = num(e.quantidade);
-      g.custoUnit = num(e.quantidade) > 0 ? num(e.custo_total) / num(e.quantidade) : null;
-      g.cobertura = g.consumoDia > 0 ? Math.max(0, g.saldo) / g.consumoDia : null;
-      g.comprar = Math.max(0, Math.ceil(g.necessidade - Math.max(0, g.saldo)));
+      aplica(g, e);
     });
     const temEstoque = est.size > 0;
-    const ordemClasse = { A: 0, B: 1, C: 2 };
-    const sugestao = temEstoque ? lista.filter(g => g.saldo != null && g.comprar > 0)
-      .sort((a, b) => ordemClasse[a.classe] - ordemClasse[b.classe] || b.valor12 - a.valor12) : [];
-    const ruptura = temEstoque ? lista.filter(g => g.saldo != null && g.saldo <= 0 && g.qtd90 > 0).sort((a, b) => b.valor12 - a.valor12) : [];
+    const ordemClasse = { A: 0, B: 1, C: 2, '—': 3 };
     // Parado: tem saldo e custo, mas não vendeu nada em 90 dias.
     const vendeu90 = new Set(lista.filter(g => g.qtd90 > 0 && g.codigo).map(g => codigoFKN(g.codigo)));
-    const parado = (estoque || []).filter(x => num(x.quantidade) > 0 && num(x.custo_total) > 0 && !vendeu90.has(codigoFKN(x.codigo)))
-      .sort((a, b) => num(b.custo_total) - num(a.custo_total));
-    const positivos = (estoque || []).filter(x => num(x.quantidade) > 0);
-    const estoqueInfo = temEstoque ? {
-      produtos: est.size, valor: positivos.reduce((s, x) => s + num(x.custo_total), 0),
-      em: (estoque || []).reduce((m, x) => (x.atualizado_em && x.atualizado_em > m ? x.atualizado_em : m), ''),
-      negativos: (estoque || []).filter(x => num(x.quantidade) < 0).length,
-      valorSugestao: sugestao.reduce((s, g) => s + (g.custoUnit ? g.custoUnit * g.comprar : 0), 0),
-      semCusto: sugestao.filter(g => !g.custoUnit).length,
-      valorParado: parado.reduce((s, x) => s + num(x.custo_total), 0)
-    } : null;
+    const parado = itensEst.filter(x => x.quantidade > 0 && x.custo_total > 0 && !vendeu90.has(x.codigo))
+      .sort((a, b) => b.custo_total - a.custo_total);
+    const positivos = itensEst.filter(x => x.quantidade > 0);
     // Todos os produtos para a tela Compras: os vendidos (com a conta acima) + os que só estão no estoque.
     const produtos = lista.slice();
-    (estoque || []).forEach(x => {
-      if (usados.has(codigoFKN(x.codigo))) return;
-      produtos.push({ chave: 'e:' + codigoFKN(x.codigo), descricao: x.descricao, codigo: codigoFKN(x.codigo), unidade: x.unidade || '', valor12: 0, qtd90: 0, qtd90ant: 0,
-        clientes12: 0, prevista: 0, clientesPrevistos: 0, classe: '—', consumoDia: 0, necessidade: 0, saldo: num(x.quantidade),
-        custoUnit: num(x.quantidade) > 0 ? num(x.custo_total) / num(x.quantidade) : null, cobertura: null, comprar: 0, tendencia: null, soEstoque: true });
+    itensEst.forEach(x => {
+      if (usados.has(x.codigo)) return;
+      const g = { chave: 'e:' + x.codigo, descricao: x.descricao, codigo: x.codigo, unidade: x.unidade || '', valor12: 0, qtd90: 0, qtd90ant: 0,
+        clientes12: 0, prevista: 0, clientesPrevistos: 0, classe: '—', consumoDia: 0, necessidade: 0, tendencia: null, soEstoque: true };
+      aplica(g, x);
+      produtos.push(g);
     });
-    const paradoSet = new Set(parado.map(x => codigoFKN(x.codigo)));
+    const paradoSet = new Set(parado.map(x => x.codigo));
     produtos.forEach(g => { g.parado = !!(g.codigo && paradoSet.has(codigoFKN(g.codigo))); g.emFalta = g.saldo != null && g.saldo <= 0 && g.qtd90 > 0; });
-    return { dias, demanda, produtos, estoque: estoqueInfo, sugestao, ruptura, parado, clientesPrevistos: clientesPrevistos.sort((a, b) => (a.proxima < b.proxima ? -1 : 1)), abc,
+    const sugestao = temEstoque ? produtos.filter(g => g.saldo != null && g.comprar > 0)
+      .sort((a, b) => ordemClasse[a.classe] - ordemClasse[b.classe] || b.valor12 - a.valor12) : [];
+    const ruptura = temEstoque ? lista.filter(g => g.saldo != null && g.saldo <= 0 && g.qtd90 > 0).sort((a, b) => b.valor12 - a.valor12) : [];
+    // Pedido por fornecedor: a sugestão agrupada (o que não tem fornecedor no FKN fica junto no fim).
+    const porForn = new Map();
+    sugestao.forEach(g => {
+      const k = g.fornecedorCod || '';
+      if (!porForn.has(k)) porForn.set(k, { cod: k, nome: g.fornecedor || 'Sem fornecedor no FKN', itens: [], custo: 0, semCusto: 0 });
+      const f = porForn.get(k);
+      f.itens.push(g); if (g.custoUnit) f.custo += g.custoUnit * g.comprar; else f.semCusto++;
+    });
+    const fornecedores = [...porForn.values()].sort((a, b) => (!a.cod) - (!b.cod) || b.custo - a.custo);
+    const distintos = campo => [...new Set(produtos.map(g => g[campo]).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+    const estoqueInfo = temEstoque ? {
+      produtos: est.size, valor: positivos.reduce((s, x) => s + x.custo_total, 0),
+      em: (estoque || []).reduce((m, x) => (x.atualizado_em && x.atualizado_em > m ? x.atualizado_em : m), ''),
+      negativos: itensEst.filter(x => x.quantidade < 0).length,
+      valorSugestao: sugestao.reduce((s, g) => s + (g.custoUnit ? g.custoUnit * g.comprar : 0), 0),
+      semCusto: sugestao.filter(g => !g.custoUnit).length,
+      valorParado: parado.reduce((s, x) => s + x.custo_total, 0),
+      completo: itensEst.some(x => x.fornecedor_cod !== undefined || x.estoque_min > 0), // veio da listagem cadastral
+      pedidos: itensEst.filter(x => x.pend_fornecedor > 0).length
+    } : null;
+    return { dias, demanda, produtos, estoque: estoqueInfo, sugestao, ruptura, parado, pedidoPorFornecedor: fornecedores,
+      listas: { fornecedores: distintos('fornecedor'), linhas: distintos('linha'), familias: distintos('familia') }, clientesPrevistos: clientesPrevistos.sort((a, b) => (a.proxima < b.proxima ? -1 : 1)), abc,
       emAlta: comMovimento.filter(g => g.tendencia >= 25).sort((a, b) => b.tendencia - a.tendencia).slice(0, 8),
       emQueda: comMovimento.filter(g => g.tendencia <= -25).sort((a, b) => a.tendencia - b.tendencia).slice(0, 8) };
   }
 
-  const G = { painel, compras, lerEstoque, codigoFKN };
+  const G = { painel, compras, lerEstoque, lerListagemProdutos, lerArquivoEstoque, ehListagemProdutos, juntaVariantes, fatorCaixa, codigoFKN };
   raiz.CRMGestao = G;
   if (typeof module !== 'undefined') module.exports = G;
 
@@ -305,25 +408,29 @@
           (c.estoque ? '<dl class="g-base g-base-4"><div><dt>Estoque a custo</dt><dd>' + esc(R.moeda(c.estoque.valor)) + '</dd></div><div><dt>Sugestão de pedido (' + c.dias + ' dias)</dt><dd>' + esc(R.moeda(c.estoque.valorSugestao)) + ' <small>' + c.sugestao.length + ' produtos</small></dd></div>' +
             '<div><dt>Em falta</dt><dd>' + c.ruptura.length + ' <small>vendeu em 90 dias e está zerado</small></dd></div><div><dt>Estoque parado</dt><dd>' + esc(R.moeda(c.estoque.valorParado)) + ' <small>sem venda em 90 dias</small></dd></div></dl>' +
             '<p class="dica">Estoque do FKN de ' + esc(R.dataBR(c.estoque.em) + ' ' + R.horaLocal(c.estoque.em)) + '.</p>'
-            : '<p class="vazio">Sem estoque do FKN ainda: em Compras, use "Atualizar estoque (CSV do FKN)".</p>') + '</section>';
+            : '<p class="vazio">Sem estoque do FKN ainda: em Compras, use "Atualizar estoque (listagem do FKN)".</p>') + '</section>' +
+        (CRM.cartaoReceber ? CRM.cartaoReceber() : '');
     },
-    depois() {}
+    depois() { if (CRM.depoisReceber) CRM.depoisReceber(); }
   };
 
   // ================================================================ Compras (admin e comprador)
   // Uma tabela de produtos com pesquisa e filtros: o que comprar, em falta, parado, vendidos ou
   // todo o estoque. Exporta exatamente o que está na tela.
-  const fc = { busca: '', curva: '', mostrar: 'comprar', ordem: 'curva' };
+  const fc = { busca: '', curva: '', mostrar: 'comprar', ordem: 'curva', fornecedor: '', linha: '' };
   const MOSTRAR = [['comprar', 'Sugestão de pedido (precisa comprar)'], ['falta', 'Em falta (vendeu e está zerado)'], ['parado', 'Estoque parado (sem venda em 90 dias)'],
-    ['vendidos', 'Vendidos nos últimos 12 meses'], ['todos', 'Todos os produtos']];
+    ['minimo', 'Abaixo do mínimo do FKN'], ['pedidos', 'Já pedidos ao fornecedor (chegando)'], ['vendidos', 'Vendidos nos últimos 12 meses'], ['todos', 'Todos os produtos']];
   const ORDEM = [['curva', 'Curva (A primeiro) e faturamento'], ['pedido', 'Maior custo do pedido'], ['dura', 'Acaba antes'], ['vendido', 'Mais vendido (R$ 12 meses)'],
     ['parado', 'Maior valor parado'], ['nome', 'Nome']];
   const OC = { A: 0, B: 1, C: 2, '—': 3 };
   // [chave, título, número?, valor para ordenar]
   const COLUNAS = [
     ['produto', 'Produto', false, g => R.normaliza(R.nomeDeItem(g.descricao))],
+    ['fornecedor', 'Fornecedor', false, g => (g.fornecedor ? R.normaliza(g.fornecedor) : null)],
     ['curva', 'Curva', false, g => (g.classe === '—' ? null : OC[g.classe])],
     ['estoque', 'Estoque', true, g => g.saldo],
+    ['minimo', 'Mín. FKN', true, g => g.minimo || null],
+    ['pedido', 'Já pedido', true, g => g.pedido || null],
     ['consumo', 'Consumo/mês', true, g => (g.consumoDia ? g.consumoDia * 30 : null)],
     ['dura', 'Dura', true, g => g.cobertura],
     ['clientes', 'Clientes previstos', true, g => g.clientesPrevistos || null],
@@ -342,10 +449,14 @@
     const q = R.normaliza(fc.busca);
     let l = c.produtos.filter(g => {
       if (fc.curva && g.classe !== fc.curva) return false;
+      if (fc.fornecedor && (fc.fornecedor === '-' ? g.fornecedor : g.fornecedor !== fc.fornecedor)) return false;
+      if (fc.linha && g.linha !== fc.linha) return false;
       if (q && R.normaliza(g.descricao).indexOf(q) === -1 && String(g.codigo || '').indexOf(fc.busca.trim()) === -1) return false;
       if (fc.mostrar === 'comprar') return g.comprar > 0;
       if (fc.mostrar === 'falta') return g.emFalta;
       if (fc.mostrar === 'parado') return g.parado;
+      if (fc.mostrar === 'minimo') return g.minimo > 0 && !g.inativo && (g.saldo || 0) + (g.pedido || 0) < g.minimo;
+      if (fc.mostrar === 'pedidos') return g.pedido > 0;
       if (fc.mostrar === 'vendidos') return g.valor12 > 0;
       return true;
     });
@@ -385,7 +496,7 @@
       const e = c.estoque;
       const l = filtraProdutos(c);
       ultimo = Object.assign({}, ultimo || {}, { c, filtrados: l });
-      const botao = '<label class="btn sec arquivo">Atualizar estoque (CSV do FKN)<input type="file" id="gEstoque" accept=".csv,.txt,text/csv"></label>';
+      const botao = '<label class="btn sec arquivo" title="No FKN: Listagem cadastral de produtos (SIFN108), salvar em CSV. O CSV simples de estoque também serve.">Atualizar estoque (listagem do FKN)<input type="file" id="gEstoque" accept=".csv,.txt,text/csv"></label>';
       const velho = e && e.em && R.diasEntre(R.diaLocal(e.em), hoje) > 3;
       const curva = g => (g.classe === '—' ? '<small>—</small>' : CRM.selo(g.classe, g.classe === 'A' ? 'verde' : g.classe === 'B' ? 'azul' : 'etiqueta'));
       const custo = g => (g.comprar && g.custoUnit ? R.moeda(g.custoUnit * g.comprar) : '—');
@@ -404,21 +515,29 @@
           '<input type="search" id="cBusca" placeholder="Pesquisar produto ou código" value="' + esc(fc.busca) + '" aria-label="Pesquisar produto ou código">' +
           '<select id="cMostrar" aria-label="O que mostrar">' + CRM.opcoesHTML(MOSTRAR, fc.mostrar) + '</select>' +
           '<select id="cCurva" aria-label="Curva">' + CRM.opcoesHTML([['', 'Todas as curvas'], ['A', 'Curva A'], ['B', 'Curva B'], ['C', 'Curva C']], fc.curva) + '</select>' +
+          (c.listas.fornecedores.length ? '<select id="cFornecedor" aria-label="Fornecedor">' + CRM.opcoesHTML([['', 'Todos os fornecedores']].concat(c.listas.fornecedores.map(f => [f, f]), [['-', 'Sem fornecedor no FKN']]), fc.fornecedor) + '</select>' : '') +
+          (c.listas.linhas.length ? '<select id="cLinha" aria-label="Linha">' + CRM.opcoesHTML([['', 'Todas as linhas']].concat(c.listas.linhas.map(f => [f, f])), fc.linha) + '</select>' : '') +
           '<select id="gDias" aria-label="Prazo">' + CRM.opcoesHTML([['15', 'Para 15 dias'], ['30', 'Para 30 dias'], ['45', 'Para 45 dias'], ['60', 'Para 60 dias'], ['90', 'Para 90 dias']], String(c.dias)) + '</select>' +
           '<select id="cOrdem" aria-label="Ordenar">' + CRM.opcoesHTML(ORDEM, fc.ordem) + '</select>' +
           '<button type="button" class="btn sec" data-acao="compras-exportar">Exportar (' + l.length + ')</button>' +
         '</div>' +
-        '<p class="dica">Precisa = o maior entre o que os clientes devem pedir (pelo ritmo e pelos itens de sempre) e o consumo médio dos últimos 90 dias no prazo. Comprar = precisa − estoque. Confira mínimos e embalagem do fornecedor.</p>' +
+        '<p class="dica">Precisa = o maior entre o que os clientes devem pedir (pelo ritmo e pelos itens de sempre) e o consumo médio dos últimos 90 dias no prazo. ' +
+          'Comprar = precisa (no mínimo o estoque mínimo do FKN) − estoque − o que já foi pedido ao fornecedor. O estoque do FKN já desconta o reservado para cliente, e a caixa fechada entra em unidades.' +
+          (e && !e.completo ? ' <strong>Para ter fornecedor, mínimo e pedidos em aberto, use a Listagem cadastral de produtos do FKN (SIFN108) em CSV.</strong>' : '') + '</p>' +
         (l.length ? '<div class="tabela-rolagem tabela-fixa"><table class="tabela compras"><thead><tr>' + cabecalhoCompras() + '</tr></thead><tbody>' +
-          l.slice(0, LIMITE_COMPRAS).map(g => '<tr><td>' + esc(R.nomeDeItem(g.descricao)) + ' <small>' + esc(g.codigo || '') + '</small></td><td>' + curva(g) + '</td>' +
-            '<td class="num">' + (g.saldo == null ? '—' : g.saldo < 0 ? CRM.selo(qtd(g.saldo), 'vermelho') : qtd(g.saldo)) + ' <small>' + esc(g.unidade) + '</small></td>' +
+          l.slice(0, LIMITE_COMPRAS).map(g => '<tr><td>' + esc(R.nomeDeItem(g.descricao)) + ' <small>' + esc(g.codigo || '') + '</small>' + (g.inativo ? ' ' + CRM.selo('inativo no FKN', 'etiqueta') : '') + '</td>' +
+            '<td class="forn" title="' + esc(g.fornecedor || '') + '"><small>' + esc(g.fornecedor || '—') + '</small></td><td>' + curva(g) + '</td>' +
+            '<td class="num">' + (g.saldo == null ? '—' : g.saldo < 0 ? CRM.selo(qtd(g.saldo), 'vermelho') : qtd(g.saldo)) + ' <small>' + esc(g.unidade) + '</small>' +
+              (g.embalagens && g.embalagens.some(x => x.saldo) ? '<br><small>' + g.embalagens.filter(x => x.saldo).map(x => qtd(x.saldo) + ' cx de ' + x.fator).join(' + ') + '</small>' : '') + '</td>' +
+            '<td class="num">' + (g.minimo ? qtd(g.minimo) : '—') + '</td><td class="num">' + (g.pedido ? qtd(g.pedido) : '—') + '</td>' +
             '<td class="num">' + (g.consumoDia ? qtd(g.consumoDia * 30) : '—') + '</td>' +
             '<td class="num">' + (g.cobertura == null ? '—' : g.cobertura < 1 ? CRM.selo('acabou', 'vermelho') : Math.round(g.cobertura) + ' dias') + '</td>' +
             '<td class="num">' + (g.clientesPrevistos || '—') + '</td><td class="num">' + (g.necessidade ? qtd(g.necessidade) : '—') + '</td>' +
-            '<td class="num">' + (g.comprar ? '<strong>' + g.comprar + '</strong>' : '—') + '</td><td class="num">' + esc(custo(g)) + '</td>' +
+            '<td class="num">' + (g.comprar ? '<strong>' + g.comprar + '</strong>' + (g.caixas ? '<br><small>' + g.caixas + ' cx de ' + g.caixa.fator + '</small>' : '') + (g.pelaMinimo ? '<br><small>pelo mínimo</small>' : '') : '—') + '</td><td class="num">' + esc(custo(g)) + '</td>' +
             '<td class="num">' + (g.valor12 ? esc(R.moeda(g.valor12)) : '—') + '</td><td class="num">' + (g.tendencia == null ? '—' : seta(g.tendencia)) + '</td></tr>').join('') +
           '</tbody></table></div>' + (l.length > LIMITE_COMPRAS ? '<p class="mais">Mostrando ' + LIMITE_COMPRAS + ' de ' + l.length + '; o arquivo exportado tem todos.</p>' : '')
           : '<p class="vazio">Nenhum produto com esses filtros.</p>') + '</section>' +
+        cartaoPorFornecedor(c) +
         '<div class="g-duas">' +
           '<section class="cartao"><h2>Clientes com compra prevista <small>' + c.clientesPrevistos.length + ' até ' + esc(R.dataBR(R.somaDias(hoje, c.dias))) + '</small></h2>' +
             (c.clientesPrevistos.length ? '<ul class="g-tend">' + c.clientesPrevistos.slice(0, 15).map(x => '<li><span>' + esc(x.empresa.nome) + '</span><strong>' + esc(R.dataBR(x.proxima)) + '</strong><small>' +
@@ -435,7 +554,7 @@
         // Ordem que faz sentido para cada visão (dá para trocar depois).
         if (campo === 'mostrar') fc.ordem = { comprar: 'curva', falta: 'vendido', parado: 'parado', vendidos: 'vendido', todos: 'nome' }[el.value] || fc.ordem;
         CRM.render(); }); };
-      liga('cBusca', 'busca'); liga('cMostrar', 'mostrar'); liga('cCurva', 'curva'); liga('cOrdem', 'ordem'); liga('gDias', null, true);
+      liga('cBusca', 'busca'); liga('cMostrar', 'mostrar'); liga('cCurva', 'curva'); liga('cFornecedor', 'fornecedor'); liga('cLinha', 'linha'); liga('cOrdem', 'ordem'); liga('gDias', null, true);
       ['cOrdem', 'cMostrar'].forEach(id => { const el = document.getElementById(id); if (el) el.addEventListener('change', () => { fc.col = null; }, true); });
     }
   };
@@ -444,12 +563,24 @@
     const buf = await f.arrayBuffer();
     let txt = new TextDecoder('utf-8').decode(buf);
     if (txt.indexOf('�') !== -1) txt = new TextDecoder('windows-1252').decode(buf); // CSV do FKN é Windows-1252
-    const lista = G.lerEstoque(txt);
+    const lista = G.lerArquivoEstoque(txt);
     const neg = lista.filter(x => x.quantidade < 0).length;
     CRM.toast('Gravando o estoque: ' + lista.length + ' produtos…');
     const n = await CRM.store().salvarEstoque(lista, (i, tot) => CRM.toast('Gravando o estoque: ' + i + ' de ' + tot + '…'));
     CRM.toast('Estoque atualizado: ' + n + ' produtos' + (neg ? ' (' + neg + ' com saldo negativo no FKN)' : '') + '.');
     estoque = null; CRM.render();
+  }
+
+  // Pedido por fornecedor: a sugestão de compra separada por fornecedor, pronta para mandar.
+  function cartaoPorFornecedor(c) {
+    const l = c.pedidoPorFornecedor || [];
+    if (!l.length || !c.estoque || !c.estoque.completo) return '';
+    return '<section class="cartao"><h2>Pedido por fornecedor <small>' + l.length + ' fornecedor(es) · ' + esc(R.moeda(c.estoque.valorSugestao)) + ' para ' + c.dias + ' dias</small></h2>' +
+      '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Fornecedor</th><th class="num">Produtos</th><th class="num">Custo estimado</th><th></th></tr></thead><tbody>' +
+      l.map((f, i) => '<tr><td><button type="button" class="link" data-acao="compras-ver-fornecedor" data-id="' + i + '">' + esc(f.nome) + '</button>' + (f.cod ? ' <small>' + esc(f.cod) + '</small>' : '') + '</td>' +
+        '<td class="num">' + f.itens.length + '</td><td class="num">' + esc(R.moeda(f.custo)) + (f.semCusto ? ' <small>' + f.semCusto + ' sem custo</small>' : '') + '</td>' +
+        '<td class="num"><button type="button" class="mini" data-acao="compras-pedido-fornecedor" data-id="' + i + '">Exportar pedido</button></td></tr>').join('') +
+      '</tbody></table></div></section>';
   }
 
   function listaTop(l, total) {
@@ -466,11 +597,25 @@
 
   Object.assign(CRM.acoes, {
     'compras-coluna': id => { if (fc.col === id) fc.dir = fc.dir === 'desc' ? 'asc' : 'desc'; else { fc.col = id; fc.dir = COLUNAS.find(c => c[0] === id)[2] ? 'desc' : 'asc'; } CRM.render(); },
+    'compras-ver-fornecedor': i => {
+      const f = ultimo && ultimo.c && ultimo.c.pedidoPorFornecedor[+i];
+      if (!f) return;
+      Object.assign(fc, { fornecedor: f.cod ? f.nome : '-', mostrar: 'comprar', busca: '', curva: '', linha: '', col: null });
+      CRM.render();
+      const t = document.querySelector('.filtros-compras'); if (t && t.scrollIntoView) t.scrollIntoView({ block: 'start' });
+    },
+    'compras-pedido-fornecedor': i => {
+      const f = ultimo && ultimo.c && ultimo.c.pedidoPorFornecedor[+i];
+      if (!f) return;
+      CRM.baixarCSV('pedido-' + R.normaliza(f.nome).replace(/[^a-z0-9]+/g, '-').slice(0, 40) + '-' + diasCompras + 'dias', ['Código', 'Produto', 'Unidade', 'Comprar', 'Caixas', 'Custo unitário', 'Custo estimado', 'Estoque', 'Já pedido', 'Mínimo FKN'],
+        f.itens.map(g => [g.codigo || '', g.descricao, g.unidade, g.comprar, g.caixas ? g.caixas + ' cx de ' + g.caixa.fator : '', g.custoUnit ? +g.custoUnit.toFixed(2) : '',
+          g.custoUnit ? +(g.custoUnit * g.comprar).toFixed(2) : '', g.saldo, g.pedido || 0, g.minimo || 0]));
+    },
     'compras-exportar': () => {
       const l = (ultimo && ultimo.filtrados) || [];
-      CRM.baixarCSV('compras-' + fc.mostrar + '-' + diasCompras + 'dias', ['Código', 'Produto', 'Unidade', 'Curva', 'Estoque', 'Consumo por mês', 'Dura (dias)', 'Clientes previstos', 'Precisa', 'Comprar', 'Custo unitário', 'Custo do pedido', 'Vendido 12 meses (R$)', 'Tendência %'],
-        l.map(g => [g.codigo || '', g.descricao, g.unidade, g.classe, g.saldo == null ? '' : g.saldo, g.consumoDia ? +(g.consumoDia * 30).toFixed(2) : '', g.cobertura == null ? '' : Math.round(g.cobertura),
-          g.clientesPrevistos || 0, +(g.necessidade || 0).toFixed(2), g.comprar || 0, g.custoUnit ? +g.custoUnit.toFixed(2) : '', g.custoUnit && g.comprar ? +(g.custoUnit * g.comprar).toFixed(2) : '',
+      CRM.baixarCSV('compras-' + fc.mostrar + '-' + diasCompras + 'dias', ['Código', 'Produto', 'Unidade', 'Fornecedor', 'Linha', 'Família', 'Curva', 'Estoque', 'Mínimo FKN', 'Já pedido', 'Consumo por mês', 'Dura (dias)', 'Clientes previstos', 'Precisa', 'Comprar', 'Caixas', 'Custo unitário', 'Custo do pedido', 'Vendido 12 meses (R$)', 'Tendência %'],
+        l.map(g => [g.codigo || '', g.descricao, g.unidade, g.fornecedor || '', g.linha || '', g.familia || '', g.classe, g.saldo == null ? '' : g.saldo, g.minimo || '', g.pedido || '', g.consumoDia ? +(g.consumoDia * 30).toFixed(2) : '', g.cobertura == null ? '' : Math.round(g.cobertura),
+          g.clientesPrevistos || 0, +(g.necessidade || 0).toFixed(2), g.comprar || 0, g.caixas ? g.caixas + ' cx de ' + g.caixa.fator : '', g.custoUnit ? +g.custoUnit.toFixed(2) : '', g.custoUnit && g.comprar ? +(g.custoUnit * g.comprar).toFixed(2) : '',
           +(g.valor12 || 0).toFixed(2), g.tendencia == null ? '' : Math.round(g.tendencia)]));
     },
     'gestao-exportar': t => {

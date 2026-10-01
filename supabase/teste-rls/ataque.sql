@@ -104,6 +104,23 @@ select 'Gestora vê estoque (NÃO devia)' t, count(*) from crm_estoque having co
 select 'Rodízio caiu no comprador (NÃO devia)' t from (select crm_proximo_vendedor() r) x where r = 'f0000000-0000-0000-0000-000000000006';
 select pg_temp.como('a0000000-0000-0000-0000-000000000001');
 select 'Admin vê estoque' t, count(*) from crm_estoque;
+-- contas a receber: admin grava; gestora vê tudo; vendedor só os da carteira; comprador nada
+select pg_temp.como('a0000000-0000-0000-0000-000000000001');
+insert into crm_titulos (duplicata, empresa_id, vencimento, valor) select '000001/01', id, current_date - 10, 100 from crm_empresas where nome='Da Ana';
+insert into crm_titulos (duplicata, empresa_id, vencimento, valor) select '000002/01', id, current_date + 10, 200 from crm_empresas where nome='Só do Bruno';
+insert into crm_titulos (duplicata, vencimento, valor) values ('000003/01', current_date, 300) returning 'admin gravou títulos' as ok;
+select pg_temp.como('b0000000-0000-0000-0000-000000000002');
+select 'Gestora vê títulos' t, count(*) from crm_titulos;
+insert into crm_titulos (duplicata, vencimento) values ('x', current_date); -- FALHA
+update crm_titulos set empresa_id = empresa_id where duplicata = '000003/01' returning 'gestora repassou título (junção de duplicados)' as ok;
+select pg_temp.como('c0000000-0000-0000-0000-000000000003');
+select 'Ana vê título que não é dela (NÃO devia)' t, count(*) from crm_titulos where duplicata <> '000001/01' having count(*) > 0;
+select 'Ana vê o título dela' t, count(*) from crm_titulos;
+update crm_titulos set valor = 0 returning 'Ana alterou título (NÃO devia)';
+select pg_temp.como('d0000000-0000-0000-0000-000000000004');
+select 'Bruno vê título que não é dele (NÃO devia)' t, count(*) from crm_titulos where duplicata <> '000002/01' having count(*) > 0;
+select pg_temp.como('f0000000-0000-0000-0000-000000000006');
+select 'Comprador vê títulos (NÃO devia)' t, count(*) from crm_titulos having count(*) > 0;
 -- Bruno desativado perde tudo
 reset role; update crm_usuarios set ativo=false where nome='Bruno'; set role authenticated; select pg_temp.como('d0000000-0000-0000-0000-000000000004');
 select 'Bruno desativado vê' t, count(*) from crm_empresas;

@@ -93,3 +93,53 @@ test('gestão: negócios abertos e conversão só do funil de vendas (pós-venda
   assert.equal(p.funil.abertas.valor, 100);
   assert.equal(p.funil.abertas.ponderado, 50);
 });
+
+// Listagem cadastral de produtos do FKN (SIFN108) em CSV: um bloco por produto.
+const bloco = (cod, v, nome, sit, linha, fam, est, ind, forn) => [
+  cod + ';' + v + ';' + nome + ';;' + sit + ';' + linha + ';' + fam + ';',
+  '       ESTOQUE:;mín:' + est[0] + ';   máx:' + est[1] + ';   atual:' + est[2] + ';   saldo:' + est[3] + ';   PEND:   cli:' + est[4] + ';   for:' + est[5] + ';   prog:;',
+  '       IND:cus/ven  0,0000/;  30,0000   ($);med:      0,000;  comp:' + ind[0] + ';  cus:' + ind[1] + ';  ven:' + ind[2] + ';  tab:       0,000;',
+  '       Fornecedor: ' + forn + ';',
+  '   localiz:;;',
+  '       últ.entrada: 05/09/2026   últ.saída: 16/09/2026   últ.alt.preço: 07/08/2026   data cadastro: 26/07/2024;',
+  '       VENDA ULT 6 MESES: ABR/26       0,0 MAI/26       0,0 JUN/26       0,0 JUL/26       0,0 AGO/26       0,0 SET/26       0,0 MÉDIA;',
+  '------------------------------------------------------------;'].join('\r\n');
+const LISTAGEM = ['EMPRESA EXEMPLO LTDA;PAG.: 1 de 1;', ';DATA: 01/10/2026;', 'SISTEMA DE GESTÃO EMPRESARIAL;14:14;', 'LISTAGEM CADASTRAL DE PRODUTOS;FKN(108)-00;',
+  'CÓDIGO;;NOME DO PRODUTO;FANTASIA;SITUAÇÃO;LINHA;FAMÍLIA;', '',
+  bloco('010001', 0, 'DETERGENTE 5L', 'ATIVO', 'DOMISSANITARIOS', '107 MULTI USO', ['      2', '     10', '        3', '        1', '      2', '      0'], ['     25,000', '     25,000', '      32,50'], '00059 FORNECEDOR UM LTDA'),
+  bloco('010001', 1, 'DETERGENTE 5L CX C/4', 'ATIVO', 'DOMISSANITARIOS', '107 MULTI USO', ['      0', '      0', '        1', '        1', '      0', '      1'], ['    100,000', '    100,000', '     130,00'], '00059 FORNECEDOR UM LTDA'),
+  bloco('010002', 0, 'PAPEL TOALHA', 'ATIVO', 'PAPEIS', '200 TOALHA', ['     50', '    200', '      100', '      100', '      0', '      0'], ['     10,000', '     10,000', '      13,00'], '00077 FORNECEDOR DOIS LTDA'),
+  bloco('010005', 0, 'LUVA NITRILICA', 'ATIVO', 'EPI', '300 LUVAS', ['     20', '     40', '        5', '        5', '      0', '      3'], ['      4,000', '      4,000', '       5,20'], '00000'),
+  bloco('010009', 0, 'PRODUTO ANTIGO', 'INATIVO', 'UTILIDADES', '000', ['      0', '      0', '        0', '        0', '      0', '      0'], ['      1,000', '      1,000', '       1,30'], '00000')
+].join('\r\n');
+
+test('listagem de produtos do FKN: fornecedor, mínimo, pedido e a caixa fechada', () => {
+  assert.ok(G.ehListagemProdutos(LISTAGEM));
+  const l = G.lerArquivoEstoque(LISTAGEM);
+  assert.deepEqual(l.map(x => x.codigo), ['010001', '010001.1', '010002', '010005'], 'inativo sem saldo fica de fora');
+  const det = l[0];
+  assert.deepEqual([det.quantidade, det.estoque_min, det.estoque_max, det.pend_cliente, det.pend_fornecedor, det.custo_unit, det.preco_venda, det.fornecedor_cod, det.fornecedor, det.linha, det.familia, det.ult_entrada],
+    [1, 2, 10, 2, 0, 25, 32.5, '00059', 'FORNECEDOR UM LTDA', 'DOMISSANITARIOS', '107 MULTI USO', '2026-09-05'], 'saldo (já sem o reservado para cliente), não o atual');
+  assert.equal(l[3].fornecedor, null, 'fornecedor 00000 = sem fornecedor');
+  assert.equal(det.custo_total, 25);
+
+  const j = G.juntaVariantes(l);
+  const dj = j.find(x => x.codigo === '010001');
+  assert.equal(j.length, 3, 'a caixa entra na unidade');
+  assert.deepEqual([dj.quantidade, dj.pend_fornecedor, dj.caixa.fator, dj.caixa.saldo], [5, 4, 4, 1], '1 + 1 cx de 4; 1 cx pedida = 4');
+  assert.equal(G.fatorCaixa({ custo_unit: 0 }, { descricao: 'CERA CX C/12' }), 12, 'sem custo: pelo nome');
+
+  const D = base();
+  D.nota_itens.forEach(it => { it.codigo = it.descricao === 'DETERGENTE 5L' ? '010001' : '010002'; });
+  const c = G.compras(D, R.indexa(D), R.config({}), HOJE, 30, l.map(x => Object.assign({ atualizado_em: '2026-10-01T17:00:00Z' }, x)));
+  // Detergente: precisa ~5,3 (consumo); tem 5 (1 + 1 cx de 4) e 4 a caminho → não compra.
+  const g = c.produtos.find(x => x.codigo === '010001');
+  assert.deepEqual([g.saldo, g.pedido, g.comprar, g.fornecedor], [5, 4, 0, 'FORNECEDOR UM LTDA']);
+  // Luva: sem venda, mas mínimo 20, tem 5 e 3 pedidas → compra 12 pelo mínimo.
+  const luva = c.produtos.find(x => x.codigo === '010005');
+  assert.deepEqual([luva.comprar, luva.pelaMinimo], [12, true]);
+  assert.ok(c.estoque.completo);
+  assert.deepEqual(c.pedidoPorFornecedor.map(f => [f.nome, f.itens.length, f.custo]), [['Sem fornecedor no FKN', 1, 48]]);
+  assert.deepEqual(c.listas.fornecedores, ['FORNECEDOR DOIS LTDA', 'FORNECEDOR UM LTDA']);
+  assert.ok(!c.parado.some(x => x.codigo === '010001.1'), 'a caixa não aparece como parada separada');
+});

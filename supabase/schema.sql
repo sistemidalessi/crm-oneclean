@@ -742,6 +742,59 @@ revoke all on public.crm_estoque from anon, public;
 grant select, insert, update, delete on public.crm_estoque to authenticated;
 drop policy if exists tudo on public.crm_estoque;
 create policy tudo on public.crm_estoque for all to authenticated using ((select public.crm_eh_admin()) or (select public.crm_eh_comprador())) with check ((select public.crm_eh_admin()) or (select public.crm_eh_comprador()));
+-- Listagem cadastral de produtos do FKN (SIFN108): fornecedor, linha, família, mínimo/máximo,
+-- pendências e custos. O CSV simples de estoque deixa estas colunas como estão.
+alter table public.crm_estoque add column if not exists situacao        text;
+alter table public.crm_estoque add column if not exists linha           text;
+alter table public.crm_estoque add column if not exists familia         text;
+alter table public.crm_estoque add column if not exists fornecedor_cod  text;
+alter table public.crm_estoque add column if not exists fornecedor      text;
+alter table public.crm_estoque add column if not exists estoque_min     numeric(14,3);
+alter table public.crm_estoque add column if not exists estoque_max     numeric(14,3);
+alter table public.crm_estoque add column if not exists pend_cliente    numeric(14,3);
+alter table public.crm_estoque add column if not exists pend_fornecedor numeric(14,3);
+alter table public.crm_estoque add column if not exists custo_unit      numeric(16,4);
+alter table public.crm_estoque add column if not exists custo_compra    numeric(16,4);
+alter table public.crm_estoque add column if not exists preco_venda     numeric(16,4);
+alter table public.crm_estoque add column if not exists ult_entrada     date;
+alter table public.crm_estoque add column if not exists ult_saida       date;
+
+-- contas a receber (listagem SIFN016 do FKN, "em aberto"): retrato dos títulos; cada importação
+-- troca o retrato inteiro. Quem vê: gestor e administrador, todos; vendedor, os da carteira dele.
+-- Só o administrador importa.
+create table if not exists public.crm_titulos (
+  id             uuid primary key default gen_random_uuid(),
+  duplicata      text not null check (length(btrim(duplicata)) > 0),
+  nota_numero    integer,
+  parcela        integer,
+  empresa_id     uuid references public.crm_empresas(id) on delete set null,
+  cliente_codigo text,
+  cliente_nome   text,
+  cliente_doc    text,
+  vendedor_nome  text,
+  emitida_em     date,
+  vencimento     date not null,
+  valor          numeric(14,2) not null default 0,
+  portador       text,
+  abono          boolean not null default false,
+  criado_em      timestamptz not null default now(),
+  atualizado_em  timestamptz not null default now()
+);
+create unique index if not exists crm_titulos_duplicata_uq on public.crm_titulos (duplicata);
+create index if not exists crm_titulos_empresa_idx on public.crm_titulos (empresa_id);
+alter table public.crm_titulos enable row level security;
+revoke all on public.crm_titulos from anon, public;
+grant select, insert, update, delete on public.crm_titulos to authenticated;
+drop policy if exists le on public.crm_titulos;
+drop policy if exists grava on public.crm_titulos;
+drop policy if exists altera on public.crm_titulos;
+drop policy if exists apaga on public.crm_titulos;
+create policy le on public.crm_titulos for select to authenticated
+  using ((select public.crm_eh_gestor()) or empresa_id in (select public.crm_empresas_minhas()));
+create policy grava on public.crm_titulos for insert to authenticated with check ((select public.crm_eh_admin()));
+-- alterar: a gestora também (ao juntar cadastros duplicados, o título vai para o cadastro que fica).
+create policy altera on public.crm_titulos for update to authenticated using ((select public.crm_eh_gestor())) with check ((select public.crm_eh_gestor()));
+create policy apaga on public.crm_titulos for delete to authenticated using ((select public.crm_eh_admin()));
 
 -- integrações: só o administrador; o registro das entregas o gestor também lê.
 create policy tudo on public.crm_integracoes for all to authenticated using ((select public.crm_eh_admin())) with check ((select public.crm_eh_admin()));
