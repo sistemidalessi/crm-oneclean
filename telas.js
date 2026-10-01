@@ -358,6 +358,7 @@
       if (cart && e.responsavel_id !== cart && !f.todas) return false;
       if (f.responsavel === '__nenhum' ? e.responsavel_id : f.responsavel && e.responsavel_id !== f.responsavel) return false;
       if (f.situacao && CRM.situacao(e) !== f.situacao) return false;
+      if (f.tipo && CRM.tipoCliente(e).tipo !== f.tipo) return false;
       if (f.segmento && e.segmento !== f.segmento) return false;
       if (f.origem && e.origem !== f.origem) return false;
       if (f.uf && e.uf !== f.uf) return false;
@@ -379,7 +380,8 @@
   const COLS_EMPRESA = {
     nome: e => R.normaliza(e.nome), situacao: e => CRM.situacao(e), responsavel: e => CRM.nomeUsuario(e.responsavel_id),
     cidade: e => (e.cidade || '') + (e.uf || ''), ultimo: e => CRM.resumo(e.id).ultimoContato || '', proxima: e => (CRM.resumo(e.id).proxima || {}).data_hora || '',
-    comprado: e => CRM.resumo(e.id).totalComprado || 0, criado: e => e.criado_em || ''
+    comprado: e => CRM.resumo(e.id).totalComprado || 0, criado: e => e.criado_em || '',
+    tipo: e => ['novo', 'reativado', 'recorrente', 'inativo', 'sem_compra'].indexOf(CRM.tipoCliente(e).tipo)
   };
 
   const empresas = {
@@ -396,6 +398,7 @@
         '<div class="filtros">' +
         '<input type="search" id="fBusca" placeholder="Nome, CNPJ, telefone, e-mail, pessoa…" value="' + esc(f.busca || '') + '">' +
         sel('situacao', CRM.lista([], 'Situação').concat(R.SITUACOES), f.situacao) +
+        sel('tipo', [['', 'Tipo de cliente']].concat(window.CRMPerfil.TIPOS), f.tipo) +
         (g ? sel('responsavel', [['', 'Responsável'], ['__nenhum', '(sem responsável)']].concat(CRM.usuariosAtivos().map(u => [u.user_id, u.nome])), f.responsavel) : '') +
         sel('segmento', CRM.lista(CRM.opcoes('segmento'), 'Segmento'), f.segmento) +
         sel('origem', CRM.lista(CRM.opcoes('origem'), 'Origem'), f.origem) +
@@ -411,7 +414,7 @@
           .filter(a => g || (a[0] !== 'responsavel')).concat(g ? [['excluir', 'Excluir']] : [])) +
         (lista.length ? '<div class="tabela-rolagem cartao sem-pad"><table class="tabela clicavel"><thead><tr>' +
           '<th class="sel"><input type="checkbox" data-acao="selecionar-todos" data-id="empresas"' + (todosSel ? ' checked' : '') + ' aria-label="Selecionar todos"></th>' +
-          cabecalhoOrdenavel('empresas', 'nome', 'Empresa') + cabecalhoOrdenavel('empresas', 'situacao', 'Situação') + cabecalhoOrdenavel('empresas', 'responsavel', 'Responsável') +
+          cabecalhoOrdenavel('empresas', 'nome', 'Empresa') + cabecalhoOrdenavel('empresas', 'situacao', 'Situação') + cabecalhoOrdenavel('empresas', 'tipo', 'Tipo') + cabecalhoOrdenavel('empresas', 'responsavel', 'Responsável') +
           cabecalhoOrdenavel('empresas', 'cidade', 'Cidade') + '<th>Contato</th>' + cabecalhoOrdenavel('empresas', 'ultimo', 'Último contato') +
           cabecalhoOrdenavel('empresas', 'proxima', 'Próximo passo') + cabecalhoOrdenavel('empresas', 'comprado', 'Comprou', 'num') +
           '</tr></thead><tbody>' + lista.slice(0, lim).map(e => {
@@ -422,6 +425,7 @@
               '<td class="sel"><input type="checkbox" data-acao="selecionar" data-id="empresas:' + esc(e.id) + '"' + (selecao.empresas.has(e.id) ? ' checked' : '') + ' aria-label="Selecionar"></td>' +
               '<td><strong>' + esc(e.nome) + '</strong> ' + CRM.estrelas(e.qualificacao) + '<small>' + esc([e.segmento, (e.tags || []).join(', ')].filter(Boolean).join(' · ')) + '</small></td>' +
               '<td>' + CRM.seloSituacao(sit) + '</td>' +
+              '<td>' + (CRM.seloTipoCliente(e) || '<small>—</small>') + '</td>' +
               '<td>' + esc(CRM.nomeUsuario(e.responsavel_id)) + '</td>' +
               '<td>' + esc([e.cidade, e.uf].filter(Boolean).join('/')) + '</td>' +
               '<td>' + (c ? esc(c.nome) + '<small>' + esc(telefoneDe(e, c)) + '</small>' : '<small>' + esc(telefoneDe(e, null)) + '</small>') + '</td>' +
@@ -796,10 +800,10 @@
       if (tela === 'empresas') {
         const l = empresasFiltradas();
         CRM.baixarCSV('empresas', ['Nome', 'Razão social', 'CNPJ', 'Situação', 'Responsável', 'Segmento', 'Origem', 'Qualificação', 'Telefone', 'WhatsApp', 'E-mail', 'Site',
-          'CEP', 'Endereço', 'Número', 'Complemento', 'Bairro', 'Cidade', 'UF', 'Etiquetas', 'Último contato', 'Última compra', 'Total comprado', 'Cadastro', 'Observações'],
+          'CEP', 'Endereço', 'Número', 'Complemento', 'Bairro', 'Cidade', 'UF', 'Etiquetas', 'Último contato', 'Última compra', 'Total comprado', 'Tipo de cliente', 'Cadastro', 'Observações'],
         l.map(e => { const r = CRM.resumo(e.id); return [e.nome, e.razao_social, e.cnpj, R2.rotulo(R2.SITUACOES, CRM.situacao(e)), CRM.nomeUsuario(e.responsavel_id), e.segmento, e.origem, e.qualificacao,
           e.telefone, e.whatsapp, e.email, e.site, e.cep, e.logradouro, e.numero, e.complemento, e.bairro, e.cidade, e.uf, e.tags, R2.dataBR(r.ultimoContato), R2.dataBR(r.ultimaCompra),
-          r.totalComprado ? String(r.totalComprado).replace('.', ',') : '', R2.dataBR(e.criado_em), e.observacoes]; }));
+          r.totalComprado ? String(r.totalComprado).replace('.', ',') : '', R2.rotulo(window.CRMPerfil.TIPOS, CRM.tipoCliente(e).tipo), R2.dataBR(e.criado_em), e.observacoes]; }));
       } else if (tela === 'negocios') {
         const l = negociosFiltrados();
         CRM.baixarCSV('negocios', ['Título', 'Empresa', 'Etapa', 'Status', 'Valor', 'Responsável', 'Origem', 'Previsão', 'Fechado em', 'Motivo de perda', 'Criado em'],

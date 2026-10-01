@@ -213,6 +213,13 @@ da OneClean é o **FKN** (SIFWin, da FKN Informática) — com N; não escrever 
   aberto confere a versão publicada a cada ~4 min e ao voltar para a janela; se mudou, recarrega
   sozinho quando não há janela aberta nem campo com texto (`confereVersao` em `app.js`). Se o
   navegador insistir na versão antiga, não entra em laço: mostra a faixa `#faixaVersao`.
+- **Tipo de cliente (01/10/2026, pedido da equipe):** `perfil.js` (fora do motor das notas) classifica
+  pelas compras (notas de venda + negócios ganhos, a até 3 dias = uma): novo (1ª compra nos últimos
+  `dias_cliente_novo`, padrão 90), reativado (voltou nesse prazo depois de mais que `dias_inativo`
+  sem comprar), inativo, recorrente, sem compra. Ficha (selo com a data), coluna/filtro/ordem em
+  Empresas e exportação. Testado em `testes/perfil.test.js`.
+  Limite: as notas começam em 06/01/2026 e os ganhos do Agendor em 30/06/2026; quem comprava em 2025 e
+  voltou agora aparece como "novo" até as notas antigas entrarem (vigia com `--desde` anterior).
 - **Cliente da nota × cadastro antigo; matriz e filial (01/10/2026):** o Agendor quase não tinha CNPJ
   (1.889 de 1.987); a 1ª nota de cliente antigo criava cadastro repetido (New Aço + 38 mesclados
   por SQL com backup em `crm_backup.mescla_empresas`, lote "notas x agendor 01/10"; análise em

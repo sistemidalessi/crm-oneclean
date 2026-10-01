@@ -109,7 +109,7 @@
       '<br><small>' + doGrupo.length + ' cadastro(s) · faturado pelo grupo em 12 meses: ' + esc(R.moeda(fatGrupo)) + '</small>';
 
     dlg.innerHTML = '<div class="ficha">' +
-      '<header class="ficha-topo"><div class="ficha-titulo"><h2>' + esc(e.nome) + '</h2>' + CRM.seloSituacao(sit) + CRM.estrelas(e.qualificacao) +
+      '<header class="ficha-topo"><div class="ficha-titulo"><h2>' + esc(e.nome) + '</h2>' + CRM.seloSituacao(sit) + CRM.seloTipoCliente(e, true) + CRM.estrelas(e.qualificacao) +
         (e.tags || []).map(t => CRM.selo(t, 'etiqueta')).join('') +
         '<span class="resp">' + CRM.avatar(CRM.usuario(e.responsavel_id)) + esc(CRM.nomeUsuario(e.responsavel_id)) + '</span></div>' +
         '<span class="flex"></span>' +

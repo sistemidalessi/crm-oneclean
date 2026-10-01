@@ -38,6 +38,7 @@
     { tipo: 'secao', rotulo: 'Alertas' },
     { nome: 'dias_sem_contato', rotulo: 'Cliente sem contato há mais de (dias)', tipo: 'numero', passo: '1', min: 1 },
     { nome: 'dias_parado', rotulo: 'Negócio parado há mais de (dias)', tipo: 'numero', passo: '1', min: 1 },
+    { nome: 'dias_cliente_novo', rotulo: 'Cliente "novo" ou "reativado" por quantos dias depois da compra', tipo: 'numero', passo: '1', min: 1, ajuda: 'padrão 90; "reativado" = voltou depois de ficar mais que os dias de inativo sem comprar' },
     { nome: 'dias_esquecido', rotulo: 'Parado há mais de (dias) vira "esquecido": sai dos avisos e vai para a limpeza', tipo: 'numero', passo: '1', min: 0, ajuda: '0 = nunca' },
     { nome: 'leads_desde', rotulo: '"Leads sem atendimento" conta só os cadastrados a partir de', tipo: 'data', ajuda: 'vazio = todos; a base antiga importada fica como lista de prospecção' },
     { nome: 'dias_inativo', rotulo: 'Cliente inativo sem comprar há (dias)', tipo: 'numero', passo: '1', min: 1 },
