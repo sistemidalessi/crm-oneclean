@@ -101,8 +101,9 @@ e troca o retrato de `crm_estoque` / `crm_titulos`. Travas: listagem com < metad
 atuais, contas a receber sem TOTAL GERAL ou com soma diferente → 422, nada muda, e o vigia não
 insiste até o arquivo mudar. Entrega aparece em Integrações → Últimas entregas. Testado: vigia
 contra servidor falso (testes/vigia.test.js) e a função transpilada no Node com banco falso e os
-arquivos reais. **Falta o Anderson:** criar a pasta e configurar no servidor (README, "Arquivos do
-FKN pelo vigia").
+arquivos reais. **Ligado no servidor em 01/10 15:18** (vigia `2026-10-01b`, `--pasta-fkn D:\sistema\CRM-FKN`,
+na rede `\\Servidor\sistema\CRM-FKN`); 1ª entrega real às 15:24: 174 títulos e 2.265 linhas de
+produtos. Para atualizar: puxar o relatório no FKN e salvar o CSV nessa pasta.
 
 **A fazer:** fase 3 (WhatsApp oficial da Meta, e-mail, Google Agenda) e IA.
 
