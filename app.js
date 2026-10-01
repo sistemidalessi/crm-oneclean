@@ -87,6 +87,8 @@
       if (CRM.ehComprador() && store.clientesCompras) D.empresas = await store.clientesCompras();
       // Administrador: sinal de vida do vigia de notas (aviso se parar).
       if (CRM.ehAdmin() && store.vigias) E.vigias = await store.vigias().catch(() => E.vigias || []);
+      // Administrador e comprador: quando chegaram os relatórios do FKN (lembrete em Compras).
+      if ((CRM.ehAdmin() || CRM.ehComprador()) && store.fknAtualizado) E.fkn = await store.fknAtualizado().catch(() => E.fkn || null);
       E.D = D;
       E.carregadoEm = Date.now();
       E.falhaCarga = null;
@@ -290,6 +292,13 @@
     ['negocios', 'Negócios', '$'], ['agenda', 'Atividades', '▣'], ['relatorios', 'Relatórios', '▲'], ['ajustes', 'Configurações', '⚙'], ['compras', 'Compras', '▤'], ['gestao', 'Gestão', '◆']
   ];
   CRM.ABAS = ABAS;
+  // Relatórios do FKN que estão pendentes neste turno (manhã/tarde): [{ arquivo, ultimo, turno }].
+  CRM.lembreteFkn = () => {
+    if (!E.fkn || !(CRM.ehAdmin() || CRM.ehComprador())) return [];
+    return [['estoque', 'Listagem cadastral de produtos'], ['receber', 'Contas a receber por cliente (em aberto)']]
+      .map(([k, nome]) => { const l = DD.lembreteFkn(E.fkn[k]); return l ? { arquivo: nome, ultimo: E.fkn[k], turno: l.turno } : null; }).filter(Boolean);
+  };
+  CRM.recarregarFkn = async () => { if (store && store.fknAtualizado) { E.fkn = await store.fknAtualizado().catch(() => E.fkn); CRM.render(); } };
 
   let pendente = false;
   CRM.render = () => {
@@ -330,7 +339,8 @@
     const nTarefas = al.atrasadas.length + al.deHoje.length;
     $('#menuLateral').innerHTML = abas.map(a => '<button type="button" class="nav' + (E.aba === a[0] ? ' ativa' : '') + '" data-acao="aba" data-id="' + a[0] + '"' +
       (E.aba === a[0] ? ' aria-current="page"' : '') + ' title="' + esc(a[1]) + ' (tecla ' + (ABAS.indexOf(a) + 1) + ')"><span class="nav-ico">' + a[2] + '</span><span class="nav-txt">' + esc(a[1]) + '</span>' +
-      (a[0] === 'inicio' && nTarefas ? '<span class="bolinha' + (al.atrasadas.length ? ' vermelha' : '') + '">' + nTarefas + '</span>' : '') + '</button>').join('');
+      (a[0] === 'inicio' && nTarefas ? '<span class="bolinha' + (al.atrasadas.length ? ' vermelha' : '') + '">' + nTarefas + '</span>' : '') +
+      (a[0] === 'compras' && CRM.lembreteFkn().length ? '<span class="bolinha vermelha" title="Puxar os relatórios do FKN">!</span>' : '') + '</button>').join('');
 
     const sel = $('#visao');
     if (CRM.ehGestor()) {

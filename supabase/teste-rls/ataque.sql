@@ -121,6 +121,9 @@ select pg_temp.como('d0000000-0000-0000-0000-000000000004');
 select 'Bruno vê título que não é dele (NÃO devia)' t, count(*) from crm_titulos where duplicata <> '000002/01' having count(*) > 0;
 select pg_temp.como('f0000000-0000-0000-0000-000000000006');
 select 'Comprador vê títulos (NÃO devia)' t, count(*) from crm_titulos having count(*) > 0;
+select 'Comprador vê quando chegou o contas a receber' t, receber is not null from crm_fkn_atualizado();
+select pg_temp.como('c0000000-0000-0000-0000-000000000003');
+select 'Ana vê datas do FKN (NÃO devia)' t, count(*) from crm_fkn_atualizado() having count(*) > 0;
 -- Bruno desativado perde tudo
 reset role; update crm_usuarios set ativo=false where nome='Bruno'; set role authenticated; select pg_temp.como('d0000000-0000-0000-0000-000000000004');
 select 'Bruno desativado vê' t, count(*) from crm_empresas;

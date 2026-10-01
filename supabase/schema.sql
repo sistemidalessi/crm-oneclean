@@ -796,6 +796,16 @@ create policy grava on public.crm_titulos for insert to authenticated with check
 create policy altera on public.crm_titulos for update to authenticated using ((select public.crm_eh_gestor())) with check ((select public.crm_eh_gestor()));
 create policy apaga on public.crm_titulos for delete to authenticated using ((select public.crm_eh_admin()));
 
+-- Quando chegou cada relatório do FKN (lembrete em Compras): o comprador não lê os títulos, então
+-- vê só as datas. Vendedor e gestor não recebem nada.
+create or replace function public.crm_fkn_atualizado()
+returns table (estoque timestamptz, receber timestamptz) language sql stable security definer set search_path = public as $$
+  select (select max(atualizado_em) from public.crm_estoque), (select max(atualizado_em) from public.crm_titulos)
+   where public.crm_eh_admin() or public.crm_eh_comprador();
+$$;
+revoke all on function public.crm_fkn_atualizado() from public, anon;
+grant execute on function public.crm_fkn_atualizado() to authenticated;
+
 -- integrações: só o administrador; o registro das entregas o gestor também lê.
 create policy tudo on public.crm_integracoes for all to authenticated using ((select public.crm_eh_admin())) with check ((select public.crm_eh_admin()));
 create policy le on public.crm_integracao_log for select to authenticated using ((select public.crm_eh_gestor()));

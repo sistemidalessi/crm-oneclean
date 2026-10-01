@@ -447,7 +447,11 @@
       const velho = e && e.em && R.diasEntre(R.diaLocal(e.em), hoje) > 3;
       const curva = g => (g.classe === '—' ? '<small>—</small>' : CRM.selo(g.classe, g.classe === 'A' ? 'verde' : g.classe === 'B' ? 'azul' : 'etiqueta'));
       const custo = g => (g.comprar && g.custoUnit ? R.moeda(g.custoUnit * g.comprar) : '—');
-      return '<div class="cabecalho"><div><h1>Compras</h1><p class="sub">' +
+      const lemb = CRM.lembreteFkn ? CRM.lembreteFkn() : [];
+      const faixaFkn = lemb.length ? '<div class="faixa alerta lembrete-fkn"><strong>Hora de puxar ' + (lemb.length > 1 ? 'os relatórios' : 'o relatório') + ' do FKN (' + esc(lemb[0].turno) + '):</strong> ' +
+        lemb.map(x => esc(x.arquivo) + ' <small>(último: ' + (x.ultimo ? esc(R.dataBR(R.diaLocal(x.ultimo)) + ' ' + R.horaLocal(x.ultimo)) : 'nunca') + ')</small>').join(' · ') +
+        '. No FKN, gere e salve em CSV ' + (cfg.pasta_fkn ? 'na pasta <code>' + esc(cfg.pasta_fkn) + '</code>' : 'na pasta que o vigia olha') + ': o vigia manda sozinho e este aviso some.</div>' : '';
+      return faixaFkn + '<div class="cabecalho"><div><h1>Compras</h1><p class="sub">' +
           (e ? 'Estoque do FKN de <strong>' + esc(R.dataBR(e.em) + ' ' + R.horaLocal(e.em)) + '</strong>' + (velho ? ' ' + CRM.selo('desatualizado: exporte de novo no FKN', 'ambar') : '') + ' · ' + e.produtos + ' produtos'
             : 'Sem estoque do FKN ainda: exporte a posição de estoque em CSV no FKN e clique em "Atualizar estoque"') +
           '</p></div><span class="flex"></span>' + botao + '</div>' +
@@ -516,6 +520,7 @@
     const n = await CRM.store().salvarEstoque(lista, (i, tot) => CRM.toast('Gravando o estoque: ' + i + ' de ' + tot + '…'));
     CRM.toast('Estoque atualizado: ' + n + ' produtos' + (neg ? ' (' + neg + ' com saldo negativo no FKN)' : '') + '.');
     estoque = null; CRM.render();
+    if (CRM.recarregarFkn) CRM.recarregarFkn();
   }
 
   // Pedido por fornecedor: a sugestão de compra separada por fornecedor, pronta para mandar.

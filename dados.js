@@ -437,6 +437,30 @@
     return { estado: min > PARADO_MIN ? 'parado' : 'ok', minutos: Math.max(0, min) };
   }
 
-  raiz.CRMDados = { TABELAS, chave, Local, Supa, uuid, vazio, LOCAL_ADMIN, cascataMemoria, situacaoVigia, PARADO_MIN };
+  // Lembrete de puxar os relatórios do FKN (listagem de produtos e contas a receber): um de manhã
+  // (a partir das 7h) e um à tarde (a partir das 13h), de segunda a sexta. Pendente = a última
+  // entrega é de antes do começo do turno. Devolve { turno, desde } ou null.
+  const TURNOS_FKN = [[7, 'manhã'], [13, 'tarde']];
+  function lembreteFkn(ultimo, agora) {
+    agora = agora ? new Date(agora) : new Date();
+    const dia = agora.getDay();
+    if (dia === 0 || dia === 6) return null;
+    const t = TURNOS_FKN.slice().reverse().find(x => agora.getHours() >= x[0]);
+    if (!t) return null;
+    const desde = new Date(agora); desde.setHours(t[0], 0, 0, 0);
+    return !ultimo || new Date(ultimo) < desde ? { turno: t[1], desde } : null;
+  }
+  // Última atualização de cada arquivo do FKN (função do banco: o comprador não lê os títulos).
+  Supa.prototype.fknAtualizado = async function () {
+    const l = unwrap(await comTentativas(() => this.sb.rpc('crm_fkn_atualizado')));
+    return (l && l[0]) || { estoque: null, receber: null };
+  };
+  Local.prototype.fknAtualizado = async function () {
+    const est = await this.estoque(), tit = this.ler().titulos || [];
+    const max = l => l.reduce((m, x) => (x.atualizado_em && x.atualizado_em > m ? x.atualizado_em : m), '') || null;
+    return { estoque: max(est), receber: max(tit) };
+  };
+
+  raiz.CRMDados = { TABELAS, chave, Local, Supa, uuid, vazio, LOCAL_ADMIN, cascataMemoria, situacaoVigia, PARADO_MIN, lembreteFkn };
   if (typeof module !== 'undefined' && module.exports) module.exports = raiz.CRMDados;
 })(typeof window !== 'undefined' ? window : globalThis);

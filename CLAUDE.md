@@ -104,6 +104,12 @@ contra servidor falso (testes/vigia.test.js) e a função transpilada no Node co
 arquivos reais. **Ligado no servidor em 01/10 15:18** (vigia `2026-10-01b`, `--pasta-fkn D:\sistema\CRM-FKN`,
 na rede `\\Servidor\sistema\CRM-FKN`); 1ª entrega real às 15:24: 174 títulos e 2.265 linhas de
 produtos. Para atualizar: puxar o relatório no FKN e salvar o CSV nessa pasta.
+**Lembrete (01/10, pedido do Anderson):** de segunda a sexta, a partir das 7h (manhã) e das 13h
+(tarde), se a última entrega de um dos dois relatórios for de antes do começo do turno, Compras
+mostra a faixa "Hora de puxar os relatórios do FKN" e o menu Compras ganha um "!" (admin e
+comprador). Datas pela função `crm_fkn_atualizado()` (o comprador não lê títulos); regra em
+`CRMDados.lembreteFkn`; pasta mostrada = `cfg.pasta_fkn` (Configurações → Geral → Notas fiscais).
+O FKN não gera relatório sozinho (perguntar à FKN Informática se exporta por linha de comando).
 
 **A fazer:** fase 3 (WhatsApp oficial da Meta, e-mail, Google Agenda) e IA.
 

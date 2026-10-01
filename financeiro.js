@@ -151,6 +151,7 @@
     CRM.toast('Gravando ' + lig.titulos.length + ' títulos…');
     const l = await CRM.store().salvarTitulos(lig.titulos);
     E().D.titulos = l;
+    if (CRM.recarregarFkn) CRM.recarregarFkn();
     CRM.toast('Contas a receber atualizado: ' + lig.titulos.length + ' títulos de ' + lido.clientes + ' clientes (' + R.moeda(lido.soma) + ')' +
       (lig.sem ? ' · ' + lig.sem + ' sem cliente no CRM' : '') + (lido.confere ? '' : ' · ATENÇÃO: a soma não bate com o total geral do FKN (' + R.moeda(lido.totalGeral) + ')') + '.');
     CRM.render();

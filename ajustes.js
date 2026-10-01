@@ -45,6 +45,7 @@
     { nome: 'ciclo_recompra_padrao', rotulo: 'Ciclo de recompra padrão (dias)', tipo: 'numero', passo: '1', min: 1, ajuda: 'cada empresa pode ter o seu' },
     { tipo: 'secao', rotulo: 'Notas fiscais' },
     { nome: 'vendedores_antigos', rotulo: 'Ex-vendedores (como aparecem na nota, separados por vírgula)', largo: true, dica: 'ex.: NICOLLY, JULIA', ajuda: 'as notas deles contam no faturamento e em Compras, sem ir para a carteira ou o histórico de ninguém' },
+    { nome: 'pasta_fkn', rotulo: 'Pasta dos relatórios do FKN (a que o vigia olha)', largo: true, dica: 'ex.: \\\\Servidor\\sistema\\CRM-FKN', ajuda: 'aparece no lembrete de Compras (manhã e tarde) para quem puxa a listagem de produtos e o contas a receber' },
     { tipo: 'secao', rotulo: 'Automações' },
     { nome: 'rodizio', rotulo: 'Lead cadastrado pelo gestor sem responsável vai para o próximo vendedor (rodízio)', tipo: 'checkbox', largo: true },
     { nome: 'auto_tarefa_lead', rotulo: 'Lead novo ganha a tarefa "Fazer o primeiro contato"', tipo: 'checkbox', largo: true },

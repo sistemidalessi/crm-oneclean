@@ -94,3 +94,16 @@ test('vigia manda os arquivos do FKN da pasta (o mais novo de cada tipo) e não 
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('lembrete dos relatórios do FKN: um de manhã (7h) e um à tarde (13h), de segunda a sexta', () => {
+  const L = DD.lembreteFkn;
+  const qua = (h, m) => new Date(2026, 8, 30, h, m || 0); // quarta-feira, 30/09/2026 (hora local)
+  assert.equal(L(null, qua(6, 59)), null, 'antes das 7h não cobra');
+  assert.equal(L(qua(6, 0), qua(8)).turno, 'manhã', 'chegou antes das 7h: falta o da manhã');
+  assert.equal(L(qua(7, 30), qua(12, 59)), null, 'o da manhã já veio');
+  assert.equal(L(qua(7, 30), qua(13, 1)).turno, 'tarde', 'passou das 13h: falta o da tarde');
+  assert.equal(L(qua(13, 20), qua(18)), null, 'o da tarde já veio');
+  assert.equal(L(null, qua(9)).turno, 'manhã', 'nunca veio');
+  assert.equal(L(null, new Date(2026, 9, 3, 10)), null, 'sábado não cobra');
+  assert.equal(L(null, new Date(2026, 9, 4, 10)), null, 'domingo não cobra');
+});
