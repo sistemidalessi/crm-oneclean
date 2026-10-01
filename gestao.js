@@ -18,7 +18,8 @@
       return d && d >= de && d <= ate && R.notaDeVenda(n, ix.porNota.get(n.id));
     });
   }
-  const donoDe = (ix, n) => { const e = n.empresa_id && ix.porId.empresas.get(n.empresa_id); return e ? e.responsavel_id || null : null; };
+  // Quem vendeu: o vendedor escrito na nota; sem ele, a carteira do cliente.
+  const donoDe = (ix, n) => { if (n.vendedor_id) return n.vendedor_id; const e = n.empresa_id && ix.porId.empresas.get(n.empresa_id); return e ? e.responsavel_id || null : null; };
 
   function resumoPeriodo(D, ix, de, ate) {
     const l = vendas(D, ix, de, ate);
@@ -318,6 +319,25 @@
   const ORDEM = [['curva', 'Curva (A primeiro) e faturamento'], ['pedido', 'Maior custo do pedido'], ['dura', 'Acaba antes'], ['vendido', 'Mais vendido (R$ 12 meses)'],
     ['parado', 'Maior valor parado'], ['nome', 'Nome']];
   const OC = { A: 0, B: 1, C: 2, '—': 3 };
+  // [chave, título, número?, valor para ordenar]
+  const COLUNAS = [
+    ['produto', 'Produto', false, g => R.normaliza(R.nomeDeItem(g.descricao))],
+    ['curva', 'Curva', false, g => (g.classe === '—' ? null : OC[g.classe])],
+    ['estoque', 'Estoque', true, g => g.saldo],
+    ['consumo', 'Consumo/mês', true, g => (g.consumoDia ? g.consumoDia * 30 : null)],
+    ['dura', 'Dura', true, g => g.cobertura],
+    ['clientes', 'Clientes previstos', true, g => g.clientesPrevistos || null],
+    ['precisa', 'Precisa', true, g => g.necessidade || null],
+    ['comprar', 'Comprar', true, g => g.comprar || null],
+    ['custo', 'Custo do pedido', true, g => (g.comprar && g.custoUnit ? g.custoUnit * g.comprar : null)],
+    ['vendido', 'Vendido 12 meses', true, g => g.valor12 || null],
+    ['tendencia', 'Tendência', true, g => g.tendencia]
+  ];
+  const cabecalhoCompras = () => COLUNAS.map(c => {
+    const ativo = fc.col === c[0], seta = ativo ? (fc.dir === 'desc' ? ' ▼' : ' ▲') : '';
+    return '<th class="ordenavel' + (c[2] ? ' num' : '') + (ativo ? ' ativo' : '') + '" data-acao="compras-coluna" data-id="' + c[0] + '" title="Ordenar por ' + esc(c[1]) + ' (clique de novo para inverter)"' +
+      (ativo ? ' aria-sort="' + (fc.dir === 'desc' ? 'descending' : 'ascending') + '"' : '') + '>' + esc(c[1]) + seta + '</th>';
+  }).join('');
   function filtraProdutos(c) {
     const q = R.normaliza(fc.busca);
     let l = c.produtos.filter(g => {
@@ -331,6 +351,19 @@
     });
     const custoPedido = g => (g.custoUnit ? g.custoUnit * (g.comprar || 0) : 0);
     const valorParado = g => (g.saldo > 0 && g.custoUnit ? g.saldo * g.custoUnit : 0);
+    // Clique no cabeçalho: ordena por aquela coluna; clicar de novo inverte (como no Excel).
+    if (fc.col) {
+      const v = COLUNAS.find(x => x[0] === fc.col);
+      if (v) {
+        const f = v[3], dir = fc.dir === 'desc' ? -1 : 1;
+        return l.sort((a, b) => {
+          const x = f(a), y = f(b);
+          if (x == null && y == null) return 0;
+          if (x == null) return 1; if (y == null) return -1; // vazio sempre no fim
+          return (typeof x === 'string' ? x.localeCompare(y, 'pt-BR') : x - y) * dir;
+        });
+      }
+    }
     const ord = {
       curva: (a, b) => OC[a.classe] - OC[b.classe] || b.valor12 - a.valor12,
       pedido: (a, b) => custoPedido(b) - custoPedido(a),
@@ -342,6 +375,7 @@
     return l.sort(ord);
   }
 
+  const LIMITE_COMPRAS = 400;
   CRM.telas.compras = {
     render() {
       if (!CRM.ehAdmin() && !CRM.ehComprador()) return '<div class="cartao"><p class="vazio">Esta tela é do administrador e do comprador.</p></div>';
@@ -375,15 +409,15 @@
           '<button type="button" class="btn sec" data-acao="compras-exportar">Exportar (' + l.length + ')</button>' +
         '</div>' +
         '<p class="dica">Precisa = o maior entre o que os clientes devem pedir (pelo ritmo e pelos itens de sempre) e o consumo médio dos últimos 90 dias no prazo. Comprar = precisa − estoque. Confira mínimos e embalagem do fornecedor.</p>' +
-        (l.length ? '<div class="tabela-rolagem"><table class="tabela compras"><thead><tr><th>Produto</th><th>Curva</th><th class="num">Estoque</th><th class="num">Consumo/mês</th><th class="num">Dura</th><th class="num">Clientes previstos</th><th class="num">Precisa</th><th class="num">Comprar</th><th class="num">Custo do pedido</th><th class="num">Vendido 12 meses</th><th class="num">Tendência</th></tr></thead><tbody>' +
-          l.slice(0, 150).map(g => '<tr><td>' + esc(R.nomeDeItem(g.descricao)) + ' <small>' + esc(g.codigo || '') + '</small></td><td>' + curva(g) + '</td>' +
+        (l.length ? '<div class="tabela-rolagem tabela-fixa"><table class="tabela compras"><thead><tr>' + cabecalhoCompras() + '</tr></thead><tbody>' +
+          l.slice(0, LIMITE_COMPRAS).map(g => '<tr><td>' + esc(R.nomeDeItem(g.descricao)) + ' <small>' + esc(g.codigo || '') + '</small></td><td>' + curva(g) + '</td>' +
             '<td class="num">' + (g.saldo == null ? '—' : g.saldo < 0 ? CRM.selo(qtd(g.saldo), 'vermelho') : qtd(g.saldo)) + ' <small>' + esc(g.unidade) + '</small></td>' +
             '<td class="num">' + (g.consumoDia ? qtd(g.consumoDia * 30) : '—') + '</td>' +
             '<td class="num">' + (g.cobertura == null ? '—' : g.cobertura < 1 ? CRM.selo('acabou', 'vermelho') : Math.round(g.cobertura) + ' dias') + '</td>' +
             '<td class="num">' + (g.clientesPrevistos || '—') + '</td><td class="num">' + (g.necessidade ? qtd(g.necessidade) : '—') + '</td>' +
             '<td class="num">' + (g.comprar ? '<strong>' + g.comprar + '</strong>' : '—') + '</td><td class="num">' + esc(custo(g)) + '</td>' +
             '<td class="num">' + (g.valor12 ? esc(R.moeda(g.valor12)) : '—') + '</td><td class="num">' + (g.tendencia == null ? '—' : seta(g.tendencia)) + '</td></tr>').join('') +
-          '</tbody></table></div>' + (l.length > 150 ? '<p class="mais">Mostrando 150 de ' + l.length + '; o arquivo exportado tem todos.</p>' : '')
+          '</tbody></table></div>' + (l.length > LIMITE_COMPRAS ? '<p class="mais">Mostrando ' + LIMITE_COMPRAS + ' de ' + l.length + '; o arquivo exportado tem todos.</p>' : '')
           : '<p class="vazio">Nenhum produto com esses filtros.</p>') + '</section>' +
         '<div class="g-duas">' +
           '<section class="cartao"><h2>Clientes com compra prevista <small>' + c.clientesPrevistos.length + ' até ' + esc(R.dataBR(R.somaDias(hoje, c.dias))) + '</small></h2>' +
@@ -402,6 +436,7 @@
         if (campo === 'mostrar') fc.ordem = { comprar: 'curva', falta: 'vendido', parado: 'parado', vendidos: 'vendido', todos: 'nome' }[el.value] || fc.ordem;
         CRM.render(); }); };
       liga('cBusca', 'busca'); liga('cMostrar', 'mostrar'); liga('cCurva', 'curva'); liga('cOrdem', 'ordem'); liga('gDias', null, true);
+      ['cOrdem', 'cMostrar'].forEach(id => { const el = document.getElementById(id); if (el) el.addEventListener('change', () => { fc.col = null; }, true); });
     }
   };
 
@@ -430,6 +465,7 @@
   }
 
   Object.assign(CRM.acoes, {
+    'compras-coluna': id => { if (fc.col === id) fc.dir = fc.dir === 'desc' ? 'asc' : 'desc'; else { fc.col = id; fc.dir = COLUNAS.find(c => c[0] === id)[2] ? 'desc' : 'asc'; } CRM.render(); },
     'compras-exportar': () => {
       const l = (ultimo && ultimo.filtrados) || [];
       CRM.baixarCSV('compras-' + fc.mostrar + '-' + diasCompras + 'dias', ['Código', 'Produto', 'Unidade', 'Curva', 'Estoque', 'Consumo por mês', 'Dura (dias)', 'Clientes previstos', 'Precisa', 'Comprar', 'Custo unitário', 'Custo do pedido', 'Vendido 12 meses (R$)', 'Tendência %'],

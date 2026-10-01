@@ -35,6 +35,8 @@ insert into crm_empresas (nome, responsavel_id) values ('Só do Bruno','d0000000
 insert into crm_notas (chave, emitida_em, empresa_id, valor_total) select repeat('1',44), now(), id, 100 from crm_empresas where nome='Da Ana';
 insert into crm_notas (chave, emitida_em, empresa_id, valor_total) select repeat('2',44), now(), id, 200 from crm_empresas where nome='Só do Bruno';
 insert into crm_notas (chave, emitida_em, valor_total) values (repeat('3',44), now(), 300);
+-- venda do Bruno (vendedor escrito na nota) num cliente da Ana: os dois veem; ninguém mais
+insert into crm_notas (chave, emitida_em, empresa_id, valor_total, vendedor_id) select repeat('5',44), now(), id, 400, 'd0000000-0000-0000-0000-000000000004' from crm_empresas where nome='Da Ana';
 insert into crm_nota_itens (nota_id, descricao, quantidade, valor_total) select id, 'Item', 1, valor_total from crm_notas;
 insert into crm_notas (chave, emitida_em) values ('123', now()); -- FALHA (chave inválida)
 -- Ana de novo
@@ -48,7 +50,7 @@ delete from crm_empresas where nome='Da Ana' returning 'Ana apagou empresa (NÃO
 update crm_etapas set nome='hack' returning 'Ana mexeu em etapa (NÃO devia)';
 insert into crm_etapas (nome) values ('hack'); -- FALHA
 update crm_usuarios set papel='admin' where user_id='c0000000-0000-0000-0000-000000000003' returning 'Ana virou admin (NÃO devia)';
-select 'Ana vê notas (só a da empresa dela)' t, (select string_agg(valor_total::text, ',') from crm_notas) notas, (select count(*) from crm_nota_itens) itens;
+select 'Ana vê notas (as da empresa dela: 100 e a venda do Bruno nela, 400)' t, (select string_agg(valor_total::text, ',') from crm_notas) notas, (select count(*) from crm_nota_itens) itens;
 insert into crm_notas (chave, emitida_em) values (repeat('4',44), now()); -- FALHA
 update crm_notas set valor_total=1 returning 'Ana alterou nota (NÃO devia)';
 delete from crm_nota_itens returning 'Ana apagou item de nota (NÃO devia)';
@@ -72,7 +74,7 @@ select pg_temp.como('d0000000-0000-0000-0000-000000000004');
 select 'Bruno vê empresas' t, string_agg(nome, ', ' order by nome) from crm_empresas;
 select 'Bruno vê negócios (o da Ana, na empresa dele)' t, count(*) from crm_negocios;
 update crm_negocios set valor=1 returning 'Bruno alterou negócio da Ana (NÃO devia)';
-select 'Bruno vê notas (só a dele)' t, (select string_agg(valor_total::text, ',') from crm_notas) notas, (select count(*) from crm_nota_itens) itens;
+select 'Bruno vê notas (a da empresa dele, 200, e a que ele vendeu, 400)' t, (select string_agg(valor_total::text, ',') from crm_notas) notas, (select count(*) from crm_nota_itens) itens;
 -- de fora (logado, não está em crm_usuarios)
 select pg_temp.como('e0000000-0000-0000-0000-000000000005');
 select 'De fora vê' t, (select count(*) from crm_empresas) e, (select count(*) from crm_usuarios) u, (select count(*) from crm_etapas) et, (select count(*) from crm_config) cfg, (select count(*) from crm_notas) n, (select count(*) from crm_nota_itens) ni;

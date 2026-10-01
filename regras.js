@@ -494,7 +494,8 @@
     const resp = filtro.responsavel_id || null;
     const empresa = id => (id && ix.porId.empresas.get(id)) || null;
     const itensDe = n => ix.porNota.get(n.id) || [];
-    const dono = n => { const e = empresa(n.empresa_id); return e ? e.responsavel_id || null : null; };
+    // Quem vendeu: o vendedor escrito na nota (DIRETO, externos…); sem ele, a carteira do cliente.
+    const dono = n => { if (n.vendedor_id) return n.vendedor_id; const e = empresa(n.empresa_id); return e ? e.responsavel_id || null : null; };
     const chaveCliente = n => n.empresa_id || (n.cliente_doc ? 'doc:' + digitos(n.cliente_doc) : 'nome:' + normaliza(n.cliente_nome));
     const nomeCliente = n => { const e = empresa(n.empresa_id); return e ? e.nome : n.cliente_nome || '(sem nome)'; };
     const todas = (D.notas || []).filter(n => notaDeVenda(n, itensDe(n)) && (!resp || dono(n) === resp));

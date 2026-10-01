@@ -273,3 +273,33 @@ test('matriz e filial: mesma raiz de CNPJ vira cadastro próprio ligado ao grupo
   assert.notEqual(pt.criar.notas[0].empresa_id, 'm2', 'mesmo nome com outro CNPJ: cadastro novo, não mistura');
   assert.ok(!pt.criar.empresas[0].grupo_id);
 });
+
+test('vendedor da nota: "nome na nota" (DIRETO) vira o usuário, a nota guarda quem vendeu, nota antiga é completada', () => {
+  const D = base();
+  D.usuarios = [{ user_id: 'dono', nome: 'Anderson', ativo: true, nomes_nota: ['DIRETO'] }, { user_id: 'u1', nome: 'Ana', ativo: true }, { user_id: 'u3', nome: 'Silmara Externa', ativo: true }];
+  D.empresas = [{ id: 'c1', nome: 'Cliente da Ana', razao_social: 'CLIENTE DA ANA LTDA', cnpj: '44.555.666/0001-99', responsavel_id: 'u1', situacao: 'cliente' }];
+  D.notas = [{ id: 'velha', chave: chave(9), emitida_em: '2026-09-01T10:00:00Z', empresa_id: 'c1', valor_total: 10 }];
+  const it = [{ cod: 'A', desc: 'Detergente', q: 1, p: 100 }];
+  const docs = [
+    xml({ n: 1, dest: 'CLIENTE DA ANA LTDA', cnpjDest: '44555666000199', itens: it, adic: 'VENDEDOR: DIRETO;' }),
+    xml({ n: 2, dest: 'CLIENTE DA ANA LTDA', cnpjDest: '44555666000199', itens: it, adic: 'VENDEDOR: SILMARA;' }),
+    xml({ n: 3, dest: 'OUTRO CLIENTE LTDA', cnpjDest: '55666777000188', itens: it, adic: 'VENDEDOR: FULANO;' }),
+    xml({ n: 9, dest: 'CLIENTE DA ANA LTDA', cnpjDest: '44555666000199', itens: it, adic: 'VENDEDOR: ANA;' })
+  ].map(N.lerXml);
+  const pl = N.planeja(D, docs, { filtro: 'auto' });
+  const n1 = pl.criar.notas.find(x => x.numero === 1), n2 = pl.criar.notas.find(x => x.numero === 2);
+  assert.equal(n1.vendedor_id, 'dono', 'DIRETO = o dono'); assert.equal(n1.vendedor_nome, 'DIRETO');
+  assert.equal(n1.empresa_id, 'c1', 'a nota vai para o cliente, que continua na carteira da Ana');
+  assert.equal(n2.vendedor_id, 'u3', 'SILMARA pelo primeiro nome');
+  assert.ok(!pl.criar.notas.find(x => x.numero === 3), 'vendedor que não é da equipe continua de fora');
+  const p9 = pl.atualizar.find(a => a.tabela === 'notas' && a.id === 'velha');
+  assert.deepEqual(p9.patch, { vendedor_nome: 'ANA', vendedor_id: 'u1' }, 'nota antiga ganha o vendedor');
+  assert.equal(pl.resumoNotas.vendedoresCompletados, 1);
+  assert.ok(!pl.criar.empresas.length);
+  // Faturamento: a venda DIRETO conta para o dono, não para a dona da carteira.
+  D.notas = [Object.assign({}, n1, { id: 'x1' }), Object.assign({}, n2, { id: 'x2' }), { id: 'x3', chave: chave(7), emitida_em: '2026-09-20T10:00:00Z', empresa_id: 'c1', valor_total: 50 }];
+  const ix = R.indexa(D);
+  const fat = R.faturamento(D, ix, '2026-10-01', { periodo: R.periodo('ano', '2026-10-01') });
+  const por = Object.fromEntries(fat.porVendedor.map(v => [v.nome, v.valor]));
+  assert.equal(por['Anderson'], 100); assert.equal(por['Silmara Externa'], 100); assert.equal(por['Ana'], 50, 'nota sem vendedor: pela carteira');
+});

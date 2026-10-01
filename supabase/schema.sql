@@ -323,6 +323,14 @@ create table if not exists public.crm_integracoes (
   atualizado_em timestamptz not null default now()
 );
 
+-- Vendedor da nota (o escrito no infCpl, "VENDEDOR: NOME"): os relatórios de faturamento e a
+-- Gestão contam a venda para ele (DIRETO, vendedora externa…); sem ele, a carteira do cliente.
+-- nomes_nota: como o usuário aparece nas notas quando não é pelo nome (ex.: DIRETO = o dono).
+alter table public.crm_notas add column if not exists vendedor_nome text;
+alter table public.crm_notas add column if not exists vendedor_id uuid references public.crm_usuarios(user_id) on delete set null;
+create index if not exists crm_notas_vendedor_idx on public.crm_notas (vendedor_id);
+alter table public.crm_usuarios add column if not exists nomes_nota text[] not null default '{}';
+
 -- Sinal de vida do vigia (a cada 30 min, mesmo sem nota): hora e resumo (versão, máquina,
 -- XML esperando, última falha). Se parar, o CRM avisa o administrador.
 alter table public.crm_integracoes add column if not exists ultimo_sinal timestamptz;
@@ -431,9 +439,12 @@ language sql stable security definer set search_path = public as $$
      and (responsavel_id = auth.uid() or empresa_id in (select public.crm_empresas_minhas()));
 $$;
 
+-- Notas das empresas da carteira e as que o próprio vendedor vendeu (vendedor escrito na nota).
 create or replace function public.crm_notas_minhas() returns setof uuid
 language sql stable security definer set search_path = public as $$
-  select id from public.crm_notas where empresa_id in (select public.crm_empresas_minhas());
+  select id from public.crm_notas where empresa_id in (select public.crm_empresas_minhas())
+  union
+  select id from public.crm_notas where public.crm_eh_membro() and vendedor_id = auth.uid();
 $$;
 
 -- Compras: clientes só com o que a demanda precisa (sem contato, telefone nem e-mail).
@@ -706,7 +717,8 @@ create policy apaga on public.crm_atividades for delete to authenticated
 
 -- notas fiscais: gestor importa e corrige; vendedor lê as das empresas que vê.
 create policy le on public.crm_notas for select to authenticated
-  using ((select public.crm_eh_gestor()) or (select public.crm_eh_comprador()) or empresa_id in (select public.crm_empresas_minhas()));
+  using ((select public.crm_eh_gestor()) or (select public.crm_eh_comprador()) or empresa_id in (select public.crm_empresas_minhas())
+         or ((select public.crm_eh_membro()) and vendedor_id = (select auth.uid())));
 create policy grava on public.crm_notas for insert to authenticated with check ((select public.crm_eh_gestor()));
 create policy altera on public.crm_notas for update to authenticated using ((select public.crm_eh_gestor())) with check ((select public.crm_eh_gestor()));
 create policy apaga on public.crm_notas for delete to authenticated using ((select public.crm_eh_gestor()));

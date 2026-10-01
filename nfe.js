@@ -166,7 +166,9 @@
     const usuarioDoVendedor = nome => {
       if (!nome) return null;
       const k = R.normaliza(nome).replace(/\s+/g, ' ');
-      return equipe.find(u => R.normaliza(u.nome).replace(/\s+/g, ' ') === k) ||
+      // "Nome na nota" do usuário (ex.: DIRETO = o dono, que vende direto) vale primeiro.
+      return equipe.find(u => (u.nomes_nota || []).some(x => R.normaliza(x).replace(/\s+/g, ' ') === k)) ||
+        equipe.find(u => R.normaliza(u.nome).replace(/\s+/g, ' ') === k) ||
         (equipe.filter(u => primeiro(u.nome) === primeiro(nome)).length === 1 ? equipe.find(u => primeiro(u.nome) === primeiro(nome)) : null);
     };
     const chaveVend = d => d.vendedor ? R.normaliza(d.vendedor).replace(/\s+/g, ' ') : '';
@@ -318,7 +320,16 @@
     }
 
     notas.slice().sort((a, b) => String(a.emitida_em).localeCompare(String(b.emitida_em))).forEach(d => {
-      if (existentes.has(d.chave)) { resumo.jaImportadas++; conta('notas', 'ignorados'); return; }
+      if (existentes.has(d.chave)) {
+        resumo.jaImportadas++; conta('notas', 'ignorados');
+        // Nota antiga sem o vendedor gravado (de antes de 01/10/2026): completa.
+        const ex = existentes.get(d.chave), v = vendedores.get(chaveVend(d));
+        if (d.vendedor && ex.id && !ex.vendedor_nome) {
+          plano.atualizar.push({ tabela: 'notas', id: ex.id, patch: { vendedor_nome: texto(d.vendedor), vendedor_id: v && v.usuario ? v.usuario.user_id : null } });
+          resumo.vendedoresCompletados = (resumo.vendedoresCompletados || 0) + 1;
+        }
+        return;
+      }
       if (!d.saida) { resumo.entradas++; return ignora(d, 'nota de entrada (compra)'); }
       if (principal && d.emitente.doc !== principal) { resumo.deOutraEmpresa++; return ignora(d, 'emitida por outra empresa (' + (d.emitente.nome || R.formataCNPJ(d.emitente.doc)) + ')'); }
       if (d.finalidade === '4') { resumo.devolucoes++; return ignora(d, 'nota de devolução'); }
@@ -335,7 +346,8 @@
       const n = {
         id: uuid(), chave: d.chave, numero: d.numero, serie: d.serie, emitida_em: new Date(d.emitida_em).toISOString(), empresa_id: e ? e.id : null,
         cliente_doc: d.cliente.doc ? R.formataCNPJ(d.cliente.doc) : null, cliente_nome: texto(d.cliente.nome), cidade: texto(d.cliente.cidade),
-        uf: texto(d.cliente.uf), natureza: d.natureza, valor_produtos: d.valor_produtos, valor_total: d.valor_total, cancelada
+        uf: texto(d.cliente.uf), natureza: d.natureza, valor_produtos: d.valor_produtos, valor_total: d.valor_total, cancelada,
+        vendedor_nome: texto(d.vendedor), vendedor_id: vend && vend.usuario ? vend.usuario.user_id : null
       };
       Object.keys(n).forEach(k => { if (n[k] == null) delete n[k]; });
       plano.criar.notas.push(n); conta('notas', 'criados'); resumo.novas++;

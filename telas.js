@@ -717,7 +717,7 @@
         fat.topProdutosQtd.slice(0, 10).map((x, i) => [i + 1, esc(x.descricao) + (x.codigo ? ' <small>' + esc(x.codigo) + '</small>' : ''), esc(R.numero(x.quantidade)) + ' ' + esc(x.unidade), CRM.barra(x.quantidade, maxQ), esc(R.moeda(x.valor)), x.notas]),
         'Nenhum item de venda nas notas do período.') + '</section>' +
       '</div><div class="colunas">' +
-      '<section class="cartao"><h2>Faturado por vendedor <small>responsável pelo cliente</small> ' + exp('tFatVend') + '</h2>' + tabela('tFatVend', [['Vendedor'], ['Clientes', 1], ['Notas', 1], ['Valor', 1], [''], ['% do total', 1]],
+      '<section class="cartao"><h2>Faturado por vendedor <small>quem vendeu (o escrito na nota; sem ele, a carteira)</small> ' + exp('tFatVend') + '</h2>' + tabela('tFatVend', [['Vendedor'], ['Clientes', 1], ['Notas', 1], ['Valor', 1], [''], ['% do total', 1]],
         fat.porVendedor.map(g => [esc(g.nome), g.clientes, g.notas, esc(R.moeda(g.valor)), CRM.barra(g.valor, mv), pctTotal(g.valor)])) + '</section>' +
       '<section class="cartao"><h2>Top 10 cidades ' + exp('tFatCid') + '</h2>' + tabela('tFatCid', [['Cidade'], ['Clientes', 1], ['Notas', 1], ['Valor', 1], ['']],
         fat.porCidade.slice(0, 10).map(g => [esc(g.nome), g.clientes, g.notas, esc(R.moeda(g.valor)), CRM.barra(g.valor, mcid)])) + '</section>' +

@@ -513,3 +513,8 @@ label.btn.arquivo input[type=file] { position: absolute; inset: 0; opacity: 0; c
 /* Duplicados: cliente da nota × cadastro antigo */
 .par-nota { display: flex; gap: 10px; align-items: center; justify-content: space-between; padding: 6px 0; border-top: 1px dashed var(--linha); flex-wrap: wrap; }
 .par-nota .botoes { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* Tabela com cabeçalho fixo (Compras): rola dentro do cartão e o título das colunas fica no topo */
+.tabela-rolagem.tabela-fixa { max-height: calc(100vh - 230px); overflow: auto; border: 1px solid var(--borda); border-radius: 10px; }
+.tabela-fixa .tabela thead th { position: sticky; top: 0; z-index: 2; background: var(--papel); box-shadow: inset 0 -1px 0 var(--borda); }
+.tabela-fixa .tabela thead th.ordenavel:hover { background: var(--fundo); }

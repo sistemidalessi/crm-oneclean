@@ -100,9 +100,9 @@ Deno.serve(async (req) => {
       tudo(db, 'crm_empresas', 'id,nome,razao_social,cnpj,telefone,whatsapp,email,cep,logradouro,numero,complemento,bairro,cidade,uf,situacao,responsavel_id,segmento,grupo_id'),
       tudo(db, 'crm_produtos', 'id,nome,codigo'),
       db.from('crm_opcoes').select('id,tipo,nome').eq('tipo', 'segmento').then((r: { data: unknown[] }) => r.data || []),
-      db.from('crm_usuarios').select('user_id,nome,ativo').then((r: { data: unknown[] }) => r.data || []),
+      db.from('crm_usuarios').select('user_id,nome,ativo,nomes_nota').then((r: { data: unknown[] }) => r.data || []),
       tudo(db, 'crm_contatos', 'id,empresa_id,email'),
-      chaves.length ? db.from('crm_notas').select('id,chave,cancelada').in('chave', chaves).then((r: { data: unknown[] }) => r.data || []) : []
+      chaves.length ? db.from('crm_notas').select('id,chave,cancelada,vendedor_nome').in('chave', chaves).then((r: { data: unknown[] }) => r.data || []) : []
     ]);
     const plano = N.planeja({ empresas, produtos, opcoes, usuarios, contatos, notas }, docs, { filtro: integ.filtro, cadastrarProdutos: true });
 

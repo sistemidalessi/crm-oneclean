@@ -214,6 +214,14 @@ e-mail, Google Agenda) e IA.
   aberto confere a versão publicada a cada ~4 min e ao voltar para a janela; se mudou, recarrega
   sozinho quando não há janela aberta nem campo com texto (`confereVersao` em `app.js`). Se o
   navegador insistir na versão antiga, não entra em laço: mostra a faixa `#faixaVersao`.
+- **Vendedor da nota; DIRETO e externos (01/10/2026):** `crm_notas.vendedor_nome/vendedor_id` (o
+  "VENDEDOR: …" do infCpl). Faturamento (Relatórios) e Gestão contam a venda para quem vendeu; sem
+  vendedor, a carteira. `crm_usuarios.nomes_nota` = como o usuário aparece na nota quando não é pelo
+  nome (Anderson = `DIRETO`; Configurações → Equipe, "Nome na nota fiscal"). Vendedor vê as notas da
+  carteira **e** as que vendeu (`crm_notas_minhas`, política `le`). Nota já importada sem vendedor é
+  completada quando chega de novo (apagar `vigia-notas-estado.json` no servidor reenvia tudo, sem
+  duplicar). Silmara (externa) entra quando tiver usuário (casa pelo primeiro nome).
+- **Compras:** cabeçalho fixo (`.tabela-fixa`) e ordenação por coluna (clique; de novo inverte).
 - **Tipo de cliente (01/10/2026, pedido da equipe):** `perfil.js` (fora do motor das notas) classifica
   pelas compras (notas de venda + negócios ganhos, a até 3 dias = uma): novo (1ª compra nos últimos
   `dias_cliente_novo`, padrão 90), reativado (voltou nesse prazo depois de mais que `dias_inativo`
