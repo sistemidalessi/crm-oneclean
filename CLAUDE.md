@@ -62,12 +62,11 @@ Vigia agora com `--desde 202512`: a pasta só tem notas desde dez/2025 (CNPJ nov
 tinha 1 nota, fora da equipe — o histórico da equipe começa em jan/2026. O sistema de gestão da
 OneClean é o **FKN** (SIFWin, da FKN Informática) — com N; não escrever "FKM".
 
-**Falta o Anderson:** Configurações → Duplicados: conferir os ~10 clientes das notas (Ap+Elettro,
-Nossa Senhora Aparecida, Nova Portal, Street/4R, Trufer, Alcance, Senac, Plestin, EL SHADAI) e
-"Apagar os 39 cadastros vazios"; Integrações: excluir "TESTE TEMPORÁRIO (apagar)"; SQL Editor:
-`drop extension pg_net;` (a ferramenta do Supabase trava em DELETE/DROP sem confirmação dele);
-revogar o token do Agendor, apagar `C:\Migracao\agendor-exportado-*.json` e o backup do CRM da
-pasta do Financeiro; subir o estoque real em Compras.
+**Feito pelo Anderson em 01/10:** conferência de Duplicados (39 vazios apagados, 65 cadastros
+juntados, 26 marcados "outra empresa", grupos ligados), chave de teste excluída, `pg_net` removido,
+token do Agendor revogado (novo gerado e não usado), `C:\Migracao` apagada; o backup do CRM já não
+estava na pasta do Financeiro. **Falta:** subir o estoque real em Compras; confirmar cadastro público
+desligado e Site URL no Supabase.
 
 **A fazer:** Compras (fornecedor/grupo, estoque automático); fase 3 (WhatsApp oficial da Meta,
 e-mail, Google Agenda) e IA.
