@@ -9,15 +9,16 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self'; img-src 'self' data:; connect-src 'self' https://*.supabase.co wss://*.supabase.co; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <title>CRM</title>
-<link rel="icon" href="assets/logo.jpg">
-<link rel="stylesheet" href="crm.css">
+<meta name="crm-versao" content="64471e189ea6">
+<link rel="icon" href="assets/logo.jpg?v=c886df2fc5">
+<link rel="stylesheet" href="crm.css?v=48426eace3">
 </head>
 <body>
 <div id="tela"></div>
 
 <div id="app" class="app" hidden>
   <aside class="lateral">
-    <div class="marca"><img id="logoTopo" src="assets/logo.jpg" alt="" class="logo"><img id="logoMenu" alt="" class="logo-menu" hidden><div><strong id="nomeTopo">CRM</strong><span>CRM</span></div></div>
+    <div class="marca"><img id="logoTopo" src="assets/logo.jpg?v=c886df2fc5" alt="" class="logo"><img id="logoMenu" alt="" class="logo-menu" hidden><div><strong id="nomeTopo">CRM</strong><span>CRM</span></div></div>
     <nav id="menuLateral" class="menu-lateral" aria-label="Seções"></nav>
     <p class="assinatura">Sistemi Dalessi</p>
   </aside>
@@ -34,6 +35,7 @@
     </header>
     <div id="faixaModo" class="faixa" hidden>Modo local: os dados ficam só neste navegador. Para a equipe usar de qualquer computador, ligue o Supabase (crm/README.md).</div>
     <div id="faixaCarga" class="faixa" role="status" hidden></div>
+    <div id="faixaVersao" class="faixa" role="status" hidden></div>
     <main id="conteudo" class="conteudo"></main>
   </div>
 </div>
@@ -44,18 +46,18 @@
 <div id="impressao" class="impressao"></div>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-<script src="config.js"></script>
-<script src="regras.js"></script>
-<script src="dados.js"></script>
-<script src="planilha.js"></script>
-<script src="nfe.js"></script>
-<script src="xlsx-leitor.js"></script>
-<script src="ui.js"></script>
-<script src="app.js"></script>
-<script src="telas.js"></script>
-<script src="gestao.js"></script>
-<script src="fichas.js"></script>
-<script src="ajustes.js"></script>
-<script src="sequencia.js"></script>
+<script src="config.js?v=1ccac3591b"></script>
+<script src="regras.js?v=2aa5b88112"></script>
+<script src="dados.js?v=416ffbe1dc"></script>
+<script src="planilha.js?v=a28bdeac90"></script>
+<script src="nfe.js?v=789bdfc637"></script>
+<script src="xlsx-leitor.js?v=aed21d9301"></script>
+<script src="ui.js?v=60c6494296"></script>
+<script src="app.js?v=83b0d215e0"></script>
+<script src="telas.js?v=8097391229"></script>
+<script src="gestao.js?v=c2c28a0cc5"></script>
+<script src="fichas.js?v=809808ae5d"></script>
+<script src="ajustes.js?v=838c8c5485"></script>
+<script src="sequencia.js?v=188f282c54"></script>
 </body>
 </html>

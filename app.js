@@ -465,8 +465,48 @@
     setInterval(() => {
       if (store && store.modo === 'supabase' && E.eu && document.visibilityState === 'visible' && Date.now() - E.carregadoEm > 300000 && !$('dialog[open]')) CRM.recarregar(true);
       verificaLembretes();
+      if (versaoNova) atualizaSePuder(); else confereVersao();
     }, 60000);
+    window.addEventListener('focus', () => confereVersao());
   }
+
+  // ------------------------------------------------------------ versão nova publicada
+  // O index.html é carimbado (ferramentas/carimba-versao.js): cada arquivo com ?v= e a versão
+  // geral na <meta name="crm-versao">. O CRM que fica aberto o dia todo confere a versão
+  // publicada e, quando muda, recarrega sozinho quando ninguém está digitando (sem Ctrl+F5).
+  const minhaVersao = (document.querySelector('meta[name="crm-versao"]') || {}).content || '';
+  let versaoNova = '', ultimaConsulta = 0;
+  async function confereVersao() {
+    if (!minhaVersao || !/^https?:$/.test(location.protocol) || Date.now() - ultimaConsulta < 240000) return;
+    ultimaConsulta = Date.now();
+    try {
+      const r = await fetch(location.pathname, { cache: 'no-store' });
+      const m = r.ok && /<meta name="crm-versao" content="([0-9a-f]+)">/.exec(await r.text());
+      if (m && m[1] !== minhaVersao) versaoNova = m[1];
+    } catch (e) { /* sem rede agora: confere na próxima */ }
+    if (versaoNova) atualizaSePuder();
+  }
+  // Janela aberta (ficha, formulário) ou campo com texto: espera a próxima volta.
+  function ocupado() {
+    if ($('dialog[open]')) return true;
+    const a = document.activeElement;
+    return !!(a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && a.value);
+  }
+  function atualizaSePuder() {
+    if (!versaoNova || ocupado()) return;
+    // Sem laço: se já recarregou para esta versão e o navegador insistiu na antiga, só avisa.
+    let tentou = '';
+    try { tentou = sessionStorage.getItem('sd-crm-recarregou') || ''; } catch (e) { /* ok */ }
+    if (tentou === versaoNova) {
+      const f = $('#faixaVersao');
+      if (f && f.hidden) { f.textContent = 'Há uma versão nova do CRM. Aperte Ctrl+F5 para atualizar.'; f.hidden = false; }
+      return;
+    }
+    try { sessionStorage.setItem('sd-crm-recarregou', versaoNova); } catch (e) { /* ok */ }
+    CRM.toast('Versão nova do CRM: atualizando…');
+    setTimeout(() => location.reload(), 1500);
+  }
+  CRM.versao = { minha: () => minhaVersao, confere: () => { ultimaConsulta = 0; return confereVersao(); } };
 
   function mostraAtalhos() {
     CRM.abrirForm({

@@ -207,6 +207,12 @@ da OneClean é o **FKN** (SIFWin, da FKN Informática) — com N; não escrever 
 - Ao mexer em permissão: rodar `sh supabase/teste-rls/roda.sh` (Postgres local
   que imita os papéis do Supabase; falha se aparecer "NÃO devia" ou se alguma leitura ficar
   lenta no teste de volume).
+- **Versão nova sem Ctrl+F5:** o `index.html` leva `?v=` em cada arquivo e a versão geral em
+  `<meta name="crm-versao">`, carimbados por `node ferramentas/carimba-versao.js` (rodar antes de
+  todo commit que mexe em .js/.css/logo; `testes/versao.test.js` reprova se esquecer). O app
+  aberto confere a versão publicada a cada ~4 min e ao voltar para a janela; se mudou, recarrega
+  sozinho quando não há janela aberta nem campo com texto (`confereVersao` em `app.js`). Se o
+  navegador insistir na versão antiga, não entra em laço: mostra a faixa `#faixaVersao`.
 - **Política de leitura nunca chama função por linha** (`crm_ve_empresa(id)` etc.): usar
   `coluna in (select public.crm_empresas_minhas())` e `(select public.crm_eh_gestor())`. Ver o
   incidente de 01/10/2026 no topo; `testes/rls-rapida.test.js` barra.
@@ -437,6 +443,7 @@ da OneClean é o **FKN** (SIFWin, da FKN Informática) — com N; não escrever 
 ## Verificar antes de commitar
 
 ```
+node ferramentas/carimba-versao.js     # SEMPRE que mexer em .js/.css/logo (versões no index.html)
 node --test testes/*.test.js           # regras, importador e trava das políticas (rodar também com TZ=UTC)
 sh supabase/teste-rls/roda.sh           # se mexeu no schema/permissões (ataque + volume)
 ```
