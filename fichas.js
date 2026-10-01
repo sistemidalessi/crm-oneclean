@@ -98,6 +98,15 @@
     const sit = CRM.situacao(e);
     const ganhos = fechados.filter(n => n.status === 'ganho');
     const notas = (E().ix.porEmpresa.notas.get(e.id) || []).slice().sort((a, b) => String(b.emitida_em).localeCompare(String(a.emitida_em)));
+    // Matriz e filiais (ou unidades do mesmo cliente): cada CNPJ é um cadastro, ligado pelo grupo.
+    const principal = (e.grupo_id && CRM.empresa(e.grupo_id)) || e;
+    const doGrupo = [principal].concat(E().D.empresas.filter(x => x.grupo_id === principal.id));
+    const linkEmp = x => '<button type="button" class="link" data-acao="abrir-empresa" data-id="' + esc(x.id) + '">' + esc(x.nome) + '</button>';
+    const desde = R.somaDias(CRM.hoje(), -365);
+    const fatGrupo = doGrupo.reduce((t, x) => t + (E().ix.porEmpresa.notas.get(x.id) || []).filter(n => !n.cancelada && R.diaLocal(n.emitida_em) >= desde).reduce((s, n) => s + R.num(n.valor_total), 0), 0);
+    const grupo = doGrupo.length < 2 ? '' : (e.grupo_id ? 'Unidade de ' + linkEmp(principal) : '<strong>Principal</strong> do grupo') +
+      '<br><small>' + doGrupo.filter(x => x.id !== e.id).map(linkEmp).join(' · ') + '</small>' +
+      '<br><small>' + doGrupo.length + ' cadastro(s) · faturado pelo grupo em 12 meses: ' + esc(R.moeda(fatGrupo)) + '</small>';
 
     dlg.innerHTML = '<div class="ficha">' +
       '<header class="ficha-topo"><div class="ficha-titulo"><h2>' + esc(e.nome) + '</h2>' + CRM.seloSituacao(sit) + CRM.estrelas(e.qualificacao) +
@@ -115,7 +124,7 @@
       // ---- coluna 1: dados + contatos
       '<div class="ficha-col">' +
         '<section><dl class="dados">' +
-          dado('Razão social', esc(e.razao_social)) + dado('CNPJ/CPF', esc(e.cnpj) + (e.cnpj && R.digitos(e.cnpj).length === 14 && !R.cnpjValido(e.cnpj) ? ' ' + CRM.selo('inválido?', 'ambar') : '')) +
+          dado('Grupo', grupo) + dado('Razão social', esc(e.razao_social)) + dado('CNPJ/CPF', esc(e.cnpj) + (e.cnpj && R.digitos(e.cnpj).length === 14 && !R.cnpjValido(e.cnpj) ? ' ' + CRM.selo('inválido?', 'ambar') : '')) +
           dado('Telefone', esc(e.telefone)) + dado('WhatsApp', esc(e.whatsapp)) +
           dado('E-mail', e.email ? '<a href="mailto:' + esc(e.email) + '">' + esc(e.email) + '</a>' : '') +
           dado('Site', e.site ? '<a href="' + esc(/^https?:/i.test(e.site) ? e.site : 'https://' + e.site) + '" target="_blank" rel="noopener noreferrer">' + esc(e.site) + '</a>' : '') +

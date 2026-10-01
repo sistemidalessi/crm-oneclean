@@ -213,6 +213,16 @@ da OneClean é o **FKN** (SIFWin, da FKN Informática) — com N; não escrever 
   aberto confere a versão publicada a cada ~4 min e ao voltar para a janela; se mudou, recarrega
   sozinho quando não há janela aberta nem campo com texto (`confereVersao` em `app.js`). Se o
   navegador insistir na versão antiga, não entra em laço: mostra a faixa `#faixaVersao`.
+- **Cliente da nota × cadastro antigo; matriz e filial (01/10/2026):** o Agendor quase não tinha CNPJ
+  (1.889 de 1.987); a 1ª nota de cliente antigo criava cadastro repetido (New Aço + 38 mesclados
+  por SQL com backup em `crm_backup.mescla_empresas`, lote "notas x agendor 01/10"; análise em
+  `crm_backup.analise_duplicados_notas`). Agora `nfe.js` acha o cliente nesta ordem: CNPJ → nome igual
+  (**não** se o cadastro tem outro CNPJ: é outra unidade) → **mesma raiz de CNPJ** (8 dígitos) = filial:
+  cadastro próprio com `grupo_id` do principal e a mesma carteira → **parecida** (`N.parecida`: cliente
+  sem CNPJ da mesma vendedora, domínio do e-mail no nome ou 2 palavras próprias; só se for UM; a razão
+  social da nota vira a oficial). Configurações → Duplicados: seção "Clientes das notas × cadastros
+  antigos" (juntar / mesmo grupo / outra empresa, esta em `cfg.nao_mesclar_notas`) e "Cadastros vazios
+  de mesclas" (`(mesclado em …)`, apagar). Ficha mostra o grupo e o faturado do grupo em 12 meses.
 - **Sinal de vida do vigia (01/10/2026):** `vigia-notas.js` manda `{sinal:true, info}` ao ligar e a
   cada 30 min (entrega de nota também conta); a `crm-notas` grava `crm_integracoes.ultimo_sinal` e
   `sinal` (versão, máquina, XML esperando, última falha) sem carregar o motor. O admin carrega

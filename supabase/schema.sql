@@ -359,6 +359,13 @@ create index if not exists crm_empresas_cnpj_idx     on public.crm_empresas (cnp
 create unique index if not exists crm_empresas_ext_uq on public.crm_empresas (externo_id) where externo_id is not null;
 -- Códigos de origem (ex. agendor:org:…) dos cadastros mesclados neste: reimportar não os recria.
 alter table public.crm_empresas add column if not exists externos_mesclados text[] not null default '{}';
+-- Matriz e filiais (mesma raiz de CNPJ) ou unidades do mesmo cliente: cada CNPJ é um cadastro,
+-- ligado ao principal do grupo (o principal tem grupo_id nulo). A importação de notas cria a
+-- filial já ligada; Configurações → Duplicados liga à mão ("Mesmo grupo").
+alter table public.crm_empresas add column if not exists grupo_id uuid references public.crm_empresas(id) on delete set null;
+create index if not exists crm_empresas_grupo_idx on public.crm_empresas (grupo_id);
+alter table public.crm_empresas drop constraint if exists crm_empresas_grupo_nao_proprio;
+alter table public.crm_empresas add constraint crm_empresas_grupo_nao_proprio check (grupo_id is null or grupo_id <> id);
 create index if not exists crm_contatos_empresa_idx  on public.crm_contatos (empresa_id);
 create unique index if not exists crm_contatos_ext_uq on public.crm_contatos (externo_id) where externo_id is not null;
 create index if not exists crm_negocios_empresa_idx  on public.crm_negocios (empresa_id);

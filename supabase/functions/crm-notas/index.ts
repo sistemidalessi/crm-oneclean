@@ -96,14 +96,15 @@ Deno.serve(async (req) => {
     const chaves = [...new Set(docs.map((d: { chave: string }) => d.chave))];
 
     // Só o que o planejador precisa (sem carregar o CRM inteiro).
-    const [empresas, produtos, opcoes, usuarios, notas] = await Promise.all([
-      tudo(db, 'crm_empresas', 'id,nome,razao_social,cnpj,telefone,whatsapp,email,cep,logradouro,numero,complemento,bairro,cidade,uf,situacao,responsavel_id,segmento'),
+    const [empresas, produtos, opcoes, usuarios, contatos, notas] = await Promise.all([
+      tudo(db, 'crm_empresas', 'id,nome,razao_social,cnpj,telefone,whatsapp,email,cep,logradouro,numero,complemento,bairro,cidade,uf,situacao,responsavel_id,segmento,grupo_id'),
       tudo(db, 'crm_produtos', 'id,nome,codigo'),
       db.from('crm_opcoes').select('id,tipo,nome').eq('tipo', 'segmento').then((r: { data: unknown[] }) => r.data || []),
       db.from('crm_usuarios').select('user_id,nome,ativo').then((r: { data: unknown[] }) => r.data || []),
+      tudo(db, 'crm_contatos', 'id,empresa_id,email'),
       chaves.length ? db.from('crm_notas').select('id,chave,cancelada').in('chave', chaves).then((r: { data: unknown[] }) => r.data || []) : []
     ]);
-    const plano = N.planeja({ empresas, produtos, opcoes, usuarios, notas }, docs, { filtro: integ.filtro, cadastrarProdutos: true });
+    const plano = N.planeja({ empresas, produtos, opcoes, usuarios, contatos, notas }, docs, { filtro: integ.filtro, cadastrarProdutos: true });
 
     // Grava na mesma ordem da importação manual; lote recusado é regravado um a um.
     const erros: string[] = [];

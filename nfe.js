@@ -100,6 +100,30 @@
   //               | 'carteira' (só clientes já cadastrados com responsável da equipe)
   //               | 'vendedores' (só os vendedores escritos na nota que estão em vendedoresIncluidos;
   //                 sem a lista, os que batem com alguém da equipe) }
+  // ---- cliente parecido sem CNPJ. O Agendor da OneClean quase não tinha CNPJ (1.889 de 1.987
+  // clientes): sem isto, a 1ª nota de um cliente antigo criava um cadastro novo ao lado do que já
+  // existia (01/10/2026: New Aço e outros 38). Palavras comuns e nomes de pessoa não contam.
+  const COMUNS = new Set(('ltda eireli epp sa comercio comercial servicos servico industria industrial cia dos das the and com importacao exportacao ' +
+    'distribuidora distribuicao grupo empresa condominio residencial edificio associacao limpeza produtos sociedade brasil sao paulo santo andre ' +
+    'bernardo campo administradora adm escritorio loja casa clinica centro hospital escola colegio instituto restaurante padaria mercado supermercado ' +
+    'auto posto tecnologia solucoes engenharia construtora consultoria participacoes transportes logistica metalurgica alimentos paula silva santos ' +
+    'maria jose joao ana oliveira souza pereira lima costa ferreira rodrigues almeida novo nova new unidade filial matriz educacao infantil ensino').split(' '));
+  const palavras = s => [...new Set(R.normaliza(s || '').replace(/[^a-z0-9]+/g, ' ').split(' ').filter(t => t.length >= 3 && !/^\d+$/.test(t) && !COMUNS.has(t)))];
+  const EMAIL_GENERICO = /^(gmail|hotmail|yahoo|outlook|uol|bol|terra|icloud|live|msn|ig|globo|r7|zipmail|me|email)\./;
+  const dominios = lista => lista.map(m => String(m || '').trim().toLowerCase().split('@')[1] || '').filter(d => d && !EMAIL_GENERICO.test(d))
+    .map(d => d.split('.')[0]).filter(d => d.length >= 4);
+  // Compara o nome da nota com um cadastro. emails: e-mails do cadastro e das pessoas dele.
+  // forte = dá para ligar sozinho (domínio do e-mail no nome, 2 palavras próprias iguais, ou o
+  // cadastro tem uma palavra própria só, longa, e ela está no nome da nota).
+  function parecida(nomeNota, e, emails) {
+    const tn = new Set(palavras(nomeNota)), te = palavras((e.nome || '') + ' ' + (e.razao_social || ''));
+    const comuns = te.filter(t => tn.has(t)).length;
+    const compacto = R.normaliza(nomeNota || '').replace(/[^a-z0-9]/g, '');
+    const dominio = dominios([e.email].concat(emails || [])).some(d => compacto.includes(d));
+    const unica = comuns === 1 && te.length === 1 && te[0].length >= 5;
+    return { comuns, dominio, nome: comuns >= 2 || (comuns >= 1 && Math.min(te.length, tn.size) === 1), forte: dominio || comuns >= 2 || unica };
+  }
+
   function planeja(D, docs, op) {
     op = op || {};
     const texto = v => (v == null || String(v).trim() === '' ? null : String(v).trim());
@@ -159,10 +183,12 @@
     plano.vendedoresIncluidos = [...incluidos];
 
     // ---- empresas: por CNPJ/CPF, razão social, nome e nome antes do " | " (o Agendor da OneClean usa "Empresa | Contato").
-    const porDoc = new Map(), porNome = new Map();
+    const porDoc = new Map(), porNome = new Map(), porRaiz = new Map(), porId = new Map();
     const guarda = (m, k, e) => { if (k && !m.has(k)) m.set(k, e); };
     const indexaEmpresa = e => {
+      porId.set(e.id, e);
       const d = R.digitos(e.cnpj); if (d.length === 11 || d.length === 14) guarda(porDoc, d, e);
+      if (d.length === 14) guarda(porRaiz, d.slice(0, 8), e);
       [e.razao_social, e.nome, e.nome && e.nome.indexOf('|') > 0 ? e.nome.split('|')[0] : null].forEach(n => guarda(porNome, R.chaveNome(n), e));
     };
     (D.empresas || []).forEach(indexaEmpresa);
@@ -185,10 +211,40 @@
       patches.set(e.id, p);
     };
     const segmentos = new Set((D.opcoes || []).filter(o => o.tipo === 'segmento').map(o => o.nome));
-    const achaEmpresa = d => ((d.cliente.doc.length === 11 || d.cliente.doc.length === 14) && porDoc.get(d.cliente.doc)) || porNome.get(R.chaveNome(d.cliente.nome)) || null;
+    const achaEmpresa = d => {
+      const doc = d.cliente.doc;
+      if (doc.length === 11 || doc.length === 14) { const e = porDoc.get(doc); if (e) return e; }
+      const e = porNome.get(R.chaveNome(d.cliente.nome)) || null;
+      // Mesmo nome com outro CNPJ: é outra unidade (filial) ou outra empresa, nunca a mesma.
+      if (e && doc.length === 14) {
+        const dele = R.digitos(e.cnpj || (patches.get(e.id) || {}).cnpj);
+        if (dele.length === 14 && dele !== doc) return null;
+      }
+      return e;
+    };
+    // Matriz/filial: mesmos 8 primeiros dígitos do CNPJ. Devolve o principal do grupo.
+    const principalDaRaiz = d => {
+      if (d.cliente.doc.length !== 14) return null;
+      const m = porRaiz.get(d.cliente.doc.slice(0, 8));
+      return m ? (m.grupo_id && porId.get(m.grupo_id)) || m : null;
+    };
+    // Sem CNPJ nem nome igual: o cliente da mesma vendedora, sem CNPJ, que se parece com o da
+    // nota — só se for UM (dois parecidos = não arrisca; cria e aparece em Duplicados).
+    const emailsDe = new Map();
+    (D.contatos || []).forEach(c => { if (c.email) { const l = emailsDe.get(c.empresa_id) || []; l.push(c.email); emailsDe.set(c.empresa_id, l); } });
+    plano.ligadasPorNome = [];
+    const semCnpj = e => !R.chaveDoc(e.cnpj) && !(patches.get(e.id) || {}).cnpj && !novas.has(e.id);
+    function parecidaDaNota(d, responsavel) {
+      if (!responsavel || !d.cliente.nome) return null;
+      const achadas = (D.empresas || []).filter(e => e.responsavel_id === responsavel && semCnpj(e) && parecida(d.cliente.nome, e, emailsDe.get(e.id)).forte);
+      return achadas.length === 1 ? achadas[0] : null;
+    }
     function empresaDaNota(d, responsavel) {
       const c = d.cliente, doc = c.doc;
       let e = achaEmpresa(d);
+      let porParecida = false;
+      const matriz = e ? null : principalDaRaiz(d);
+      if (!e && !matriz) { e = parecidaDaNota(d, responsavel); porParecida = !!e; }
       if (e) {
         if (novas.has(e.id)) { completa(e, { cnpj: doc ? R.formataCNPJ(doc) : null }); return e; }
         if (!ligadas.has(e.id)) { ligadas.add(e.id); resumo.empresasLigadas++; }
@@ -212,6 +268,12 @@
         resumo.camposCompletados += Object.keys(p).length - antes;
         marcaDono(Object.assign({ id: e.id }, p));
         if (!tinhaCnpj && p.cnpj) { resumo.cnpjsCompletados++; porDoc.set(doc, e); }
+        // Ligada por parecida: a razão social da nota é a oficial (a do Agendor era só um nome).
+        if (porParecida) {
+          if (texto(c.nome) && texto(c.nome) !== e.razao_social) { const q = patches.get(e.id) || {}; q.razao_social = texto(c.nome); patches.set(e.id, q); }
+          plano.ligadasPorNome.push({ nota: d.numero, cliente: texto(c.nome), empresa_id: e.id, empresa: e.nome });
+          resumo.ligadasPorNome = (resumo.ligadasPorNome || 0) + 1;
+        }
         if (e.situacao !== 'cliente') { const p = patches.get(e.id) || {}; p.situacao = 'cliente'; patches.set(e.id, p); }
         return e;
       }
@@ -223,16 +285,21 @@
       }
       const idNovo = uuid();
       const seLivre = (v, k) => (livre({ id: idNovo }, k) ? v : null);
+      // Filial de cliente que já existe: cadastro próprio, ligado ao grupo e na mesma carteira.
+      const nomeFilial = matriz && texto(c.nome) ? texto(c.nome) + ' (' + (texto(c.cidade) || 'filial ' + doc.slice(8, 12)) + ')' : null;
       e = {
-        id: idNovo, nome: texto(c.nome) || 'Cliente sem nome (NF ' + (d.numero || '') + ')', razao_social: texto(c.nome), cnpj: doc ? R.formataCNPJ(doc) : null,
+        id: idNovo, nome: nomeFilial || texto(c.nome) || 'Cliente sem nome (NF ' + (d.numero || '') + ')', razao_social: texto(c.nome), cnpj: doc ? R.formataCNPJ(doc) : null,
+        grupo_id: matriz ? matriz.id : null,
         email: seLivre(texto(c.email) && c.email.trim().toLowerCase(), R.chaveEmail(c.email) && 'm' + R.chaveEmail(c.email)),
         telefone: seLivre(texto(c.telefone), R.chaveTelefone(c.telefone) && 't' + R.chaveTelefone(c.telefone)), cep: texto(c.cep), logradouro: texto(c.logradouro),
         numero: texto(c.numero), complemento: texto(c.complemento), bairro: texto(c.bairro), cidade: texto(c.cidade), uf: texto(c.uf) && c.uf.toUpperCase(),
-        situacao: 'cliente', qualificacao: 0, tags: [], segmento, responsavel_id: responsavel || op.responsavelPadrao || null,
+        situacao: 'cliente', qualificacao: 0, tags: [], segmento: segmento || (matriz && matriz.segmento) || null,
+        responsavel_id: responsavel || (matriz && matriz.responsavel_id) || op.responsavelPadrao || null,
         criado_em: d.emitida_em ? new Date(d.emitida_em).toISOString() : undefined
       };
       Object.keys(e).forEach(k => { if (e[k] == null || e[k] === undefined) delete e[k]; });
       plano.criar.empresas.push(e); novas.add(e.id); indexaEmpresa(e); marcaDono(e); conta('empresas', 'criados'); resumo.empresasNovas++;
+      if (matriz) resumo.filiaisNovas = (resumo.filiaisNovas || 0) + 1;
       return e;
     }
 
@@ -262,7 +329,7 @@
       // 'auto' (o vigia da pasta de XML usa): nota com vendedor escrito vale pelo vendedor; sem, pela carteira.
       const modo = filtro === 'auto' ? (d.vendedor ? 'vendedores' : 'carteira') : filtro;
       if (modo === 'vendedores' && !incluidos.has(chaveVend(d))) return fora(d.vendedor ? 'vendedor(a) ' + d.vendedor + ' não marcado(a)' : 'nota sem vendedor escrito');
-      if (modo === 'carteira') { const ex = achaEmpresa(d); if (!ex || !time.has(ex.responsavel_id)) return fora('cliente fora da carteira da equipe'); }
+      if (modo === 'carteira') { const ex = achaEmpresa(d) || principalDaRaiz(d); if (!ex || !time.has(ex.responsavel_id)) return fora('cliente fora da carteira da equipe'); }
       const e = empresaDaNota(d, vend && vend.usuario ? vend.usuario.user_id : null);
       const cancelada = cancelar.has(d.chave);
       const n = {
@@ -296,7 +363,7 @@
     return plano;
   }
 
-  const api = { lerXml, planeja };
+  const api = { lerXml, planeja, parecida, palavras };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else raiz.CRMNfe = api;
 })(typeof window !== 'undefined' ? window : globalThis);

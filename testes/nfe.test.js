@@ -209,3 +209,67 @@ test('completar cadastro pela nota: não usa telefone/e-mail que já é de outro
   assert.equal(p.cidade, undefined, 'cidade já estava preenchida');
   assert.equal(pl.resumoNotas.dadosDeOutroCadastro, 2);
 });
+
+// 01/10/2026: o Agendor quase não tinha CNPJ e a 1ª nota de cliente antigo criava cadastro repetido.
+test('nota acha cliente sem CNPJ da mesma vendedora (domínio do e-mail ou nome próprio); dois parecidos não arrisca', () => {
+  const D = base();
+  D.usuarios = [{ user_id: 'u1', nome: 'Ana', ativo: true }, { user_id: 'u2', nome: 'Bia', ativo: true }];
+  D.empresas = [
+    { id: 'e1', nome: 'Ferro Forte - Carla', razao_social: 'Ferro Forte', email: 'compras@ferroforte.com.br', responsavel_id: 'u1', situacao: 'prospect' },
+    { id: 'e2', nome: 'Vidraçaria Cristal Centro', responsavel_id: 'u1', situacao: 'cliente' },
+    { id: 'e3', nome: 'Vidraçaria Cristal Norte', responsavel_id: 'u1', situacao: 'cliente' },
+    { id: 'e4', nome: 'Gráfica Aurora | Paulo', responsavel_id: 'u2', situacao: 'cliente' },
+    { id: 'e5', nome: 'Polistampex', responsavel_id: 'u1', situacao: 'cliente' }
+  ];
+  const it = [{ cod: 'A', desc: 'Detergente', q: 1, p: 10 }];
+  const docs = [
+    xml({ n: 1, dest: 'FERRO FORTE INDUSTRIA DE PERFIS LTDA', cnpjDest: '44555666000199', itens: it, adic: 'VENDEDOR: ANA;' }),
+    xml({ n: 2, dest: 'VIDRACARIA CRISTAL LTDA', cnpjDest: '55666777000188', itens: it, adic: 'VENDEDOR: ANA;' }),
+    xml({ n: 3, dest: 'GRAFICA AURORA IMPRESSOS EIRELI', cnpjDest: '66777888000177', itens: it, adic: 'VENDEDOR: ANA;' }),
+    xml({ n: 4, dest: 'POLISTAMPEX INDUSTRIA METALURGICA LTDA', cnpjDest: '77888999000166', itens: it, adic: 'VENDEDOR: ANA;' })
+  ].map(N.lerXml);
+  const pl = N.planeja(D, docs, { filtro: 'vendedores' });
+  const notaDe = n => pl.criar.notas.find(x => x.numero === n);
+  assert.equal(notaDe(1).empresa_id, 'e1', 'domínio ferroforte no nome da nota');
+  const p1 = pl.atualizar.find(a => a.id === 'e1').patch;
+  assert.equal(p1.cnpj, '44.555.666/0001-99');
+  assert.equal(p1.razao_social, 'FERRO FORTE INDUSTRIA DE PERFIS LTDA', 'razão social da nota é a oficial');
+  assert.equal(p1.situacao, 'cliente');
+  assert.equal(notaDe(4).empresa_id, 'e5', 'cadastro de uma palavra própria só');
+  assert.ok(!['e2', 'e3'].includes(notaDe(2).empresa_id), 'dois parecidos: cria outro (vai para Duplicados)');
+  assert.notEqual(notaDe(3).empresa_id, 'e4', 'parecido de outra vendedora: não liga');
+  assert.equal(pl.ligadasPorNome.length, 2);
+  assert.equal(pl.resumoNotas.ligadasPorNome, 2);
+});
+
+test('matriz e filial: mesma raiz de CNPJ vira cadastro próprio ligado ao grupo; mesmo nome com outro CNPJ não mistura', () => {
+  const D = base();
+  D.usuarios = [{ user_id: 'u1', nome: 'Ana', ativo: true }];
+  D.empresas = [
+    { id: 'm1', nome: 'Padaria Sol | Rita', razao_social: 'PADARIA SOL LTDA', cnpj: '12.345.678/0001-90', responsavel_id: 'u1', segmento: 'Alimentação', situacao: 'cliente' },
+    { id: 'm2', nome: 'Colégio Lua', razao_social: 'COLEGIO LUA LTDA', cnpj: '22.333.444/0001-55', responsavel_id: 'u1', situacao: 'cliente' }
+  ];
+  const it = [{ cod: 'A', desc: 'Detergente', q: 1, p: 10 }];
+  const docs = [
+    xml({ n: 1, dest: 'PADARIA SOL LTDA', cnpjDest: '12345678000270', itens: it }),
+    xml({ n: 2, dest: 'PADARIA SOL LTDA', cnpjDest: '12345678000270', itens: it }),
+    xml({ n: 3, dest: 'COLEGIO LUA LTDA', cnpjDest: '99888777000166', itens: it }),
+    xml({ n: 4, dest: 'PADARIA SOL LTDA', cnpjDest: '12345678000190', itens: it })
+  ].map(N.lerXml);
+  const pl = N.planeja(D, docs, { filtro: 'carteira' });
+  const notaDe = n => pl.criar.notas.find(x => x.numero === n);
+  const filial = pl.criar.empresas.find(e => e.cnpj === '12.345.678/0002-70');
+  assert.ok(filial, 'filial criada');
+  assert.equal(filial.grupo_id, 'm1');
+  assert.equal(filial.responsavel_id, 'u1', 'mesma carteira da matriz');
+  assert.equal(filial.segmento, 'Alimentação');
+  assert.equal(filial.nome, 'PADARIA SOL LTDA (Santo André)');
+  assert.equal(notaDe(1).empresa_id, filial.id);
+  assert.equal(notaDe(2).empresa_id, filial.id, 'a 2ª nota da filial vai para a mesma filial');
+  assert.equal(notaDe(4).empresa_id, 'm1', 'a matriz continua com as notas dela');
+  assert.ok(!notaDe(3), 'outro CNPJ de raiz diferente, fora da carteira: fica de fora (não cai no Colégio Lua)');
+  assert.equal(pl.resumoNotas.filiaisNovas, 1);
+  const pt = N.planeja(D, docs.slice(2, 3), {});
+  assert.notEqual(pt.criar.notas[0].empresa_id, 'm2', 'mesmo nome com outro CNPJ: cadastro novo, não mistura');
+  assert.ok(!pt.criar.empresas[0].grupo_id);
+});
