@@ -51,24 +51,26 @@ carrega ~4× o volume da OneClean e falha se alguma leitura passar de 1 s (com o
 `dados.js`); sem carga nenhuma, a tela diz "seus dados estão guardados" e tenta sozinha; com dados
 antigos, só aparece a faixa `#faixaCarga`. Ao criar política nova: copiar o formato das que existem.
 
-## ONDE PARAMOS (30/09/2026, noite) — retomar daqui
+## ONDE PARAMOS (01/10/2026, manhã) — retomar daqui
 
-**Estado:** CRM no ar e pronto para a equipe começar em 01/10 (Agendor desligado). Extração final
-do Agendor importada; vigia de notas rodando no servidor; no dia 30 entraram também avisos do sino
-sem a base antiga, recompra inteligente, fila do dia, sequência do lead novo, aba Gestão (admin),
-aba Compras + papel comprador, estoque do FKN por CSV, chances das etapas. O sistema de gestão
-da OneClean é o **FKN** (SIFWin, da FKN Informática) — com N; não escrever "FKM".
+**Estado:** 1º dia da equipe só no CRM. De manhã o CRM abriu vazio (políticas lentas; ver
+INCIDENTE acima) e foi resolvido e travado por teste. No mesmo dia: versão nova sem Ctrl+F5
+(`ferramentas/carimba-versao.js`), sinal de vida do vigia (**vigia do servidor atualizado às
+10:25, sinal chegando**), cliente da nota × cadastro antigo (39 mesclados; conferência em
+Duplicados), matriz/filial (`grupo_id`), tipo de cliente (novo/recorrente/reativado/inativo).
+Vigia agora com `--desde 202512`: a pasta só tem notas desde dez/2025 (CNPJ novo); dezembro
+tinha 1 nota, fora da equipe — o histórico da equipe começa em jan/2026. O sistema de gestão da
+OneClean é o **FKN** (SIFWin, da FKN Informática) — com N; não escrever "FKM".
 
-**Amanhã (01/10), primeiro:**
-1. Anderson: revogar o token do Agendor; apagar `C:\Migracao\agendor-exportado-*.json`; tirar o
-   backup do CRM de `\\servidor\Financeiro\Recepção de Documentos`; criar o usuário comprador
-   (Configurações → Equipe, papel "Comprador (só Compras)") quando quiser.
-2. Acompanhar o primeiro dia da equipe (dúvidas, ajustes de tela); conferir no banco se o vigia
-   está entregando as notas do dia (`crm_integracao_log`).
-3. Compras, a fazer: fornecedor/grupo nos filtros (se o FKN exportar), estoque automático (vigia
-   manda o CSV quando o arquivo muda + lembrete para quem exporta).
-4. Depois: fase 3 (WhatsApp oficial da Meta, e-mail, Google Agenda) e IA.
+**Falta o Anderson:** Configurações → Duplicados: conferir os ~10 clientes das notas (Ap+Elettro,
+Nossa Senhora Aparecida, Nova Portal, Street/4R, Trufer, Alcance, Senac, Plestin, EL SHADAI) e
+"Apagar os 39 cadastros vazios"; Integrações: excluir "TESTE TEMPORÁRIO (apagar)"; SQL Editor:
+`drop extension pg_net;` (a ferramenta do Supabase trava em DELETE/DROP sem confirmação dele);
+revogar o token do Agendor, apagar `C:\Migracao\agendor-exportado-*.json` e o backup do CRM da
+pasta do Financeiro; subir o estoque real em Compras.
 
+**A fazer:** Compras (fornecedor/grupo, estoque automático); fase 3 (WhatsApp oficial da Meta,
+e-mail, Google Agenda) e IA.
 
 - **Vigia de notas pronto** (seção "Vigia de notas" abaixo e no README): Edge Function
   `crm-notas` publicada no banco real e testada (chave errada 401, chave certa 200; os
