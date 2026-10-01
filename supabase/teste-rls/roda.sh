@@ -16,4 +16,8 @@ $P -d crm -v ON_ERROR_STOP=1 -f "$DIR/../schema.sql" >/dev/null 2>&1   # 2ª vez
 SAIDA=$($P -d crm -At -f "$DIR/ataque.sql" 2>&1)
 echo "$SAIDA" | grep -v '^[a-e]0000000' | grep -v '^$'
 if echo "$SAIDA" | grep -q 'NÃO devia'; then echo; echo 'PERMISSÃO FURADA'; exit 1; fi
-echo; echo 'OK: nenhuma permissão furada'
+VOLUME=$($P -d crm -At -f "$DIR/volume.sql" 2>&1 | sed -n 's/.*volume|/volume|/p')
+echo "$VOLUME"
+if echo "$VOLUME" | grep -q 'LENTO'; then echo; echo 'POLÍTICA LENTA (ver volume.sql)'; exit 1; fi
+if ! echo "$VOLUME" | grep -q '^volume|fim'; then echo; echo 'TESTE DE VOLUME NÃO TERMINOU (ver volume.sql)'; exit 1; fi
+echo; echo 'OK: nenhuma permissão furada e nenhuma leitura lenta'

@@ -31,6 +31,26 @@ dados precisavam vir de lá. A migração é o caminho mais sensível do sistema
 - Esta é a cópia viva do código. A origem foi `sistemi-dalessi/crm/`, que fica só
   como histórico; mudança nova entra aqui.
 
+## INCIDENTE 01/10/2026 (manhã): CRM vazio para todos os logins — resolvido
+
+Primeiro dia sem o Agendor: com a equipe toda abrindo o CRM, as leituras passavam do
+`statement_timeout` (8 s do papel `authenticated`) e o banco devolvia 500. O app mostrava as telas
+vazias. **Nenhum dado se perdeu.** Causa: as políticas de leitura chamavam `crm_ve_empresa(id)` /
+`crm_ve_nota(id)` **uma vez por linha** (função SECURITY DEFINER não é embutida pelo Postgres), cada
+uma com subconsultas; uma página de 1.000 atividades levava 2,2 s para uma vendedora, e os itens de
+nota, ainda mais. Correção (migrations `crm_rls_rapida`, `crm_rls_rapida_insert_returning` e
+`crm_rls_rapida_negocios_indices`, já no `schema.sql`): carteira em conjunto
+(`crm_empresas_minhas()`, `crm_negocios_meus()`, `crm_notas_minhas()`, usadas como
+`coluna in (select ...)`, calculadas uma vez por consulta) e `(select crm_eh_*())` /
+`(select auth.uid())` em todas as políticas. Leitura caiu para milissegundos; o mesmo acesso de
+antes (ensaio de ataque com saída idêntica à do schema antigo; contagens por usuário no banco real
+iguais). **Travas para não voltar:** `testes/rls-rapida.test.js` reprova política de leitura com
+`crm_ve_*` ou papel/`auth.uid()` fora de subconsulta; `supabase/teste-rls/volume.sql` (roda.sh)
+carrega ~4× o volume da OneClean e falha se alguma leitura passar de 1 s (com o schema antigo,
+27 s). No app: leitura que falha por demora/rede tenta de novo 3 vezes (`comTentativas` em
+`dados.js`); sem carga nenhuma, a tela diz "seus dados estão guardados" e tenta sozinha; com dados
+antigos, só aparece a faixa `#faixaCarga`. Ao criar política nova: copiar o formato das que existem.
+
 ## ONDE PARAMOS (30/09/2026, noite) — retomar daqui
 
 **Estado:** CRM no ar e pronto para a equipe começar em 01/10 (Agendor desligado). Extração final
@@ -185,7 +205,11 @@ da OneClean é o **FKN** (SIFWin, da FKN Informática) — com N; não escrever 
 - **Usuários novos** só pela Edge Function `crm-usuarios` (service_role fica no
   servidor, confere se quem chama é admin ativo). Nunca pôr service_role no app.
 - Ao mexer em permissão: rodar `sh supabase/teste-rls/roda.sh` (Postgres local
-  que imita os papéis do Supabase; falha se aparecer "NÃO devia").
+  que imita os papéis do Supabase; falha se aparecer "NÃO devia" ou se alguma leitura ficar
+  lenta no teste de volume).
+- **Política de leitura nunca chama função por linha** (`crm_ve_empresa(id)` etc.): usar
+  `coluna in (select public.crm_empresas_minhas())` e `(select public.crm_eh_gestor())`. Ver o
+  incidente de 01/10/2026 no topo; `testes/rls-rapida.test.js` barra.
 - Coluna nova: `alter table ... add column if not exists` no `schema.sql` + campo
   no formulário. Tipo novo de atividade: `TIPOS_ATIVIDADE` em `regras.js` **e** o
   `check` de `crm_atividades.tipo`. Mesmo para situações e status.
@@ -413,8 +437,8 @@ da OneClean é o **FKN** (SIFWin, da FKN Informática) — com N; não escrever 
 ## Verificar antes de commitar
 
 ```
-node --test testes/*.test.js           # regras e importador (rodar também com TZ=UTC)
-sh supabase/teste-rls/roda.sh           # se mexeu no schema/permissões
+node --test testes/*.test.js           # regras, importador e trava das políticas (rodar também com TZ=UTC)
+sh supabase/teste-rls/roda.sh           # se mexeu no schema/permissões (ataque + volume)
 ```
 e abrir o `index.html` no modo local (menu do usuário → "Carregar dados de
 exemplo") para passear pelas telas. Não há build nem lint.

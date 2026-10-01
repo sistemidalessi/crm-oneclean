@@ -76,15 +76,30 @@
     if (i >= 0) E.D[t][i] = r; else E.D[t].push(r);
   }
 
+  // Leitura que falhou nunca vira tela vazia: sem nenhuma carga ainda, a tela diz que os dados
+  // estão guardados e tenta de novo sozinha; com dados antigos na tela, avisa na faixa do topo.
+  let novaTentativa = null;
   CRM.recarregar = async function (silencioso) {
+    clearTimeout(novaTentativa);
     try {
-      E.D = await store.carregar();
+      const D = await store.carregar();
       // Comprador não lê empresas (RLS): recebe só nome e ritmo, pela função do banco.
-      if (CRM.ehComprador() && store.clientesCompras) E.D.empresas = await store.clientesCompras();
+      if (CRM.ehComprador() && store.clientesCompras) D.empresas = await store.clientesCompras();
+      E.D = D;
       E.carregadoEm = Date.now();
+      E.falhaCarga = null;
       reindexa();
       CRM.render();
-    } catch (e) { if (!silencioso) CRM.falhou(e); else console.error(e); }
+    } catch (e) {
+      console.error(e);
+      E.falhaCarga = { msg: e.message || String(e), tentativas: ((E.falhaCarga && E.falhaCarga.tentativas) || 0) + 1 };
+      const espera = Math.min(120, 15 * E.falhaCarga.tentativas);
+      E.falhaCarga.proxima = Date.now() + espera * 1000;
+      novaTentativa = setTimeout(() => CRM.recarregar(true), espera * 1000);
+      if (!silencioso && E.carregadoEm) CRM.falhou(e);
+      // Com dados na tela, só a faixa muda (não atrapalha quem está digitando).
+      if (E.carregadoEm) CRM.atualizaFaixaCarga(); else CRM.render();
+    }
   };
 
   // Cadastro repetido: CNPJ/CPF, telefone ou e-mail que já são de outra empresa.
@@ -281,6 +296,15 @@
     requestAnimationFrame(() => { pendente = false; renderAgora(); });
   };
 
+  function atualizaFaixaCarga() {
+    const faixa = $('#faixaCarga');
+    if (!faixa) return;
+    faixa.hidden = !(E.falhaCarga && E.carregadoEm);
+    if (!faixa.hidden) faixa.innerHTML = 'Não consegui atualizar os dados (' + esc(E.falhaCarga.msg) + '). O que está na tela é de ' +
+      new Date(E.carregadoEm).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) + '. <button type="button" class="mini" data-acao="recarregar-dados">Tentar agora</button>';
+  }
+  CRM.atualizaFaixaCarga = atualizaFaixaCarga;
+
   function renderAgora() {
     if (!E.eu) return;
     // Comprador: só Compras. Compras e Gestão: administrador. Configurações: gestor.
@@ -306,8 +330,17 @@
     $('#sino').title = al.atrasadas.length + ' tarefa(s) atrasada(s), ' + al.leadsSemAtendimento.length + ' lead(s) sem atendimento, ' +
       al.negociosParados.length + ' negócio(s) parado(s), ' + al.clientesSemContato.length + ' cliente(s) sem contato, ' + al.recompra.length + ' recompra(s)';
 
-    const tela = CRM.telas[E.aba] || CRM.telas.inicio;
+    atualizaFaixaCarga();
     const c = $('#conteudo');
+    if (E.falhaCarga && !E.carregadoEm) {
+      c.innerHTML = '<section class="cartao falha-carga"><h2>Não consegui carregar os dados do CRM</h2>' +
+        '<p><strong>Seus dados estão guardados no servidor: nada foi apagado.</strong> A leitura falhou: ' + esc(E.falhaCarga.msg) + '</p>' +
+        '<p>Vou tentar de novo sozinho em ' + Math.max(1, Math.round((E.falhaCarga.proxima - Date.now()) / 1000)) + ' segundos.</p>' +
+        '<p><button type="button" class="btn" data-acao="recarregar-dados">Tentar agora</button></p>' +
+        '<p class="dica">Se continuar assim por alguns minutos, avise o administrador.</p></section>';
+      return;
+    }
+    const tela = CRM.telas[E.aba] || CRM.telas.inicio;
     const rolagem = c.scrollTop;
     const foco = document.activeElement && document.activeElement.id && c.contains(document.activeElement) ? document.activeElement.id : null;
     c.innerHTML = tela.render(al);
@@ -355,6 +388,7 @@
 
   // ------------------------------------------------------------ ações por delegação
   const ACOES = CRM.acoes = {
+    'recarregar-dados': () => CRM.recarregar().then(() => { if (!E.falhaCarga) CRM.toast('Dados carregados.'); }),
     aba: id => CRM.irPara(id),
     'abrir-empresa': id => CRM.fichas.abrirEmpresa(id),
     'abrir-negocio': id => CRM.fichas.abrirNegocio(id),

@@ -371,6 +371,14 @@ create unique index if not exists crm_notas_chave_uq  on public.crm_notas (chave
 create index if not exists crm_notas_empresa_idx     on public.crm_notas (empresa_id, emitida_em);
 create index if not exists crm_nota_itens_nota_idx   on public.crm_nota_itens (nota_id);
 create index if not exists crm_integracao_log_idx    on public.crm_integracao_log (quando desc);
+create index if not exists crm_atividades_negocio_idx on public.crm_atividades (negocio_id);
+create index if not exists crm_atividades_contato_idx on public.crm_atividades (contato_id);
+create index if not exists crm_negocios_etapa_idx    on public.crm_negocios (etapa_id);
+create index if not exists crm_negocios_contato_idx  on public.crm_negocios (contato_id);
+create index if not exists crm_nota_itens_produto_idx on public.crm_nota_itens (produto_id);
+create index if not exists crm_negocio_itens_produto_idx on public.crm_negocio_itens (produto_id);
+create index if not exists crm_filtros_usuario_idx   on public.crm_filtros (usuario_id);
+create index if not exists crm_integracao_log_integracao_idx on public.crm_integracao_log (integracao_id);
 
 -- =================================================================== visibilidade
 create or replace function public.crm_ve_empresa(e uuid)
@@ -391,6 +399,29 @@ create or replace function public.crm_ve_nota(n uuid)
 returns boolean language sql stable security definer set search_path = public as $$
   select exists (select 1 from public.crm_notas x where x.id = n
                  and (public.crm_eh_gestor() or public.crm_eh_comprador() or (x.empresa_id is not null and public.crm_ve_empresa(x.empresa_id))));
+$$;
+
+-- Carteira em conjunto: as políticas de leitura usam "coluna in (select crm_..._minhas())",
+-- que o Postgres calcula UMA vez por consulta (hash). As crm_ve_*(id) acima rodam uma vez POR
+-- LINHA e, com a equipe toda abrindo o CRM, estouravam o statement_timeout (01/10/2026: CRM
+-- vazio para todos). Nunca voltar a usar crm_ve_* em política de leitura (testes/rls-rapida.test.js).
+-- Vazio para quem não é membro; o gestor é tratado à parte nas políticas.
+create or replace function public.crm_empresas_minhas() returns setof uuid
+language sql stable security definer set search_path = public as $$
+  select id from public.crm_empresas where public.crm_eh_membro() and responsavel_id = auth.uid()
+  union
+  select empresa_id from public.crm_negocios where public.crm_eh_membro() and responsavel_id = auth.uid() and empresa_id is not null;
+$$;
+
+create or replace function public.crm_negocios_meus() returns setof uuid
+language sql stable security definer set search_path = public as $$
+  select id from public.crm_negocios where public.crm_eh_membro()
+     and (responsavel_id = auth.uid() or empresa_id in (select public.crm_empresas_minhas()));
+$$;
+
+create or replace function public.crm_notas_minhas() returns setof uuid
+language sql stable security definer set search_path = public as $$
+  select id from public.crm_notas where empresa_id in (select public.crm_empresas_minhas());
 $$;
 
 -- Compras: clientes só com o que a demanda precisa (sem contato, telefone nem e-mail).
@@ -588,88 +619,89 @@ begin
   -- Cadastros de configuração: todo usuário ativo lê (inclusive o comprador); gestor/admin escreve.
   foreach t in array array['crm_config','crm_etapas','crm_opcoes','crm_produtos','crm_modelos']
   loop
-    execute format('create policy le on public.%I for select to authenticated using (public.crm_eh_ativo())', t);
-    execute format('create policy grava on public.%I for insert to authenticated with check (public.crm_eh_gestor())', t);
-    execute format('create policy altera on public.%I for update to authenticated using (public.crm_eh_gestor()) with check (public.crm_eh_gestor())', t);
-    execute format('create policy apaga on public.%I for delete to authenticated using (public.crm_eh_gestor())', t);
+    execute format('create policy le on public.%I for select to authenticated using ((select public.crm_eh_ativo()))', t);
+    execute format('create policy grava on public.%I for insert to authenticated with check ((select public.crm_eh_gestor()))', t);
+    execute format('create policy altera on public.%I for update to authenticated using ((select public.crm_eh_gestor())) with check ((select public.crm_eh_gestor()))', t);
+    execute format('create policy apaga on public.%I for delete to authenticated using ((select public.crm_eh_gestor()))', t);
   end loop;
 end;
 $$;
 
 -- usuários: todo usuário ativo vê a equipe (para nomes e filtros); só admin mexe.
-create policy le on public.crm_usuarios for select to authenticated using (public.crm_eh_ativo());
-create policy grava on public.crm_usuarios for insert to authenticated with check (public.crm_eh_admin());
-create policy altera on public.crm_usuarios for update to authenticated using (public.crm_eh_admin()) with check (public.crm_eh_admin());
-create policy apaga on public.crm_usuarios for delete to authenticated using (public.crm_eh_admin());
+create policy le on public.crm_usuarios for select to authenticated using ((select public.crm_eh_ativo()));
+create policy grava on public.crm_usuarios for insert to authenticated with check ((select public.crm_eh_admin()));
+create policy altera on public.crm_usuarios for update to authenticated using ((select public.crm_eh_admin())) with check ((select public.crm_eh_admin()));
+create policy apaga on public.crm_usuarios for delete to authenticated using ((select public.crm_eh_admin()));
 
 -- metas: vendedor vê a própria; gestor vê e define todas.
-create policy le on public.crm_metas for select to authenticated using (public.crm_eh_gestor() or (public.crm_eh_membro() and usuario_id = auth.uid()));
-create policy grava on public.crm_metas for insert to authenticated with check (public.crm_eh_gestor());
-create policy altera on public.crm_metas for update to authenticated using (public.crm_eh_gestor()) with check (public.crm_eh_gestor());
-create policy apaga on public.crm_metas for delete to authenticated using (public.crm_eh_gestor());
+create policy le on public.crm_metas for select to authenticated using ((select public.crm_eh_gestor()) or ((select public.crm_eh_membro()) and usuario_id = (select auth.uid())));
+create policy grava on public.crm_metas for insert to authenticated with check ((select public.crm_eh_gestor()));
+create policy altera on public.crm_metas for update to authenticated using ((select public.crm_eh_gestor())) with check ((select public.crm_eh_gestor()));
+create policy apaga on public.crm_metas for delete to authenticated using ((select public.crm_eh_gestor()));
 
 -- filtros salvos: cada um os seus.
 create policy proprios on public.crm_filtros for all to authenticated
-  using (public.crm_eh_membro() and usuario_id = auth.uid())
-  with check (public.crm_eh_membro() and usuario_id = auth.uid());
+  using ((select public.crm_eh_membro()) and usuario_id = (select auth.uid()))
+  with check ((select public.crm_eh_membro()) and usuario_id = (select auth.uid()));
 
 -- empresas: carteira própria. O teste direto do responsável na própria linha é
 -- necessário: no INSERT ... RETURNING (que o app usa) a subconsulta dentro de
--- crm_ve_empresa() ainda não enxerga a linha recém-inserida (achado no banco real
+-- crm_empresas_minhas() ainda não enxerga a linha recém-inserida (achado no banco real
 -- em 29/09/2026: vendedor não conseguia cadastrar lead).
 create policy le on public.crm_empresas for select to authenticated
-  using (public.crm_eh_gestor() or (public.crm_eh_membro() and responsavel_id = auth.uid()) or public.crm_ve_empresa(id));
+  using ((select public.crm_eh_gestor()) or ((select public.crm_eh_membro()) and responsavel_id = (select auth.uid())) or id in (select public.crm_empresas_minhas()));
 create policy grava on public.crm_empresas for insert to authenticated
-  with check (public.crm_eh_gestor() or (public.crm_eh_membro() and responsavel_id = auth.uid()));
+  with check ((select public.crm_eh_gestor()) or ((select public.crm_eh_membro()) and responsavel_id = (select auth.uid())));
 create policy altera on public.crm_empresas for update to authenticated
-  using (public.crm_eh_gestor() or (public.crm_eh_membro() and responsavel_id = auth.uid()))
-  with check (public.crm_eh_gestor() or (public.crm_eh_membro() and responsavel_id = auth.uid()));
-create policy apaga on public.crm_empresas for delete to authenticated using (public.crm_eh_gestor());
+  using ((select public.crm_eh_gestor()) or ((select public.crm_eh_membro()) and responsavel_id = (select auth.uid())))
+  with check ((select public.crm_eh_gestor()) or ((select public.crm_eh_membro()) and responsavel_id = (select auth.uid())));
+create policy apaga on public.crm_empresas for delete to authenticated using ((select public.crm_eh_gestor()));
 
 -- contatos: acompanham a empresa.
 create policy tudo on public.crm_contatos for all to authenticated
-  using (public.crm_ve_empresa(empresa_id)) with check (public.crm_ve_empresa(empresa_id));
+  using ((select public.crm_eh_gestor()) or empresa_id in (select public.crm_empresas_minhas()))
+  with check ((select public.crm_eh_gestor()) or empresa_id in (select public.crm_empresas_minhas()));
 
 -- negócios: dono do negócio ou quem vê a empresa enxerga; só dono/gestor altera.
 create policy le on public.crm_negocios for select to authenticated
-  using (public.crm_eh_gestor() or (public.crm_eh_membro() and responsavel_id = auth.uid()) or public.crm_ve_empresa(empresa_id));
+  using ((select public.crm_eh_gestor()) or ((select public.crm_eh_membro()) and responsavel_id = (select auth.uid())) or empresa_id in (select public.crm_empresas_minhas()));
 create policy grava on public.crm_negocios for insert to authenticated
-  with check (public.crm_eh_gestor() or (public.crm_eh_membro() and responsavel_id = auth.uid() and public.crm_ve_empresa(empresa_id)));
+  with check ((select public.crm_eh_gestor()) or ((select public.crm_eh_membro()) and responsavel_id = (select auth.uid()) and public.crm_ve_empresa(empresa_id)));
 create policy altera on public.crm_negocios for update to authenticated
-  using (public.crm_eh_gestor() or (public.crm_eh_membro() and responsavel_id = auth.uid()))
-  with check (public.crm_eh_gestor() or (public.crm_eh_membro() and responsavel_id = auth.uid()));
-create policy apaga on public.crm_negocios for delete to authenticated using (public.crm_eh_gestor());
+  using ((select public.crm_eh_gestor()) or ((select public.crm_eh_membro()) and responsavel_id = (select auth.uid())))
+  with check ((select public.crm_eh_gestor()) or ((select public.crm_eh_membro()) and responsavel_id = (select auth.uid())));
+create policy apaga on public.crm_negocios for delete to authenticated using ((select public.crm_eh_gestor()));
 
 -- itens e propostas: acompanham o negócio.
-create policy le on public.crm_negocio_itens for select to authenticated using (public.crm_ve_negocio(negocio_id));
+create policy le on public.crm_negocio_itens for select to authenticated using ((select public.crm_eh_gestor()) or negocio_id in (select public.crm_negocios_meus()));
 create policy grava on public.crm_negocio_itens for insert to authenticated with check (public.crm_edita_negocio(negocio_id));
 create policy altera on public.crm_negocio_itens for update to authenticated using (public.crm_edita_negocio(negocio_id)) with check (public.crm_edita_negocio(negocio_id));
 create policy apaga on public.crm_negocio_itens for delete to authenticated using (public.crm_edita_negocio(negocio_id));
-create policy le on public.crm_propostas for select to authenticated using (public.crm_ve_negocio(negocio_id));
+create policy le on public.crm_propostas for select to authenticated using ((select public.crm_eh_gestor()) or negocio_id in (select public.crm_negocios_meus()));
 create policy grava on public.crm_propostas for insert to authenticated with check (public.crm_edita_negocio(negocio_id));
 create policy altera on public.crm_propostas for update to authenticated using (public.crm_edita_negocio(negocio_id)) with check (public.crm_edita_negocio(negocio_id));
 create policy apaga on public.crm_propostas for delete to authenticated using (public.crm_edita_negocio(negocio_id));
 
 -- atividades: quem vê a empresa vê o histórico; pode agendar para colega.
 create policy le on public.crm_atividades for select to authenticated
-  using (public.crm_eh_gestor() or (public.crm_eh_membro() and responsavel_id = auth.uid()) or public.crm_ve_empresa(empresa_id));
+  using ((select public.crm_eh_gestor()) or ((select public.crm_eh_membro()) and responsavel_id = (select auth.uid())) or empresa_id in (select public.crm_empresas_minhas()));
 create policy grava on public.crm_atividades for insert to authenticated with check (public.crm_ve_empresa(empresa_id));
 create policy altera on public.crm_atividades for update to authenticated
-  using (public.crm_eh_gestor() or (public.crm_eh_membro() and (responsavel_id = auth.uid() or criado_por = auth.uid())))
+  using ((select public.crm_eh_gestor()) or ((select public.crm_eh_membro()) and (responsavel_id = (select auth.uid()) or criado_por = (select auth.uid()))))
   with check (public.crm_ve_empresa(empresa_id));
 create policy apaga on public.crm_atividades for delete to authenticated
-  using (public.crm_eh_gestor() or (public.crm_eh_membro() and (responsavel_id = auth.uid() or criado_por = auth.uid())));
+  using ((select public.crm_eh_gestor()) or ((select public.crm_eh_membro()) and (responsavel_id = (select auth.uid()) or criado_por = (select auth.uid()))));
 
 -- notas fiscais: gestor importa e corrige; vendedor lê as das empresas que vê.
 create policy le on public.crm_notas for select to authenticated
-  using (public.crm_eh_gestor() or public.crm_eh_comprador() or (empresa_id is not null and public.crm_ve_empresa(empresa_id)));
-create policy grava on public.crm_notas for insert to authenticated with check (public.crm_eh_gestor());
-create policy altera on public.crm_notas for update to authenticated using (public.crm_eh_gestor()) with check (public.crm_eh_gestor());
-create policy apaga on public.crm_notas for delete to authenticated using (public.crm_eh_gestor());
-create policy le on public.crm_nota_itens for select to authenticated using (public.crm_ve_nota(nota_id));
-create policy grava on public.crm_nota_itens for insert to authenticated with check (public.crm_eh_gestor());
-create policy altera on public.crm_nota_itens for update to authenticated using (public.crm_eh_gestor()) with check (public.crm_eh_gestor());
-create policy apaga on public.crm_nota_itens for delete to authenticated using (public.crm_eh_gestor());
+  using ((select public.crm_eh_gestor()) or (select public.crm_eh_comprador()) or empresa_id in (select public.crm_empresas_minhas()));
+create policy grava on public.crm_notas for insert to authenticated with check ((select public.crm_eh_gestor()));
+create policy altera on public.crm_notas for update to authenticated using ((select public.crm_eh_gestor())) with check ((select public.crm_eh_gestor()));
+create policy apaga on public.crm_notas for delete to authenticated using ((select public.crm_eh_gestor()));
+create policy le on public.crm_nota_itens for select to authenticated using ((select public.crm_eh_gestor()) or (select public.crm_eh_comprador()) or nota_id in (select public.crm_notas_minhas()));
+create policy grava on public.crm_nota_itens for insert to authenticated with check ((select public.crm_eh_gestor()));
+create policy altera on public.crm_nota_itens for update to authenticated using ((select public.crm_eh_gestor())) with check ((select public.crm_eh_gestor()));
+create policy apaga on public.crm_nota_itens for delete to authenticated using ((select public.crm_eh_gestor()));
 
 -- estoque (CSV do FKN, tela Gestão → Compras): só o administrador.
 create table if not exists public.crm_estoque (
@@ -685,22 +717,24 @@ alter table public.crm_estoque enable row level security;
 revoke all on public.crm_estoque from anon, public;
 grant select, insert, update, delete on public.crm_estoque to authenticated;
 drop policy if exists tudo on public.crm_estoque;
-create policy tudo on public.crm_estoque for all to authenticated using (public.crm_eh_admin() or public.crm_eh_comprador()) with check (public.crm_eh_admin() or public.crm_eh_comprador());
+create policy tudo on public.crm_estoque for all to authenticated using ((select public.crm_eh_admin()) or (select public.crm_eh_comprador())) with check ((select public.crm_eh_admin()) or (select public.crm_eh_comprador()));
 
 -- integrações: só o administrador; o registro das entregas o gestor também lê.
-create policy tudo on public.crm_integracoes for all to authenticated using (public.crm_eh_admin()) with check (public.crm_eh_admin());
-create policy le on public.crm_integracao_log for select to authenticated using (public.crm_eh_gestor());
+create policy tudo on public.crm_integracoes for all to authenticated using ((select public.crm_eh_admin())) with check ((select public.crm_eh_admin()));
+create policy le on public.crm_integracao_log for select to authenticated using ((select public.crm_eh_gestor()));
 
 -- histórico: só gestor lê.
-create policy le on public.crm_historico for select to authenticated using (public.crm_eh_gestor());
+create policy le on public.crm_historico for select to authenticated using ((select public.crm_eh_gestor()));
 
 -- =================================================================== permissões de função
 revoke all on function public.crm_papel(), public.crm_eh_ativo(), public.crm_eh_membro(), public.crm_eh_gestor(), public.crm_eh_admin(), public.crm_eh_comprador(),
   public.crm_ve_empresa(uuid), public.crm_ve_negocio(uuid), public.crm_ve_nota(uuid), public.crm_edita_negocio(uuid),
-  public.crm_proximo_vendedor(), public.crm_clientes_compras() from public, anon;
+  public.crm_proximo_vendedor(), public.crm_clientes_compras(),
+  public.crm_empresas_minhas(), public.crm_negocios_meus(), public.crm_notas_minhas() from public, anon;
 grant execute on function public.crm_papel(), public.crm_eh_ativo(), public.crm_eh_membro(), public.crm_eh_gestor(), public.crm_eh_admin(), public.crm_eh_comprador(),
   public.crm_ve_empresa(uuid), public.crm_ve_negocio(uuid), public.crm_ve_nota(uuid), public.crm_edita_negocio(uuid),
-  public.crm_proximo_vendedor(), public.crm_clientes_compras() to authenticated;
+  public.crm_proximo_vendedor(), public.crm_clientes_compras(),
+  public.crm_empresas_minhas(), public.crm_negocios_meus(), public.crm_notas_minhas() to authenticated;
 revoke all on function public.crm_acha_duplicado(text, text[], text[], uuid), public.crm_duplicado_empresa(text, text[], text[], uuid),
   public.crm_barra_duplicado() from public, anon, authenticated;
 grant execute on function public.crm_duplicado_empresa(text, text[], text[], uuid) to authenticated;

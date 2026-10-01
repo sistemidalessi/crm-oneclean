@@ -221,14 +221,31 @@
     if (/violates foreign key/i.test(m)) return 'Registro ligado a outro que não existe mais. Recarregue a página.';
     if (/duplicate key/i.test(m)) return 'Já existe um registro igual.';
     if (/JWT expired|invalid JWT/i.test(m)) return 'Sua sessão expirou. Entre de novo.';
+    if (/statement timeout|canceling statement/i.test(m)) return 'O servidor demorou para responder. Tente de novo em instantes.';
+    if (/failed to fetch|networkerror|load failed/i.test(m)) return 'Sem conexão com o servidor. Confira a internet e tente de novo.';
     return m;
+  }
+
+  // Leitura que falha por demora ou rede (servidor ocupado, Wi-Fi caindo) tenta de novo antes de
+  // desistir; permissão e sessão expirada não adiantam repetir. Em 01/10/2026 o banco cancelou
+  // leituras por tempo e o CRM abriu vazio para a equipe (a causa, nas políticas, está corrigida
+  // e testada em supabase/teste-rls/volume.sql; isto é a segunda proteção).
+  const ESPERAS = [1500, 4000, 8000];
+  const repete = r => r.error && !/row-level security|permission denied|JWT|não está liberado/i.test(r.error.message || '');
+  async function comTentativas(fazer) {
+    let r;
+    for (let i = 0; ; i++) {
+      try { r = await fazer(); } catch (e) { r = { error: e }; }
+      if (!repete(r) || i >= ESPERAS.length) return r;
+      await new Promise(ok => setTimeout(ok, ESPERAS[i]));
+    }
   }
 
   async function tudo(sb, t) {
     const out = [];
     for (let de = 0; ; de += PAGINA) {
       const ordem = t === 'config' ? 'id' : chave(t) === 'user_id' ? 'nome' : 'criado_em';
-      const lote = unwrap(await sb.from(tab(t)).select('*').order(ordem).order(chave(t)).range(de, de + PAGINA - 1));
+      const lote = unwrap(await comTentativas(() => sb.from(tab(t)).select('*').order(ordem).order(chave(t)).range(de, de + PAGINA - 1)));
       out.push(...lote);
       if (lote.length < PAGINA) return out;
     }
@@ -321,7 +338,7 @@
   Supa.prototype.clientesCompras = async function () {
     const out = [];
     for (let de = 0; ; de += PAGINA) {
-      const l = unwrap(await this.sb.rpc('crm_clientes_compras').range(de, de + PAGINA - 1));
+      const l = unwrap(await comTentativas(() => this.sb.rpc('crm_clientes_compras').range(de, de + PAGINA - 1)));
       out.push(...l);
       if (l.length < PAGINA) return out;
     }
