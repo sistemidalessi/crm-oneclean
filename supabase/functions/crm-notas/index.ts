@@ -66,8 +66,11 @@ async function arquivoFkn(db: any, integ: { id: string }, f: { nome?: string; ba
     const { error } = await db.from(tabela).delete().lt('atualizado_em', agora);
     if (error) throw new Error(tabela + ' (limpeza): ' + error.message);
   };
-  const registra = (texto: string, qtd: number, valor: number) => db.from('crm_integracao_log').insert({
-    integracao_id: integ.id, arquivos: 1, notas_novas: 0, valor, fora: 0, erros: 0, resumo: { fkn: texto, arquivo: nome, qtd } });
+  const registra = async (texto: string, qtd: number, valor: number) => {
+    await db.from('crm_integracao_log').insert({ integracao_id: integ.id, arquivos: 1, notas_novas: 0, valor, fora: 0, erros: 0, resumo: { fkn: texto, arquivo: nome, qtd } });
+    const ag = new Date().toISOString();
+    await db.from('crm_integracoes').update({ ultimo_uso: ag, ultimo_sinal: ag }).eq('id', integ.id); // entrega também é sinal de vida
+  };
 
   if (K.ehListagemProdutos(txt)) {
     const lista = K.lerListagemProdutos(txt);
