@@ -194,6 +194,29 @@ Get-Content C:\CRM\vigia-notas.log -Tail 3
 ```
 (a configuração e o estado ficam como estão; a última linha deve mostrar "vigia ligado (versão …)").
 
+**Arquivos do FKN pelo vigia (01/10/2026):** o vigia também manda sozinho ao CRM a
+**Listagem cadastral de produtos** (estoque de Compras) e o **Contas a receber por cliente —
+em aberto**, assim que alguém salvar o CSV numa pasta combinada. O FKN não agenda relatório:
+alguém ainda gera e salva; o que deixa de existir é entrar no CRM e clicar em "Atualizar".
+O vigia reconhece o arquivo pelo conteúdo (o nome não importa), manda só o mais novo de cada
+tipo e não manda de novo o que não mudou. A função recusa arquivo cortado (listagem com menos
+da metade dos produtos que o CRM já tem, contas a receber sem o TOTAL GERAL ou com soma que não
+bate) — aí nada é trocado e o motivo vai para o `vigia-notas.log`. Ligar (PowerShell como
+administrador, no servidor; a pasta fica dentro do compartilhamento que todos já usam, para
+salvar de qualquer computador, e o vigia lê pelo caminho local, que a conta SYSTEM enxerga):
+```
+(Get-SmbShare -Name sistema).Path
+mkdir "<caminho que apareceu>\CRM-FKN"
+Stop-ScheduledTask -TaskName "CRM - vigia de notas"
+Invoke-WebRequest https://raw.githubusercontent.com/sistemidalessi/crm-oneclean/main/ferramentas/vigia-notas.js -OutFile C:\CRM\vigia-notas.js
+cd C:\CRM
+node vigia-notas.js --configurar --pasta-fkn "<caminho que apareceu>\CRM-FKN"
+Start-ScheduledTask -TaskName "CRM - vigia de notas"
+Get-Content C:\CRM\vigia-notas.log -Tail 3
+```
+No FKN, salvar os dois relatórios em CSV em `\\Servidor\sistema\CRM-FKN` (pode sobrescrever o
+anterior). Em um ou dois minutos aparecem em Configurações → Integrações → "Últimas entregas".
+
 O que já foi enviado fica em `vigia-notas-estado.json` (apagar esse arquivo = reenviar
 tudo, sem duplicar); `vigia-notas.json` guarda a chave — **não copiar para outro lugar**.
 Se o CRM ou a internet cair, o vigia tenta de novo na volta seguinte. Chave vazou ou o

@@ -14,12 +14,17 @@
 // O que já foi enviado fica em vigia-notas-estado.json; o que aconteceu, em vigia-notas.log.
 // Sinal de vida: a cada 30 min (e ao ligar) avisa o CRM que está rodando, mesmo sem nota nova;
 // se o sinal parar, o CRM avisa o administrador (servidor desligado, tarefa parada).
+//
+// Arquivos do FKN (opcional): com --pasta-fkn "C:\CRM\FKN" o vigia também olha essa pasta e manda
+// ao CRM, assim que alguém salvar, a "Listagem cadastral de produtos" (estoque de Compras) e o
+// "Contas a receber por cliente — em aberto", em CSV. Reconhece pelo conteúdo (o nome não
+// importa); de cada tipo manda só o mais novo. Pode pôr mais de uma pasta separando com ";".
 'use strict';
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const VERSAO = '2026-10-01';
+const VERSAO = '2026-10-01b';
 const SINAL_MS = 30 * 60 * 1000;
 
 const AQUI = __dirname;
@@ -45,14 +50,15 @@ function configurar() {
     chave: arg('chave') || atual.chave || '',
     pasta: arg('pasta') || atual.pasta || '',
     desde: arg('desde') || atual.desde || String(new Date().getFullYear()) + '01',
-    intervaloSegundos: Number(arg('intervalo') || atual.intervaloSegundos || 60)
+    intervaloSegundos: Number(arg('intervalo') || atual.intervaloSegundos || 60),
+    pastaFkn: arg('pasta-fkn') != null ? arg('pasta-fkn') : atual.pastaFkn || ''
   };
   if (!/^https?:\/\/.+/.test(cfg.url) || cfg.chave.length < 32 || !cfg.pasta) {
     console.error('Informe --url (https://...supabase.co), --chave (do CRM) e --pasta.');
     process.exit(1);
   }
   fs.writeFileSync(CONFIG, JSON.stringify(cfg, null, 2));
-  registra('configurado: pasta ' + cfg.pasta + ', meses a partir de ' + cfg.desde);
+  registra('configurado: pasta ' + cfg.pasta + ', meses a partir de ' + cfg.desde + (cfg.pastaFkn ? ' · arquivos do FKN em ' + cfg.pastaFkn : ''));
 }
 
 // XML da pasta e das subpastas de mês (AAAAMM >= "desde"). Dos pares nota/nota com protocolo que o
@@ -105,11 +111,61 @@ async function sinal(cfg, estado, pendentes, forcar) {
   } catch (e) { registra('sinal de vida não chegou ao CRM (tento de novo na próxima volta): ' + e.message); }
 }
 
+// ------------------------------------------------------------ arquivos do FKN
+// Tipo pelo começo do arquivo (o FKN grava em Windows-1252; "latin1" basta para reconhecer).
+function tipoFkn(buf) {
+  const ini = buf.subarray(0, 4000).toString('latin1');
+  if (/LISTAGEM CADASTRAL DE PRODUTOS/i.test(ini)) return 'produtos';
+  if (/CONTAS A RECEBER/i.test(ini)) return 'receber';
+  return null;
+}
+const NOME_FKN = { produtos: 'listagem de produtos', receber: 'contas a receber' };
+async function arquivosFkn(cfg, estado) {
+  if (!cfg.pastaFkn) return;
+  if (!estado.fkn) estado.fkn = {};
+  const agora = Date.now(), maisNovo = {};
+  for (const dir of String(cfg.pastaFkn).split(';').map(x => x.trim()).filter(Boolean)) {
+    let itens;
+    try { itens = fs.readdirSync(dir, { withFileTypes: true }); } catch (e) { registra('não consegui abrir a pasta do FKN ' + dir + ': ' + e.message); continue; }
+    for (const i of itens) {
+      if (!i.isFile() || !/\.(csv|txt)$/i.test(i.name)) continue;
+      const caminho = path.join(dir, i.name);
+      let st; try { st = fs.statSync(caminho); } catch (e) { continue; }
+      const marca = st.size + ':' + Math.round(st.mtimeMs);
+      if (estado.fkn[caminho] === marca || agora - st.mtimeMs < ESPERA_ARQUIVO_MS) continue;
+      let buf; try { buf = fs.readFileSync(caminho); } catch (e) { registra('não li ' + caminho + ': ' + e.message); continue; }
+      const tipo = tipoFkn(buf);
+      if (!tipo) { estado.fkn[caminho] = marca; continue; } // outro CSV qualquer: não olha de novo
+      if (!maisNovo[tipo] || st.mtimeMs > maisNovo[tipo].mtime) {
+        if (maisNovo[tipo]) estado.fkn[maisNovo[tipo].caminho] = maisNovo[tipo].marca; // mais velho: pula
+        maisNovo[tipo] = { caminho, marca, mtime: st.mtimeMs, buf, nome: i.name };
+      } else estado.fkn[caminho] = marca;
+    }
+  }
+  for (const tipo of Object.keys(maisNovo)) {
+    const a = maisNovo[tipo];
+    try {
+      const r = await chama(cfg, { fkn: { nome: a.nome, base64: a.buf.toString('base64') } });
+      estado.fkn[a.caminho] = a.marca;
+      estado.ultimaFalha = '';
+      estado.ultimoSinal = Date.now();
+      registra('FKN: ' + NOME_FKN[tipo] + ' (' + a.nome + ') enviada ao CRM' + (r.produtos ? ': ' + r.produtos + ' linhas' : r.titulos != null ? ': ' + r.titulos + ' títulos' + (r.semCliente ? ', ' + r.semCliente + ' sem cliente no CRM' : '') : ''));
+    } catch (e) {
+      // Recusado pelo CRM (arquivo cortado, soma que não bate): não insiste até o arquivo mudar.
+      if (/HTTP 422/.test(e.message)) estado.fkn[a.caminho] = a.marca;
+      registra('FKN: ' + NOME_FKN[tipo] + ' não foi: ' + e.message);
+      estado.ultimaFalha = new Date().toLocaleString('pt-BR') + ': FKN ' + NOME_FKN[tipo] + ': ' + e.message;
+    }
+  }
+  fs.writeFileSync(ESTADO, JSON.stringify(estado));
+}
+
 async function umaVolta(forcarSinal) {
   const cfg = leJson(CONFIG, null);
   if (!cfg) { console.error('Configure antes: node vigia-notas.js --configurar --url ... --chave ... --pasta ...'); process.exit(1); }
   const estado = leJson(ESTADO, { enviados: {} });
   if (!estado.enviados) estado.enviados = {};
+  try { await arquivosFkn(cfg, estado); } catch (e) { registra('FKN: erro: ' + e.message); }
   const agora = Date.now();
   const novos = [];
   for (const a of listaXml(cfg)) {
@@ -160,7 +216,7 @@ async function principal() {
   if (process.argv.includes('--configurar')) return configurar();
   if (process.argv.includes('--uma-vez')) { await umaVolta(); return; }
   const cfg = leJson(CONFIG, {});
-  registra('vigia ligado (versão ' + VERSAO + '): ' + (cfg.pasta || '(sem pasta)'));
+  registra('vigia ligado (versão ' + VERSAO + '): ' + (cfg.pasta || '(sem pasta)') + (cfg.pastaFkn ? ' · FKN: ' + cfg.pastaFkn : ''));
   let primeira = true;
   for (;;) {
     try { await umaVolta(primeira); } catch (e) { registra('erro: ' + e.message); }
@@ -170,4 +226,4 @@ async function principal() {
 }
 
 if (require.main === module) principal();
-module.exports = { listaXml, umaVolta };
+module.exports = { listaXml, umaVolta, tipoFkn };

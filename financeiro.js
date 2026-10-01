@@ -10,69 +10,9 @@
   const num = R.num;
   const digitos = v => String(v == null ? '' : v).replace(/\D/g, '');
 
-  // "28/09/26" ou "28/09/2026" → "2026-09-28"; "00/00/0000" → null.
-  function dataFKN(v) {
-    const m = /^(\d\d)\/(\d\d)\/(\d\d|\d{4})$/.exec(String(v || '').trim());
-    if (!m || m[1] === '00') return null;
-    return (m[3].length === 2 ? '20' + m[3] : m[3]) + '-' + m[2] + '-' + m[1];
-  }
-
-  const ehContasReceber = t => /CONTAS A RECEBER/i.test(String(t).slice(0, 3000));
-  function lerContasReceber(texto) {
-    if (!ehContasReceber(texto)) throw new Error('não parece a listagem de contas a receber do FKN (Contas a receber por cliente, salva em CSV)');
-    let cli = null, posicao = null, hora = null, totalGeral = null, vencidoGeral = null;
-    const porDup = new Map();
-    String(texto).split(/\r?\n/).forEach(l => {
-      let m;
-      if (!posicao && (m = /^;DATA:\s*(\d\d\/\d\d\/\d{4})/.exec(l))) { posicao = dataFKN(m[1]); return; }
-      if (!hora && (m = /;(\d\d:\d\d);\s*$/.exec(l))) hora = m[1];
-      if ((m = /^CLIENTE:\s*(\d+)\s+([^;]*);(?:TEL:([^;]*);)?(?:VEND:\s*([^;]*);)?/.exec(l))) {
-        cli = { codigo: m[1], nome: m[2].trim(), vendedor: (m[4] || '').trim(), doc: '' };
-        return;
-      }
-      if (cli && (m = /^(?:CNPJ|CPF)\.*:\s*([\d./-]+)/.exec(l))) { cli.doc = digitos(m[1]); return; }
-      if ((m = /^\s*(\d+)\/(\d+)([^;]*);\s*(\d\d\/\d\d\/\d\d(?:\d\d)?);\s*([-\d.,]+);\s*(\d\d\/\d\d\/\d\d(?:\d\d)?);\s*(\d*);([^;]*)/.exec(l))) {
-        if (!cli) return;
-        let dup = m[1] + '/' + m[2];
-        if (porDup.has(dup)) dup += '-' + cli.codigo; // mesmo número em clientes diferentes (raro)
-        porDup.set(dup, { duplicata: dup, nota_numero: +m[1], parcela: +m[2], abono: /!/.test(m[3]),
-          cliente_codigo: cli.codigo, cliente_nome: cli.nome || null, cliente_doc: cli.doc || null, vendedor_nome: cli.vendedor || null,
-          emitida_em: dataFKN(m[4]), vencimento: dataFKN(m[6]), valor: R.numeroBR(m[5]) || 0, portador: m[8].trim() || null });
-        return;
-      }
-      if ((m = /TOTAL GERAL[.\s]*:;\s*([-\d.,]+)/.exec(l))) totalGeral = R.numeroBR(m[1]);
-      else if (totalGeral != null && vencidoGeral == null && (m = /VENCIDO:;\s*([-\d.,]+)/.exec(l))) vencidoGeral = R.numeroBR(m[1]);
-    });
-    const titulos = [...porDup.values()].filter(t => t.vencimento);
-    if (!titulos.length) throw new Error('não achei títulos na listagem (use "Em aberto" e salve em CSV)');
-    const soma = Math.round(titulos.reduce((s, t) => s + t.valor, 0) * 100) / 100;
-    return { posicao, hora, titulos, soma, totalGeral, vencidoGeral, confere: totalGeral == null || Math.abs(soma - totalGeral) < 0.02,
-      clientes: new Set(titulos.map(t => t.cliente_codigo)).size };
-  }
-
-  // Cliente do CRM de cada título: a nota de mesmo número e mesmo CNPJ (a mais certa); senão o
-  // cadastro com o CNPJ (havendo mais de um, o que tem notas). Sem nenhum, fica sem cliente.
-  function ligaEmpresas(titulos, D, ix) {
-    const notasNum = new Map();
-    (D.notas || []).forEach(n => { if (n.numero != null && n.empresa_id) { const k = String(+n.numero); if (!notasNum.has(k)) notasNum.set(k, []); notasNum.get(k).push(n); } });
-    const porDoc = new Map();
-    (D.empresas || []).forEach(e => { const d = digitos(e.cnpj); if (d.length >= 11) { if (!porDoc.has(d)) porDoc.set(d, []); porDoc.get(d).push(e); } });
-    const nNotas = e => ((ix && ix.porEmpresa && ix.porEmpresa.notas.get(e.id)) || []).length;
-    let pelaNota = 0, peloDoc = 0, sem = 0;
-    const out = titulos.map(t => {
-      const doc = digitos(t.cliente_doc);
-      const n = (notasNum.get(String(t.nota_numero)) || []).find(x => !doc || digitos(x.cliente_doc) === doc);
-      let empresa_id = n ? n.empresa_id : null;
-      if (empresa_id) pelaNota++;
-      else {
-        const l = porDoc.get(doc) || [];
-        const e = l.slice().sort((a, b) => nNotas(b) - nNotas(a) || (a.grupo_id ? 1 : 0) - (b.grupo_id ? 1 : 0))[0];
-        if (e) { empresa_id = e.id; peloDoc++; } else sem++;
-      }
-      return Object.assign({}, t, { empresa_id });
-    });
-    return { titulos: out, pelaNota, peloDoc, sem };
-  }
+  // Leitores (contas a receber do FKN) em fkn.js.
+  const K = raiz.CRMFkn || (typeof require !== 'undefined' ? require('./fkn.js') : null);
+  const { lerContasReceber, ehContasReceber, ligaEmpresas, dataFKN } = K;
 
   // Resumo de uma lista de títulos no dia "hoje": em aberto, vencido, a vencer e o maior atraso.
   function resume(lista, hoje) {

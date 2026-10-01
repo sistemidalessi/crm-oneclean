@@ -9,6 +9,8 @@
 // código do site. Depois de mexer em regras.js ou nfe.js: commit + push, depois
 //   node ferramentas/fixa-motor-notas.js     (atualiza COMMIT e HASHES aqui)
 // e publicar de novo esta função. O teste testes/motor.test.js avisa se esquecer.
+// Também recebe do vigia os CSV salvos pelo FKN ({fkn: {nome, base64}}): a listagem de produtos
+// (estoque de Compras) e o contas a receber — lidos por fkn.js, o mesmo leitor da tela.
 // Deploy: verify_jwt DESLIGADO (a chave de integração é conferida aqui).
 import { createClient } from 'npm:@supabase/supabase-js@2.116.0';
 
@@ -36,8 +38,59 @@ async function carregaMotor() {
   gt.CRMRegras = g.CRMRegras;
   gt.CRMDados = { uuid: () => crypto.randomUUID() };
   new Function(codigo['nfe.js'])();
+  new Function(codigo['fkn.js'])();
   N = gt.CRMNfe;
+  K = gt.CRMFkn;
   return N;
+}
+// deno-lint-ignore no-explicit-any
+let K: any = null;
+
+// Arquivo do FKN que o vigia mandou: reconhece pelo conteúdo e troca o retrato (estoque ou
+// títulos em aberto). Travas: produtos com menos da metade do que já existe, ou contas a receber
+// cuja soma não bate com o total geral, são recusados (arquivo cortado não apaga o que existe).
+// deno-lint-ignore no-explicit-any
+async function arquivoFkn(db: any, integ: { id: string }, f: { nome?: string; base64?: string }) {
+  await carregaMotor();
+  const bytes = Uint8Array.from(atob(String(f.base64 || '')), c => c.charCodeAt(0));
+  let txt: string;
+  try { txt = new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch { txt = new TextDecoder('windows-1252').decode(bytes); }
+  txt = txt.replace(/^\uFEFF/, '');
+  const nome = String(f.nome || '').slice(0, 200);
+  const agora = new Date().toISOString();
+  const grava = async (tabela: string, linhas: Record<string, unknown>[], conflito: string) => {
+    for (let i = 0; i < linhas.length; i += LOTE) {
+      const { error } = await db.from(tabela).upsert(linhas.slice(i, i + LOTE).map(x => Object.assign({}, x, { atualizado_em: agora })), { onConflict: conflito, defaultToNull: false });
+      if (error) throw new Error(tabela + ': ' + error.message);
+    }
+    const { error } = await db.from(tabela).delete().lt('atualizado_em', agora);
+    if (error) throw new Error(tabela + ' (limpeza): ' + error.message);
+  };
+  const registra = (texto: string, qtd: number, valor: number) => db.from('crm_integracao_log').insert({
+    integracao_id: integ.id, arquivos: 1, notas_novas: 0, valor, fora: 0, erros: 0, resumo: { fkn: texto, arquivo: nome, qtd } });
+
+  if (K.ehListagemProdutos(txt)) {
+    const lista = K.lerListagemProdutos(txt);
+    const { count } = await db.from('crm_estoque').select('codigo', { count: 'exact', head: true });
+    if (count && lista.length < count / 2) return resposta(422, { erro: 'listagem com ' + lista.length + ' produtos (o CRM tem ' + count + '): parece cortada; não troquei o estoque' });
+    await grava('crm_estoque', lista, 'codigo');
+    const valor = lista.reduce((s: number, x: { custo_total: number }) => s + (x.custo_total || 0), 0);
+    await registra('Listagem de produtos do FKN: ' + lista.length + ' linhas', lista.length, valor);
+    return resposta(200, { ok: true, fkn: 'produtos', produtos: lista.length });
+  }
+  if (K.ehContasReceber(txt)) {
+    const lido = K.lerContasReceber(txt);
+    if (lido.totalGeral == null) return resposta(422, { erro: 'contas a receber sem a linha do TOTAL GERAL: o arquivo parece cortado; não troquei' });
+    if (!lido.confere) return resposta(422, { erro: 'contas a receber: a soma dos títulos (' + lido.soma + ') não bate com o total geral (' + lido.totalGeral + '); não troquei' });
+    const [empresas, notas] = await Promise.all([tudo(db, 'crm_empresas', 'id,cnpj,grupo_id'), tudo(db, 'crm_notas', 'id,numero,empresa_id,cliente_doc')]);
+    const porEmp = new Map<string, unknown[]>();
+    (notas as { empresa_id: string }[]).forEach(n => { if (n.empresa_id) { if (!porEmp.has(n.empresa_id)) porEmp.set(n.empresa_id, []); porEmp.get(n.empresa_id)!.push(n); } });
+    const lig = K.ligaEmpresas(lido.titulos, { empresas, notas }, { porEmpresa: { notas: porEmp } });
+    await grava('crm_titulos', lig.titulos, 'duplicata');
+    await registra('Contas a receber do FKN: ' + lig.titulos.length + ' títulos de ' + lido.clientes + ' clientes' + (lig.sem ? ' (' + lig.sem + ' sem cliente no CRM)' : ''), lig.titulos.length, lido.soma);
+    return resposta(200, { ok: true, fkn: 'receber', titulos: lig.titulos.length, semCliente: lig.sem });
+  }
+  return resposta(422, { erro: 'arquivo do FKN não reconhecido (só a listagem de produtos e o contas a receber, em CSV)' });
 }
 
 const MAX_ARQUIVOS = 60;
@@ -74,7 +127,7 @@ Deno.serve(async (req) => {
   const { data: integ } = await db.from('crm_integracoes').select('id, nome, filtro, ativo').eq('token_hash', await sha256(chave)).maybeSingle();
   if (!integ || !integ.ativo) return resposta(401, { erro: 'chave inválida ou desativada' });
 
-  let corpo: { arquivos?: { nome?: string; xml?: string }[]; sinal?: boolean; info?: Record<string, unknown> };
+  let corpo: { arquivos?: { nome?: string; xml?: string }[]; sinal?: boolean; info?: Record<string, unknown>; fkn?: { nome?: string; base64?: string } };
   try { corpo = await req.json(); } catch { return resposta(400, { erro: 'corpo inválido' }); }
 
   // Sinal de vida do vigia (a cada 30 min, mesmo sem nota): guarda a hora e um resumo curto.
@@ -85,6 +138,9 @@ Deno.serve(async (req) => {
     const { error } = await db.from('crm_integracoes').update({ ultimo_sinal: new Date().toISOString(), sinal }).eq('id', integ.id);
     if (error) return resposta(500, { erro: 'sinal não gravado: ' + error.message });
     return resposta(200, { ok: true, sinal: true });
+  }
+  if (corpo.fkn) {
+    try { return await arquivoFkn(db, integ, corpo.fkn); } catch (e) { return resposta(500, { erro: 'falha no arquivo do FKN: ' + (e instanceof Error ? e.message : String(e)) }); }
   }
   const arquivos = Array.isArray(corpo.arquivos) ? corpo.arquivos : [];
   if (arquivos.length > MAX_ARQUIVOS) return resposta(413, { erro: 'no máximo ' + MAX_ARQUIVOS + ' arquivos por envio' });

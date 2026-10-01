@@ -93,8 +93,18 @@ o da empresa e o de cada pessoa (principal primeiro), separando campos com vári
 espaço) e sem repetir (`CRM.fichas.emailsDe`, `linkEmail`). O botão na linha de uma pessoa (ou
 tarefa ligada a uma pessoa) continua só para ela. O botão mostra quantos são: "E-mail (15)".
 
-**A fazer:** estoque e contas a receber automáticos pelo vigia (mandar o CSV
-quando o arquivo mudar); fase 3 (WhatsApp oficial da Meta, e-mail, Google Agenda) e IA.
+**Arquivos do FKN pelo vigia (01/10) — feito:** `vigia-notas.js --pasta-fkn` olha uma pasta e
+manda `{fkn:{nome, base64}}` à `crm-notas` quando um CSV muda (o mais novo de cada tipo; outro
+CSV qualquer é ignorado). A função lê com **`fkn.js`** (leitores puros tirados de `gestao.js` e
+`financeiro.js`; agora fixado no motor junto com regras.js e nfe.js — mexeu, refixar e publicar)
+e troca o retrato de `crm_estoque` / `crm_titulos`. Travas: listagem com < metade dos produtos
+atuais, contas a receber sem TOTAL GERAL ou com soma diferente → 422, nada muda, e o vigia não
+insiste até o arquivo mudar. Entrega aparece em Integrações → Últimas entregas. Testado: vigia
+contra servidor falso (testes/vigia.test.js) e a função transpilada no Node com banco falso e os
+arquivos reais. **Falta o Anderson:** criar a pasta e configurar no servidor (README, "Arquivos do
+FKN pelo vigia").
+
+**A fazer:** fase 3 (WhatsApp oficial da Meta, e-mail, Google Agenda) e IA.
 
 - **Vigia de notas pronto** (seção "Vigia de notas" abaixo e no README): Edge Function
   `crm-notas` publicada no banco real e testada (chave errada 401, chave certa 200; os

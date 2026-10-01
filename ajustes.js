@@ -788,7 +788,7 @@
           const v = ((l.resumo && l.resumo.vendedores) || []).filter(x => x.chave).map(x => x.nome + ' ' + x.qtd + (x.usuario_nome ? '' : ' (fora)')).join(', ');
           const er = (l.resumo && l.resumo.erros) || [];
           return '<tr><td>' + quando(l.quando) + '</td><td class="num">' + l.arquivos + '</td><td class="num">' + l.notas_novas + '</td><td class="num">' + esc(R.moeda(l.valor)) + '</td><td class="num">' + l.fora + '</td>' +
-            '<td><small>' + esc(v) + '</small>' + (er.length ? ' <details><summary>' + CRM.selo(er.length + ' erro(s)', 'vermelho') + '</summary><small>' + er.map(esc).join('<br>') + '</small></details>' : '') + '</td></tr>';
+            '<td><small>' + esc((l.resumo && l.resumo.fkn) || v) + '</small>' + (er.length ? ' <details><summary>' + CRM.selo(er.length + ' erro(s)', 'vermelho') + '</summary><small>' + er.map(esc).join('<br>') + '</small></details>' : '') + '</td></tr>';
         }).join('') + '</tbody></table>' : '<p class="vazio">Nenhuma entrega ainda.</p>') + '</section>';
   };
   // Sinal de vida do vigia (a cada 30 min): rodando, parado ou vigia antigo sem sinal.

@@ -14,6 +14,7 @@ test('a Edge Function crm-notas está fixada nas regras atuais', () => {
   assert.match(s, /const COMMIT = '[0-9a-f]{40}';/, 'sem commit fixado');
   assert.ok(s.includes("'regras.js': '" + h['regras.js'] + "'"), 'regras.js mudou: rode node ferramentas/fixa-motor-notas.js e publique a função');
   assert.ok(s.includes("'nfe.js': '" + h['nfe.js'] + "'"), 'nfe.js mudou: rode node ferramentas/fixa-motor-notas.js e publique a função');
+  assert.ok(s.includes("'fkn.js': '" + h['fkn.js'] + "'"), 'fkn.js mudou: rode node ferramentas/fixa-motor-notas.js e publique a função');
 });
 
 test('regras.js e nfe.js rodam do jeito que a Edge Function carrega (sem module, sem window)', () => {
@@ -33,4 +34,17 @@ test('regras.js e nfe.js rodam do jeito que a Edge Function carrega (sem module,
   const pl = N.planeja({ usuarios: [{ user_id: 'u1', nome: 'Ana Souza', ativo: true }], empresas: [], produtos: [], opcoes: [], notas: [] }, [d], { filtro: 'auto' });
   assert.equal(pl.criar.notas.length, 1);
   assert.equal(pl.criar.empresas[0].responsavel_id, 'u1');
+});
+
+test('fkn.js roda do jeito que a Edge Function carrega (sem module, sem require)', () => {
+  const regras = fs.readFileSync(path.join(__dirname, '..', 'regras.js'), 'utf8');
+  const fkn = fs.readFileSync(path.join(__dirname, '..', 'fkn.js'), 'utf8');
+  const g = {};
+  new Function('module', 'require', regras).call(g, undefined, undefined);
+  const falso = { CRMRegras: g.CRMRegras };
+  new Function('module', 'require', 'globalThis', 'window', fkn.replace("typeof window !== 'undefined' ? window : globalThis", 'window'))(undefined, undefined, falso, falso);
+  const K = falso.CRMFkn;
+  assert.ok(K && K.lerContasReceber && K.lerListagemProdutos && K.ligaEmpresas);
+  assert.ok(K.ehContasReceber('X;\nCONTAS A RECEBER POR CLIENTE: EM ABERTO;'));
+  assert.equal(K.codigoFKN('010503.0'), '010503');
 });
