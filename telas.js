@@ -592,6 +592,31 @@
   };
 
   // ================================================================ Relatórios
+  let ultimoRel = null; // o que os quadros mostraram (para abrir a lista ao clicar)
+  function listaDoQuadro(id) {
+    const r = ultimoRel; if (!r) return null;
+    const L = r.d.listas, sub = r.quando;
+    const emp = ids => ids.map(x => CRM.empresa(x)).filter(Boolean);
+    const neg = (titulo, itens, data, extra) => Object.assign({ titulo, sub, tipo: 'negocios', itens, data }, extra || {});
+    const ativ = (titulo, itens) => ({ titulo, sub, tipo: 'atividades', itens });
+    const outrasAtiv = [{ rotulo: 'Realizadas (' + L.realizadas.length + ')', abre: () => ativ('Atividades realizadas', L.realizadas) },
+      { rotulo: 'Pendentes (' + L.pendentes.length + ')', abre: () => ativ('Atividades pendentes', L.pendentes) },
+      { rotulo: 'Atrasadas (' + L.atrasadas.length + ')', abre: () => ativ('Atividades atrasadas', L.atrasadas) }];
+    const novos = new Set(L.clientesNovos);
+    return {
+      ganhos: () => neg('Negócios ganhos', L.ganhos, 'fechado_em'),
+      perdidos: () => neg('Negócios perdidos', L.perdidos, 'fechado_em'),
+      iniciados: () => neg('Negócios iniciados', L.iniciados, 'criado_em'),
+      decididos: () => neg('Ganhos e perdidos', L.decididos, 'fechado_em'),
+      ciclo: () => neg('Negócios ganhos (ciclo de venda)', L.ganhos, 'fechado_em', { sub: sub + ' · ciclo = dias entre a criação e o fechamento' }),
+      abertos: () => neg('Negócios em andamento', L.abertos, 'previsao_fechamento', { sub: 'abertos hoje' + (r.quando.indexOf('·') !== -1 ? ' ·' + r.quando.split('·').slice(1).join('·') : '') }),
+      previstos: () => neg('Vendas previstas no período', L.previstos, 'previsao_fechamento'),
+      leads: () => ({ titulo: 'Leads novos (empresas cadastradas)', sub, tipo: 'empresas', itens: L.leads }),
+      clientes: () => ({ titulo: 'Clientes que compraram', sub, tipo: 'empresas', itens: emp(L.clientesNovos.concat(L.clientesRecorrentes)), marca: e => (novos.has(e.id) ? 'novo' : 'recorrente') }),
+      atividades: () => Object.assign(ativ('Atividades realizadas', L.realizadas), { outras: outrasAtiv }),
+      notas: () => ({ titulo: 'Notas fiscais do período', sub, tipo: 'notas', itens: r.fat.lista || [], vendedor: r.fat.vendedorDe, cliente: r.fat.clienteDe })
+    }[id];
+  }
   const relatorios = {
     render() {
       const f = F('relatorios');
@@ -603,7 +628,10 @@
       if (f.funil == null || (f.funil && funis.indexOf(f.funil) === -1)) f.funil = funis.length > 1 ? funis[0] : '';
       const d = R.dashboard(E().D, E().ix, E().cfg, hoje, { periodo: p, responsavel_id: resp, funil: f.funil });
       const fat = ultimoFat = R.faturamento(E().D, E().ix, hoje, { periodo: p, responsavel_id: resp });
-      const k = (t, v, s, cls) => '<div class="kpi ' + (cls || '') + '"><span>' + esc(t) + '</span><strong>' + esc(v) + '</strong><small>' + esc(s || '') + '</small></div>';
+      ultimoRel = { d, fat, quando: (p.de > '0001' ? R.dataBR(p.de) + ' a ' + R.dataBR(p.ate) : 'todo o histórico') + (resp ? ' · ' + CRM.nomeUsuario(resp) : ' · equipe toda') };
+      // Quadro com "id" vira botão: clicar abre a lista do que ele conta (CRM.mostraLista).
+      const k = (t, v, s, cls, id) => (id ? '<button type="button" class="kpi clicavel ' + (cls || '') + '" data-acao="rel-lista" data-id="' + id + '" title="Ver quais são">' : '<div class="kpi ' + (cls || '') + '">') +
+        '<span>' + esc(t) + '</span><strong>' + esc(v) + '</strong><small>' + esc(s || '') + '</small>' + (id ? '</button>' : '</div>');
       const maxMes = Math.max(1, ...d.porMes.map(m => m.valor));
       const maxPrev = Math.max(1, ...d.previsao.map(m => m.valor));
       const tabela = (id, cab, linhas, vaziaTxt) => linhas.length ? '<div class="tabela-rolagem"><table class="tabela" id="' + id + '"><thead><tr>' + cab.map(c => '<th' + (c[1] ? ' class="num"' : '') + '>' + esc(c[0]) + '</th>').join('') + '</tr></thead><tbody>' +
@@ -623,18 +651,18 @@
         '<span class="flex"></span><button type="button" class="btn sec" data-acao="imprimir">Imprimir</button></div>' +
         '<section class="kpis">' +
         // Mesmos nomes do painel do Agendor, que a equipe já conhece.
-        k('Total vendido', R.moeda(d.realizadas.valor), d.realizadas.qtd + ' negócio(s) ganho(s)' + (resp ? ' · ' + CRM.nomeUsuario(resp) : ' · equipe toda'), 'verde') +
-        (fat.existe ? k('Faturado (notas fiscais)', R.moeda(fat.total), fat.notas + ' nota(s) · ' + fat.clientes + ' cliente(s)', 'verde') : '') +
-        k('Negócios ganhos', String(d.realizadas.qtd), 'ticket médio ' + R.moeda(d.ticket)) +
-        k('Negócios iniciados', String(d.iniciados.qtd), R.moeda(d.iniciados.valor)) +
-        k('Negócios perdidos', String(d.perdidas.qtd), R.moeda(d.perdidas.valor), d.perdidas.qtd ? 'alerta' : '') +
-        k('Taxa ganhos vs perdidos', R.pct(d.conversao), R.pct(d.conversaoValor) + ' em valor') +
-        k('Ciclo médio de vendas', d.ciclo == null ? '—' : Math.round(d.ciclo) + ' dias', 'da criação ao fechamento') +
-        k('Em andamento', R.moeda(d.abertas.valor), d.abertas.qtd + ' negócios · ponderado ' + R.moeda(d.abertas.ponderado)) +
-        k('Vendas previstas', R.moeda(d.previstas.valor), d.previstas.qtd + ' com previsão no período · ponderado ' + R.moeda(d.previstas.ponderado)) +
-        k('Leads novos', String(d.leadsNovos), 'empresas cadastradas no período') +
-        k('Clientes', d.clientesNovos + ' novos', d.clientesRecorrentes + ' recorrentes compraram') +
-        k('Atividades', String(d.atividadesRealizadas), d.atividadesPendentes + ' pendentes · ' + d.atividadesAtrasadas + ' atrasadas', d.atividadesAtrasadas ? 'alerta' : '') +
+        k('Total vendido', R.moeda(d.realizadas.valor), d.realizadas.qtd + ' negócio(s) ganho(s)' + (resp ? ' · ' + CRM.nomeUsuario(resp) : ' · equipe toda'), 'verde', 'ganhos') +
+        (fat.existe ? k('Faturado (notas fiscais)', R.moeda(fat.total), fat.notas + ' nota(s) · ' + fat.clientes + ' cliente(s)', 'verde', 'notas') : '') +
+        k('Negócios ganhos', String(d.realizadas.qtd), 'ticket médio ' + R.moeda(d.ticket), '', 'ganhos') +
+        k('Negócios iniciados', String(d.iniciados.qtd), R.moeda(d.iniciados.valor), '', 'iniciados') +
+        k('Negócios perdidos', String(d.perdidas.qtd), R.moeda(d.perdidas.valor), d.perdidas.qtd ? 'alerta' : '', 'perdidos') +
+        k('Taxa ganhos vs perdidos', R.pct(d.conversao), R.pct(d.conversaoValor) + ' em valor', '', 'decididos') +
+        k('Ciclo médio de vendas', d.ciclo == null ? '—' : Math.round(d.ciclo) + ' dias', 'da criação ao fechamento', '', 'ciclo') +
+        k('Em andamento', R.moeda(d.abertas.valor), d.abertas.qtd + ' negócios · ponderado ' + R.moeda(d.abertas.ponderado), '', 'abertos') +
+        k('Vendas previstas', R.moeda(d.previstas.valor), d.previstas.qtd + ' com previsão no período · ponderado ' + R.moeda(d.previstas.ponderado), '', 'previstos') +
+        k('Leads novos', String(d.leadsNovos), 'empresas cadastradas no período', '', 'leads') +
+        k('Clientes', d.clientesNovos + ' novos', d.clientesRecorrentes + ' recorrentes compraram', '', 'clientes') +
+        k('Atividades', String(d.atividadesRealizadas), d.atividadesPendentes + ' pendentes · ' + d.atividadesAtrasadas + ' atrasadas', d.atividadesAtrasadas ? 'alerta' : '', 'atividades') +
         '</section>' +
         '<div class="colunas">' +
         '<section class="cartao"><h2>Vendas por mês <small>12 meses</small></h2><div class="grafico-colunas">' + d.porMes.map(m => '<div class="col" title="' + esc(R.mesCurto(m.mes) + ': ' + R.moeda(m.valor) + ' (' + m.qtd + ')') + '">' +
@@ -743,6 +771,7 @@
       else CRM.baixarCSV('faturamento-produtos', ['Produto', 'Código', 'Unidade', 'Quantidade', 'Valor', 'Notas', 'Clientes'],
         f.topProdutosValor.map(x => [x.descricao, x.codigo, x.unidade, String(x.quantidade).replace('.', ','), String(x.valor.toFixed(2)).replace('.', ','), x.notas, x.clientes]));
     },
+    'rel-lista': id => { const f = listaDoQuadro(id); if (f && CRM.mostraLista) CRM.mostraLista(f()); },
     'fila-pular': k => { pulados.add(k); CRM.render(); },
     'fila-voltar-pulados': () => { pulados.clear(); CRM.render(); },
     'fila-concluir': id => CRM.concluirTarefa(id, true),

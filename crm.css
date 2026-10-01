@@ -524,3 +524,15 @@ label.btn.arquivo input[type=file] { position: absolute; inset: 0; opacity: 0; c
 .ficha .financeiro .titulos li { display: flex; flex-wrap: wrap; gap: .25rem .6rem; align-items: baseline; }
 .ficha .financeiro .titulos li strong { margin-left: auto; }
 .resumo-compras.devendo { background: var(--vermelho-fundo); color: var(--vermelho); }
+/* Quadros clicáveis (abrem a lista do que contam) e a janela da lista */
+.kpi.clicavel { cursor: pointer; transition: box-shadow .15s, transform .15s; }
+.kpi.clicavel:hover, .kpi.clicavel:focus-visible { box-shadow: 0 4px 14px rgba(0,0,0,.12); transform: translateY(-1px); }
+.lista-detalhe { padding: 14px 18px 18px; display: grid; gap: 10px; }
+.lista-detalhe header { display: flex; align-items: flex-start; gap: 10px; }
+.lista-detalhe h2 { margin: 0; font-size: 1.1rem; }
+.lista-detalhe h2 small { color: var(--suave); font-weight: normal; }
+.lista-detalhe .sub { margin: 2px 0 0; color: var(--suave); font-size: .82rem; }
+.lista-detalhe .lista-outras { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; }
+.lista-detalhe tr.clicavel { cursor: pointer; }
+.lista-detalhe tr.clicavel:hover td { background: var(--fundo); }
+#dlgLista { height: auto; max-height: 90vh; }

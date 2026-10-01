@@ -567,7 +567,9 @@
       topClientes: listaClientes, porSegmento, porVendedor, porCidade, porMes,
       topProdutosValor: listaProdutos.slice().sort((a, b) => b.valor - a.valor),
       topProdutosQtd: listaProdutos.slice().sort((a, b) => b.quantidade - a.quantidade),
-      canceladas: (D.notas || []).filter(n => n.cancelada && noPeriodo(diaLocal(n.emitida_em), p)).length
+      canceladas: (D.notas || []).filter(n => n.cancelada && noPeriodo(diaLocal(n.emitida_em), p)).length,
+      // As notas que formam o total (para o quadro clicável de Relatórios).
+      lista: doPeriodo, vendedorDe: nomeVendedor, clienteDe: nomeCliente
     };
   }
 
@@ -665,9 +667,10 @@
     // Clientes novos (1ª compra no período) x recorrentes (já tinham comprado antes).
     const empresasCompraram = new Set(ganhos.map(n => n.empresa_id));
     let novos = 0, recorrentes = 0;
+    const idsNovos = [], idsRecorrentes = [];
     empresasCompraram.forEach(id => {
       const r = ix.resumo.get(id);
-      if (r && r.primeiraCompra && r.primeiraCompra < p.de) recorrentes++; else novos++;
+      if (r && r.primeiraCompra && r.primeiraCompra < p.de) { recorrentes++; idsRecorrentes.push(id); } else { novos++; idsNovos.push(id); }
     });
 
     const decididos = ganhos.length + perdidos.length;
@@ -690,7 +693,11 @@
       atividadesAtrasadas: ativs.filter(a => !a.concluida && diaLocal(a.data_hora) < hoje).length,
       porVendedor, porMes, previsao, porOrigem, vendasPorOrigem, motivosPerda,
       porProduto: [...porProduto.values()].sort((a, b) => b.valor - a.valor),
-      porEtapa, atividadesPorTipo
+      porEtapa, atividadesPorTipo,
+      // O que cada quadro conta (Relatórios: clicar no quadro abre a lista).
+      listas: { ganhos, perdidos, iniciados, abertos, previstos, decididos: ganhos.concat(perdidos), leads: empresasDoPeriodo,
+        clientesNovos: idsNovos, clientesRecorrentes: idsRecorrentes, realizadas,
+        pendentes: ativs.filter(a => !a.concluida), atrasadas: ativs.filter(a => !a.concluida && diaLocal(a.data_hora) < hoje) }
     };
   }
 

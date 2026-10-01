@@ -78,8 +78,16 @@ números dessas notas (174 títulos: 172 ligados pela nota, 2 pelo CNPJ, nenhum 
 **Falta o Anderson:** subir a listagem de produtos em Compras e o contas a receber na Gestão
 (os dois botões aceitam o CSV salvo pelo FKN).
 
-**A fazer:** quadros clicáveis em Relatórios/Início/Gestão (pedido da líder: clicar em "Negócios
-iniciados 3" e ver quais são); estoque e contas a receber automáticos pelo vigia (mandar o CSV
+**Quadros clicáveis (01/10, pedido da líder) — feito:** em Relatórios todos os quadros (vendido,
+faturado, ganhos, iniciados, perdidos, taxa, ciclo, em andamento, previstas, leads, clientes,
+atividades com pendentes/atrasadas) abrem a lista do que contam (`detalhe.js`, `CRM.mostraLista`,
+janela `#dlgLista`; cada linha abre a ficha; exporta CSV). As listas saem do próprio cálculo do
+quadro (`R.dashboard(...).listas`, `R.faturamento(...).lista`) — número e lista sempre batem;
+não recalcular à parte. Gestão: faturamento do mês/ano, clientes que compraram, negócios abertos,
+conversão. Compras: os quadros aplicam o filtro (sugestão, em falta, parado, curva A). O Início já
+era clicável (rola até a lista).
+
+**A fazer:** estoque e contas a receber automáticos pelo vigia (mandar o CSV
 quando o arquivo mudar); fase 3 (WhatsApp oficial da Meta, e-mail, Google Agenda) e IA.
 
 - **Vigia de notas pronto** (seção "Vigia de notas" abaixo e no README): Edge Function

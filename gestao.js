@@ -352,7 +352,9 @@
   const pct = v => (v == null ? '—' : (v > 0 ? '+' : '') + R.pct(v));
   const qtd = v => String(+Number(v || 0).toFixed(1)).replace('.', ',');
   const abrevia = v => (v >= 1e6 ? (v / 1e6).toFixed(1).replace('.', ',') + ' mi' : v >= 1e3 ? Math.round(v / 1e3) + ' mil' : String(Math.round(v)));
-  const kpi = (t, v, s, cls) => '<div class="kpi ' + (cls || '') + '"><span>' + esc(t) + '</span><strong>' + esc(v) + '</strong><small>' + s + '</small></div>';
+  // Com "acao": o quadro vira botão (abre a lista do que conta ou aplica o filtro).
+  const kpi = (t, v, s, cls, acao, id) => (acao ? '<button type="button" class="kpi clicavel ' + (cls || '') + '" data-acao="' + acao + '" data-id="' + id + '" title="Ver quais são">' : '<div class="kpi ' + (cls || '') + '">') +
+    '<span>' + esc(t) + '</span><strong>' + esc(v) + '</strong><small>' + s + '</small>' + (acao ? '</button>' : '</div>');
   const seta = v => (v == null ? '' : v >= 0 ? '<span class="g-sobe">▲ ' + esc(pct(v)) + '</span>' : '<span class="g-desce">▼ ' + esc(pct(v)) + '</span>');
 
   CRM.telas.gestao = {
@@ -372,12 +374,12 @@
         (semNotas ? '<div class="cartao"><p class="vazio">Sem notas fiscais importadas: o faturamento, os tops e as compras aparecem quando as notas entrarem.</p></div>' : '') +
         // ---- números do mês
         '<section class="kpis">' +
-          kpi('Faturamento do mês', R.moeda(m.atual.valor), seta(m.variacao) + ' vs. mesmo ponto de ' + esc(R.mesCurto(R.somaMeses(m.de, -1))) + ' (' + esc(R.moeda(m.anteriorMesmoDia.valor)) + ')', 'azul') +
+          kpi('Faturamento do mês', R.moeda(m.atual.valor), seta(m.variacao) + ' vs. mesmo ponto de ' + esc(R.mesCurto(R.somaMeses(m.de, -1))) + ' (' + esc(R.moeda(m.anteriorMesmoDia.valor)) + ')', 'azul', 'gestao-lista', 'mes') +
           kpi('Projeção do mês', R.moeda(m.projecao), 'no ritmo atual · mês passado fechou em ' + esc(R.moeda(m.anterior.valor))) +
-          kpi('Faturamento no ano', R.moeda(p.ano.valor), p.ano.notas + ' notas · ' + p.ano.clientes + ' clientes') +
-          kpi('Clientes que compraram', String(m.atual.clientes), m.novos + ' novo(s) no mês · ticket ' + esc(R.moeda(m.atual.ticket)), 'verde') +
-          kpi('Negócios abertos', R.moeda(f.abertas.valor), f.abertas.qtd + ' negócios · ponderado pela chance ' + esc(R.moeda(f.abertas.ponderado)) + (p.funilVendas ? ' · ' + esc(p.funilVendas) : '')) +
-          kpi('Conversão do mês', f.conversao == null ? '—' : R.pct(f.conversao), f.realizadas.qtd + ' ganhos · ' + f.perdidas.qtd + ' perdidos' + (p.funilVendas ? ' · ' + esc(p.funilVendas) : '')) +
+          kpi('Faturamento no ano', R.moeda(p.ano.valor), p.ano.notas + ' notas · ' + p.ano.clientes + ' clientes', '', 'gestao-lista', 'ano') +
+          kpi('Clientes que compraram', String(m.atual.clientes), m.novos + ' novo(s) no mês · ticket ' + esc(R.moeda(m.atual.ticket)), 'verde', 'gestao-lista', 'clientes') +
+          kpi('Negócios abertos', R.moeda(f.abertas.valor), f.abertas.qtd + ' negócios · ponderado pela chance ' + esc(R.moeda(f.abertas.ponderado)) + (p.funilVendas ? ' · ' + esc(p.funilVendas) : ''), '', 'gestao-lista', 'abertos') +
+          kpi('Conversão do mês', f.conversao == null ? '—' : R.pct(f.conversao), f.realizadas.qtd + ' ganhos · ' + f.perdidas.qtd + ' perdidos' + (p.funilVendas ? ' · ' + esc(p.funilVendas) : ''), '', 'gestao-lista', 'decididos') +
         '</section>' +
         // ---- 12 meses + base
         '<div class="g-duas">' +
@@ -506,10 +508,10 @@
           '</p></div><span class="flex"></span>' + botao + '</div>' +
         (e ? '<section class="kpis">' +
           kpi('Estoque a custo', R.moeda(e.valor), (e.negativos ? e.negativos + ' com saldo negativo no FKN' : 'saldo positivo'), 'azul') +
-          kpi('Sugestão de pedido', R.moeda(e.valorSugestao), c.sugestao.length + ' produtos para ' + c.dias + ' dias' + (e.semCusto ? ' · ' + e.semCusto + ' sem custo' : ''), 'verde') +
-          kpi('Em falta', String(c.ruptura.length), 'vendeu em 90 dias e está zerado', c.ruptura.length ? 'vermelho' : '') +
-          kpi('Estoque parado', R.moeda(e.valorParado), c.parado.length + ' produtos sem venda em 90 dias') +
-          kpi('Curva A', String(c.abc.A.length), 'produtos que fazem 80% do faturamento') +
+          kpi('Sugestão de pedido', R.moeda(e.valorSugestao), c.sugestao.length + ' produtos para ' + c.dias + ' dias' + (e.semCusto ? ' · ' + e.semCusto + ' sem custo' : ''), 'verde', 'compras-kpi', 'comprar') +
+          kpi('Em falta', String(c.ruptura.length), 'vendeu em 90 dias e está zerado', c.ruptura.length ? 'vermelho' : '', 'compras-kpi', 'falta') +
+          kpi('Estoque parado', R.moeda(e.valorParado), c.parado.length + ' produtos sem venda em 90 dias', '', 'compras-kpi', 'parado') +
+          kpi('Curva A', String(c.abc.A.length), 'produtos que fazem 80% do faturamento', '', 'compras-kpi', 'A') +
         '</section>' : '') +
         '<section class="cartao"><div class="filtros-compras">' +
           '<input type="search" id="cBusca" placeholder="Pesquisar produto ou código" value="' + esc(fc.busca) + '" aria-label="Pesquisar produto ou código">' +
@@ -597,6 +599,28 @@
 
   Object.assign(CRM.acoes, {
     'compras-coluna': id => { if (fc.col === id) fc.dir = fc.dir === 'desc' ? 'asc' : 'desc'; else { fc.col = id; fc.dir = COLUNAS.find(c => c[0] === id)[2] ? 'desc' : 'asc'; } CRM.render(); },
+    // Quadros de Compras: aplicam o filtro na tabela logo abaixo.
+    'compras-kpi': id => {
+      Object.assign(fc, id === 'A' ? { mostrar: 'vendidos', curva: 'A', ordem: 'vendido' } : { mostrar: id, curva: '', ordem: { comprar: 'curva', falta: 'vendido', parado: 'parado' }[id] },
+        { busca: '', fornecedor: '', linha: '', col: null });
+      CRM.render();
+      const t = document.querySelector('.filtros-compras'); if (t && t.scrollIntoView) t.scrollIntoView({ block: 'start' });
+    },
+    // Quadros da Gestão: a lista do que cada número conta.
+    'gestao-lista': id => {
+      if (!ultimo || !ultimo.p || !CRM.mostraLista) return;
+      const p = ultimo.p, m = p.mes, L = p.funil.listas || {};
+      const notas = (titulo, l) => ({ titulo, tipo: 'notas', itens: l, vendedor: n => CRM.nomeUsuario(donoDe(E().ix, n)) + (n.vendedor_nome && !n.vendedor_id ? ' (' + n.vendedor_nome + ', ex-vendedor)' : '') });
+      const desde = R.dataBR(m.de);
+      const f = {
+        mes: () => Object.assign(notas('Notas do mês', m.atual.lista), { sub: desde + ' até hoje' }),
+        ano: () => Object.assign(notas('Notas do ano', p.ano.lista), { sub: 'de 01/01 até hoje' }),
+        clientes: () => ({ titulo: 'Clientes que compraram no mês', sub: desde + ' até hoje', tipo: 'empresas', itens: [...new Set(m.atual.lista.map(n => n.empresa_id).filter(Boolean))].map(id => CRM.empresa(id)).filter(Boolean) }),
+        abertos: () => ({ titulo: 'Negócios abertos' + (p.funilVendas ? ' · ' + p.funilVendas : ''), tipo: 'negocios', itens: L.abertos || [], data: 'previsao_fechamento' }),
+        decididos: () => ({ titulo: 'Ganhos e perdidos no mês' + (p.funilVendas ? ' · ' + p.funilVendas : ''), tipo: 'negocios', itens: L.decididos || [], data: 'fechado_em' })
+      }[id];
+      if (f) CRM.mostraLista(f());
+    },
     'compras-ver-fornecedor': i => {
       const f = ultimo && ultimo.c && ultimo.c.pedidoPorFornecedor[+i];
       if (!f) return;
