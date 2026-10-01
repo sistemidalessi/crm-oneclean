@@ -87,6 +87,12 @@ não recalcular à parte. Gestão: faturamento do mês/ano, clientes que comprar
 conversão. Compras: os quadros aplicam o filtro (sugestão, em falta, parado, curva A). O Início já
 era clicável (rola até a lista).
 
+**E-mail para todos (01/10, pedido dos vendedores):** o botão E-mail da empresa (topo da ficha,
+listas, Recompra, Fila, sequência sem pessoa) abre o e-mail para **todos** os endereços cadastrados:
+o da empresa e o de cada pessoa (principal primeiro), separando campos com vários (";", ",",
+espaço) e sem repetir (`CRM.fichas.emailsDe`, `linkEmail`). O botão na linha de uma pessoa (ou
+tarefa ligada a uma pessoa) continua só para ela. O botão mostra quantos são: "E-mail (15)".
+
 **A fazer:** estoque e contas a receber automáticos pelo vigia (mandar o CSV
 quando o arquivo mudar); fase 3 (WhatsApp oficial da Meta, e-mail, Google Agenda) e IA.
 

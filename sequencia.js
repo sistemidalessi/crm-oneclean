@@ -104,12 +104,14 @@
     const e = CRM.empresa(a.empresa_id); if (!p || !e) return;
     const F = CRM.fichas;
     if (p.tipo === 'email') {
-      const c = F.escolheContato(e, a.contato_id, x => x.email);
-      const para = (c && c.email) || e.email;
-      if (!para) { CRM.toast('Sem e-mail cadastrado para este lead.', true); return; }
+      // Tarefa de uma pessoa: só ela; senão, todos os e-mails do lead.
+      const escolhido = a.contato_id ? CRM.contato(a.contato_id) : null;
+      const c = escolhido || F.escolheContato(e, null, x => x.email);
+      const para = F.emailsDe(e, escolhido);
+      if (!para.length) { CRM.toast('Sem e-mail cadastrado para este lead.', true); return; }
       const v = F.variaveis(e, c), assunto = R.aplicaModelo(p.assunto || p.titulo, v), corpo = R.aplicaModelo(p.mensagem, v);
-      location.href = 'mailto:' + encodeURIComponent(para) + '?subject=' + encodeURIComponent(assunto) + '&body=' + encodeURIComponent(corpo);
-      await F.registraAuto(e, c, 'email', 'E-mail da sequência para ' + para + ' — "' + assunto + '": ' + corpo);
+      location.href = F.linkEmail(para, assunto, corpo);
+      await F.registraAuto(e, escolhido, 'email', 'E-mail da sequência para ' + para.join(', ') + ' — "' + assunto + '": ' + corpo);
     } else {
       const c = F.escolheContato(e, a.contato_id, x => R.linkWhatsApp(x.whatsapp || x.celular || x.telefone));
       const tel = F.telDe(e, c);

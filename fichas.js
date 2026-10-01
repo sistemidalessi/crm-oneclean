@@ -126,7 +126,7 @@
         '<section><dl class="dados">' +
           dado('Grupo', grupo) + dado('Razão social', esc(e.razao_social)) + dado('CNPJ/CPF', esc(e.cnpj) + (e.cnpj && R.digitos(e.cnpj).length === 14 && !R.cnpjValido(e.cnpj) ? ' ' + CRM.selo('inválido?', 'ambar') : '')) +
           dado('Telefone', esc(e.telefone)) + dado('WhatsApp', esc(e.whatsapp)) +
-          dado('E-mail', e.email ? '<a href="mailto:' + esc(e.email) + '">' + esc(e.email) + '</a>' : '') +
+          dado('E-mail', e.email ? (separaEmails(e.email).length ? separaEmails(e.email).map(m => '<a href="mailto:' + esc(m) + '">' + esc(m) + '</a>').join('<br>') : esc(e.email)) : '') +
           dado('Site', e.site ? '<a href="' + esc(/^https?:/i.test(e.site) ? e.site : 'https://' + e.site) + '" target="_blank" rel="noopener noreferrer">' + esc(e.site) + '</a>' : '') +
           dado('Endereço', endereco ? '<a href="https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(endereco) + '" target="_blank" rel="noopener noreferrer">' + esc(endereco) + '</a>' : '') +
           dado('Segmento', esc(e.segmento)) + dado('Origem', esc(e.origem)) +
@@ -855,17 +855,33 @@
     fichas.formRegistro(null, { empresa_id: e.id, contato_id: c ? c.id : null, tipo: 'ligacao', descricao: 'Ligação para ' + (c ? c.nome + ' ' : '') + '(' + tel + '): ' });
   };
 
+  // E-mails para onde vai a mensagem: da pessoa escolhida (clique na pessoa) ou, pelo botão da
+  // empresa, TODOS os cadastrados — o da empresa e os de cada pessoa, principal primeiro; um campo
+  // pode ter vários separados por ";" "," ou espaço. Sem repetir.
+  const separaEmails = v => String(v == null ? '' : v).split(/[;,\s/]+/).map(s => s.trim().replace(/^<|>$/g, '')).filter(s => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s));
+  function emailsDe(e, contato) {
+    const pessoas = CRM.doEmpresa('contatos', e.id).slice().sort((a, b) => (b.principal ? 1 : 0) - (a.principal ? 1 : 0));
+    const l = contato ? separaEmails(contato.email) : separaEmails(e.email).concat(...pessoas.map(x => separaEmails(x.email)));
+    const vistos = new Set();
+    return l.filter(m => { const k = m.toLowerCase(); if (vistos.has(k)) return false; vistos.add(k); return true; });
+  }
+  const linkEmail = (lista, assunto, corpo) => 'mailto:' + lista.map(m => encodeURIComponent(m).replace(/%40/g, '@')).join(',') + '?subject=' + encodeURIComponent(assunto) + '&body=' + encodeURIComponent(corpo);
+  fichas.emailsDe = emailsDe;
+  fichas.linkEmail = linkEmail;
+
   fichas.email = (empresaId, el) => {
     const e = CRM.empresa(empresaId); if (!e) return;
-    const c = escolheContato(e, el && el.dataset.contato, x => x.email);
-    const para = (el && el.dataset.para) || (c && c.email) || e.email;
-    if (!para) { CRM.toast('Sem e-mail cadastrado.', true); return; }
+    const escolhido = el && el.dataset.contato ? CRM.contato(el.dataset.contato) : null;
+    const para = emailsDe(e, escolhido);
+    if (!para.length) { CRM.toast('Sem e-mail cadastrado.', true); return; }
+    const c = escolhido || escolheContato(e, null, x => x.email); // para {nome}/{primeiro_nome} do modelo
     comModelo(el, 'email', m => {
       const v = variaveis(e, c);
       const assunto = m ? R.aplicaModelo(m.assunto || '', v) : '';
       const corpo = m ? R.aplicaModelo(m.corpo, v) : '';
-      location.href = 'mailto:' + encodeURIComponent(para) + '?subject=' + encodeURIComponent(assunto) + '&body=' + encodeURIComponent(corpo);
-      registraAuto(e, c, 'email', 'E-mail para ' + para + (assunto ? ' — "' + assunto + '"' : '') + (corpo ? ': ' + corpo : ''));
+      location.href = linkEmail(para, assunto, corpo);
+      if (para.length > 1) CRM.toast('E-mail aberto para ' + para.length + ' endereços.');
+      registraAuto(e, escolhido, 'email', 'E-mail para ' + para.join(', ') + (assunto ? ' — "' + assunto + '"' : '') + (corpo ? ': ' + corpo : ''));
     });
   };
 

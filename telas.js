@@ -21,11 +21,13 @@
     const e = CRM.empresa(empresaId); if (!e) return '';
     const c = contatoId ? CRM.contato(contatoId) : contatoPrincipal(empresaId);
     const tel = telefoneDe(e, c);
+    const emails = CRM.fichas && CRM.fichas.emailsDe ? CRM.fichas.emailsDe(e, contatoId ? c : null) : [(c && c.email) || e.email].filter(Boolean);
     return '<span class="acoes-rapidas">' +
       (R.linkWhatsApp(tel) ? '<button type="button" class="mini wa" data-acao="whatsapp" data-id="' + esc(empresaId) + '"' + CRM.attr('data-contato', c && c.id) + ' title="WhatsApp">WhatsApp</button>' : '') +
       (R.linkTelefone(tel) ? '<button type="button" class="mini" data-acao="ligar" data-id="' + esc(empresaId) + '"' + CRM.attr('data-contato', c && c.id) + ' title="Ligar">Ligar</button>' : '') +
-      ((c && c.email) || e.email ? '<button type="button" class="mini" data-acao="email" data-id="' + esc(empresaId) + '"' + CRM.attr('data-contato', c && c.email ? c.id : null) +
-        CRM.attr('data-para', (c && c.email) || e.email) + ' title="' + esc((c && c.email) || e.email) + '">E-mail</button>' : '') +
+      // E-mail: na linha de uma pessoa, só ela; na da empresa, todos os e-mails cadastrados.
+      (emails.length ? '<button type="button" class="mini" data-acao="email" data-id="' + esc(empresaId) + '"' + CRM.attr('data-contato', contatoId && c && c.email ? c.id : null) +
+        ' title="' + esc(emails.join(', ')) + '">E-mail' + (emails.length > 1 ? ' (' + emails.length + ')' : '') + '</button>' : '') +
       '</span>';
   }
   CRM.acoesRapidas = acoesRapidas;
