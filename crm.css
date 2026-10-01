@@ -141,6 +141,7 @@ input.curto { width: 120px; }
 .usu-nome { display: grid; font-weight: 600; font-size: .85rem; line-height: 1.2; }
 .usu-nome small { font-weight: 400; color: var(--suave); font-size: .72rem; }
 .faixa { background: var(--ambar-fundo); color: var(--ambar); padding: 5px 16px; font-size: .82rem; text-align: center; }
+.faixa.alerta { background: var(--vermelho-fundo); color: var(--vermelho); font-weight: 600; }
 .falha-carga { max-width: 640px; margin: 40px auto; display: grid; gap: 10px; }
 .falha-carga h2 { margin: 0; }
 .conteudo { flex: 1; overflow: auto; padding: 18px 20px 40px; display: grid; gap: 14px; align-content: start; }

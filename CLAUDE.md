@@ -213,6 +213,13 @@ da OneClean é o **FKN** (SIFWin, da FKN Informática) — com N; não escrever 
   aberto confere a versão publicada a cada ~4 min e ao voltar para a janela; se mudou, recarrega
   sozinho quando não há janela aberta nem campo com texto (`confereVersao` em `app.js`). Se o
   navegador insistir na versão antiga, não entra em laço: mostra a faixa `#faixaVersao`.
+- **Sinal de vida do vigia (01/10/2026):** `vigia-notas.js` manda `{sinal:true, info}` ao ligar e a
+  cada 30 min (entrega de nota também conta); a `crm-notas` grava `crm_integracoes.ultimo_sinal` e
+  `sinal` (versão, máquina, XML esperando, última falha) sem carregar o motor. O admin carrega
+  `store.vigias()` no `recarregar` e vê a faixa `#faixaVigia` se passar de 75 min
+  (`CRMDados.situacaoVigia`, testado em `testes/vigia.test.js`, que roda o vigia contra um servidor
+  falso). Teste com chave temporária: a ferramenta do Supabase trava em DELETE/DROP (pede
+  confirmação); desligar a chave e trocar o hash com UPDATE e pedir ao Anderson para excluir pela tela.
 - **Política de leitura nunca chama função por linha** (`crm_ve_empresa(id)` etc.): usar
   `coluna in (select public.crm_empresas_minhas())` e `(select public.crm_eh_gestor())`. Ver o
   incidente de 01/10/2026 no topo; `testes/rls-rapida.test.js` barra.

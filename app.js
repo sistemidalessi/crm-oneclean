@@ -85,6 +85,8 @@
       const D = await store.carregar();
       // Comprador não lê empresas (RLS): recebe só nome e ritmo, pela função do banco.
       if (CRM.ehComprador() && store.clientesCompras) D.empresas = await store.clientesCompras();
+      // Administrador: sinal de vida do vigia de notas (aviso se parar).
+      if (CRM.ehAdmin() && store.vigias) E.vigias = await store.vigias().catch(() => E.vigias || []);
       E.D = D;
       E.carregadoEm = Date.now();
       E.falhaCarga = null;
@@ -305,6 +307,18 @@
   }
   CRM.atualizaFaixaCarga = atualizaFaixaCarga;
 
+  // Vigia de notas sem sinal de vida (manda a cada 30 min): só o administrador vê.
+  function atualizaFaixaVigia() {
+    const f = $('#faixaVigia');
+    if (!f) return;
+    const parados = CRM.ehAdmin() ? (E.vigias || []).filter(c => DD.situacaoVigia(c).estado === 'parado') : [];
+    f.hidden = !parados.length;
+    if (parados.length) f.innerHTML = parados.map(c => 'O vigia de notas "' + esc(c.nome) + '" não dá sinal de vida desde ' +
+      esc(R.dataBR(R.diaLocal(c.ultimo_sinal)) + ' ' + R.horaLocal(c.ultimo_sinal)) + ': as notas novas não estão entrando.').join(' ') +
+      ' Confira se o servidor está ligado e se a tarefa "CRM - vigia de notas" está rodando. ' +
+      '<button type="button" class="mini" data-acao="ver-integracoes">ver integrações</button>';
+  }
+
   function renderAgora() {
     if (!E.eu) return;
     // Comprador: só Compras. Compras e Gestão: administrador. Configurações: gestor.
@@ -331,6 +345,7 @@
       al.negociosParados.length + ' negócio(s) parado(s), ' + al.clientesSemContato.length + ' cliente(s) sem contato, ' + al.recompra.length + ' recompra(s)';
 
     atualizaFaixaCarga();
+    atualizaFaixaVigia();
     const c = $('#conteudo');
     if (E.falhaCarga && !E.carregadoEm) {
       c.innerHTML = '<section class="cartao falha-carga"><h2>Não consegui carregar os dados do CRM</h2>' +
@@ -389,6 +404,7 @@
   // ------------------------------------------------------------ ações por delegação
   const ACOES = CRM.acoes = {
     'recarregar-dados': () => CRM.recarregar().then(() => { if (!E.falhaCarga) CRM.toast('Dados carregados.'); }),
+    'ver-integracoes': () => { CRM.gravaPref('ajustes', 'integracoes'); CRM.irPara('ajustes'); },
     aba: id => CRM.irPara(id),
     'abrir-empresa': id => CRM.fichas.abrirEmpresa(id),
     'abrir-negocio': id => CRM.fichas.abrirNegocio(id),

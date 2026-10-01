@@ -74,8 +74,18 @@ Deno.serve(async (req) => {
   const { data: integ } = await db.from('crm_integracoes').select('id, nome, filtro, ativo').eq('token_hash', await sha256(chave)).maybeSingle();
   if (!integ || !integ.ativo) return resposta(401, { erro: 'chave inválida ou desativada' });
 
-  let corpo: { arquivos?: { nome?: string; xml?: string }[] };
+  let corpo: { arquivos?: { nome?: string; xml?: string }[]; sinal?: boolean; info?: Record<string, unknown> };
   try { corpo = await req.json(); } catch { return resposta(400, { erro: 'corpo inválido' }); }
+
+  // Sinal de vida do vigia (a cada 30 min, mesmo sem nota): guarda a hora e um resumo curto.
+  if (corpo.sinal === true) {
+    const i = corpo.info ?? {};
+    const sinal = { versao: String(i.versao ?? '').slice(0, 20), maquina: String(i.maquina ?? '').slice(0, 60),
+      pendentes: Math.max(0, Math.min(1e6, Number(i.pendentes) || 0)), ultima_falha: String(i.ultima_falha ?? '').slice(0, 300) };
+    const { error } = await db.from('crm_integracoes').update({ ultimo_sinal: new Date().toISOString(), sinal }).eq('id', integ.id);
+    if (error) return resposta(500, { erro: 'sinal não gravado: ' + error.message });
+    return resposta(200, { ok: true, sinal: true });
+  }
   const arquivos = Array.isArray(corpo.arquivos) ? corpo.arquivos : [];
   if (arquivos.length > MAX_ARQUIVOS) return resposta(413, { erro: 'no máximo ' + MAX_ARQUIVOS + ' arquivos por envio' });
 
@@ -133,7 +143,8 @@ Deno.serve(async (req) => {
       integracao_id: integ.id, arquivos: arquivos.length, notas_novas: r.novas, valor: r.valor, fora: r.foraDoFiltro, erros: erros.length,
       resumo: { resumo: r, vendedores: plano.vendedoresNotas, erros: erros.slice(0, 50) }
     });
-    await db.from('crm_integracoes').update({ ultimo_uso: new Date().toISOString() }).eq('id', integ.id);
+    const agora = new Date().toISOString();
+    await db.from('crm_integracoes').update({ ultimo_uso: agora, ultimo_sinal: agora }).eq('id', integ.id);
     return resposta(200, { ok: true, resumo: r, arquivos: situacao, erros });
   } catch (e) {
     return resposta(500, { erro: 'falha ao importar: ' + (e instanceof Error ? e.message : String(e)) });

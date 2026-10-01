@@ -181,6 +181,19 @@ entregar notas e pode ser desligada a qualquer momento no CRM.
    pasta for de rede, a conta SYSTEM pode não enxergá-la: usar o caminho local no servidor
    ou trocar `-User "SYSTEM"` por um usuário com acesso (`-User USUARIO -Password SENHA`).
 
+**Sinal de vida:** o vigia avisa o CRM ao ligar e a cada 30 min, mesmo sem nota nova. Em
+Configurações → Integrações aparece "rodando há X min" (com a máquina e a versão); se passar
+de 75 min sem sinal, o administrador vê uma faixa vermelha no topo do CRM (servidor desligado
+ou tarefa parada). "Sem sinal — vigia antigo" quer dizer que o `vigia-notas.js` do servidor é
+anterior a 01/10/2026: atualizar assim (PowerShell como administrador):
+```
+Stop-ScheduledTask -TaskName "CRM - vigia de notas"
+Invoke-WebRequest https://raw.githubusercontent.com/sistemidalessi/crm-oneclean/main/ferramentas/vigia-notas.js -OutFile C:\CRM\vigia-notas.js
+Start-ScheduledTask -TaskName "CRM - vigia de notas"
+Get-Content C:\CRM\vigia-notas.log -Tail 3
+```
+(a configuração e o estado ficam como estão; a última linha deve mostrar "vigia ligado (versão …)").
+
 O que já foi enviado fica em `vigia-notas-estado.json` (apagar esse arquivo = reenviar
 tudo, sem duplicar); `vigia-notas.json` guarda a chave — **não copiar para outro lugar**.
 Se o CRM ou a internet cair, o vigia tenta de novo na volta seguinte. Chave vazou ou o

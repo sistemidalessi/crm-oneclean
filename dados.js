@@ -371,10 +371,16 @@
 
   Supa.prototype.integracoes = async function () {
     const [c, l] = await Promise.all([
-      this.sb.from('crm_integracoes').select('id,nome,filtro,ativo,ultimo_uso,criado_em').order('criado_em'),
+      this.sb.from('crm_integracoes').select('id,nome,filtro,ativo,ultimo_uso,ultimo_sinal,sinal,criado_em').order('criado_em'),
       this.sb.from('crm_integracao_log').select('*').order('quando', { ascending: false }).limit(40)
     ]);
     return { chaves: c.error ? [] : c.data, registro: unwrap(l) };
+  };
+
+  // Para o aviso do administrador: só o sinal de vida de cada vigia (RLS: só admin lê).
+  Supa.prototype.vigias = async function () {
+    const r = await this.sb.from('crm_integracoes').select('id,nome,ativo,ultimo_uso,ultimo_sinal,sinal');
+    return r.error ? [] : r.data;
   };
 
   Supa.prototype.historico = async function (filtro) {
@@ -403,6 +409,16 @@
     cascata(d, t, s);
   }
 
-  raiz.CRMDados = { TABELAS, chave, Local, Supa, uuid, vazio, LOCAL_ADMIN, cascataMemoria };
+  // Sinal de vida do vigia: 'ok' (sinal há menos de 75 min; ele manda a cada 30), 'parado' ou
+  // 'nunca' (vigia antigo, sem sinal de vida: atualizar o vigia-notas.js no servidor).
+  const PARADO_MIN = 75;
+  function situacaoVigia(c, agora) {
+    if (!c || !c.ativo) return { estado: 'desligada' };
+    if (!c.ultimo_sinal) return { estado: 'nunca' };
+    const min = Math.floor(((agora || Date.now()) - new Date(c.ultimo_sinal).getTime()) / 60000);
+    return { estado: min > PARADO_MIN ? 'parado' : 'ok', minutos: Math.max(0, min) };
+  }
+
+  raiz.CRMDados = { TABELAS, chave, Local, Supa, uuid, vazio, LOCAL_ADMIN, cascataMemoria, situacaoVigia, PARADO_MIN };
   if (typeof module !== 'undefined' && module.exports) module.exports = raiz.CRMDados;
 })(typeof window !== 'undefined' ? window : globalThis);

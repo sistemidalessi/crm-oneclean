@@ -323,6 +323,11 @@ create table if not exists public.crm_integracoes (
   atualizado_em timestamptz not null default now()
 );
 
+-- Sinal de vida do vigia (a cada 30 min, mesmo sem nota): hora e resumo (versão, máquina,
+-- XML esperando, última falha). Se parar, o CRM avisa o administrador.
+alter table public.crm_integracoes add column if not exists ultimo_sinal timestamptz;
+alter table public.crm_integracoes add column if not exists sinal jsonb;
+
 -- Registro de cada entrega do vigia (só a Edge Function escreve; gestor lê).
 create table if not exists public.crm_integracao_log (
   id            bigint generated always as identity primary key,

@@ -12,9 +12,15 @@
 //
 // A chave é gerada no CRM em Configurações → Integrações (só serve para entregar notas).
 // O que já foi enviado fica em vigia-notas-estado.json; o que aconteceu, em vigia-notas.log.
+// Sinal de vida: a cada 30 min (e ao ligar) avisa o CRM que está rodando, mesmo sem nota nova;
+// se o sinal parar, o CRM avisa o administrador (servidor desligado, tarefa parada).
 'use strict';
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
+
+const VERSAO = '2026-10-01';
+const SINAL_MS = 30 * 60 * 1000;
 
 const AQUI = __dirname;
 const CONFIG = path.join(AQUI, 'vigia-notas.json');
@@ -74,7 +80,11 @@ function listaXml(cfg) {
 }
 
 async function envia(cfg, lote) {
-  const corpo = JSON.stringify({ arquivos: lote.map(a => ({ nome: a.rel, xml: a.xml })) });
+  return chama(cfg, { arquivos: lote.map(a => ({ nome: a.rel, xml: a.xml })) });
+}
+
+async function chama(cfg, dados) {
+  const corpo = JSON.stringify(dados);
   const r = await fetch(cfg.url + '/functions/v1/crm-notas', {
     method: 'POST', headers: { 'content-type': 'application/json', 'x-crm-chave': cfg.chave }, body: corpo, signal: AbortSignal.timeout(150000)
   });
@@ -85,10 +95,21 @@ async function envia(cfg, lote) {
   return j;
 }
 
-async function umaVolta() {
+// Sinal de vida (no máximo a cada 30 min, ou já, se forcar): o CRM guarda a hora e o resumo.
+async function sinal(cfg, estado, pendentes, forcar) {
+  if (!forcar && Date.now() - (estado.ultimoSinal || 0) < SINAL_MS) return;
+  try {
+    await chama(cfg, { sinal: true, info: { versao: VERSAO, maquina: os.hostname(), pendentes, ultima_falha: estado.ultimaFalha || '' } });
+    estado.ultimoSinal = Date.now();
+    fs.writeFileSync(ESTADO, JSON.stringify(estado));
+  } catch (e) { registra('sinal de vida não chegou ao CRM (tento de novo na próxima volta): ' + e.message); }
+}
+
+async function umaVolta(forcarSinal) {
   const cfg = leJson(CONFIG, null);
   if (!cfg) { console.error('Configure antes: node vigia-notas.js --configurar --url ... --chave ... --pasta ...'); process.exit(1); }
   const estado = leJson(ESTADO, { enviados: {} });
+  if (!estado.enviados) estado.enviados = {};
   const agora = Date.now();
   const novos = [];
   for (const a of listaXml(cfg)) {
@@ -98,7 +119,7 @@ async function umaVolta() {
     if (estado.enviados[a.rel] === marca || agora - st.mtimeMs < ESPERA_ARQUIVO_MS) continue;
     novos.push(Object.assign(a, { marca, tamanho: st.size }));
   }
-  if (!novos.length) return 0;
+  if (!novos.length) { await sinal(cfg, estado, 0, forcarSinal); return 0; }
   registra(novos.length + ' XML novo(s) para enviar');
   let enviados = 0, importadas = 0, fora = 0, erros = 0;
   for (let i = 0; i < novos.length;) {
@@ -121,13 +142,17 @@ async function umaVolta() {
       });
       (r.erros || []).forEach(e => registra('  CRM: ' + e));
       enviados += lote.length;
+      estado.ultimaFalha = '';
+      estado.ultimoSinal = Date.now(); // entrega também é sinal de vida
       fs.writeFileSync(ESTADO, JSON.stringify(estado));
     } catch (e) {
       registra('falha ao enviar (tento de novo na próxima volta): ' + e.message);
+      estado.ultimaFalha = new Date().toLocaleString('pt-BR') + ': ' + e.message;
       break;
     }
   }
   registra('enviados ' + enviados + ' · importadas ' + importadas + ' · fora (venda direta/externos) ' + fora + (erros ? ' · com erro ' + erros : ''));
+  await sinal(cfg, estado, novos.length - enviados, forcarSinal);
   return enviados;
 }
 
@@ -135,9 +160,11 @@ async function principal() {
   if (process.argv.includes('--configurar')) return configurar();
   if (process.argv.includes('--uma-vez')) { await umaVolta(); return; }
   const cfg = leJson(CONFIG, {});
-  registra('vigia ligado: ' + (cfg.pasta || '(sem pasta)'));
+  registra('vigia ligado (versão ' + VERSAO + '): ' + (cfg.pasta || '(sem pasta)'));
+  let primeira = true;
   for (;;) {
-    try { await umaVolta(); } catch (e) { registra('erro: ' + e.message); }
+    try { await umaVolta(primeira); } catch (e) { registra('erro: ' + e.message); }
+    primeira = false;
     await new Promise(r => setTimeout(r, (cfg.intervaloSegundos || 60) * 1000));
   }
 }

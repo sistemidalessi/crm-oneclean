@@ -673,10 +673,10 @@
         '<p><code id="chaveGerada">' + esc(chaveNova.chave) + '</code> <button type="button" class="mini" data-acao="copiar-chave">copiar</button></p>' +
         '<p class="dica">No servidor, na pasta onde colocou o vigia-notas.js:</p><pre class="comando">node vigia-notas.js --configurar --url ' + esc(url) + ' --chave ' + esc(chaveNova.chave) +
         ' --pasta "D:\\...\\Enviados\\Autorizados"</pre></div>' : '') +
-      (integ.chaves.length ? '<table class="tabela"><thead><tr><th>Chave</th><th>Quais notas entram</th><th>Último envio</th><th>Criada</th><th></th></tr></thead><tbody>' +
+      (integ.chaves.length ? '<table class="tabela"><thead><tr><th>Chave</th><th>Quais notas entram</th><th>Sinal de vida</th><th>Último envio</th><th>Criada</th><th></th></tr></thead><tbody>' +
         integ.chaves.map(c => '<tr><td><strong>' + esc(c.nome) + '</strong> ' + (c.ativo ? CRM.selo('ativa', 'verde') : CRM.selo('desligada', 'vermelho')) + '</td>' +
           '<td>' + (admin ? '<select data-integ-filtro="' + esc(c.id) + '">' + CRM.opcoesHTML(FILTROS_INTEG, c.filtro) + '</select>' : esc(R.rotulo(FILTROS_INTEG, c.filtro))) + '</td>' +
-          '<td>' + quando(c.ultimo_uso) + '</td><td>' + quando(c.criado_em) + '</td>' +
+          '<td>' + sinalDe(c) + '</td><td>' + quando(c.ultimo_uso) + '</td><td>' + quando(c.criado_em) + '</td>' +
           '<td>' + (admin ? '<button type="button" class="mini" data-acao="integ-ativar" data-id="' + esc(c.id) + '">' + (c.ativo ? 'desligar' : 'ligar') + '</button> ' +
             '<button type="button" class="mini" data-acao="integ-excluir" data-id="' + esc(c.id) + '">excluir</button>' : '') + '</td></tr>').join('') + '</tbody></table>'
         : '<p class="vazio">' + (admin ? 'Nenhuma chave ainda.' : 'Só o administrador vê e gera as chaves.') + '</p>') +
@@ -690,6 +690,18 @@
             '<td><small>' + esc(v) + '</small>' + (er.length ? ' <details><summary>' + CRM.selo(er.length + ' erro(s)', 'vermelho') + '</summary><small>' + er.map(esc).join('<br>') + '</small></details>' : '') + '</td></tr>';
         }).join('') + '</tbody></table>' : '<p class="vazio">Nenhuma entrega ainda.</p>') + '</section>';
   };
+  // Sinal de vida do vigia (a cada 30 min): rodando, parado ou vigia antigo sem sinal.
+  function sinalDe(c) {
+    const st = window.CRMDados.situacaoVigia(c);
+    const i = c.sinal || {};
+    const det = [i.maquina, i.versao && 'versão ' + i.versao, i.pendentes ? i.pendentes + ' XML esperando' : ''].filter(Boolean).join(' · ');
+    const falha = i.ultima_falha ? '<br><small>Última falha: ' + esc(i.ultima_falha) + '</small>' : '';
+    if (st.estado === 'desligada') return '—';
+    if (st.estado === 'nunca') return CRM.selo('sem sinal', 'ambar') + '<br><small>Vigia antigo: atualize o vigia-notas.js no servidor.</small>';
+    const ha = st.minutos < 1 ? 'agora há pouco' : st.minutos < 120 ? 'há ' + st.minutos + ' min' : 'há ' + Math.round(st.minutos / 60) + ' h';
+    return (st.estado === 'ok' ? CRM.selo('rodando', 'verde') : CRM.selo('parado', 'vermelho')) + ' ' + esc(ha) +
+      (det ? '<br><small>' + esc(det) + '</small>' : '') + falha;
+  }
   async function carregaIntegracoes() { try { integ = await CRM.store().integracoes(); CRM.render(); } catch (e) { CRM.falhou(e); } }
   DEPOIS.integracoes = () => {
     $$('[data-integ-filtro]').forEach(s => s.addEventListener('change', async () => {
