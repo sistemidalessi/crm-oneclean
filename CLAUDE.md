@@ -602,7 +602,8 @@ A vendedora continua fazendo o orçamento no FKN (preço, estoque e condição f
   contato, o cabeçalho da tabela (do azul-petróleo `#175b6d` ao azul escurecido) e os títulos.
   Também no CRM (pedido do Anderson, 02/10): **menu lateral** em degradê vertical do petróleo
   `#175b6d` ao azul, com a borda direita turquesa → azul; **tela de login** com o fundo no degradê
-  do Instagram (turquesa → azul → petróleo) e faixa no alto do cartão. Botões e destaques seguem
+  do Instagram (turquesa → azul → petróleo), **ondas** brancas translúcidas no pé do fundo e a
+  mesma onda do orçamento no alto do cartão (`ondasEntrada` em `app.js`). Botões e destaques seguem
   com o verde `#a9c451`.
 - Lembrete dos relatórios do FKN **só de segunda a sexta** (confirmado pelo Anderson em 02/10: não
   trabalham sábado) — é como já está em `lembreteFkn`; não acrescentar sábado.

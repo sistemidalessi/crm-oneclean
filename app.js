@@ -581,9 +581,25 @@
   CRM.nomeInstalacao = nomeInstalacao;
   CRM.logo = logo;
 
+  // Tela de entrada (login, senha nova, avisos): fundo no degradê da marca com ondas brancas
+  // translúcidas no pé e a mesma onda do orçamento no alto do cartão.
+  function ondasEntrada() {
+    const cs = getComputedStyle(document.documentElement);
+    const a = cs.getPropertyValue('--grad-a').trim() || '#2a4a7a', b = cs.getPropertyValue('--grad-b').trim() || '#0f2340';
+    return {
+      cartao: '<svg class="onda-cartao" viewBox="0 0 800 48" preserveAspectRatio="none" aria-hidden="true"><defs><linearGradient id="onda-entrada" x1="0" x2="1" y1="0" y2="0">' +
+        '<stop offset="0" stop-color="' + esc(a) + '"/><stop offset="1" stop-color="' + esc(b) + '"/></linearGradient></defs>' +
+        '<path d="M0 30 C 130 10, 270 8, 410 26 S 690 46, 800 20 V0 H0 Z" fill="url(#onda-entrada)" opacity=".28"/>' +
+        '<path d="M0 18 C 150 0, 290 2, 430 16 S 700 32, 800 8 V0 H0 Z" fill="url(#onda-entrada)"/></svg>',
+      fundo: '<svg class="ondas-fundo" viewBox="0 0 800 60" preserveAspectRatio="none" aria-hidden="true">' +
+        '<path d="M0 26 C 160 4, 300 6, 450 24 S 700 48, 800 18 V60 H0 Z" fill="#fff" opacity=".10"/>' +
+        '<path d="M0 40 C 140 22, 320 20, 470 36 S 690 56, 800 34 V60 H0 Z" fill="#fff" opacity=".14"/></svg>'
+    };
+  }
   function telaEntrada(html) {
     $('#app').hidden = true;
-    $('#tela').innerHTML = '<div class="entrada"><div class="entrada-cartao">' +
+    const o = ondasEntrada();
+    $('#tela').innerHTML = '<div class="entrada">' + o.fundo + '<div class="entrada-cartao">' + o.cartao +
       '<img src="' + esc(logo()) + '" alt="" class="logo-grande"><h1>' + esc(nomeInstalacao()) + '</h1>' + html + '</div>' +
       '<p class="rodape-entrada">CRM · Sistemi Dalessi — sistemas sob medida</p></div>';
   }
