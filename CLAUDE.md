@@ -580,6 +580,12 @@ A vendedora continua fazendo o orçamento no FKN (preço, estoque e condição f
   enviado" / "Envio de orçamento" + resumo (número, valor, validade); o link do WhatsApp não leva
   arquivo, então a vendedora anexa o PDF. A proposta vira "enviada" (histórico e etapa) e a volta
   do contato pergunta como foi.
+- **Passo a passo para as vendedoras** (02/10, telas reais do CRM com cliente de exemplo):
+  https://claude.ai/artifact/9A4bGmGhd9c7F5cxiKwi21 (privado; o Anderson compartilha pelo menu
+  Share) e em PDF. O passo 1 (FKN: impressão do orçamento → disquete → Tudo → CSV) foi descrito
+  pelo jeito dos relatórios; falta o Anderson confirmar/mandar print da tela do FKN.
+- Telefones das linhas cadastrados pelo Anderson em 02/10 (só números; o orçamento formata como
+  "WhatsApp (11) 94488-4942", `fichas.telBonito`).
 - Banco: `crm_propostas.numero_fkn`, `crm_propostas.dados` (jsonb), `crm_usuarios.telefone`
   (aplicados em produção em 02/10). Amostra real conferida (9 itens, soma = total) e apagada.
 - Telefone da linha de cada vendedora: **o Anderson vai preencher** (Configurações → Usuários).
