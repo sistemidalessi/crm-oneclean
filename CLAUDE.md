@@ -598,13 +598,19 @@ A vendedora continua fazendo o orçamento no FKN (preço, estoque e condição f
 - **Fotos dos produtos: feitas e tiradas no mesmo dia (02/10)** — o Anderson achou desnecessário;
   `fotos.js` apagado. Ficaram em produção, sem uso e vazios, a coluna `crm_produtos.foto` e o bucket
   `crm-fotos` (não reintroduzir sem ele pedir).
-- **Layout "clean" do orçamento (02/10, pedido do Anderson: profissional, leitura limpa, que lembre
-  limpeza)** — `fichas.imprimirProposta` + `.proposta-doc`: onda no degradê da marca no alto e no pé
-  da página (água), "ORÇAMENTO nº" grande à direita com emissão/validade, Cliente e Atendimento sem
-  caixas (rótulos pequenos em caixa alta), tabela só com linhas finas (cabeçalho com sublinhado
-  turquesa), fecho com Condições à esquerda e quadro do Total à direita, agradecimento e rodapé
-  centralizados. Cuidado com nomes de classe: `.topo` e `.meta` já existem no CRM (`.topo` some na
-  impressão) — por isso `onda cima/pe` e `doc-meta`.
+- **Modelo do orçamento aprovado pelo Anderson (02/10, fim do dia)** — ele montou o layout em outro
+  lugar (PDF "OneClean-Orcamento-Proposta") e pediu para reproduzir **exatamente**, com os itens
+  numerados ao lado. `fichas.imprimirProposta` + `.proposta-doc`: faixa turquesa no alto, logo e
+  "ORÇAMENTO 22.400" com emissão/validade, frase de destaque (`cfg.proposta_chamada` e
+  `proposta_subchamada`, em Configurações → Geral), "Preparado para", três cartões (frete, entrega,
+  pagamento) tirados do orçamento do FKN, "Produtos selecionados" numerados com código embaixo,
+  "Entrega e atendimento" + "Seu contato" (vendedora, WhatsApp e e-mail) ao lado do "Total do
+  pedido", e o botão **"Vamos programar sua entrega? / Confirmar pelo WhatsApp"** (`cfg.proposta_cta`)
+  que no PDF é **link clicável** para o WhatsApp da vendedora responsável (telefone do cadastro), com
+  a mensagem "Olá, X! Recebi o orçamento nº N (R$ …) e quero programar a entrega." Sem telefone, o
+  botão não sai. Cores em `config.js → cores.documento` (`#009cb3`, `#163e50`). Nomes do FKN em
+  maiúsculas viram frase e ganham de volta os acentos mais comuns (`ACENTOS`). Cabe numa página
+  com ~10 itens. Cuidado com nomes de classe que já existem no CRM (`.topo`, `.meta`, `.faixa`).
 - **Degradê da marca na proposta (02/10):** tirado dos prints do Instagram e do site que o Anderson
   mandou (o ambiente bloqueia `www.oneclean.com.br`): turquesa `#03baca` → azul `#0198cf`, em
   `config.js → cores.gradiente`. Vira as faixas do topo e do rodapé, a borda dos quadros Para/Seu

@@ -678,68 +678,83 @@
     }
   }
 
-  // Proposta / orçamento no layout da empresa: limpo e arejado — onda no degradê da marca no alto
-  // e no pé (água, limpeza), linhas finas, sem caixas pesadas, total em destaque. Serve para a
-  // proposta gerada no CRM e para o orçamento importado do FKN (p.dados: pagamento, frete, entrega…).
-  function ondaSVG(classe) {
-    const cs = getComputedStyle(document.documentElement);
-    const a = cs.getPropertyValue('--grad-a').trim() || '#2a4a7a', b = cs.getPropertyValue('--grad-b').trim() || '#0f2340';
-    const id = 'onda-' + classe;
-    return '<svg class="onda ' + classe + '" viewBox="0 0 800 48" preserveAspectRatio="none" aria-hidden="true">' +
-      '<defs><linearGradient id="' + id + '" x1="0" x2="1" y1="0" y2="0"><stop offset="0" stop-color="' + esc(a) + '"/><stop offset="1" stop-color="' + esc(b) + '"/></linearGradient></defs>' +
-      '<path d="M0 30 C 130 10, 270 8, 410 26 S 690 46, 800 20 V0 H0 Z" fill="url(#' + id + ')" opacity=".28"/>' +
-      '<path d="M0 18 C 150 0, 290 2, 430 16 S 700 32, 800 8 V0 H0 Z" fill="url(#' + id + ')"/></svg>';
-  }
+  // Proposta / orçamento no layout da empresa (modelo aprovado pelo Anderson em 02/10): faixa no
+  // alto, logo e número, frase de destaque, "Preparado para", cartões de frete/entrega/pagamento,
+  // produtos numerados, entrega e atendimento ao lado do total e o botão "Confirmar pelo WhatsApp",
+  // que no PDF é um link clicável para o WhatsApp da vendedora responsável. Serve para a proposta
+  // gerada no CRM e para o orçamento importado do FKN (p.dados: pagamento, frete, entrega…).
   // "11944884942" → "(11) 94488-4942" (o cadastro aceita só números).
   const telBonito = t => { const d = R.digitos(t).replace(/^55(?=\d{10,11}$)/, ''); return d.length === 11 ? '(' + d.slice(0, 2) + ') ' + d.slice(2, 7) + '-' + d.slice(7) : d.length === 10 ? '(' + d.slice(0, 2) + ') ' + d.slice(2, 6) + '-' + d.slice(6) : String(t || ''); };
   fichas.telBonito = telBonito;
+  // O FKN escreve tudo em maiúsculas: no documento, nomes de produto em frase ("Detergente 5 lts
+  // neutro") e endereço/pessoa com iniciais maiúsculas ("Rua das Acacias 250"). Texto que já vem
+  // com minúsculas fica como está.
+  const soMaiusculas = s => /[A-ZÀ-Ú]/.test(s) && !/[a-zà-ú]/.test(s);
+  // O FKN também tira os acentos: devolve os das palavras mais comuns do ramo e de endereço.
+  const ACENTOS = { agua: 'água', aguas: 'águas', sanitaria: 'sanitária', sanitario: 'sanitário', liquido: 'líquido', liquida: 'líquida', higienico: 'higiênico',
+    higienica: 'higiênica', rolao: 'rolão', plastico: 'plástico', plastica: 'plástica', uteis: 'úteis', util: 'útil', alcool: 'álcool', sabao: 'sabão', papelao: 'papelão',
+    descartavel: 'descartável', descartaveis: 'descartáveis', residuos: 'resíduos', acido: 'ácido', saponaceo: 'saponáceo', algodao: 'algodão', cafe: 'café', acucar: 'açúcar',
+    condominio: 'condomínio', sindica: 'síndica', sindico: 'síndico', proprio: 'próprio', propria: 'própria', reposicao: 'reposição', manutencao: 'manutenção',
+    escritorio: 'escritório', automovel: 'automóvel', pratico: 'prático', unico: 'único', tecnico: 'técnico', pao: 'pão', sao: 'são', joao: 'joão', jose: 'josé',
+    sebastiao: 'sebastião', antonio: 'antônio', andre: 'andré', acacias: 'acácias', pilao: 'pilão', negrao: 'negrão' };
+  const acentua = t => t.replace(/[a-zà-ú]+/g, w => ACENTOS[w] || w);
+  const frase = s => { s = String(s || '').replace(/\s+/g, ' ').trim(); if (!soMaiusculas(s)) return s; const t = acentua(s.toLowerCase()); return t.charAt(0).toUpperCase() + t.slice(1); };
+  const maiusculas = s => (soMaiusculas(String(s || '')) ? acentua(String(s).toLowerCase()).toUpperCase() : String(s || ''));
+  const PEQUENAS = new Set(['de', 'da', 'do', 'das', 'dos', 'e', 'em', 'p/', 'c/']);
+  const iniciais = s => { s = String(s || '').replace(/\s+/g, ' ').trim(); if (!soMaiusculas(s)) return s;
+    return acentua(s.toLowerCase()).split(' ').map((w, k) => /^[a-z]{2}$/i.test(w) && /^(sp|rj|mg|pr|sc|rs|ba|go|df|es|pe|ce|ms|mt|pa|am)$/.test(w) ? w.toUpperCase()
+      : k && PEQUENAS.has(w) ? w : w.replace(/^(\S)/, c => c.toUpperCase())).join(' ').replace(/\/(\w{2})\b/g, (m, uf) => '/' + uf.toUpperCase()); };
   fichas.imprimirProposta = p => {
     const n = CRM.negocio(p.negocio_id);
     const e = n && CRM.empresa(n.empresa_id);
     const c = n && n.contato_id ? CRM.contato(n.contato_id) : (e && principal(e.id));
     const vend = n && CRM.usuario(n.responsavel_id);
-    const d = p.dados || {};
+    const cfg = E().cfg, d = p.dados || {};
     const itens = p.itens || [];
-    const comCodigo = itens.some(it => it.codigo), comUn = itens.some(it => it.unidade), comDesc = itens.some(it => R.num(it.desconto));
+    const comDesc = itens.some(it => R.num(it.desconto));
     const qtd = v => String(+Number(v || 0).toFixed(3)).replace('.', ',');
     const precoUnit = v => 'R$ ' + Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
     const totalDe = it => (it.total != null ? R.num(it.total) : R.totalItem(it));
-    const subtotal = itens.reduce((s, it) => s + totalDe(it), 0);
     const emitida = d.emissao || p.enviada_em || R.diaLocal(p.criado_em);
-    const endereco = e ? [[e.logradouro, e.numero].filter(Boolean).join(', '), e.bairro, [e.cidade, e.uf].filter(Boolean).join('/'), e.cep].filter(Boolean).join(' · ') : '';
+    const numero = p.numero_fkn ? Number(p.numero_fkn).toLocaleString('pt-BR') : String(p.numero);
+    const endereco = e ? [iniciais([e.logradouro, e.numero].filter(Boolean).join(', ')), iniciais(e.bairro), [iniciais(e.cidade), e.uf].filter(Boolean).join('/'), e.cep ? 'CEP ' + e.cep : ''].filter(Boolean).join(' · ') : '';
     const ac = (c && c.nome) || d.ac;
-    const temFrete = d.fkn || R.num(d.frete);
-    const cond = [['Pagamento', d.pagamento ? d.pagamento + (d.cobranca ? ' · ' + d.cobranca.toLowerCase() : '') : ''], ['Prazo de entrega', d.prazo_entrega],
-      ['Frete', d.frete_tipo ? String(d.frete_tipo).replace(/^\d+-/, '') : ''],
-      ['Transporte', d.transportadora ? (d.transportadora === 'PROPRIO' ? 'frota própria' : d.transportadora) : ''], ['Entrega em', d.endereco_entrega],
-      ['Seu pedido', d.seu_pedido], ['Referência', d.ref]].filter(x => x[1]);
-    const cab = '<th class="n">#</th>' + (comCodigo ? '<th>Código</th>' : '') + '<th>Produto</th>' + (comUn ? '<th>Un.</th>' : '') + '<th class="num">Qtd.</th><th class="num">Preço unit.</th>' +
-      (comDesc ? '<th class="num">Desc.</th>' : '') + '<th class="num">Total</th>';
-    const meta = [d.versao ? 'Versão ' + d.versao : '', 'Emissão <b>' + esc(R.dataBR(emitida)) + '</b>', p.validade ? 'Válido até <b>' + esc(R.dataBR(p.validade)) + '</b>' : ''].filter(Boolean).join(' · ');
+    const linhaCliente = [ac ? 'A/C ' + iniciais(ac) + (c && c.cargo ? ' — ' + c.cargo : '') : '', e && e.cnpj ? (R.digitos(e.cnpj).length === 11 ? 'CPF ' : 'CNPJ ') + e.cnpj : ''].filter(Boolean);
+    // Cartões: frete, entrega e pagamento (do orçamento do FKN).
+    const cartoes = [];
+    if (d.fkn || R.num(d.frete)) cartoes.push([R.num(d.frete) ? 'Frete ' + R.moeda(d.frete) : 'Frete grátis', 'Neste orçamento']);
+    if (d.prazo_entrega) cartoes.push(['Entrega em ' + acentua(d.prazo_entrega.toLowerCase()), d.transportadora === 'PROPRIO' ? 'Frota própria' : d.transportadora ? 'Transporte: ' + iniciais(d.transportadora) : 'Prazo de entrega']);
+    else if (d.transportadora) cartoes.push([d.transportadora === 'PROPRIO' ? 'Entrega com frota própria' : 'Transporte: ' + iniciais(d.transportadora), 'Entrega']);
+    if (d.pagamento) cartoes.push([[d.cobranca, d.pagamento].filter(Boolean).join(' '), 'Condições de pagamento']);
+    const cepCliente = e ? R.digitos(e.cep) : '';
+    const entregaAqui = !d.endereco_entrega || (cepCliente && R.digitos(d.endereco_entrega).indexOf(cepCliente) !== -1);
+    const entrega = [entregaAqui ? 'Entrega no endereço indicado acima.' : 'Entrega em ' + iniciais(d.endereco_entrega.replace(/\s+Bairro:\s*/i, ' · ').replace(/\s+Cep:\s*/i, ' · CEP ')) + '.',
+      d.ref ? 'Referência: ' + frase(d.ref).toLowerCase() + '.' : '', d.seu_pedido ? 'Seu pedido: ' + d.seu_pedido + '.' : ''].filter(Boolean);
+    const tel = vend && R.linkWhatsApp(vend.telefone) ? vend.telefone : '';
+    const msgWa = 'Olá' + (vend ? ', ' + R.primeiroNome(vend.nome) : '') + '! Recebi o orçamento nº ' + numero + ' (' + R.moeda(p.valor_total) + ') e quero programar a entrega.';
+    const freteTxt = R.num(d.frete) ? 'Frete ' + R.moeda(d.frete) + ' incluído' : (d.fkn ? 'Frete grátis' : '');
     const el = $('#impressao');
-    el.innerHTML = '<div class="proposta-doc">' + ondaSVG('cima') +
+    el.innerHTML = '<div class="proposta-doc">' +
+      '<div class="faixa-doc"></div>' +
       '<header><img src="' + esc(CRM.logo()) + '" alt="' + esc(CRM.nomeInstalacao()) + '">' +
-        '<div class="doc-id"><span class="rotulo">' + (p.numero_fkn ? 'Orçamento' : 'Proposta comercial') + '</span>' +
-        '<strong class="numero">nº ' + esc(p.numero_fkn ? Number(p.numero_fkn).toLocaleString('pt-BR') : p.numero) + '</strong><span class="doc-meta">' + meta + '</span></div></header>' +
-      '<section class="partes"><div><h2>Cliente</h2><p class="nome">' + esc(e ? e.razao_social || e.nome : '') + '</p>' + (e && e.cnpj ? '<p>CNPJ/CPF ' + esc(e.cnpj) + '</p>' : '') +
-        (ac ? '<p>A/C ' + esc(ac) + (c && c.cargo ? ' — ' + esc(c.cargo) : '') + '</p>' : '') + (endereco ? '<p>' + esc(endereco) + '</p>' : '') + '</div>' +
-        (vend ? '<div><h2>Atendimento</h2><p class="nome">' + esc(vend.nome) + '</p>' + (vend.telefone ? '<p>WhatsApp ' + esc(telBonito(vend.telefone)) + '</p>' : '') + (vend.email ? '<p>' + esc(vend.email) + '</p>' : '') + '</div>' : '') +
-      '</section>' +
-      '<table class="itens"><thead><tr>' + cab + '</tr></thead><tbody>' +
-      itens.map((it, i) => '<tr><td class="n">' + (i + 1) + '</td>' + (comCodigo ? '<td class="cod">' + esc(it.codigo || '') + '</td>' : '') + '<td>' + esc(it.descricao) + '</td>' +
-        (comUn ? '<td class="un">' + esc(it.unidade || '') + '</td>' : '') + '<td class="num">' + esc(qtd(it.quantidade)) + '</td><td class="num">' + esc(precoUnit(it.preco)) + '</td>' +
+        '<div class="doc-id"><strong>' + (p.numero_fkn ? 'Orçamento ' : 'Proposta ') + esc(numero) + '</strong>' +
+        '<span>Emitido em ' + esc(R.dataBR(emitida)) + '</span>' + (p.validade ? '<span>Válido até ' + esc(R.dataBR(p.validade)) + '</span>' : '') + '</div></header>' +
+      (cfg.proposta_chamada ? '<section class="chamada"><h1>' + esc(cfg.proposta_chamada) + '</h1>' + (cfg.proposta_subchamada ? '<p>' + esc(cfg.proposta_subchamada) + '</p>' : '') + '</section>' : '') +
+      '<section class="preparado"><h2>Preparado para</h2><p class="nome">' + esc(maiusculas(e ? e.razao_social || e.nome : '')) + '</p>' +
+        (linhaCliente.length ? '<p>' + linhaCliente.map(esc).join('&nbsp; | &nbsp;') + '</p>' : '') + (endereco ? '<p>' + esc(endereco) + '</p>' : '') + '</section>' +
+      (cartoes.length ? '<section class="cartoes c' + cartoes.length + '">' + cartoes.map(x => '<div><strong>' + esc(x[0]) + '</strong><span>' + esc(x[1]) + '</span></div>').join('') + '</section>' : '') +
+      '<h2 class="titulo-itens">Produtos selecionados</h2>' +
+      '<table class="itens"><thead><tr><th class="n">#</th><th>Produto / embalagem</th><th class="num">Qtd.</th><th class="num">Unitário</th>' + (comDesc ? '<th class="num">Desc.</th>' : '') + '<th class="num">Total</th></tr></thead><tbody>' +
+      itens.map((it, i) => '<tr><td class="n">' + (i + 1) + '</td><td><span class="prod">' + esc(frase(it.descricao)) + '</span>' + (it.codigo ? '<span class="cod">Cód. ' + esc(it.codigo) + '</span>' : '') + '</td>' +
+        '<td class="num qtd">' + esc(qtd(it.quantidade)) + (it.unidade ? ' ' + esc(it.unidade) : '') + '</td><td class="num">' + esc(precoUnit(it.preco)) + '</td>' +
         (comDesc ? '<td class="num">' + (R.num(it.desconto) ? esc(R.numero(it.desconto)) + '%' : '—') + '</td>' : '') +
         '<td class="num tot">' + esc(R.moeda(totalDe(it))) + '</td></tr>').join('') + '</tbody></table>' +
-      '<section class="fecho"><div class="condicoes">' +
-        (cond.length ? '<h2>Condições</h2><dl>' + cond.map(x => '<div><dt>' + esc(x[0]) + '</dt><dd>' + esc(x[1]) + '</dd></div>').join('') + '</dl>'
-          : p.condicoes ? '<h2>Condições</h2><p class="pre">' + esc(p.condicoes) + '</p>' : '') +
-        (p.observacoes ? '<h2 class="obs">Observações</h2><p class="pre">' + esc(p.observacoes) + '</p>' : '') + '</div>' +
-        '<div class="totais"><dl><div><dt>Produtos (' + itens.length + (itens.length === 1 ? ' item' : ' itens') + ')</dt><dd>' + esc(R.moeda(subtotal)) + '</dd></div>' +
-          (temFrete ? '<div><dt>Frete</dt><dd>' + (R.num(d.frete) ? esc(R.moeda(d.frete)) : 'grátis') + '</dd></div>' : '') + '</dl>' +
-          '<div class="total"><span>Total</span><strong>' + esc(R.moeda(p.valor_total)) + '</strong></div>' +
-          (p.validade ? '<p class="validade">Condições válidas até ' + esc(R.dataBR(p.validade)) + '</p>' : '') + '</div></section>' +
-      '<footer><p class="agradece">Obrigado pela preferência!</p><p>Qualquer ajuste de produto ou quantidade, é só falar com ' + esc(vend ? R.primeiroNome(vend.nome) : 'a gente') + '.</p>' +
-        '<p class="rodape">' + esc(E().cfg.proposta_rodape || CRM.nomeInstalacao()) + '</p></footer>' + ondaSVG('pe') + '</div>';
+      '<section class="fecho"><div class="atende"><h2>Entrega e atendimento</h2>' + entrega.map(x => '<p>' + esc(x) + '</p>').join('') +
+        (!d.fkn && p.condicoes ? '<p class="pre">' + esc(p.condicoes) + '</p>' : '') + (p.observacoes ? '<p class="pre">' + esc(p.observacoes) + '</p>' : '') +
+        (vend ? '<p class="contato">Seu contato: ' + esc(R.primeiroNome(vend.nome)) + '</p>' + [tel ? 'WhatsApp ' + telBonito(tel) : '', vend.email || ''].filter(Boolean).map(x => '<p>' + esc(x) + '</p>').join('') : '') + '</div>' +
+        '<div class="total"><span class="rot">Total do pedido</span><strong>' + esc(R.moeda(p.valor_total)) + '</strong><span class="sub">' + esc([itens.length + (itens.length === 1 ? ' item' : ' itens'), freteTxt].filter(Boolean).join(' · ')) + '</span></div></section>' +
+      (tel ? '<a class="cta" href="' + esc(R.linkWhatsApp(tel, msgWa)) + '"><span>' + esc(cfg.proposta_cta || 'Vamos programar sua entrega?') + '</span><span class="vai">Confirmar pelo WhatsApp &nbsp;›</span></a>' : '') +
+      '<footer>' + esc(cfg.proposta_rodape || CRM.nomeInstalacao()) + '</footer></div>';
     document.body.classList.add('imprimindo');
     const titAntes = document.title;
     document.title = (p.numero_fkn ? 'Orcamento ' + p.numero_fkn : 'Proposta ' + p.numero) + ' - ' + (e ? e.nome : ''); // nome sugerido do PDF

@@ -716,6 +716,10 @@
       raiz.setProperty('--ouro-escuro', mistura(d, [0, 0, 0], 0.15));
       raiz.setProperty('--sobre-ouro', luz(d) > 0.6 ? '#1a1a1a' : '#ffffff');
     }
+    // Cores do documento da proposta (cores.documento: { destaque, escuro }).
+    const doc = c.documento || {};
+    if (hex(doc.destaque)) raiz.setProperty('--doc-destaque', doc.destaque);
+    if (hex(doc.escuro)) raiz.setProperty('--doc-escuro', doc.escuro);
     // Degradê da marca (cores.gradiente: [de, até]) — faixas da proposta; o tom escuro do "até"
     // segura o texto branco no cabeçalho da tabela.
     const g = Array.isArray(c.gradiente) ? c.gradiente.map(hex) : [];
