@@ -271,6 +271,9 @@ recusas mais novas que a última entrega boa) faz o aviso de Compras dizer o que
   carteira **e** as que vendeu (`crm_notas_minhas`, política `le`). Nota já importada sem vendedor é
   completada quando chega de novo (apagar `vigia-notas-estado.json` no servidor reenvia tudo, sem
   duplicar). Silmara (externa) entra quando tiver usuário (casa pelo primeiro nome).
+  **Feito em 01/10:** Silmara é usuária (vendedor, equipe "Vendas Externas", fora do rodízio de
+  leads) e o Anderson confirmou em 02/10 que **ela entra no faturamento mesmo sendo externa**: as
+  notas dela já estão todas ligadas a ela (440, R$ 661.498,29 em 2026 até 02/10; carteira de 71).
   **Ex-vendedores** (`cfg.vendedores_antigos`, Configurações → Geral → Notas fiscais; hoje NICOLLY,
   NICOLI BIANCA, NICOLAS, JULIA): as notas entram com `vendedor_nome` e **sem** `vendedor_id` — contam
   no total e em Compras como "NOME (ex-vendedor)", não vão para a carteira de ninguém (pedido do
