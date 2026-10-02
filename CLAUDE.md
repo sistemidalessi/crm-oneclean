@@ -583,7 +583,9 @@ A vendedora continua fazendo o orçamento no FKN (preço, estoque e condição f
 - Banco: `crm_propostas.numero_fkn`, `crm_propostas.dados` (jsonb), `crm_usuarios.telefone`
   (aplicados em produção em 02/10). Amostra real conferida (9 itens, soma = total) e apagada.
 - Telefone da linha de cada vendedora: **o Anderson vai preencher** (Configurações → Usuários).
-  Falta ainda o texto do rodapé (CNPJ, telefone, e-mail e site da OneClean).
+  Rodapé da proposta preenchido em 02/10 (autorizado pelo Anderson, dados do caminhão):
+  "OneClean · Produtos de Limpeza e Descartáveis · WhatsApp (11) 98719-0372 · vendas@oneclean.com.br ·
+  www.oneclean.com.br" (`crm_config.dados.proposta_rodape`; CNPJ ficou de fora até ele passar).
 - **Fotos dos produtos no orçamento (02/10, pedido do Anderson)** — `fotos.js`: foto por produto
   (Configurações → Produtos: "Pôr/Trocar foto" no produto ou **"Enviar fotos (várias)"**, com o
   nome de cada arquivo sendo o código do FKN, ex. `010049.jpg`; código sem produto no catálogo é
