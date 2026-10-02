@@ -805,6 +805,20 @@ returns table (estoque timestamptz, receber timestamptz) language sql stable sec
 $$;
 revoke all on function public.crm_fkn_atualizado() from public, anon;
 grant execute on function public.crm_fkn_atualizado() to authenticated;
+-- O mesmo, mais o motivo da última recusa de cada relatório (arquivo puxado com opção faltando),
+-- se for mais nova que a última entrega boa — o lembrete de Compras mostra o que marcar.
+create or replace function public.crm_fkn_situacao()
+returns jsonb language sql stable security definer set search_path = public as $$
+  with u as (select (select max(atualizado_em) from public.crm_estoque) estoque, (select max(atualizado_em) from public.crm_titulos) receber),
+  r as (select distinct on (resumo->>'fkn_tipo') resumo->>'fkn_tipo' tipo, resumo->>'fkn_recusa' texto, resumo->>'arquivo' arquivo, quando
+          from public.crm_integracao_log where resumo ? 'fkn_recusa' order by resumo->>'fkn_tipo', quando desc)
+  select jsonb_build_object('estoque', u.estoque, 'receber', u.receber,
+    'recusas', coalesce((select jsonb_agg(jsonb_build_object('tipo', r.tipo, 'texto', r.texto, 'arquivo', r.arquivo, 'quando', r.quando))
+                           from r where r.quando > coalesce(case r.tipo when 'produtos' then u.estoque else u.receber end, '-infinity'::timestamptz)), '[]'::jsonb))
+    from u where public.crm_eh_admin() or public.crm_eh_comprador();
+$$;
+revoke all on function public.crm_fkn_situacao() from public, anon;
+grant execute on function public.crm_fkn_situacao() to authenticated;
 
 -- integrações: só o administrador; o registro das entregas o gestor também lê.
 create policy tudo on public.crm_integracoes for all to authenticated using ((select public.crm_eh_admin())) with check ((select public.crm_eh_admin()));

@@ -84,3 +84,17 @@ test('contas a receber: resumo por cliente e painel', () => {
   assert.equal(g.vence7, 0);
   assert.equal(F.dataFKN('00/00/0000'), null);
 });
+
+test('contas a receber: conferência do relatório puxado no FKN (o que faltou marcar)', () => {
+  const K = require('../fkn.js');
+  const ok = K.conferirContasReceber(CSV, F.lerContasReceber(CSV));
+  assert.deepEqual(ok.recusa, [], 'o relatório completo passa');
+  const semCnpj = CSV.split('\r\n').filter(l => !/^CNPJ/.test(l)).join('\r\n');
+  assert.match(K.conferirContasReceber(semCnpj, F.lerContasReceber(semCnpj)).recusa.join(), /dados cadastrais/);
+  const periodo = CSV.replace('00/00/0000 A 00/00/0000', '01/10/2026 A 31/10/2026');
+  assert.match(K.conferirContasReceber(periodo, F.lerContasReceber(periodo)).recusa.join(), /período de vencimento em branco/);
+  const liquidados = CSV.replace('EM ABERTO', 'LIQUIDADOS');
+  assert.match(K.conferirContasReceber(liquidados, F.lerContasReceber(liquidados)).recusa.join(), /Em aberto/);
+  const cortado = CSV.split(';;TOTAL GERAL')[0];
+  assert.match(K.conferirContasReceber(cortado, F.lerContasReceber(cortado)).recusa.join(), /TOTAL GERAL/);
+});

@@ -72,19 +72,32 @@ async function arquivoFkn(db: any, integ: { id: string }, f: { nome?: string; ba
     await db.from('crm_integracoes').update({ ultimo_uso: ag, ultimo_sinal: ag }).eq('id', integ.id); // entrega também é sinal de vida
   };
 
+  // Recusa: não troca nada, registra o motivo (aparece em Integrações e no lembrete de Compras).
+  const recusa = async (tipo: string, motivos: string[]) => {
+    const texto = motivos.join('; ');
+    await db.from('crm_integracao_log').insert({ integracao_id: integ.id, arquivos: 1, notas_novas: 0, valor: 0, fora: 0, erros: 1,
+      resumo: { fkn: (tipo === 'produtos' ? 'Listagem de produtos' : 'Contas a receber') + ' do FKN recusada: ' + texto, fkn_recusa: texto, fkn_tipo: tipo, arquivo: nome } });
+    return resposta(422, { erro: texto });
+  };
+
   if (K.ehListagemProdutos(txt)) {
+    const conf = K.conferirListagemProdutos(txt);
+    if (conf.recusa.length) return recusa('produtos', conf.recusa);
     const lista = K.lerListagemProdutos(txt);
     const { count } = await db.from('crm_estoque').select('codigo', { count: 'exact', head: true });
-    if (count && lista.length < count / 2) return resposta(422, { erro: 'listagem com ' + lista.length + ' produtos (o CRM tem ' + count + '): parece cortada; não troquei o estoque' });
+    if (count && lista.length < count / 2) return recusa('produtos', ['veio com ' + lista.length + ' produtos (o CRM tem ' + count + '): confira se nenhuma linha, família ou fornecedor ficou filtrado e salve com "Tudo"']);
     await grava('crm_estoque', lista, 'codigo');
     const valor = lista.reduce((s: number, x: { custo_total: number }) => s + (x.custo_total || 0), 0);
-    await registra('Listagem de produtos do FKN: ' + lista.length + ' linhas', lista.length, valor);
+    await registra('Listagem de produtos do FKN: ' + lista.length + ' linhas' + (conf.avisos.length ? ' (atenção: ' + conf.avisos.join('; ') + ')' : ''), lista.length, valor);
     return resposta(200, { ok: true, fkn: 'produtos', produtos: lista.length });
   }
   if (K.ehContasReceber(txt)) {
-    const lido = K.lerContasReceber(txt);
-    if (lido.totalGeral == null) return resposta(422, { erro: 'contas a receber sem a linha do TOTAL GERAL: o arquivo parece cortado; não troquei' });
-    if (!lido.confere) return resposta(422, { erro: 'contas a receber: a soma dos títulos (' + lido.soma + ') não bate com o total geral (' + lido.totalGeral + '); não troquei' });
+    let lido;
+    try { lido = K.lerContasReceber(txt); } catch (e) { return recusa('receber', [e instanceof Error ? e.message : String(e)]); }
+    const conf = K.conferirContasReceber(txt, lido);
+    if (conf.recusa.length) return recusa('receber', conf.recusa);
+    const { count } = await db.from('crm_titulos').select('duplicata', { count: 'exact', head: true });
+    if (count && count >= 20 && lido.titulos.length < count * 0.4) return recusa('receber', ['veio com ' + lido.titulos.length + ' títulos (o CRM tem ' + count + '): confira Cliente 0, Portador 0, Situação GERAL e a filial']);
     const [empresas, notas] = await Promise.all([tudo(db, 'crm_empresas', 'id,cnpj,grupo_id'), tudo(db, 'crm_notas', 'id,numero,empresa_id,cliente_doc')]);
     const porEmp = new Map<string, unknown[]>();
     (notas as { empresa_id: string }[]).forEach(n => { if (n.empresa_id) { if (!porEmp.has(n.empresa_id)) porEmp.set(n.empresa_id, []); porEmp.get(n.empresa_id)!.push(n); } });

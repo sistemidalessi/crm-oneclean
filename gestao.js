@@ -448,9 +448,14 @@
       const curva = g => (g.classe === '—' ? '<small>—</small>' : CRM.selo(g.classe, g.classe === 'A' ? 'verde' : g.classe === 'B' ? 'azul' : 'etiqueta'));
       const custo = g => (g.comprar && g.custoUnit ? R.moeda(g.custoUnit * g.comprar) : '—');
       const lemb = CRM.lembreteFkn ? CRM.lembreteFkn() : [];
-      const faixaFkn = lemb.length ? '<div class="faixa alerta lembrete-fkn"><strong>Hora de puxar ' + (lemb.length > 1 ? 'os relatórios' : 'o relatório') + ' do FKN (' + esc(lemb[0].turno) + '):</strong> ' +
-        lemb.map(x => esc(x.arquivo) + ' <small>(último: ' + (x.ultimo ? esc(R.dataBR(R.diaLocal(x.ultimo)) + ' ' + R.horaLocal(x.ultimo)) : 'nunca') + ')</small>').join(' · ') +
-        '. No FKN, gere e salve em CSV ' + (cfg.pasta_fkn ? 'na pasta <code>' + esc(cfg.pasta_fkn) + '</code>' : 'na pasta que o vigia olha') + ': o vigia manda sozinho e este aviso some.</div>' : '';
+      const recs = CRM.recusasFkn ? CRM.recusasFkn() : [];
+      const quandoFkn = v => (v ? esc(R.dataBR(R.diaLocal(v)) + ' ' + R.horaLocal(v)) : 'nunca');
+      const NOME_REC = { produtos: 'A listagem de produtos', receber: 'O contas a receber' };
+      const faixaFkn = (lemb.length || recs.length ? '<div class="faixa alerta lembrete-fkn">' +
+        (lemb.length ? '<p><strong>Hora de puxar ' + (lemb.length > 1 ? 'os relatórios' : 'o relatório') + ' do FKN (' + esc(lemb[0].turno) + '):</strong> ' +
+          lemb.map(x => esc(x.arquivo) + ' <small>(último: ' + quandoFkn(x.ultimo) + ')</small>').join(' · ') + '.</p>' : '') +
+        recs.map(r => '<p><strong>' + esc(NOME_REC[r.tipo] || 'O relatório') + ' salvo em ' + quandoFkn(r.quando) + ' foi recusado</strong> (nada foi trocado): ' + esc(r.texto) + '. Gere de novo e salve na pasta.</p>').join('') +
+        '</div>' : '') + (lemb.length || recs.length ? colinhaFkn(cfg, true, recs) : '');
       return faixaFkn + '<div class="cabecalho"><div><h1>Compras</h1><p class="sub">' +
           (e ? 'Estoque do FKN de <strong>' + esc(R.dataBR(e.em) + ' ' + R.horaLocal(e.em)) + '</strong>' + (velho ? ' ' + CRM.selo('desatualizado: exporte de novo no FKN', 'ambar') : '') + ' · ' + e.produtos + ' produtos'
             : 'Sem estoque do FKN ainda: exporte a posição de estoque em CSV no FKN e clique em "Atualizar estoque"') +
@@ -496,7 +501,7 @@
               : '<p class="vazio">Nenhum cliente com ritmo de compra no prazo.</p>') + '</section>' +
           '<section class="cartao"><h2>Tendência <small>últimos 90 dias × 90 anteriores</small></h2>' +
             '<h3>Em alta</h3>' + listaTendencia(c.emAlta) + '<h3>Em queda</h3>' + listaTendencia(c.emQueda) + '</section>' +
-        '</div>';
+        '</div>' + (lemb.length || recs.length ? '' : colinhaFkn(cfg, false, recs)); // sem aviso: a colinha fica fechada no fim
     },
     depois() {
       const arq = document.getElementById('gEstoque');
@@ -514,6 +519,8 @@
     const buf = await f.arrayBuffer();
     let txt = new TextDecoder('utf-8').decode(buf);
     if (txt.indexOf('�') !== -1) txt = new TextDecoder('windows-1252').decode(buf); // CSV do FKN é Windows-1252
+    // Listagem do FKN puxada com opção faltando: recusa (mesma conferência do vigia).
+    if (G.ehListagemProdutos(txt)) { const conf = K.conferirListagemProdutos(txt); if (conf.recusa.length) throw new Error('Arquivo recusado, nada foi trocado: ' + conf.recusa.join('; ') + '. Veja a colinha no fim de Compras.'); }
     const lista = G.lerArquivoEstoque(txt);
     const neg = lista.filter(x => x.quantidade < 0).length;
     CRM.toast('Gravando o estoque: ' + lista.length + ' produtos…');
@@ -521,6 +528,34 @@
     CRM.toast('Estoque atualizado: ' + n + ' produtos' + (neg ? ' (' + neg + ' com saldo negativo no FKN)' : '') + '.');
     estoque = null; CRM.render();
     if (CRM.recarregarFkn) CRM.recarregarFkn();
+  }
+
+  // Colinha para puxar os dois relatórios no FKN (passo a passo + checklist). Abre sozinha quando
+  // há lembrete ou recusa; fica fechada no resto do tempo. O vigia confere o arquivo e recusa o
+  // que vier com opção faltando (fkn.js → conferir*), mas o checklist evita o vai e volta.
+  function colinhaFkn(cfg, abrir, recs) {
+    const pasta = esc(cfg.pasta_fkn || 'pasta que o vigia olha');
+    const marca = (tipo, txt) => (recs || []).some(r => r.tipo === tipo) ? '<strong>' + txt + '</strong>' : txt;
+    const lista = itens => '<ul class="checklist">' + itens.map(t => '<li>☐ ' + t + '</li>').join('') + '</ul>';
+    return '<details class="cartao colinha-fkn"' + (abrir ? ' open' : '') + '><summary><h2>Colinha: como puxar os relatórios do FKN <small>manhã e tarde · salvar em ' + pasta + '</small></h2></summary>' +
+      '<div class="g-duas">' +
+      '<section>' + marca('produtos', '<h3>1. Listagem cadastral de produtos</h3>') + '<ol>' +
+        '<li>No SIFWin: <strong>Cadastros → Produto → Listagens → Listagem cadastral</strong>.</li>' +
+        '<li>Listagem <strong>Padrão</strong> · Ordem <strong>Código</strong> · Unidade <strong>Geral</strong> · Separação <strong>Nenhuma</strong>.</li>' +
+        '<li>Em <strong>Listar dados</strong>, marcar os seis: Estoque/pendências, Índices/preços, Fornecedor, Movimentação (datas), Venda média (6 meses) e Localização.</li>' +
+        '<li>Situação <strong>0</strong> (todos); linha, família e fornecedor em branco.</li>' +
+        '<li><strong>OK</strong> → no relatório, o <strong>disquete</strong> → <strong>Tudo</strong> → tipo <strong>CSV</strong> → salvar em <code>' + pasta + '</code> (pode substituir o antigo).</li></ol>' +
+        '<p class="dica">Checklist antes de salvar:</p>' + lista(['empresa/filial a de sempre (o nome no topo do relatório é o mesmo da última vez)', 'os seis itens de "Listar dados" marcados',
+          'nenhuma linha, família ou fornecedor filtrado; situação 0', 'salvo com "Tudo" (não só a página) e em CSV, não XLS', 'na pasta ' + pasta]) + '</section>' +
+      '<section>' + marca('receber', '<h3>2. Contas a receber por cliente</h3>') + '<ol>' +
+        '<li>No SIFWin: <strong>Contas a Receber → Relatórios → Por cliente</strong>.</li>' +
+        '<li>Cliente <strong>0</strong> (todos) · Portador <strong>0</strong> · Situação <strong>GERAL</strong> · Filial: a de sempre (todas, se tiver a opção).</li>' +
+        '<li>Listar títulos: <strong>Em aberto</strong> (vencidos e a vencer). Período de vencimento <strong>em branco</strong>.</li>' +
+        '<li>Marcar <strong>"Listar os dados cadastrais dos clientes"</strong> (traz o CNPJ, que liga o título ao cliente).</li>' +
+        '<li><strong>OK</strong> → <strong>disquete</strong> → <strong>Tudo</strong> → <strong>CSV</strong> → salvar em <code>' + pasta + '</code>.</li></ol>' +
+        '<p class="dica">Checklist antes de salvar:</p>' + lista(['"Em aberto" (não liquidados, não geral)', 'período de vencimento em branco', '"Listar os dados cadastrais dos clientes" marcado',
+          'cliente 0, portador 0, situação GERAL, filial de sempre', 'tem o TOTAL GERAL no fim (salvo com "Tudo"), em CSV', 'na pasta ' + pasta]) + '</section>' +
+      '</div><p class="dica">Em 1 ou 2 minutos o vigia manda ao CRM e o aviso some. Se faltar alguma opção, o CRM recusa o arquivo, não troca nada e o aviso diz o que marcar.</p></details>';
   }
 
   // Pedido por fornecedor: a sugestão de compra separada por fornecedor, pronta para mandar.

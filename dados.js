@@ -450,15 +450,16 @@
     const desde = new Date(agora); desde.setHours(t[0], 0, 0, 0);
     return !ultimo || new Date(ultimo) < desde ? { turno: t[1], desde } : null;
   }
-  // Última atualização de cada arquivo do FKN (função do banco: o comprador não lê os títulos).
+  // Última atualização de cada arquivo do FKN e a última recusa (arquivo puxado com opção
+  // faltando), pela função do banco: o comprador não lê os títulos nem o registro de entregas.
   Supa.prototype.fknAtualizado = async function () {
-    const l = unwrap(await comTentativas(() => this.sb.rpc('crm_fkn_atualizado')));
-    return (l && l[0]) || { estoque: null, receber: null };
+    const r = unwrap(await comTentativas(() => this.sb.rpc('crm_fkn_situacao')));
+    return Object.assign({ estoque: null, receber: null, recusas: [] }, r || {});
   };
   Local.prototype.fknAtualizado = async function () {
     const est = await this.estoque(), tit = this.ler().titulos || [];
     const max = l => l.reduce((m, x) => (x.atualizado_em && x.atualizado_em > m ? x.atualizado_em : m), '') || null;
-    return { estoque: max(est), receber: max(tit) };
+    return { estoque: max(est), receber: max(tit), recusas: [] };
   };
 
   raiz.CRMDados = { TABELAS, chave, Local, Supa, uuid, vazio, LOCAL_ADMIN, cascataMemoria, situacaoVigia, PARADO_MIN, lembreteFkn };

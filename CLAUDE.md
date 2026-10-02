@@ -110,6 +110,15 @@ mostra a faixa "Hora de puxar os relatórios do FKN" e o menu Compras ganha um "
 comprador). Datas pela função `crm_fkn_atualizado()` (o comprador não lê títulos); regra em
 `CRMDados.lembreteFkn`; pasta mostrada = `cfg.pasta_fkn` (Configurações → Geral → Notas fiscais).
 O FKN não gera relatório sozinho (perguntar à FKN Informática se exporta por linha de comando).
+**Colinha e conferência (02/10, pedido do Anderson):** em Compras, a "Colinha: como puxar os
+relatórios do FKN" (passo a passo no SIFWin + checklist de cada um) abre no topo junto com o aviso e
+fica fechada no fim da tela no resto do tempo. Como o relatório é puxado à mão, `fkn.js`
+(`conferirListagemProdutos`, `conferirContasReceber`) recusa o arquivo com opção faltando —
+produtos sem Estoque/pendências, Índices/preços ou Fornecedor; contas a receber que não seja "Em
+aberto", com período preenchido, sem os dados cadastrais (CNPJ) ou sem TOTAL GERAL; e menos de 40%
+dos títulos atuais (filtro esquecido) — tanto pelo vigia quanto pelo botão. A recusa vai para
+`crm_integracao_log` (`resumo.fkn_recusa`, `fkn_tipo`) e `crm_fkn_situacao()` (jsonb: datas +
+recusas mais novas que a última entrega boa) faz o aviso de Compras dizer o que marcar.
 
 **A fazer:** fase 3 (WhatsApp oficial da Meta, e-mail, Google Agenda) e IA.
 

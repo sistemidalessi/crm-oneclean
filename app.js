@@ -298,6 +298,8 @@
     return [['estoque', 'Listagem cadastral de produtos'], ['receber', 'Contas a receber por cliente (em aberto)']]
       .map(([k, nome]) => { const l = DD.lembreteFkn(E.fkn[k]); return l ? { arquivo: nome, ultimo: E.fkn[k], turno: l.turno } : null; }).filter(Boolean);
   };
+  // Último arquivo do FKN recusado (opção esquecida ao puxar), mais novo que a última entrega boa.
+  CRM.recusasFkn = () => (E.fkn && (CRM.ehAdmin() || CRM.ehComprador()) && E.fkn.recusas) || [];
   CRM.recarregarFkn = async () => { if (store && store.fknAtualizado) { E.fkn = await store.fknAtualizado().catch(() => E.fkn); CRM.render(); } };
 
   let pendente = false;
@@ -340,7 +342,7 @@
     $('#menuLateral').innerHTML = abas.map(a => '<button type="button" class="nav' + (E.aba === a[0] ? ' ativa' : '') + '" data-acao="aba" data-id="' + a[0] + '"' +
       (E.aba === a[0] ? ' aria-current="page"' : '') + ' title="' + esc(a[1]) + ' (tecla ' + (ABAS.indexOf(a) + 1) + ')"><span class="nav-ico">' + a[2] + '</span><span class="nav-txt">' + esc(a[1]) + '</span>' +
       (a[0] === 'inicio' && nTarefas ? '<span class="bolinha' + (al.atrasadas.length ? ' vermelha' : '') + '">' + nTarefas + '</span>' : '') +
-      (a[0] === 'compras' && CRM.lembreteFkn().length ? '<span class="bolinha vermelha" title="Puxar os relatórios do FKN">!</span>' : '') + '</button>').join('');
+      (a[0] === 'compras' && (CRM.lembreteFkn().length || CRM.recusasFkn().length) ? '<span class="bolinha vermelha" title="Puxar os relatórios do FKN">!</span>' : '') + '</button>').join('');
 
     const sel = $('#visao');
     if (CRM.ehGestor()) {

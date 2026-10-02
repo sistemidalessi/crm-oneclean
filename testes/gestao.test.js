@@ -143,3 +143,16 @@ test('listagem de produtos do FKN: fornecedor, mínimo, pedido e a caixa fechada
   assert.deepEqual(c.listas.fornecedores, ['FORNECEDOR DOIS LTDA', 'FORNECEDOR UM LTDA']);
   assert.ok(!c.parado.some(x => x.codigo === '010001.1'), 'a caixa não aparece como parada separada');
 });
+
+test('listagem de produtos: conferência do relatório puxado no FKN (o que faltou marcar)', () => {
+  const K = require('../fkn.js');
+  assert.deepEqual(K.conferirListagemProdutos(LISTAGEM).recusa, [], 'a listagem completa passa');
+  const tira = re => LISTAGEM.split('\r\n').filter(l => !re.test(l)).join('\r\n');
+  assert.match(K.conferirListagemProdutos(tira(/Fornecedor:/)).recusa.join(), /"Fornecedor"/);
+  assert.match(K.conferirListagemProdutos(tira(/IND:/)).recusa.join(), /"Índices\/preços"/);
+  assert.match(K.conferirListagemProdutos(tira(/ESTOQUE:/)).recusa.join(), /"Estoque\/pendências"/);
+  const semDatas = K.conferirListagemProdutos(tira(/últ\.entrada/));
+  assert.deepEqual(semDatas.recusa, [], 'sem as datas ainda entra');
+  assert.match(semDatas.avisos.join(), /Movimentação/);
+  assert.match(K.conferirListagemProdutos('A;B\r\n1;2').recusa.join(), /não achei produtos/);
+});

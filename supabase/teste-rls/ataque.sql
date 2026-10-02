@@ -122,8 +122,13 @@ select 'Bruno vê título que não é dele (NÃO devia)' t, count(*) from crm_ti
 select pg_temp.como('f0000000-0000-0000-0000-000000000006');
 select 'Comprador vê títulos (NÃO devia)' t, count(*) from crm_titulos having count(*) > 0;
 select 'Comprador vê quando chegou o contas a receber' t, receber is not null from crm_fkn_atualizado();
+select 'Comprador vê a situação do FKN' t, crm_fkn_situacao() ? 'recusas';
+reset role; insert into crm_integracao_log (integracao_id, arquivos, erros, resumo) select id, 1, 1, '{"fkn_recusa":"marque Fornecedor","fkn_tipo":"produtos","arquivo":"x.csv"}'::jsonb from crm_integracoes limit 1;
+set role authenticated; select pg_temp.como('f0000000-0000-0000-0000-000000000006');
+select 'Comprador vê a recusa nova do FKN' t, jsonb_array_length(crm_fkn_situacao()->'recusas'), crm_fkn_situacao()->'recusas'->0->>'texto';
 select pg_temp.como('c0000000-0000-0000-0000-000000000003');
 select 'Ana vê datas do FKN (NÃO devia)' t, count(*) from crm_fkn_atualizado() having count(*) > 0;
+select 'Ana vê situação do FKN (NÃO devia)' t from (select crm_fkn_situacao() x) y where x is not null;
 -- Bruno desativado perde tudo
 reset role; update crm_usuarios set ativo=false where nome='Bruno'; set role authenticated; select pg_temp.como('d0000000-0000-0000-0000-000000000004');
 select 'Bruno desativado vê' t, count(*) from crm_empresas;

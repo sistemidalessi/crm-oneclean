@@ -135,7 +135,41 @@
   }
 
 
-  const api = { lerEstoque, lerListagemProdutos, lerArquivoEstoque, ehListagemProdutos, codigoFKN, lerContasReceber, ehContasReceber, ligaEmpresas, dataFKN };
+  // ------------------------------------------------------------ conferência do relatório
+  // O relatório é puxado à mão no FKN: opção esquecida = dado faltando. "recusa" = não troca o que
+  // já está no CRM (diz o que marcar); "avisos" = entra, mas falta um detalhe. Mesmas regras na
+  // tela e na Edge Function (o vigia).
+  const conta = (t, re) => (String(t).match(re) || []).length;
+  function conferirListagemProdutos(texto) {
+    const t = String(texto), recusa = [], avisos = [];
+    const blocos = conta(t, /^\d{3,};\d;/gm);
+    if (!blocos) recusa.push('não achei produtos: é a "Listagem cadastral de produtos" salva em CSV?');
+    else {
+      const falta = (re, nome) => conta(t, re) < blocos * 0.9;
+      if (falta(/ESTOQUE:;\s*m[ií]n:/gi)) recusa.push('marque "Estoque/pendências" em Listar dados');
+      if (falta(/comp:\s*[-\d.,]+;\s*cus:/gi)) recusa.push('marque "Índices/preços" em Listar dados');
+      if (falta(/Fornecedor:\s*\d+/gi)) recusa.push('marque "Fornecedor" em Listar dados');
+      if (falta(/[úu]lt\.entrada:/gi)) avisos.push('"Movimentação (datas)" não veio marcado (última entrada e saída ficam em branco)');
+      if (falta(/localiz:/gi)) avisos.push('"Localização" não veio marcado');
+      if (!/;\s*INATIVO\s*;/i.test(t)) avisos.push('não veio nenhum produto inativo: confira se "Situação" está 0 (todos)');
+    }
+    return { recusa, avisos, produtos: blocos };
+  }
+  function conferirContasReceber(texto, lido) {
+    const t = String(texto), recusa = [], avisos = [];
+    const cab = (/^.*CONTAS A RECEBER[^\n]*/im.exec(t) || [''])[0];
+    if (!/EM ABERTO/i.test(cab)) recusa.push('em "Listar títulos" escolha "Em aberto"');
+    const per = /VENCTO\s*EM:\s*(\d\d\/\d\d\/\d{4})\s*A\s*(\d\d\/\d\d\/\d{4})/i.exec(cab);
+    if (per && !(/^00\/00/.test(per[1]) && /^00\/00/.test(per[2]))) recusa.push('deixe o período de vencimento em branco (veio ' + per[1] + ' a ' + per[2] + ')');
+    const l = (lido && lido.titulos) || [];
+    if (l.length && l.filter(x => !x.cliente_doc).length > l.length / 2) recusa.push('marque "Listar os dados cadastrais dos clientes" (é o que traz o CNPJ)');
+    if (lido && lido.totalGeral == null) recusa.push('o arquivo veio sem o TOTAL GERAL no fim: salve com "Tudo" (não só a página)');
+    else if (lido && !lido.confere) recusa.push('a soma dos títulos não bate com o TOTAL GERAL: gere de novo');
+    return { recusa, avisos };
+  }
+
+  const api = { lerEstoque, lerListagemProdutos, lerArquivoEstoque, ehListagemProdutos, codigoFKN, lerContasReceber, ehContasReceber, ligaEmpresas, dataFKN,
+    conferirListagemProdutos, conferirContasReceber };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else raiz.CRMFkn = api;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -147,6 +147,8 @@
     let txt = new TextDecoder('utf-8').decode(buf);
     if (txt.indexOf('\uFFFD') !== -1) txt = new TextDecoder('windows-1252').decode(buf); // CSV do FKN é Windows-1252
     const lido = lerContasReceber(txt);
+    const conf = K.conferirContasReceber(txt, lido);
+    if (conf.recusa.length) throw new Error('Arquivo recusado, nada foi trocado: ' + conf.recusa.join('; ') + '. Veja a colinha no fim de Compras.');
     const lig = ligaEmpresas(lido.titulos, E().D, E().ix);
     CRM.toast('Gravando ' + lig.titulos.length + ' títulos…');
     const l = await CRM.store().salvarTitulos(lig.titulos);

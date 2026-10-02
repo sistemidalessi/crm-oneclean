@@ -536,3 +536,11 @@ label.btn.arquivo input[type=file] { position: absolute; inset: 0; opacity: 0; c
 .lista-detalhe tr.clicavel { cursor: pointer; }
 .lista-detalhe tr.clicavel:hover td { background: var(--fundo); }
 #dlgLista { height: auto; max-height: 90vh; }
+/* Colinha do FKN (Compras) */
+.lembrete-fkn p { margin: 2px 0; }
+.colinha-fkn summary { cursor: pointer; list-style: none; }
+.colinha-fkn summary h2 { display: inline; }
+.colinha-fkn ol { padding-left: 1.3rem; margin: 6px 0; }
+.colinha-fkn ol li { margin: 3px 0; }
+.colinha-fkn .checklist { list-style: none; padding: 0; margin: 4px 0 8px; }
+.colinha-fkn .checklist li { margin: 2px 0; }
