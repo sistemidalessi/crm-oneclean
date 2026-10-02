@@ -611,6 +611,12 @@ A vendedora continua fazendo o orçamento no FKN (preço, estoque e condição f
   botão não sai. Cores em `config.js → cores.documento` (`#009cb3`, `#163e50`). Nomes do FKN em
   maiúsculas viram frase e ganham de volta os acentos mais comuns (`ACENTOS`). Cabe numa página
   com ~10 itens. Cuidado com nomes de classe que já existem no CRM (`.topo`, `.meta`, `.faixa`).
+  Ajuste pedido no mesmo dia: **o verde da borboleta também** (`cores.documento.verde` `#a9c451`:
+  faixa do alto termina em verde, traço verde sob a frase, borda verde no "Preparado para" e no
+  Total, bolinha verde nos cartões, números dos itens em verde escuro, botão "Confirmar pelo
+  WhatsApp" numa pílula verde com letra preta), **letra preta** (`#1c1c1c`) nos textos de leitura
+  (frase, cliente, produtos, valores, contato) — o azul-escuro fica só no cabeçalho da tabela — e
+  **logo maior** (86 px de altura).
 - **Degradê da marca na proposta (02/10):** tirado dos prints do Instagram e do site que o Anderson
   mandou (o ambiente bloqueia `www.oneclean.com.br`): turquesa `#03baca` → azul `#0198cf`, em
   `config.js → cores.gradiente`. Vira as faixas do topo e do rodapé, a borda dos quadros Para/Seu

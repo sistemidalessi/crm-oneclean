@@ -720,6 +720,12 @@
     const doc = c.documento || {};
     if (hex(doc.destaque)) raiz.setProperty('--doc-destaque', doc.destaque);
     if (hex(doc.escuro)) raiz.setProperty('--doc-escuro', doc.escuro);
+    const v = hex(doc.verde);
+    if (v) {
+      raiz.setProperty('--doc-verde', doc.verde);
+      raiz.setProperty('--doc-verde-esc', mistura(v, [0, 0, 0], 0.45)); // números dos itens: verde que se lê no branco
+      raiz.setProperty('--doc-verde-claro', mistura(v, [255, 255, 255], 0.88));
+    }
     // Degradê da marca (cores.gradiente: [de, até]) — faixas da proposta; o tom escuro do "até"
     // segura o texto branco no cabeçalho da tabela.
     const g = Array.isArray(c.gradiente) ? c.gradiente.map(hex) : [];
