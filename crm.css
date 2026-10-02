@@ -419,8 +419,8 @@ body.arrastando-card .zonas-fim { display: grid; grid-template-columns: 1fr 1fr;
 .proposta-doc tfoot td { font-weight: 700; font-size: 12pt; border-top: 2px solid var(--marinho); border-bottom: 0; color: var(--marinho); }
 .proposta-doc tfoot tr.sub td { font-size: 10pt; font-weight: 600; color: #333; border-top: 1px solid #d9dee0; }
 .proposta-doc .condicoes dl { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 16px; margin: 0; }
-.proposta-doc .condicoes dl > div { display: flex; gap: 6px; }
-.proposta-doc .condicoes dt { color: #666; min-width: 7.5em; }
+.proposta-doc .condicoes dl > div { display: flex; gap: 10px; }
+.proposta-doc .condicoes dt { color: #666; flex: 0 0 auto; min-width: 7em; white-space: nowrap; }
 .proposta-doc .condicoes dd { margin: 0; font-weight: 600; }
 .proposta-doc .pre { white-space: pre-wrap; margin: 0; }
 .proposta-doc footer { margin-top: 22px; border-top: 1px solid #d9dee0; padding-top: 8px; color: #555; font-size: 8.5pt; }

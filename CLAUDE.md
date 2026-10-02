@@ -582,8 +582,10 @@ A vendedora continua fazendo o orçamento no FKN (preço, estoque e condição f
   do contato pergunta como foi.
 - Banco: `crm_propostas.numero_fkn`, `crm_propostas.dados` (jsonb), `crm_usuarios.telefone`
   (aplicados em produção em 02/10). Amostra real conferida (9 itens, soma = total) e apagada.
-- Falta o Anderson: telefone da linha de cada vendedora e o texto do rodapé (CNPJ, telefone,
-  e-mail e site da OneClean).
+- Telefone da linha de cada vendedora: **o Anderson vai preencher** (Configurações → Usuários).
+  Falta ainda o texto do rodapé (CNPJ, telefone, e-mail e site da OneClean).
+- Lembrete dos relatórios do FKN **só de segunda a sexta** (confirmado pelo Anderson em 02/10: não
+  trabalham sábado) — é como já está em `lembreteFkn`; não acrescentar sábado.
 
 ## Sequência do lead novo (30/09/2026)
 
