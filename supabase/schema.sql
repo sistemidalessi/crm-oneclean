@@ -115,8 +115,8 @@ create table if not exists public.crm_produtos (
   criado_em     timestamptz not null default now(),
   atualizado_em timestamptz not null default now()
 );
--- Foto do produto (aparece na proposta/orçamento): endereço público no bucket crm-fotos
--- (com ?v= para o navegador não guardar a antiga) ou, no modo local, a imagem em data: URL.
+-- Foto do produto: SEM USO desde 02/10/2026 (as fotos saíram do orçamento a pedido do Anderson);
+-- a coluna e o bucket crm-fotos ficam por existirem em produção, vazios.
 alter table public.crm_produtos add column if not exists foto text;
 
 create table if not exists public.crm_modelos (
@@ -881,8 +881,8 @@ select x.tipo, x.nome, x.ordem
  where not exists (select 1 from public.crm_opcoes);
 
 -- =================================================================== fotos dos produtos (Storage)
--- Bucket público para leitura (foto de produto não é dado sigiloso e precisa abrir no PDF da
--- proposta); só gestor/admin envia, troca ou apaga. Fora do Supabase (teste local) não existe
+-- SEM USO desde 02/10/2026 (ver crm_produtos.foto). Bucket público para leitura; só gestor/admin
+-- envia, troca ou apaga. Fora do Supabase (teste local) não existe
 -- o esquema storage: o bloco não faz nada.
 do $$
 begin

@@ -678,8 +678,18 @@
     }
   }
 
-  // Proposta / orçamento no layout da empresa (logo e cores da instalação). Serve para a proposta
-  // gerada no CRM e para o orçamento importado do FKN (p.dados: pagamento, frete, entrega…).
+  // Proposta / orçamento no layout da empresa: limpo e arejado — onda no degradê da marca no alto
+  // e no pé (água, limpeza), linhas finas, sem caixas pesadas, total em destaque. Serve para a
+  // proposta gerada no CRM e para o orçamento importado do FKN (p.dados: pagamento, frete, entrega…).
+  function ondaSVG(classe) {
+    const cs = getComputedStyle(document.documentElement);
+    const a = cs.getPropertyValue('--grad-a').trim() || '#2a4a7a', b = cs.getPropertyValue('--grad-b').trim() || '#0f2340';
+    const id = 'onda-' + classe;
+    return '<svg class="onda ' + classe + '" viewBox="0 0 800 48" preserveAspectRatio="none" aria-hidden="true">' +
+      '<defs><linearGradient id="' + id + '" x1="0" x2="1" y1="0" y2="0"><stop offset="0" stop-color="' + esc(a) + '"/><stop offset="1" stop-color="' + esc(b) + '"/></linearGradient></defs>' +
+      '<path d="M0 30 C 130 10, 270 8, 410 26 S 690 46, 800 20 V0 H0 Z" fill="url(#' + id + ')" opacity=".28"/>' +
+      '<path d="M0 18 C 150 0, 290 2, 430 16 S 700 32, 800 8 V0 H0 Z" fill="url(#' + id + ')"/></svg>';
+  }
   fichas.imprimirProposta = p => {
     const n = CRM.negocio(p.negocio_id);
     const e = n && CRM.empresa(n.empresa_id);
@@ -687,47 +697,52 @@
     const vend = n && CRM.usuario(n.responsavel_id);
     const d = p.dados || {};
     const itens = p.itens || [];
-    const fotos = itens.map(it => (CRM.fotos ? CRM.fotos.doItem(it) : null)), comFoto = fotos.some(Boolean);
     const comCodigo = itens.some(it => it.codigo), comUn = itens.some(it => it.unidade), comDesc = itens.some(it => R.num(it.desconto));
     const qtd = v => String(+Number(v || 0).toFixed(3)).replace('.', ',');
     const precoUnit = v => 'R$ ' + Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
-    const titulo = p.numero_fkn ? 'Orçamento nº ' + Number(p.numero_fkn).toLocaleString('pt-BR') + (d.versao ? ' · versão ' + d.versao : '') : 'Proposta comercial nº ' + p.numero;
+    const totalDe = it => (it.total != null ? R.num(it.total) : R.totalItem(it));
+    const subtotal = itens.reduce((s, it) => s + totalDe(it), 0);
     const emitida = d.emissao || p.enviada_em || R.diaLocal(p.criado_em);
     const endereco = e ? [[e.logradouro, e.numero].filter(Boolean).join(', '), e.bairro, [e.cidade, e.uf].filter(Boolean).join('/'), e.cep].filter(Boolean).join(' · ') : '';
     const ac = (c && c.nome) || d.ac;
+    const temFrete = d.fkn || R.num(d.frete);
     const cond = [['Pagamento', d.pagamento ? d.pagamento + (d.cobranca ? ' · ' + d.cobranca.toLowerCase() : '') : ''], ['Prazo de entrega', d.prazo_entrega],
-      ['Frete', d.fkn ? (R.num(d.frete) ? R.moeda(d.frete) : 'grátis') + (d.frete_tipo ? ' (' + String(d.frete_tipo).replace(/^\d+-/, '') + ')' : '') : ''],
+      ['Frete', d.frete_tipo ? String(d.frete_tipo).replace(/^\d+-/, '') : ''],
       ['Transporte', d.transportadora ? (d.transportadora === 'PROPRIO' ? 'frota própria' : d.transportadora) : ''], ['Entrega em', d.endereco_entrega],
       ['Seu pedido', d.seu_pedido], ['Referência', d.ref]].filter(x => x[1]);
-    const cab = '<th class="n">#</th>' + (comFoto ? '<th class="foto"></th>' : '') + (comCodigo ? '<th>Código</th>' : '') + '<th>Produto</th>' + (comUn ? '<th>Un.</th>' : '') + '<th class="num">Qtd.</th><th class="num">Preço unit.</th>' +
+    const cab = '<th class="n">#</th>' + (comCodigo ? '<th>Código</th>' : '') + '<th>Produto</th>' + (comUn ? '<th>Un.</th>' : '') + '<th class="num">Qtd.</th><th class="num">Preço unit.</th>' +
       (comDesc ? '<th class="num">Desc.</th>' : '') + '<th class="num">Total</th>';
-    const cols = 5 + (comFoto ? 1 : 0) + (comCodigo ? 1 : 0) + (comUn ? 1 : 0) + (comDesc ? 1 : 0);
+    const meta = [d.versao ? 'Versão ' + d.versao : '', 'Emissão <b>' + esc(R.dataBR(emitida)) + '</b>', p.validade ? 'Válido até <b>' + esc(R.dataBR(p.validade)) + '</b>' : ''].filter(Boolean).join(' · ');
     const el = $('#impressao');
-    el.innerHTML = '<div class="proposta-doc">' +
-      '<header><img src="' + esc(CRM.logo()) + '" alt=""><div class="dir"><p class="doc-tipo">' + esc(titulo) + '</p>' +
-        '<p>Emitido em ' + esc(R.dataBR(emitida)) + '</p>' + (p.validade ? '<p><strong>Válido até ' + esc(R.dataBR(p.validade)) + '</strong></p>' : '') + '</div></header>' +
-      '<section class="partes"><div class="cliente"><h2>Para</h2><p><strong>' + esc(e ? e.razao_social || e.nome : '') + '</strong>' + (e && e.cnpj ? '<br>CNPJ/CPF ' + esc(e.cnpj) : '') +
-        (ac ? '<br>A/C ' + esc(ac) + (c && c.cargo ? ' — ' + esc(c.cargo) : '') : '') + (endereco ? '<br>' + esc(endereco) : '') + '</p></div>' +
-        (vend ? '<div class="vendedor"><h2>Seu contato</h2><p><strong>' + esc(vend.nome) + '</strong>' + (vend.telefone ? '<br>' + esc(vend.telefone) : '') + (vend.email ? '<br>' + esc(vend.email) : '') + '</p></div>' : '') +
+    el.innerHTML = '<div class="proposta-doc">' + ondaSVG('cima') +
+      '<header><img src="' + esc(CRM.logo()) + '" alt="' + esc(CRM.nomeInstalacao()) + '">' +
+        '<div class="doc-id"><span class="rotulo">' + (p.numero_fkn ? 'Orçamento' : 'Proposta comercial') + '</span>' +
+        '<strong class="numero">nº ' + esc(p.numero_fkn ? Number(p.numero_fkn).toLocaleString('pt-BR') : p.numero) + '</strong><span class="doc-meta">' + meta + '</span></div></header>' +
+      '<section class="partes"><div><h2>Cliente</h2><p class="nome">' + esc(e ? e.razao_social || e.nome : '') + '</p>' + (e && e.cnpj ? '<p>CNPJ/CPF ' + esc(e.cnpj) + '</p>' : '') +
+        (ac ? '<p>A/C ' + esc(ac) + (c && c.cargo ? ' — ' + esc(c.cargo) : '') + '</p>' : '') + (endereco ? '<p>' + esc(endereco) + '</p>' : '') + '</div>' +
+        (vend ? '<div><h2>Atendimento</h2><p class="nome">' + esc(vend.nome) + '</p>' + (vend.telefone ? '<p>' + esc(vend.telefone) + '</p>' : '') + (vend.email ? '<p>' + esc(vend.email) + '</p>' : '') + '</div>' : '') +
       '</section>' +
-      '<table><thead><tr>' + cab + '</tr></thead><tbody>' +
-      itens.map((it, i) => '<tr><td class="n">' + (i + 1) + '</td>' + (comFoto ? '<td class="foto">' + (fotos[i] ? '<img src="' + esc(fotos[i]) + '" alt="">' : '') + '</td>' : '') + (comCodigo ? '<td class="cod">' + esc(it.codigo || '') + '</td>' : '') + '<td>' + esc(it.descricao) + '</td>' +
-        (comUn ? '<td>' + esc(it.unidade || '') + '</td>' : '') + '<td class="num">' + esc(qtd(it.quantidade)) + '</td><td class="num">' + esc(precoUnit(it.preco)) + '</td>' +
+      '<table class="itens"><thead><tr>' + cab + '</tr></thead><tbody>' +
+      itens.map((it, i) => '<tr><td class="n">' + (i + 1) + '</td>' + (comCodigo ? '<td class="cod">' + esc(it.codigo || '') + '</td>' : '') + '<td>' + esc(it.descricao) + '</td>' +
+        (comUn ? '<td class="un">' + esc(it.unidade || '') + '</td>' : '') + '<td class="num">' + esc(qtd(it.quantidade)) + '</td><td class="num">' + esc(precoUnit(it.preco)) + '</td>' +
         (comDesc ? '<td class="num">' + (R.num(it.desconto) ? esc(R.numero(it.desconto)) + '%' : '—') + '</td>' : '') +
-        '<td class="num">' + esc(R.moeda(it.total != null ? it.total : R.totalItem(it))) + '</td></tr>').join('') +
-      '</tbody><tfoot>' + (R.num(d.frete) ? '<tr class="sub"><td colspan="' + (cols - 1) + '">Frete</td><td class="num">' + esc(R.moeda(d.frete)) + '</td></tr>' : '') +
-        '<tr><td colspan="' + (cols - 1) + '">Total</td><td class="num">' + esc(R.moeda(p.valor_total)) + '</td></tr></tfoot></table>' +
-      (cond.length ? '<section class="condicoes"><h2>Condições</h2><dl>' + cond.map(x => '<div><dt>' + esc(x[0]) + '</dt><dd>' + esc(x[1]) + '</dd></div>').join('') + '</dl></section>'
-        : p.condicoes ? '<section><h2>Condições</h2><p class="pre">' + esc(p.condicoes) + '</p></section>' : '') +
-      (p.observacoes ? '<section><h2>Observações</h2><p class="pre">' + esc(p.observacoes) + '</p></section>' : '') +
-      '<footer><p class="agradece">Obrigado pela preferência! Qualquer ajuste, é só falar com ' + esc(vend ? R.primeiroNome(vend.nome) : 'a gente') + '.</p>' +
-        (E().cfg.proposta_rodape ? '<p class="pre">' + esc(E().cfg.proposta_rodape) + '</p>' : '<p>' + esc(CRM.nomeInstalacao()) + '</p>') + '</footer></div>';
+        '<td class="num tot">' + esc(R.moeda(totalDe(it))) + '</td></tr>').join('') + '</tbody></table>' +
+      '<section class="fecho"><div class="condicoes">' +
+        (cond.length ? '<h2>Condições</h2><dl>' + cond.map(x => '<div><dt>' + esc(x[0]) + '</dt><dd>' + esc(x[1]) + '</dd></div>').join('') + '</dl>'
+          : p.condicoes ? '<h2>Condições</h2><p class="pre">' + esc(p.condicoes) + '</p>' : '') +
+        (p.observacoes ? '<h2 class="obs">Observações</h2><p class="pre">' + esc(p.observacoes) + '</p>' : '') + '</div>' +
+        '<div class="totais"><dl><div><dt>Produtos (' + itens.length + (itens.length === 1 ? ' item' : ' itens') + ')</dt><dd>' + esc(R.moeda(subtotal)) + '</dd></div>' +
+          (temFrete ? '<div><dt>Frete</dt><dd>' + (R.num(d.frete) ? esc(R.moeda(d.frete)) : 'grátis') + '</dd></div>' : '') + '</dl>' +
+          '<div class="total"><span>Total</span><strong>' + esc(R.moeda(p.valor_total)) + '</strong></div>' +
+          (p.validade ? '<p class="validade">Condições válidas até ' + esc(R.dataBR(p.validade)) + '</p>' : '') + '</div></section>' +
+      '<footer><p class="agradece">Obrigado pela preferência!</p><p>Qualquer ajuste de produto ou quantidade, é só falar com ' + esc(vend ? R.primeiroNome(vend.nome) : 'a gente') + '.</p>' +
+        '<p class="rodape">' + esc(E().cfg.proposta_rodape || CRM.nomeInstalacao()) + '</p></footer>' + ondaSVG('pe') + '</div>';
     document.body.classList.add('imprimindo');
     const titAntes = document.title;
     document.title = (p.numero_fkn ? 'Orcamento ' + p.numero_fkn : 'Proposta ' + p.numero) + ' - ' + (e ? e.nome : ''); // nome sugerido do PDF
     const limpa = () => { document.body.classList.remove('imprimindo'); document.title = titAntes; window.removeEventListener('afterprint', limpa); };
     window.addEventListener('afterprint', limpa);
-    // Espera as fotos carregarem (até 4 s) para não sair o PDF com o quadro vazio.
+    // Espera o logo carregar (até 4 s) para não sair o PDF sem ele.
     const imgs = [...el.querySelectorAll('img')].filter(i => !i.complete);
     Promise.race([Promise.all(imgs.map(i => new Promise(ok => { i.onload = i.onerror = ok; }))), new Promise(ok => setTimeout(ok, 4000))])
       .then(() => setTimeout(() => window.print(), 50));

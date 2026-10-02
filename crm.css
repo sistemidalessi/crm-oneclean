@@ -401,41 +401,45 @@ body.arrastando-card .zonas-fim { display: grid; grid-template-columns: 1fr 1fr;
   body.imprimindo > *:not(.impressao) { display: none !important; }
   body.imprimindo .impressao { display: block; }
 }
-.proposta-doc { font: 10.5pt/1.45 system-ui, sans-serif; color: #1b1b1b; padding: 8mm 10mm; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-.proposta-doc header { display: flex; gap: 14px; align-items: center; padding-bottom: 12px; margin-bottom: 12px; position: relative; }
-.proposta-doc header::after, .proposta-doc footer::before { content: ''; position: absolute; left: 0; right: 0; height: 5px; border-radius: 3px; background: linear-gradient(90deg, var(--grad-a), var(--grad-b)); }
-.proposta-doc header::after { bottom: 0; }
-.proposta-doc header img { width: auto; max-width: 220px; height: 64px; object-fit: contain; }
-.proposta-doc header p { margin: 0; }
-.proposta-doc header .dir { margin-left: auto; text-align: right; }
-.proposta-doc .doc-tipo { font-size: 15pt; font-weight: 700; color: var(--marinho); }
-.proposta-doc h2 { font-size: 9pt; text-transform: uppercase; letter-spacing: .6px; color: var(--grad-esc); margin: 12px 0 4px; }
-.proposta-doc .partes { display: grid; grid-template-columns: 1.6fr 1fr; gap: 12px; }
-.proposta-doc .partes > div { background: var(--grad-claro); border-left: 4px solid var(--grad-a); border-radius: 6px; padding: 6px 10px 8px; }
-.proposta-doc .partes h2 { margin-top: 2px; }
-.proposta-doc .partes p { margin: 0; }
-.proposta-doc table { width: 100%; border-collapse: collapse; margin-top: 12px; }
-.proposta-doc th, .proposta-doc td { border-bottom: 1px solid #d9dee0; padding: 5px 6px; text-align: left; vertical-align: top; }
-.proposta-doc thead tr { background: linear-gradient(90deg, var(--marinho), var(--grad-esc)); }
-.proposta-doc th { background: transparent; color: #fff; font-size: 8.5pt; text-transform: uppercase; letter-spacing: .3px; }
-.proposta-doc tbody tr:nth-child(even) td { background: #f6f8f9; }
-.proposta-doc td.n, .proposta-doc th.n { width: 1.6em; color: #777; }
-.proposta-doc th.n { color: rgba(255, 255, 255, .75); }
-.proposta-doc td.cod { color: #555; font-size: 9pt; white-space: nowrap; }
-.proposta-doc th.foto, .proposta-doc td.foto { width: 46px; padding: 3px 4px; }
-.proposta-doc td.foto img { width: 40px; height: 40px; object-fit: contain; display: block; border-radius: 4px; background: #fff; }
-.proposta-doc tbody td { vertical-align: middle; }
-.proposta-doc .num { text-align: right; white-space: nowrap; }
-.proposta-doc tfoot td { font-weight: 700; font-size: 12pt; border-top: 2px solid var(--grad-esc); border-bottom: 0; color: var(--marinho); }
-.proposta-doc tfoot tr.sub td { font-size: 10pt; font-weight: 600; color: #333; border-top: 1px solid #d9dee0; }
-.proposta-doc .condicoes dl { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 16px; margin: 0; }
-.proposta-doc .condicoes dl > div { display: flex; gap: 10px; }
-.proposta-doc .condicoes dt { color: #666; flex: 0 0 auto; min-width: 7em; white-space: nowrap; }
-.proposta-doc .condicoes dd { margin: 0; font-weight: 600; }
-.proposta-doc .pre { white-space: pre-wrap; margin: 0; }
-.proposta-doc footer { margin-top: 22px; padding-top: 12px; color: #555; font-size: 8.5pt; position: relative; }
-.proposta-doc footer::before { top: 0; height: 3px; }
-.proposta-doc footer .agradece { color: var(--marinho); font-size: 10pt; font-weight: 600; margin: 0 0 4px; }
+.proposta-doc { font: 10pt/1.5 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; color: #24323a; padding: 0 12mm 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.proposta-doc .onda { display: block; width: calc(100% + 24mm); margin: 0 -12mm; height: 13mm; }
+.proposta-doc .onda.pe { height: 7mm; transform: scaleY(-1); opacity: .5; margin-top: 8mm; }
+.proposta-doc p { margin: 0; }
+.proposta-doc header { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; padding: 3mm 0 5mm; border-bottom: 1px solid #e3edef; }
+.proposta-doc header img { width: auto; max-width: 220px; height: 60px; object-fit: contain; }
+.proposta-doc .doc-id { display: grid; gap: 1px; text-align: right; }
+.proposta-doc .doc-id .rotulo { font-size: 8pt; font-weight: 700; letter-spacing: 3px; text-transform: uppercase; color: var(--grad-esc); }
+.proposta-doc .doc-id .numero { font-size: 21pt; font-weight: 600; line-height: 1.15; letter-spacing: -.3px; color: var(--marinho); }
+.proposta-doc .doc-id .doc-meta { font-size: 8.5pt; color: #6b7f87; white-space: nowrap; }
+.proposta-doc .doc-id .doc-meta b { color: #24323a; font-weight: 600; }
+.proposta-doc h2 { font-size: 7.5pt; font-weight: 700; letter-spacing: 1.6px; text-transform: uppercase; color: var(--grad-esc); margin: 0 0 5px; }
+.proposta-doc .partes { display: grid; grid-template-columns: 1.7fr 1fr; gap: 10mm; padding: 5mm 0 6mm; }
+.proposta-doc .partes p { color: #4a5b62; font-size: 9.5pt; }
+.proposta-doc .partes p.nome { color: #1a2a31; font-size: 10.5pt; font-weight: 600; margin-bottom: 2px; }
+.proposta-doc table.itens { width: 100%; border-collapse: collapse; }
+.proposta-doc th { background: none; padding: 0 6px 6px; border-bottom: 1.5px solid var(--grad-a); color: #5f7881; font-size: 7.5pt; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; text-align: left; }
+.proposta-doc td { padding: 7px 6px; border-bottom: 1px solid #edf2f4; vertical-align: middle; }
+.proposta-doc td.n, .proposta-doc th.n { width: 1.8em; color: #9aabb1; font-size: 8.5pt; }
+.proposta-doc td.cod, .proposta-doc td.un { color: #7a8c93; font-size: 8.5pt; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.proposta-doc .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.proposta-doc td.tot { color: #1a2a31; font-weight: 500; }
+.proposta-doc .fecho { display: grid; grid-template-columns: 1.5fr 1fr; gap: 10mm; align-items: start; margin-top: 6mm; break-inside: avoid; }
+.proposta-doc .condicoes dl { display: grid; gap: 5px; margin: 0; }
+.proposta-doc .condicoes dl > div { display: grid; grid-template-columns: 8.5em 1fr; gap: 8px; }
+.proposta-doc .condicoes dt { color: #6b7f87; font-size: 9pt; }
+.proposta-doc .condicoes dd { margin: 0; color: #1a2a31; font-size: 9.5pt; }
+.proposta-doc .condicoes h2.obs { margin-top: 12px; }
+.proposta-doc .totais dl { display: grid; gap: 4px; margin: 0 0 8px; }
+.proposta-doc .totais dl > div { display: flex; justify-content: space-between; color: #4a5b62; font-size: 9.5pt; }
+.proposta-doc .totais dd { margin: 0; font-variant-numeric: tabular-nums; }
+.proposta-doc .total { display: flex; justify-content: space-between; align-items: baseline; padding: 10px 12px; border-left: 3px solid var(--grad-a); border-radius: 8px; background: var(--grad-claro); }
+.proposta-doc .total span { color: var(--grad-esc); font-size: 8pt; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; }
+.proposta-doc .total strong { color: var(--marinho); font-size: 16pt; font-weight: 700; font-variant-numeric: tabular-nums; }
+.proposta-doc .validade { margin-top: 6px; color: #6b7f87; font-size: 8.5pt; text-align: right; }
+.proposta-doc .pre { white-space: pre-wrap; }
+.proposta-doc footer { margin-top: 10mm; padding-top: 5mm; border-top: 1px solid #e3edef; color: #6b7f87; font-size: 8.5pt; text-align: center; }
+.proposta-doc footer .agradece { color: var(--marinho); font-size: 11pt; font-weight: 600; margin-bottom: 1px; }
+.proposta-doc footer .rodape { margin-top: 6px; color: #7a8c93; }
 .proposta-doc tr { break-inside: avoid; }
 
 /* ---------- telas menores (notebook) ---------- */
@@ -568,10 +572,3 @@ label.btn.arquivo input[type=file] { position: absolute; inset: 0; opacity: 0; c
 .colinha-fkn ol li { margin: 3px 0; }
 .colinha-fkn .checklist { list-style: none; padding: 0; margin: 4px 0 8px; }
 .colinha-fkn .checklist li { margin: 2px 0; }
-
-/* Fotos dos produtos (Configurações → Produtos) */
-.tabela .col-foto { width: 44px; padding-top: 4px; padding-bottom: 4px; }
-.mini-foto { width: 36px; height: 36px; object-fit: contain; border-radius: 4px; background: #fff; display: block; }
-.foto-form { display: flex; gap: 14px; align-items: center; margin: 12px 18px 0; }
-.foto-form img { width: 96px; height: 96px; object-fit: contain; border: 1px solid var(--borda, #ddd); border-radius: 6px; background: #fff; }
-.foto-form .dica { margin: 6px 0 0; }

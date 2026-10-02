@@ -175,12 +175,9 @@
   TELAS.produtos = () => {
     const l = E().D.produtos.slice().sort((a, b) => (a.ativo === false) - (b.ativo === false) || a.nome.localeCompare(b.nome, 'pt-BR'));
     return '<div class="barra-acoes"><button type="button" class="btn ouro" data-acao="produto-novo">+ Produto</button>' +
-      '<button type="button" class="btn sec" data-acao="ajustes-secao" data-id="importar">Importar planilha de produtos</button>' +
-      (CRM.fotos && CRM.ehGestor() ? '<button type="button" class="btn sec" data-acao="fotos-varias" title="Escolha várias imagens de uma vez; o nome de cada arquivo é o código do FKN (ex.: 010049.jpg)">Enviar fotos (várias)</button>' : '') + '</div>' +
-      (CRM.fotos ? '<p class="dica">Fotos: aparecem no orçamento enviado ao cliente. Para mandar muitas de uma vez, salve cada imagem com o código do FKN como nome (010049.jpg) e use "Enviar fotos". ' +
-        l.filter(p => p.foto).length + ' de ' + l.length + ' produtos com foto.</p>' : '') +
-      (l.length ? '<div class="cartao sem-pad tabela-rolagem"><table class="tabela clicavel"><thead><tr><th class="col-foto"></th><th>Produto</th><th>Código</th><th>Unidade</th><th>Categoria</th><th class="num">Preço</th><th></th></tr></thead><tbody>' +
-        l.map(p => '<tr data-acao="produto-editar" data-id="' + esc(p.id) + '" tabindex="0" class="' + (p.ativo === false ? 'inativo' : '') + '"><td class="col-foto">' + (p.foto ? '<img class="mini-foto" src="' + esc(p.foto) + '" alt="" loading="lazy">' : '') + '</td><td><strong>' + esc(p.nome) + '</strong></td><td>' + esc(p.codigo || '') + '</td><td>' + esc(p.unidade || '') +
+      '<button type="button" class="btn sec" data-acao="ajustes-secao" data-id="importar">Importar planilha de produtos</button></div>' +
+      (l.length ? '<div class="cartao sem-pad tabela-rolagem"><table class="tabela clicavel"><thead><tr><th>Produto</th><th>Código</th><th>Unidade</th><th>Categoria</th><th class="num">Preço</th><th></th></tr></thead><tbody>' +
+        l.map(p => '<tr data-acao="produto-editar" data-id="' + esc(p.id) + '" tabindex="0" class="' + (p.ativo === false ? 'inativo' : '') + '"><td><strong>' + esc(p.nome) + '</strong></td><td>' + esc(p.codigo || '') + '</td><td>' + esc(p.unidade || '') +
           '</td><td>' + esc(p.categoria || '') + '</td><td class="num">' + esc(R.moeda(p.preco)) + '</td><td>' + (p.ativo === false ? CRM.selo('inativo', 'cinza') : '') + '</td></tr>').join('') + '</tbody></table></div>'
         : '<div class="cartao"><p class="vazio">Nenhum produto. Cadastre aqui ou importe uma planilha — eles aparecem para escolher nos itens do negócio e na proposta.</p></div>');
   };
@@ -192,10 +189,6 @@
         { nome: 'categoria', rotulo: 'Categoria', sugestoes: [...new Set(E().D.produtos.map(x => x.categoria).filter(Boolean))] }, { nome: 'preco', rotulo: 'Preço (R$)', tipo: 'numero' },
         { nome: 'ativo', rotulo: 'Ativo (aparece para escolher)', tipo: 'checkbox', largo: true }],
       valores: p || { ativo: true },
-      htmlAntes: p && CRM.fotos ? '<div class="foto-form"><img class="foto-produto" data-id="' + esc(p.id) + '" src="' + esc(p.foto || '') + '" alt=""' + (p.foto ? '' : ' hidden') + '>' +
-        '<div><button type="button" class="btn sec" data-acao="produto-foto" data-id="' + esc(p.id) + '">' + (p.foto ? 'Trocar foto' : 'Pôr foto') + '</button>' +
-        (p.foto ? ' <button type="button" class="btn sec" data-acao="produto-foto-tirar" data-id="' + esc(p.id) + '">Tirar foto</button>' : '') +
-        '<p class="dica">Aparece no orçamento. JPG, PNG ou WEBP; o CRM reduz o tamanho sozinho.</p></div></div>' : '',
       aoSalvar: v => CRM.salvar('produtos', p && p.id, v),
       aoExcluir: p ? () => CRM.remover('produtos', p.id) : null,
       textoExcluir: 'Excluir o produto? (os negócios que já têm o item continuam com a descrição). Se ele só saiu de linha, prefira desmarcar "Ativo".'

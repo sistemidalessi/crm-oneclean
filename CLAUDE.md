@@ -586,16 +586,16 @@ A vendedora continua fazendo o orçamento no FKN (preço, estoque e condição f
   Rodapé da proposta preenchido em 02/10 (autorizado pelo Anderson, dados do caminhão):
   "OneClean · Produtos de Limpeza e Descartáveis · WhatsApp (11) 98719-0372 · vendas@oneclean.com.br ·
   www.oneclean.com.br" (`crm_config.dados.proposta_rodape`; CNPJ ficou de fora até ele passar).
-- **Fotos dos produtos no orçamento (02/10, pedido do Anderson)** — `fotos.js`: foto por produto
-  (Configurações → Produtos: "Pôr/Trocar foto" no produto ou **"Enviar fotos (várias)"**, com o
-  nome de cada arquivo sendo o código do FKN, ex. `010049.jpg`; código sem produto no catálogo é
-  criado a partir da listagem do FKN quando quem envia é admin). Reduzida no navegador (600 px,
-  JPEG ~10–60 KB) e guardada no Storage, **bucket público `crm-fotos`** (leitura pública por URL,
-  porque a foto precisa abrir no PDF; só gestor/admin envia/troca/apaga — políticas em
-  `schema.sql`, aplicadas em produção em 02/10), endereço em `crm_produtos.foto` (`?v=` contra
-  cache). No orçamento entra uma coluna com a foto quando algum item tem; a impressão espera as
-  fotos carregarem (até 4 s). CSP: `img-src` com `blob:` e `https://*.supabase.co`.
-  As fotos em si o Anderson ainda vai providenciar (fornecedores/site).
+- **Fotos dos produtos: feitas e tiradas no mesmo dia (02/10)** — o Anderson achou desnecessário;
+  `fotos.js` apagado. Ficaram em produção, sem uso e vazios, a coluna `crm_produtos.foto` e o bucket
+  `crm-fotos` (não reintroduzir sem ele pedir).
+- **Layout "clean" do orçamento (02/10, pedido do Anderson: profissional, leitura limpa, que lembre
+  limpeza)** — `fichas.imprimirProposta` + `.proposta-doc`: onda no degradê da marca no alto e no pé
+  da página (água), "ORÇAMENTO nº" grande à direita com emissão/validade, Cliente e Atendimento sem
+  caixas (rótulos pequenos em caixa alta), tabela só com linhas finas (cabeçalho com sublinhado
+  turquesa), fecho com Condições à esquerda e quadro do Total à direita, agradecimento e rodapé
+  centralizados. Cuidado com nomes de classe: `.topo` e `.meta` já existem no CRM (`.topo` some na
+  impressão) — por isso `onda cima/pe` e `doc-meta`.
 - **Degradê da marca na proposta (02/10):** tirado dos prints do Instagram e do site que o Anderson
   mandou (o ambiente bloqueia `www.oneclean.com.br`): turquesa `#03baca` → azul `#0198cf`, em
   `config.js → cores.gradiente`. Vira as faixas do topo e do rodapé, a borda dos quadros Para/Seu
