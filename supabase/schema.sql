@@ -32,6 +32,8 @@ create table if not exists public.crm_usuarios (
   criado_em    timestamptz not null default now(),
   atualizado_em timestamptz not null default now()
 );
+-- Telefone/WhatsApp da linha da vendedora (aparece na proposta).
+alter table public.crm_usuarios add column if not exists telefone text;
 
 create or replace function public.crm_papel()
 returns text language sql stable security definer set search_path = public as $$
@@ -246,6 +248,11 @@ create table if not exists public.crm_propostas (
   criado_em     timestamptz not null default now(),
   atualizado_em timestamptz not null default now()
 );
+-- Orçamento importado do FKN (orcamento.js): número do orçamento lá e o que mais veio dele
+-- (condição de pagamento, cobrança, frete, transportadora, entrega, A/C…), para o PDF.
+alter table public.crm_propostas add column if not exists numero_fkn text;
+alter table public.crm_propostas add column if not exists dados jsonb not null default '{}'::jsonb;
+create index if not exists crm_propostas_numero_fkn_idx on public.crm_propostas (numero_fkn);
 
 -- Atividade: registro (concluida = true) ou tarefa agendada (concluida = false).
 create table if not exists public.crm_atividades (

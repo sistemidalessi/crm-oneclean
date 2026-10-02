@@ -294,14 +294,17 @@
               '</td><td class="num">' + esc(R.moeda(it.preco)) + '</td><td class="num">' + (R.num(it.desconto) ? esc(R.numero(it.desconto)) + '%' : '—') + '</td><td class="num">' + esc(R.moeda(R.totalItem(it))) + '</td></tr>').join('') +
             '</tbody><tfoot><tr><td colspan="4">Total</td><td class="num"><strong>' + esc(R.moeda(R.totalItens(itens))) + '</strong></td></tr></tfoot></table>'
             : '<p class="vazio">Sem itens. O valor do negócio é o informado à mão.</p>') + '</section>' +
-        '<section><h3>Propostas ' + (pode ? '<button type="button" class="mini" data-acao="nova-proposta">+ gerar proposta</button>' : '') + '</h3>' +
+        '<section><h3>Propostas ' + (pode ? '<button type="button" class="mini" data-acao="nova-proposta">+ gerar proposta</button>' +
+          (CRM.importarOrcamento ? '<button type="button" class="mini" data-acao="importar-orcamento" data-id="' + esc(n.id) + '" title="Arquivo CSV do orçamento salvo no FKN">importar do FKN</button>' : '') : '') + '</h3>' +
           (props.length ? '<ul class="lista">' + props.map(p => '<li class="proposta"><div><strong>#' + esc(p.numero) + ' · ' + esc(R.moeda(p.valor_total)) + '</strong> ' + CRM.seloProposta(p.status) +
             '<small>' + esc([p.enviada_em ? 'enviada ' + R.dataBR(p.enviada_em) : '', p.validade ? 'válida até ' + R.dataBR(p.validade) : '', p.respondida_em ? 'resposta ' + R.dataBR(p.respondida_em) : ''].filter(Boolean).join(' · ')) + '</small></div>' +
             '<span class="acoes-rapidas"><button type="button" class="mini" data-acao="imprimir-proposta" data-id="' + esc(p.id) + '">Imprimir / PDF</button>' +
+            (pode ? '<button type="button" class="mini" data-acao="enviar-proposta" data-id="' + esc(p.id) + ':whatsapp" title="Abre o WhatsApp com a mensagem; anexe o PDF na conversa">WhatsApp</button>' +
+              '<button type="button" class="mini" data-acao="enviar-proposta" data-id="' + esc(p.id) + ':email" title="Abre o e-mail para todos os endereços do cliente; anexe o PDF">E-mail</button>' : '') +
             (pode && p.status === 'rascunho' ? '<button type="button" class="mini" data-acao="proposta-status" data-id="' + esc(p.id) + ':enviada">Marcar enviada</button>' : '') +
             (pode && p.status === 'enviada' ? '<button type="button" class="mini verde" data-acao="proposta-status" data-id="' + esc(p.id) + ':aprovada">Aprovada</button><button type="button" class="mini" data-acao="proposta-status" data-id="' + esc(p.id) + ':recusada">Recusada</button>' : '') +
             (pode ? '<button type="button" class="mini" data-acao="editar-proposta" data-id="' + esc(p.id) + '">editar</button>' : '') + '</span></li>').join('') + '</ul>'
-            : '<p class="vazio">Nenhuma proposta. "Gerar proposta" usa os itens acima e fica numerada.</p>') + '</section>' +
+            : '<p class="vazio">Nenhuma proposta. "Gerar proposta" usa os itens acima e fica numerada; "importar do FKN" traz o orçamento feito lá.</p>') + '</section>' +
       '</div>' +
       '<div class="ficha-col historico">' +
         '<section><h3>Próximo passo <button type="button" class="mini" data-acao="tarefa-negocio">+ tarefa</button></h3>' +
@@ -675,29 +678,91 @@
     }
   }
 
+  // Proposta / orçamento no layout da empresa (logo e cores da instalação). Serve para a proposta
+  // gerada no CRM e para o orçamento importado do FKN (p.dados: pagamento, frete, entrega…).
   fichas.imprimirProposta = p => {
     const n = CRM.negocio(p.negocio_id);
     const e = n && CRM.empresa(n.empresa_id);
     const c = n && n.contato_id ? CRM.contato(n.contato_id) : (e && principal(e.id));
     const vend = n && CRM.usuario(n.responsavel_id);
+    const d = p.dados || {};
+    const itens = p.itens || [];
+    const comCodigo = itens.some(it => it.codigo), comUn = itens.some(it => it.unidade), comDesc = itens.some(it => R.num(it.desconto));
+    const qtd = v => String(+Number(v || 0).toFixed(3)).replace('.', ',');
+    const precoUnit = v => 'R$ ' + Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+    const titulo = p.numero_fkn ? 'Orçamento nº ' + Number(p.numero_fkn).toLocaleString('pt-BR') + (d.versao ? ' · versão ' + d.versao : '') : 'Proposta comercial nº ' + p.numero;
+    const emitida = d.emissao || p.enviada_em || R.diaLocal(p.criado_em);
+    const endereco = e ? [[e.logradouro, e.numero].filter(Boolean).join(', '), e.bairro, [e.cidade, e.uf].filter(Boolean).join('/'), e.cep].filter(Boolean).join(' · ') : '';
+    const ac = (c && c.nome) || d.ac;
+    const cond = [['Pagamento', d.pagamento ? d.pagamento + (d.cobranca ? ' · ' + d.cobranca.toLowerCase() : '') : ''], ['Prazo de entrega', d.prazo_entrega],
+      ['Frete', d.fkn ? (R.num(d.frete) ? R.moeda(d.frete) : 'grátis') + (d.frete_tipo ? ' (' + String(d.frete_tipo).replace(/^\d+-/, '') + ')' : '') : ''],
+      ['Transporte', d.transportadora ? (d.transportadora === 'PROPRIO' ? 'frota própria' : d.transportadora) : ''], ['Entrega em', d.endereco_entrega],
+      ['Seu pedido', d.seu_pedido], ['Referência', d.ref]].filter(x => x[1]);
+    const cab = '<th class="n">#</th>' + (comCodigo ? '<th>Código</th>' : '') + '<th>Produto</th>' + (comUn ? '<th>Un.</th>' : '') + '<th class="num">Qtd.</th><th class="num">Preço unit.</th>' +
+      (comDesc ? '<th class="num">Desc.</th>' : '') + '<th class="num">Total</th>';
+    const cols = 5 + (comCodigo ? 1 : 0) + (comUn ? 1 : 0) + (comDesc ? 1 : 0);
     const el = $('#impressao');
     el.innerHTML = '<div class="proposta-doc">' +
-      '<header><img src="' + esc(CRM.logo()) + '" alt=""><div><h1>' + esc(CRM.nomeInstalacao()) + '</h1><p>Proposta comercial nº ' + esc(p.numero) + '</p></div>' +
-      '<div class="dir"><p>' + esc(R.dataBR(p.enviada_em || p.criado_em)) + '</p>' + (p.validade ? '<p>Válida até ' + esc(R.dataBR(p.validade)) + '</p>' : '') + '</div></header>' +
-      '<section class="cliente"><h2>Para</h2><p><strong>' + esc(e ? e.razao_social || e.nome : '') + '</strong>' + (e && e.cnpj ? '<br>CNPJ/CPF ' + esc(e.cnpj) : '') +
-      (c ? '<br>A/C ' + esc(c.nome) + (c.cargo ? ' — ' + esc(c.cargo) : '') : '') +
-      (e ? '<br>' + esc([[e.logradouro, e.numero].filter(Boolean).join(', '), e.bairro, [e.cidade, e.uf].filter(Boolean).join('/')].filter(Boolean).join(' · ')) : '') + '</p></section>' +
-      '<table><thead><tr><th>Item</th><th class="num">Qtd.</th><th class="num">Preço unit.</th><th class="num">Desc.</th><th class="num">Total</th></tr></thead><tbody>' +
-      (p.itens || []).map(it => '<tr><td>' + esc(it.descricao) + '</td><td class="num">' + esc(R.numero(it.quantidade)) + '</td><td class="num">' + esc(R.moeda(it.preco)) +
-        '</td><td class="num">' + (R.num(it.desconto) ? esc(R.numero(it.desconto)) + '%' : '—') + '</td><td class="num">' + esc(R.moeda(it.total != null ? it.total : R.totalItem(it))) + '</td></tr>').join('') +
-      '</tbody><tfoot><tr><td colspan="4">Total</td><td class="num">' + esc(R.moeda(p.valor_total)) + '</td></tr></tfoot></table>' +
-      (p.condicoes ? '<section><h2>Condições</h2><p class="pre">' + esc(p.condicoes) + '</p></section>' : '') +
+      '<header><img src="' + esc(CRM.logo()) + '" alt=""><div class="dir"><p class="doc-tipo">' + esc(titulo) + '</p>' +
+        '<p>Emitido em ' + esc(R.dataBR(emitida)) + '</p>' + (p.validade ? '<p><strong>Válido até ' + esc(R.dataBR(p.validade)) + '</strong></p>' : '') + '</div></header>' +
+      '<section class="partes"><div class="cliente"><h2>Para</h2><p><strong>' + esc(e ? e.razao_social || e.nome : '') + '</strong>' + (e && e.cnpj ? '<br>CNPJ/CPF ' + esc(e.cnpj) : '') +
+        (ac ? '<br>A/C ' + esc(ac) + (c && c.cargo ? ' — ' + esc(c.cargo) : '') : '') + (endereco ? '<br>' + esc(endereco) : '') + '</p></div>' +
+        (vend ? '<div class="vendedor"><h2>Seu contato</h2><p><strong>' + esc(vend.nome) + '</strong>' + (vend.telefone ? '<br>' + esc(vend.telefone) : '') + (vend.email ? '<br>' + esc(vend.email) : '') + '</p></div>' : '') +
+      '</section>' +
+      '<table><thead><tr>' + cab + '</tr></thead><tbody>' +
+      itens.map((it, i) => '<tr><td class="n">' + (i + 1) + '</td>' + (comCodigo ? '<td class="cod">' + esc(it.codigo || '') + '</td>' : '') + '<td>' + esc(it.descricao) + '</td>' +
+        (comUn ? '<td>' + esc(it.unidade || '') + '</td>' : '') + '<td class="num">' + esc(qtd(it.quantidade)) + '</td><td class="num">' + esc(precoUnit(it.preco)) + '</td>' +
+        (comDesc ? '<td class="num">' + (R.num(it.desconto) ? esc(R.numero(it.desconto)) + '%' : '—') + '</td>' : '') +
+        '<td class="num">' + esc(R.moeda(it.total != null ? it.total : R.totalItem(it))) + '</td></tr>').join('') +
+      '</tbody><tfoot>' + (R.num(d.frete) ? '<tr class="sub"><td colspan="' + (cols - 1) + '">Frete</td><td class="num">' + esc(R.moeda(d.frete)) + '</td></tr>' : '') +
+        '<tr><td colspan="' + (cols - 1) + '">Total</td><td class="num">' + esc(R.moeda(p.valor_total)) + '</td></tr></tfoot></table>' +
+      (cond.length ? '<section class="condicoes"><h2>Condições</h2><dl>' + cond.map(x => '<div><dt>' + esc(x[0]) + '</dt><dd>' + esc(x[1]) + '</dd></div>').join('') + '</dl></section>'
+        : p.condicoes ? '<section><h2>Condições</h2><p class="pre">' + esc(p.condicoes) + '</p></section>' : '') +
       (p.observacoes ? '<section><h2>Observações</h2><p class="pre">' + esc(p.observacoes) + '</p></section>' : '') +
-      '<footer>' + (vend ? '<p>' + esc(vend.nome) + (vend.email ? ' · ' + esc(vend.email) : '') + '</p>' : '') + '</footer></div>';
+      '<footer><p class="agradece">Obrigado pela preferência! Qualquer ajuste, é só falar com ' + esc(vend ? R.primeiroNome(vend.nome) : 'a gente') + '.</p>' +
+        (E().cfg.proposta_rodape ? '<p class="pre">' + esc(E().cfg.proposta_rodape) + '</p>' : '<p>' + esc(CRM.nomeInstalacao()) + '</p>') + '</footer></div>';
     document.body.classList.add('imprimindo');
-    const limpa = () => { document.body.classList.remove('imprimindo'); window.removeEventListener('afterprint', limpa); };
+    const titAntes = document.title;
+    document.title = (p.numero_fkn ? 'Orcamento ' + p.numero_fkn : 'Proposta ' + p.numero) + ' - ' + (e ? e.nome : ''); // nome sugerido do PDF
+    const limpa = () => { document.body.classList.remove('imprimindo'); document.title = titAntes; window.removeEventListener('afterprint', limpa); };
     window.addEventListener('afterprint', limpa);
     setTimeout(() => window.print(), 50);
+  };
+
+  // Enviar a proposta ao cliente: abre o WhatsApp (ou o e-mail para todos os endereços) com o
+  // modelo de envio de orçamento e o resumo (número, valor, validade). O link do WhatsApp não leva
+  // arquivo: o PDF ("Imprimir / PDF" → Salvar como PDF) é anexado na conversa. A proposta passa a
+  // "enviada" (histórico e etapa, como no "Marcar enviada") e, na volta, o CRM pergunta como foi.
+  fichas.enviarProposta = async (pid, canal, el) => {
+    const p = E().ix.porId.propostas.get(pid); if (!p) return;
+    const n = CRM.negocio(p.negocio_id), e = n && CRM.empresa(n.empresa_id); if (!e) return;
+    const c = n.contato_id ? CRM.contato(n.contato_id) : null;
+    const nome = p.numero_fkn ? 'Orçamento nº ' + Number(p.numero_fkn).toLocaleString('pt-BR') : 'Proposta nº ' + p.numero;
+    const resumo = nome + ' · ' + R.moeda(p.valor_total) + (p.validade ? ' · válido até ' + R.dataBR(p.validade) : '');
+    const v = variaveis(e, c || escolheContato(e, null, x => canal === 'email' ? x.email : R.linkWhatsApp(x.whatsapp || x.celular || x.telefone)));
+    const modelo = E().D.modelos.find(m => m.canal === canal && /or[çc]amento/i.test(m.nome) && /envi/i.test(m.nome));
+    let reg;
+    if (canal === 'whatsapp') {
+      const cw = c && R.linkWhatsApp(telDe(null, c)) ? c : escolheContato(e, null, x => R.linkWhatsApp(x.whatsapp || x.celular || x.telefone));
+      const tel = telDe(e, cw);
+      if (!R.linkWhatsApp(tel)) { CRM.toast('Sem número de WhatsApp com DDD neste cliente.', true); return; }
+      const texto = (modelo ? R.aplicaModelo(modelo.corpo, v) : v.saudacao + ' Segue o orçamento que combinamos.') + '\n\n' + resumo;
+      window.open(R.linkWhatsApp(tel, texto), '_blank', 'noopener');
+      reg = await registraAuto(e, cw, 'whatsapp', nome + ' enviado pelo WhatsApp' + (cw ? ' a ' + cw.nome : '') + ': ' + texto);
+      esperaVolta(e, cw, reg, 'whatsapp');
+    } else {
+      const para = emailsDe(e, c && separaEmails(c.email).length ? c : null);
+      if (!para.length) { CRM.toast('Sem e-mail cadastrado neste cliente.', true); return; }
+      const assunto = modelo ? R.aplicaModelo(modelo.assunto || '', v) : nome + ' — ' + CRM.nomeInstalacao();
+      const corpo = (modelo ? R.aplicaModelo(modelo.corpo, v) : v.saudacao + '\n\nSegue em anexo o orçamento.') + '\n\n' + resumo;
+      location.href = linkEmail(para, assunto, corpo);
+      reg = await registraAuto(e, c, 'email', nome + ' por e-mail para ' + para.join(', ') + ' — "' + assunto + '"');
+      esperaVolta(e, c, reg, 'email');
+    }
+    CRM.toast('Anexe o PDF na mensagem: "Imprimir / PDF" → Salvar como PDF.');
+    if (p.status === 'rascunho') {
+      try { const r = await CRM.atualizar('propostas', p.id, { status: 'enviada', enviada_em: CRM.hoje() }); await aoMudarProposta(r, 'rascunho', n); } catch (x) { CRM.falhou(x); }
+    }
   };
 
   // ------------------------------------------------------------ tarefas e registros
@@ -1060,6 +1125,7 @@
     'nova-proposta': () => fichas.formProposta(null, CRM.negocio(abertoNegocio)),
     'editar-proposta': id => fichas.formProposta(E().ix.porId.propostas.get(id), CRM.negocio(abertoNegocio)),
     'imprimir-proposta': id => fichas.imprimirProposta(E().ix.porId.propostas.get(id)),
+    'enviar-proposta': (id, el) => { const [pid, canal] = id.split(':'); fichas.enviarProposta(pid, canal, el).catch(CRM.falhou); },
     'proposta-status': async id => {
       const [pid, st] = id.split(':');
       const p = E().ix.porId.propostas.get(pid);

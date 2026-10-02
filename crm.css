@@ -398,21 +398,34 @@ body.arrastando-card .zonas-fim { display: grid; grid-template-columns: 1fr 1fr;
   body.imprimindo > *:not(.impressao) { display: none !important; }
   body.imprimindo .impressao { display: block; }
 }
-.proposta-doc { font: 11pt/1.4 system-ui, sans-serif; color: #111; padding: 10mm; }
-.proposta-doc header { display: flex; gap: 14px; align-items: center; border-bottom: 3px solid var(--ouro); padding-bottom: 10px; margin-bottom: 14px; }
-.proposta-doc header img { width: auto; max-width: 200px; height: 60px; object-fit: contain; }
-.proposta-doc header h1 { font-size: 16pt; }
+.proposta-doc { font: 10.5pt/1.45 system-ui, sans-serif; color: #1b1b1b; padding: 8mm 10mm; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.proposta-doc header { display: flex; gap: 14px; align-items: center; border-bottom: 4px solid var(--ouro); padding-bottom: 10px; margin-bottom: 12px; }
+.proposta-doc header img { width: auto; max-width: 220px; height: 64px; object-fit: contain; }
 .proposta-doc header p { margin: 0; }
 .proposta-doc header .dir { margin-left: auto; text-align: right; }
-.proposta-doc h2 { font-size: 11pt; text-transform: uppercase; letter-spacing: .5px; color: #555; margin: 14px 0 4px; }
-.proposta-doc .cliente p { margin: 0; }
+.proposta-doc .doc-tipo { font-size: 15pt; font-weight: 700; color: var(--marinho); }
+.proposta-doc h2 { font-size: 9pt; text-transform: uppercase; letter-spacing: .6px; color: var(--marinho); margin: 12px 0 4px; }
+.proposta-doc .partes { display: grid; grid-template-columns: 1.6fr 1fr; gap: 12px; }
+.proposta-doc .partes > div { background: #f4f7f8; border-radius: 6px; padding: 6px 10px 8px; }
+.proposta-doc .partes h2 { margin-top: 2px; }
+.proposta-doc .partes p { margin: 0; }
 .proposta-doc table { width: 100%; border-collapse: collapse; margin-top: 12px; }
-.proposta-doc th, .proposta-doc td { border-bottom: 1px solid #ccc; padding: 6px; text-align: left; }
-.proposta-doc th { background: #f1f1f1; font-size: 9pt; text-transform: uppercase; }
-.proposta-doc .num { text-align: right; }
-.proposta-doc tfoot td { font-weight: 700; font-size: 12pt; border-top: 2px solid #111; }
+.proposta-doc th, .proposta-doc td { border-bottom: 1px solid #d9dee0; padding: 5px 6px; text-align: left; vertical-align: top; }
+.proposta-doc th { background: var(--marinho); color: #fff; font-size: 8.5pt; text-transform: uppercase; letter-spacing: .3px; }
+.proposta-doc tbody tr:nth-child(even) td { background: #f6f8f9; }
+.proposta-doc td.n, .proposta-doc th.n { width: 1.6em; color: #777; }
+.proposta-doc td.cod { color: #555; font-size: 9pt; white-space: nowrap; }
+.proposta-doc .num { text-align: right; white-space: nowrap; }
+.proposta-doc tfoot td { font-weight: 700; font-size: 12pt; border-top: 2px solid var(--marinho); border-bottom: 0; color: var(--marinho); }
+.proposta-doc tfoot tr.sub td { font-size: 10pt; font-weight: 600; color: #333; border-top: 1px solid #d9dee0; }
+.proposta-doc .condicoes dl { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 16px; margin: 0; }
+.proposta-doc .condicoes dl > div { display: flex; gap: 6px; }
+.proposta-doc .condicoes dt { color: #666; min-width: 7.5em; }
+.proposta-doc .condicoes dd { margin: 0; font-weight: 600; }
 .proposta-doc .pre { white-space: pre-wrap; margin: 0; }
-.proposta-doc footer { margin-top: 24px; color: #555; font-size: 9pt; }
+.proposta-doc footer { margin-top: 22px; border-top: 1px solid #d9dee0; padding-top: 8px; color: #555; font-size: 8.5pt; }
+.proposta-doc footer .agradece { color: var(--marinho); font-size: 10pt; font-weight: 600; margin: 0 0 4px; }
+.proposta-doc tr { break-inside: avoid; }
 
 /* ---------- telas menores (notebook) ---------- */
 @media (max-width: 1280px) {

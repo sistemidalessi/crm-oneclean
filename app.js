@@ -425,9 +425,10 @@
     'novo-menu': (id, el) => CRM.menuFlutuante(el, [
       ['Lead / empresa', () => CRM.fichas.formLead(), 'tecla N'],
       ['Negócio', () => CRM.fichas.formNegocio(null, {})],
+      CRM.importarOrcamento ? ['Orçamento do FKN (importar)', () => CRM.importarOrcamento()] : null,
       ['Tarefa', () => CRM.fichas.formTarefa(null, {}), 'tecla T'],
       ['Registrar atividade', () => CRM.fichas.formRegistro(null, {}), 'tecla R']
-    ]),
+    ].filter(Boolean)),
     'menu-usuario': (id, el) => CRM.menuFlutuante(el, [
       ['Recarregar dados', () => CRM.recarregar().then(() => CRM.toast('Atualizado.'))],
       ['Ativar lembretes na tela', pedirNotificacao],

@@ -548,7 +548,42 @@ recusas mais novas que a última entrega boa) faz o aviso de Compras dizer o que
   o próximo passo vem "Nenhum agora".
 - **Modelos de mensagem** (Configurações → Modelos): variáveis novas `{titulos_vencidos}` ("o título
   da NF 2205 (R$ 917,88, vencido em 24/09)"); `{saudacao}` e `{itens}` também listadas na tela.
-- Próximo: o orçamento do FKN importado como proposta no layout da OneClean (esperando amostra).
+- Feito em seguida: o orçamento do FKN importado como proposta (seção abaixo).
+
+## Orçamento do FKN → proposta no layout da OneClean (02/10/2026, pedido do Anderson)
+
+A vendedora continua fazendo o orçamento no FKN (preço, estoque e condição ficam lá); salva em
+**CSV** e importa no CRM, que monta o documento no layout da empresa, pronto para o cliente.
+- **Onde:** "+ Novo" → "Orçamento do FKN (importar)", ou "importar do FKN" na seção Propostas da
+  ficha do negócio. `orcamento.js`: parte pura `CRMOrcamento.lerOrcamentoFKN` (testada em
+  `testes/orcamento.test.js`, dados fictícios) e a tela.
+- **Formato do CSV do FKN** (é a impressão do orçamento): cabeçalho em duas colunas (cliente à
+  esquerda; PROPOSTA, VERSÃO, EMISSÃO, VÁLIDO ATÉ, COD.CLI, TEL, SEU PEDIDO à direita), as 3 linhas
+  depois de "PROPOSTA:" são nome, endereço e CEP/bairro/cidade/UF; itens `IT; CÓDIGO; NOME; UN; QTDE;
+  PREÇO UNIT; %DESC; PREÇO TOTAL;` (preço unitário com 4 casas — "15,4700" é 15,47, não milhar;
+  código "010049.0" vira "010049"); rodapé FRETE, VALOR TOTAL, Cond. pagamento, Cobrança, Prazo
+  entrega, Vendedor, Transportadora, Endereço de entrega. Arquivo em Windows-1252. Com mais de uma
+  página o cabeçalho se repete: itens juntados pelo número. Soma dos itens (+ frete) conferida com o
+  total; diferença aparece em ATENÇÃO na tela.
+- **O que faz:** acha o cliente pelo CNPJ (ou cadastra como lead, origem "Orçamento FKN"); o
+  vendedor escrito no FKN ("ALYSSON") vira o responsável (nomes na nota → nome → primeiro nome);
+  negócio novo "Orçamento N" ou um aberto do cliente, na etapa de orçamento/proposta do funil de
+  vendas (avança, nunca volta); troca os itens do negócio pelos do orçamento (produto ligado pelo
+  código); cria a proposta com `numero_fkn` e `dados` (pagamento, frete, entrega…). **Reimportar o
+  mesmo número atualiza** a mesma proposta (nova versão do FKN), não duplica.
+- **Layout** (`fichas.imprimirProposta`, CSS `.proposta-doc`): logo, "Orçamento nº · versão",
+  emitido/válido até, Para (razão, CNPJ, A/C, endereço) e Seu contato (vendedora com o **telefone
+  da linha**, campo novo no cadastro do usuário), tabela com código/un./desconto, frete e total,
+  condições, agradecimento e o **rodapé da empresa** (Configurações → Geral → "Propostas e
+  orçamentos", `proposta_rodape`). O PDF sai com o nome "Orcamento N - cliente".
+- **Enviar** (botões WhatsApp e E-mail na proposta): abre a conversa com o modelo "Orçamento
+  enviado" / "Envio de orçamento" + resumo (número, valor, validade); o link do WhatsApp não leva
+  arquivo, então a vendedora anexa o PDF. A proposta vira "enviada" (histórico e etapa) e a volta
+  do contato pergunta como foi.
+- Banco: `crm_propostas.numero_fkn`, `crm_propostas.dados` (jsonb), `crm_usuarios.telefone`
+  (aplicados em produção em 02/10). Amostra real conferida (9 itens, soma = total) e apagada.
+- Falta o Anderson: telefone da linha de cada vendedora e o texto do rodapé (CNPJ, telefone,
+  e-mail e site da OneClean).
 
 ## Sequência do lead novo (30/09/2026)
 

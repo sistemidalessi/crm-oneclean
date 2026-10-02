@@ -46,6 +46,8 @@
     { tipo: 'secao', rotulo: 'Notas fiscais' },
     { nome: 'vendedores_antigos', rotulo: 'Ex-vendedores (como aparecem na nota, separados por vírgula)', largo: true, dica: 'ex.: NICOLLY, JULIA', ajuda: 'as notas deles contam no faturamento e em Compras, sem ir para a carteira ou o histórico de ninguém' },
     { nome: 'pasta_fkn', rotulo: 'Pasta dos relatórios do FKN (a que o vigia olha)', largo: true, dica: 'ex.: \\\\Servidor\\sistema\\CRM-FKN', ajuda: 'aparece no lembrete de Compras (manhã e tarde) para quem puxa a listagem de produtos e o contas a receber' },
+    { tipo: 'secao', rotulo: 'Propostas e orçamentos' },
+    { nome: 'proposta_rodape', rotulo: 'Rodapé da proposta (dados da empresa)', largo: true, tipo: 'textarea', linhas: 2, dica: 'ex.: OneClean · CNPJ 00.000.000/0001-00 · (11) 4000-0000 · contato@empresa.com.br', ajuda: 'sai no fim de toda proposta e orçamento em PDF' },
     { tipo: 'secao', rotulo: 'Automações' },
     { nome: 'rodizio', rotulo: 'Lead cadastrado pelo gestor sem responsável vai para o próximo vendedor (rodízio)', tipo: 'checkbox', largo: true },
     { nome: 'auto_tarefa_lead', rotulo: 'Lead novo ganha a tarefa "Fazer o primeiro contato"', tipo: 'checkbox', largo: true },
@@ -223,6 +225,7 @@
       { nome: 'email', rotulo: 'E-mail (login)', tipo: 'email', obrigatorio: !u && sup, desabilitado: !!u && sup },
       { nome: 'papel', rotulo: 'Papel', tipo: 'select', opcoes: R.PAPEIS, padrao: 'vendedor' },
       { nome: 'equipe', rotulo: 'Equipe', dica: 'ex.: Interno, Externo, Campinas' },
+      { nome: 'telefone', rotulo: 'Telefone / WhatsApp da linha', tipo: 'tel', dica: '(11) 90000-0000', ajuda: 'aparece nas propostas, para o cliente falar com a pessoa' },
       { nome: 'nomes_nota_txt', rotulo: 'Nome na nota fiscal (se for diferente do nome)', largo: true, dica: 'ex.: DIRETO', ajuda: 'como o FKN escreve "VENDEDOR: …" nas notas desta pessoa; vários, separados por vírgula' },
       { nome: 'recebe_leads', rotulo: 'Recebe leads do rodízio (o comprador nunca recebe)', tipo: 'checkbox', largo: true },
       { nome: 'ativo', rotulo: 'Ativo (desmarcar tira o acesso na hora)', tipo: 'checkbox', largo: true }
@@ -254,7 +257,7 @@
           await CRM.store().adminUsuarios({ acao: 'criar', nome: v.nome, email: v.email, senha: v.senha, papel: v.papel, equipe: v.equipe, recebe_leads: v.recebe_leads, ativo: v.ativo });
           await CRM.recarregar();
           const novo = E().D.usuarios.find(x => String(x.email || '').toLowerCase() === String(v.email).toLowerCase());
-          if (novo && nomesNota.length) await CRM.atualizar('usuarios', novo.user_id, { nomes_nota: nomesNota });
+          if (novo && (nomesNota.length || v.telefone)) await CRM.atualizar('usuarios', novo.user_id, Object.assign(nomesNota.length ? { nomes_nota: nomesNota } : {}, v.telefone ? { telefone: v.telefone } : {}));
           alert('Usuário criado.\n\nLogin: ' + v.email + '\nSenha provisória: ' + v.senha + '\n\nPasse para a pessoa (ela pode trocar depois).');
         } else {
           delete v.senha;
