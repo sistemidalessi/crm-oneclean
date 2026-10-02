@@ -690,6 +690,9 @@
       '<path d="M0 30 C 130 10, 270 8, 410 26 S 690 46, 800 20 V0 H0 Z" fill="url(#' + id + ')" opacity=".28"/>' +
       '<path d="M0 18 C 150 0, 290 2, 430 16 S 700 32, 800 8 V0 H0 Z" fill="url(#' + id + ')"/></svg>';
   }
+  // "11944884942" → "(11) 94488-4942" (o cadastro aceita só números).
+  const telBonito = t => { const d = R.digitos(t).replace(/^55(?=\d{10,11}$)/, ''); return d.length === 11 ? '(' + d.slice(0, 2) + ') ' + d.slice(2, 7) + '-' + d.slice(7) : d.length === 10 ? '(' + d.slice(0, 2) + ') ' + d.slice(2, 6) + '-' + d.slice(6) : String(t || ''); };
+  fichas.telBonito = telBonito;
   fichas.imprimirProposta = p => {
     const n = CRM.negocio(p.negocio_id);
     const e = n && CRM.empresa(n.empresa_id);
@@ -720,7 +723,7 @@
         '<strong class="numero">nº ' + esc(p.numero_fkn ? Number(p.numero_fkn).toLocaleString('pt-BR') : p.numero) + '</strong><span class="doc-meta">' + meta + '</span></div></header>' +
       '<section class="partes"><div><h2>Cliente</h2><p class="nome">' + esc(e ? e.razao_social || e.nome : '') + '</p>' + (e && e.cnpj ? '<p>CNPJ/CPF ' + esc(e.cnpj) + '</p>' : '') +
         (ac ? '<p>A/C ' + esc(ac) + (c && c.cargo ? ' — ' + esc(c.cargo) : '') + '</p>' : '') + (endereco ? '<p>' + esc(endereco) + '</p>' : '') + '</div>' +
-        (vend ? '<div><h2>Atendimento</h2><p class="nome">' + esc(vend.nome) + '</p>' + (vend.telefone ? '<p>' + esc(vend.telefone) + '</p>' : '') + (vend.email ? '<p>' + esc(vend.email) + '</p>' : '') + '</div>' : '') +
+        (vend ? '<div><h2>Atendimento</h2><p class="nome">' + esc(vend.nome) + '</p>' + (vend.telefone ? '<p>WhatsApp ' + esc(telBonito(vend.telefone)) + '</p>' : '') + (vend.email ? '<p>' + esc(vend.email) + '</p>' : '') + '</div>' : '') +
       '</section>' +
       '<table class="itens"><thead><tr>' + cab + '</tr></thead><tbody>' +
       itens.map((it, i) => '<tr><td class="n">' + (i + 1) + '</td>' + (comCodigo ? '<td class="cod">' + esc(it.codigo || '') + '</td>' : '') + '<td>' + esc(it.descricao) + '</td>' +
