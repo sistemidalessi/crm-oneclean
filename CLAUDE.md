@@ -537,6 +537,10 @@ recusas mais novas que a última entrega boa) faz o aviso de Compras dizer o que
   Brasília): `delete … where atualizado_em < agora and (origem <> 'nota' or criado_em < geradoEm)`.
 - Ficha: título da nota aparece com "(da nota)" até o FKN confirmar.
 - Notas já importadas antes de 02/10 não ganham título pela nota (o contas a receber do FKN já os tem).
+- **Conferido em produção (02/10, 17:41):** as primeiras 5 notas novas pelo vigia (2564 a 2568,
+  de Isabela, Alysson e Silmara) geraram 6 títulos `origem='nota'` (a 2565 em 2 parcelas), com soma
+  das parcelas = valor da nota, vencimentos do `<dup>`, portador BOLETO e o mesmo cliente da nota.
+  A rotina de conferência de hora em hora foi apagada.
 
 ## WhatsApp: caminho 3 e volta do contato (02/10/2026, decisão do Anderson)
 
