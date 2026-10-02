@@ -66,7 +66,7 @@ OneClean é o **FKN** (SIFWin, da FKN Informática) — com N; não escrever "FK
 juntados, 26 marcados "outra empresa", grupos ligados), chave de teste excluída, `pg_net` removido,
 token do Agendor revogado (novo gerado e não usado), `C:\Migracao` apagada; o backup do CRM já não
 estava na pasta do Financeiro. Supabase conferido (cadastro público e login anônimo desligados, confirmação de e-mail ligada,
-Site URL e Redirect URL = endereço do Pages). **Falta:** subir o estoque real em Compras.
+Site URL e Redirect URL = endereço do Pages). Estoque real subido em 01/10 (listagem do FKN).
 
 **01/10, tarde — FKN no CRM (feito):** listagem cadastral de produtos (SIFN108) em Compras
 (fornecedor, linha, família, mínimo/máximo, já pedido, caixa fechada, pedido por fornecedor) e
@@ -75,7 +75,7 @@ ver "FKN: listagem de produtos e contas a receber" abaixo. A OneClean tem duas r
 FKN (DISTRIBUIDORA e BRASIL): **as duas valem como OneClean** (decisão do Anderson); as notas no CRM
 são todas de um CNPJ só e os números das duplicatas do contas a receber são os
 números dessas notas (174 títulos: 172 ligados pela nota, 2 pelo CNPJ, nenhum sem cliente).
-**Falta o Anderson:** subir a listagem de produtos em Compras e o contas a receber na Gestão
+**Feito em 01/10:** listagem de produtos e contas a receber subidos (depois, pelo vigia)
 (os dois botões aceitam o CSV salvo pelo FKN).
 
 **Quadros clicáveis (01/10, pedido da líder) — feito:** em Relatórios todos os quadros (vendido,
@@ -174,9 +174,8 @@ recusas mais novas que a última entrega boa) faz o aviso de Compras dizer o que
   tarefas novas + 114 atualizadas. CRM ficou com 2.098 empresas, 3.172 negócios (= Agendor),
   5.720 atividades. Setembro no CRM: ganhos 111 / R$ 127.871,57, perdidos 68 / R$ 151.088,92.
   A API do Agendor passou a recusar o histórico por empresa (erro 400 pedindo filtro de data):
-  sem efeito, o histórico antigo já tinha entrado em 29/09. **Falta o Anderson:** revogar o
-  token do Agendor, apagar `C:\Migracao\agendor-exportado-*.json` e tirar o backup do CRM da
-  pasta de rede `\\servidor\Financeiro\Recepção de Documentos`.
+  sem efeito, o histórico antigo já tinha entrado em 29/09. Feito em 01/10: token do Agendor
+  revogado, `C:\Migracao` apagada e backup fora da pasta do Financeiro.
 
 ## Registro de 30/09/2026, manhã
 
