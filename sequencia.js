@@ -111,14 +111,16 @@
       if (!para.length) { CRM.toast('Sem e-mail cadastrado para este lead.', true); return; }
       const v = F.variaveis(e, c), assunto = R.aplicaModelo(p.assunto || p.titulo, v), corpo = R.aplicaModelo(p.mensagem, v);
       location.href = F.linkEmail(para, assunto, corpo);
-      await F.registraAuto(e, escolhido, 'email', 'E-mail da sequência para ' + para.join(', ') + ' — "' + assunto + '": ' + corpo);
+      const reg = await F.registraAuto(e, escolhido, 'email', 'E-mail da sequência para ' + para.join(', ') + ' — "' + assunto + '": ' + corpo);
+      if (F.esperaVolta) F.esperaVolta(e, c, reg, 'email', true); // o passo seguinte da sequência já é agendado
     } else {
       const c = F.escolheContato(e, a.contato_id, x => R.linkWhatsApp(x.whatsapp || x.celular || x.telefone));
       const tel = F.telDe(e, c);
       if (!R.linkWhatsApp(tel)) { CRM.toast('Sem número de WhatsApp com DDD neste lead.', true); return; }
       const texto = R.aplicaModelo(p.mensagem, F.variaveis(e, c));
       window.open(R.linkWhatsApp(tel, texto), '_blank', 'noopener');
-      await F.registraAuto(e, c, 'whatsapp', 'WhatsApp da sequência' + (c ? ' para ' + c.nome : '') + ': ' + texto);
+      const reg = await F.registraAuto(e, c, 'whatsapp', 'WhatsApp da sequência' + (c ? ' para ' + c.nome : '') + ': ' + texto);
+      if (F.esperaVolta) F.esperaVolta(e, c, reg, 'whatsapp', true);
     }
     await CRM.concluirTarefa(a.id, true);
   }

@@ -320,7 +320,7 @@
   // ================================================================ Modelos
   TELAS.modelos = () => {
     const l = E().D.modelos.slice().sort((a, b) => a.canal.localeCompare(b.canal) || a.nome.localeCompare(b.nome, 'pt-BR'));
-    return '<p class="dica">Aparecem ao clicar em WhatsApp ou E-mail na ficha. Variáveis: <code>{primeiro_nome}</code> <code>{contato}</code> <code>{empresa}</code> <code>{vendedor}</code> <code>{vendedor_primeiro_nome}</code> <code>{minha_empresa}</code> <code>{data}</code>. ' +
+    return '<p class="dica">Aparecem ao clicar em WhatsApp ou E-mail na ficha. Variáveis: <code>{saudacao}</code> ("Olá, Maria!") <code>{primeiro_nome}</code> <code>{contato}</code> <code>{empresa}</code> <code>{vendedor}</code> <code>{vendedor_primeiro_nome}</code> <code>{minha_empresa}</code> <code>{data}</code> <code>{itens}</code> (o que o cliente costuma levar) <code>{titulos_vencidos}</code> ("o título da NF 2205 (R$ 917,88, vencido em 24/09)"). ' +
       'A mensagem enviada fica registrada sozinha no histórico do cliente.</p><div class="barra-acoes"><button type="button" class="btn ouro" data-acao="modelo-novo">+ Modelo</button></div>' +
       (l.length ? '<div class="cartao sem-pad"><table class="tabela clicavel"><thead><tr><th>Nome</th><th>Canal</th><th>Texto</th></tr></thead><tbody>' +
         l.map(m => '<tr data-acao="modelo-editar" data-id="' + esc(m.id) + '" tabindex="0"><td><strong>' + esc(m.nome) + '</strong></td><td>' + (m.canal === 'email' ? 'E-mail' : 'WhatsApp') + '</td><td><small>' + esc((m.assunto ? m.assunto + ' — ' : '') + m.corpo.slice(0, 140)) + '</small></td></tr>').join('') +

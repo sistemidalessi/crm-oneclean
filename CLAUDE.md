@@ -535,6 +535,21 @@ recusas mais novas que a última entrega boa) faz o aviso de Compras dizer o que
 - Ficha: título da nota aparece com "(da nota)" até o FKN confirmar.
 - Notas já importadas antes de 02/10 não ganham título pela nota (o contas a receber do FKN já os tem).
 
+## WhatsApp: caminho 3 e volta do contato (02/10/2026, decisão do Anderson)
+
+- Decisão: **sem WhatsApp não oficial** (Z-API, Evolution: risco de bloqueio do número); o oficial
+  da Meta (API Cloud) fica para depois. Cada vendedora tem **uma linha da empresa (chip próprio)**,
+  não usa número pessoal — bom para a API oficial no futuro (cada linha vira um número da conta).
+- **Volta do contato** (`fichas.js`, `esperaVolta`/`formVolta`): depois de abrir WhatsApp ou
+  e-mail pelo CRM (ficha, listas, recompra, sequência), quando a vendedora volta para a aba (focus
+  ou visibilitychange, depois de 4 s e até 3 h) abre "Como foi o WhatsApp com X?": resultado,
+  o que ficou combinado (vai para o histórico, na mesma atividade) e o próximo passo (tarefa
+  WhatsApp/e-mail às 9h, prazo sugerido pelo resultado). Recompra e sequência já agendam o retorno:
+  o próximo passo vem "Nenhum agora".
+- **Modelos de mensagem** (Configurações → Modelos): variáveis novas `{titulos_vencidos}` ("o título
+  da NF 2205 (R$ 917,88, vencido em 24/09)"); `{saudacao}` e `{itens}` também listadas na tela.
+- Próximo: o orçamento do FKN importado como proposta no layout da OneClean (esperando amostra).
+
 ## Sequência do lead novo (30/09/2026)
 
 - `sequencia.js` (depois de `ajustes.js`) embrulha `CRM.auto.aoCriarEmpresa` e

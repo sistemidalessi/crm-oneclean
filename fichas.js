@@ -796,7 +796,15 @@
     const itens = R.textoItens(R.itensHabituais(E().ix, e.id));
     return { contato: c ? c.nome : '', primeiro_nome: pn, empresa: e.nome, vendedor: E().eu.nome, saudacao: trat ? 'Olá, ' + trat[1] + ' ' + trat[2] + '!' : pn ? 'Olá, ' + pn + '!' : 'Olá!',
       vendedor_primeiro_nome: R.primeiroNome(E().eu.nome), data: R.dataBR(CRM.hoje()), minha_empresa: CRM.nomeInstalacao(),
-      itens: itens || 'os produtos de sempre' };
+      itens: itens || 'os produtos de sempre', titulos_vencidos: titulosVencidos(e) };
+  }
+  // "o título da NF 2205 (R$ 917,88, vencido em 24/09)" — para o modelo de cobrança gentil.
+  function titulosVencidos(e) {
+    const f = CRM.financeiro ? CRM.financeiro(e.id) : null, hoje = CRM.hoje();
+    const l = f ? f.titulos.filter(t => t.vencimento < hoje) : [];
+    if (!l.length) return 'o pagamento em aberto';
+    const um = t => 'NF ' + (t.nota_numero || t.duplicata) + ' (' + R.moeda(t.valor) + ', vencido em ' + R.dataBR(t.vencimento).slice(0, 5) + ')';
+    return (l.length === 1 ? 'o título da ' : 'os títulos ') + l.map(um).join(', ');
   }
 
   function escolheContato(e, contatoId, pred) {
@@ -813,13 +821,66 @@
 
   async function registraAuto(e, c, tipo, texto) {
     try {
-      await CRM.inserir('atividades', { empresa_id: e.id, contato_id: c ? c.id : null, tipo, descricao: texto, concluida: true, concluida_em: agoraISO(), data_hora: agoraISO(), responsavel_id: CRM.meuId(), automatica: true });
-      CRM.toast('Registrado no histórico. Edite se quiser anotar a resposta.');
-    } catch (x) { CRM.falhou(x); }
+      const a = await CRM.inserir('atividades', { empresa_id: e.id, contato_id: c ? c.id : null, tipo, descricao: texto, concluida: true, concluida_em: agoraISO(), data_hora: agoraISO(), responsavel_id: CRM.meuId(), automatica: true });
+      CRM.toast('Registrado no histórico. Quando voltar, conte como foi.');
+      return a;
+    } catch (x) { CRM.falhou(x); return null; }
+  }
+
+  // ------------------------------------------------------------ volta do WhatsApp / e-mail
+  // Depois de abrir o WhatsApp (ou o e-mail), quando a vendedora volta para o CRM aparece um
+  // quadro rápido: como foi, o que ficou combinado e o próximo passo — assim a conversa não some
+  // e o cliente não fica sem retorno. "Depois" fecha sem mexer em nada.
+  const RESULTADOS = [['aguardando', 'Mandei, estou aguardando a resposta'], ['respondeu', 'Respondeu, conversamos'], ['orcamento', 'Pediu orçamento'],
+    ['pedido', 'Fechou pedido'], ['sem_interesse', 'Sem interesse agora'], ['nao_atende', 'Não atende / número errado']];
+  const PROXIMO = { aguardando: ['2', 'Cobrar a resposta'], respondeu: ['7', 'Retomar o contato'], orcamento: ['1', 'Acompanhar o orçamento'],
+    pedido: ['7', 'Pós-venda: conferir se chegou tudo certo'], sem_interesse: ['30', 'Tentar de novo'], nao_atende: ['1', 'Conferir o telefone e tentar outro contato'] };
+  let aguardandoVolta = null;
+  function esperaVolta(e, c, atividade, tipo, jaAgendado) {
+    aguardandoVolta = { empresaId: e.id, contatoId: c ? c.id : null, atividade, tipo, jaAgendado: !!jaAgendado, desde: Date.now() };
+  }
+  function aoVoltar() {
+    const v = aguardandoVolta;
+    if (!v || document.visibilityState === 'hidden' || Date.now() - v.desde < 4000) return; // ainda não saiu de verdade
+    aguardandoVolta = null;
+    if (Date.now() - v.desde > 3 * 3600e3 || document.querySelector('#dlgForm[open]')) return;
+    formVolta(v);
+  }
+  if (typeof window !== 'undefined') { window.addEventListener('focus', aoVoltar); document.addEventListener('visibilitychange', aoVoltar); }
+  function formVolta(v) {
+    const e = CRM.empresa(v.empresaId); if (!e) return;
+    const canal = v.tipo === 'email' ? 'e-mail' : 'WhatsApp';
+    CRM.abrirForm({
+      titulo: 'Como foi o ' + canal + ' com ' + e.nome + '?', intro: 'Anote o que ficou combinado e deixe o próximo passo agendado. "Cancelar" fecha sem mudar nada.', semFoco: true,
+      campos: [
+        { nome: 'resultado', rotulo: 'Resultado', tipo: 'select', opcoes: RESULTADOS, padrao: 'aguardando', largo: true },
+        { nome: 'anotacao', rotulo: 'O que ficou combinado (opcional)', tipo: 'textarea', linhas: 2, largo: true, dica: 'ex.: pediu orçamento de papel toalha; quer entrega na segunda' },
+        { nome: 'proximo', rotulo: 'Próximo passo', tipo: 'select', opcoes: [['', 'Nenhum agora'], ['1', 'Amanhã'], ['2', 'Em 2 dias'], ['7', 'Em 1 semana'], ['30', 'Em 1 mês']],
+          padrao: v.jaAgendado ? '' : PROXIMO.aguardando[0], ajuda: v.jaAgendado ? 'o retorno já ficou agendado automaticamente' : '' },
+        { nome: 'proximo_desc', rotulo: 'O que fazer', padrao: PROXIMO.aguardando[1] }
+      ],
+      salvarTexto: 'Registrar',
+      extras: form => {
+        const r = form.elements.resultado;
+        r.addEventListener('change', () => { const p = PROXIMO[r.value]; if (!p) return; if (!v.jaAgendado || r.value !== 'aguardando') form.elements.proximo.value = p[0]; form.elements.proximo_desc.value = p[1]; });
+      },
+      aoSalvar: async val => {
+        const rot = R.rotulo(RESULTADOS, val.resultado);
+        if (v.atividade && v.atividade.id) {
+          const a = E().ix.porId.atividades.get(v.atividade.id) || v.atividade;
+          await CRM.atualizar('atividades', a.id, { descricao: String(a.descricao || '') + '\nResultado: ' + rot + (val.anotacao ? ' — ' + val.anotacao : '') });
+        }
+        if (val.proximo) {
+          await CRM.auto.tarefa({ empresa_id: e.id, contato_id: v.contatoId, tipo: v.tipo === 'email' ? 'email' : 'whatsapp', descricao: val.proximo_desc || PROXIMO[val.resultado][1],
+            data_hora: R.momento(R.somaDias(CRM.hoje(), Number(val.proximo)), '09:00'), responsavel_id: e.responsavel_id || CRM.meuId() });
+        }
+        CRM.toast('Registrado' + (val.proximo ? ' e próximo passo agendado.' : '.'));
+      }
+    });
   }
 
   // Para outros módulos (sequencia.js) montarem mensagens do mesmo jeito.
-  Object.assign(fichas, { variaveis, telDe, escolheContato, registraAuto });
+  Object.assign(fichas, { variaveis, telDe, escolheContato, registraAuto, esperaVolta });
 
   fichas.whatsapp = (empresaId, el) => {
     const e = CRM.empresa(empresaId); if (!e) return;
@@ -829,7 +890,8 @@
     comModelo(el, 'whatsapp', m => {
       const texto = m ? R.aplicaModelo(m.corpo, variaveis(e, c)) : '';
       window.open(R.linkWhatsApp(tel, texto), '_blank', 'noopener');
-      registraAuto(e, c, 'whatsapp', (m ? 'Mensagem "' + m.nome + '" enviada pelo WhatsApp' : 'Conversa aberta no WhatsApp') + (c ? ' com ' + c.nome : '') + (texto ? ': ' + texto : ''));
+      registraAuto(e, c, 'whatsapp', (m ? 'Mensagem "' + m.nome + '" enviada pelo WhatsApp' : 'Conversa aberta no WhatsApp') + (c ? ' com ' + c.nome : '') + (texto ? ': ' + texto : ''))
+        .then(a => esperaVolta(e, c, a, 'whatsapp'));
     });
   };
 
@@ -842,7 +904,8 @@
     if (!R.linkWhatsApp(tel)) { CRM.toast('Sem número de WhatsApp com DDD nesta empresa.', true); return; }
     const texto = R.aplicaModelo(E().cfg.modelo_recompra, variaveis(e, c));
     window.open(R.linkWhatsApp(tel, texto), '_blank', 'noopener');
-    await registraAuto(e, c, 'whatsapp', 'Recompra oferecida pelo WhatsApp' + (c ? ' a ' + c.nome : '') + ': ' + texto);
+    const reg = await registraAuto(e, c, 'whatsapp', 'Recompra oferecida pelo WhatsApp' + (c ? ' a ' + c.nome : '') + ': ' + texto);
+    esperaVolta(e, c, reg, 'whatsapp', true);
     await CRM.auto.tarefa({ empresa_id: e.id, contato_id: c ? c.id : null, tipo: 'whatsapp', descricao: 'Retorno da oferta de recompra',
       data_hora: R.momento(R.somaDias(CRM.hoje(), 2), '09:00'), responsavel_id: e.responsavel_id || CRM.meuId() });
   };
@@ -881,7 +944,8 @@
       const corpo = m ? R.aplicaModelo(m.corpo, v) : '';
       location.href = linkEmail(para, assunto, corpo);
       if (para.length > 1) CRM.toast('E-mail aberto para ' + para.length + ' endereços.');
-      registraAuto(e, escolhido, 'email', 'E-mail para ' + para.join(', ') + (assunto ? ' — "' + assunto + '"' : '') + (corpo ? ': ' + corpo : ''));
+      registraAuto(e, escolhido, 'email', 'E-mail para ' + para.join(', ') + (assunto ? ' — "' + assunto + '"' : '') + (corpo ? ': ' + corpo : ''))
+        .then(a => esperaVolta(e, c, a, 'email'));
     });
   };
 
