@@ -100,7 +100,8 @@
         (f.proximo ? '<br>próximo vencimento ' + esc(R.dataBR(f.proximo)) : '') + '</p>' +
       '<ul class="lista titulos">' + f.titulos.map(t => {
         const venc = t.vencimento < hoje;
-        return '<li><span>' + esc(t.duplicata) + (t.abono ? ' <small>(abono)</small>' : '') + ' · NF ' + esc(t.nota_numero || '') + '</span>' +
+        return '<li><span>' + esc(t.duplicata) + (t.abono ? ' <small>(abono)</small>' : '') + ' · NF ' + esc(t.nota_numero || '') +
+          (t.origem === 'nota' ? ' <small title="Criado pela parcela da nota fiscal; a próxima listagem do FKN confirma">(da nota)</small>' : '') + '</span>' +
           '<small>vence ' + esc(R.dataBR(t.vencimento)) + (venc ? ' ' + CRM.selo(atraso(R.diasEntre(t.vencimento, hoje)) + ' em atraso', 'vermelho') : '') + (t.portador ? ' · ' + esc(t.portador) : '') + '</small>' +
           '<strong>' + esc(R.moeda(t.valor)) + '</strong></li>';
       }).join('') + '</ul></section>';
@@ -151,7 +152,8 @@
     if (conf.recusa.length) throw new Error('Arquivo recusado, nada foi trocado: ' + conf.recusa.join('; ') + '. Veja a colinha no fim de Compras.');
     const lig = ligaEmpresas(lido.titulos, E().D, E().ix);
     CRM.toast('Gravando ' + lig.titulos.length + ' títulos…');
-    const l = await CRM.store().salvarTitulos(lig.titulos);
+    const gerado = lido.posicao ? new Date(lido.posicao + 'T' + (lido.hora || '00:00') + ':00-03:00').toISOString() : null; // horário de Brasília
+    const l = await CRM.store().salvarTitulos(lig.titulos, gerado);
     E().D.titulos = l;
     if (CRM.recarregarFkn) CRM.recarregarFkn();
     CRM.toast('Contas a receber atualizado: ' + lig.titulos.length + ' títulos de ' + lido.clientes + ' clientes (' + R.moeda(lido.soma) + ')' +

@@ -520,6 +520,22 @@ recusas mais novas que a última entrega boa) faz o aviso de Compras dizer o que
   O atraso é contado do vencimento até hoje: entre uma importação e outra, um título pago ainda
   aparece — por isso a data da atualização vai junto.
 
+## Títulos direto das parcelas da nota (02/10/2026)
+
+- A NF-e traz a cobrança: `<cobr><dup><nDup>001</nDup><dVenc>…</dVenc><vDup>…</vDup>`. O FKN numera
+  001, 002…, e no contas a receber a duplicata é **número da nota com 6 dígitos / parcela com 2**
+  (nota 2527 → `002527/01`, `/02`, `/03`, mesmos vencimentos e valores — conferido no servidor).
+- `nfe.js`: `lerXml` devolve `parcelas` e `forma_pagamento` (tPag → portador: 15 BOLETO, 17 PIX…);
+  `planeja` cria `plano.criar.titulos` (origem `nota`) para nota **nova**, de venda e não cancelada;
+  cancelamento → `plano.titulosCancelados` (prefixo `002527`) e os títulos `origem='nota'` saem.
+- Gravação: vigia (`crm-notas`) faz upsert com `ignoreDuplicates` (o que o FKN já listou não é
+  mexido); importação manual filtra o que já existe. `crm_titulos.origem` 'fkn' | 'nota'.
+- A listagem do FKN confirma (vira `origem='fkn'`) e tira o pago, mas **não apaga título de nota
+  criado depois da hora em que o relatório foi gerado** (cabeçalho DATA + hora, horário de
+  Brasília): `delete … where atualizado_em < agora and (origem <> 'nota' or criado_em < geradoEm)`.
+- Ficha: título da nota aparece com "(da nota)" até o FKN confirmar.
+- Notas já importadas antes de 02/10 não ganham título pela nota (o contas a receber do FKN já os tem).
+
 ## Sequência do lead novo (30/09/2026)
 
 - `sequencia.js` (depois de `ajustes.js`) embrulha `CRM.auto.aoCriarEmpresa` e

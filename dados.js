@@ -42,7 +42,7 @@
     metas: { valor: 0 },
     notas: { cancelada: false, valor_total: 0, valor_produtos: 0 },
     nota_itens: { quantidade: 0, valor_unitario: 0, valor_total: 0, ordem: 0 },
-    titulos: { valor: 0, abono: false }
+    titulos: { valor: 0, abono: false, origem: 'fkn' }
   };
 
   // Filhos apagados junto (no Supabase é o "on delete cascade"/"set null").
@@ -372,17 +372,19 @@
 
   // Contas a receber (listagem do FKN): retrato novo a cada importação — grava por duplicata,
   // apaga o que não veio (foi pago) e devolve a lista como ficou.
-  Supa.prototype.salvarTitulos = async function (lista) {
+  // geradoEm: hora em que o FKN gerou o relatório — título criado pela nota depois disso fica.
+  Supa.prototype.salvarTitulos = async function (lista, geradoEm) {
     const agora = new Date().toISOString();
-    const linhas = lista.map(x => { const o = Object.assign({}, x, { atualizado_em: agora }); delete o.id; return o; });
+    const linhas = lista.map(x => { const o = Object.assign({}, x, { atualizado_em: agora, origem: 'fkn' }); delete o.id; return o; });
     for (let i = 0; i < linhas.length; i += LOTE)
       unwrap(await this.sb.from('crm_titulos').upsert(linhas.slice(i, i + LOTE), { onConflict: 'duplicata', defaultToNull: false }));
-    unwrap(await this.sb.from('crm_titulos').delete().lt('atualizado_em', agora));
+    unwrap(await this.sb.from('crm_titulos').delete().lt('atualizado_em', agora).or('origem.neq.nota,criado_em.lt.' + (geradoEm || agora)));
     return tudo(this.sb, 'titulos');
   };
-  Local.prototype.salvarTitulos = async function (lista) {
+  Local.prototype.salvarTitulos = async function (lista, geradoEm) {
     const d = this.ler(), agora = new Date().toISOString();
-    d.titulos = lista.map(x => Object.assign({ id: uuid(), criado_em: agora }, x, { atualizado_em: agora }));
+    const ficam = (d.titulos || []).filter(t => t.origem === 'nota' && t.criado_em >= (geradoEm || agora) && !lista.some(x => x.duplicata === t.duplicata));
+    d.titulos = ficam.concat(lista.map(x => Object.assign({ id: uuid(), criado_em: agora }, x, { atualizado_em: agora, origem: 'fkn' })));
     this.gravar(d);
     return d.titulos;
   };

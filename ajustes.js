@@ -463,7 +463,7 @@
     CRM.render();
   }
 
-  const NOMES_IMPORT = { opcoes: 'itens de lista', etapas: 'etapas do funil', produtos: 'produtos', empresas: 'empresas', contatos: 'pessoas', negocios: 'negócios', negocio_itens: 'itens de negócio', atividades: 'tarefas/histórico', notas: 'notas fiscais', nota_itens: 'itens das notas' };
+  const NOMES_IMPORT = { opcoes: 'itens de lista', etapas: 'etapas do funil', produtos: 'produtos', empresas: 'empresas', contatos: 'pessoas', negocios: 'negócios', negocio_itens: 'itens de negócio', atividades: 'tarefas/histórico', notas: 'notas fiscais', nota_itens: 'itens das notas', titulos: 'títulos a receber (parcelas das notas)' };
 
   function resumoNotas() {
     const r = imp.plano.resumoNotas;
@@ -533,7 +533,9 @@
     imp.etapa = 'rodando';
     CRM.render();
     const prog = t => { imp.progresso = t; const el = $('#progressoImport'); if (el) el.textContent = t; };
-    const ordem = ['opcoes', 'etapas', 'produtos', 'empresas', 'contatos', 'negocios', 'negocio_itens', 'atividades', 'notas', 'nota_itens'];
+    const ordem = ['opcoes', 'etapas', 'produtos', 'empresas', 'contatos', 'negocios', 'negocio_itens', 'atividades', 'notas', 'nota_itens', 'titulos'];
+    // Títulos das parcelas: o que já existe (do FKN ou de outra importação) não é mexido.
+    if (pl.criar.titulos) { const ja = new Set((E().D.titulos || []).map(t => t.duplicata)); pl.criar.titulos = pl.criar.titulos.filter(t => !ja.has(t.duplicata)); }
     const inicio = Date.now();
     imp.resultado = { criados: {}, atualizados: 0, erros: [] };
     try {
@@ -554,6 +556,10 @@
         }
       };
       await Promise.all([trabalhador(), trabalhador(), trabalhador(), trabalhador()]);
+      // Nota cancelada: tira os títulos que vieram das parcelas dela.
+      const pre = new Set(pl.titulosCancelados || []);
+      const sair = (E().D.titulos || []).filter(t => t.origem === 'nota' && pre.has(String(t.duplicata).split('/')[0])).map(t => t.id);
+      if (sair.length) { try { await CRM.store().removerVarios('titulos', sair); } catch (e) { imp.resultado.erros.push('títulos da nota cancelada: ' + e.message); } }
       await CRM.recarregar();
     } catch (e) {
       imp.resultado.erros.push(e.message);

@@ -9,7 +9,7 @@ const EMIT = '11222333000181';
 const base = () => ({ usuarios: [], etapas: [], opcoes: [], produtos: [], metas: [], empresas: [], contatos: [], negocios: [], negocio_itens: [], propostas: [], atividades: [], notas: [], nota_itens: [] });
 const chave = n => ('3526091122233300018155001' + String(n).padStart(9, '0') + '1').padEnd(44, '0').slice(0, 44);
 
-function xml({ n, dest, cnpjDest, itens, tpNF = '1', finNFe = '1', cStat = '100', emit = EMIT, data = '2026-09-15T10:30:00-03:00', prefixo = '', adic = '' }) {
+function xml({ n, dest, cnpjDest, itens, tpNF = '1', finNFe = '1', cStat = '100', emit = EMIT, data = '2026-09-15T10:30:00-03:00', prefixo = '', adic = '', cobr = '' }) {
   const t = (tag, v) => '<' + prefixo + tag + '>' + v + '</' + prefixo + tag + '>';
   const det = itens.map((it, i) => '<' + prefixo + 'det nItem="' + (i + 1) + '">' + t('prod',
     t('cProd', it.cod) + t('cEAN', 'SEM GTIN') + t('xProd', it.desc) + t('NCM', '34022000') + t('CFOP', it.cfop || '5102') + t('uCom', it.un || 'UN') +
@@ -21,7 +21,7 @@ function xml({ n, dest, cnpjDest, itens, tpNF = '1', finNFe = '1', cStat = '100'
     t('emit', t('CNPJ', emit) + t('xNome', 'DISTRIBUIDORA EXEMPLO LTDA') + t('enderEmit', t('xMun', 'São Bernardo do Campo') + t('UF', 'SP'))) +
     t('dest', (cnpjDest ? t('CNPJ', cnpjDest) : t('CPF', '12345678909')) + t('xNome', dest) + t('enderDest', t('xLgr', 'Rua Um') + t('nro', '10') + t('xBairro', 'Centro') + t('xMun', 'Santo André') + t('UF', 'SP') + t('CEP', '09000000') + t('fone', '1140000000')) + t('email', 'Compras@' + (cnpjDest || 'cpf') + '.com.br')) +
     det + t('total', t('ICMSTot', t('vProd', vProd.toFixed(2)) + t('vNF', (vProd - itens.reduce((s, it) => s + (it.desc0 || 0), 0)).toFixed(2)))) +
-    (adic ? t('infAdic', t('infCpl', adic)) : '') + '</' + prefixo + 'infNFe></' + prefixo + 'NFe>';
+    cobr + (adic ? t('infAdic', t('infCpl', adic)) : '') + '</' + prefixo + 'infNFe></' + prefixo + 'NFe>';
   return '<?xml version="1.0" encoding="UTF-8"?><nfeProc versao="4.00" xmlns="http://www.portalfiscal.inf.br/nfe">' + nfe +
     '<protNFe versao="4.00"><infProt><chNFe>' + chave(n) + '</chNFe><cStat>' + cStat + '</cStat><xMotivo>Autorizado o uso da NF-e</xMotivo></infProt></protNFe></nfeProc>';
 }
@@ -320,4 +320,28 @@ test('vendedor da nota: "nome na nota" (DIRETO) vira o usuário, a nota guarda q
   const dono = fat2.porVendedor.find(v => v.nome === 'Anderson');
   assert.equal(dono.valor, 130);
   assert.deepEqual(dono.nomesNota.map(x => [x.nome, x.valor]), [['DIRETO', 100], ['NICOLLY', 30]]);
+});
+
+test('títulos das parcelas da nota (cobr/dup): duplicata "002527/01", não duplica, cancelamento tira', () => {
+  const COBR = '<cobr><fat><nFat>2527</nFat><vOrig>2042.28</vOrig><vDesc>0.00</vDesc><vLiq>2042.28</vLiq></fat>' +
+    '<dup><nDup>001</nDup><dVenc>2026-10-23</dVenc><vDup>680.76</vDup></dup><dup><nDup>002</nDup><dVenc>2026-10-30</dVenc><vDup>680.76</vDup></dup>' +
+    '<dup><nDup>003</nDup><dVenc>2026-11-06</dVenc><vDup>680.76</vDup></dup></cobr><pag><detPag><indPag>1</indPag><tPag>15</tPag><vPag>2042.28</vPag></detPag></pag>';
+  const it = [{ cod: 'DET5', desc: 'Detergente 5L', q: 10, p: 204.228 }];
+  const d = N.lerXml(xml({ n: 2527, dest: 'CLIENTE EXEMPLO LTDA', cnpjDest: '44555666000199', itens: it, cobr: COBR }));
+  assert.deepEqual(d.parcelas, [{ n: 1, vencimento: '2026-10-23', valor: 680.76 }, { n: 2, vencimento: '2026-10-30', valor: 680.76 }, { n: 3, vencimento: '2026-11-06', valor: 680.76 }]);
+  assert.equal(d.forma_pagamento, '15');
+  const pl = N.planeja(base(), [d], {});
+  assert.deepEqual(pl.criar.titulos.map(t => [t.duplicata, t.parcela, t.vencimento, t.valor, t.portador, t.origem]),
+    [['002527/01', 1, '2026-10-23', 680.76, 'BOLETO', 'nota'], ['002527/02', 2, '2026-10-30', 680.76, 'BOLETO', 'nota'], ['002527/03', 3, '2026-11-06', 680.76, 'BOLETO', 'nota']]);
+  assert.equal(pl.criar.titulos[0].empresa_id, pl.criar.notas[0].empresa_id, 'título no cliente da nota');
+  assert.equal(pl.criar.titulos[0].cliente_doc, '44555666000199');
+  assert.equal(pl.resumoNotas.titulosNovos, 3);
+  // À vista (sem cobr) ou remessa: nenhum título.
+  assert.equal(N.planeja(base(), [N.lerXml(xml({ n: 2528, dest: 'X', cnpjDest: '44555666000199', itens: it }))], {}).criar.titulos.length, 0);
+  assert.equal(N.planeja(base(), [N.lerXml(xml({ n: 2529, dest: 'X', cnpjDest: '44555666000199', itens: [Object.assign({}, it[0], { cfop: '5949' })], cobr: COBR }))], {}).criar.titulos.length, 0);
+  // Nota já importada: não cria de novo. Cancelamento: prefixo para tirar os títulos.
+  const D = base(); D.notas = [{ id: 'n1', chave: d.chave }];
+  const pl2 = N.planeja(D, [d, N.lerXml(cancelamento(2527))], {});
+  assert.equal(pl2.criar.titulos.length, 0);
+  assert.deepEqual(pl2.titulosCancelados, ['002527']);
 });

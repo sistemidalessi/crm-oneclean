@@ -58,12 +58,16 @@ async function arquivoFkn(db: any, integ: { id: string }, f: { nome?: string; ba
   txt = txt.replace(/^\uFEFF/, '');
   const nome = String(f.nome || '').slice(0, 200);
   const agora = new Date().toISOString();
-  const grava = async (tabela: string, linhas: Record<string, unknown>[], conflito: string) => {
+  // naoApagarDesde: título criado pela nota DEPOIS da hora em que o relatório foi gerado não está
+  // nele e não foi pago — fica (só o de antes, que o FKN não listou, sai).
+  const grava = async (tabela: string, linhas: Record<string, unknown>[], conflito: string, naoApagarDesde?: string) => {
     for (let i = 0; i < linhas.length; i += LOTE) {
       const { error } = await db.from(tabela).upsert(linhas.slice(i, i + LOTE).map(x => Object.assign({}, x, { atualizado_em: agora })), { onConflict: conflito, defaultToNull: false });
       if (error) throw new Error(tabela + ': ' + error.message);
     }
-    const { error } = await db.from(tabela).delete().lt('atualizado_em', agora);
+    let q = db.from(tabela).delete().lt('atualizado_em', agora);
+    if (naoApagarDesde) q = q.or('origem.neq.nota,criado_em.lt.' + naoApagarDesde);
+    const { error } = await q;
     if (error) throw new Error(tabela + ' (limpeza): ' + error.message);
   };
   const registra = async (texto: string, qtd: number, valor: number) => {
@@ -102,7 +106,9 @@ async function arquivoFkn(db: any, integ: { id: string }, f: { nome?: string; ba
     const porEmp = new Map<string, unknown[]>();
     (notas as { empresa_id: string }[]).forEach(n => { if (n.empresa_id) { if (!porEmp.has(n.empresa_id)) porEmp.set(n.empresa_id, []); porEmp.get(n.empresa_id)!.push(n); } });
     const lig = K.ligaEmpresas(lido.titulos, { empresas, notas }, { porEmpresa: { notas: porEmp } });
-    await grava('crm_titulos', lig.titulos, 'duplicata');
+    // Hora em que o relatório foi gerado no FKN (cabeçalho DATA + hora; horário de Brasília).
+    const geradoEm = lido.posicao ? new Date(lido.posicao + 'T' + (lido.hora || '00:00') + ':00-03:00').toISOString() : agora;
+    await grava('crm_titulos', lig.titulos.map((t: Record<string, unknown>) => Object.assign({}, t, { origem: 'fkn' })), 'duplicata', geradoEm);
     await registra('Contas a receber do FKN: ' + lig.titulos.length + ' títulos de ' + lido.clientes + ' clientes' + (lig.sem ? ' (' + lig.sem + ' sem cliente no CRM)' : ''), lig.titulos.length, lido.soma);
     return resposta(200, { ok: true, fkn: 'receber', titulos: lig.titulos.length, semCliente: lig.sem });
   }
@@ -198,6 +204,17 @@ Deno.serve(async (req) => {
     for (const a of plano.atualizar) {
       const { error } = await db.from('crm_' + a.tabela).update(a.patch).eq('id', a.id);
       if (error) erros.push(a.tabela + ' ' + a.id + ': ' + error.message);
+    }
+    // Títulos das parcelas (contas a receber já na emissão): o que o FKN já listou não é mexido.
+    const titulos = (plano.criar.titulos || []).filter((t: { nota_numero: number }) => !plano.criar.notas.some((n: { numero: number; id: string }) => n.numero === t.nota_numero && falhou.has(n.id)));
+    for (let i = 0; i < titulos.length; i += LOTE) {
+      const { error } = await db.from('crm_titulos').upsert(titulos.slice(i, i + LOTE), { onConflict: 'duplicata', ignoreDuplicates: true });
+      if (error) erros.push('títulos: ' + error.message);
+    }
+    // Nota cancelada: tira os títulos que vieram dela (os do FKN saem na próxima listagem).
+    for (const pre of plano.titulosCancelados || []) {
+      const { error } = await db.from('crm_titulos').delete().eq('origem', 'nota').like('duplicata', pre + '/%');
+      if (error) erros.push('títulos da nota cancelada ' + pre + ': ' + error.message);
     }
 
     // Situação de cada arquivo, para o vigia registrar.

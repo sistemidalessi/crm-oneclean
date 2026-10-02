@@ -761,7 +761,7 @@ alter table public.crm_estoque add column if not exists ult_saida       date;
 
 -- contas a receber (listagem SIFN016 do FKN, "em aberto"): retrato dos títulos; cada importação
 -- troca o retrato inteiro. Quem vê: gestor e administrador, todos; vendedor, os da carteira dele.
--- Só o administrador importa.
+-- O administrador importa a listagem; as notas (vigia ou gestora) criam os títulos das parcelas.
 create table if not exists public.crm_titulos (
   id             uuid primary key default gen_random_uuid(),
   duplicata      text not null check (length(btrim(duplicata)) > 0),
@@ -781,6 +781,14 @@ create table if not exists public.crm_titulos (
   atualizado_em  timestamptz not null default now()
 );
 create unique index if not exists crm_titulos_duplicata_uq on public.crm_titulos (duplicata);
+-- origem: 'fkn' (veio da listagem) ou 'nota' (criado pelas parcelas da NF-e, ainda não confirmado
+-- pelo FKN). A listagem só apaga título da nota criado antes da hora em que ela foi gerada.
+alter table public.crm_titulos add column if not exists origem text not null default 'fkn';
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'crm_titulos_origem_ck') then
+    alter table public.crm_titulos add constraint crm_titulos_origem_ck check (origem in ('fkn', 'nota'));
+  end if;
+end $$;
 create index if not exists crm_titulos_empresa_idx on public.crm_titulos (empresa_id);
 alter table public.crm_titulos enable row level security;
 revoke all on public.crm_titulos from anon, public;
@@ -791,7 +799,8 @@ drop policy if exists altera on public.crm_titulos;
 drop policy if exists apaga on public.crm_titulos;
 create policy le on public.crm_titulos for select to authenticated
   using ((select public.crm_eh_gestor()) or empresa_id in (select public.crm_empresas_minhas()));
-create policy grava on public.crm_titulos for insert to authenticated with check ((select public.crm_eh_admin()));
+-- gravar: a gestora também (a importação manual de notas cria os títulos das parcelas).
+create policy grava on public.crm_titulos for insert to authenticated with check ((select public.crm_eh_gestor()));
 -- alterar: a gestora também (ao juntar cadastros duplicados, o título vai para o cadastro que fica).
 create policy altera on public.crm_titulos for update to authenticated using ((select public.crm_eh_gestor())) with check ((select public.crm_eh_gestor()));
 create policy apaga on public.crm_titulos for delete to authenticated using ((select public.crm_eh_admin()));

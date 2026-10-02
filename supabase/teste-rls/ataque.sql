@@ -111,11 +111,12 @@ insert into crm_titulos (duplicata, empresa_id, vencimento, valor) select '00000
 insert into crm_titulos (duplicata, vencimento, valor) values ('000003/01', current_date, 300) returning 'admin gravou títulos' as ok;
 select pg_temp.como('b0000000-0000-0000-0000-000000000002');
 select 'Gestora vê títulos' t, count(*) from crm_titulos;
-insert into crm_titulos (duplicata, vencimento) values ('x', current_date); -- FALHA
+insert into crm_titulos (duplicata, vencimento, origem) values ('x/01', current_date, 'nota') returning 'gestora gravou título de nota' as ok;
 update crm_titulos set empresa_id = empresa_id where duplicata = '000003/01' returning 'gestora repassou título (junção de duplicados)' as ok;
 select pg_temp.como('c0000000-0000-0000-0000-000000000003');
 select 'Ana vê título que não é dela (NÃO devia)' t, count(*) from crm_titulos where duplicata <> '000001/01' having count(*) > 0;
 select 'Ana vê o título dela' t, count(*) from crm_titulos;
+insert into crm_titulos (duplicata, vencimento) values ('ana/01', current_date); -- FALHA
 update crm_titulos set valor = 0 returning 'Ana alterou título (NÃO devia)';
 select pg_temp.como('d0000000-0000-0000-0000-000000000004');
 select 'Bruno vê título que não é dele (NÃO devia)' t, count(*) from crm_titulos where duplicata <> '000002/01' having count(*) > 0;

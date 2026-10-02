@@ -78,6 +78,12 @@
         valor_total: arred(numero(valor(p, 'vProd')) - numero(valor(p, 'vDesc')))
       };
     });
+    // Parcelas (duplicatas) da cobrança: <cobr><dup><nDup>001</nDup><dVenc>…</dVenc><vDup>…</vDup>.
+    // O FKN numera 001, 002…, e no contas a receber a duplicata é "002527/01" (nota/parcela).
+    const cobr = bloco(c, 'cobr');
+    const parcelas = blocos(cobr, 'dup').map((p, i) => ({ n: Number(String(valor(p.corpo, 'nDup')).replace(/\D/g, '')) || i + 1,
+      vencimento: (valor(p.corpo, 'dVenc') || '').slice(0, 10) || null, valor: numero(valor(p.corpo, 'vDup')) })).filter(p => p.vencimento && p.valor > 0);
+    const pag = bloco(bloco(c, 'pag'), 'detPag');
     return {
       tipo: 'nota', chave, modelo: valor(ide, 'mod'), numero: Number(valor(ide, 'nNF')) || null, serie: valor(ide, 'serie') || null,
       emitida_em: valor(ide, 'dhEmi') || (dia ? dia + 'T12:00:00-03:00' : null),
@@ -90,7 +96,8 @@
         complemento: valor(end, 'xCpl'), bairro: valor(end, 'xBairro'), cidade: valor(end, 'xMun'), uf: valor(end, 'UF')
       },
       vendedor: vendedorNoXml(bloco(c, 'infAdic')),
-      valor_produtos: numero(valor(tot, 'vProd')), valor_total: numero(valor(tot, 'vNF')), itens
+      valor_produtos: numero(valor(tot, 'vProd')), valor_total: numero(valor(tot, 'vNF')), itens,
+      parcelas, forma_pagamento: valor(pag, 'tPag') || null
     };
   }
 
@@ -124,10 +131,15 @@
     return { comuns, dominio, nome: comuns >= 2 || (comuns >= 1 && Math.min(te.length, tn.size) === 1), forte: dominio || comuns >= 2 || unica };
   }
 
+  const prefixoDup = numero => String(numero || 0).padStart(6, '0');
+  const PAGAMENTO = { '01': 'DINHEIRO', '02': 'CHEQUE', '03': 'CARTÃO CRÉDITO', '04': 'CARTÃO DÉBITO', '05': 'CRÉDITO LOJA', '15': 'BOLETO',
+    '16': 'DEPÓSITO', '17': 'PIX', '18': 'TRANSFERÊNCIA', '90': 'SEM PAGAMENTO', '99': 'OUTROS' };
+
   function planeja(D, docs, op) {
     op = op || {};
     const texto = v => (v == null || String(v).trim() === '' ? null : String(v).trim());
-    const plano = { criar: { opcoes: [], produtos: [], empresas: [], notas: [], nota_itens: [] }, atualizar: [], contagem: {}, ignorados: [], semResponsavel: [] };
+    const plano = { criar: { opcoes: [], produtos: [], empresas: [], notas: [], nota_itens: [], titulos: [] }, atualizar: [], contagem: {}, ignorados: [], semResponsavel: [],
+      titulosCancelados: [] };
     const conta = (t, k) => { plano.contagem[t] = plano.contagem[t] || { criados: 0, atualizados: 0, ignorados: 0 }; plano.contagem[t][k]++; };
     const resumo = { lidas: 0, novas: 0, valor: 0, foraDoFiltro: 0, valorForaDoFiltro: 0, de: null, ate: null, jaImportadas: 0, canceladas: 0, deOutraEmpresa: 0, entradas: 0,
       devolucoes: 0, naoAutorizadas: 0, empresasLigadas: 0, empresasNovas: 0, cnpjsCompletados: 0, produtosNovos: 0, emitente: null };
@@ -157,6 +169,8 @@
     cancelar.forEach(ch => {
       const ex = existentes.get(ch);
       if (ex && !ex.cancelada) { plano.atualizar.push({ tabela: 'notas', id: ex.id, patch: { cancelada: true } }); conta('notas', 'atualizados'); resumo.canceladas++; }
+      // Nota cancelada: os títulos que vieram dela saem (prefixo da duplicata; o nNF está na chave).
+      plano.titulosCancelados.push(prefixoDup(Number(ch.slice(25, 34))));
     });
 
     // ---- vendedor da nota -> usuário do CRM (nome completo ou primeiro nome, se só um tiver)
@@ -361,6 +375,17 @@
         const dia = R.diaLocal(n.emitida_em);
         if (!resumo.de || dia < resumo.de) resumo.de = dia;
         if (!resumo.ate || dia > resumo.ate) resumo.ate = dia;
+      }
+      // Títulos (contas a receber) das parcelas da nota: entram já ao emitir; a listagem do FKN
+      // confirma depois e tira o que foi pago. Só nota de venda, não cancelada.
+      if (!cancelada && (d.parcelas || []).length && d.itens.some(it => R.cfopDeVenda(it.cfop))) {
+        d.parcelas.forEach(pc => {
+          plano.criar.titulos.push({ duplicata: prefixoDup(d.numero) + '/' + String(pc.n).padStart(2, '0'), nota_numero: d.numero, parcela: pc.n,
+            empresa_id: n.empresa_id || null, cliente_doc: d.cliente.doc || null, cliente_nome: texto(d.cliente.nome), vendedor_nome: texto(d.vendedor),
+            emitida_em: R.diaLocal(n.emitida_em), vencimento: pc.vencimento, valor: pc.valor, portador: PAGAMENTO[d.forma_pagamento] || null, origem: 'nota' });
+          conta('titulos', 'criados');
+        });
+        resumo.titulosNovos = (resumo.titulosNovos || 0) + d.parcelas.length;
       }
       d.itens.forEach(it => {
         const p = produtoDo(it);
