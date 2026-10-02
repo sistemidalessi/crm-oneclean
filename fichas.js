@@ -687,6 +687,7 @@
     const vend = n && CRM.usuario(n.responsavel_id);
     const d = p.dados || {};
     const itens = p.itens || [];
+    const fotos = itens.map(it => (CRM.fotos ? CRM.fotos.doItem(it) : null)), comFoto = fotos.some(Boolean);
     const comCodigo = itens.some(it => it.codigo), comUn = itens.some(it => it.unidade), comDesc = itens.some(it => R.num(it.desconto));
     const qtd = v => String(+Number(v || 0).toFixed(3)).replace('.', ',');
     const precoUnit = v => 'R$ ' + Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
@@ -698,9 +699,9 @@
       ['Frete', d.fkn ? (R.num(d.frete) ? R.moeda(d.frete) : 'grátis') + (d.frete_tipo ? ' (' + String(d.frete_tipo).replace(/^\d+-/, '') + ')' : '') : ''],
       ['Transporte', d.transportadora ? (d.transportadora === 'PROPRIO' ? 'frota própria' : d.transportadora) : ''], ['Entrega em', d.endereco_entrega],
       ['Seu pedido', d.seu_pedido], ['Referência', d.ref]].filter(x => x[1]);
-    const cab = '<th class="n">#</th>' + (comCodigo ? '<th>Código</th>' : '') + '<th>Produto</th>' + (comUn ? '<th>Un.</th>' : '') + '<th class="num">Qtd.</th><th class="num">Preço unit.</th>' +
+    const cab = '<th class="n">#</th>' + (comFoto ? '<th class="foto"></th>' : '') + (comCodigo ? '<th>Código</th>' : '') + '<th>Produto</th>' + (comUn ? '<th>Un.</th>' : '') + '<th class="num">Qtd.</th><th class="num">Preço unit.</th>' +
       (comDesc ? '<th class="num">Desc.</th>' : '') + '<th class="num">Total</th>';
-    const cols = 5 + (comCodigo ? 1 : 0) + (comUn ? 1 : 0) + (comDesc ? 1 : 0);
+    const cols = 5 + (comFoto ? 1 : 0) + (comCodigo ? 1 : 0) + (comUn ? 1 : 0) + (comDesc ? 1 : 0);
     const el = $('#impressao');
     el.innerHTML = '<div class="proposta-doc">' +
       '<header><img src="' + esc(CRM.logo()) + '" alt=""><div class="dir"><p class="doc-tipo">' + esc(titulo) + '</p>' +
@@ -710,7 +711,7 @@
         (vend ? '<div class="vendedor"><h2>Seu contato</h2><p><strong>' + esc(vend.nome) + '</strong>' + (vend.telefone ? '<br>' + esc(vend.telefone) : '') + (vend.email ? '<br>' + esc(vend.email) : '') + '</p></div>' : '') +
       '</section>' +
       '<table><thead><tr>' + cab + '</tr></thead><tbody>' +
-      itens.map((it, i) => '<tr><td class="n">' + (i + 1) + '</td>' + (comCodigo ? '<td class="cod">' + esc(it.codigo || '') + '</td>' : '') + '<td>' + esc(it.descricao) + '</td>' +
+      itens.map((it, i) => '<tr><td class="n">' + (i + 1) + '</td>' + (comFoto ? '<td class="foto">' + (fotos[i] ? '<img src="' + esc(fotos[i]) + '" alt="">' : '') + '</td>' : '') + (comCodigo ? '<td class="cod">' + esc(it.codigo || '') + '</td>' : '') + '<td>' + esc(it.descricao) + '</td>' +
         (comUn ? '<td>' + esc(it.unidade || '') + '</td>' : '') + '<td class="num">' + esc(qtd(it.quantidade)) + '</td><td class="num">' + esc(precoUnit(it.preco)) + '</td>' +
         (comDesc ? '<td class="num">' + (R.num(it.desconto) ? esc(R.numero(it.desconto)) + '%' : '—') + '</td>' : '') +
         '<td class="num">' + esc(R.moeda(it.total != null ? it.total : R.totalItem(it))) + '</td></tr>').join('') +
@@ -726,7 +727,10 @@
     document.title = (p.numero_fkn ? 'Orcamento ' + p.numero_fkn : 'Proposta ' + p.numero) + ' - ' + (e ? e.nome : ''); // nome sugerido do PDF
     const limpa = () => { document.body.classList.remove('imprimindo'); document.title = titAntes; window.removeEventListener('afterprint', limpa); };
     window.addEventListener('afterprint', limpa);
-    setTimeout(() => window.print(), 50);
+    // Espera as fotos carregarem (até 4 s) para não sair o PDF com o quadro vazio.
+    const imgs = [...el.querySelectorAll('img')].filter(i => !i.complete);
+    Promise.race([Promise.all(imgs.map(i => new Promise(ok => { i.onload = i.onerror = ok; }))), new Promise(ok => setTimeout(ok, 4000))])
+      .then(() => setTimeout(() => window.print(), 50));
   };
 
   // Enviar a proposta ao cliente: abre o WhatsApp (ou o e-mail para todos os endereços) com o

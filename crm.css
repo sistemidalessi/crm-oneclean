@@ -278,7 +278,7 @@ body.arrastando-card .zonas-fim { display: grid; grid-template-columns: 1fr 1fr;
 .form > header h2 { flex: 1; }
 .form > footer { border-top: 1px solid var(--borda); }
 .form-corpo { overflow: auto; flex: 1; }
-.form .intro { margin: 12px 18px 0; color: var(--suave); }
+.form .intro { margin: 12px 18px 0; color: var(--suave); white-space: pre-line; }
 .campos { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px 14px; padding: 14px 18px; }
 .campo { display: grid; gap: 3px; align-content: start; grid-column: span 3; }
 .campo.terco { grid-column: span 2; }
@@ -415,6 +415,9 @@ body.arrastando-card .zonas-fim { display: grid; grid-template-columns: 1fr 1fr;
 .proposta-doc tbody tr:nth-child(even) td { background: #f6f8f9; }
 .proposta-doc td.n, .proposta-doc th.n { width: 1.6em; color: #777; }
 .proposta-doc td.cod { color: #555; font-size: 9pt; white-space: nowrap; }
+.proposta-doc th.foto, .proposta-doc td.foto { width: 46px; padding: 3px 4px; }
+.proposta-doc td.foto img { width: 40px; height: 40px; object-fit: contain; display: block; border-radius: 4px; background: #fff; }
+.proposta-doc tbody td { vertical-align: middle; }
 .proposta-doc .num { text-align: right; white-space: nowrap; }
 .proposta-doc tfoot td { font-weight: 700; font-size: 12pt; border-top: 2px solid var(--marinho); border-bottom: 0; color: var(--marinho); }
 .proposta-doc tfoot tr.sub td { font-size: 10pt; font-weight: 600; color: #333; border-top: 1px solid #d9dee0; }
@@ -557,3 +560,10 @@ label.btn.arquivo input[type=file] { position: absolute; inset: 0; opacity: 0; c
 .colinha-fkn ol li { margin: 3px 0; }
 .colinha-fkn .checklist { list-style: none; padding: 0; margin: 4px 0 8px; }
 .colinha-fkn .checklist li { margin: 2px 0; }
+
+/* Fotos dos produtos (Configurações → Produtos) */
+.tabela .col-foto { width: 44px; padding-top: 4px; padding-bottom: 4px; }
+.mini-foto { width: 36px; height: 36px; object-fit: contain; border-radius: 4px; background: #fff; display: block; }
+.foto-form { display: flex; gap: 14px; align-items: center; margin: 12px 18px 0; }
+.foto-form img { width: 96px; height: 96px; object-fit: contain; border: 1px solid var(--borda, #ddd); border-radius: 6px; background: #fff; }
+.foto-form .dica { margin: 6px 0 0; }

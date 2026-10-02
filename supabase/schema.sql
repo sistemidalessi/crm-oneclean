@@ -115,6 +115,9 @@ create table if not exists public.crm_produtos (
   criado_em     timestamptz not null default now(),
   atualizado_em timestamptz not null default now()
 );
+-- Foto do produto (aparece na proposta/orçamento): endereço público no bucket crm-fotos
+-- (com ?v= para o navegador não guardar a antiga) ou, no modo local, a imagem em data: URL.
+alter table public.crm_produtos add column if not exists foto text;
 
 create table if not exists public.crm_modelos (
   id            uuid primary key default gen_random_uuid(),
@@ -876,3 +879,21 @@ select x.tipo, x.nome, x.ordem
     ('motivo_perda','Não era o momento',7)
   ) as x(tipo, nome, ordem)
  where not exists (select 1 from public.crm_opcoes);
+
+-- =================================================================== fotos dos produtos (Storage)
+-- Bucket público para leitura (foto de produto não é dado sigiloso e precisa abrir no PDF da
+-- proposta); só gestor/admin envia, troca ou apaga. Fora do Supabase (teste local) não existe
+-- o esquema storage: o bloco não faz nada.
+do $$
+begin
+  if not exists (select 1 from pg_namespace where nspname = 'storage') then return; end if;
+  insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+  values ('crm-fotos', 'crm-fotos', true, 1048576, array['image/jpeg','image/png','image/webp'])
+  on conflict (id) do update set public = true, file_size_limit = 1048576, allowed_mime_types = excluded.allowed_mime_types;
+  if not exists (select 1 from pg_policies where schemaname = 'storage' and tablename = 'objects' and policyname = 'crm_fotos_le') then
+    create policy crm_fotos_le on storage.objects for select to authenticated using (bucket_id = 'crm-fotos' and (select public.crm_eh_ativo()));
+    create policy crm_fotos_grava on storage.objects for insert to authenticated with check (bucket_id = 'crm-fotos' and (select public.crm_eh_gestor()));
+    create policy crm_fotos_altera on storage.objects for update to authenticated using (bucket_id = 'crm-fotos' and (select public.crm_eh_gestor())) with check (bucket_id = 'crm-fotos' and (select public.crm_eh_gestor()));
+    create policy crm_fotos_apaga on storage.objects for delete to authenticated using (bucket_id = 'crm-fotos' and (select public.crm_eh_gestor()));
+  end if;
+end $$;

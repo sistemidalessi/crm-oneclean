@@ -584,6 +584,17 @@ A vendedora continua fazendo o orçamento no FKN (preço, estoque e condição f
   (aplicados em produção em 02/10). Amostra real conferida (9 itens, soma = total) e apagada.
 - Telefone da linha de cada vendedora: **o Anderson vai preencher** (Configurações → Usuários).
   Falta ainda o texto do rodapé (CNPJ, telefone, e-mail e site da OneClean).
+- **Fotos dos produtos no orçamento (02/10, pedido do Anderson)** — `fotos.js`: foto por produto
+  (Configurações → Produtos: "Pôr/Trocar foto" no produto ou **"Enviar fotos (várias)"**, com o
+  nome de cada arquivo sendo o código do FKN, ex. `010049.jpg`; código sem produto no catálogo é
+  criado a partir da listagem do FKN quando quem envia é admin). Reduzida no navegador (600 px,
+  JPEG ~10–60 KB) e guardada no Storage, **bucket público `crm-fotos`** (leitura pública por URL,
+  porque a foto precisa abrir no PDF; só gestor/admin envia/troca/apaga — políticas em
+  `schema.sql`, aplicadas em produção em 02/10), endereço em `crm_produtos.foto` (`?v=` contra
+  cache). No orçamento entra uma coluna com a foto quando algum item tem; a impressão espera as
+  fotos carregarem (até 4 s). CSP: `img-src` com `blob:` e `https://*.supabase.co`.
+  As fotos em si o Anderson ainda vai providenciar (fornecedores/site). A paleta do site e das
+  redes da OneClean não deu para buscar daqui (o ambiente bloqueia `www.oneclean.com.br`).
 - Lembrete dos relatórios do FKN **só de segunda a sexta** (confirmado pelo Anderson em 02/10: não
   trabalham sábado) — é como já está em `lembreteFkn`; não acrescentar sábado.
 
