@@ -10,7 +10,8 @@ window.CRM_CONFIG = {
   logoNoMenu: 'completo',                  // logo completo no alto do menu, num cartão branco
   // Paleta do logo da OneClean: azul #2592ae e verde #a9c451. O principal é o mesmo azul bem
   // mais escuro (pedido do Anderson), o que também deixa o texto branco do menu bem legível.
-  cores: { principal: '#175b6d', destaque: '#a9c451' },
+  // Degradê turquesa → azul do Instagram e do site (tirado dos prints de 02/10): faixas da proposta.
+  cores: { principal: '#175b6d', destaque: '#a9c451', gradiente: ['#03baca', '#0198cf'] },
   supabaseUrl: 'https://udhigavckigciqnicgyy.supabase.co',
   supabaseAnonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkaGlnYXZja2lnY2lxbmljZ3l5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA3MDQzNjcsImV4cCI6MjEwNjI4MDM2N30.vQQcV9RIWI5ZBDUreKWoWPNEE9JcSM33XHUWUHYJqlY'
 };

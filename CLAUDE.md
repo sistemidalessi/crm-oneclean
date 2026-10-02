@@ -593,8 +593,12 @@ A vendedora continua fazendo o orçamento no FKN (preço, estoque e condição f
   `schema.sql`, aplicadas em produção em 02/10), endereço em `crm_produtos.foto` (`?v=` contra
   cache). No orçamento entra uma coluna com a foto quando algum item tem; a impressão espera as
   fotos carregarem (até 4 s). CSP: `img-src` com `blob:` e `https://*.supabase.co`.
-  As fotos em si o Anderson ainda vai providenciar (fornecedores/site). A paleta do site e das
-  redes da OneClean não deu para buscar daqui (o ambiente bloqueia `www.oneclean.com.br`).
+  As fotos em si o Anderson ainda vai providenciar (fornecedores/site).
+- **Degradê da marca na proposta (02/10):** tirado dos prints do Instagram e do site que o Anderson
+  mandou (o ambiente bloqueia `www.oneclean.com.br`): turquesa `#03baca` → azul `#0198cf`, em
+  `config.js → cores.gradiente`. Vira as faixas do topo e do rodapé, a borda dos quadros Para/Seu
+  contato, o cabeçalho da tabela (do azul-petróleo `#175b6d` ao azul escurecido) e os títulos.
+  Telas do CRM continuam com o principal `#175b6d` e o verde `#a9c451`.
 - Lembrete dos relatórios do FKN **só de segunda a sexta** (confirmado pelo Anderson em 02/10: não
   trabalham sábado) — é como já está em `lembreteFkn`; não acrescentar sábado.
 

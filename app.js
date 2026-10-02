@@ -700,6 +700,15 @@
       raiz.setProperty('--ouro-escuro', mistura(d, [0, 0, 0], 0.15));
       raiz.setProperty('--sobre-ouro', luz(d) > 0.6 ? '#1a1a1a' : '#ffffff');
     }
+    // Degradê da marca (cores.gradiente: [de, até]) — faixas da proposta; o tom escuro do "até"
+    // segura o texto branco no cabeçalho da tabela.
+    const g = Array.isArray(c.gradiente) ? c.gradiente.map(hex) : [];
+    if (g[0] && g[1]) {
+      raiz.setProperty('--grad-a', c.gradiente[0]);
+      raiz.setProperty('--grad-b', c.gradiente[1]);
+      raiz.setProperty('--grad-esc', mistura(g[1], [0, 0, 0], 0.15));
+      raiz.setProperty('--grad-claro', mistura(g[0], [255, 255, 255], 0.92));
+    }
   }
 
   async function iniciar() {
