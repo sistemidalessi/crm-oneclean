@@ -111,7 +111,7 @@ input.curto { width: 120px; }
 
 /* ---------- estrutura ---------- */
 .app { display: flex; height: 100vh; }
-.lateral { width: 200px; flex: none; background: var(--marinho); color: #fff; display: flex; flex-direction: column; border-right: 2px solid var(--ouro); }
+.lateral { width: 200px; flex: none; background: linear-gradient(180deg, var(--marinho) 30%, var(--grad-esc) 100%); color: #fff; display: flex; flex-direction: column; border-right: 3px solid; border-image: linear-gradient(180deg, var(--grad-a), var(--grad-b)) 1; }
 .marca { display: flex; align-items: center; gap: 10px; padding: 14px; }
 .marca .logo { width: 38px; height: 38px; border-radius: 50%; object-fit: cover; background: #fff; }
 .marca strong { display: block; font-size: .95rem; max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -376,15 +376,16 @@ body.arrastando-card .zonas-fim { display: grid; grid-template-columns: 1fr 1fr;
 .tabela.historico td { vertical-align: top; }
 
 /* ---------- entrada ---------- */
-.entrada { min-height: 100vh; display: grid; place-items: center; align-content: center; gap: 12px; padding: 16px; background: var(--marinho); }
-.entrada-cartao { width: min(380px, 100%); background: var(--papel); border-radius: 16px; padding: 28px; display: grid; gap: 12px; text-align: center; border-top: 4px solid var(--ouro); }
+.entrada { min-height: 100vh; display: grid; place-items: center; align-content: center; gap: 12px; padding: 16px; background: var(--marinho); background: linear-gradient(135deg, var(--grad-a) 0%, var(--grad-b) 55%, var(--marinho) 100%); }
+.entrada-cartao { width: min(380px, 100%); background: var(--papel); border-radius: 16px; padding: 28px; display: grid; gap: 12px; text-align: center; box-shadow: 0 18px 40px rgba(0, 0, 0, .22); position: relative; overflow: hidden; }
+.entrada-cartao::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 5px; background: linear-gradient(90deg, var(--grad-a), var(--grad-b)); }
 .grade-login { display: grid; gap: 12px; text-align: left; }
 .grade-login .campo input { width: 100%; }
 .grade-login .link { justify-self: center; }
 .entrada-cartao p { margin: 0; color: var(--suave); }
 .entrada-cartao .erro-form { margin: 0; }
 .logo-grande { width: auto; max-width: min(260px, 100%); max-height: 140px; justify-self: center; border-radius: 12px; }
-.rodape-entrada { color: rgba(255, 255, 255, .5); font-size: .75rem; margin: 0; }
+.rodape-entrada { color: rgba(255, 255, 255, .85); font-size: .75rem; margin: 0; }
 
 .toast { position: fixed; left: 50%; bottom: 20px; transform: translate(-50%, 20px); opacity: 0; pointer-events: none; background: var(--marinho); color: #fff; padding: 10px 16px; border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, .25); transition: opacity .2s, transform .2s; z-index: 100; max-width: calc(100vw - 32px); }
 .toast.mostra { opacity: 1; transform: translate(-50%, 0); }

@@ -600,7 +600,10 @@ A vendedora continua fazendo o orçamento no FKN (preço, estoque e condição f
   mandou (o ambiente bloqueia `www.oneclean.com.br`): turquesa `#03baca` → azul `#0198cf`, em
   `config.js → cores.gradiente`. Vira as faixas do topo e do rodapé, a borda dos quadros Para/Seu
   contato, o cabeçalho da tabela (do azul-petróleo `#175b6d` ao azul escurecido) e os títulos.
-  Telas do CRM continuam com o principal `#175b6d` e o verde `#a9c451`.
+  Também no CRM (pedido do Anderson, 02/10): **menu lateral** em degradê vertical do petróleo
+  `#175b6d` ao azul, com a borda direita turquesa → azul; **tela de login** com o fundo no degradê
+  do Instagram (turquesa → azul → petróleo) e faixa no alto do cartão. Botões e destaques seguem
+  com o verde `#a9c451`.
 - Lembrete dos relatórios do FKN **só de segunda a sexta** (confirmado pelo Anderson em 02/10: não
   trabalham sábado) — é como já está em `lembreteFkn`; não acrescentar sábado.
 
