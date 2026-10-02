@@ -109,7 +109,7 @@ produtos. Para atualizar: puxar o relatório no FKN e salvar o CSV nessa pasta.
 mostra a faixa "Hora de puxar os relatórios do FKN" e o menu Compras ganha um "!" (admin e
 comprador). Datas pela função `crm_fkn_atualizado()` (o comprador não lê títulos); regra em
 `CRMDados.lembreteFkn`; pasta mostrada = `cfg.pasta_fkn` (Configurações → Geral → Notas fiscais).
-O FKN não gera relatório sozinho (perguntar à FKN Informática se exporta por linha de comando).
+O FKN não gera relatório sozinho. Perguntar à FKN Informática se exporta por linha de comando: **adiado por decisão do Anderson (02/10)**, não insistir.
 **Colinha e conferência (02/10, pedido do Anderson):** em Compras, a "Colinha: como puxar os
 relatórios do FKN" (passo a passo no SIFWin + checklist de cada um) abre no topo junto com o aviso e
 fica fechada no fim da tela no resto do tempo. Como o relatório é puxado à mão, `fkn.js`
