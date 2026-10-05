@@ -688,6 +688,11 @@ A vendedora continua fazendo o orçamento no FKN (preço, estoque e condição f
   05/10) **não são** os mesmos clientes dos cadastros antigos (resposta do Anderson): ficam separados,
   não mesclar. O cadastro "JOSIANE" foi excluído pelo Anderson; Xingu conferido (2 negócios, 2 propostas,
   11 atividades).
+- **Publicação do Pages presa (05/10, 16:39–19:17):** os builds de `pages-build-deployment` ficaram
+  na fila do GitHub sem máquina (um foi cancelado pelo próprio GitHub após 15 min; o "re-run" ficou
+  em "not yet queued" e não dava para cancelar). Saída: um push novo dispara outro build. Para conferir
+  se o site publicou: `gh api "repos/sistemidalessi/crm-oneclean/actions/runs?per_page=3"` (último com
+  `success` = no ar) — daqui o github.io não abre. Enquanto não publica, o CRM segue na versão anterior.
 - **Sino conferido (05/10):** soma atrasadas + leads sem atendimento + negócios parados + clientes sem
   contato + recompra (não conta "para hoje"); a bolinha do Início é atrasadas + para hoje. Segue o
   filtro de visão (equipe toda para gestor). Número alto = 164 negócios parados, quase todos do Agendor.
