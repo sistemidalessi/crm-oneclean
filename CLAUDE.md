@@ -672,6 +672,15 @@ A vendedora continua fazendo o orçamento no FKN (preço, estoque e condição f
   FKN" (não está na lista de origens; o navegador caía em "(a da empresa)"). `ui.js` agora acrescenta o
   valor gravado como opção quando ele não está na lista — vale para todo select de formulário (ex.:
   responsável inativo deixava de ser trocado sem querer).
+- **Limpeza do Xingu (05/10, autorizada; resposta do Alysson: 22351 e 22352 são vendas separadas, o
+  negócio zerado era duplicata):** backup em `crm_backup.xingu_2026_10_05`; tudo junto no "COLÉGIO XINGU"
+  de 11:50 (negócios 22352 R$ 2.659,45 e 22351 R$ 2.620,11, cada um com a sua proposta, 7 atividades);
+  as duas empresas duplicadas e o negócio zerado foram apagados pelo Anderson no CRM. O "COLÉGIO XINGU -
+  JOSIANE" (Agendor, vazio) ficou — esperando o Anderson dizer se é o mesmo. Vendedora não exclui
+  negócio (só gestor/admin): duplicata ela pede para a Isabela apagar.
+- **Sino conferido (05/10):** soma atrasadas + leads sem atendimento + negócios parados + clientes sem
+  contato + recompra (não conta "para hoje"); a bolinha do Início é atrasadas + para hoje. Segue o
+  filtro de visão (equipe toda para gestor). Número alto = 164 negócios parados, quase todos do Agendor.
 - **Degradê da marca na proposta (02/10):** tirado dos prints do Instagram e do site que o Anderson
   mandou (o ambiente bloqueia `www.oneclean.com.br`): turquesa `#03baca` → azul `#0198cf`, em
   `config.js → cores.gradiente`. Vira as faixas do topo e do rodapé, a borda dos quadros Para/Seu
