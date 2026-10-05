@@ -541,6 +541,10 @@ recusas mais novas que a última entrega boa) faz o aviso de Compras dizer o que
   de Isabela, Alysson e Silmara) geraram 6 títulos `origem='nota'` (a 2565 em 2 parcelas), com soma
   das parcelas = valor da nota, vencimentos do `<dup>`, portador BOLETO e o mesmo cliente da nota.
   A rotina de conferência de hora em hora foi apagada.
+- **Vigia parado de dom 04/10 14:58 a seg 05/10 ~10:05** (último sinal antes; nenhuma nota perdida —
+  não houve emissão no período). O Anderson religou a tarefa e, em 05/10, acrescentou o gatilho
+  "a cada 10 min" (README, passo 5) para a tarefa voltar sozinha se cair. Causa provável: reinício
+  do servidor no domingo (não confirmado: falta o `LastBootUpTime`).
 
 ## WhatsApp: caminho 3 e volta do contato (02/10/2026, decisão do Anderson)
 

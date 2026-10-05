@@ -173,10 +173,16 @@ entregar notas e pode ser desligada a qualquer momento no CRM.
    ```
    $acao = New-ScheduledTaskAction -Execute "C:\Program Files\nodejs\node.exe" -Argument "C:\CRM\vigia-notas.js" -WorkingDirectory "C:\CRM"
    $inicio = New-ScheduledTaskTrigger -AtStartup
+   $repete = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 10) -RepetitionDuration (New-TimeSpan -Days 3650)
    $ajustes = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1)
-   Register-ScheduledTask -TaskName "CRM - vigia de notas" -Action $acao -Trigger $inicio -Settings $ajustes -User "SYSTEM" -RunLevel Highest
+   Register-ScheduledTask -TaskName "CRM - vigia de notas" -Action $acao -Trigger $inicio,$repete -Settings $ajustes -User "SYSTEM" -RunLevel Highest
    Start-ScheduledTask -TaskName "CRM - vigia de notas"
    ```
+   O segundo gatilho (a cada 10 min) religa o vigia se ele cair; se já estiver rodando, o
+   Windows ignora (padrão "não iniciar outra instância"). Sem ele, o vigia ficou parado de
+   domingo 04/10 à tarde até segunda 05/10 de manhã. Tarefa antiga, só com "ao iniciar": rodar
+   `Set-ScheduledTask -TaskName "CRM - vigia de notas" -Trigger $inicio,$repete` (com as duas
+   variáveis acima) e conferir com `Get-ScheduledTask -TaskName "CRM - vigia de notas" | Select-Object -ExpandProperty Triggers`.
    Conferir: `Get-Content C:\CRM\vigia-notas.log -Tail 5` (deve ter "vigia ligado"). Se a
    pasta for de rede, a conta SYSTEM pode não enxergá-la: usar o caminho local no servidor
    ou trocar `-User "SYSTEM"` por um usuário com acesso (`-User USUARIO -Password SENHA`).
