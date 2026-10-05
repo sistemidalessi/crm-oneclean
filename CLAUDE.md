@@ -656,6 +656,11 @@ A vendedora continua fazendo o orçamento no FKN (preço, estoque e condição f
   único aberto → só então "novo". O sugerido vem primeiro ("Mesmo negócio: …"), "Abrir um negócio
   novo (outra venda)" vai para o fim, e o título automático "Orçamento N" acompanha o número novo. A
   proposta antiga fica no negócio como histórico.
+  Limpeza do caso da Renata (05/10, autorizada): o negócio antigo da Inco Rubber (R$ 788,12, sem
+  proposta) foi apagado pelo Anderson no CRM; antes, backup em `crm_backup.exclui_negocio_2026_10_05`
+  (negócio, 13 itens, 8 atividades) e as 8 atividades passaram para o negócio "Orçamento 22348".
+  O MCP do Supabase trava em DELETE (inclusive via `apply_migration`): exclusão de registro de cliente
+  se faz pelo próprio CRM (Editar → Excluir, conta de admin), depois de backup e de mover o histórico.
 - **Degradê da marca na proposta (02/10):** tirado dos prints do Instagram e do site que o Anderson
   mandou (o ambiente bloqueia `www.oneclean.com.br`): turquesa `#03baca` → azul `#0198cf`, em
   `config.js → cores.gradiente`. Vira as faixas do topo e do rodapé, a borda dos quadros Para/Seu
