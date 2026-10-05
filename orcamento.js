@@ -76,7 +76,29 @@
       o.endereco_entrega && 'Entrega: ' + o.endereco_entrega].filter(Boolean).join('\n');
   }
 
-  const O = { lerOrcamentoFKN, ehOrcamentoFKN, condicoesTexto };
+  // Em qual negócio o orçamento entra. Atualização do orçamento (mesmo número reimportado, ou
+  // número novo do FKN para o mesmo cliente) continua no mesmo negócio; "novo" só quando não há
+  // negócio aberto que seja dele. Devolve o id sugerido ('novo' se nenhum) e os abertos com o
+  // sugerido primeiro.
+  //   negocioId: importação feita de dentro da ficha do negócio (manda sempre)
+  //   prop: proposta já importada com este número do FKN; abertos: negócios abertos do cliente
+  //   propostas: todas as propostas (para achar o negócio aberto que já tem orçamento do FKN)
+  function negocioDoOrcamento(negocioId, prop, abertos, propostas) {
+    const aberto = id => id && abertos.some(x => x.id === id);
+    let id = null;
+    if (negocioId) id = negocioId;
+    else if (prop && aberto(prop.negocio_id)) id = prop.negocio_id;
+    else {
+      const comFkn = (propostas || []).filter(p => p.numero_fkn && aberto(p.negocio_id))
+        .sort((a, b) => String(b.criado_em || '').localeCompare(String(a.criado_em || '')) || (b.numero || 0) - (a.numero || 0));
+      if (comFkn.length) id = comFkn[0].negocio_id;
+      else if (abertos.length === 1) id = abertos[0].id;
+    }
+    const ordem = abertos.slice().sort((a, b) => (b.id === id) - (a.id === id));
+    return { padrao: id || 'novo', abertos: ordem };
+  }
+
+  const O = { lerOrcamentoFKN, ehOrcamentoFKN, condicoesTexto, negocioDoOrcamento };
   raiz.CRMOrcamento = O;
   if (typeof module !== 'undefined') module.exports = O;
 
@@ -119,8 +141,10 @@
     const vend = usuarioDo(o.vendedor);
     const etapa = etapaOrcamento();
     const prop = (E().D.propostas || []).find(p => p.numero_fkn === o.numero);
-    const abertos = emp ? CRM.doEmpresa('negocios', emp.id).filter(x => x.status === 'aberto') : [];
-    const padraoNeg = negocioId || (prop && prop.negocio_id) || (abertos.length === 1 ? abertos[0].id : 'novo');
+    const lista = emp ? CRM.doEmpresa('negocios', emp.id).filter(x => x.status === 'aberto' || x.id === negocioId) : [];
+    if (negocioId && !lista.some(x => x.id === negocioId) && CRM.negocio(negocioId)) lista.push(CRM.negocio(negocioId));
+    const sug = negocioDoOrcamento(negocioId, prop, lista, E().D.propostas);
+    const padraoNeg = sug.padrao, abertos = sug.abertos;
     const contatos = emp ? CRM.doEmpresa('contatos', emp.id) : [];
     const ac = R.normaliza(o.ac || ''), mail = String(o.cliente.email || '').toLowerCase();
     const contato = contatos.find(c => (mail && String(c.email || '').toLowerCase() === mail) || (ac && R.normaliza(c.nome).indexOf(R.primeiroNome(ac)) === 0));
@@ -128,12 +152,14 @@
       (o.validade ? ' · válido até ' + R.dataBR(o.validade) : '') + '\nCliente: ' + (o.cliente.nome || '?') + (doc ? ' (' + R.formataCNPJ(doc) + ')' : '') +
       (emp ? ' — já está no CRM' + (emp.nome !== o.cliente.nome ? ' como "' + emp.nome + '"' : '') : ' — não está no CRM: vai ser cadastrado') + (o.vendedor ? '\nVendedor no FKN: ' + o.vendedor : '') +
       (prop ? '\nEste orçamento já foi importado (proposta #' + prop.numero + '): os itens e o valor vão ser atualizados.' : '') +
+      (padraoNeg !== 'novo' ? '\nAtualização de orçamento continua no mesmo negócio (já vem marcado abaixo). Só escolha "negócio novo" se for outra venda.' : '') +
       (o.confere ? '' : '\nATENÇÃO: a soma dos itens (' + R.moeda(o.soma) + ') não bate com o total do FKN (' + R.moeda(o.total) + ').');
     CRM.abrirForm({
       titulo: 'Importar orçamento do FKN', intro: resumo, largura: 'largo',
       campos: [
         { nome: 'negocio', rotulo: 'Entra no negócio', tipo: 'select', largo: true, padrao: padraoNeg,
-          opcoes: [['novo', 'Novo negócio: Orçamento ' + o.numero + (etapa ? ' (etapa ' + etapa.nome + ')' : '')]].concat(abertos.map(x => [x.id, x.titulo + ' · ' + ((CRM.etapa(x.etapa_id) || {}).nome || '') + ' · ' + R.moeda(x.valor)])) },
+          opcoes: abertos.map(x => [x.id, (x.id === padraoNeg ? 'Mesmo negócio: ' : '') + x.titulo + ' · ' + ((CRM.etapa(x.etapa_id) || {}).nome || '') + ' · ' + R.moeda(x.valor)])
+            .concat([['novo', 'Abrir um negócio novo (outra venda): Orçamento ' + o.numero + (etapa ? ' (etapa ' + etapa.nome + ')' : '')]]) },
         { nome: 'responsavel_id', rotulo: 'Responsável', tipo: 'select', opcoes: CRM.opcoesUsuarios(), padrao: (vend && vend.user_id) || (emp && emp.responsavel_id) || CRM.meuId() },
         { nome: 'contato_id', rotulo: 'Aos cuidados de', tipo: 'select', opcoes: [['', o.ac ? o.ac + ' (só no documento)' : '—']].concat(contatos.map(c => [c.id, c.nome])), padrao: contato ? contato.id : '' }
       ],
@@ -162,7 +188,9 @@
     let neg;
     if (v.negocio && v.negocio !== 'novo') {
       neg = CRM.negocio(v.negocio);
-      const patch = { valor: total, previsao_fechamento: o.validade || neg.previsao_fechamento || null, responsavel_id: v.responsavel_id || neg.responsavel_id, contato_id: v.contato_id || neg.contato_id || null };
+      const patch = { valor: total,
+        // título automático "Orçamento 22348" acompanha o número novo do FKN
+        titulo: /^Or[çc]amento \d+$/.test(neg.titulo || '') ? 'Orçamento ' + o.numero : neg.titulo, previsao_fechamento: o.validade || neg.previsao_fechamento || null, responsavel_id: v.responsavel_id || neg.responsavel_id, contato_id: v.contato_id || neg.contato_id || null };
       const atual = CRM.etapa(neg.etapa_id);
       if (etapa && (!atual || (atual.funil === etapa.funil && atual.ordem < etapa.ordem))) patch.etapa_id = etapa.id; // avança até "orçamento", nunca volta
       neg = await CRM.auto.mudarNegocio(neg, patch);

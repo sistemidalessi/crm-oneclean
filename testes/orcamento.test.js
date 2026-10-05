@@ -102,3 +102,20 @@ test('condições em texto para a proposta', () => {
   assert.match(t, /Frete: R\$\s?12,30 — Remetente \(CIF\)/);
   assert.match(t, /Transporte: próprio/);
 });
+
+test('atualização do orçamento continua no mesmo negócio', () => {
+  const ab = [{ id: 'a', titulo: 'Antigo do Agendor' }, { id: 'b', titulo: 'Orçamento 100' }, { id: 'c', titulo: 'Outro' }];
+  const props = [{ negocio_id: 'b', numero_fkn: '100', numero: 1, criado_em: '2026-10-05T10:00' }, { negocio_id: 'z', numero_fkn: '90', numero: 0, criado_em: '2026-10-06' }];
+  // mesmo número reimportado → negócio da proposta, e ele vem primeiro na lista
+  let r = O.negocioDoOrcamento(null, props[0], ab, props);
+  assert.equal(r.padrao, 'b'); assert.equal(r.abertos[0].id, 'b');
+  // número novo do FKN, mesmo cliente → negócio aberto que já tem orçamento do FKN
+  r = O.negocioDoOrcamento(null, null, ab, props);
+  assert.equal(r.padrao, 'b');
+  // importado de dentro da ficha → manda o negócio da ficha
+  assert.equal(O.negocioDoOrcamento('c', props[0], ab, props).padrao, 'c');
+  // proposta antiga em negócio já fechado e vários abertos sem FKN → negócio novo
+  assert.equal(O.negocioDoOrcamento(null, props[1], [ab[0], ab[2]], props).padrao, 'novo');
+  // um só aberto → ele
+  assert.equal(O.negocioDoOrcamento(null, null, [ab[0]], []).padrao, 'a');
+});

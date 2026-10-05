@@ -648,6 +648,14 @@ A vendedora continua fazendo o orçamento no FKN (preço, estoque e condição f
   cortando entre linhas. Se o PDF não puder ser gerado, cai na impressão antiga. O texto do PDF é
   imagem (não dá para copiar), o que é aceitável para orçamento. `H` leva 40 px de folga: o
   html2canvas desenha o texto um pouco abaixo do DOM (sem a folga, o rodapé cortava).
+- **Atualização de orçamento fica no mesmo negócio (05/10, pedido do Anderson):** em 05/10 a Renata
+  (22348) e a Isabela (22356) reimportaram o orçamento atualizado e acabaram com negócio novo — a
+  lista "Entra no negócio" trazia "Novo negócio" em primeiro. Agora `negocioDoOrcamento` (puro, testado)
+  escolhe: negócio da ficha (se importou de dentro dele) → negócio da proposta já importada com o mesmo
+  nº → negócio aberto do cliente que já tem orçamento do FKN (número novo do FKN para o mesmo pedido) →
+  único aberto → só então "novo". O sugerido vem primeiro ("Mesmo negócio: …"), "Abrir um negócio
+  novo (outra venda)" vai para o fim, e o título automático "Orçamento N" acompanha o número novo. A
+  proposta antiga fica no negócio como histórico.
 - **Degradê da marca na proposta (02/10):** tirado dos prints do Instagram e do site que o Anderson
   mandou (o ambiente bloqueia `www.oneclean.com.br`): turquesa `#03baca` → azul `#0198cf`, em
   `config.js → cores.gradiente`. Vira as faixas do topo e do rodapé, a borda dos quadros Para/Seu
