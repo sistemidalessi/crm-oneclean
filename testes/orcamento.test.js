@@ -132,6 +132,18 @@ test('cliente sem CNPJ no orçamento: acha pelo código do FKN, e-mail ou nome a
   assert.deepEqual(r({ email: 'Compras@exemplo.com.br', nome: 'Outro' }), ['y', 'e-mail', '']);
   assert.deepEqual(r({ nome: 'Colegio Exemplo' }), ['y', 'nome', '']);
   // sem achar: devolve os parecidos para escolher
-  assert.deepEqual(r({ nome: 'Colegio Exemplo Unidade 2' }), [null, null, 'y']);
+  assert.deepEqual(r({ nome: 'Colegio Exemplo Unidade 2' }), [null, null, 'y,x']);
   assert.deepEqual(r({ nome: 'Escola Nova' }), [null, null, '']);
+  // duas palavras em comum: sugere (o mais parecido primeiro)
+  const D2 = { empresas: [{ id: 'a', nome: 'NR Express - Matriz São Paulo | Amanda' }, { id: 'b', nome: 'Alisson Clube Atlético Ypiranga' }, { id: 'c', nome: 'Clube Ypiranga Sul' }] };
+  assert.deepEqual(O.clienteDoOrcamento({ nome: 'NR EXPRESS ORÇ 3' }, D2).parecidos.map(x => x.id), ['a']);
+  assert.deepEqual(O.clienteDoOrcamento({ nome: 'CLUBE ATLETICO YPIRANGA' }, D2).parecidos.map(x => x.id), ['b', 'c']);
+});
+
+test('e-mail vazio no FKN não pega a palavra da coluna da direita ("SEU PEDIDO")', () => {
+  const sem = CSV.replace(pad('EMAIL: compras@exemplo.com.br', 'SEU PEDIDO: 77;'), pad('EMAIL:', 'SEU PEDIDO: 77;'));
+  assert.notEqual(sem, CSV);
+  const o = O.lerOrcamentoFKN(sem);
+  assert.equal(o.cliente.email, undefined);
+  assert.equal(o.seu_pedido, '77');
 });

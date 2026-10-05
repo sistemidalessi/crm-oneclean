@@ -39,7 +39,8 @@
       if ((v = pega(/I\.E\.:\s*(\S+)/i, l))) o.cliente.ie = v;
       if (/^A\/C SR\(A\):/i.test(l)) o.ac = esquerda(l.replace(/^A\/C SR\(A\):/i, '')) || null;
       if (/^REF:/i.test(l)) o.ref = esquerda(l.replace(/^REF:/i, '')) || null;
-      if ((v = pega(/^EMAIL:\s*(\S+)/i, l))) o.cliente.email = v.replace(/;$/, '');
+      // e-mail vazio no FKN: a palavra seguinte é da coluna da direita ("SEU PEDIDO") — só vale com @
+      if ((v = pega(/^EMAIL:\s*(\S+@\S+)/i, l))) o.cliente.email = v.replace(/;$/, '');
       const it = /^\s*(\d+);\s*([\w.-]+);\s*(.*?);\s*(\S*);\s*([-\d.,]+);\s*([-\d.,]+);\s*([-\d.,]*);\s*([-\d.,]+);/.exec(l);
       if (it) {
         const item = { item: +it[1], codigo: it[2].replace(/\.0+$/, ''), descricao: it[3].trim(), unidade: it[4] || null, quantidade: n(it[5]), preco: n(it[6]), desconto: n(it[7]), total: n(it[8]) };
@@ -126,7 +127,15 @@
     if (!k) return { empresa: null, como: null, parecidos: [] };
     const iguais = emps.filter(x => R.chaveNome(x.nome) === k || (x.razao_social && R.chaveNome(x.razao_social) === k));
     if (iguais.length === 1) return { empresa: iguais[0], como: 'nome', parecidos: [] };
-    const parecidos = iguais.length ? iguais : k.length >= 5 ? emps.filter(x => { const y = R.chaveNome(x.nome); return y && (y.indexOf(k) !== -1 || (y.length >= 5 && k.indexOf(y) !== -1)); }) : [];
+    // Parecido: um nome contém o outro ("CLUBE ATLETICO YPIRANGA" × "Alisson Clube Atlético Ypiranga") ou
+    // têm duas palavras em comum ("NR EXPRESS ORÇ 3" × "NR Express - Matriz São Paulo | Amanda").
+    // Só sugere: a vendedora escolhe na lista; o padrão continua "cadastrar novo".
+    const palavras = t => t.split(' ').filter(p => p.length >= 2 && !/^\d+$/.test(p));
+    const pk = palavras(k);
+    const nota = x => { const y = R.chaveNome(x.nome); if (!y) return 0;
+      if (y.indexOf(k) !== -1 || (y.length >= 5 && k.indexOf(y) !== -1)) return 99;
+      const py = palavras(y); return pk.filter(p => py.indexOf(p) !== -1).length; };
+    const parecidos = iguais.length ? iguais : emps.map(x => [x, nota(x)]).filter(a => a[1] >= 2).sort((a, b) => b[1] - a[1]).map(a => a[0]);
     return { empresa: null, como: null, parecidos: parecidos.slice(0, 8) };
   }
 
