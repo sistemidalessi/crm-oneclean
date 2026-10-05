@@ -94,7 +94,9 @@
     if (c.tipo === 'textarea') {
       input = '<textarea id="' + id + '" name="' + nome + '" rows="' + (c.linhas || 3) + '"' + dis + attr('placeholder', c.dica) + '>' + esc(val) + '</textarea>';
     } else if (c.tipo === 'select') {
-      input = '<select id="' + id + '" name="' + nome + '"' + dis + '>' + opcoesHTML(c.opcoes, val) + '</select>';
+      // valor gravado que não está na lista (ex.: origem "Orçamento FKN"): entra como opção, senão salvar apagava
+      const fora = v != null && v !== '' && !c.opcoes.some(o => String(o[0]) === String(v));
+      input = '<select id="' + id + '" name="' + nome + '"' + dis + '>' + opcoesHTML(fora ? c.opcoes.concat([[v, /^[0-9a-f-]{36}$/i.test(String(v)) ? '(o atual)' : v]]) : c.opcoes, val) + '</select>';
     } else if (c.tipo === 'estrelas') {
       input = '<select id="' + id + '" name="' + nome + '"' + dis + '>' + opcoesHTML([[0, '—'], [1, '★'], [2, '★★'], [3, '★★★'], [4, '★★★★'], [5, '★★★★★']], val || 0) + '</select>';
     } else if (c.tipo === 'datahora') {

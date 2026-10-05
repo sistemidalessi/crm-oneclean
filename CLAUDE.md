@@ -661,6 +661,17 @@ A vendedora continua fazendo o orçamento no FKN (preço, estoque e condição f
   (negócio, 13 itens, 8 atividades) e as 8 atividades passaram para o negócio "Orçamento 22348".
   O MCP do Supabase trava em DELETE (inclusive via `apply_migration`): exclusão de registro de cliente
   se faz pelo próprio CRM (Editar → Excluir, conta de admin), depois de backup e de mover o histórico.
+- **Orçamento sem CNPJ não cadastra o cliente de novo (05/10):** o Alysson importou 22352 duas vezes e
+  22351 uma, sem CNPJ no FKN, e nasceram três "COLÉGIO XINGU" (além do "COLÉGIO XINGU - JOSIANE" do
+  Agendor). `clienteDoOrcamento` (puro, testado) procura: CNPJ → empresa do negócio (importação pela
+  ficha) → código do cliente no FKN (`crm_titulos.cliente_codigo` ou `dados.codigo_cliente` de proposta
+  já importada) → e-mail → nome igual (`chaveNome`). Sem CNPJ aparece o campo **"Cliente no CRM"** com o
+  achado e os de nome parecido, mais "Cadastrar cliente novo"; trocar o cliente ali zera negócio/pessoa
+  sugeridos. Achado sem CNPJ e o orçamento traz CNPJ → completa a ficha.
+- **Select que perdia o valor gravado (05/10):** editar um negócio importado apagava a origem "Orçamento
+  FKN" (não está na lista de origens; o navegador caía em "(a da empresa)"). `ui.js` agora acrescenta o
+  valor gravado como opção quando ele não está na lista — vale para todo select de formulário (ex.:
+  responsável inativo deixava de ser trocado sem querer).
 - **Degradê da marca na proposta (02/10):** tirado dos prints do Instagram e do site que o Anderson
   mandou (o ambiente bloqueia `www.oneclean.com.br`): turquesa `#03baca` → azul `#0198cf`, em
   `config.js → cores.gradiente`. Vira as faixas do topo e do rodapé, a borda dos quadros Para/Seu

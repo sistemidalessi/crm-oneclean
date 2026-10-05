@@ -98,7 +98,39 @@
     return { padrao: id || 'novo', abertos: ordem };
   }
 
-  const O = { lerOrcamentoFKN, ehOrcamentoFKN, condicoesTexto, negocioDoOrcamento };
+  // Quem é o cliente do orçamento. O FKN nem sempre traz CNPJ (escola, condomínio, pessoa): sem ele,
+  // procura pelo código do cliente no FKN (contas a receber e orçamentos já importados), pelo e-mail
+  // e pelo nome igual — antes de cadastrar de novo (em 05/10 três importações sem CNPJ criaram três
+  // "COLÉGIO XINGU"). Sem achar, devolve os de nome parecido para a vendedora escolher.
+  //   D: { empresas, propostas, negocios, titulos }; negocioId: importação feita da ficha do negócio
+  function clienteDoOrcamento(c, D, negocioId) {
+    const emps = D.empresas || [], porId = id => emps.find(e => e.id === id) || null;
+    const doc = digitos(c.doc);
+    let e = doc && emps.find(x => digitos(x.cnpj) === doc);
+    if (e) return { empresa: e, como: 'cnpj', parecidos: [] };
+    if (negocioId) { const n = (D.negocios || []).find(x => x.id === negocioId); if (n && porId(n.empresa_id)) return { empresa: porId(n.empresa_id), como: 'negócio', parecidos: [] }; }
+    const cod = String(c.codigo || '').replace(/^0+/, '');
+    if (cod) {
+      const t = (D.titulos || []).find(x => x.empresa_id && String(x.cliente_codigo || '').replace(/^0+/, '') === cod);
+      if (t && porId(t.empresa_id)) return { empresa: porId(t.empresa_id), como: 'código do FKN', parecidos: [] };
+      const p = (D.propostas || []).find(x => x.dados && String(x.dados.codigo_cliente || '').replace(/^0+/, '') === cod);
+      const n = p && (D.negocios || []).find(x => x.id === p.negocio_id);
+      if (n && porId(n.empresa_id)) return { empresa: porId(n.empresa_id), como: 'código do FKN', parecidos: [] };
+    }
+    const mail = String(c.email || '').toLowerCase().trim();
+    if (mail) {
+      const l = emps.filter(x => String(x.email || '').toLowerCase().split(/[\s,;]+/).indexOf(mail) !== -1);
+      if (l.length === 1) return { empresa: l[0], como: 'e-mail', parecidos: [] };
+    }
+    const k = R.chaveNome(c.nome || '');
+    if (!k) return { empresa: null, como: null, parecidos: [] };
+    const iguais = emps.filter(x => R.chaveNome(x.nome) === k || (x.razao_social && R.chaveNome(x.razao_social) === k));
+    if (iguais.length === 1) return { empresa: iguais[0], como: 'nome', parecidos: [] };
+    const parecidos = iguais.length ? iguais : k.length >= 5 ? emps.filter(x => { const y = R.chaveNome(x.nome); return y && (y.indexOf(k) !== -1 || (y.length >= 5 && k.indexOf(y) !== -1)); }) : [];
+    return { empresa: null, como: null, parecidos: parecidos.slice(0, 8) };
+  }
+
+  const O = { lerOrcamentoFKN, ehOrcamentoFKN, condicoesTexto, negocioDoOrcamento, clienteDoOrcamento };
   raiz.CRMOrcamento = O;
   if (typeof module !== 'undefined') module.exports = O;
 
@@ -137,7 +169,8 @@
   CRM.importarOrcamento = negocioId => escolheArquivo(async f => {
     const o = await lerArquivo(f);
     const doc = o.cliente.doc;
-    const emp = (doc && E().D.empresas.find(e => digitos(e.cnpj) === doc)) || (negocioId && CRM.empresa((CRM.negocio(negocioId) || {}).empresa_id)) || null;
+    const achado = clienteDoOrcamento(o.cliente, E().D, negocioId);
+    const emp = achado.empresa;
     const vend = usuarioDo(o.vendedor);
     const etapa = etapaOrcamento();
     const prop = (E().D.propostas || []).find(p => p.numero_fkn === o.numero);
@@ -150,24 +183,35 @@
     const contato = contatos.find(c => (mail && String(c.email || '').toLowerCase() === mail) || (ac && R.normaliza(c.nome).indexOf(R.primeiroNome(ac)) === 0));
     const resumo = 'Orçamento nº ' + o.numero + (o.versao ? ' (versão ' + o.versao + ')' : '') + ' · ' + o.itens.length + ' itens · ' + R.moeda(o.total || o.soma) +
       (o.validade ? ' · válido até ' + R.dataBR(o.validade) : '') + '\nCliente: ' + (o.cliente.nome || '?') + (doc ? ' (' + R.formataCNPJ(doc) + ')' : '') +
-      (emp ? ' — já está no CRM' + (emp.nome !== o.cliente.nome ? ' como "' + emp.nome + '"' : '') : ' — não está no CRM: vai ser cadastrado') + (o.vendedor ? '\nVendedor no FKN: ' + o.vendedor : '') +
+      (emp ? ' — já está no CRM' + (emp.nome !== o.cliente.nome ? ' como "' + emp.nome + '"' : '') + (achado.como !== 'cnpj' ? ' (achado pelo ' + achado.como + ': confira abaixo)' : '')
+        : achado.parecidos.length ? ' — sem CNPJ no orçamento: veja abaixo se já é um destes clientes' : ' — não está no CRM: vai ser cadastrado') + (o.vendedor ? '\nVendedor no FKN: ' + o.vendedor : '') +
       (prop ? '\nEste orçamento já foi importado (proposta #' + prop.numero + '): os itens e o valor vão ser atualizados.' : '') +
       (padraoNeg !== 'novo' ? '\nAtualização de orçamento continua no mesmo negócio (já vem marcado abaixo). Só escolha "negócio novo" se for outra venda.' : '') +
       (o.confere ? '' : '\nATENÇÃO: a soma dos itens (' + R.moeda(o.soma) + ') não bate com o total do FKN (' + R.moeda(o.total) + ').');
     CRM.abrirForm({
       titulo: 'Importar orçamento do FKN', intro: resumo, largura: 'largo',
       campos: [
+        achado.como === 'cnpj' ? null : { nome: 'cliente', rotulo: 'Cliente no CRM', tipo: 'select', largo: true, padrao: emp ? emp.id : 'novo',
+          opcoes: (emp ? [emp] : []).concat(achado.parecidos.filter(x => !emp || x.id !== emp.id))
+            .map(x => [x.id, x.nome + (x.cidade ? ' · ' + x.cidade : '') + (x.cnpj ? ' · ' + x.cnpj : '') + ' · ' + CRM.nomeUsuario(x.responsavel_id)])
+            .concat([['novo', 'Cadastrar cliente novo: ' + (o.cliente.nome || 'sem nome')]]) },
         { nome: 'negocio', rotulo: 'Entra no negócio', tipo: 'select', largo: true, padrao: padraoNeg,
           opcoes: abertos.map(x => [x.id, (x.id === padraoNeg ? 'Mesmo negócio: ' : '') + x.titulo + ' · ' + ((CRM.etapa(x.etapa_id) || {}).nome || '') + ' · ' + R.moeda(x.valor)])
             .concat([['novo', 'Abrir um negócio novo (outra venda): Orçamento ' + o.numero + (etapa ? ' (etapa ' + etapa.nome + ')' : '')]]) },
         { nome: 'responsavel_id', rotulo: 'Responsável', tipo: 'select', opcoes: CRM.opcoesUsuarios(), padrao: (vend && vend.user_id) || (emp && emp.responsavel_id) || CRM.meuId() },
         { nome: 'contato_id', rotulo: 'Aos cuidados de', tipo: 'select', opcoes: [['', o.ac ? o.ac + ' (só no documento)' : '—']].concat(contatos.map(c => [c.id, c.nome])), padrao: contato ? contato.id : '' }
-      ],
+      ].filter(Boolean),
       salvarTexto: 'Importar e gerar o PDF',
       aoSalvar: async v => {
         // Pergunta onde salvar o PDF já no clique (o navegador só abre a janela logo depois dele).
-        const alvo = CRM.fichas.pedeArquivoPdf ? await CRM.fichas.pedeArquivoPdf('Orcamento ' + o.numero + ' - ' + (emp ? emp.nome : o.cliente.nome || '')) : null;
-        const r = await grava(o, emp, v, prop);
+        // Cliente trocado na lista: negócio e pessoa sugeridos eram do outro → negócio novo, sem pessoa.
+        let cli = emp;
+        if (v.cliente !== undefined) {
+          cli = v.cliente === 'novo' ? null : CRM.empresa(v.cliente);
+          if (!cli || !emp || cli.id !== emp.id) { if (!(cli && v.negocio !== 'novo' && (CRM.negocio(v.negocio) || {}).empresa_id === cli.id)) v.negocio = 'novo'; v.contato_id = ''; }
+        }
+        const alvo = CRM.fichas.pedeArquivoPdf ? await CRM.fichas.pedeArquivoPdf('Orcamento ' + o.numero + ' - ' + (cli ? cli.nome : o.cliente.nome || '')) : null;
+        const r = await grava(o, cli, v, prop);
         setTimeout(() => CRM.fichas.abrirNegocio(r.negocio.id), 50);
         if (CRM.fichas.baixarPdfProposta) CRM.fichas.baixarPdfProposta(r.proposta, alvo).catch(CRM.falhou);
       }
@@ -181,6 +225,9 @@
       emp = await CRM.inserir('empresas', { nome: c.nome || 'Cliente do orçamento ' + o.numero, razao_social: c.nome || null, cnpj: c.doc ? R.formataCNPJ(c.doc) : null, email: c.email || null,
         telefone: c.telefone || null, logradouro: c.endereco || null, cep: c.cep || null, bairro: c.bairro || null, cidade: c.cidade || null, uf: c.uf || null,
         situacao: 'lead', responsavel_id: v.responsavel_id || CRM.meuId(), origem: 'Orçamento FKN' });
+    } else if (o.cliente.doc && !digitos(emp.cnpj) && CRM.podeEditarEmpresa(emp)) {
+      // achado sem CNPJ (código, e-mail ou nome) e o orçamento traz: completa a ficha
+      await CRM.atualizar('empresas', emp.id, { cnpj: R.formataCNPJ(o.cliente.doc) }).catch(() => {});
     }
     // 2) negócio
     const etapa = etapaOrcamento();

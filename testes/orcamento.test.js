@@ -119,3 +119,19 @@ test('atualização do orçamento continua no mesmo negócio', () => {
   // um só aberto → ele
   assert.equal(O.negocioDoOrcamento(null, null, [ab[0]], []).padrao, 'a');
 });
+
+test('cliente sem CNPJ no orçamento: acha pelo código do FKN, e-mail ou nome antes de cadastrar', () => {
+  const empresas = [{ id: 'x', nome: 'Colégio Exemplo - Maria' }, { id: 'y', nome: 'COLÉGIO EXEMPLO', email: 'a@x.com; compras@exemplo.com.br' },
+    { id: 'z', nome: 'Padaria Sol', cnpj: '11.222.333/0001-81' }, { id: 'w', nome: 'Mercado Lua' }];
+  const D = { empresas, titulos: [{ cliente_codigo: '0777', empresa_id: 'w' }], propostas: [{ negocio_id: 'n1', dados: { codigo_cliente: '555' } }], negocios: [{ id: 'n1', empresa_id: 'x' }] };
+  const r = (c, nid) => { const a = O.clienteDoOrcamento(c, D, nid); return [a.empresa && a.empresa.id, a.como, a.parecidos.map(p => p.id).join()]; };
+  assert.deepEqual(r({ doc: '11222333000181', nome: 'Outro' }), ['z', 'cnpj', '']);
+  assert.deepEqual(r({ nome: 'Qualquer' }, 'n1'), ['x', 'negócio', '']);
+  assert.deepEqual(r({ codigo: '777', nome: 'Outro' }), ['w', 'código do FKN', '']);
+  assert.deepEqual(r({ codigo: '555', nome: 'Outro' }), ['x', 'código do FKN', '']);
+  assert.deepEqual(r({ email: 'Compras@exemplo.com.br', nome: 'Outro' }), ['y', 'e-mail', '']);
+  assert.deepEqual(r({ nome: 'Colegio Exemplo' }), ['y', 'nome', '']);
+  // sem achar: devolve os parecidos para escolher
+  assert.deepEqual(r({ nome: 'Colegio Exemplo Unidade 2' }), [null, null, 'y']);
+  assert.deepEqual(r({ nome: 'Escola Nova' }), [null, null, '']);
+});
