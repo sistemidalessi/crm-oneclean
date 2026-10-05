@@ -548,7 +548,8 @@ recusas mais novas que a última entrega boa) faz o aviso de Compras dizer o que
   de internet no servidor), depois voltou, e ~14:58 o vigia **travou aberto sem registrar erro** (a
   tarefa seguia "Running", então nem o gatilho de 10 min religaria). Correção: vigia **`2026-10-05`**
   com **trava de segurança** — 20 min sem completar uma volta (ou um lote) → registra "vigia travado…"
-  e sai com erro; a tarefa (RestartCount + gatilho de 10 min) liga de novo.
+  e sai com erro; a tarefa (RestartCount + gatilho de 10 min) liga de novo. **Instalado no servidor
+  em 05/10 10:12** (sinal chegando com a versão 2026-10-05; tarefa com os dois gatilhos conferidos).
 
 ## WhatsApp: caminho 3 e volta do contato (02/10/2026, decisão do Anderson)
 
