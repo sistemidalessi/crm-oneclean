@@ -550,6 +550,12 @@ recusas mais novas que a última entrega boa) faz o aviso de Compras dizer o que
   com **trava de segurança** — 20 min sem completar uma volta (ou um lote) → registra "vigia travado…"
   e sai com erro; a tarefa (RestartCount + gatilho de 10 min) liga de novo. **Instalado no servidor
   em 05/10 10:12** (sinal chegando com a versão 2026-10-05; tarefa com os dois gatilhos conferidos).
+- **05/10 11:53 — contas a receber do FKN aceito de novo** (183 títulos de 124 clientes, R$ 211.980,81,
+  todos ligados a cliente) depois de duas recusas por falta de "Listar os dados cadastrais dos
+  clientes". Os títulos nascidos das notas 2564–2569 apareceram no relatório com a mesma parcela,
+  valor, vencimento e cliente — conferência nota × FKN fechada; o CRM trocou os da nota pelos do FKN
+  sem duplicar. Dica dada ao Anderson: no "Salvar como" do FKN, entrar em `\\Servidor\SISTEMA\CRM-FKN`
+  (no nível "Rede > servidor" o Windows não deixa salvar).
 
 ## WhatsApp: caminho 3 e volta do contato (02/10/2026, decisão do Anderson)
 
