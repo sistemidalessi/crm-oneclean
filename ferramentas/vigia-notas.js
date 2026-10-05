@@ -24,7 +24,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const VERSAO = '2026-10-01b';
+const VERSAO = '2026-10-05';
 const SINAL_MS = 30 * 60 * 1000;
 
 const AQUI = __dirname;
@@ -34,6 +34,14 @@ const LOG = path.join(AQUI, 'vigia-notas.log');
 const POR_ENVIO = 50;
 const BYTES_POR_ENVIO = 8 * 1024 * 1024;
 const ESPERA_ARQUIVO_MS = 15000; // arquivo mexido há menos que isso pode estar sendo gravado
+
+// Trava de segurança (05/10/2026): no domingo 04/10 o vigia ficou aberto mas parado (depois de uma
+// queda de internet), sem erro no log — e a tarefa do Windows não religa o que ainda está "rodando".
+// Se passar TRAVADO_MS sem completar uma volta (ou um lote), ele registra e sai com erro; a tarefa
+// (RestartCount + gatilho a cada 10 min) liga de novo. Nada se perde: o estado fica gravado.
+const TRAVADO_MS = 20 * 60 * 1000;
+let ultimoProgresso = Date.now();
+const vivo = () => { ultimoProgresso = Date.now(); };
 
 function registra(msg) {
   const linha = new Date().toLocaleString('pt-BR') + '  ' + msg;
@@ -147,6 +155,7 @@ async function arquivosFkn(cfg, estado) {
     try {
       const r = await chama(cfg, { fkn: { nome: a.nome, base64: a.buf.toString('base64') } });
       estado.fkn[a.caminho] = a.marca;
+      vivo();
       estado.ultimaFalha = '';
       estado.ultimoSinal = Date.now();
       registra('FKN: ' + NOME_FKN[tipo] + ' (' + a.nome + ') enviada ao CRM' + (r.produtos ? ': ' + r.produtos + ' linhas' : r.titulos != null ? ': ' + r.titulos + ' títulos' + (r.semCliente ? ', ' + r.semCliente + ' sem cliente no CRM' : '') : ''));
@@ -198,6 +207,7 @@ async function umaVolta(forcarSinal) {
       });
       (r.erros || []).forEach(e => registra('  CRM: ' + e));
       enviados += lote.length;
+      vivo();
       estado.ultimaFalha = '';
       estado.ultimoSinal = Date.now(); // entrega também é sinal de vida
       fs.writeFileSync(ESTADO, JSON.stringify(estado));
@@ -218,8 +228,16 @@ async function principal() {
   const cfg = leJson(CONFIG, {});
   registra('vigia ligado (versão ' + VERSAO + '): ' + (cfg.pasta || '(sem pasta)') + (cfg.pastaFkn ? ' · FKN: ' + cfg.pastaFkn : ''));
   let primeira = true;
+  setInterval(() => {
+    const parado = Date.now() - ultimoProgresso;
+    if (parado > TRAVADO_MS) {
+      registra('vigia travado há ' + Math.round(parado / 60000) + ' min sem completar uma volta: saindo para a tarefa do Windows ligar de novo');
+      process.exit(1);
+    }
+  }, 60 * 1000);
   for (;;) {
     try { await umaVolta(primeira); } catch (e) { registra('erro: ' + e.message); }
+    vivo();
     primeira = false;
     await new Promise(r => setTimeout(r, (cfg.intervaloSegundos || 60) * 1000));
   }
