@@ -684,8 +684,10 @@ A vendedora continua fazendo o orçamento no FKN (preço, estoque e condição f
 - **E-mail "SEU" (05/10):** com o e-mail vazio no orçamento do FKN, a leitura pegava a palavra da coluna da
   direita ("SEU PEDIDO") — três empresas cadastradas com e-mail "SEU" (corrigidas). Agora só vale com @.
   `clienteDoOrcamento` também sugere nomes com duas palavras em comum (pegaria "NR EXPRESS ORÇ 3" ×
-  "NR Express - Matriz…"); NR Express e Clube Atlético Ypiranga entraram em duplicado em 05/10 —
-  conferência com o Anderson.
+  "NR Express - Matriz…"). "NR EXPRESS ORÇ 3" e "CLUBE ATLETICO YPIRANGA" (criados por orçamento em
+  05/10) **não são** os mesmos clientes dos cadastros antigos (resposta do Anderson): ficam separados,
+  não mesclar. O cadastro "JOSIANE" foi excluído pelo Anderson; Xingu conferido (2 negócios, 2 propostas,
+  11 atividades).
 - **Sino conferido (05/10):** soma atrasadas + leads sem atendimento + negócios parados + clientes sem
   contato + recompra (não conta "para hoje"); a bolinha do Início é atrasadas + para hoje. Segue o
   filtro de visão (equipe toda para gestor). Número alto = 164 negócios parados, quase todos do Agendor.
