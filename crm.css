@@ -453,6 +453,35 @@ body.arrastando-card .zonas-fim { display: grid; grid-template-columns: 1fr 1fr;
 .proposta-doc .pre { white-space: pre-wrap; }
 .proposta-doc footer { margin-top: 3mm; color: var(--cz); font-size: 9pt; }
 .proposta-doc tr { break-inside: avoid; }
+/* Orçamento comprido (mais de 12 itens): tudo um pouco menor para caber na primeira folha. */
+.proposta-doc.denso header { padding: 3mm 0; }
+.proposta-doc.denso header img { height: 72px; }
+.proposta-doc.denso .chamada { padding-top: 3mm; }
+.proposta-doc.denso .chamada h1 { font-size: 16pt; }
+.proposta-doc.denso .chamada p { font-size: 9.5pt; }
+.proposta-doc.denso .chamada::after { margin-top: 2mm; }
+.proposta-doc.denso .preparado { margin-top: 3mm; padding: 2.5mm 5mm; gap: 1px; }
+.proposta-doc.denso .preparado .nome { font-size: 10.5pt; }
+.proposta-doc.denso .preparado p, .proposta-doc.denso .cartoes span { font-size: 8.5pt; }
+.proposta-doc.denso .cartoes { margin-top: 3mm; gap: 3mm; }
+.proposta-doc.denso .cartoes > div { padding: 2mm 3.5mm; }
+.proposta-doc.denso .titulo-itens { margin: 3.5mm 0 2mm; font-size: 10pt; }
+.proposta-doc.denso th { padding: 5px 6px; font-size: 7.5pt; }
+.proposta-doc.denso td { padding: 2px 6px; font-size: 8.5pt; }
+.proposta-doc.denso td .prod { display: inline; font-size: 8.5pt; }
+.proposta-doc.denso td .cod { display: inline; margin-left: 6px; font-size: 7pt; }
+.proposta-doc.denso .fecho { margin-top: 3mm; gap: 8mm; }
+.proposta-doc.denso .atende { font-size: 9pt; gap: 1px; }
+.proposta-doc.denso .atende .contato { margin-top: 4px; font-size: 9.5pt; }
+.proposta-doc.denso .total { padding: 3mm 5mm; }
+.proposta-doc.denso .total strong { font-size: 19pt; }
+.proposta-doc.denso .cta { margin-top: 3mm; padding: 2.2mm 3mm 2.2mm 6mm; font-size: 11pt; }
+.proposta-doc.denso .cta .vai { font-size: 10pt; padding: 1.6mm 4mm; }
+.proposta-doc.denso footer { margin-top: 2.5mm; font-size: 8pt; }
+/* Área fora da tela onde o PDF é desenhado (html2canvas); a folha A4 tem 794 px a 96 dpi. */
+.pdf-palco { position: absolute; left: -10000px; top: 0; width: 794px; background: #fff; }
+.pdf-palco .proposta-doc { display: flow-root; padding-bottom: 6mm; }
+.pdf-palco .proposta-doc .cartoes strong { letter-spacing: 0; }
 
 /* ---------- telas menores (notebook) ---------- */
 @media (max-width: 1280px) {

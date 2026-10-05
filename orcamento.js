@@ -137,8 +137,14 @@
         { nome: 'responsavel_id', rotulo: 'Responsável', tipo: 'select', opcoes: CRM.opcoesUsuarios(), padrao: (vend && vend.user_id) || (emp && emp.responsavel_id) || CRM.meuId() },
         { nome: 'contato_id', rotulo: 'Aos cuidados de', tipo: 'select', opcoes: [['', o.ac ? o.ac + ' (só no documento)' : '—']].concat(contatos.map(c => [c.id, c.nome])), padrao: contato ? contato.id : '' }
       ],
-      salvarTexto: 'Importar e montar a proposta',
-      aoSalvar: async v => { const r = await grava(o, emp, v, prop); setTimeout(() => CRM.fichas.abrirNegocio(r.negocio.id), 50); }
+      salvarTexto: 'Importar e gerar o PDF',
+      aoSalvar: async v => {
+        // Pergunta onde salvar o PDF já no clique (o navegador só abre a janela logo depois dele).
+        const alvo = CRM.fichas.pedeArquivoPdf ? await CRM.fichas.pedeArquivoPdf('Orcamento ' + o.numero + ' - ' + (emp ? emp.nome : o.cliente.nome || '')) : null;
+        const r = await grava(o, emp, v, prop);
+        setTimeout(() => CRM.fichas.abrirNegocio(r.negocio.id), 50);
+        if (CRM.fichas.baixarPdfProposta) CRM.fichas.baixarPdfProposta(r.proposta, alvo).catch(CRM.falhou);
+      }
     });
   });
 
@@ -179,7 +185,7 @@
     const campos = { negocio_id: neg.id, itens, valor_total: total, validade: o.validade || null, condicoes: condicoesTexto(o), numero_fkn: o.numero, dados };
     const p = prop ? await CRM.atualizar('propostas', prop.id, campos) : await CRM.inserir('propostas', Object.assign({ status: 'rascunho' }, campos));
     await CRM.auto.sistema(emp.id, neg.id, 'Orçamento ' + o.numero + ' do FKN importado' + (prop ? ' de novo (atualizado)' : '') + ': ' + o.itens.length + ' itens, ' + R.moeda(total));
-    CRM.toast('Orçamento ' + o.numero + ' importado. Abra "Imprimir / PDF" para ver no layout da ' + CRM.nomeInstalacao() + '.');
+    CRM.toast('Orçamento ' + o.numero + ' importado.');
     return { empresa: emp, negocio: neg, proposta: p };
   }
 

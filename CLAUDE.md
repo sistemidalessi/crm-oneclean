@@ -621,6 +621,18 @@ A vendedora continua fazendo o orçamento no FKN (preço, estoque e condição f
   WhatsApp" numa pílula verde com letra preta), **letra preta** (`#1c1c1c`) nos textos de leitura
   (frase, cliente, produtos, valores, contato) — o azul-escuro fica só no cabeçalho da tabela — e
   **logo maior** (86 px de altura).
+- **PDF direto, sem tela de impressão (05/10, pedido do Anderson):** "Importar e gerar o PDF" (fim da
+  importação) e o botão **"Baixar PDF"** da proposta geram o arquivo na hora: o CRM pergunta onde
+  salvar (`showSaveFilePicker`, chamado logo no clique porque o navegador só abre a janela com o
+  clique recente; navegador sem a janela → vai para Downloads), desenha o documento numa área fora
+  da tela (`.pdf-palco`, 794 px = A4) com **html2canvas** e monta o A4 com **jsPDF** — as duas em
+  `vendor/` (html2canvas 1.4.1, jsPDF 2.5.2, MIT; sem CDN, carregadas só na hora) — com o botão
+  "Confirmar pelo WhatsApp" clicável por cima (`pdf.link`). **Sempre na primeira folha:** mais de 12
+  itens liga o modo `denso` (letras e espaços menores, código ao lado do nome) e, se ainda passar do
+  A4, a página inteira é reduzida (até 60%: 45 itens cabem); só acima disso vai para mais folhas,
+  cortando entre linhas. Se o PDF não puder ser gerado, cai na impressão antiga. O texto do PDF é
+  imagem (não dá para copiar), o que é aceitável para orçamento. `H` leva 40 px de folga: o
+  html2canvas desenha o texto um pouco abaixo do DOM (sem a folga, o rodapé cortava).
 - **Degradê da marca na proposta (02/10):** tirado dos prints do Instagram e do site que o Anderson
   mandou (o ambiente bloqueia `www.oneclean.com.br`): turquesa `#03baca` → azul `#0198cf`, em
   `config.js → cores.gradiente`. Vira as faixas do topo e do rodapé, a borda dos quadros Para/Seu

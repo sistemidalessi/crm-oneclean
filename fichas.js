@@ -298,7 +298,7 @@
           (CRM.importarOrcamento ? '<button type="button" class="mini" data-acao="importar-orcamento" data-id="' + esc(n.id) + '" title="Arquivo CSV do orçamento salvo no FKN">importar do FKN</button>' : '') : '') + '</h3>' +
           (props.length ? '<ul class="lista">' + props.map(p => '<li class="proposta"><div><strong>#' + esc(p.numero) + ' · ' + esc(R.moeda(p.valor_total)) + '</strong> ' + CRM.seloProposta(p.status) +
             '<small>' + esc([p.enviada_em ? 'enviada ' + R.dataBR(p.enviada_em) : '', p.validade ? 'válida até ' + R.dataBR(p.validade) : '', p.respondida_em ? 'resposta ' + R.dataBR(p.respondida_em) : ''].filter(Boolean).join(' · ')) + '</small></div>' +
-            '<span class="acoes-rapidas"><button type="button" class="mini" data-acao="imprimir-proposta" data-id="' + esc(p.id) + '">Imprimir / PDF</button>' +
+            '<span class="acoes-rapidas"><button type="button" class="mini" data-acao="pdf-proposta" data-id="' + esc(p.id) + '" title="Gera o PDF e pergunta onde salvar">Baixar PDF</button>' +
             (pode ? '<button type="button" class="mini" data-acao="enviar-proposta" data-id="' + esc(p.id) + ':whatsapp" title="Abre o WhatsApp com a mensagem; anexe o PDF na conversa">WhatsApp</button>' +
               '<button type="button" class="mini" data-acao="enviar-proposta" data-id="' + esc(p.id) + ':email" title="Abre o e-mail para todos os endereços do cliente; anexe o PDF">E-mail</button>' : '') +
             (pode && p.status === 'rascunho' ? '<button type="button" class="mini" data-acao="proposta-status" data-id="' + esc(p.id) + ':enviada">Marcar enviada</button>' : '') +
@@ -704,7 +704,8 @@
   const iniciais = s => { s = String(s || '').replace(/\s+/g, ' ').trim(); if (!soMaiusculas(s)) return s;
     return acentua(s.toLowerCase()).split(' ').map((w, k) => /^[a-z]{2}$/i.test(w) && /^(sp|rj|mg|pr|sc|rs|ba|go|df|es|pe|ce|ms|mt|pa|am)$/.test(w) ? w.toUpperCase()
       : k && PEQUENAS.has(w) ? w : w.replace(/^(\S)/, c => c.toUpperCase())).join(' ').replace(/\/(\w{2})\b/g, (m, uf) => '/' + uf.toUpperCase()); };
-  fichas.imprimirProposta = p => {
+  // Monta o documento (HTML) da proposta e o nome do arquivo.
+  function montaProposta(p) {
     const n = CRM.negocio(p.negocio_id);
     const e = n && CRM.empresa(n.empresa_id);
     const c = n && n.contato_id ? CRM.contato(n.contato_id) : (e && principal(e.id));
@@ -733,8 +734,9 @@
     const tel = vend && R.linkWhatsApp(vend.telefone) ? vend.telefone : '';
     const msgWa = 'Olá' + (vend ? ', ' + R.primeiroNome(vend.nome) : '') + '! Recebi o orçamento nº ' + numero + ' (' + R.moeda(p.valor_total) + ') e quero programar a entrega.';
     const freteTxt = R.num(d.frete) ? 'Frete ' + R.moeda(d.frete) + ' incluído' : (d.fkn ? 'Frete grátis' : '');
-    const el = $('#impressao');
-    el.innerHTML = '<div class="proposta-doc">' +
+    const nome = ((p.numero_fkn ? 'Orcamento ' + p.numero_fkn : 'Proposta ' + p.numero) + ' - ' + (e ? e.nome : '')).replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim();
+    // Orçamento comprido: letras e espaços menores para caber na primeira folha (com o total e o botão).
+    const html = '<div class="proposta-doc' + (itens.length > 12 ? ' denso' : '') + '">' +
       '<div class="faixa-doc"></div>' +
       '<header><img src="' + esc(CRM.logo()) + '" alt="' + esc(CRM.nomeInstalacao()) + '">' +
         '<div class="doc-id"><strong>' + (p.numero_fkn ? 'Orçamento ' : 'Proposta ') + esc(numero) + '</strong>' +
@@ -755,9 +757,17 @@
         '<div class="total"><span class="rot">Total do pedido</span><strong>' + esc(R.moeda(p.valor_total)) + '</strong><span class="sub">' + esc([itens.length + (itens.length === 1 ? ' item' : ' itens'), freteTxt].filter(Boolean).join(' · ')) + '</span></div></section>' +
       (tel ? '<a class="cta" href="' + esc(R.linkWhatsApp(tel, msgWa)) + '"><span>' + esc(cfg.proposta_cta || 'Vamos programar sua entrega?') + '</span><span class="vai">Confirmar pelo WhatsApp &nbsp;›</span></a>' : '') +
       '<footer>' + esc(cfg.proposta_rodape || CRM.nomeInstalacao()) + '</footer></div>';
+    return { html, nome };
+  }
+
+  // Impressão pelo navegador: só sobra como plano B, se o PDF direto não puder ser gerado.
+  fichas.imprimirProposta = p => {
+    const m = montaProposta(p);
+    const el = $('#impressao');
+    el.innerHTML = m.html;
     document.body.classList.add('imprimindo');
     const titAntes = document.title;
-    document.title = (p.numero_fkn ? 'Orcamento ' + p.numero_fkn : 'Proposta ' + p.numero) + ' - ' + (e ? e.nome : ''); // nome sugerido do PDF
+    document.title = m.nome; // nome sugerido do PDF
     const limpa = () => { document.body.classList.remove('imprimindo'); document.title = titAntes; window.removeEventListener('afterprint', limpa); };
     window.addEventListener('afterprint', limpa);
     // Espera o logo carregar (até 4 s) para não sair o PDF sem ele.
@@ -766,9 +776,102 @@
       .then(() => setTimeout(() => window.print(), 50));
   };
 
+
+  // ------------------------------------------------------------ PDF direto (sem tela de impressão)
+  // O documento é desenhado numa área escondida, vira imagem (html2canvas) e PDF A4 (jsPDF), com o
+  // botão "Confirmar pelo WhatsApp" clicável por cima. Sempre numa folha só: se passar da altura
+  // do A4 a página inteira é reduzida (até 60%); só orçamento enorme vai para mais de uma folha,
+  // cortando entre linhas de produto. As duas bibliotecas ficam em vendor/ (sem depender de CDN).
+  const LARGURA = 794; // A4 a 96 dpi (210 mm)
+  const ALTURA = Math.round(LARGURA * 297 / 210);
+  const carregados = {};
+  const carrega = src => carregados[src] || (carregados[src] = new Promise((ok, falha) => {
+    const s = document.createElement('script');
+    s.src = src; s.onload = ok; s.onerror = () => { delete carregados[src]; falha(new Error('não consegui carregar ' + src + ' (sem internet?)')); };
+    document.head.appendChild(s);
+  }));
+  const temSalvarComo = () => typeof window.showSaveFilePicker === 'function';
+  // Pergunta onde salvar ANTES de gerar (o navegador só abre a janela logo depois do clique).
+  // null = navegador sem a janela (vai para Downloads); false = a pessoa cancelou.
+  async function pedeArquivo(nome) {
+    if (!temSalvarComo()) return null;
+    try {
+      return await window.showSaveFilePicker({ suggestedName: nome + '.pdf', types: [{ description: 'PDF', accept: { 'application/pdf': ['.pdf'] } }] });
+    } catch (e) {
+      if (e && e.name === 'AbortError') return false;
+      return null; // sem permissão para a janela agora: baixa normalmente
+    }
+  }
+  async function geraPdf(m) {
+    await carrega('vendor/html2canvas.min.js');
+    await carrega('vendor/jspdf.umd.min.js');
+    const palco = document.createElement('div');
+    palco.className = 'pdf-palco';
+    palco.innerHTML = m.html;
+    document.body.appendChild(palco);
+    try {
+      const doc = palco.firstElementChild;
+      const imgs = [...doc.querySelectorAll('img')].filter(i => !i.complete);
+      await Promise.race([Promise.all(imgs.map(i => new Promise(ok => { i.onload = i.onerror = ok; }))), new Promise(ok => setTimeout(ok, 4000))]);
+      const H = Math.ceil(Math.max(doc.scrollHeight, doc.getBoundingClientRect().height)) + 40; // folga: o html2canvas desenha o texto um pouco abaixo
+      const canvas = await window.html2canvas(doc, { scale: 2, backgroundColor: '#ffffff', logging: false, width: LARGURA, height: H, windowWidth: LARGURA, windowHeight: H + 50, scrollX: 0, scrollY: 0 });
+      const pdf = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4', compress: true });
+      const base = doc.getBoundingClientRect();
+      const cta = doc.querySelector('.cta');
+      const r = cta && cta.getBoundingClientRect();
+      const mmPx = 210 / LARGURA;
+      let s = Math.min(1, ALTURA / H);
+      if (s >= 0.6) { // uma folha
+        const w = 210 * s, x = (210 - w) / 2;
+        pdf.addImage(canvas.toDataURL('image/jpeg', 0.92), 'JPEG', x, 0, w, H * mmPx * s);
+        if (r) pdf.link(x + (r.left - base.left) * mmPx * s, (r.top - base.top) * mmPx * s, r.width * mmPx * s, r.height * mmPx * s, { url: cta.href });
+      } else { // orçamento enorme: folhas cortadas entre linhas, na largura toda
+        const fundos = [...doc.querySelectorAll('tbody tr')].map(tr => tr.getBoundingClientRect().bottom - base.top);
+        let ini = 0, pag = 0;
+        while (ini < H - 1) {
+          let fim = Math.min(H, ini + ALTURA);
+          if (fim < H) { const corte = fundos.filter(b => b > ini + 50 && b <= fim).pop(); if (corte) fim = corte; }
+          const fatia = document.createElement('canvas');
+          fatia.width = canvas.width; fatia.height = Math.round((fim - ini) * 2);
+          fatia.getContext('2d').drawImage(canvas, 0, Math.round(ini * 2), canvas.width, fatia.height, 0, 0, canvas.width, fatia.height);
+          if (pag) pdf.addPage();
+          pdf.addImage(fatia.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, 210, (fim - ini) * mmPx);
+          if (r && r.top - base.top >= ini && r.bottom - base.top <= fim) pdf.link((r.left - base.left) * mmPx, (r.top - base.top - ini) * mmPx, r.width * mmPx, r.height * mmPx, { url: cta.href });
+          ini = fim; pag++;
+        }
+      }
+      return pdf.output('blob');
+    } finally { palco.remove(); }
+  }
+  async function salva(blob, nome, alvo) {
+    if (alvo) { const w = await alvo.createWritable(); await w.write(blob); await w.close(); return alvo.name; }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = nome + '.pdf';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 30000);
+    return nome + '.pdf';
+  }
+  // Botão "Baixar PDF" (e o fim da importação do orçamento): pergunta onde salvar e gera o PDF.
+  // alvo já escolhido (importação) pode vir pronto; false = a pessoa cancelou a janela.
+  fichas.baixarPdfProposta = async (p, alvo) => {
+    const m = montaProposta(p);
+    if (alvo === undefined) alvo = await pedeArquivo(m.nome);
+    if (alvo === false) { CRM.toast('PDF não salvo. Quando quiser, clique em "Baixar PDF" na proposta.'); return; }
+    CRM.toast('Gerando o PDF…');
+    try {
+      const arq = await salva(await geraPdf(m), m.nome, alvo);
+      CRM.toast('PDF salvo: ' + arq + (alvo ? '' : ' (pasta Downloads)') + '. Agora é só anexar no WhatsApp ou no e-mail.');
+    } catch (e) {
+      console.error(e);
+      CRM.toast('Não consegui gerar o PDF direto (' + e.message + '). Abrindo a impressão: escolha "Salvar como PDF".', true);
+      fichas.imprimirProposta(p);
+    }
+  };
+  fichas.pedeArquivoPdf = nome => pedeArquivo(String(nome).replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim());
+
   // Enviar a proposta ao cliente: abre o WhatsApp (ou o e-mail para todos os endereços) com o
   // modelo de envio de orçamento e o resumo (número, valor, validade). O link do WhatsApp não leva
-  // arquivo: o PDF ("Imprimir / PDF" → Salvar como PDF) é anexado na conversa. A proposta passa a
+  // arquivo: o PDF ("Baixar PDF") é anexado na conversa. A proposta passa a
   // "enviada" (histórico e etapa, como no "Marcar enviada") e, na volta, o CRM pergunta como foi.
   fichas.enviarProposta = async (pid, canal, el) => {
     const p = E().ix.porId.propostas.get(pid); if (!p) return;
@@ -796,7 +899,7 @@
       reg = await registraAuto(e, c, 'email', nome + ' por e-mail para ' + para.join(', ') + ' — "' + assunto + '"');
       esperaVolta(e, c, reg, 'email');
     }
-    CRM.toast('Anexe o PDF na mensagem: "Imprimir / PDF" → Salvar como PDF.');
+    CRM.toast('Anexe o PDF na mensagem (o que você salvou com "Baixar PDF").');
     if (p.status === 'rascunho') {
       try { const r = await CRM.atualizar('propostas', p.id, { status: 'enviada', enviada_em: CRM.hoje() }); await aoMudarProposta(r, 'rascunho', n); } catch (x) { CRM.falhou(x); }
     }
@@ -1162,6 +1265,7 @@
     'nova-proposta': () => fichas.formProposta(null, CRM.negocio(abertoNegocio)),
     'editar-proposta': id => fichas.formProposta(E().ix.porId.propostas.get(id), CRM.negocio(abertoNegocio)),
     'imprimir-proposta': id => fichas.imprimirProposta(E().ix.porId.propostas.get(id)),
+    'pdf-proposta': id => fichas.baixarPdfProposta(E().ix.porId.propostas.get(id)).catch(CRM.falhou),
     'enviar-proposta': (id, el) => { const [pid, canal] = id.split(':'); fichas.enviarProposta(pid, canal, el).catch(CRM.falhou); },
     'proposta-status': async id => {
       const [pid, st] = id.split(':');
