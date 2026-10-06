@@ -697,3 +697,4 @@ tr.apagado td { opacity: .55; }
 .cx-conf-ignora { opacity: .6; }
 .cx-sem-emp .cx-emp { display: none; }
 @media (max-width: 600px) { .cx-frases-linha { flex-direction: column; } }
+.cx-antigos { margin: 0; color: var(--suave); font-size: .78rem; }

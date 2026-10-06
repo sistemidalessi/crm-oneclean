@@ -452,7 +452,12 @@
   function blocosVencidos() {
     const h = hoje();
     const v = vencidas(F.lancamentos, h, titulos(), nomeTitulo);
-    const rv = receberVencido(titulos(), F.lancamentos, h, d1());
+    // corte do Anderson (06/10/2026: "deixe somente os que venceram hoje, pra seguirmos certo daqui pra
+    // frente"): título vencido antes da data fica fora do bloco — continua no contas a receber e na cobrança
+    const desde = (E().cfg || {}).caixa_receber_desde || '';
+    const rvTodos = receberVencido(titulos(), F.lancamentos, h, d1());
+    const rv = desde ? rvTodos.filter(t => t.vencimento >= desde) : rvTodos;
+    const antigos = rvTodos.length - rv.length;
     const tot = l => l.reduce((t, x) => t + Number(x.valor || 0), 0);
     const b = (acao, id, rot, cls) => '<button type="button" class="mini' + (cls ? ' ' + cls : '') + '" data-acao="' + acao + '" data-id="' + esc(id) + '">' + esc(rot) + '</button>';
     return (v.length ? '<details class="cartao cx-venc"><summary><strong>Contas vencidas sem baixa: ' + v.length + ' (' + esc(R.moeda(tot(v))) + ')</strong> <small>fora do saldo da grade. Já pagou? "Já estava paga". Vai negociar? "Pausar".</small></summary>' +
@@ -461,7 +466,9 @@
       '</tbody></table></div></details>' : '') +
       (rv.length ? '<details class="cartao cx-venc"><summary><strong>A receber vencido: ' + rv.length + ' título(s) (' + esc(R.moeda(tot(rv))) + ')</strong> <small>já deviam ter caído na conta; fora da previsão até entrarem. Caiu? "Recebi hoje".</small></summary>' +
       '<div class="tabela-rolagem"><table class="tabela"><tbody>' + rv.map(t => '<tr><td>' + esc(nomeTitulo(t)) + '<small>duplicata ' + esc(t.duplicata) + '</small></td><td>vence ' + esc(R.dataBR(t.vencimento)) + '</td>' +
-        '<td class="num">' + esc(R.moeda(t.valor)) + '</td><td class="acoes-linha">' + b('cx-ok', 'tit:' + t.duplicata, 'Recebi hoje') + b('cx-item', 'tit:' + t.duplicata, 'Remarcar ou valor') + '</td></tr>').join('') + '</tbody></table></div></details>' : '');
+        '<td class="num">' + esc(R.moeda(t.valor)) + '</td><td class="acoes-linha">' + b('cx-ok', 'tit:' + t.duplicata, 'Recebi hoje') + b('cx-item', 'tit:' + t.duplicata, 'Remarcar ou valor') + '</td></tr>').join('') + '</tbody></table></div></details>' : '') +
+      (antigos ? '<p class="cx-antigos">' + antigos + ' título(s) vencido(s) antes de ' + esc(R.dataBR(desde)) + ' (' + esc(R.moeda(tot(rvTodos.filter(t => t.vencimento < desde)))) +
+        ') ficam fora do Caixa — continuam no contas a receber e na cobrança. Configurações → Geral.</p>' : '');
   }
   function listaContas() {
     const h = hoje();

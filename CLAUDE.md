@@ -909,6 +909,15 @@ Anderson: cada sistema cuida da sua empresa; o "Geral" (as duas) é de quem lê 
   empréstimo; sem "lembrar". Frase de volta ("devolvi 1.600 pra Agilité") dá baixa na volta prevista, não
   duplica (o ✓ também). Conferência: "Devolve à Agilité em … o valor de …", editáveis. Leitor copiado de novo
   (79fdfe7): "devolve dia 14" depois de SAÍDA = data da volta; enviei/mandei = saída que aconteceu.
+- **Corte do "A receber vencido" (pedido do Anderson, 06/10 à noite: "deixe somente os que venceram hoje, pra
+  seguirmos certo daqui pra frente"):** `cfg.caixa_receber_desde` = 2026-10-05 (Configurações → Geral, campo
+  "Caixa: A receber vencido mostra só…"). Os 9 títulos antigos (29/01 a 07/08, R$ 11.540,90) saem do bloco do
+  Caixa com uma linha dizendo quantos ficaram de fora; **não foram apagados** (voltariam pelo FKN) e continuam
+  no contas a receber, na cobrança (selo e duplicatas em atraso) e na leitura da Agilité. Contas a pagar
+  vencidas antes de hoje: nenhuma.
+- **Transferência real lançada (06/10):** entrada de R$ 1.600 da Agilité hoje (baixa às 17:00, antes do saldo
+  do BB informado às 17:54, que já tinha o dinheiro — não conta duas vezes) e devolução prevista em 14/10, as
+  duas "Transferência entre empresas" e entre empresas; frase gravada, então "Desfazer a frase" desfaz as duas.
 - **Assinatura do produto (pedido do Anderson, 06/10 à noite: "o orçamento já faz a propaganda"):** linha discreta
   no pé de toda proposta/orçamento em PDF — "Orçamento gerado pelo CRM **Sistemi Dalessi** · sistemas sob medida ·
   afdalessi@gmail.com" (`CRM.ASSINATURA_EMAIL`, app.js) — e o e-mail no rodapé do login. Configurações → Geral:
