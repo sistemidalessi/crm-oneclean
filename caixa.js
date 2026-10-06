@@ -1,169 +1,20 @@
 /* CRM Sistemi Dalessi — Caixa: contas a pagar, contas recorrentes e caixa do dia (06/10/2026).
    Troca a planilha "Fluxo de Caixa" do Excel. SÓ o administrador: tem salário, pró-labore e retirada
    (a RLS das tabelas crm_fin_* barra todo o resto — ver schema.sql).
-   - Saldo = último saldo informado do banco ("Conferir com o banco") + o que foi baixado no caixa
-     (✓) depois dele. Pago "fora" (sumiu do FKN, "já estava paga") aparece, mas não mexe no saldo.
+   As contas (saldo, grade, dia útil, crédito dos títulos) ficam em caixa-calculo.js (CRMCaixa), que
+   a Edge Function crm-caixa-leitura também usa; aqui fica a tela.
    - Grade de 15 dias como a planilha: uma coluna por dia, entradas em cima, saídas embaixo, total de
-     cada parte e saldo no fim do dia. Verde = aconteceu; branco = previsto; borda vermelha = venceu.
-   - Dia útil bancário de São Bernardo do Campo: o que vence em sábado, domingo ou feriado é pago (ou
-     entra) no próximo dia útil; o vencimento gravado não muda.
-   - Título do contas a receber entra no dia em que o dinheiro cai: pago no vencimento (ou no próximo
-     dia útil) e creditado no dia útil seguinte.
-   Parte pura (CRMCaixa.*, testada em testes/caixa.test.js) e a tela. */
+     cada parte e saldo no fim do dia. Verde = aconteceu; branco = previsto; borda vermelha = venceu. */
 (function (raiz) {
   'use strict';
-  const R = raiz.CRMRegras || (typeof require !== 'undefined' ? require('./regras.js') : null);
+  const R = raiz.CRMRegras;
+  const C = raiz.CRMCaixa;
+  const { feriado, posterga, porqueNaoUtil, creditoTitulo, gerarMes, saldoAtual, itensGrade, saldosGrade, vencidas, receberVencido,
+    CATEGORIAS_SAIDA, CATEGORIAS_ENTRADA, ENTRE_EMPRESAS } = C;
   const r2 = v => Math.round(Number(v || 0) * 100) / 100;
-  const dt = s => new Date(s + 'T12:00:00Z');
-  const iso = d => d.toISOString().slice(0, 10);
-  const soma = (s, n) => { const d = dt(s); d.setUTCDate(d.getUTCDate() + n); return iso(d); };
-  const semana = s => dt(s).getUTCDay();
+  const semana = s => new Date(s + 'T12:00:00Z').getUTCDay();
   const dm = s => s ? s.slice(8, 10) + '/' + s.slice(5, 7) : '';
   const DIAS = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
-
-  // ------------------------------------------------------------ feriados e dia útil (bancário, SBC)
-  function pascoa(ano) { // Meeus/Butcher
-    const a = ano % 19, b = Math.floor(ano / 100), c = ano % 100, d = Math.floor(b / 4), e = b % 4;
-    const f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30;
-    const i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451);
-    const mes = Math.floor((h + l - 7 * m + 114) / 31), dia = ((h + l - 7 * m + 114) % 31) + 1;
-    return ano + '-' + String(mes).padStart(2, '0') + '-' + String(dia).padStart(2, '0');
-  }
-  const cacheFeriados = new Map();
-  // Nacionais, o do Estado de SP (9 de julho), Carnaval (banco fechado) e os de São Bernardo do
-  // Campo (aniversário da cidade, 20/08, e Corpus Christi), onde fica a OneClean.
-  function feriados(ano) {
-    if (cacheFeriados.has(ano)) return cacheFeriados.get(ano);
-    const f = {};
-    const add = (mmdd, nome) => { f[ano + '-' + mmdd] = { nome }; };
-    add('01-01', 'Confraternização Universal'); add('04-21', 'Tiradentes'); add('05-01', 'Dia do Trabalho');
-    add('09-07', 'Independência'); add('10-12', 'Nossa Senhora Aparecida'); add('11-02', 'Finados');
-    add('11-15', 'Proclamação da República'); add('11-20', 'Consciência Negra'); add('12-25', 'Natal');
-    add('07-09', 'Revolução Constitucionalista (SP)'); add('08-20', 'Aniversário de São Bernardo do Campo');
-    const p = pascoa(ano);
-    f[soma(p, -48)] = { nome: 'Carnaval' }; f[soma(p, -47)] = { nome: 'Carnaval' };
-    f[soma(p, -2)] = { nome: 'Sexta-feira Santa' }; f[soma(p, 60)] = { nome: 'Corpus Christi' };
-    cacheFeriados.set(ano, f);
-    return f;
-  }
-  const feriado = s => feriados(Number(String(s).slice(0, 4)))[s] || null;
-  const util = s => { const w = semana(s); return w !== 0 && w !== 6 && !feriado(s); };
-  const posterga = s => { let x = s; while (!util(x)) x = soma(x, 1); return x; };
-  const utilDepois = s => posterga(soma(s, 1));
-  const porqueNaoUtil = s => { const f = feriado(s); return f ? 'feriado (' + f.nome + ')' : DIAS[semana(s)]; };
-  // Dia em que o título cai na conta: pago no vencimento (ou próximo dia útil) e creditado no dia útil
-  // seguinte. d1 = false: cai no mesmo dia do pagamento.
-  const creditoTitulo = (venc, d1) => { const pg = posterga(venc); return d1 === false ? pg : utilDepois(pg); };
-
-  // ------------------------------------------------------------ recorrentes
-  // "AAAA-MM" + dia → data, sem estourar o fim do mês (dia 31 em fevereiro → 28/29).
-  function diaDoMes(compet, dia) {
-    const [a, m] = compet.split('-').map(Number);
-    const ultimo = new Date(Date.UTC(a, m, 0)).getUTCDate();
-    return compet + '-' + String(Math.min(dia, ultimo)).padStart(2, '0');
-  }
-  const mesesEntre = (a, b) => (+b.slice(0, 4) - +a.slice(0, 4)) * 12 + (+b.slice(5, 7) - +a.slice(5, 7));
-  // Contas do mês "AAAA-MM" geradas pelas recorrentes ativas que ainda não têm a conta desse mês
-  // (idempotente: o banco também barra duas contas da mesma recorrente no mesmo mês).
-  function gerarMes(recorrentes, compet, existentes) {
-    const ja = new Set((existentes || []).filter(l => l.recorrente_id).map(l => l.recorrente_id + '|' + String(l.competencia || '').slice(0, 7)));
-    const out = [];
-    (recorrentes || []).forEach(r => {
-      if (r.ativo === false) return;
-      const ini = String(r.inicio || '').slice(0, 7) || compet;
-      if (compet < ini) return;
-      let parcela = null;
-      if (r.parcelas) { parcela = (r.parcela_inicio || 1) + mesesEntre(ini, compet); if (parcela > r.parcelas) return; }
-      if (ja.has(r.id + '|' + compet)) return;
-      out.push({ tipo: r.tipo || 'saida', descricao: r.descricao + (parcela ? ' (' + String(parcela).padStart(2, '0') + ' de ' + r.parcelas + ')' : ''),
-        fornecedor: r.fornecedor || null, categoria: r.categoria || null, valor: r2(r.valor), vencimento: diaDoMes(compet, r.dia),
-        entre_empresas: !!r.entre_empresas, origem: 'recorrente', recorrente_id: r.id, competencia: compet + '-01', parcela, parcelas: r.parcelas || null });
-    });
-    return out;
-  }
-
-  // ------------------------------------------------------------ saldo
-  const tempo = v => { const t = Date.parse(v || ''); return isNaN(t) ? 0 : t; };
-  function ancora(saldos) {
-    return (saldos || []).slice().sort((a, b) => String(b.data).localeCompare(String(a.data)) || tempo(b.criado_em) - tempo(a.criado_em))[0] || null;
-  }
-  // Baixado no caixa depois do saldo informado (mesmo dia: baixado depois de informar).
-  const contaNoSaldo = (l, a) => l.situacao === 'pago' && l.baixa === 'caixa' && l.pago_em &&
-    (l.pago_em > a.data || (l.pago_em === a.data && tempo(l.baixado_em) > tempo(a.criado_em)));
-  const sinal = l => (l.tipo === 'entrada' ? 1 : -1) * Number(l.valor || 0);
-  function saldoAtual(saldos, lancs) {
-    const a = ancora(saldos);
-    if (!a) return { ancora: null, saldo: null, entradas: 0, saidas: 0, n: 0 };
-    let e = 0, s = 0, n = 0;
-    (lancs || []).forEach(l => { if (contaNoSaldo(l, a)) { n++; if (l.tipo === 'entrada') e += Number(l.valor || 0); else s += Number(l.valor || 0); } });
-    return { ancora: a, saldo: r2(Number(a.valor) + e - s), entradas: r2(e), saidas: r2(s), n };
-  }
-
-  // ------------------------------------------------------------ grade
-  // Item: { chave, tipo: 'lanc'|'titulo', secao: 'entrada'|'saida', data, titulo, valor, estado:
-  // 'feito'|'fora'|'previsto', obs, ref }. Vencidos (conta ou título que já devia ter acontecido)
-  // ficam fora da grade e do saldo previsto: vão para os blocos próprios.
-  function itensGrade(de, ate, hoje, lancs, titulos, opc) {
-    opc = opc || {};
-    const it = [];
-    const add = o => { if (o.data >= de && o.data <= ate) it.push(o); };
-    const recebidos = new Set((lancs || []).filter(l => l.titulo_duplicata).map(l => l.titulo_duplicata));
-    (lancs || []).forEach(l => {
-      const secao = l.tipo === 'entrada' ? 'entrada' : 'saida';
-      const base = { chave: 'lanc:' + l.id, tipo: 'lanc', secao, titulo: l.descricao, valor: r2(l.valor), ref: l };
-      if (l.situacao === 'pausado') return;
-      if (l.situacao === 'pago') { add(Object.assign(base, { data: l.pago_em, estado: l.baixa === 'caixa' ? 'feito' : 'fora', obs: l.baixa === 'caixa' ? '' : 'pago fora do caixa do dia' })); return; }
-      const pg = posterga(l.vencimento);
-      if (pg < hoje) return;
-      add(Object.assign(base, { data: pg, estado: 'previsto', obs: pg !== l.vencimento ? 'vence ' + dm(l.vencimento) + ', ' + porqueNaoUtil(l.vencimento) + ' → ' + (secao === 'entrada' ? 'entra' : 'paga') + ' no próximo dia útil' : '' }));
-    });
-    (titulos || []).forEach(t => {
-      if (recebidos.has(t.duplicata)) return;
-      const cr = creditoTitulo(t.vencimento, opc.d1);
-      if (cr < hoje) return;
-      add({ chave: 'tit:' + t.duplicata, tipo: 'titulo', secao: 'entrada', data: cr, titulo: (opc.nome ? opc.nome(t) : t.cliente_nome || 'Cliente') + ' · ' + t.duplicata,
-        valor: r2(t.valor), estado: 'previsto', obs: 'título vence ' + dm(t.vencimento) + ', cai na conta ' + dm(cr), ref: t });
-    });
-    return it;
-  }
-  // Saldo no fim de cada dia. De hoje em diante: saldo atual + previstos até o dia (os de antes do
-  // começo da grade também — "previstos" vem de hoje até o fim). Para trás: saldo atual − o que foi
-  // baixado no caixa depois do dia (antes do saldo informado: sem saldo).
-  function saldosGrade(dias, hoje, s, lancs, previstos) {
-    const out = {};
-    if (s.saldo == null) return out;
-    dias.forEach(d => {
-      if (d < hoje) {
-        if (d < s.ancora.data) { out[d] = null; return; }
-        let v = s.saldo;
-        (lancs || []).forEach(l => { if (contaNoSaldo(l, s.ancora) && l.pago_em > d) v -= sinal(l); });
-        out[d] = r2(v); return;
-      }
-      let v = s.saldo;
-      (previstos || []).forEach(x => { if (x.estado === 'previsto' && x.data >= hoje && x.data <= d) v += (x.secao === 'entrada' ? 1 : -1) * x.valor; });
-      out[d] = r2(v);
-    });
-    return out;
-  }
-  const vencidas = (lancs, hoje) => (lancs || []).filter(l => l.situacao === 'aberto' && posterga(l.vencimento) < hoje)
-    .sort((a, b) => a.vencimento.localeCompare(b.vencimento) || b.valor - a.valor);
-  function receberVencido(titulos, lancs, hoje, d1) {
-    const recebidos = new Set((lancs || []).filter(l => l.titulo_duplicata).map(l => l.titulo_duplicata));
-    return (titulos || []).filter(t => !recebidos.has(t.duplicata) && creditoTitulo(t.vencimento, d1) < hoje)
-      .sort((a, b) => a.vencimento.localeCompare(b.vencimento));
-  }
-
-  const CATEGORIAS_SAIDA = ['Fornecedores', 'Salários', 'Benefícios (VT, VR, cesta)', 'FGTS e encargos', 'Pró-labore', 'Retiradas dos sócios',
-    'Reembolso da folha à Agilité', 'Aluguel', 'Energia', 'Água', 'Telefone e internet', 'Contabilidade', 'Sistema (FKN)', 'Convênio médico',
-    'Impostos', 'Reparcelamentos', 'Cartões', 'Empréstimos e giro', 'Frete e combustível', 'Tarifas bancárias', 'Outras saídas'];
-  const CATEGORIAS_ENTRADA = ['Duplicatas recebidas', 'Material vendido à Agilité', 'Outras entradas'];
-  // Passagem entre OneClean e Agilité: no "Geral" das duas empresas esses valores se anulam.
-  const ENTRE_EMPRESAS = /agilit/i;
-
-  const O = { feriados, feriado, util, posterga, utilDepois, porqueNaoUtil, creditoTitulo, pascoa, diaDoMes, gerarMes, ancora, saldoAtual,
-    itensGrade, saldosGrade, vencidas, receberVencido, CATEGORIAS_SAIDA, CATEGORIAS_ENTRADA, ENTRE_EMPRESAS, soma };
-  raiz.CRMCaixa = O;
-  if (typeof module !== 'undefined') module.exports = O;
 
   // ------------------------------------------------------------ tela
   const CRM = raiz.CRM;

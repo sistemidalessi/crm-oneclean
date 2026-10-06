@@ -170,8 +170,9 @@ Deno.serve(async (req) => {
   if (Number(req.headers.get('content-length') ?? 0) > MAX_BYTES) return resposta(413, { erro: 'lote grande demais' });
 
   const db = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } });
-  const { data: integ } = await db.from('crm_integracoes').select('id, nome, filtro, ativo').eq('token_hash', await sha256(chave)).maybeSingle();
-  if (!integ || !integ.ativo) return resposta(401, { erro: 'chave inválida ou desativada' });
+  const { data: integ } = await db.from('crm_integracoes').select('id, nome, filtro, ativo, uso').eq('token_hash', await sha256(chave)).maybeSingle();
+  // a senha de leitura do Caixa (uso = 'caixa') não entrega notas
+  if (!integ || !integ.ativo || integ.uso === 'caixa') return resposta(401, { erro: 'chave inválida ou desativada' });
 
   let corpo: { arquivos?: { nome?: string; xml?: string }[]; sinal?: boolean; info?: Record<string, unknown>; fkn?: { nome?: string; base64?: string } };
   try { corpo = await req.json(); } catch { return resposta(400, { erro: 'corpo inválido' }); }

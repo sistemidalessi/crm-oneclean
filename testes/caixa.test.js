@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const C = require('../caixa.js');
+const C = require('../caixa-calculo.js');
 
 test('feriados de São Bernardo do Campo e dia útil bancário', () => {
   assert.equal(C.pascoa(2026), '2026-04-05');
@@ -141,4 +141,52 @@ test('contas a pagar do FKN: novas, antigas pausadas, já lançadas ligadas e su
   assert.deepEqual(p.inserir.map(x => [x.chave_fkn, x.situacao]), [['00005|30468-2', 'pausado'], ['16001|OUT/26 - I', 'aberto']]);
   assert.match(p.inserir[0].observacoes, /pendência antiga/);
   assert.equal(p.antigas.qtd, 1);
+});
+
+test('leitura do caixa (Agilité "Geral" e gestora): bate com a grade, sem nome de pessoa', () => {
+  const hoje = '2026-10-06';
+  const lancamentos = [
+    { id: 'p1', tipo: 'saida', descricao: 'Salário Fulana Exemplo', categoria: 'Salários', valor: 3500, vencimento: '2026-10-07', situacao: 'aberto' },
+    { id: 'p2', tipo: 'saida', descricao: 'Salário Beltrana Teste', categoria: 'Salários', valor: 3200, vencimento: '2026-10-07', situacao: 'aberto' },
+    { id: 'p3', tipo: 'saida', descricao: 'Comissão da Fulana', valor: 400, vencimento: '2026-10-07', situacao: 'aberto' },
+    { id: 'a1', tipo: 'saida', descricao: 'Aluguel galpão', categoria: 'Aluguel', valor: 4500, vencimento: '2026-10-10', situacao: 'aberto' }, // sábado → 13 (12 é feriado)
+    { id: 'r1', tipo: 'saida', descricao: 'Reembolso da folha à Agilité', categoria: 'Reembolso da folha à Agilité', valor: 11000, vencimento: '2026-10-08', situacao: 'aberto', entre_empresas: true },
+    { id: 'f1', tipo: 'saida', descricao: 'Boleto ligar (11) 98765-4321 CPF 123.456.789-09', fornecedor: 'FORNECEDOR FICTICIO LTDA', valor: 100, vencimento: '2026-10-06', situacao: 'pago', pago_em: hoje, baixa: 'caixa', baixado_em: '2026-10-06T15:00:00Z' },
+    { id: 'f2', tipo: 'saida', descricao: 'Pago fora', valor: 50, vencimento: '2026-10-06', situacao: 'pago', pago_em: hoje, baixa: 'fora' },
+    { id: 'v1', tipo: 'saida', descricao: 'Energia', categoria: 'Energia', valor: 900, vencimento: '2026-09-20', situacao: 'aberto' },
+    { id: 'z1', tipo: 'saida', descricao: 'PAPELARIA FICTICIA · 123-01', fornecedor: 'PAPELARIA FICTICIA', valor: 300, vencimento: '2026-05-01', situacao: 'pausado', origem: 'fkn' },
+    { id: 'z2', tipo: 'saida', descricao: 'PAPELARIA FICTICIA · 124-01', fornecedor: 'PAPELARIA FICTICIA', valor: 200, vencimento: '2026-06-01', situacao: 'pausado', origem: 'fkn' }
+  ];
+  const saldos = [{ data: hoje, valor: 8052.79, criado_em: '2026-10-06T12:00:00Z' }];
+  const titulos = [{ duplicata: '100-1', cliente: 'CLIENTE EXEMPLO LTDA', valor: 2000, vencimento: '2026-10-08' },
+    { duplicata: '200-1', cliente: 'AGILITE FICTICIA', valor: 700, vencimento: '2026-10-09' },
+    { duplicata: '300-1', cliente: 'ATRASADO SA', valor: 50, vencimento: '2026-09-01' }];
+  const r = C.resumoLeitura({ lancamentos, saldos, titulos, recorrentes: [], pessoas: ['Fulana Exemplo', 'Beltrana Teste'] }, { hoje, dias: 10, d1: true, gerado_em: 'x' });
+  // saldo e saldo de cada dia = os da grade da tela
+  const s = C.saldoAtual(saldos, lancamentos);
+  assert.equal(r.saldo.atual, s.saldo);
+  assert.equal(r.saldo.atual, 7952.79);
+  const dias = r.proximos_dias.map(x => x.data);
+  const g = C.saldosGrade(dias, hoje, s, lancamentos, C.itensGrade(hoje, dias[dias.length - 1], hoje, lancamentos, titulos, { d1: true }));
+  r.proximos_dias.forEach(x => assert.equal(x.saldo_fim_do_dia, g[x.data], x.data));
+  const d06 = r.proximos_dias[0];
+  assert.equal(d06.saidas, 100, 'o pago fora não entra na soma do dia');
+  assert.ok(d06.itens.some(i => i.pago_fora && i.situacao === 'aconteceu'));
+  assert.ok(d06.itens.some(i => i.descricao.indexOf('[telefone]') !== -1 && i.descricao.indexOf('[CPF]') !== -1));
+  // folha e comissão somadas por dia e categoria, sem nome
+  const d07 = r.proximos_dias.find(x => x.data === '2026-10-07');
+  assert.deepEqual(d07.itens.map(i => [i.descricao, i.valor, i.lancamentos_somados || 1]), [['Salários', 6700, 2], ['Pessoal', 400, 1]]);
+  assert.doesNotMatch(JSON.stringify(r), /Fulana|Beltrana/);
+  // entre empresas e dia útil
+  assert.ok(r.proximos_dias.find(x => x.data === '2026-10-08').itens.every(i => i.descricao !== 'Reembolso da folha à Agilité' || i.entre_empresas));
+  assert.deepEqual(r.proximos_dias.find(x => x.data === '2026-10-12').sem_banco, 'feriado (Nossa Senhora Aparecida)');
+  assert.ok(r.proximos_dias.find(x => x.data === '2026-10-13').itens.some(i => i.descricao === 'Aluguel galpão'));
+  assert.ok(r.proximos_dias.find(x => x.data === '2026-10-13').itens.some(i => i.cliente_fornecedor === 'AGILITE FICTICIA' && i.entre_empresas), 'título 09/10 (sex) cai seg 12 → feriado → 13');
+  // vencidas, pausadas, títulos
+  assert.deepEqual([r.contas_vencidas.quantidade, r.contas_vencidas.total, r.contas_vencidas.itens[0].situacao], [1, 900, 'vencido']);
+  assert.deepEqual(r.contas_pausadas.contas.map(c => [c.conta, c.parcelas, c.total]), [['PAPELARIA FICTICIA', 2, 500]]);
+  assert.deepEqual([r.titulos_a_receber.quantidade, r.titulos_a_receber.vencidos, r.titulos_a_receber.total], [3, 1, 2750]);
+  assert.equal(r.titulos_a_receber.titulos.find(t => t.duplicata === '100-1').cai_na_conta, '2026-10-09');
+  assert.equal(r.menor_saldo.valor, Math.min(...r.proximos_dias.map(x => x.saldo_fim_do_dia)));
+  assert.equal(r.totais_periodo.saldo_final, r.proximos_dias[9].saldo_fim_do_dia);
 });

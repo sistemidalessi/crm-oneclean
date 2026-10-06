@@ -345,6 +345,10 @@ alter table public.crm_usuarios add column if not exists nomes_nota text[] not n
 -- XML esperando, última falha). Se parar, o CRM avisa o administrador.
 alter table public.crm_integracoes add column if not exists ultimo_sinal timestamptz;
 alter table public.crm_integracoes add column if not exists sinal jsonb;
+-- uso: 'notas' = chave do vigia (entrega notas e relatórios do FKN, função crm-notas); 'caixa' = senha
+-- de LEITURA do Caixa (função crm-caixa-leitura, para a aba Geral da Agilité e a gestora do grupo).
+-- Uma não serve para a outra.
+alter table public.crm_integracoes add column if not exists uso text not null default 'notas' check (uso in ('notas','caixa'));
 
 -- Registro de cada entrega do vigia (só a Edge Function escreve; gestor lê).
 create table if not exists public.crm_integracao_log (

@@ -407,7 +407,7 @@
 
   Supa.prototype.integracoes = async function () {
     const [c, l] = await Promise.all([
-      this.sb.from('crm_integracoes').select('id,nome,filtro,ativo,ultimo_uso,ultimo_sinal,sinal,criado_em').order('criado_em'),
+      this.sb.from('crm_integracoes').select('id,nome,filtro,ativo,ultimo_uso,ultimo_sinal,sinal,criado_em,uso').order('criado_em'),
       this.sb.from('crm_integracao_log').select('*').order('quando', { ascending: false }).limit(40)
     ]);
     return { chaves: c.error ? [] : c.data, registro: unwrap(l) };
@@ -415,8 +415,8 @@
 
   // Para o aviso do administrador: só o sinal de vida de cada vigia (RLS: só admin lê).
   Supa.prototype.vigias = async function () {
-    const r = await this.sb.from('crm_integracoes').select('id,nome,ativo,ultimo_uso,ultimo_sinal,sinal');
-    return r.error ? [] : r.data;
+    const r = await this.sb.from('crm_integracoes').select('id,nome,ativo,ultimo_uso,ultimo_sinal,sinal,uso');
+    return r.error ? [] : r.data.filter(x => x.uso !== 'caixa'); // a senha de leitura do Caixa não é vigia
   };
 
   Supa.prototype.historico = async function (filtro) {

@@ -785,22 +785,24 @@
     const admin = CRM.ehAdmin();
     const url = (window.CRM_CONFIG && window.CRM_CONFIG.supabaseUrl) || 'https://SEU-PROJETO.supabase.co';
     const quando = v => (v ? esc(R.dataBR(R.diaLocal(v)) + ' ' + R.horaLocal(v)) : '—');
+    const vigias = integ.chaves.filter(c => c.uso !== 'caixa');
     return '<section class="cartao"><h2>Vigia de notas fiscais</h2>' +
       '<p>Um programinha no servidor onde fica a pasta de XML do emissor (UniNFe) olha a pasta a cada minuto e manda as notas novas para cá. ' +
       'Elas passam pelas mesmas regras da importação manual: <strong>só as da equipe</strong> (pelo vendedor escrito na nota), o cadastro do cliente é completado e nada duplica.</p>' +
       '<p class="dica">O programa não recebe senha nem acesso ao banco: só uma <strong>chave de integração</strong>, que serve apenas para entregar notas. Instalação: <code>ferramentas/vigia-notas.js</code> (README, "Vigia de notas").</p>' +
-      (chaveNova ? '<div class="aviso-notas"><p><strong>Chave gerada para "' + esc(chaveNova.nome) + '".</strong> Copie agora: ela não aparece de novo (o CRM guarda só uma impressão digital dela).</p>' +
+      (chaveNova && chaveNova.uso !== 'caixa' ? '<div class="aviso-notas"><p><strong>Chave gerada para "' + esc(chaveNova.nome) + '".</strong> Copie agora: ela não aparece de novo (o CRM guarda só uma impressão digital dela).</p>' +
         '<p><code id="chaveGerada">' + esc(chaveNova.chave) + '</code> <button type="button" class="mini" data-acao="copiar-chave">copiar</button></p>' +
         '<p class="dica">No servidor, na pasta onde colocou o vigia-notas.js:</p><pre class="comando">node vigia-notas.js --configurar --url ' + esc(url) + ' --chave ' + esc(chaveNova.chave) +
         ' --pasta "D:\\...\\Enviados\\Autorizados"</pre></div>' : '') +
-      (integ.chaves.length ? '<table class="tabela"><thead><tr><th>Chave</th><th>Quais notas entram</th><th>Sinal de vida</th><th>Último envio</th><th>Criada</th><th></th></tr></thead><tbody>' +
-        integ.chaves.map(c => '<tr><td><strong>' + esc(c.nome) + '</strong> ' + (c.ativo ? CRM.selo('ativa', 'verde') : CRM.selo('desligada', 'vermelho')) + '</td>' +
+      (vigias.length ? '<table class="tabela"><thead><tr><th>Chave</th><th>Quais notas entram</th><th>Sinal de vida</th><th>Último envio</th><th>Criada</th><th></th></tr></thead><tbody>' +
+        vigias.map(c => '<tr><td><strong>' + esc(c.nome) + '</strong> ' + (c.ativo ? CRM.selo('ativa', 'verde') : CRM.selo('desligada', 'vermelho')) + '</td>' +
           '<td>' + (admin ? '<select data-integ-filtro="' + esc(c.id) + '">' + CRM.opcoesHTML(FILTROS_INTEG, c.filtro) + '</select>' : esc(R.rotulo(FILTROS_INTEG, c.filtro))) + '</td>' +
           '<td>' + sinalDe(c) + '</td><td>' + quando(c.ultimo_uso) + '</td><td>' + quando(c.criado_em) + '</td>' +
           '<td>' + (admin ? '<button type="button" class="mini" data-acao="integ-ativar" data-id="' + esc(c.id) + '">' + (c.ativo ? 'desligar' : 'ligar') + '</button> ' +
             '<button type="button" class="mini" data-acao="integ-excluir" data-id="' + esc(c.id) + '">excluir</button>' : '') + '</td></tr>').join('') + '</tbody></table>'
         : '<p class="vazio">' + (admin ? 'Nenhuma chave ainda.' : 'Só o administrador vê e gera as chaves.') + '</p>') +
       (admin ? '<p><button type="button" class="btn ouro" data-acao="integ-nova">Gerar chave para o vigia</button></p>' : '') + '</section>' +
+      (admin ? leituraCaixa(url, quando) : '') +
       '<section class="cartao"><h2>Últimas entregas <button type="button" class="mini" data-acao="integ-atualizar">atualizar</button></h2>' +
       (integ.registro.length ? '<table class="tabela"><thead><tr><th>Quando</th><th class="num">Arquivos</th><th class="num">Notas novas</th><th class="num">Valor</th><th class="num">Fora</th><th>Detalhes</th></tr></thead><tbody>' +
         integ.registro.map(l => {
@@ -828,15 +830,32 @@
       try { await CRM.store().atualizar('integracoes', s.dataset.integFiltro, { filtro: s.value }); CRM.toast('Filtro da integração salvo.'); integ = null; CRM.render(); } catch (e) { CRM.falhou(e); }
     }));
   };
-  async function novaChave() {
-    const nome = (prompt('Nome da chave (onde o vigia vai rodar):', 'Vigia de notas — servidor') || '').trim();
+  // Senha de LEITURA do Caixa (função crm-caixa-leitura): o sistema da Agilité (aba Geral) e a gestora
+  // do grupo leem o resumo do caixa com ela. Só lê; não serve para entregar notas (nem a do vigia
+  // serve para ler o caixa). Aparece uma vez: o CRM guarda só o SHA-256.
+  function leituraCaixa(url, quando) {
+    const l = integ.chaves.filter(c => c.uso === 'caixa');
+    const end = url + '/functions/v1/crm-caixa-leitura?dias=30';
+    return '<section class="cartao"><h2>Leitura do Caixa (Agilité e gestora do grupo)</h2>' +
+      '<p>Endereço só de leitura do resumo do Caixa (saldo, próximos dias, vencidas, pausadas e títulos a receber), no mesmo formato do sistema da Agilité, ' +
+      'para a aba <strong>Geral</strong> de lá somar as duas empresas. Salário, pró-labore, retiradas e comissões saem somados, sem nome. Ninguém grava nada por ele.</p>' +
+      '<p>Endereço: <code>' + esc(end) + '</code></p>' +
+      (chaveNova && chaveNova.uso === 'caixa' ? '<div class="aviso-notas"><p><strong>Senha gerada para "' + esc(chaveNova.nome) + '".</strong> Copie agora e cole direto no campo de Configurações do sistema da Agilité: ela não aparece de novo. ' +
+        '<strong>Não mande por WhatsApp, e-mail nem chat.</strong></p><p><code id="chaveGerada">' + esc(chaveNova.chave) + '</code> <button type="button" class="mini" data-acao="copiar-chave">copiar</button></p></div>' : '') +
+      (l.length ? '<table class="tabela"><thead><tr><th>Senha</th><th>Criada</th><th></th></tr></thead><tbody>' + l.map(c => '<tr><td><strong>' + esc(c.nome) + '</strong> ' +
+        (c.ativo ? CRM.selo('ativa', 'verde') : CRM.selo('desligada', 'vermelho')) + '</td><td>' + quando(c.criado_em) + '</td><td><button type="button" class="mini" data-acao="integ-ativar" data-id="' + esc(c.id) + '">' +
+        (c.ativo ? 'desligar' : 'ligar') + '</button> <button type="button" class="mini" data-acao="integ-excluir" data-id="' + esc(c.id) + '">excluir</button></td></tr>').join('') + '</tbody></table>' : '<p class="vazio">Nenhuma senha de leitura ainda.</p>') +
+      '<p><button type="button" class="btn sec" data-acao="integ-nova-caixa">Gerar senha de leitura do Caixa</button> <small>Vazou ou trocou de computador? Gere outra e exclua a antiga.</small></p></section>';
+  }
+  async function novaChave(uso) {
+    const nome = (prompt(uso === 'caixa' ? 'Nome da senha (quem vai ler o Caixa):' : 'Nome da chave (onde o vigia vai rodar):', uso === 'caixa' ? 'Leitura do Caixa — sistema da Agilité' : 'Vigia de notas — servidor') || '').trim();
     if (!nome) return;
     const b = crypto.getRandomValues(new Uint8Array(32));
     const chave = btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
     const h = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(chave));
     const token_hash = [...new Uint8Array(h)].map(x => x.toString(16).padStart(2, '0')).join('');
-    await CRM.store().inserir('integracoes', { nome, token_hash, filtro: 'auto' });
-    chaveNova = { nome, chave };
+    await CRM.store().inserir('integracoes', { nome, token_hash, filtro: 'auto', uso: uso === 'caixa' ? 'caixa' : 'notas' });
+    chaveNova = { nome, chave, uso: uso === 'caixa' ? 'caixa' : 'notas' };
     integ = null; CRM.render();
   }
 
@@ -977,9 +996,11 @@
     'historico-atualizar': () => { historico = null; CRM.render(); },
     'integ-atualizar': () => { integ = null; CRM.render(); },
     'integ-nova': () => novaChave().catch(CRM.falhou),
+    'integ-nova-caixa': () => novaChave('caixa').catch(CRM.falhou),
     'integ-ativar': async id => { const c = integ.chaves.find(x => x.id === id); try { await CRM.store().atualizar('integracoes', id, { ativo: !c.ativo }); integ = null; CRM.render(); } catch (e) { CRM.falhou(e); } },
     'integ-excluir': async id => {
-      if (!confirm('Excluir esta chave? O vigia que usa ela para de entregar notas (o registro das entregas também some).')) return;
+      const c = integ.chaves.find(x => x.id === id);
+      if (!confirm(c && c.uso === 'caixa' ? 'Excluir esta senha? Quem lê o Caixa com ela passa a receber "senha inválida".' : 'Excluir esta chave? O vigia que usa ela para de entregar notas (o registro das entregas também some).')) return;
       try { await CRM.store().remover('integracoes', id); integ = null; CRM.render(); } catch (e) { CRM.falhou(e); }
     },
     'copiar-chave': () => { const t = $('#chaveGerada'); if (t && navigator.clipboard) navigator.clipboard.writeText(t.textContent).then(() => CRM.toast('Chave copiada.')); }

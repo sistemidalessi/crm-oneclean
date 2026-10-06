@@ -48,3 +48,16 @@ test('fkn.js roda do jeito que a Edge Function carrega (sem module, sem require)
   assert.ok(K.ehContasReceber('X;\nCONTAS A RECEBER POR CLIENTE: EM ABERTO;'));
   assert.equal(K.codigoFKN('010503.0'), '010503');
 });
+
+test('a Edge Function crm-caixa-leitura está fixada no caixa-calculo.js atual e ele roda do jeito que ela carrega', () => {
+  const { hashesDe, arquivoDa } = require('../ferramentas/fixa-motor-notas.js');
+  const s = fs.readFileSync(arquivoDa('crm-caixa-leitura'), 'utf8');
+  const h = hashesDe(['caixa-calculo.js']);
+  assert.match(s, /const COMMIT = '[0-9a-f]{40}';/, 'sem commit fixado');
+  assert.ok(s.includes("'caixa-calculo.js': '" + h['caixa-calculo.js'] + "'"), 'caixa-calculo.js mudou: rode node ferramentas/fixa-motor-notas.js e publique a crm-caixa-leitura');
+  const codigo = fs.readFileSync(path.join(__dirname, '..', 'caixa-calculo.js'), 'utf8');
+  const g = {};
+  new Function('module', 'require', 'globalThis', 'window', codigo)(undefined, undefined, g, g);
+  const r = g.CRMCaixa.resumoLeitura({ lancamentos: [], saldos: [{ data: '2026-10-05', valor: 8052.79 }], titulos: [] }, { hoje: '2026-10-06', dias: 30 });
+  assert.deepEqual([r.empresa, r.saldo.atual, r.proximos_dias.length, r.periodo.ate], ['oneclean', 8052.79, 30, '2026-11-04']);
+});
