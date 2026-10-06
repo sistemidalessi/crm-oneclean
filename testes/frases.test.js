@@ -224,3 +224,24 @@ test('palavra genérica (compra, mercadoria) não acha cadastro de cliente', () 
   const p = um('saiu 502,05 compra de mercadoria', { clientes: [{ id: 'c', nome: '| A/C COMPRAS' }], fornecedores: [{ nome: 'MERCADORIAS EXEMPLO LTDA' }] });
   assert.deepEqual([p.valor, p.situacao, p.categoria, p.fornecedor], [502.05, 'realizado', 'Fornecedores', '']);
 });
+
+test('transferência entre empresas (espelho da Agilité): entrada hoje, volta prevista, baixa sem duplicar', () => {
+  let l = le('recebi 1.600 da Agilité pra pagar as contas de hoje, devolvo dia 14');
+  assert.equal(l.length, 1);
+  const p = l[0];
+  assert.deepEqual([p.tipo, p.valor, p.data, p.situacao, p.categoria, p.entre_empresas, p.podeLembrar, !!p.emprestimo],
+    ['entrada', 1600, HOJE, 'realizado', 'Transferência entre empresas', true, false, false]);
+  assert.deepEqual(p.transferencia, { volta: '2026-10-14', valor: 1600 });
+  const g = F.gravacao(p, { agora: 'x' });
+  assert.deepEqual(g.inserir.map(x => [x.tipo, x.valor, x.vencimento, x.situacao, x.categoria, x.entre_empresas]),
+    [['entrada', 1600, HOJE, 'pago', 'Transferência entre empresas', true], ['saida', 1600, '2026-10-14', 'aberto', 'Transferência entre empresas', true]]);
+  assert.deepEqual(F.desfazer(Object.assign({}, g.inserir[0]), { lancamentos: g.inserir }).remover.sort(), g.inserir.map(x => x.id).sort());
+  // no dia 14: "devolvi 1.600 pra Agilité" dá baixa na volta prevista
+  const volta = Object.assign({}, g.inserir[1]);
+  const d = F.classificar(F.interpretar('devolvi 1.600 pra Agilité', '2026-10-14').itens, Object.assign({}, vazio, { hoje: '2026-10-14', lancamentos: [volta] }))[0];
+  assert.equal(d.acao, 'baixar:' + volta.id);
+  // material, reembolso e "entrou … da Agilité" sem palavra de transferência continuam como eram
+  assert.equal(um('entrou 5 mil da Agilité').categoria, 'Material vendido à Agilité');
+  assert.equal(um('paguei 3.000 reembolso folha agilité').categoria, 'Reembolso da folha à Agilité');
+  assert.equal(um('transferi 500 pra Agilité, devolve dia 20').transferencia.volta, '2026-10-20');
+});

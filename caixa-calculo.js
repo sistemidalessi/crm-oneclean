@@ -245,10 +245,11 @@
 
   const CATEGORIAS_SAIDA = ['Fornecedores', 'Salários', 'Benefícios (VT, VR, cesta)', 'FGTS e encargos', 'Pró-labore', 'Retiradas dos sócios',
     'Reembolso da folha à Agilité', 'Aluguel', 'Energia', 'Água', 'Telefone e internet', 'Contabilidade', 'Sistema (FKN)', 'Convênio médico',
-    'Impostos', 'Reparcelamentos', 'Cartões', 'Empréstimos e giro', 'Frete e combustível', 'Tarifas bancárias', 'Outras saídas'];
-  const CATEGORIAS_ENTRADA = ['Duplicatas recebidas', 'Material vendido à Agilité', 'Empréstimos recebidos', 'Outras entradas'];
+    'Impostos', 'Reparcelamentos', 'Cartões', 'Empréstimos e giro', 'Frete e combustível', 'Tarifas bancárias', 'Transferência entre empresas', 'Outras saídas'];
+  const CATEGORIAS_ENTRADA = ['Duplicatas recebidas', 'Material vendido à Agilité', 'Empréstimos recebidos', 'Transferência entre empresas', 'Outras entradas'];
   // Passagem entre OneClean e Agilité: no "Geral" das duas empresas esses valores se anulam.
-  const ENTRE_EMPRESAS = /agilit/i;
+  // ("Transferência entre empresas" também: dinheiro que só muda de empresa dentro do grupo)
+  const ENTRE_EMPRESAS = /agilit|transfer[eê]ncia entre empresas/i;
 
   // ------------------------------------------------------------ leitura (Agilité "Geral" e a gestora do grupo)
   // Mesmo formato do GET /api/ceo/resumo da Agilité (src/routes/caixa_leitura.js do

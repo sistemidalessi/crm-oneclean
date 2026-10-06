@@ -899,6 +899,16 @@ Anderson: cada sistema cuida da sua empresa; o "Geral" (as duas) é de quem lê 
   "Tirar a remarcação" volta ao normal. Ao receber, "Valor que entrou" grava o que caiu de fato (juros ou
   parte), com a diferença na observação. A listagem do FKN não apaga a previsão (o upsert só grava as colunas
   que traz). Na leitura: `cai_na_conta` = a data remarcada e `atrasado: true`.
+- **Transferência entre empresas (06/10 à noite, espelho da Agilité, commit 79fdfe7 de lá):** categoria
+  **"Transferência entre empresas"** (nome exato; nas listas de entrada e de saída; `ENTRE_EMPRESAS` também casa
+  com ela): só caixa — não é receita, despesa nem empréstimo; na aba Geral da Agilité as duas pontas se anulam.
+  Frase que cita a Agilité + palavra de transferência (transferi, enviei, mandei, pix, emprestei, empréstimo,
+  adiantamento, devolução, devolv…) e **sem** material/produto/reembolso/folha/salário/benefício → o lançamento +
+  a volta prevista (outra direção) se houver data ("recebi 1.600 da Agilité pra pagar as contas de hoje, devolvo
+  dia 14" = entrada hoje + saída prevista 14/10), os dois `entre_empresas`; vem antes de material e de
+  empréstimo; sem "lembrar". Frase de volta ("devolvi 1.600 pra Agilité") dá baixa na volta prevista, não
+  duplica (o ✓ também). Conferência: "Devolve à Agilité em … o valor de …", editáveis. Leitor copiado de novo
+  (79fdfe7): "devolve dia 14" depois de SAÍDA = data da volta; enviei/mandei = saída que aconteceu.
 - **Assinatura do produto (pedido do Anderson, 06/10 à noite: "o orçamento já faz a propaganda"):** linha discreta
   no pé de toda proposta/orçamento em PDF — "Orçamento gerado pelo CRM **Sistemi Dalessi** · sistemas sob medida ·
   afdalessi@gmail.com" (`CRM.ASSINATURA_EMAIL`, app.js) — e o e-mail no rodapé do login. Configurações → Geral:

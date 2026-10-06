@@ -23,13 +23,13 @@
   const r2 = v => Math.round(Number(v || 0) * 100) / 100;
 
   // ------------------------------------------------------------ leitura (a MESMA da Agilité)
-  // Cópia de src/caixa/interpretar.js do agilite-sistema-gestao (commit 4d1675c, 06/10/2026 — conferido
+  // Cópia de src/caixa/interpretar.js do agilite-sistema-gestao (commit 79fdfe7, 06/10/2026 — conferido
   // linha a linha): a mesma frase dá o mesmo resultado nos dois caixas. Regra combinada: mudou lá, copiar
   // para cá; mudou aqui, avisar a Agilité para levar (e rodar os testes dos dois lados).
   const MESES = { jan: 1, fev: 2, mar: 3, abr: 4, mai: 5, jun: 6, jul: 7, ago: 8, set: 9, out: 10, nov: 11, dez: 12 };
   const ENTRADA = /\b(entrada|entradas|entrou|entraram|entra|entrar|recebi|recebemos|recebido|recebida|receber|caiu|cairam|cai|credito|creditado|deposito|depositado|depositaram)\b/;
-  const SAIDA = /\b(sai|sair|saiu|saida|saidas|pagar|pago|paga|paguei|pagamos|pagou|pagamento|devolver|devolvi|devolvo|devolve|devolvido|devolvida|devolvidos|devolveremos|devolverei|devolucao|debito|debitado|debitou|transferi|transferencia|pix)\b/;
-  const REALIZADO = /\b(pago|paga|pagos|paguei|pagamos|pagou|saiu|entrou|entraram|recebi|recebemos|recebido|recebida|caiu|cairam|debitado|debitou|transferi|devolvi|depositado|depositaram|creditado)\b/;
+  const SAIDA = /\b(sai|sair|saiu|saida|saidas|enviei|enviamos|mandei|mandamos|pagar|pago|paga|paguei|pagamos|pagou|pagamento|devolver|devolvi|devolvo|devolve|devolvido|devolvida|devolvidos|devolveremos|devolverei|devolucao|debito|debitado|debitou|transferi|transferencia|pix)\b/;
+  const REALIZADO = /\b(enviei|enviamos|mandei|mandamos|pago|paga|pagos|paguei|pagamos|pagou|saiu|entrou|entraram|recebi|recebemos|recebido|recebida|caiu|cairam|debitado|debitou|transferi|devolvi|depositado|depositaram|creditado)\b/;
   const PREVISTO = /\b(vai|vao|sera|serao|vou|vamos|ira|irao|irei|precisa|precisar|precisamos|vence|vencendo|vencimento|previsto|prevista|agendado|agendar|a pagar|a receber|tem que|temos que|devolveremos|devolverei)\b/;
   // trecho que fala da devolucao de um emprestimo ("sera devolvido 60 mil dia 14")
   const DEVOLUCAO = /\b(devolv\w*|devolucao|pagar de volta)\b/;
@@ -65,8 +65,8 @@
   // "12.898,29" "48 mil" "1,5 mil" "300" "R$ 1.200" "3k" -> numero. Ignora "05 de 48" (parcela).
   function extrairValor(txt) {
     let t = baixo(txt).replace(/\b\d+\s*de\s*\d+\b/g, ' ');
-    // "8 diárias … 624" (nasceu no CRM, 06/10/2026; a Agilité levou): número logo antes de uma unidade é
-    // quantidade, não valor, quando sobra outro número na frase
+    // "8 diárias … 624": numero logo antes de uma unidade e' quantidade, nao valor, quando sobra
+    // outro numero na frase (regra criada no CRM-OneClean em 06/10/2026, trazida pra ca' igual)
     const semQtd = t.replace(QUANTIDADE, ' ');
     if (semQtd !== t && /\d/.test(semQtd)) t = semQtd;
     // "100,000,00" e "100,000" (virgula como milhar, 06/10/2026) vem antes de "100,00"
@@ -87,7 +87,7 @@
   }
 
   const QUANTIDADE = /\b\d{1,3}\s+(?:diarias?|fts?|folguistas?|horas?|plantoes?|pessoas?|funcionari[oa]s?|unidades?|un|caixas?|cx|fardos?|pacotes?|galoes?|litros?|kits?|pecas?|rolos?)\b/g;
-  // (CRM: quantidade — "8 diárias" — também não é valor para partir a frase no " e ")
+  // (quantidade - "8 diárias" - tambem nao e' valor pra partir a frase no " e ")
   const temValor = (txt) => extrairValor(baixo(txt).replace(QUANTIDADE, ' ').replace(/\b\d{1,2}\/\d{1,2}(\/\d{2,4})?\b/g, ' ').replace(/\bdia\s+\d{1,2}\b/gi, ' ')).valor != null;
 
   // Separa a frase em pedacos. Virgula, ";", " mas ", " depois " sempre separam;
@@ -109,7 +109,7 @@
   }
 
   // palavras de controle; borda "de letra" com \p{L} (o \b do JS quebra em "almoço" e corta o "o")
-  const TIRA = new RegExp('(?<![\\p{L}\\d])(?:entrada|entradas|saida|saidas|data|emprestimo|devolucao|sera|serao|entrou|entraram|entra|entrar|recebi|recebemos|recebido|recebida|receber|caiu|cairam|credito|creditado|deposito|depositado|depositaram|sai|sair|saiu|pagar|pago|pagos|paga|paguei|pagamos|pagou|pix|transferi|transferencia|vai|vao|precisa|precisar|precisamos|tem que|temos que|vence|vencendo|previsto|prevista|agendado|agendar|hoje|ontem|amanha|ja|foi|foram|que|o|a|os|as|um|uma|do|da|dos|das|de|pro|pra|para|no|na|em|com|valor|reais|referente|ref)(?![\\p{L}\\d])', 'giu');
+  const TIRA = new RegExp('(?<![\\p{L}\\d])(?:entrada|entradas|saida|saidas|data|enviei|enviamos|mandei|mandamos|emprestimo|devolucao|sera|serao|entrou|entraram|entra|entrar|recebi|recebemos|recebido|recebida|receber|caiu|cairam|credito|creditado|deposito|depositado|depositaram|sai|sair|saiu|pagar|pago|pagos|paga|paguei|pagamos|pagou|pix|transferi|transferencia|vai|vao|precisa|precisar|precisamos|tem que|temos que|vence|vencendo|previsto|prevista|agendado|agendar|hoje|ontem|amanha|ja|foi|foram|que|o|a|os|as|um|uma|do|da|dos|das|de|pro|pra|para|no|na|em|com|valor|reais|referente|ref)(?![\\p{L}\\d])', 'giu');
   // Tira do texto valor, data e as palavras de controle; o que sobra e' o "do que se trata".
   function rotuloDe(txt, trechos) {
     let s = ` ${txt} `.replace(/\b(\d+)\s+de\s+(\d+)\b/gi, '$1/$2'); // "11 de 13" (parcela) fica "11/13"
@@ -181,6 +181,8 @@
         // "a diferenca e' juros": so' explica a devolucao maior; nao vira nome
         if (c.juros) { for (const it of doLinha) if (it.valorDevolver != null) it.jurosNaFrase = true; continue; }
         if (ant && (ant.tipo === 'entrada') && c.dir === 'saida' && c.data) { ant.devolucaoPrevista = c.data; continue; }
+        // "transferi 1.600 pra OneClean, devolve dia 14": a data e' da volta, nao da saida (06/10/2026)
+        if (ant && c.data && DEVOLUCAO.test(baixo(c.texto))) { ant.devolucaoPrevista = c.data; continue; }
         for (const it of doLinha) {
           if (!it.data && c.data) it.data = c.data;
           if (!it.situacao && c.sit) it.situacao = c.sit;
@@ -294,6 +296,13 @@
   const FORTES = new Set(['Diárias de cobertura', 'Uniformes', 'Sekron (monitoramento)', 'Energia', 'Contabilidade', 'Medicina do trabalho']);
   // Folha e benefício: "lembrar" não aparece (uma regra "vt" com o fornecedor de hoje valeria para todo VT).
   const FOLHA = new Set(['Salários', 'Benefícios (VT, VR, cesta)', 'FGTS e encargos', 'Pró-labore', 'Reembolso da folha à Agilité', 'Retiradas dos sócios']);
+  // Transferência entre as empresas do grupo (OneClean ↔ Agilité, 06/10/2026, espelho da Agilité): só
+  // muda de empresa — não é receita, despesa nem empréstimo; na aba Geral da Agilité as duas pontas se
+  // anulam. Vale quando a frase cita a Agilité, tem palavra de transferência e não fala de material,
+  // produto, reembolso, folha, salário ou benefício (esses continuam "Material vendido"/"Reembolso da folha").
+  const CAT_TRANSF = 'Transferência entre empresas';
+  const TRANSF = /\b(transferi|transferimos|transferencia|transferido|enviei|enviamos|enviou|mandei|mandamos|mandou|emprestei|emprestamos|emprestou|emprestimo|adiantei|adiantamento|pix|devolucao|devolv\w*)\b/;
+  const ehTransferencia = (it, texto) => { const t = baixo((it.frase || '') + ' ' + texto); return AGILITE.test(t) && TRANSF.test(t) && !/\b(material|produto|reembolso|folha|salario|beneficio)/.test(t); };
   const ehEmprestimo = (it, texto) => it.tipo === 'entrada' && (!!(it.parcelas && typeof it.parcelas === 'object') || !!it.emprestimo || it.valorDevolver != null || !!it.devolucaoPrevista || /\bemprest/.test(baixo(texto)));
   function categoriaDe(texto, tipo) {
     const t = baixo(texto);
@@ -381,6 +390,28 @@
       const p = Object.assign({}, it, { opcoes: [], motivo: '', chave: chaveRegra(texto), fornecedor: '', lembrar: false });
       const realizado = it.situacao === 'realizado';
       if (typeof it.parcelas === 'number') p.parcelas = it.parcelas; // "12x de 350": guarda o número de parcelas
+      if (ehTransferencia(it, texto)) {
+        const entrada = it.tipo === 'entrada';
+        Object.assign(p, { categoria: CAT_TRANSF, fornecedor: 'Agilité', entre_empresas: true, podeLembrar: false, parcelas: null,
+          descricao: entrada ? 'Transferência da Agilité' : 'Transferência para a Agilité' });
+        // a volta já prevista (ex.: "devolvi 1.600 pra Agilité" no dia 14): dá baixa nela, não cria outra
+        const prevista = (ctx.lancamentos || []).filter(l => l.situacao === 'aberto' && l.tipo === it.tipo && l.categoria === CAT_TRANSF && !usados.has('l:' + l.id) &&
+          Math.abs(Number(l.valor) - it.valor) <= Math.max(1, it.valor * 0.01)).sort((a, b) => Math.abs(dias(a.vencimento, it.data)) - Math.abs(dias(b.vencimento, it.data)))[0];
+        if (prevista && realizado) {
+          usados.add('l:' + prevista.id);
+          p.acao = 'baixar:' + prevista.id;
+          p.opcoes = [{ acao: 'baixar:' + prevista.id, rotulo: (entrada ? 'Receber' : 'Pagar') + ' a volta prevista: ' + prevista.descricao + ' · ' + moeda(prevista.valor) + ' · ' + dm(prevista.vencimento) },
+            { acao: 'novo', rotulo: 'Lançar nova transferência' }, { acao: 'ignorar', rotulo: 'Não lançar' }];
+          p.motivo = 'transferência entre empresas: é a volta prevista "' + prevista.descricao + '" (' + moeda(prevista.valor) + ', ' + dm(prevista.vencimento) + ') — dá baixa nela, sem lançar outra';
+          return p;
+        }
+        p.transferencia = { volta: it.devolucaoPrevista || null, valor: it.valorDevolver != null ? it.valorDevolver : it.valor };
+        p.acao = 'novo';
+        p.opcoes = [{ acao: 'novo', rotulo: 'Lançar a transferência' }, { acao: 'ignorar', rotulo: 'Não lançar' }];
+        p.motivo = 'transferência ' + (entrada ? 'da Agilité (entre empresas: não é receita nem empréstimo)' : 'para a Agilité (entre empresas: não é despesa)') +
+          (p.transferencia.volta ? ' — volta ' + moeda(p.transferencia.valor) + ' em ' + dataBR(p.transferencia.volta) + ' (fica prevista na grade)' : ' — se houver volta, preencha a data');
+        return p;
+      }
       // Empréstimo recebido (não é receita): devolve numa vez (valor/data) ou em parcelas (recorrente).
       if (ehEmprestimo(it, texto)) {
         const credor = maiuscula(it.rotulo || it.contexto || 'Empréstimo');
@@ -482,6 +513,7 @@
     const [acao, alvo] = [p.acao.split(':')[0], p.acao.slice(p.acao.indexOf(':') + 1)];
     if (acao === 'ignorar') return { inserir: [], atualizar: [], titulos: [], recorrentes: [] };
     if (p.emprestimo && p.tipo === 'entrada') return gravaEmprestimo(p, agora);
+    if (p.transferencia && acao === 'novo') return gravaTransferencia(p, agora);
     if (acao === 'baixar' || acao === 'ajustar') {
       const l = (ctx.lancamentos || []).find(x => x.id === alvo);
       if (!l) throw new Error('a conta "' + alvo + '" não está mais no caixa');
@@ -508,6 +540,22 @@
       valor: r2(p.valor), vencimento: p.data, situacao: pago ? 'pago' : 'aberto', pago_em: pago ? p.data : null, baixa: pago ? 'caixa' : null,
       baixado_em: pago ? agora : null, entre_empresas: !!p.entre_empresas, origem: 'tela', frase: p.frase },
       p.parcelas ? { parcelas: p.parcelas, observacoes: p.parcelas + ' parcelas de ' + moeda(p.valor) } : {})], atualizar: [], titulos: [], recorrentes: [] };
+  }
+
+  // Transferência entre empresas: o lançamento de hoje e a volta prevista (a outra direção), os dois na
+  // categoria "Transferência entre empresas" e entre empresas. Desfazer apaga os dois (frase_antes.criou).
+  function gravaTransferencia(p, agora) {
+    const pago = p.situacao === 'realizado', entrada = p.tipo === 'entrada';
+    const base = { categoria: CAT_TRANSF, fornecedor: 'Agilité', entre_empresas: true, origem: 'tela' };
+    const l = Object.assign({ id: novoId(), tipo: p.tipo, descricao: p.descricao || (entrada ? 'Transferência da Agilité' : 'Transferência para a Agilité'), valor: r2(p.valor), vencimento: p.data,
+      situacao: pago ? 'pago' : 'aberto', pago_em: pago ? p.data : null, baixa: pago ? 'caixa' : null, baixado_em: pago ? agora : null, frase: p.frase,
+      observacoes: 'Só muda de empresa dentro do grupo: não é ' + (entrada ? 'receita' : 'despesa') + '.' }, base);
+    const inserir = [l];
+    const t = p.transferencia || {};
+    if (t.volta) inserir.push(Object.assign({ id: novoId(), tipo: entrada ? 'saida' : 'entrada', descricao: entrada ? 'Devolução da transferência à Agilité' : 'Agilité devolve a transferência',
+      valor: r2(t.valor > 0 ? t.valor : p.valor), vencimento: t.volta, situacao: 'aberto', observacoes: 'Volta da transferência de ' + moeda(p.valor) + ' em ' + dataBR(p.data) + '.' }, base));
+    l.frase_antes = { criou: { lancamentos: inserir.slice(1).map(x => x.id), recorrentes: [] } };
+    return { inserir, atualizar: [], titulos: [], recorrentes: [] };
   }
 
   // Empréstimo recebido: a entrada (marcada como empréstimo, não é receita) e a devolução — numa vez
@@ -564,7 +612,7 @@
     return out;
   }
 
-  const O = { interpretar, extrairData, extrairValor, pedacos, rotuloDe, baixo, semAcento, tokens, categoriaDe, chaveRegra, regraDe, nomeDe, classificar, gravacao, desfazer };
+  const O = { CAT_TRANSF, interpretar, extrairData, extrairValor, pedacos, rotuloDe, baixo, semAcento, tokens, categoriaDe, chaveRegra, regraDe, nomeDe, classificar, gravacao, desfazer };
   raiz.CRMFrases = O;
   if (typeof module !== 'undefined') module.exports = O;
 })(typeof window !== 'undefined' ? window : globalThis);

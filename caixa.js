@@ -259,7 +259,9 @@
       campo('Categoria', '<input type="text" name="c' + i + '" value="' + esc(p.categoria) + '" list="cxCats" autocomplete="off">', 'cx-n') +
       campo(p.tipo === 'entrada' ? 'De quem' : 'Fornecedor', '<input type="text" name="f' + i + '" value="' + esc(p.fornecedor) + '" list="cxForn" autocomplete="off">', 'cx-n') +
       '<label class="campo check cx-n"><input type="checkbox" name="e' + i + '"' + (p.entre_empresas ? ' checked' : '') + '> Entre empresas (OneClean ↔ Agilité)</label>' +
-      (p.tipo === 'entrada' ? emprestimoHTML(p, i) : '') +
+      (p.transferencia ? campo(p.tipo === 'entrada' ? 'Devolve à Agilité em' : 'A Agilité devolve em', '<input type="date" name="tv' + i + '" value="' + esc(p.transferencia.volta || '') + '">', 'cx-n') +
+        campo('o valor de (R$)', '<input type="number" name="tw' + i + '" step="0.01" min="0" inputmode="decimal" value="' + esc(p.transferencia.valor || '') + '" placeholder="o mesmo">', 'cx-n')
+        : p.tipo === 'entrada' ? emprestimoHTML(p, i) : '') +
       (p.chave && p.podeLembrar ? '<label class="campo check largo cx-n" title="Grava uma regra: da próxima vez que aparecer &quot;' + esc(p.rotulo || p.chave) + '&quot;, o CRM já classifica igual a esta linha — categoria, fornecedor e entre empresas.">' +
         '<input type="checkbox" name="l' + i + '"> da próxima vez, classificar "' + esc(p.rotulo || p.chave) + '" igual</label>' : '') +
       '</div></fieldset>';
@@ -303,6 +305,8 @@
             situacao: el('s' + i).value, descricao: el('x' + i).value.trim() || p.descricao, categoria: el('c' + i).value.trim(), fornecedor: el('f' + i).value.trim(),
             entre_empresas: el('e' + i).checked || ENTRE_EMPRESAS.test(el('c' + i).value), lembrar: !!(el('l' + i) && el('l' + i).checked)
           });
+          // transferência entre empresas: a volta que está na tela (vazia = sem volta prevista)
+          q.transferencia = p.transferencia && q.categoria === p.categoria ? { volta: (el('tv' + i) && el('tv' + i).value) || null, valor: num('tw' + i) || q.valor } : null;
           // empréstimo: o que está na tela vale (a pessoa pode corrigir valor, data e parcelas)
           q.emprestimo = null;
           if (q.tipo === 'entrada' && el('m' + i) && el('m' + i).checked) {
