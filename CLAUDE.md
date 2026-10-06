@@ -858,6 +858,11 @@ Anderson: cada sistema cuida da sua empresa; o "Geral" (as duas) é de quem lê 
 - **Leitura conferida com os dados reais (06/10, 15h):** reembolsos em 06, 14, 20 e 30/10 e os 6 títulos
   da Agilité só em 21/10, todos entre empresas. Cliente cadastrado como "Empresa | Contato" (padrão do
   Agendor, 27 clientes com título) saía com o nome do contato: na leitura agora vai só a empresa.
+- **Ticket médio visível (pedido do Anderson, 06/10):** Gestão ganhou o quadro "Ticket médio do mês" logo
+  depois de "Conversão do mês" (faturamento ÷ notas de venda do mês, seta contra o mês passado inteiro e,
+  embaixo, o ticket dos negócios ganhos; clique abre as notas do mês) e a ordem dos quadros passou a ser
+  faturamento, projeção, conversão, ticket, clientes, abertos, ano. Relatórios ganhou "Ticket médio" ao
+  lado de "Taxa ganhos vs perdidos" (por negócio ganho e, com notas, por nota).
 - **A página não sobe mais ao dar baixa** (pedido do Anderson): `renderAgora` (app.js) guarda e devolve a
   rolagem da página e da janela (celular), a das `.tabela-rolagem`/`.cx-grade-rolagem` e os `<details>`
   abertos (fechavam a cada redesenho: o bloco "A receber vencido" fechava e a página subia). Vale para

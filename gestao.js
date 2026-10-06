@@ -86,6 +86,7 @@
     const fat12 = R.faturamento(D, ix, hoje, { periodo: R.periodo('12meses', hoje) });
     return {
       mes: { de: mes, ate: fimMes, atual, anterior, anteriorMesmoDia, variacao: variacao(atual.valor, anteriorMesmoDia.valor),
+        variacaoTicket: anterior.notas ? variacao(atual.ticket, anterior.ticket) : null,
         projecao: diaDoMes ? atual.valor / diaDoMes * diasNoMes : 0, novos: novosMes },
       ano, porMes: fat12.porMes, equipe, funil, funilVendas,
       base: { clientes: (D.empresas || []).filter(e => e.situacao === 'cliente').length, ativos: compraram90.size,
@@ -321,10 +322,14 @@
         '<section class="kpis">' +
           kpi('Faturamento do mês', R.moeda(m.atual.valor), seta(m.variacao) + ' vs. mesmo ponto de ' + esc(R.mesCurto(R.somaMeses(m.de, -1))) + ' (' + esc(R.moeda(m.anteriorMesmoDia.valor)) + ')', 'azul', 'gestao-lista', 'mes') +
           kpi('Projeção do mês', R.moeda(m.projecao), 'no ritmo atual · mês passado fechou em ' + esc(R.moeda(m.anterior.valor))) +
-          kpi('Faturamento no ano', R.moeda(p.ano.valor), p.ano.notas + ' notas · ' + p.ano.clientes + ' clientes', '', 'gestao-lista', 'ano') +
-          kpi('Clientes que compraram', String(m.atual.clientes), m.novos + ' novo(s) no mês · ticket ' + esc(R.moeda(m.atual.ticket)), 'verde', 'gestao-lista', 'clientes') +
-          kpi('Negócios abertos', R.moeda(f.abertas.valor), f.abertas.qtd + ' negócios · ponderado pela chance ' + esc(R.moeda(f.abertas.ponderado)) + (p.funilVendas ? ' · ' + esc(p.funilVendas) : ''), '', 'gestao-lista', 'abertos') +
           kpi('Conversão do mês', f.conversao == null ? '—' : R.pct(f.conversao), f.realizadas.qtd + ' ganhos · ' + f.perdidas.qtd + ' perdidos' + (p.funilVendas ? ' · ' + esc(p.funilVendas) : ''), '', 'gestao-lista', 'decididos') +
+          // Ticket médio ao lado da conversão (pedido do Anderson, 06/10): por nota fiscal do mês (o que
+          // de fato faturou), comparado com o mês passado; o dos negócios ganhos vem embaixo.
+          kpi('Ticket médio do mês', m.atual.notas ? R.moeda(m.atual.ticket) : '—', (m.atual.notas ? seta(m.variacaoTicket) + ' vs. ' + esc(R.mesCurto(R.somaMeses(m.de, -1))) + ' (' + esc(R.moeda(m.anterior.ticket)) + ') · ' + m.atual.notas + ' notas' : 'sem notas no mês') +
+            (f.realizadas.qtd ? ' · negócios ganhos: ' + esc(R.moeda(f.ticket)) : ''), 'verde', 'gestao-lista', 'mes') +
+          kpi('Clientes que compraram', String(m.atual.clientes), m.novos + ' novo(s) no mês', 'verde', 'gestao-lista', 'clientes') +
+          kpi('Negócios abertos', R.moeda(f.abertas.valor), f.abertas.qtd + ' negócios · ponderado pela chance ' + esc(R.moeda(f.abertas.ponderado)) + (p.funilVendas ? ' · ' + esc(p.funilVendas) : ''), '', 'gestao-lista', 'abertos') +
+          kpi('Faturamento no ano', R.moeda(p.ano.valor), p.ano.notas + ' notas · ' + p.ano.clientes + ' clientes', '', 'gestao-lista', 'ano') +
         '</section>' +
         // ---- 12 meses + base
         '<div class="g-duas">' +

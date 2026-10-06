@@ -659,6 +659,7 @@
         k('Negócios iniciados', String(d.iniciados.qtd), R.moeda(d.iniciados.valor), '', 'iniciados') +
         k('Negócios perdidos', String(d.perdidas.qtd), R.moeda(d.perdidas.valor), d.perdidas.qtd ? 'alerta' : '', 'perdidos') +
         k('Taxa ganhos vs perdidos', R.pct(d.conversao), R.pct(d.conversaoValor) + ' em valor', '', 'decididos') +
+        k('Ticket médio', d.realizadas.qtd ? R.moeda(d.ticket) : '—', 'por negócio ganho' + (fat.existe && fat.notas ? ' · por nota ' + R.moeda(fat.ticket) : ''), 'verde', 'ganhos') +
         k('Ciclo médio de vendas', d.ciclo == null ? '—' : Math.round(d.ciclo) + ' dias', 'da criação ao fechamento', '', 'ciclo') +
         k('Em andamento', R.moeda(d.abertas.valor), d.abertas.qtd + ' negócios · ponderado ' + R.moeda(d.abertas.ponderado), '', 'abertos') +
         k('Vendas previstas', R.moeda(d.previstas.valor), d.previstas.qtd + ' com previsão no período · ponderado ' + R.moeda(d.previstas.ponderado), '', 'previstos') +
