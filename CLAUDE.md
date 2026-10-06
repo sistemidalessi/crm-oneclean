@@ -688,6 +688,10 @@ A vendedora continua fazendo o orçamento no FKN (preço, estoque e condição f
   05/10) **não são** os mesmos clientes dos cadastros antigos (resposta do Anderson): ficam separados,
   não mesclar. O cadastro "JOSIANE" foi excluído pelo Anderson; Xingu conferido (2 negócios, 2 propostas,
   11 atividades).
+- **Argus juntado (06/10, pedido do Anderson):** "Maxwell Argus Vidros de Segurança" (Agendor: 1 negócio, 7
+  atividades, WhatsApp, e-mail) foi para "ARGUS BY VANTECH VIDROS DE SEGURANCA LTDA" (CNPJ, endereço, notas);
+  backup em `crm_backup.argus_2026_10_06`, Agendor em `externos_mesclados`, nota "Cadastro mesclado" no
+  histórico; o vazio ficou "APAGAR - duplicado de ARGUS BY VANTECH" para o Anderson excluir no CRM.
 - **Publicação do Pages presa (05/10, 16:39–19:17):** os builds de `pages-build-deployment` ficaram
   na fila do GitHub sem máquina (um foi cancelado pelo próprio GitHub após 15 min; o "re-run" ficou
   em "not yet queued" e não dava para cancelar). Saída: um push novo dispara outro build. Para conferir
