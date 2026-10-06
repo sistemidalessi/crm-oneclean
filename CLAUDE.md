@@ -899,6 +899,12 @@ Anderson: cada sistema cuida da sua empresa; o "Geral" (as duas) é de quem lê 
   "Tirar a remarcação" volta ao normal. Ao receber, "Valor que entrou" grava o que caiu de fato (juros ou
   parte), com a diferença na observação. A listagem do FKN não apaga a previsão (o upsert só grava as colunas
   que traz). Na leitura: `cai_na_conta` = a data remarcada e `atrasado: true`.
+- **Assinatura do produto (pedido do Anderson, 06/10 à noite: "o orçamento já faz a propaganda"):** linha discreta
+  no pé de toda proposta/orçamento em PDF — "Orçamento gerado pelo CRM **Sistemi Dalessi** · sistemas sob medida ·
+  afdalessi@gmail.com" (`CRM.ASSINATURA_EMAIL`, app.js) — e o e-mail no rodapé do login. Configurações → Geral:
+  "Tirar a assinatura…" (`cfg.sem_assinatura`; para cliente que não quiser a marca — pode virar item de preço).
+  Quando existir o domínio, trocar o e-mail pelo site. O campo "Nome que aparece no CRM" fica travado quando o
+  `config.js` fixa o nome (OneClean).
 - **A página não sobe mais ao dar baixa** (pedido do Anderson): `renderAgora` (app.js) guarda e devolve a
   rolagem da página e da janela (celular), a das `.tabela-rolagem`/`.cx-grade-rolagem` e os `<details>`
   abertos (fechavam a cada redesenho: o bloco "A receber vencido" fechava e a página subia). Vale para

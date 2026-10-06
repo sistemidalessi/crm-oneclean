@@ -388,6 +388,7 @@ body.arrastando-card .zonas-fim { display: grid; grid-template-columns: 1fr 1fr;
 .entrada-cartao .erro-form { margin: 0; }
 .logo-grande { width: auto; max-width: min(260px, 100%); max-height: 140px; justify-self: center; border-radius: 12px; }
 .rodape-entrada { color: rgba(255, 255, 255, .85); font-size: .75rem; margin: 0; }
+.rodape-entrada a { color: inherit; }
 
 .toast { position: fixed; left: 50%; bottom: 20px; transform: translate(-50%, 20px); opacity: 0; pointer-events: none; background: var(--marinho); color: #fff; padding: 10px 16px; border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, .25); transition: opacity .2s, transform .2s; z-index: 100; max-width: calc(100vw - 32px); }
 .toast.mostra { opacity: 1; transform: translate(-50%, 0); }
@@ -452,6 +453,8 @@ body.arrastando-card .zonas-fim { display: grid; grid-template-columns: 1fr 1fr;
 .proposta-doc .cta .vai { font-size: 11pt; padding: 2.2mm 5mm; border-radius: 999px; background: var(--dv); color: var(--dp); white-space: nowrap; }
 .proposta-doc .pre { white-space: pre-wrap; }
 .proposta-doc footer { margin-top: 3mm; color: var(--cz); font-size: 9pt; }
+.proposta-doc .assinatura { margin: 1.5mm 0 0; padding: 0; color: #9aa3a8; font-size: 7pt; letter-spacing: .02em; }
+.proposta-doc .assinatura strong { font-weight: 600; color: #7d878c; }
 .proposta-doc tr { break-inside: avoid; }
 /* Orçamento comprido (mais de 12 itens): tudo um pouco menor para caber na primeira folha. */
 .proposta-doc.denso header { padding: 3mm 0; }

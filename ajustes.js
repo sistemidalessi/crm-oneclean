@@ -34,7 +34,11 @@
   // ================================================================ Geral
   const CAMPOS_GERAL = [
     { tipo: 'secao', rotulo: 'Empresa' },
-    { nome: 'nome_empresa', rotulo: 'Nome que aparece no CRM e nas propostas', largo: true },
+    // nome fixado na instalação (config.js) vale mais que este campo: mostra travado, para não confundir
+    (window.CRM_CONFIG && window.CRM_CONFIG.nomeEmpresa)
+      ? { nome: 'nome_empresa', rotulo: 'Nome que aparece no CRM e nas propostas', largo: true, desabilitado: true, dica: window.CRM_CONFIG.nomeEmpresa,
+        ajuda: 'definido na instalação ("' + window.CRM_CONFIG.nomeEmpresa + '"); este campo vale só para instalações sem nome fixo' }
+      : { nome: 'nome_empresa', rotulo: 'Nome que aparece no CRM e nas propostas', largo: true },
     { tipo: 'secao', rotulo: 'Alertas' },
     { nome: 'dias_sem_contato', rotulo: 'Cliente sem contato há mais de (dias)', tipo: 'numero', passo: '1', min: 1 },
     { nome: 'dias_parado', rotulo: 'Negócio parado há mais de (dias)', tipo: 'numero', passo: '1', min: 1 },
@@ -50,6 +54,7 @@
     { nome: 'proposta_chamada', rotulo: 'Frase de destaque no alto da proposta', largo: true, dica: 'ex.: Seu abastecimento, com mais praticidade.', ajuda: 'em branco, a proposta sai sem a frase' },
     { nome: 'proposta_subchamada', rotulo: 'Linha abaixo da frase', largo: true, dica: 'ex.: Limpeza, higiene e descartáveis para sua empresa.' },
     { nome: 'proposta_cta', rotulo: 'Texto do botão de WhatsApp da proposta', largo: true, dica: 'Vamos programar sua entrega?', ajuda: 'o botão leva ao WhatsApp da vendedora responsável (telefone do cadastro dela), com a mensagem de confirmação pronta' },
+    { nome: 'sem_assinatura', rotulo: 'Tirar a assinatura "Orçamento gerado pelo CRM Sistemi Dalessi" do rodapé', tipo: 'checkbox', ajuda: 'linha discreta no pé de cada proposta e orçamento em PDF' },
     { nome: 'proposta_rodape', rotulo: 'Rodapé da proposta (dados da empresa)', largo: true, tipo: 'textarea', linhas: 2, dica: 'ex.: OneClean · CNPJ 00.000.000/0001-00 · (11) 4000-0000 · contato@empresa.com.br', ajuda: 'sai no fim de toda proposta e orçamento em PDF' },
     { tipo: 'secao', rotulo: 'Automações' },
     { nome: 'rodizio', rotulo: 'Lead cadastrado pelo gestor sem responsável vai para o próximo vendedor (rodízio)', tipo: 'checkbox', largo: true },

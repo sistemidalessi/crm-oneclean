@@ -756,7 +756,9 @@
         (vend ? '<p class="contato">Seu contato: ' + esc(R.primeiroNome(vend.nome)) + '</p>' + [tel ? 'WhatsApp ' + telBonito(tel) : '', vend.email || ''].filter(Boolean).map(x => '<p>' + esc(x) + '</p>').join('') : '') + '</div>' +
         '<div class="total"><span class="rot">Total do pedido</span><strong>' + esc(R.moeda(p.valor_total)) + '</strong><span class="sub">' + esc([itens.length + (itens.length === 1 ? ' item' : ' itens'), freteTxt].filter(Boolean).join(' · ')) + '</span></div></section>' +
       (tel ? '<a class="cta" href="' + esc(R.linkWhatsApp(tel, msgWa)) + '"><span>' + esc(cfg.proposta_cta || 'Vamos programar sua entrega?') + '</span><span class="vai">Confirmar pelo WhatsApp &nbsp;›</span></a>' : '') +
-      '<footer>' + esc(cfg.proposta_rodape || CRM.nomeInstalacao()) + '</footer></div>';
+      '<footer>' + esc(cfg.proposta_rodape || CRM.nomeInstalacao()) + '</footer>' +
+      // assinatura do produto (pedido do Anderson, 06/10/2026: o orçamento faz a propaganda); dá para tirar em Configurações
+      (cfg.sem_assinatura ? '' : '<p class="assinatura">Orçamento gerado pelo CRM <strong>Sistemi Dalessi</strong> · sistemas sob medida · ' + esc(CRM.ASSINATURA_EMAIL) + '</p>') + '</div>';
     return { html, nome };
   }
 

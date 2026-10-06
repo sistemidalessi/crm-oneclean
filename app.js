@@ -604,6 +604,8 @@
   // Versão quadrada para o menu e a aba do navegador (sem ela, usa o logo normal).
   const logoIcone = () => (window.CRM_CONFIG && window.CRM_CONFIG.logoIcone) || logo();
   CRM.nomeInstalacao = nomeInstalacao;
+  // contato da Sistemi Dalessi na assinatura do produto (login e rodapé dos orçamentos)
+  CRM.ASSINATURA_EMAIL = 'afdalessi@gmail.com';
   CRM.logo = logo;
 
   // Tela de entrada (login, senha nova, avisos): fundo no degradê da marca com ondas brancas
@@ -626,7 +628,7 @@
     const o = ondasEntrada();
     $('#tela').innerHTML = '<div class="entrada">' + o.fundo + '<div class="entrada-cartao">' + o.cartao +
       '<img src="' + esc(logo()) + '" alt="" class="logo-grande"><h1>' + esc(nomeInstalacao()) + '</h1>' + html + '</div>' +
-      '<p class="rodape-entrada">CRM · Sistemi Dalessi — sistemas sob medida</p></div>';
+      '<p class="rodape-entrada">CRM · Sistemi Dalessi — sistemas sob medida · <a href="mailto:' + CRM.ASSINATURA_EMAIL + '">' + CRM.ASSINATURA_EMAIL + '</a></p></div>';
   }
 
   function telaAviso(titulo, texto) { telaEntrada('<h2>' + esc(titulo) + '</h2><p>' + esc(texto) + '</p>'); }
