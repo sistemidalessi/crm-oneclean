@@ -745,10 +745,23 @@ Anderson: cada sistema cuida da sua empresa; o "Geral" (as duas) é de quem lê 
 - Categorias sugeridas em `CATEGORIAS_SAIDA/ENTRADA`; categoria com "Agilité" marca entre empresas
   sozinha. A "GiroCaixa - Facilities" é dívida da própria OneClean (não é entre empresas); os
   empréstimos "BB - OneClean" e "PRONAMPE" são pagos pela Agilité — não lançar como saída daqui.
-- **Falta:** leitor do contas a pagar do FKN (esperando o CSV de exemplo do Anderson; mesmas travas do
-  receber: soma × total, 422 em arquivo parcial, retrato = o que sumiu foi pago → `baixa 'fora'`),
-  confirmar com o Anderson o crédito no BB e os feriados de SBC, primeira carga da planilha (opcional)
-  e a leitura para a gestora das duas empresas (fase 2).
+- **Confirmado pelo Anderson (06/10):** no BB o boleto pago hoje cai no dia útil seguinte (D+1, como
+  ficou); feriados = nacionais + estadual + municipais de SBC (como ficou).
+- **Primeira carga da planilha (06/10, aba SET-OUT-26):** 41 recorrentes (início 10/2026) com a conta de
+  outubro de cada uma na data e no valor da planilha (vermelho/sem cor = em aberto; verde = pago →
+  EL-SHADAY 05/10 entrou pago "fora") + GiroCaixa 27 de 27 (27/10, origem 'planilha'). Na planilha,
+  verde = pago e o vermelho claro (tema accent2) é a previsão; o verde é o accent3 do tema (9BBB59) ou
+  RGB. **Não vieram da planilha** as linhas sem título: duplicatas (linhas 5–16, já estão no CRM pelo
+  contas a receber) e fornecedores (linhas 35–55, virão pelo contas a pagar do FKN) — trazer as duas
+  contaria em dobro. Até o leitor do FKN entrar, o saldo previsto não tem os boletos de fornecedor.
+  A conferir com o Anderson: categoria do EL-SHADAY; "Perua escolar" em retiradas dos sócios e
+  "Pedágio" em frete; os "SILMARA" da área de fornecedores e o "Cartão Porto" (agosto) ficaram de fora.
+  A planilha e os relatórios antigos enviados na conversa foram apagados depois do uso.
+- **Contas a pagar do FKN:** relatório **Sifn083 — Contas à Pagar por Conta/Fornecedor** (conta 0 a 0,
+  subconta 0, situação GERAL, filial da OneClean, "Dados conta/fornecedor" marcado, Em aberto, período
+  em branco, ordem por vencimento, disquete → Tudo → CSV em `\\Servidor\sistema\CRM-FKN`). **Falta** o
+  leitor (esperando o CSV de exemplo; mesmas travas do receber: soma × total, 422 em arquivo parcial,
+  retrato = o que sumiu foi pago → `baixa 'fora'`) e a leitura para a gestora das duas empresas (fase 2).
 
 ## Permissões do financeiro (06/10/2026, pedido do Anderson)
 
