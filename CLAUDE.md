@@ -855,6 +855,9 @@ Anderson: cada sistema cuida da sua empresa; o "Geral" (as duas) é de quem lê 
   Agilité (~dia 5)". Na leitura, reembolso cuja descrição só tem componente (lista `COMPONENTES`) sai
   com a descrição; com qualquer outra palavra (um nome) volta a somar sem nome. Não havia VR/VT/cesta de
   30/09 lançado no CRM (o Caixa começou em outubro).
+- **Leitura conferida com os dados reais (06/10, 15h):** reembolsos em 06, 14, 20 e 30/10 e os 6 títulos
+  da Agilité só em 21/10, todos entre empresas. Cliente cadastrado como "Empresa | Contato" (padrão do
+  Agendor, 27 clientes com título) saía com o nome do contato: na leitura agora vai só a empresa.
 - **A página não sobe mais ao dar baixa** (pedido do Anderson): `renderAgora` (app.js) guarda e devolve a
   rolagem da página e da janela (celular), a das `.tabela-rolagem`/`.cx-grade-rolagem` e os `<details>`
   abertos (fechavam a cada redesenho: o bloco "A receber vencido" fechava e a página subia). Vale para
