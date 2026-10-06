@@ -127,6 +127,8 @@ usuário, etapa e produto fica no **histórico de alterações** (quem, quando, 
 6. **Publicar:** GitHub Pages do repositório (Settings → Pages → branch `main`, raiz).
 7. **Notas automáticas (opcional):** `supabase functions deploy crm-notas --no-verify-jwt`
    e o vigia no servidor da pasta de XML (seção abaixo).
+8. **Leitura do Caixa (opcional):** `supabase functions deploy crm-caixa-leitura --no-verify-jwt`; a senha
+   de leitura o administrador gera em Configurações → Integrações.
 
 ## Vigia de notas (importação automática dos XML)
 
@@ -276,8 +278,9 @@ Invoke-RestMethod -Method Post -Uri https://SEU-PROJETO.supabase.co/functions/v1
 | `supabase/schema.sql` | Tabelas, índices, triggers (histórico), RLS, rodízio. |
 | `supabase/functions/crm-usuarios/` | Edge Function do administrador (criar usuário, senha). |
 | `supabase/functions/crm-notas/` | Edge Function que recebe os XML do vigia (chave de integração, regras do `nfe.js` num commit fixo). |
+| `supabase/functions/crm-caixa-leitura/` | Edge Function só de leitura do resumo do Caixa (senha de leitura gerada em Integrações; `caixa-calculo.js` num commit fixo). |
 | `supabase/teste-rls/` | Ensaio das permissões num Postgres local (`sh supabase/teste-rls/roda.sh`). |
 | `ferramentas/agendor-exportar.js` | Extrator da API v3 do Agendor. |
 | `ferramentas/vigia-notas.js` | Vigia da pasta de XML das notas (roda no servidor do emissor). |
-| `ferramentas/fixa-motor-notas.js` | Fixa na `crm-notas` o commit e os hashes de `regras.js`/`nfe.js`. |
+| `ferramentas/fixa-motor-notas.js` | Fixa nas Edge Functions o commit e os hashes dos arquivos que elas baixam (`crm-notas`: `regras.js`/`nfe.js`/`fkn.js`; `crm-caixa-leitura`: `caixa-calculo.js`). |
 | `testes/` | Testes das regras e do importador (`node --test testes/*.test.js`). |

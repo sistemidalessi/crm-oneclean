@@ -797,13 +797,43 @@ Anderson: cada sistema cuida da sua empresa; o "Geral" (as duas) é de quem lê 
   real: 361 contas → 194 abertas (R$ 234.532,91), 163 antigas pausadas (R$ 197.050,50), 4 ligadas às da
   planilha (salário, energia do galpão, pedágio, água da casa). Lembrete do contas a pagar na faixa do
   FKN (só admin; `crm_fkn_situacao()->'pagar'` = última entrega boa pelo vigia ou conta do FKN gravada pela
-  tela) e passo 3 (Sifn083) na colinha — 06/10. Falta: leitura para a gestora das duas empresas (fase 2).
+  tela) e passo 3 (Sifn083) na colinha — 06/10. Leitura para a gestora das duas empresas: ver abaixo.
   No `schema.sql` o bloco do financeiro fica ANTES do contas a receber (a função lê `crm_fin_lancamentos`).
 - **Confirmado pelo Anderson (06/10):** "as contas de hoje em diante ainda não foram pagas" — o verde em
   boleto futuro de fornecedor na planilha não era pago; o caixa está certo em tratá-las como previstas.
   Projeção do dia (saldo BB R$ 8.052,79): outubro (06–31) entra R$ 161.919 e sai R$ 271.715; saldo
   previsto negativo desde 06/10, pior dia 23/11 (≈ −R$ 110,6 mil). A parte de 2–3 semanas à frente é
   pessimista: títulos das vendas ainda não faturadas não existem no CRM.
+
+## Leitura do Caixa para a Agilité e a gestora do grupo (06/10/2026, "fase 2")
+
+- **Endereço:** `GET https://udhigavckigciqnicgyy.supabase.co/functions/v1/crm-caixa-leitura?dias=30` (1 a 90),
+  `Authorization: Bearer <senha>`. Só lê. Serve a aba **Geral** do sistema da Agilité (as duas empresas,
+  com o que passa entre elas anulado) e a sessão gestora do grupo (skill "ceo-do-grupo"). Formato = o do
+  `GET /api/ceo/resumo` da Agilité (`src/routes/caixa_leitura.js` do `agilite-sistema-gestao`).
+- **Senha:** gerada pelo administrador em Configurações → Integrações → "Leitura do Caixa" (aparece uma
+  vez; o banco guarda só o SHA-256 em `crm_integracoes` com `uso = 'caixa'`). Anderson cola direto no
+  campo de Configurações do sistema da Agilité — **nunca em chat, e-mail, WhatsApp ou arquivo**. O pedido
+  falava em segredo da função (`CAIXA_LEITURA_SECRET`); ficou na tela porque o MCP não grava segredo de
+  função e assim a senha nunca passa por uma conversa (e dá para gerar outra e desligar a antiga sozinho).
+  A chave do vigia (`uso = 'notas'`) não lê o caixa e a de leitura não entrega notas (`crm-notas` v14).
+- **Função** (`supabase/functions/crm-caixa-leitura`, verify_jwt desligado): sem senha/errada → 401;
+  outro método → 405; `Cache-Control: no-store`; comparação em tempo constante; não grava nada nem loga
+  dado (só a mensagem de erro). Lê as tabelas com a chave de serviço, que nunca sai do servidor.
+- **Mesmas contas da tela:** as contas do Caixa saíram de `caixa.js` para **`caixa-calculo.js`** (puro,
+  `CRMCaixa`), que a tela usa e a função baixa do GitHub num commit fixo com SHA-256 conferido (como a
+  `crm-notas`). Mexeu no `caixa-calculo.js`: commit + push, `node ferramentas/fixa-motor-notas.js` (fixa as
+  duas funções; só muda a que precisa), commit + push e publicar a `crm-caixa-leitura` de novo
+  (`testes/motor.test.js` avisa). O resumo é `CRMCaixa.resumoLeitura()` (testado em `caixa.test.js`).
+- **Conteúdo:** saldo (informado + baixado depois), próximos dias (itens `aconteceu`/`previsto`, pago fora
+  com `pago_fora: true` fora das somas), menor saldo, contas vencidas (`vencido`), pausadas agrupadas
+  (recorrente → descrição dela; do FKN → fornecedor; motivo), títulos a receber (cliente, vencimento,
+  `cai_na_conta`, `atrasado`). **Sem nome de pessoa:** salários, benefícios, encargos, pró-labore,
+  retiradas, comissões e reembolso da folha à Agilité somados por dia e categoria (descrição = categoria),
+  e também qualquer item cuja descrição ou fornecedor tenha o nome de alguém da equipe. CPF e telefone
+  mascarados. `entre_empresas` também no título de cliente Agilité. "hoje" = data de São Paulo.
+- Daqui não dá para chamar a função (a rede da sessão barra `supabase.co`); o teste com a senha (saldo e
+  saldo de cada dia contra a tela; 401/405) fica para quando o Anderson gerar a senha.
 
 ## Permissões do financeiro (06/10/2026, pedido do Anderson)
 
