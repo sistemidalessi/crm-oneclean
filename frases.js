@@ -23,8 +23,9 @@
   const r2 = v => Math.round(Number(v || 0) * 100) / 100;
 
   // ------------------------------------------------------------ leitura (a MESMA da Agilité)
-  // Cópia de src/caixa/interpretar.js do agilite-sistema-gestao (commit c81e82e, 06/10/2026): a mesma
-  // frase dá o mesmo resultado nos dois caixas. Mudou lá? Copiar de novo para cá (e rodar os testes).
+  // Cópia de src/caixa/interpretar.js do agilite-sistema-gestao (commit 4d1675c, 06/10/2026 — conferido
+  // linha a linha): a mesma frase dá o mesmo resultado nos dois caixas. Regra combinada: mudou lá, copiar
+  // para cá; mudou aqui, avisar a Agilité para levar (e rodar os testes dos dois lados).
   const MESES = { jan: 1, fev: 2, mar: 3, abr: 4, mai: 5, jun: 6, jul: 7, ago: 8, set: 9, out: 10, nov: 11, dez: 12 };
   const ENTRADA = /\b(entrada|entradas|entrou|entraram|entra|entrar|recebi|recebemos|recebido|recebida|receber|caiu|cairam|cai|credito|creditado|deposito|depositado|depositaram)\b/;
   const SAIDA = /\b(sai|sair|saiu|saida|saidas|pagar|pago|paga|paguei|pagamos|pagou|pagamento|devolver|devolvi|devolvo|devolve|devolvido|devolvida|devolvidos|devolveremos|devolverei|devolucao|debito|debitado|debitou|transferi|transferencia|pix)\b/;
@@ -64,7 +65,7 @@
   // "12.898,29" "48 mil" "1,5 mil" "300" "R$ 1.200" "3k" -> numero. Ignora "05 de 48" (parcela).
   function extrairValor(txt) {
     let t = baixo(txt).replace(/\b\d+\s*de\s*\d+\b/g, ' ');
-    // CRM (06/10/2026, ainda não na Agilité): "8 diárias … 624" — número logo antes de uma unidade é
+    // "8 diárias … 624" (nasceu no CRM, 06/10/2026; a Agilité levou): número logo antes de uma unidade é
     // quantidade, não valor, quando sobra outro número na frase
     const semQtd = t.replace(QUANTIDADE, ' ');
     if (semQtd !== t && /\d/.test(semQtd)) t = semQtd;

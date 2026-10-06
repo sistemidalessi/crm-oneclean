@@ -861,8 +861,10 @@ Anderson: cada sistema cuida da sua empresa; o "Geral" (as duas) é de quem lê 
   da parcela (o número fica guardado); "entrada"/"saída" e "empréstimo" sem verbo dão a direção; "será",
   "vou"… = previsto; **empréstimo**: devolução na mesma frase ("será devolvido 60000 dia 14/10"), em outra
   linha para o mesmo nome (até +25%) ou em parcelas ("48 parcelas de …, todo dia 18, a primeira 18/10").
-  **Só no CRM (avisado à Agilité):** número antes de unidade ("8 diárias", "3 FTs") é quantidade, não valor,
-  e não parte a frase no " e " ("Espaço e Vida").
+  Número antes de unidade ("8 diárias", "3 FTs") é quantidade, não valor, e não parte a frase no " e "
+  ("Espaço e Vida") — nasceu aqui e a Agilité levou (commit 4d1675c de lá). **Regra combinada: o leitor é o
+  mesmo código nos dois sistemas** — mudou lá, copiar para cá; mudou aqui, avisar a Agilité. Conferido
+  linha a linha em 06/10 à noite: iguais.
   Gravação do empréstimo (`gravaEmprestimo`): entrada `emprestimo = true`, categoria "Empréstimos recebidos"
   (não é receita); devolução única = saída prevista com `juros`; parcelas = recorrente "Empréstimo — <credor>"
   com `valor_contratado` e a parcela 01 já em Contas a pagar; cada parcela gerada (`gerarMes`) leva `juros` e
