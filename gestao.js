@@ -538,7 +538,7 @@
     const marca = (tipo, txt) => (recs || []).some(r => r.tipo === tipo) ? '<strong>' + txt + '</strong>' : txt;
     const lista = itens => '<ul class="checklist">' + itens.map(t => '<li>☐ ' + t + '</li>').join('') + '</ul>';
     const admin = CRM.ehAdmin(); // o contas a receber é só do administrador; o comprador puxa só o estoque
-    return '<details class="cartao colinha-fkn"' + (abrir ? ' open' : '') + '><summary><h2>Colinha: como puxar ' + (admin ? 'os relatórios' : 'o relatório de estoque') + ' do FKN <small>manhã e tarde · salvar em ' + pasta + '</small></h2></summary>' +
+    return '<details class="cartao colinha-fkn"' + (abrir ? ' open' : '') + '><summary><h2>Colinha: como puxar ' + (admin ? 'os três relatórios' : 'o relatório de estoque') + ' do FKN <small>manhã e tarde · salvar em ' + pasta + '</small></h2></summary>' +
       '<div class="g-duas">' +
       '<section>' + marca('produtos', '<h3>1. Listagem cadastral de produtos</h3>') + '<ol>' +
         '<li>No SIFWin: <strong>Cadastros → Produto → Listagens → Listagem cadastral</strong>.</li>' +
@@ -556,6 +556,14 @@
         '<li><strong>OK</strong> → <strong>disquete</strong> → <strong>Tudo</strong> → <strong>CSV</strong> → salvar em <code>' + pasta + '</code>.</li></ol>' +
         '<p class="dica">Checklist antes de salvar:</p>' + lista(['"Em aberto" (não liquidados, não geral)', 'período de vencimento em branco', '"Listar os dados cadastrais dos clientes" marcado',
           'cliente 0, portador 0, situação GERAL, filial de sempre', 'tem o TOTAL GERAL no fim (salvo com "Tudo"), em CSV', 'na pasta ' + pasta]) + '</section>' : '') +
+      (admin ? '<section>' + marca('pagar', '<h3>3. Contas a pagar por conta/fornecedor</h3>') + '<ol>' +
+        '<li>No SIFWin: relatório <strong>Sifn083 — Contas à Pagar por Conta/Fornecedor</strong>.</li>' +
+        '<li>Conta <strong>0</strong> a <strong>0</strong> · Subconta <strong>0</strong> · Situação <strong>GERAL</strong> · Filial: a da OneClean.</li>' +
+        '<li>Marcar <strong>"Dados conta/fornecedor"</strong>; o resto das caixinhas desmarcado.</li>' +
+        '<li>Listar títulos: <strong>Em aberto</strong> · No período: <strong>em branco</strong> · Por ordem de: <strong>Data de vencimento</strong>.</li>' +
+        '<li><strong>OK</strong> → <strong>disquete</strong> → <strong>Tudo</strong> → <strong>CSV</strong> → salvar em <code>' + pasta + '</code>.</li></ol>' +
+        '<p class="dica">Checklist antes de salvar:</p>' + lista(['"Em aberto"', 'período em branco (as duas datas)', 'conta 0 a 0, situação GERAL, filial de sempre',
+          'tem o TOTAL GERAL no fim (salvo com "Tudo"), em CSV', 'na pasta ' + pasta]) + '</section>' : '') +
       '</div><p class="dica">Em 1 ou 2 minutos o vigia manda ao CRM e o aviso some. Se faltar alguma opção, o CRM recusa o arquivo, não troca nada e o aviso diz o que marcar.</p></details>';
   }
 

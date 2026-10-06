@@ -299,7 +299,7 @@
   CRM.lembreteFkn = () => {
     if (!E.fkn || !(CRM.ehAdmin() || CRM.ehComprador())) return [];
     // O comprador puxa só o estoque; o contas a receber é só do administrador (06/10/2026).
-    return [['estoque', 'Listagem cadastral de produtos']].concat(CRM.ehAdmin() ? [['receber', 'Contas a receber por cliente (em aberto)']] : [])
+    return [['estoque', 'Listagem cadastral de produtos']].concat(CRM.ehAdmin() ? [['receber', 'Contas a receber por cliente (em aberto)'], ['pagar', 'Contas a pagar por conta/fornecedor (em aberto)']] : [])
       .map(([k, nome]) => { const l = DD.lembreteFkn(E.fkn[k]); return l ? { arquivo: nome, ultimo: E.fkn[k], turno: l.turno } : null; }).filter(Boolean);
   };
   // Último arquivo do FKN recusado (opção esquecida ao puxar), mais novo que a última entrega boa.

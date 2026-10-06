@@ -134,6 +134,7 @@ select 'Comprador vê quando chegou o contas a receber (NÃO devia)' t from crm_
 select 'Comprador vê quando chegou o estoque' t, estoque is not null from crm_fkn_atualizado();
 select 'Comprador vê a situação do FKN' t, crm_fkn_situacao() ? 'recusas';
 select 'Comprador vê a data do contas a receber na situação (NÃO devia)' t where crm_fkn_situacao()->>'receber' is not null;
+select 'Comprador vê a data do contas a pagar na situação (NÃO devia)' t where crm_fkn_situacao()->>'pagar' is not null;
 reset role; insert into crm_integracao_log (integracao_id, arquivos, erros, resumo) select id, 1, 1, '{"fkn_recusa":"marque Fornecedor","fkn_tipo":"produtos","arquivo":"x.csv"}'::jsonb from crm_integracoes limit 1;
 reset role; insert into crm_integracao_log (integracao_id, arquivos, erros, resumo) select id, 1, 1, '{"fkn_recusa":"marque Listar os dados cadastrais","fkn_tipo":"receber","arquivo":"r.csv"}'::jsonb from crm_integracoes limit 1;
 set role authenticated; select pg_temp.como('f0000000-0000-0000-0000-000000000006');

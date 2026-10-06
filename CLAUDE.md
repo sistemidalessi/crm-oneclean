@@ -775,8 +775,10 @@ Anderson: cada sistema cuida da sua empresa; o "Geral" (as duas) é de quem lê 
   reconhecidos. **Vigia `2026-10-06` instalado no servidor às 12:22 de 06/10** — o `Invoke-WebRequest`
   do Windows Server 2012 falha por TLS (nem com Tls12): baixar o vigia **pelo Node** (README). 1ª entrega
   real: 361 contas → 194 abertas (R$ 234.532,91), 163 antigas pausadas (R$ 197.050,50), 4 ligadas às da
-  planilha (salário, energia do galpão, pedágio, água da casa). Falta: lembrete do contas a pagar na
-  faixa do FKN (só admin); leitura para a gestora das duas empresas (fase 2).
+  planilha (salário, energia do galpão, pedágio, água da casa). Lembrete do contas a pagar na faixa do
+  FKN (só admin; `crm_fkn_situacao()->'pagar'` = última entrega boa pelo vigia ou conta do FKN gravada pela
+  tela) e passo 3 (Sifn083) na colinha — 06/10. Falta: leitura para a gestora das duas empresas (fase 2).
+  No `schema.sql` o bloco do financeiro fica ANTES do contas a receber (a função lê `crm_fin_lancamentos`).
 - **Confirmado pelo Anderson (06/10):** "as contas de hoje em diante ainda não foram pagas" — o verde em
   boleto futuro de fornecedor na planilha não era pago; o caixa está certo em tratá-las como previstas.
   Projeção do dia (saldo BB R$ 8.052,79): outubro (06–31) entra R$ 161.919 e sai R$ 271.715; saldo

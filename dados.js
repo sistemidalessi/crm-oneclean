@@ -471,7 +471,7 @@
   // faltando), pela função do banco: o comprador não lê os títulos nem o registro de entregas.
   Supa.prototype.fknAtualizado = async function () {
     const r = unwrap(await comTentativas(() => this.sb.rpc('crm_fkn_situacao')));
-    return Object.assign({ estoque: null, receber: null, recusas: [] }, r || {});
+    return Object.assign({ estoque: null, receber: null, pagar: null, recusas: [] }, r || {});
   };
   // Duplicatas EM ATRASO, com detalhe (gestora e vendedoras não leem o contas a receber — ver schema.sql).
   Supa.prototype.duplicatasAtraso = async function () {
@@ -510,7 +510,7 @@
   Local.prototype.fknAtualizado = async function () {
     const est = await this.estoque(), tit = this.ler().titulos || [];
     const max = l => l.reduce((m, x) => (x.atualizado_em && x.atualizado_em > m ? x.atualizado_em : m), '') || null;
-    return { estoque: max(est), receber: max(tit), recusas: [] };
+    return { estoque: max(est), receber: max(tit), pagar: max((this.ler().fin_lancamentos || []).filter(x => x.chave_fkn)), recusas: [] };
   };
 
   raiz.CRMDados = { TABELAS, chave, Local, Supa, uuid, vazio, LOCAL_ADMIN, cascataMemoria, situacaoVigia, PARADO_MIN, lembreteFkn };

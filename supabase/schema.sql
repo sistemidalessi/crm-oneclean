@@ -769,6 +769,95 @@ alter table public.crm_estoque add column if not exists preco_venda     numeric(
 alter table public.crm_estoque add column if not exists ult_entrada     date;
 alter table public.crm_estoque add column if not exists ult_saida       date;
 
+-- =================================================================== financeiro (só o administrador)
+-- Contas a pagar, entradas avulsas e caixa do dia (06/10/2026, troca da planilha "Fluxo de Caixa"
+-- do Excel). Tem salário, pró-labore e retirada: SÓ o administrador lê e grava — nem a gestora.
+-- Sem auditoria em crm_historico de propósito (a gestora lê o histórico).
+-- Recorrente: modelo com dia fixo do mês; "Gerar o mês" cria a conta da competência (uma só por
+-- recorrente e mês — índice único). Parcela "n de N": parcela_inicio é o número no mês de "inicio".
+create table if not exists public.crm_fin_recorrentes (
+  id              uuid primary key default gen_random_uuid(),
+  tipo            text not null default 'saida' check (tipo in ('entrada','saida')),
+  descricao       text not null check (length(btrim(descricao)) > 0),
+  fornecedor      text,
+  categoria       text,
+  valor           numeric(14,2) not null default 0 check (valor >= 0),
+  dia             smallint not null check (dia between 1 and 31),
+  entre_empresas  boolean not null default false,
+  parcelas        smallint check (parcelas is null or parcelas > 0),
+  parcela_inicio  smallint check (parcela_inicio is null or parcela_inicio > 0),
+  inicio          date not null default date_trunc('month', current_date)::date,
+  ativo           boolean not null default true,
+  observacoes     text,
+  criado_por      uuid default auth.uid(),
+  criado_em       timestamptz not null default now(),
+  atualizado_em   timestamptz not null default now()
+);
+-- Lançamento = conta a pagar (saída) ou entrada avulsa (ex.: material vendido à Agilité).
+-- situacao: aberto (previsto) | pago (aconteceu) | pausado (fora do caixa, aba "Contas pausadas").
+-- baixa: 'caixa' = ✓ no caixa do dia (entra no saldo); 'fora' = pago fora (sumiu do FKN, "já estava
+-- paga") — aparece, mas não mexe no saldo, que vem do saldo informado do banco.
+-- entre_empresas: OneClean ↔ Agilité (reembolso da folha, material vendido): no "Geral" se anulam.
+-- titulo_duplicata: título do contas a receber marcado como recebido no caixa do dia.
+create table if not exists public.crm_fin_lancamentos (
+  id                uuid primary key default gen_random_uuid(),
+  tipo              text not null default 'saida' check (tipo in ('entrada','saida')),
+  descricao         text not null check (length(btrim(descricao)) > 0),
+  fornecedor        text,
+  categoria         text,
+  valor             numeric(14,2) not null default 0 check (valor >= 0),
+  vencimento        date not null,
+  situacao          text not null default 'aberto' check (situacao in ('aberto','pago','pausado')),
+  pago_em           date,
+  baixa             text check (baixa in ('caixa','fora')),
+  baixado_em        timestamptz,
+  entre_empresas    boolean not null default false,
+  origem            text not null default 'tela' check (origem in ('tela','recorrente','fkn','planilha','titulo')),
+  recorrente_id     uuid references public.crm_fin_recorrentes(id) on delete set null,
+  competencia       date,
+  parcela           smallint,
+  parcelas          smallint,
+  chave_fkn         text,
+  titulo_duplicata  text,
+  observacoes       text,
+  criado_por        uuid default auth.uid(),
+  criado_em         timestamptz not null default now(),
+  atualizado_em     timestamptz not null default now(),
+  constraint crm_fin_lancamentos_pago_ck check (situacao <> 'pago' or pago_em is not null)
+);
+create unique index if not exists crm_fin_lanc_recorrente_uq on public.crm_fin_lancamentos (recorrente_id, competencia) where recorrente_id is not null;
+create unique index if not exists crm_fin_lanc_fkn_uq on public.crm_fin_lancamentos (chave_fkn) where chave_fkn is not null;
+create unique index if not exists crm_fin_lanc_titulo_uq on public.crm_fin_lancamentos (titulo_duplicata) where titulo_duplicata is not null;
+create index if not exists crm_fin_lanc_venc_idx on public.crm_fin_lancamentos (situacao, vencimento);
+create index if not exists crm_fin_lanc_pago_idx on public.crm_fin_lancamentos (pago_em);
+-- Saldo do banco informado ("Conferir com o banco"): saldo atual = o último informado + o que foi
+-- baixado no caixa (baixa = 'caixa') depois dele.
+create table if not exists public.crm_fin_saldos (
+  id          uuid primary key default gen_random_uuid(),
+  data        date not null,
+  valor       numeric(14,2) not null,
+  observacao  text,
+  criado_por  uuid default auth.uid(),
+  criado_em   timestamptz not null default now()
+);
+do $$
+declare t text;
+begin
+  foreach t in array array['crm_fin_recorrentes','crm_fin_lancamentos','crm_fin_saldos']
+  loop
+    if t <> 'crm_fin_saldos' then
+      execute format('drop trigger if exists %I on public.%I', t || '_atualizado_em', t);
+      execute format('create trigger %I before update on public.%I for each row execute function public.crm_toca_atualizado_em()', t || '_atualizado_em', t);
+    end if;
+    execute format('alter table public.%I enable row level security', t);
+    execute format('revoke all on public.%I from anon, public', t);
+    execute format('grant select, insert, update, delete on public.%I to authenticated', t);
+    execute format('revoke truncate, references, trigger on public.%I from authenticated', t);
+    execute format('drop policy if exists so_admin on public.%I', t);
+    execute format('create policy so_admin on public.%I for all to authenticated using ((select public.crm_eh_admin())) with check ((select public.crm_eh_admin()))', t);
+  end loop;
+end $$;
+
 -- contas a receber (listagem SIFN016 do FKN, "em aberto"): retrato dos títulos; cada importação
 -- troca o retrato inteiro. Quem lê a tabela: SÓ o administrador (06/10/2026, Anderson: "tanto
 -- Isabela quanto os demais, somente o selo de duplicata em atraso, podendo dar detalhes"). Gestora e
@@ -877,14 +966,19 @@ revoke all on function public.crm_fkn_atualizado() from public, anon;
 grant execute on function public.crm_fkn_atualizado() to authenticated;
 -- O mesmo, mais o motivo da última recusa de cada relatório (arquivo puxado com opção faltando),
 -- se for mais nova que a última entrega boa — o lembrete de Compras mostra o que marcar.
+-- 'pagar' (contas a pagar, Sifn083 — só administrador): a última entrega boa pelo vigia ou a última
+-- conta do FKN gravada/atualizada pela tela.
 create or replace function public.crm_fkn_situacao()
 returns jsonb language sql stable security definer set search_path = public as $$
-  with u as (select (select max(atualizado_em) from public.crm_estoque) estoque, (select max(atualizado_em) from public.crm_titulos) receber),
+  with u as (select (select max(atualizado_em) from public.crm_estoque) estoque, (select max(atualizado_em) from public.crm_titulos) receber,
+                    greatest((select max(quando) from public.crm_integracao_log where erros = 0 and resumo->>'fkn' like 'Contas a pagar do FKN:%'),
+                             (select max(atualizado_em) from public.crm_fin_lancamentos where chave_fkn is not null)) pagar),
   r as (select distinct on (resumo->>'fkn_tipo') resumo->>'fkn_tipo' tipo, resumo->>'fkn_recusa' texto, resumo->>'arquivo' arquivo, quando
           from public.crm_integracao_log where resumo ? 'fkn_recusa' order by resumo->>'fkn_tipo', quando desc)
   select jsonb_build_object('estoque', u.estoque, 'receber', case when public.crm_eh_admin() then u.receber end,
+    'pagar', case when public.crm_eh_admin() then u.pagar end,
     'recusas', coalesce((select jsonb_agg(jsonb_build_object('tipo', r.tipo, 'texto', r.texto, 'arquivo', r.arquivo, 'quando', r.quando))
-                           from r where r.quando > coalesce(case r.tipo when 'produtos' then u.estoque else u.receber end, '-infinity'::timestamptz)
+                           from r where r.quando > coalesce(case r.tipo when 'produtos' then u.estoque when 'pagar' then u.pagar else u.receber end, '-infinity'::timestamptz)
                             and (r.tipo = 'produtos' or public.crm_eh_admin())), '[]'::jsonb))
     from u where public.crm_eh_admin() or public.crm_eh_comprador();
 $$;
@@ -897,95 +991,6 @@ create policy le on public.crm_integracao_log for select to authenticated using 
 
 -- histórico: só gestor lê.
 create policy le on public.crm_historico for select to authenticated using ((select public.crm_eh_gestor()));
-
--- =================================================================== financeiro (só o administrador)
--- Contas a pagar, entradas avulsas e caixa do dia (06/10/2026, troca da planilha "Fluxo de Caixa"
--- do Excel). Tem salário, pró-labore e retirada: SÓ o administrador lê e grava — nem a gestora.
--- Sem auditoria em crm_historico de propósito (a gestora lê o histórico).
--- Recorrente: modelo com dia fixo do mês; "Gerar o mês" cria a conta da competência (uma só por
--- recorrente e mês — índice único). Parcela "n de N": parcela_inicio é o número no mês de "inicio".
-create table if not exists public.crm_fin_recorrentes (
-  id              uuid primary key default gen_random_uuid(),
-  tipo            text not null default 'saida' check (tipo in ('entrada','saida')),
-  descricao       text not null check (length(btrim(descricao)) > 0),
-  fornecedor      text,
-  categoria       text,
-  valor           numeric(14,2) not null default 0 check (valor >= 0),
-  dia             smallint not null check (dia between 1 and 31),
-  entre_empresas  boolean not null default false,
-  parcelas        smallint check (parcelas is null or parcelas > 0),
-  parcela_inicio  smallint check (parcela_inicio is null or parcela_inicio > 0),
-  inicio          date not null default date_trunc('month', current_date)::date,
-  ativo           boolean not null default true,
-  observacoes     text,
-  criado_por      uuid default auth.uid(),
-  criado_em       timestamptz not null default now(),
-  atualizado_em   timestamptz not null default now()
-);
--- Lançamento = conta a pagar (saída) ou entrada avulsa (ex.: material vendido à Agilité).
--- situacao: aberto (previsto) | pago (aconteceu) | pausado (fora do caixa, aba "Contas pausadas").
--- baixa: 'caixa' = ✓ no caixa do dia (entra no saldo); 'fora' = pago fora (sumiu do FKN, "já estava
--- paga") — aparece, mas não mexe no saldo, que vem do saldo informado do banco.
--- entre_empresas: OneClean ↔ Agilité (reembolso da folha, material vendido): no "Geral" se anulam.
--- titulo_duplicata: título do contas a receber marcado como recebido no caixa do dia.
-create table if not exists public.crm_fin_lancamentos (
-  id                uuid primary key default gen_random_uuid(),
-  tipo              text not null default 'saida' check (tipo in ('entrada','saida')),
-  descricao         text not null check (length(btrim(descricao)) > 0),
-  fornecedor        text,
-  categoria         text,
-  valor             numeric(14,2) not null default 0 check (valor >= 0),
-  vencimento        date not null,
-  situacao          text not null default 'aberto' check (situacao in ('aberto','pago','pausado')),
-  pago_em           date,
-  baixa             text check (baixa in ('caixa','fora')),
-  baixado_em        timestamptz,
-  entre_empresas    boolean not null default false,
-  origem            text not null default 'tela' check (origem in ('tela','recorrente','fkn','planilha','titulo')),
-  recorrente_id     uuid references public.crm_fin_recorrentes(id) on delete set null,
-  competencia       date,
-  parcela           smallint,
-  parcelas          smallint,
-  chave_fkn         text,
-  titulo_duplicata  text,
-  observacoes       text,
-  criado_por        uuid default auth.uid(),
-  criado_em         timestamptz not null default now(),
-  atualizado_em     timestamptz not null default now(),
-  constraint crm_fin_lancamentos_pago_ck check (situacao <> 'pago' or pago_em is not null)
-);
-create unique index if not exists crm_fin_lanc_recorrente_uq on public.crm_fin_lancamentos (recorrente_id, competencia) where recorrente_id is not null;
-create unique index if not exists crm_fin_lanc_fkn_uq on public.crm_fin_lancamentos (chave_fkn) where chave_fkn is not null;
-create unique index if not exists crm_fin_lanc_titulo_uq on public.crm_fin_lancamentos (titulo_duplicata) where titulo_duplicata is not null;
-create index if not exists crm_fin_lanc_venc_idx on public.crm_fin_lancamentos (situacao, vencimento);
-create index if not exists crm_fin_lanc_pago_idx on public.crm_fin_lancamentos (pago_em);
--- Saldo do banco informado ("Conferir com o banco"): saldo atual = o último informado + o que foi
--- baixado no caixa (baixa = 'caixa') depois dele.
-create table if not exists public.crm_fin_saldos (
-  id          uuid primary key default gen_random_uuid(),
-  data        date not null,
-  valor       numeric(14,2) not null,
-  observacao  text,
-  criado_por  uuid default auth.uid(),
-  criado_em   timestamptz not null default now()
-);
-do $$
-declare t text;
-begin
-  foreach t in array array['crm_fin_recorrentes','crm_fin_lancamentos','crm_fin_saldos']
-  loop
-    if t <> 'crm_fin_saldos' then
-      execute format('drop trigger if exists %I on public.%I', t || '_atualizado_em', t);
-      execute format('create trigger %I before update on public.%I for each row execute function public.crm_toca_atualizado_em()', t || '_atualizado_em', t);
-    end if;
-    execute format('alter table public.%I enable row level security', t);
-    execute format('revoke all on public.%I from anon, public', t);
-    execute format('grant select, insert, update, delete on public.%I to authenticated', t);
-    execute format('revoke truncate, references, trigger on public.%I from authenticated', t);
-    execute format('drop policy if exists so_admin on public.%I', t);
-    execute format('create policy so_admin on public.%I for all to authenticated using ((select public.crm_eh_admin())) with check ((select public.crm_eh_admin()))', t);
-  end loop;
-end $$;
 
 -- =================================================================== permissões de função
 revoke all on function public.crm_papel(), public.crm_eh_ativo(), public.crm_eh_membro(), public.crm_eh_gestor(), public.crm_eh_admin(), public.crm_eh_comprador(),
