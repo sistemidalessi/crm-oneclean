@@ -84,7 +84,7 @@ Deno.serve(async (req) => {
       tudo(db, 'crm_fin_lancamentos', 'id, tipo, descricao, fornecedor, categoria, valor, vencimento, situacao, pago_em, baixa, baixado_em, entre_empresas, origem, recorrente_id, titulo_duplicata, emprestimo, juros'),
       tudo(db, 'crm_fin_saldos', 'id, data, valor, criado_em'),
       tudo(db, 'crm_fin_recorrentes', 'id, descricao'),
-      tudo(db, 'crm_titulos', 'duplicata, empresa_id, cliente_nome, valor, vencimento', 'duplicata'),
+      tudo(db, 'crm_titulos', 'duplicata, empresa_id, cliente_nome, valor, vencimento, previsao', 'duplicata'),
       tudo(db, 'crm_usuarios', 'user_id, nome', 'user_id'),
       db.from('crm_config').select('dados').eq('id', 1).maybeSingle()
     ]);
