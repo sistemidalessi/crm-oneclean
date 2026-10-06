@@ -130,6 +130,36 @@ select 'Comprador vê a recusa nova do FKN' t, jsonb_array_length(crm_fkn_situac
 select pg_temp.como('c0000000-0000-0000-0000-000000000003');
 select 'Ana vê datas do FKN (NÃO devia)' t, count(*) from crm_fkn_atualizado() having count(*) > 0;
 select 'Ana vê situação do FKN (NÃO devia)' t from (select crm_fkn_situacao() x) y where x is not null;
+-- financeiro (contas a pagar, caixa): SÓ o admin — nem a gestora (tem salário e pró-labore)
+select pg_temp.como('a0000000-0000-0000-0000-000000000001');
+insert into crm_fin_recorrentes (descricao, categoria, valor, dia) values ('Salário vendedora', 'Salários', 3500, 5) returning 'admin criou recorrente' as ok;
+insert into crm_fin_lancamentos (descricao, categoria, valor, vencimento, recorrente_id, competencia, origem)
+  select 'Salário vendedora', 'Salários', 3500, current_date, id, date_trunc('month', current_date)::date, 'recorrente' from crm_fin_recorrentes returning 'admin gerou a conta do mês' as ok;
+insert into crm_fin_lancamentos (descricao, valor, vencimento, recorrente_id, competencia)
+  select 'de novo', 1, current_date, id, date_trunc('month', current_date)::date from crm_fin_recorrentes; -- FALHA (uma por recorrente e mês)
+insert into crm_fin_lancamentos (descricao, valor, vencimento, situacao) values ('pago sem data', 1, current_date, 'pago'); -- FALHA
+insert into crm_fin_saldos (data, valor) values (current_date, 8052.79) returning 'admin informou o saldo' as ok;
+update crm_fin_lancamentos set situacao = 'pago', pago_em = current_date, baixa = 'caixa', baixado_em = now() returning 'admin pagou no caixa' as ok;
+select pg_temp.como('b0000000-0000-0000-0000-000000000002');
+select 'Gestora vê contas a pagar (NÃO devia)' t, count(*) from crm_fin_lancamentos having count(*) > 0;
+select 'Gestora vê recorrentes (NÃO devia)' t, count(*) from crm_fin_recorrentes having count(*) > 0;
+select 'Gestora vê saldo (NÃO devia)' t, count(*) from crm_fin_saldos having count(*) > 0;
+insert into crm_fin_lancamentos (descricao, valor, vencimento) values ('gestora', 1, current_date); -- FALHA
+insert into crm_fin_saldos (data, valor) values (current_date, 1); -- FALHA
+update crm_fin_lancamentos set valor = 0 returning 'Gestora alterou conta (NÃO devia)';
+delete from crm_fin_lancamentos returning 'Gestora apagou conta (NÃO devia)';
+select pg_temp.como('c0000000-0000-0000-0000-000000000003');
+select 'Ana vê contas a pagar (NÃO devia)' t, count(*) from crm_fin_lancamentos having count(*) > 0;
+select 'Ana vê saldo (NÃO devia)' t, count(*) from crm_fin_saldos having count(*) > 0;
+insert into crm_fin_recorrentes (descricao, valor, dia) values ('ana', 1, 1); -- FALHA
+select pg_temp.como('f0000000-0000-0000-0000-000000000006');
+select 'Comprador vê contas a pagar (NÃO devia)' t, count(*) from crm_fin_lancamentos having count(*) > 0;
+select 'Comprador vê recorrentes (NÃO devia)' t, count(*) from crm_fin_recorrentes having count(*) > 0;
+select 'Comprador vê saldo (NÃO devia)' t, count(*) from crm_fin_saldos having count(*) > 0;
+update crm_fin_saldos set valor = 0 returning 'Comprador alterou saldo (NÃO devia)';
+select pg_temp.como('a0000000-0000-0000-0000-000000000001');
+select 'Admin vê financeiro' t, (select count(*) from crm_fin_lancamentos) l, (select count(*) from crm_fin_recorrentes) r, (select count(*) from crm_fin_saldos) s;
+select 'Financeiro no histórico (NÃO devia)' t, count(*) from crm_historico where tabela like 'crm_fin%' having count(*) > 0;
 -- Bruno desativado perde tudo
 reset role; update crm_usuarios set ativo=false where nome='Bruno'; set role authenticated; select pg_temp.como('d0000000-0000-0000-0000-000000000004');
 select 'Bruno desativado vê' t, count(*) from crm_empresas;
@@ -137,6 +167,8 @@ select 'Bruno desativado vê' t, count(*) from crm_empresas;
 reset role; set role anon; select pg_temp.como('');
 select count(*) from crm_empresas; -- FALHA
 select count(*) from crm_notas; -- FALHA
+select count(*) from crm_fin_lancamentos; -- FALHA
+select count(*) from crm_fin_saldos; -- FALHA
 select crm_proximo_vendedor(); -- FALHA
 select * from crm_duplicado_empresa('11222333000181', null, null); -- FALHA
 reset role;

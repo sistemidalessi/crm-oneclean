@@ -13,10 +13,13 @@
   // Ordem importa: pais antes de filhos (importação/upsert respeita as FKs).
   const TABELAS = ['usuarios', 'config', 'etapas', 'opcoes', 'produtos', 'modelos', 'metas', 'filtros',
     'empresas', 'contatos', 'negocios', 'negocio_itens', 'propostas', 'atividades', 'notas', 'nota_itens', 'titulos'];
+  // Financeiro (contas a pagar e caixa): só o administrador; carregado à parte, ao abrir o Caixa.
+  const FIN = ['fin_recorrentes', 'fin_lancamentos', 'fin_saldos'];
   const CHAVE = { usuarios: 'user_id' };
   const chave = t => CHAVE[t] || 'id';
 
   function vazio() { const d = {}; TABELAS.forEach(t => { d[t] = []; }); return d; }
+  const finVazio = d => ({ recorrentes: (d && d.fin_recorrentes) || [], lancamentos: (d && d.fin_lancamentos) || [], saldos: (d && d.fin_saldos) || [] });
 
   function uuid() {
     if (raiz.crypto && raiz.crypto.randomUUID) return raiz.crypto.randomUUID();
@@ -42,7 +45,10 @@
     metas: { valor: 0 },
     notas: { cancelada: false, valor_total: 0, valor_produtos: 0 },
     nota_itens: { quantidade: 0, valor_unitario: 0, valor_total: 0, ordem: 0 },
-    titulos: { valor: 0, abono: false, origem: 'fkn' }
+    titulos: { valor: 0, abono: false, origem: 'fkn' },
+    fin_recorrentes: { tipo: 'saida', valor: 0, entre_empresas: false, ativo: true },
+    fin_lancamentos: { tipo: 'saida', valor: 0, situacao: 'aberto', entre_empresas: false, origem: 'tela' },
+    fin_saldos: {}
   };
 
   // Filhos apagados junto (no Supabase é o "on delete cascade"/"set null").
@@ -68,6 +74,8 @@
     try { d = JSON.parse(raiz.localStorage.getItem(CHAVE_LS) || 'null'); } catch (e) { d = null; }
     const base = vazio();
     if (d) TABELAS.forEach(t => { if (Array.isArray(d[t])) base[t] = d[t]; });
+    // financeiro: mesma chave do navegador, fora do estado do CRM (só a tela Caixa lê)
+    FIN.forEach(t => { base[t] = d && Array.isArray(d[t]) ? d[t] : []; });
     return base;
   };
 
@@ -96,8 +104,10 @@
   Local.prototype.carregar = function () {
     const d = this.ler();
     if (this.semeia(d)) this.gravar(d);
+    FIN.forEach(t => { delete d[t]; });
     return Promise.resolve(d);
   };
+  Local.prototype.carregarFin = function () { return Promise.resolve(finVazio(this.ler())); };
 
   Local.prototype.usuarioAtual = function () { return Promise.resolve(this.ler().usuarios.find(u => u.user_id === LOCAL_ADMIN) || this.ler().usuarios[0]); };
 
@@ -257,6 +267,11 @@
     const d = vazio();
     TABELAS.forEach((t, i) => { d[t] = res[i]; });
     return d;
+  };
+
+  Supa.prototype.carregarFin = async function () {
+    const r = await Promise.all(FIN.map(t => tudo(this.sb, t)));
+    return finVazio({ fin_recorrentes: r[0], fin_lancamentos: r[1], fin_saldos: r[2] });
   };
 
   Supa.prototype.usuarioAtual = async function (userId) {

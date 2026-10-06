@@ -1,0 +1,525 @@
+/* CRM Sistemi Dalessi — Caixa: contas a pagar, contas recorrentes e caixa do dia (06/10/2026).
+   Troca a planilha "Fluxo de Caixa" do Excel. SÓ o administrador: tem salário, pró-labore e retirada
+   (a RLS das tabelas crm_fin_* barra todo o resto — ver schema.sql).
+   - Saldo = último saldo informado do banco ("Conferir com o banco") + o que foi baixado no caixa
+     (✓) depois dele. Pago "fora" (sumiu do FKN, "já estava paga") aparece, mas não mexe no saldo.
+   - Grade de 15 dias como a planilha: uma coluna por dia, entradas em cima, saídas embaixo, total de
+     cada parte e saldo no fim do dia. Verde = aconteceu; branco = previsto; borda vermelha = venceu.
+   - Dia útil bancário de São Bernardo do Campo: o que vence em sábado, domingo ou feriado é pago (ou
+     entra) no próximo dia útil; o vencimento gravado não muda.
+   - Título do contas a receber entra no dia em que o dinheiro cai: pago no vencimento (ou no próximo
+     dia útil) e creditado no dia útil seguinte.
+   Parte pura (CRMCaixa.*, testada em testes/caixa.test.js) e a tela. */
+(function (raiz) {
+  'use strict';
+  const R = raiz.CRMRegras || (typeof require !== 'undefined' ? require('./regras.js') : null);
+  const r2 = v => Math.round(Number(v || 0) * 100) / 100;
+  const dt = s => new Date(s + 'T12:00:00Z');
+  const iso = d => d.toISOString().slice(0, 10);
+  const soma = (s, n) => { const d = dt(s); d.setUTCDate(d.getUTCDate() + n); return iso(d); };
+  const semana = s => dt(s).getUTCDay();
+  const dm = s => s ? s.slice(8, 10) + '/' + s.slice(5, 7) : '';
+  const DIAS = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
+
+  // ------------------------------------------------------------ feriados e dia útil (bancário, SBC)
+  function pascoa(ano) { // Meeus/Butcher
+    const a = ano % 19, b = Math.floor(ano / 100), c = ano % 100, d = Math.floor(b / 4), e = b % 4;
+    const f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30;
+    const i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451);
+    const mes = Math.floor((h + l - 7 * m + 114) / 31), dia = ((h + l - 7 * m + 114) % 31) + 1;
+    return ano + '-' + String(mes).padStart(2, '0') + '-' + String(dia).padStart(2, '0');
+  }
+  const cacheFeriados = new Map();
+  // Nacionais, o do Estado de SP (9 de julho), Carnaval (banco fechado) e os de São Bernardo do
+  // Campo (aniversário da cidade, 20/08, e Corpus Christi), onde fica a OneClean.
+  function feriados(ano) {
+    if (cacheFeriados.has(ano)) return cacheFeriados.get(ano);
+    const f = {};
+    const add = (mmdd, nome) => { f[ano + '-' + mmdd] = { nome }; };
+    add('01-01', 'Confraternização Universal'); add('04-21', 'Tiradentes'); add('05-01', 'Dia do Trabalho');
+    add('09-07', 'Independência'); add('10-12', 'Nossa Senhora Aparecida'); add('11-02', 'Finados');
+    add('11-15', 'Proclamação da República'); add('11-20', 'Consciência Negra'); add('12-25', 'Natal');
+    add('07-09', 'Revolução Constitucionalista (SP)'); add('08-20', 'Aniversário de São Bernardo do Campo');
+    const p = pascoa(ano);
+    f[soma(p, -48)] = { nome: 'Carnaval' }; f[soma(p, -47)] = { nome: 'Carnaval' };
+    f[soma(p, -2)] = { nome: 'Sexta-feira Santa' }; f[soma(p, 60)] = { nome: 'Corpus Christi' };
+    cacheFeriados.set(ano, f);
+    return f;
+  }
+  const feriado = s => feriados(Number(String(s).slice(0, 4)))[s] || null;
+  const util = s => { const w = semana(s); return w !== 0 && w !== 6 && !feriado(s); };
+  const posterga = s => { let x = s; while (!util(x)) x = soma(x, 1); return x; };
+  const utilDepois = s => posterga(soma(s, 1));
+  const porqueNaoUtil = s => { const f = feriado(s); return f ? 'feriado (' + f.nome + ')' : DIAS[semana(s)]; };
+  // Dia em que o título cai na conta: pago no vencimento (ou próximo dia útil) e creditado no dia útil
+  // seguinte. d1 = false: cai no mesmo dia do pagamento.
+  const creditoTitulo = (venc, d1) => { const pg = posterga(venc); return d1 === false ? pg : utilDepois(pg); };
+
+  // ------------------------------------------------------------ recorrentes
+  // "AAAA-MM" + dia → data, sem estourar o fim do mês (dia 31 em fevereiro → 28/29).
+  function diaDoMes(compet, dia) {
+    const [a, m] = compet.split('-').map(Number);
+    const ultimo = new Date(Date.UTC(a, m, 0)).getUTCDate();
+    return compet + '-' + String(Math.min(dia, ultimo)).padStart(2, '0');
+  }
+  const mesesEntre = (a, b) => (+b.slice(0, 4) - +a.slice(0, 4)) * 12 + (+b.slice(5, 7) - +a.slice(5, 7));
+  // Contas do mês "AAAA-MM" geradas pelas recorrentes ativas que ainda não têm a conta desse mês
+  // (idempotente: o banco também barra duas contas da mesma recorrente no mesmo mês).
+  function gerarMes(recorrentes, compet, existentes) {
+    const ja = new Set((existentes || []).filter(l => l.recorrente_id).map(l => l.recorrente_id + '|' + String(l.competencia || '').slice(0, 7)));
+    const out = [];
+    (recorrentes || []).forEach(r => {
+      if (r.ativo === false) return;
+      const ini = String(r.inicio || '').slice(0, 7) || compet;
+      if (compet < ini) return;
+      let parcela = null;
+      if (r.parcelas) { parcela = (r.parcela_inicio || 1) + mesesEntre(ini, compet); if (parcela > r.parcelas) return; }
+      if (ja.has(r.id + '|' + compet)) return;
+      out.push({ tipo: r.tipo || 'saida', descricao: r.descricao + (parcela ? ' (' + String(parcela).padStart(2, '0') + ' de ' + r.parcelas + ')' : ''),
+        fornecedor: r.fornecedor || null, categoria: r.categoria || null, valor: r2(r.valor), vencimento: diaDoMes(compet, r.dia),
+        entre_empresas: !!r.entre_empresas, origem: 'recorrente', recorrente_id: r.id, competencia: compet + '-01', parcela, parcelas: r.parcelas || null });
+    });
+    return out;
+  }
+
+  // ------------------------------------------------------------ saldo
+  const tempo = v => { const t = Date.parse(v || ''); return isNaN(t) ? 0 : t; };
+  function ancora(saldos) {
+    return (saldos || []).slice().sort((a, b) => String(b.data).localeCompare(String(a.data)) || tempo(b.criado_em) - tempo(a.criado_em))[0] || null;
+  }
+  // Baixado no caixa depois do saldo informado (mesmo dia: baixado depois de informar).
+  const contaNoSaldo = (l, a) => l.situacao === 'pago' && l.baixa === 'caixa' && l.pago_em &&
+    (l.pago_em > a.data || (l.pago_em === a.data && tempo(l.baixado_em) > tempo(a.criado_em)));
+  const sinal = l => (l.tipo === 'entrada' ? 1 : -1) * Number(l.valor || 0);
+  function saldoAtual(saldos, lancs) {
+    const a = ancora(saldos);
+    if (!a) return { ancora: null, saldo: null, entradas: 0, saidas: 0, n: 0 };
+    let e = 0, s = 0, n = 0;
+    (lancs || []).forEach(l => { if (contaNoSaldo(l, a)) { n++; if (l.tipo === 'entrada') e += Number(l.valor || 0); else s += Number(l.valor || 0); } });
+    return { ancora: a, saldo: r2(Number(a.valor) + e - s), entradas: r2(e), saidas: r2(s), n };
+  }
+
+  // ------------------------------------------------------------ grade
+  // Item: { chave, tipo: 'lanc'|'titulo', secao: 'entrada'|'saida', data, titulo, valor, estado:
+  // 'feito'|'fora'|'previsto', obs, ref }. Vencidos (conta ou título que já devia ter acontecido)
+  // ficam fora da grade e do saldo previsto: vão para os blocos próprios.
+  function itensGrade(de, ate, hoje, lancs, titulos, opc) {
+    opc = opc || {};
+    const it = [];
+    const add = o => { if (o.data >= de && o.data <= ate) it.push(o); };
+    const recebidos = new Set((lancs || []).filter(l => l.titulo_duplicata).map(l => l.titulo_duplicata));
+    (lancs || []).forEach(l => {
+      const secao = l.tipo === 'entrada' ? 'entrada' : 'saida';
+      const base = { chave: 'lanc:' + l.id, tipo: 'lanc', secao, titulo: l.descricao, valor: r2(l.valor), ref: l };
+      if (l.situacao === 'pausado') return;
+      if (l.situacao === 'pago') { add(Object.assign(base, { data: l.pago_em, estado: l.baixa === 'caixa' ? 'feito' : 'fora', obs: l.baixa === 'caixa' ? '' : 'pago fora do caixa do dia' })); return; }
+      const pg = posterga(l.vencimento);
+      if (pg < hoje) return;
+      add(Object.assign(base, { data: pg, estado: 'previsto', obs: pg !== l.vencimento ? 'vence ' + dm(l.vencimento) + ', ' + porqueNaoUtil(l.vencimento) + ' → ' + (secao === 'entrada' ? 'entra' : 'paga') + ' no próximo dia útil' : '' }));
+    });
+    (titulos || []).forEach(t => {
+      if (recebidos.has(t.duplicata)) return;
+      const cr = creditoTitulo(t.vencimento, opc.d1);
+      if (cr < hoje) return;
+      add({ chave: 'tit:' + t.duplicata, tipo: 'titulo', secao: 'entrada', data: cr, titulo: (opc.nome ? opc.nome(t) : t.cliente_nome || 'Cliente') + ' · ' + t.duplicata,
+        valor: r2(t.valor), estado: 'previsto', obs: 'título vence ' + dm(t.vencimento) + ', cai na conta ' + dm(cr), ref: t });
+    });
+    return it;
+  }
+  // Saldo no fim de cada dia. De hoje em diante: saldo atual + previstos até o dia (os de antes do
+  // começo da grade também — "previstos" vem de hoje até o fim). Para trás: saldo atual − o que foi
+  // baixado no caixa depois do dia (antes do saldo informado: sem saldo).
+  function saldosGrade(dias, hoje, s, lancs, previstos) {
+    const out = {};
+    if (s.saldo == null) return out;
+    dias.forEach(d => {
+      if (d < hoje) {
+        if (d < s.ancora.data) { out[d] = null; return; }
+        let v = s.saldo;
+        (lancs || []).forEach(l => { if (contaNoSaldo(l, s.ancora) && l.pago_em > d) v -= sinal(l); });
+        out[d] = r2(v); return;
+      }
+      let v = s.saldo;
+      (previstos || []).forEach(x => { if (x.estado === 'previsto' && x.data >= hoje && x.data <= d) v += (x.secao === 'entrada' ? 1 : -1) * x.valor; });
+      out[d] = r2(v);
+    });
+    return out;
+  }
+  const vencidas = (lancs, hoje) => (lancs || []).filter(l => l.situacao === 'aberto' && posterga(l.vencimento) < hoje)
+    .sort((a, b) => a.vencimento.localeCompare(b.vencimento) || b.valor - a.valor);
+  function receberVencido(titulos, lancs, hoje, d1) {
+    const recebidos = new Set((lancs || []).filter(l => l.titulo_duplicata).map(l => l.titulo_duplicata));
+    return (titulos || []).filter(t => !recebidos.has(t.duplicata) && creditoTitulo(t.vencimento, d1) < hoje)
+      .sort((a, b) => a.vencimento.localeCompare(b.vencimento));
+  }
+
+  const CATEGORIAS_SAIDA = ['Fornecedores', 'Salários', 'Benefícios (VT, VR, cesta)', 'FGTS e encargos', 'Pró-labore', 'Retiradas dos sócios',
+    'Reembolso da folha à Agilité', 'Aluguel', 'Energia', 'Água', 'Telefone e internet', 'Contabilidade', 'Sistema (FKN)', 'Convênio médico',
+    'Impostos', 'Reparcelamentos', 'Cartões', 'Empréstimos e giro', 'Frete e combustível', 'Tarifas bancárias', 'Outras saídas'];
+  const CATEGORIAS_ENTRADA = ['Duplicatas recebidas', 'Material vendido à Agilité', 'Outras entradas'];
+  // Passagem entre OneClean e Agilité: no "Geral" das duas empresas esses valores se anulam.
+  const ENTRE_EMPRESAS = /agilit/i;
+
+  const O = { feriados, feriado, util, posterga, utilDepois, porqueNaoUtil, creditoTitulo, pascoa, diaDoMes, gerarMes, ancora, saldoAtual,
+    itensGrade, saldosGrade, vencidas, receberVencido, CATEGORIAS_SAIDA, CATEGORIAS_ENTRADA, ENTRE_EMPRESAS, soma };
+  raiz.CRMCaixa = O;
+  if (typeof module !== 'undefined') module.exports = O;
+
+  // ------------------------------------------------------------ tela
+  const CRM = raiz.CRM;
+  if (!CRM || !CRM.telas) return;
+  const E = () => CRM.estado;
+  const esc = CRM.esc;
+  const $ = (s, el) => (el || document).querySelector(s);
+
+  let F = null, lidoEm = 0, lendo = false, vista = 'dia', inicio = null;
+  const filtro = { situacao: 'abertas', tipo: '', busca: '' };
+  const hoje = () => CRM.hoje();
+  const agora = () => new Date().toISOString();
+  const d1 = () => (E().cfg || {}).caixa_credito_d1 !== false;
+  const nomeTitulo = t => { const e = t.empresa_id && CRM.empresa(t.empresa_id); return (e && e.nome) || t.cliente_nome || 'Cliente'; };
+  const titulos = () => E().D.titulos || [];
+
+  async function carrega() {
+    if (lendo) return;
+    lendo = true;
+    lidoEm = Date.now();
+    try { F = await CRM.store().carregarFin(); } catch (e) { if (!F) F = { recorrentes: [], lancamentos: [], saldos: [] }; CRM.falhou(e); }
+    lendo = false;
+    CRM.render();
+  }
+  const troca = (lista, r) => { const i = lista.findIndex(x => x.id === r.id); if (i >= 0) lista[i] = r; else lista.push(r); };
+  async function grava(id, patch) { const r = await CRM.store().atualizar('fin_lancamentos', id, patch); troca(F.lancamentos, r); CRM.render(); return r; }
+  async function insere(obj) { const r = await CRM.store().inserir('fin_lancamentos', obj); troca(F.lancamentos, r); CRM.render(); return r; }
+  async function remove(id) { await CRM.store().remover('fin_lancamentos', id); F.lancamentos = F.lancamentos.filter(x => x.id !== id); CRM.render(); }
+  const fecha = () => { const d = $('#dlgForm'); if (d && d.open) d.close(); };
+  const lanc = id => F && F.lancamentos.find(x => x.id === id);
+
+  // ---- ações sobre um lançamento
+  const pagar = (l, dia) => grava(l.id, { situacao: 'pago', pago_em: dia, baixa: 'caixa', baixado_em: agora() });
+  async function receberTitulo(dup, dia) {
+    const t = titulos().find(x => x.duplicata === dup);
+    if (!t) return;
+    await insere({ tipo: 'entrada', descricao: 'Recebido: ' + nomeTitulo(t) + ' · ' + t.duplicata, categoria: 'Duplicatas recebidas', valor: r2(t.valor),
+      vencimento: t.vencimento, situacao: 'pago', pago_em: dia, baixa: 'caixa', baixado_em: agora(), origem: 'titulo', titulo_duplicata: t.duplicata });
+    CRM.toast('Recebido em ' + dm(dia) + ': ' + R.moeda(t.valor));
+  }
+  // Dia da baixa: o da coluna, se já passou; senão hoje (não se paga no futuro).
+  const diaDaBaixa = d => (d && d <= hoje() ? d : hoje());
+
+  // ---- formulários
+  function formLanc(l, pre) {
+    pre = pre || {};
+    const tipo = (l && l.tipo) || pre.tipo || 'saida';
+    const pago = l && l.situacao === 'pago';
+    CRM.abrirForm({
+      titulo: l ? 'Editar ' + (tipo === 'entrada' ? 'entrada' : 'conta a pagar') : tipo === 'entrada' ? 'Nova entrada' : 'Nova conta a pagar',
+      intro: l && l.origem === 'fkn' ? 'Conta que veio do FKN: se ela sumir da próxima listagem, é dada como paga.' : l && l.recorrente_id ? 'Conta gerada por uma recorrente: mudar aqui vale só para este mês.' : '',
+      largura: 'largo',
+      campos: [
+        { nome: 'tipo', rotulo: 'Tipo', tipo: 'select', opcoes: [['saida', 'Saída (conta a pagar)'], ['entrada', 'Entrada']] },
+        { nome: 'descricao', rotulo: 'Descrição', obrigatorio: true, largo: true, dica: tipo === 'entrada' ? 'ex.: Material vendido à Agilité — Gran Village' : 'ex.: Aluguel do galpão' },
+        { nome: 'valor', rotulo: 'Valor (R$)', tipo: 'numero', obrigatorio: true },
+        { nome: 'vencimento', rotulo: tipo === 'entrada' ? 'Data prevista' : 'Vencimento', tipo: 'data', obrigatorio: true },
+        { nome: 'categoria', rotulo: 'Categoria', sugestoes: CATEGORIAS_SAIDA.concat(CATEGORIAS_ENTRADA) },
+        { nome: 'fornecedor', rotulo: tipo === 'entrada' ? 'De quem' : 'Fornecedor' },
+        { nome: 'parcela', rotulo: 'Parcela nº', tipo: 'numero', passo: '1', vazioNulo: true },
+        { nome: 'parcelas', rotulo: 'de (total de parcelas)', tipo: 'numero', passo: '1', vazioNulo: true },
+        { nome: 'entre_empresas', rotulo: 'Entre empresas (OneClean ↔ Agilité)', tipo: 'checkbox', ajuda: 'reembolso da folha, material vendido à Agilité' },
+        pago ? { nome: 'pago_em', rotulo: 'Pago em', tipo: 'data' } : null,
+        { nome: 'observacoes', rotulo: 'Observações', tipo: 'textarea', largo: true, linhas: 2 }
+      ].filter(Boolean),
+      valores: l || { tipo, vencimento: pre.data || hoje(), entre_empresas: false },
+      aoSalvar: async v => {
+        if (ENTRE_EMPRESAS.test(v.categoria || '')) v.entre_empresas = true;
+        v.valor = r2(v.valor);
+        if (!(v.valor > 0)) throw new Error('Informe o valor.');
+        if (l) await grava(l.id, v);
+        else await insere(Object.assign({ origem: 'tela' }, v));
+      },
+      aoExcluir: l ? async () => { await remove(l.id); } : null,
+      textoExcluir: 'Excluir este lançamento? Não tem volta.'
+    });
+  }
+
+  // Menu do cartão da grade: ajustar valor e dia, e o que dá para fazer com ele.
+  function menuItem(chave, diaColuna) {
+    const [tp, id] = [chave.slice(0, chave.indexOf(':')), chave.slice(chave.indexOf(':') + 1)];
+    const dia = diaDaBaixa(diaColuna);
+    const rotDia = dia === hoje() ? 'hoje' : 'em ' + dm(dia);
+    if (tp === 'tit') {
+      const t = titulos().find(x => x.duplicata === id);
+      if (!t) return;
+      CRM.abrirForm({
+        titulo: 'Título a receber', intro: nomeTitulo(t) + ' · duplicata ' + t.duplicata + ' · ' + R.moeda(t.valor) + '\nVence ' + R.dataBR(t.vencimento) +
+          ', cai na conta ' + R.dataBR(creditoTitulo(t.vencimento, d1())) + '.\nO título sai do contas a receber quando a listagem do FKN mostrar que foi pago.',
+        campos: [{ nome: 'dia', rotulo: 'Recebido em', tipo: 'data' }], valores: { dia },
+        salvarTexto: 'Recebi', aoSalvar: async v => { await receberTitulo(t.duplicata, diaDaBaixa(v.dia || dia)); }
+      });
+      return;
+    }
+    const l = lanc(id);
+    if (!l) return;
+    const rod = (acao, rot, cls) => '<button type="button" class="btn ' + (cls || 'sec') + '" data-acao="' + acao + '" data-id="' + esc(l.id) + '" data-dia="' + esc(dia) + '">' + esc(rot) + '</button>';
+    const aberto = l.situacao === 'aberto';
+    CRM.abrirForm({
+      titulo: l.descricao,
+      intro: [l.tipo === 'entrada' ? 'Entrada' : 'Saída', R.moeda(l.valor), (aberto ? 'vence ' : 'pago em ') + R.dataBR(aberto ? l.vencimento : l.pago_em),
+        l.categoria, l.entre_empresas ? 'entre empresas' : '', l.situacao === 'pago' && l.baixa === 'fora' ? 'pago fora do caixa do dia' : ''].filter(Boolean).join(' · '),
+      campos: aberto ? [{ nome: 'valor', rotulo: 'Valor (R$)', tipo: 'numero', ajuda: 'a fatura chegou com outro valor?' }, { nome: 'vencimento', rotulo: 'Novo dia', tipo: 'data' }] : [],
+      valores: { valor: l.valor, vencimento: l.vencimento },
+      salvarTexto: aberto ? 'Ajustar' : 'Fechar',
+      rodape: (aberto ? rod('cx-pagar', (l.tipo === 'entrada' ? 'Recebi ' : 'Paguei ') + rotDia, 'verde') + rod('cx-pausar', 'Pausar') : rod('cx-desfazer', 'Desfazer a baixa')) + rod('cx-editar', 'Editar tudo'),
+      aoSalvar: async v => { if (aberto) await grava(l.id, { valor: r2(v.valor), vencimento: v.vencimento || l.vencimento }); }
+    });
+  }
+
+  function formConferir() {
+    const s = saldoAtual(F.saldos, F.lancamentos);
+    CRM.abrirForm({
+      titulo: 'Conferir com o banco',
+      intro: s.ancora ? 'Pelo CRM, o saldo agora é ' + R.moeda(s.saldo) + ' (informado ' + R.moeda(s.ancora.valor) + ' em ' + R.dataBR(s.ancora.data) +
+        (s.n ? ', mais ' + R.moeda(s.entradas) + ' de entradas e menos ' + R.moeda(s.saidas) + ' de saídas baixadas aqui' : '') + ').\nDigite o saldo que o Banco do Brasil mostra: o CRM passa a contar dele.' :
+        'Digite o saldo que o Banco do Brasil mostra hoje: o caixa passa a contar dele.',
+      campos: [{ nome: 'valor', rotulo: 'Saldo no banco (R$)', tipo: 'numero', obrigatorio: true, min: -1e9 }, { nome: 'data', rotulo: 'Saldo do dia', tipo: 'data', obrigatorio: true },
+        { nome: 'observacao', rotulo: 'Observação', largo: true }],
+      valores: { data: hoje() },
+      salvarTexto: 'Usar este saldo',
+      aoSalvar: async v => {
+        const r = await CRM.store().inserir('fin_saldos', { data: v.data, valor: r2(v.valor), observacao: v.observacao || null });
+        F.saldos.push(r);
+        const dif = s.saldo == null ? null : r2(v.valor - s.saldo);
+        CRM.toast(dif == null || !dif ? 'Saldo do banco gravado.' : 'Saldo do banco gravado. Diferença para o CRM: ' + (dif > 0 ? '+' : '') + R.moeda(dif) + '.');
+        CRM.render();
+      }
+    });
+  }
+
+  function formRecorrente(r) {
+    CRM.abrirForm({
+      titulo: r ? 'Editar conta recorrente' : 'Nova conta recorrente',
+      intro: 'Modelo de conta que se repete todo mês no mesmo dia (aluguel, salário, parcela). "Gerar o mês" cria a conta de cada uma.',
+      largura: 'largo',
+      campos: [
+        { nome: 'tipo', rotulo: 'Tipo', tipo: 'select', opcoes: [['saida', 'Saída'], ['entrada', 'Entrada']] },
+        { nome: 'descricao', rotulo: 'Descrição', obrigatorio: true, largo: true, dica: 'ex.: Aluguel do galpão' },
+        { nome: 'valor', rotulo: 'Valor (R$)', tipo: 'numero', obrigatorio: true },
+        { nome: 'dia', rotulo: 'Dia do mês', tipo: 'numero', passo: '1', min: 1, max: 31, obrigatorio: true },
+        { nome: 'categoria', rotulo: 'Categoria', sugestoes: CATEGORIAS_SAIDA.concat(CATEGORIAS_ENTRADA) },
+        { nome: 'fornecedor', rotulo: 'Fornecedor / de quem' },
+        { nome: 'parcela_inicio', rotulo: 'Parcela no mês de início', tipo: 'numero', passo: '1', vazioNulo: true, ajuda: 'só para parcelamento' },
+        { nome: 'parcelas', rotulo: 'Total de parcelas', tipo: 'numero', passo: '1', vazioNulo: true, ajuda: 'vazio = sem fim' },
+        { nome: 'inicio', rotulo: 'A partir do mês', tipo: 'data', ajuda: 'qualquer dia do mês de início' },
+        { nome: 'entre_empresas', rotulo: 'Entre empresas (OneClean ↔ Agilité)', tipo: 'checkbox' },
+        { nome: 'ativo', rotulo: 'Ativa', tipo: 'checkbox' },
+        { nome: 'observacoes', rotulo: 'Observações', tipo: 'textarea', largo: true, linhas: 2 }
+      ],
+      valores: r || { tipo: 'saida', ativo: true, inicio: hoje().slice(0, 8) + '01' },
+      aoSalvar: async v => {
+        if (ENTRE_EMPRESAS.test(v.categoria || '')) v.entre_empresas = true;
+        v.valor = r2(v.valor); v.dia = Math.round(v.dia);
+        v.inicio = (v.inicio || hoje()).slice(0, 8) + '01';
+        if (!(v.dia >= 1 && v.dia <= 31)) throw new Error('Dia do mês entre 1 e 31.');
+        if (v.parcelas && !v.parcela_inicio) v.parcela_inicio = 1;
+        const x = r ? await CRM.store().atualizar('fin_recorrentes', r.id, v) : await CRM.store().inserir('fin_recorrentes', v);
+        troca(F.recorrentes, x); CRM.render();
+      },
+      aoExcluir: r ? async () => { await CRM.store().remover('fin_recorrentes', r.id); F.recorrentes = F.recorrentes.filter(x => x.id !== r.id); CRM.render(); } : null,
+      textoExcluir: 'Excluir esta recorrente? As contas já geradas continuam.'
+    });
+  }
+
+  async function gerar(compet) {
+    const novas = gerarMes(F.recorrentes, compet, F.lancamentos);
+    if (!novas.length) { CRM.toast('Nada a gerar em ' + R.mesCurto(compet + '-01') + ': as contas desse mês já existem.'); return; }
+    const r = await CRM.store().inserirVarios('fin_lancamentos', novas);
+    r.forEach(x => troca(F.lancamentos, x));
+    CRM.toast(r.length + ' conta(s) de ' + R.mesCurto(compet + '-01') + ' gerada(s).');
+    CRM.render();
+  }
+
+  // ---- telas
+  const selo = (t, c) => CRM.selo(t, c);
+  function seloSituacao(l, h) {
+    if (l.situacao === 'pausado') return selo('pausada', 'cinza');
+    if (l.situacao === 'pago') return selo(l.tipo === 'entrada' ? 'recebida' : 'paga', 'verde');
+    return posterga(l.vencimento) < h ? selo('vencida', 'vermelho') : selo('em aberto', 'azul');
+  }
+  function cartao(x, dia) {
+    const ok = x.estado === 'previsto' ? '<button type="button" class="cx-ok" data-acao="cx-ok" data-id="' + esc(x.chave) + '" data-dia="' + esc(dia) + '" title="' +
+      (x.secao === 'entrada' ? 'Recebi' : 'Paguei') + ' ' + (dia <= hoje() ? (dia === hoje() ? 'hoje' : 'em ' + dm(dia)) : 'hoje') + '">✓</button>' : '';
+    const arrasta = x.tipo === 'lanc' && x.estado === 'previsto' ? ' draggable="true" data-mover="' + esc(x.ref.id) + '"' : '';
+    return '<div class="cx-it ' + (x.secao === 'entrada' ? 'cx-ent' : 'cx-sai') + ' ' + x.estado + (ok ? ' comok' : '') + '"' + arrasta + '>' + ok +
+      '<button type="button" class="cx-corpo" data-acao="cx-item" data-id="' + esc(x.chave) + '" data-dia="' + esc(dia) + '" title="' + esc(x.titulo + (x.obs ? ' — ' + x.obs : '')) + '">' +
+      '<span class="t">' + esc(x.titulo) + '</span>' + (x.obs ? '<span class="o">' + esc(x.obs) + '</span>' : '') + '<span class="v">' + esc(R.moeda(x.valor)) + '</span></button></div>';
+  }
+  function grade(s) {
+    const h = hoje();
+    const de = inicio || R.somaDias(h, -1);
+    const dias = Array.from({ length: 15 }, (_, i) => R.somaDias(de, i));
+    const ate = dias[dias.length - 1];
+    const opc = { d1: d1(), nome: nomeTitulo };
+    const itens = itensGrade(de, ate, h, F.lancamentos, titulos(), opc);
+    const previstos = ate >= h ? itensGrade(h, ate, h, F.lancamentos, titulos(), opc) : [];
+    const saldos = saldosGrade(dias, h, s, F.lancamentos, previstos);
+    const naoUtil = d => { const f = feriado(d), w = semana(d); return f ? { cls: 'fer', rot: 'Feriado', nome: f.nome } : w === 6 ? { cls: 'fds', rot: 'Sábado' } : w === 0 ? { cls: 'fds', rot: 'Domingo' } : null; };
+    const th = dias.map(d => { const n = naoUtil(d); return '<th class="' + (d === h ? 'hoje' : '') + (n ? ' ' + n.cls : '') + '">' + DIAS[semana(d)].slice(0, 3) + ' <strong>' + dm(d) + '</strong>' +
+      (d === h ? ' <span class="cx-hoje">hoje</span>' : '') + (n ? '<span class="cx-naoutil">' + n.rot + '</span>' : '') + (n && n.nome ? '<span class="cx-feriado">' + esc(n.nome) + '</span>' : '') + '</th>'; }).join('');
+    const MAX = 5;
+    const celulas = secao => dias.map(d => {
+      const doDia = itens.filter(x => x.data === d && x.secao === secao).sort((a, b) => (a.estado === 'previsto' ? 1 : 0) - (b.estado === 'previsto' ? 1 : 0) || b.valor - a.valor);
+      const n = naoUtil(d);
+      const cards = doDia.length > MAX
+        ? doDia.slice(0, MAX - 1).map(x => cartao(x, d)).join('') + '<details class="cx-mais"><summary>+ ' + (doDia.length - MAX + 1) + ' ' + (secao === 'entrada' ? 'entradas' : 'saídas') + ' · ' +
+          esc(R.moeda(doDia.slice(MAX - 1).reduce((t, x) => t + x.valor, 0))) + '</summary>' + doDia.slice(MAX - 1).map(x => cartao(x, d)).join('') + '</details>'
+        : doDia.map(x => cartao(x, d)).join('');
+      return '<td data-dia="' + d + '" class="' + (d === h ? 'hoje' : '') + (n ? ' ' + n.cls : '') + '">' + cards +
+        '<button type="button" class="cx-add" data-acao="cx-add" data-id="' + secao + '" data-dia="' + d + '" title="Lançar ' + (secao === 'entrada' ? 'entrada' : 'saída') + ' em ' + dm(d) + '">+</button></td>';
+    }).join('');
+    const total = secao => dias.map(d => { const v = itens.filter(x => x.data === d && x.secao === secao && x.estado !== 'fora').reduce((t, x) => t + x.valor, 0); return '<td class="num">' + (v ? esc(R.moeda(v)) : '') + '</td>'; }).join('');
+    const saldoRow = dias.map(d => '<td class="num' + (saldos[d] != null && saldos[d] < 0 ? ' cx-neg' : '') + '"><strong>' + (saldos[d] == null ? '—' : esc(R.moeda(saldos[d]))) + '</strong></td>').join('');
+    return '<section class="cartao cx-grade-cartao"><h2>Fluxo de caixa <small>' + esc(R.dataBR(de)) + ' a ' + esc(R.dataBR(ate)) + '</small><span class="flex"></span>' +
+      '<button type="button" class="mini" data-acao="cx-nav" data-id="-15">◀ 15 dias</button><button type="button" class="mini" data-acao="cx-nav" data-id="0">Hoje</button>' +
+      '<button type="button" class="mini" data-acao="cx-nav" data-id="15">15 dias ▶</button></h2>' +
+      '<p class="cx-legenda"><span class="cx-it cx-ent feito"><span class="cx-corpo">aconteceu</span></span><span class="cx-it cx-sai previsto"><span class="cx-corpo">previsto</span></span>' +
+      '<span class="cx-it cx-sai fora"><span class="cx-corpo">pago fora do caixa</span></span>' +
+      '<small>✓ paga ou recebe no dia da coluna · clique no item para ajustar valor e dia, pausar ou desfazer · arraste uma conta para outro dia · + lança no dia</small></p>' +
+      '<div class="cx-grade-rolagem"><table class="cx-grade"><thead><tr><th class="lab"></th>' + th + '</tr></thead><tbody>' +
+        '<tr class="sec"><th class="lab ent">Entradas</th>' + celulas('entrada') + '</tr>' +
+        '<tr class="tot"><th class="lab">Total entradas</th>' + total('entrada') + '</tr>' +
+        '<tr class="sec"><th class="lab sai">Saídas</th>' + celulas('saida') + '</tr>' +
+        '<tr class="tot"><th class="lab">Total saídas</th>' + total('saida') + '</tr>' +
+        '<tr class="saldo"><th class="lab">Saldo no fim do dia</th>' + saldoRow + '</tr>' +
+      '</tbody></table></div></section>';
+  }
+  function blocosVencidos() {
+    const h = hoje();
+    const v = vencidas(F.lancamentos, h);
+    const rv = receberVencido(titulos(), F.lancamentos, h, d1());
+    const tot = l => l.reduce((t, x) => t + Number(x.valor || 0), 0);
+    const b = (acao, id, rot, cls) => '<button type="button" class="mini' + (cls ? ' ' + cls : '') + '" data-acao="' + acao + '" data-id="' + esc(id) + '">' + esc(rot) + '</button>';
+    return (v.length ? '<details class="cartao cx-venc"><summary><strong>Contas vencidas sem baixa: ' + v.length + ' (' + esc(R.moeda(tot(v))) + ')</strong> <small>fora do saldo da grade. Já pagou? "Já estava paga". Vai negociar? "Pausar".</small></summary>' +
+      '<div class="tabela-rolagem"><table class="tabela"><tbody>' + v.map(l => '<tr><td>' + esc(l.descricao) + (l.categoria ? '<small>' + esc(l.categoria) + '</small>' : '') + '</td><td>' + esc(R.dataBR(l.vencimento)) + '</td>' +
+        '<td class="num">' + esc(R.moeda(l.valor)) + '</td><td class="acoes-linha">' + b('cx-pagar', l.id, (l.tipo === 'entrada' ? 'Recebi' : 'Paguei') + ' hoje') + b('cx-japaga', l.id, 'Já estava paga') + b('cx-pausar', l.id, 'Pausar') + '</td></tr>').join('') +
+      '</tbody></table></div></details>' : '') +
+      (rv.length ? '<details class="cartao cx-venc"><summary><strong>A receber vencido: ' + rv.length + ' título(s) (' + esc(R.moeda(tot(rv))) + ')</strong> <small>já deviam ter caído na conta; fora da previsão até entrarem. Caiu? "Recebi hoje".</small></summary>' +
+      '<div class="tabela-rolagem"><table class="tabela"><tbody>' + rv.map(t => '<tr><td>' + esc(nomeTitulo(t)) + '<small>duplicata ' + esc(t.duplicata) + '</small></td><td>vence ' + esc(R.dataBR(t.vencimento)) + '</td>' +
+        '<td class="num">' + esc(R.moeda(t.valor)) + '</td><td class="acoes-linha">' + b('cx-ok', 'tit:' + t.duplicata, 'Recebi hoje') + '</td></tr>').join('') + '</tbody></table></div></details>' : '');
+  }
+  function listaContas() {
+    const h = hoje();
+    const busca = R.normaliza(filtro.busca || '');
+    let l = F.lancamentos.filter(x => !x.titulo_duplicata);
+    if (filtro.tipo) l = l.filter(x => x.tipo === filtro.tipo);
+    if (filtro.situacao === 'abertas') l = l.filter(x => x.situacao === 'aberto');
+    else if (filtro.situacao === 'vencidas') l = l.filter(x => x.situacao === 'aberto' && posterga(x.vencimento) < h);
+    else if (filtro.situacao === 'pagas') l = l.filter(x => x.situacao === 'pago');
+    else if (filtro.situacao === 'pausadas') l = l.filter(x => x.situacao === 'pausado');
+    if (busca) l = l.filter(x => R.normaliza([x.descricao, x.fornecedor, x.categoria].join(' ')).indexOf(busca) !== -1);
+    l.sort((a, b) => (filtro.situacao === 'pagas' ? String(b.pago_em).localeCompare(String(a.pago_em)) : a.vencimento.localeCompare(b.vencimento)) || b.valor - a.valor);
+    const tot = l.reduce((t, x) => t + (x.tipo === 'entrada' ? 1 : -1) * Number(x.valor || 0), 0);
+    const sel = (nome, ops, val) => '<select data-cx-filtro="' + nome + '">' + ops.map(o => '<option value="' + o[0] + '"' + (o[0] === val ? ' selected' : '') + '>' + esc(o[1]) + '</option>').join('') + '</select>';
+    return '<section class="cartao"><div class="filtros-compras">' +
+      '<input type="search" data-cx-filtro="busca" placeholder="Buscar descrição, fornecedor, categoria" value="' + esc(filtro.busca) + '">' +
+      sel('situacao', [['abertas', 'Em aberto'], ['vencidas', 'Vencidas'], ['pagas', 'Pagas'], ['pausadas', 'Pausadas'], ['todas', 'Todas']], filtro.situacao) +
+      sel('tipo', [['', 'Saídas e entradas'], ['saida', 'Só saídas'], ['entrada', 'Só entradas']], filtro.tipo) +
+      '<button type="button" class="btn" data-acao="cx-nova" data-id="saida">+ Conta a pagar</button><button type="button" class="btn sec" data-acao="cx-nova" data-id="entrada">+ Entrada</button></div>' +
+      (l.length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>' + (filtro.situacao === 'pagas' ? 'Pago em' : 'Vencimento') + '</th><th>Descrição</th><th>Categoria</th><th class="num">Valor</th><th>Situação</th><th></th></tr></thead><tbody>' +
+        l.map(x => '<tr class="clicavel" data-acao="cx-editar" data-id="' + esc(x.id) + '" tabindex="0"><td>' + esc(R.dataBR(filtro.situacao === 'pagas' ? x.pago_em : x.vencimento)) + '</td>' +
+          '<td><strong>' + esc(x.descricao) + '</strong>' + (x.fornecedor || x.entre_empresas || x.origem !== 'tela' ? '<small>' + esc([x.fornecedor, x.entre_empresas ? 'entre empresas' : '', x.origem === 'recorrente' ? 'recorrente' : x.origem === 'fkn' ? 'do FKN' : x.origem === 'planilha' ? 'da planilha' : ''].filter(Boolean).join(' · ')) + '</small>' : '') + '</td>' +
+          '<td>' + esc(x.categoria || '') + '</td><td class="num ' + (x.tipo === 'entrada' ? 'cx-pos' : 'cx-neg') + '">' + (x.tipo === 'entrada' ? '+' : '−') + esc(R.moeda(x.valor)) + '</td><td>' + seloSituacao(x, h) + '</td>' +
+          '<td class="acoes-linha">' + (x.situacao === 'aberto' ? '<button type="button" class="mini" data-acao="cx-pagar" data-id="' + esc(x.id) + '">' + (x.tipo === 'entrada' ? 'Recebi' : 'Paguei') + ' hoje</button>' : x.situacao === 'pausado' ? '<button type="button" class="mini" data-acao="cx-voltar" data-id="' + esc(x.id) + '">Voltar para o caixa</button>' : '') + '</td></tr>').join('') +
+        '</tbody><tfoot><tr><td colspan="3">' + l.length + ' lançamento(s)</td><td class="num"><strong>' + esc(R.moeda(tot)) + '</strong></td><td colspan="2"></td></tr></tfoot></table></div>'
+        : '<p class="vazio">Nada aqui.</p>') + '</section>';
+  }
+  function listaRecorrentes() {
+    const h = hoje(), compet = h.slice(0, 7), prox = R.somaMeses(compet + '-01', 1).slice(0, 7);
+    const l = F.recorrentes.slice().sort((a, b) => (b.ativo !== false) - (a.ativo !== false) || a.dia - b.dia || a.descricao.localeCompare(b.descricao, 'pt-BR'));
+    const faltam = c => gerarMes(F.recorrentes, c, F.lancamentos).length;
+    const totMes = l.filter(r => r.ativo !== false).reduce((t, r) => t + (r.tipo === 'entrada' ? 1 : -1) * Number(r.valor || 0), 0);
+    const parcelaDe = r => r.parcelas ? ((r.parcela_inicio || 1) + (+compet.slice(0, 4) - +String(r.inicio).slice(0, 4)) * 12 + (+compet.slice(5, 7) - +String(r.inicio).slice(5, 7))) + ' de ' + r.parcelas : '';
+    return '<section class="cartao"><div class="filtros-compras"><button type="button" class="btn" data-acao="cx-rec-nova">+ Conta recorrente</button>' +
+      '<button type="button" class="btn sec" data-acao="cx-gerar" data-id="' + compet + '">Gerar ' + esc(R.mesCurto(compet + '-01')) + (faltam(compet) ? ' (' + faltam(compet) + ')' : ' ✓') + '</button>' +
+      '<button type="button" class="btn sec" data-acao="cx-gerar" data-id="' + prox + '">Gerar ' + esc(R.mesCurto(prox + '-01')) + (faltam(prox) ? ' (' + faltam(prox) + ')' : ' ✓') + '</button>' +
+      '<small>Gerar o mês cria a conta de cada recorrente ativa que ainda não tem a do mês (pode clicar de novo sem duplicar).</small></div>' +
+      (l.length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th class="num">Dia</th><th>Descrição</th><th>Categoria</th><th class="num">Valor</th><th>Parcela neste mês</th><th></th></tr></thead><tbody>' +
+        l.map(r => '<tr class="clicavel' + (r.ativo === false ? ' apagado' : '') + '" data-acao="cx-rec-editar" data-id="' + esc(r.id) + '" tabindex="0"><td class="num">' + r.dia + '</td>' +
+          '<td><strong>' + esc(r.descricao) + '</strong>' + (r.fornecedor || r.entre_empresas ? '<small>' + esc([r.fornecedor, r.entre_empresas ? 'entre empresas' : ''].filter(Boolean).join(' · ')) + '</small>' : '') + '</td>' +
+          '<td>' + esc(r.categoria || '') + '</td><td class="num ' + (r.tipo === 'entrada' ? 'cx-pos' : 'cx-neg') + '">' + esc(R.moeda(r.valor)) + '</td><td>' + esc(parcelaDe(r)) + '</td>' +
+          '<td>' + (r.ativo === false ? selo('parada', 'cinza') : '') + '</td></tr>').join('') +
+        '</tbody><tfoot><tr><td colspan="3">' + l.length + ' recorrente(s) · saldo das ativas no mês</td><td class="num"><strong>' + esc(R.moeda(totMes)) + '</strong></td><td colspan="2"></td></tr></tfoot></table></div>'
+        : '<p class="vazio">Nenhuma conta recorrente ainda. Cadastre aluguel, salários, pró-labore, contas de consumo, parcelamentos…</p>') + '</section>';
+  }
+
+  CRM.telas.caixa = {
+    render() {
+      if (!CRM.ehAdmin()) return '<div class="cartao"><p class="vazio">Esta tela é só do administrador.</p></div>';
+      if (!F) { setTimeout(carrega, 0); return '<div class="cabecalho"><div><h1>Caixa</h1></div></div><div class="cartao"><p class="vazio">Carregando o caixa…</p></div>'; }
+      if (Date.now() - lidoEm > 60000) setTimeout(carrega, 0); // o que mudou em outro computador
+      const s = saldoAtual(F.saldos, F.lancamentos);
+      const pausadas = F.lancamentos.filter(x => x.situacao === 'pausado').length;
+      const aba = (id, rot) => '<button type="button" class="' + (vista === id ? 'ativa' : '') + '" data-acao="cx-vista" data-id="' + id + '">' + esc(rot) + '</button>';
+      if (vista === 'pausadas') filtro.situacao = 'pausadas';
+      return '<div class="cabecalho cx-cab"><div><h1>Caixa</h1><p class="sub">Banco do Brasil · contas a pagar, recorrentes e o dia a dia · só você vê esta tela</p></div>' +
+        '<div class="cx-saldo"><span>Saldo agora</span><strong class="' + (s.saldo < 0 ? 'cx-neg' : '') + '">' + (s.saldo == null ? '—' : esc(R.moeda(s.saldo))) + '</strong>' +
+        '<small>' + (s.ancora ? 'banco ' + esc(R.moeda(s.ancora.valor)) + ' em ' + esc(R.dataBR(s.ancora.data)) + (s.n ? ' · +' + esc(R.moeda(s.entradas)) + ' −' + esc(R.moeda(s.saidas)) + ' baixados aqui' : '') : 'informe o saldo do banco') + '</small>' +
+        '<button type="button" class="btn sec" data-acao="cx-conferir">Conferir com o banco</button></div></div>' +
+        '<nav class="cx-abas">' + aba('dia', 'Dia a dia') + aba('contas', 'Contas a pagar') + aba('recorrentes', 'Recorrentes') + aba('pausadas', 'Contas pausadas' + (pausadas ? ' (' + pausadas + ')' : '')) + '</nav>' +
+        (vista === 'dia' ? grade(s) + blocosVencidos() : vista === 'recorrentes' ? listaRecorrentes() : listaContas());
+    },
+    depois(el) {
+      // filtros da lista
+      el.querySelectorAll('[data-cx-filtro]').forEach(i => i.addEventListener(i.tagName === 'SELECT' ? 'change' : 'input', () => {
+        filtro[i.dataset.cxFiltro] = i.value;
+        if (i.dataset.cxFiltro === 'situacao' && vista === 'pausadas' && i.value !== 'pausadas') vista = 'contas';
+        CRM.render();
+      }));
+      // arrastar uma conta para outro dia
+      let arrastando = null;
+      el.querySelectorAll('[data-mover]').forEach(c => {
+        c.addEventListener('dragstart', ev => { arrastando = c.dataset.mover; ev.dataTransfer.setData('text/plain', arrastando); c.classList.add('arrastando'); });
+        c.addEventListener('dragend', () => c.classList.remove('arrastando'));
+      });
+      el.querySelectorAll('.cx-grade td[data-dia]').forEach(td => {
+        td.addEventListener('dragover', ev => { if (arrastando) { ev.preventDefault(); td.classList.add('alvo'); } });
+        td.addEventListener('dragleave', () => td.classList.remove('alvo'));
+        td.addEventListener('drop', ev => {
+          ev.preventDefault(); td.classList.remove('alvo');
+          const id = arrastando || ev.dataTransfer.getData('text/plain'); arrastando = null;
+          const l = lanc(id);
+          if (l && l.vencimento !== td.dataset.dia) grava(l.id, { vencimento: td.dataset.dia }).then(() => CRM.toast('Movida para ' + dm(td.dataset.dia) + '.')).catch(CRM.falhou);
+        });
+      });
+    }
+  };
+
+  const comDia = el => (el && el.dataset.dia) || hoje();
+  Object.assign(CRM.acoes, {
+    'cx-vista': id => { vista = id; if (id === 'contas' && filtro.situacao === 'pausadas') filtro.situacao = 'abertas'; CRM.render(); },
+    'cx-nav': id => { inicio = +id === 0 ? null : R.somaDias(inicio || R.somaDias(hoje(), -1), +id); CRM.render(); },
+    'cx-conferir': () => formConferir(),
+    'cx-nova': id => formLanc(null, { tipo: id }),
+    'cx-add': (id, el) => formLanc(null, { tipo: id, data: comDia(el) }),
+    'cx-editar': id => { fecha(); const l = lanc(id); if (l) setTimeout(() => formLanc(l), 0); },
+    'cx-item': (id, el) => menuItem(id, comDia(el)),
+    'cx-ok': (id, el) => {
+      const dia = diaDaBaixa(el && el.dataset.dia);
+      if (id.indexOf('tit:') === 0) return receberTitulo(id.slice(4), dia).catch(CRM.falhou);
+      const l = lanc(id.slice(id.indexOf(':') + 1));
+      if (l) pagar(l, dia).then(() => CRM.toast((l.tipo === 'entrada' ? 'Recebido' : 'Pago') + ' em ' + dm(dia) + ': ' + R.moeda(l.valor))).catch(CRM.falhou);
+    },
+    'cx-pagar': (id, el) => { fecha(); const l = lanc(id); if (l) pagar(l, diaDaBaixa(el && el.dataset.dia)).catch(CRM.falhou); },
+    'cx-japaga': id => { const l = lanc(id); if (l) grava(l.id, { situacao: 'pago', pago_em: l.vencimento, baixa: 'fora', baixado_em: agora() }).catch(CRM.falhou); },
+    'cx-pausar': id => { fecha(); const l = lanc(id); if (l) grava(l.id, { situacao: 'pausado' }).then(() => CRM.toast('Conta pausada: saiu do caixa (aba Contas pausadas).')).catch(CRM.falhou); },
+    'cx-voltar': id => { const l = lanc(id); if (l) grava(l.id, { situacao: 'aberto' }).catch(CRM.falhou); },
+    'cx-desfazer': id => {
+      fecha();
+      const l = lanc(id);
+      if (!l) return;
+      (l.origem === 'titulo' ? remove(l.id) : grava(l.id, { situacao: 'aberto', pago_em: null, baixa: null, baixado_em: null })).catch(CRM.falhou);
+    },
+    'cx-rec-nova': () => formRecorrente(null),
+    'cx-rec-editar': id => { const r = F && F.recorrentes.find(x => x.id === id); if (r) formRecorrente(r); },
+    'cx-gerar': id => gerar(id).catch(CRM.falhou)
+  });
+})(typeof window !== 'undefined' ? window : globalThis);

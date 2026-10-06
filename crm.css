@@ -613,3 +613,68 @@ label.btn.arquivo input[type=file] { position: absolute; inset: 0; opacity: 0; c
 .colinha-fkn ol li { margin: 3px 0; }
 .colinha-fkn .checklist { list-style: none; padding: 0; margin: 4px 0 8px; }
 .colinha-fkn .checklist li { margin: 2px 0; }
+
+/* ---- Caixa (caixa.js): saldo, abas e a grade de 15 dias como a planilha */
+.cx-cab { justify-content: space-between; align-items: flex-start; }
+.cx-saldo { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; background: var(--papel); border: 1px solid var(--borda); border-radius: 10px; padding: 8px 12px; }
+.cx-saldo span { font-size: .78rem; color: var(--suave); }
+.cx-saldo strong { font-size: 1.35rem; font-variant-numeric: tabular-nums; }
+.cx-saldo small { color: var(--suave); font-size: .75rem; }
+.cx-saldo .btn { margin-top: 4px; }
+.cx-abas { display: flex; gap: 4px; flex-wrap: wrap; margin: 0 0 12px; }
+.cx-abas button { border: 1px solid var(--borda); background: var(--papel); color: var(--texto); border-radius: 999px; padding: 6px 14px; cursor: pointer; font: inherit; }
+.cx-abas button.ativa { background: var(--marinho); border-color: var(--marinho); color: #fff; }
+.cx-pos { color: var(--verde); }
+.cx-neg { color: var(--vermelho); }
+.cx-grade-cartao h2 .mini { margin-left: 4px; }
+.cx-legenda { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 6px 0 10px; font-size: .78rem; }
+.cx-legenda .cx-it { display: inline-block; margin: 0; }
+.cx-legenda .cx-corpo { cursor: default; padding: 1px 8px; }
+.cx-legenda small { color: var(--suave); }
+.cx-grade-rolagem { overflow-x: auto; border: 1px solid var(--borda); border-radius: 8px; }
+table.cx-grade { border-collapse: separate; border-spacing: 0; table-layout: fixed; min-width: 100%; }
+table.cx-grade th, table.cx-grade td { width: 150px; min-width: 150px; vertical-align: top; padding: 5px; border-right: 1px solid var(--borda); border-bottom: 1px solid var(--borda); font-size: .78rem; }
+table.cx-grade thead th { background: var(--marinho); color: #fff; font-weight: 500; text-align: left; position: sticky; top: 0; z-index: 2; }
+table.cx-grade thead th.hoje { background: var(--marinho-3); }
+table.cx-grade thead th.fds { background: #5d6472; }
+table.cx-grade thead th.fer { background: #7a5a10; }
+table.cx-grade .cx-naoutil { display: block; width: max-content; margin-top: 3px; background: #fff; color: var(--marinho); border-radius: 4px; padding: 0 5px; font-size: .62rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+table.cx-grade th.fer .cx-naoutil { background: #f5c518; }
+table.cx-grade .cx-feriado { display: block; font-size: .62rem; color: #f5c518; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+table.cx-grade .cx-hoje { background: #f5c518; color: #231a08; border-radius: 8px; padding: 0 6px; font-size: .66rem; font-weight: 700; }
+table.cx-grade td.fds, table.cx-grade td.fer { background: repeating-linear-gradient(135deg, var(--cinza-fundo) 0 8px, var(--fundo) 8px 16px); }
+table.cx-grade td.hoje { background: var(--ambar-fundo); }
+table.cx-grade th.lab { width: 112px; min-width: 112px; position: sticky; left: 0; z-index: 1; background: var(--realce); color: var(--texto); text-align: left; font-weight: 700; }
+table.cx-grade thead th.lab { z-index: 3; background: var(--marinho); }
+table.cx-grade th.lab.ent { border-left: 4px solid var(--verde); }
+table.cx-grade th.lab.sai { border-left: 4px solid var(--vermelho); }
+table.cx-grade td.num { text-align: right; font-variant-numeric: tabular-nums; }
+table.cx-grade tr.tot td, table.cx-grade tr.tot th { background: var(--realce); }
+table.cx-grade tr.saldo td, table.cx-grade tr.saldo th { background: var(--azul-fundo); border-top: 2px solid var(--azul); }
+table.cx-grade td.alvo { outline: 2px dashed var(--azul); outline-offset: -3px; }
+.cx-it { position: relative; display: block; margin: 0 0 4px; border-radius: 5px; border: 1px solid var(--borda); background: var(--papel); }
+.cx-it.feito { background: var(--verde-fundo); border-color: var(--verde); }
+.cx-it.fora { background: var(--verde-fundo); border: 1px dashed var(--verde); opacity: .8; }
+.cx-it.vencido { border: 2px solid var(--vermelho); }
+.cx-it[draggable=true] { cursor: grab; }
+.cx-it.arrastando { opacity: .4; }
+.cx-corpo { display: block; width: 100%; text-align: left; background: none; border: 0; color: inherit; font: inherit; padding: 3px 6px; cursor: pointer; line-height: 1.25; }
+.cx-it.comok .cx-corpo { padding-right: 24px; }
+.cx-corpo .t { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.cx-corpo .o { display: block; color: var(--suave); font-size: .68rem; }
+.cx-corpo .v { display: block; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; font-weight: 600; }
+.cx-it.cx-ent .v { color: var(--verde); }
+.cx-it.cx-sai .v { color: var(--vermelho); }
+.cx-ok { position: absolute; top: 2px; right: 2px; z-index: 1; padding: 0 5px; font-size: .72rem; line-height: 16px; background: var(--papel); color: var(--verde); border: 1px solid var(--verde); border-radius: 4px; cursor: pointer; }
+.cx-ok:hover { background: var(--verde-fundo); }
+.cx-add { display: block; width: 100%; color: var(--suave); font-weight: 700; text-align: center; border: 1px dashed var(--borda); border-radius: 5px; background: none; padding: 0 4px; cursor: pointer; opacity: .5; }
+.cx-add:hover, .cx-add:focus-visible { opacity: 1; }
+.cx-mais { margin: 0 0 4px; }
+.cx-mais > summary { list-style: none; cursor: pointer; font-size: .75rem; font-weight: 700; background: var(--realce); border: 1px solid var(--borda); border-radius: 5px; padding: 3px 6px; }
+.cx-mais > summary::-webkit-details-marker { display: none; }
+.cx-mais[open] > summary { margin-bottom: 4px; }
+.cx-venc > summary { cursor: pointer; }
+.cx-venc > summary small { color: var(--suave); }
+.cx-venc td small { display: block; color: var(--suave); }
+tr.apagado td { opacity: .55; }
+@media (max-width: 700px) { .cx-saldo { align-items: flex-start; width: 100%; } }

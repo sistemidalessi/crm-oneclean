@@ -289,7 +289,7 @@
   // ------------------------------------------------------------ render
   const ABAS = [
     ['inicio', 'Início', '⌂'], ['fila', 'Fila do dia', '▶'], ['funil', 'Funil', '▥'], ['empresas', 'Empresas', '▦'], ['pessoas', 'Pessoas', '☺'],
-    ['negocios', 'Negócios', '$'], ['agenda', 'Atividades', '▣'], ['relatorios', 'Relatórios', '▲'], ['ajustes', 'Configurações', '⚙'], ['compras', 'Compras', '▤'], ['gestao', 'Gestão', '◆']
+    ['negocios', 'Negócios', '$'], ['agenda', 'Atividades', '▣'], ['relatorios', 'Relatórios', '▲'], ['ajustes', 'Configurações', '⚙'], ['compras', 'Compras', '▤'], ['gestao', 'Gestão', '◆'], ['caixa', 'Caixa', '◈']
   ];
   CRM.ABAS = ABAS;
   // Relatórios do FKN que estão pendentes neste turno (manhã/tarde): [{ arquivo, ultimo, turno }].
@@ -334,7 +334,7 @@
     if (!E.eu) return;
     // Comprador: só Compras. Compras e Gestão: administrador. Configurações: gestor.
     const abas = CRM.ehComprador() ? ABAS.filter(a => a[0] === 'compras')
-      : ABAS.filter(a => (a[0] !== 'ajustes' || CRM.ehGestor()) && ((a[0] !== 'gestao' && a[0] !== 'compras') || CRM.ehAdmin()));
+      : ABAS.filter(a => (a[0] !== 'ajustes' || CRM.ehGestor()) && ((a[0] !== 'gestao' && a[0] !== 'compras' && a[0] !== 'caixa') || CRM.ehAdmin()));
     if (!abas.some(a => a[0] === E.aba)) E.aba = abas[0][0];
     ['#buscaGlobal', '[data-acao="novo-menu"]', '#sino'].forEach(s => { const el = $(s); if (el) el.hidden = CRM.ehComprador(); });
     const al = R.alertas(E.D, E.ix, E.cfg, CRM.hoje(), CRM.carteira());

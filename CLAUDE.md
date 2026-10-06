@@ -708,6 +708,48 @@ A vendedora continua fazendo o orçamento no FKN (preço, estoque e condição f
 - Lembrete dos relatórios do FKN **só de segunda a sexta** (confirmado pelo Anderson em 02/10: não
   trabalham sábado) — é como já está em `lembreteFkn`; não acrescentar sábado.
 
+## Caixa: contas a pagar e caixa do dia — só administrador (06/10/2026, pedido do Anderson)
+
+Troca a planilha `\\servidor\Financeiro\05 - FATURAMENTO GERAL\Fluxo de Caixa Geral\Planilha de Fluxo de
+Caixa_OneClean.xlsx`, no mesmo jeito do "Caixa do dia" da Agilité (`agilite-sistema-gestao`:
+`src/routes/caixa_dia.js`, `src/agenda/feriados.js`, `src/routes/recorrentes.js`). Decidido com o
+Anderson: cada sistema cuida da sua empresa; o "Geral" (as duas) é de quem lê os dois.
+
+- **Quem vê: só o administrador** (tem salário das vendedoras, pró-labore e retiradas). RLS `so_admin`
+  nas três tabelas; **sem auditoria em `crm_historico`** de propósito (a gestora lê o histórico).
+  `supabase/teste-rls/ataque.sql` cobre gestora, vendedora, comprador e anon (roda.sh: OK em 06/10).
+  No banco de verdade as tabelas foram criadas sem os `drop ... if exists` (o MCP trava em comando de
+  remoção); `truncate/references/trigger` revogados do `authenticated`.
+- **Tabelas:** `crm_fin_lancamentos` (conta a pagar = saída; entrada avulsa = entrada; `situacao`
+  aberto/pago/pausado; `baixa` 'caixa' = ✓ no caixa, conta no saldo, 'fora' = pago fora, não mexe no
+  saldo; `entre_empresas`; `origem` tela/recorrente/fkn/planilha/titulo; `chave_fkn` e
+  `titulo_duplicata` únicos), `crm_fin_recorrentes` (dia fixo, `parcelas` + `parcela_inicio` no mês
+  `inicio`; uma conta por recorrente e mês — índice único) e `crm_fin_saldos` (saldo do banco
+  informado). Saldo inicial: **Banco do Brasil R$ 8.052,79 em 05/10/2026** (gravado em 06/10).
+- **Tela "Caixa"** (`caixa.js`, aba só do admin; dados lidos à parte por `store.carregarFin()`, relidos
+  se tiverem mais de 1 min): **Dia a dia** (grade de 15 dias: entradas em cima, saídas embaixo, totais e
+  saldo no fim do dia; verde = aconteceu, branco = previsto, tracejado = pago fora; ✓ paga/recebe no
+  dia da coluna (futuro → hoje); clique no cartão: ajustar valor e dia, pagar, pausar, desfazer,
+  editar; arrastar para outro dia; "+" lança no dia; dia com mais de 5 mostra 4 e junta o resto;
+  sábado/domingo/feriado no cabeçalho), blocos "Contas vencidas sem baixa" (Paguei hoje / Já estava
+  paga / Pausar) e "A receber vencido" (fora da previsão até entrar); **Contas a pagar** (filtros,
+  + Conta a pagar, + Entrada), **Recorrentes** ("Gerar mês" idempotente, mês atual e o próximo) e
+  **Contas pausadas**. "Conferir com o banco" grava saldo novo e mostra a diferença.
+- **Dia útil** = bancário de São Bernardo do Campo: nacionais, 9/7 (SP), Carnaval, Sexta Santa,
+  Corpus Christi e 20/08 (aniversário de SBC); **não** o 25/01 da capital. Conta que vence sem banco
+  aparece no próximo dia útil com o aviso; o vencimento gravado não muda.
+- **Título a receber** (`crm_titulos`) entra no dia do crédito: pago no vencimento (ou próximo dia
+  útil) e cai no dia útil seguinte (como na Agilité; `cfg.caixa_credito_d1 = false` = cai no mesmo
+  dia). ✓ cria uma entrada paga com `titulo_duplicata` (some da grade; o título sai do receber quando a
+  listagem do FKN mostrar que foi pago).
+- Categorias sugeridas em `CATEGORIAS_SAIDA/ENTRADA`; categoria com "Agilité" marca entre empresas
+  sozinha. A "GiroCaixa - Facilities" é dívida da própria OneClean (não é entre empresas); os
+  empréstimos "BB - OneClean" e "PRONAMPE" são pagos pela Agilité — não lançar como saída daqui.
+- **Falta:** leitor do contas a pagar do FKN (esperando o CSV de exemplo do Anderson; mesmas travas do
+  receber: soma × total, 422 em arquivo parcial, retrato = o que sumiu foi pago → `baixa 'fora'`),
+  confirmar com o Anderson o crédito no BB e os feriados de SBC, primeira carga da planilha (opcional)
+  e a leitura para a gestora das duas empresas (fase 2).
+
 ## Sequência do lead novo (30/09/2026)
 
 - `sequencia.js` (depois de `ajustes.js`) embrulha `CRM.auto.aoCriarEmpresa` e
