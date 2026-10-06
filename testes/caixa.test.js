@@ -238,3 +238,10 @@ test('reembolso da folha à Agilité: sai com o componente; com nome de pessoa, 
     ['Reembolso folha 09/2026 — FGTS + consignado', 1167.9, true], ['Reembolso folha 09/2026 — Cesta II', 392.33, true], ['Reembolso da folha à Agilité', 75, true]]);
   assert.doesNotMatch(JSON.stringify(r), /Fulano|Beltrano/);
 });
+
+test('leitura: cliente cadastrado como "Empresa | Contato" sai só com a empresa', () => {
+  const titulos = [{ duplicata: '001/01', cliente: 'GRAFICA EXEMPLO LTDA | Fulano', valor: 100, vencimento: '2026-10-08' }];
+  const r = C.resumoLeitura({ lancamentos: [], saldos: [{ data: '2026-10-06', valor: 1 }], titulos }, { hoje: '2026-10-06', dias: 10 });
+  assert.equal(r.titulos_a_receber.titulos[0].cliente, 'GRAFICA EXEMPLO LTDA');
+  assert.doesNotMatch(JSON.stringify(r), /Fulano/);
+});

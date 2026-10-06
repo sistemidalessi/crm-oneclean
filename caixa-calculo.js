@@ -229,7 +229,8 @@
     const dias = Array.from({ length: n }, (_, i) => soma(hoje, i));
     const ate = dias[n - 1];
     const lancs = d.lancamentos || [];
-    const nomeT = t => t.cliente || t.cliente_nome || 'Cliente';
+    // cadastro vindo do Agendor como "Empresa | Contato": na leitura vai só a empresa (o contato é pessoa)
+    const nomeT = t => String(t.cliente || t.cliente_nome || 'Cliente').split(/\s+\|\s+/)[0].trim() || 'Cliente';
     const opc = { d1: o.d1, nome: nomeT };
     // nomes da equipe (palavras de 4+ letras): descrição ou fornecedor com um deles sai somado
     const nomes = [...new Set((d.pessoas || []).map(semAc).join(' ').split(/[^a-z]+/).filter(w => w.length >= 4))];
