@@ -757,11 +757,23 @@ Anderson: cada sistema cuida da sua empresa; o "Geral" (as duas) é de quem lê 
   A conferir com o Anderson: categoria do EL-SHADAY; "Perua escolar" em retiradas dos sócios e
   "Pedágio" em frete; os "SILMARA" da área de fornecedores e o "Cartão Porto" (agosto) ficaram de fora.
   A planilha e os relatórios antigos enviados na conversa foram apagados depois do uso.
-- **Contas a pagar do FKN:** relatório **Sifn083 — Contas à Pagar por Conta/Fornecedor** (conta 0 a 0,
-  subconta 0, situação GERAL, filial da OneClean, "Dados conta/fornecedor" marcado, Em aberto, período
-  em branco, ordem por vencimento, disquete → Tudo → CSV em `\\Servidor\sistema\CRM-FKN`). **Falta** o
-  leitor (esperando o CSV de exemplo; mesmas travas do receber: soma × total, 422 em arquivo parcial,
-  retrato = o que sumiu foi pago → `baixa 'fora'`) e a leitura para a gestora das duas empresas (fase 2).
+- **Contas a pagar do FKN (06/10, pronto):** relatório **Sifn083 — Contas à Pagar por Conta/Fornecedor**
+  (conta 0 a 0, subconta 0, situação GERAL, filial da OneClean, "Dados conta/fornecedor", Em aberto,
+  período em branco, ordem por vencimento; CSV em `\\Servidor\sistema\CRM-FKN`). Leitor em `fkn.js`
+  (`lerContasPagar`, `conferirContasPagar`, `planoContasPagar`, `lancamentoDoFkn`), usado pela tela
+  (Caixa → Contas a pagar → "Atualizar do FKN", mostra o resumo antes de aplicar) e pela `crm-notas`
+  (vigia `2026-10-06`, que reconhece "CONTAS A PAGAR" e, ao trocar de versão, olha a pasta de novo).
+  Chave da conta = `código da conta|documento` (`chave_fkn`). Conta ≥ 10000 = despesa do plano de
+  contas (salário, energia, caminhão, despesas diversas; categoria pelo nome); abaixo, fornecedor.
+  Regras: conta nova que bate com saída em aberto lançada à mão/recorrente/planilha (valor igual,
+  vencimento ±5 dias) só é **ligada**; conta **antiga** (venceu há mais de 60 dias ou emitida há mais
+  de 1 ano) entra **pausada** com "conferir se já foi paga" — o FKN tem pendências de 2018–2025 nunca
+  baixadas; a que sumiu do retrato vira paga `baixa 'fora'` no dia do relatório; recusa se não for
+  "Em aberto", se tiver período, sem TOTAL GERAL, soma diferente ou menos de 40% do que já há.
+  1º arquivo real (06/10 12:01): 361 contas, R$ 444.413,82 (soma = total), 63 fornecedores/contas;
+  163 antigas (R$ 197.050,50) e 196 novas (R$ 235.690,92) pelo teste; salário e água da planilha
+  reconhecidos. Falta: o Anderson atualizar o vigia no servidor (README); lembrete do contas a pagar na
+  faixa do FKN (só admin) ainda não existe; leitura para a gestora das duas empresas (fase 2).
 
 ## Permissões do financeiro (06/10/2026, pedido do Anderson)
 

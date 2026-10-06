@@ -223,6 +223,15 @@ Get-Content C:\CRM\vigia-notas.log -Tail 3
 No FKN, salvar os dois relatórios em CSV em `\\Servidor\sistema\CRM-FKN` (pode sobrescrever o
 anterior). Em um ou dois minutos aparecem em Configurações → Integrações → "Últimas entregas".
 
+**Contas a pagar pelo vigia (06/10/2026, vigia `2026-10-06`):** o terceiro relatório, **Sifn083 —
+Contas à Pagar por Conta/Fornecedor** (conta 0 a 0, subconta 0, situação GERAL, filial da empresa,
+"Dados conta/fornecedor" marcado, Em aberto, período em branco, ordem por data de vencimento;
+disquete → Tudo → CSV), salvo na mesma pasta, vai para o **Caixa** (só administrador). Atualizar o
+vigia com o bloco "atualizar assim" acima (Stop → Invoke-WebRequest → Start); na primeira volta da
+versão nova ele olha a pasta de novo e manda o que já estiver lá. Mesmas travas do receber (soma ×
+TOTAL GERAL, período filtrado, arquivo cortado → recusa sem trocar nada). O que sumir do relatório
+seguinte é dado como pago; conta muito antiga entra em "Contas pausadas" para conferir.
+
 O que já foi enviado fica em `vigia-notas-estado.json` (apagar esse arquivo = reenviar
 tudo, sem duplicar); `vigia-notas.json` guarda a chave — **não copiar para outro lugar**.
 Se o CRM ou a internet cair, o vigia tenta de novo na volta seguinte. Chave vazou ou o
