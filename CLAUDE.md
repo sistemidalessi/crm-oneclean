@@ -909,6 +909,12 @@ Anderson: cada sistema cuida da sua empresa; o "Geral" (as duas) é de quem lê 
   empréstimo; sem "lembrar". Frase de volta ("devolvi 1.600 pra Agilité") dá baixa na volta prevista, não
   duplica (o ✓ também). Conferência: "Devolve à Agilité em … o valor de …", editáveis. Leitor copiado de novo
   (79fdfe7): "devolve dia 14" depois de SAÍDA = data da volta; enviei/mandei = saída que aconteceu.
+  Mesma noite, frase ditada (Agilité `b837d37`, leitor copiado de novo): retornar/retorno/volta/voltar também é
+  devolução (`DEVOLUCAO`, e palavra de transferência); " e vai retornar/voltar/devolver dia 14" depois do valor é
+  outro pedaço (`INICIO_DEVOLUCAO` em `pedacos()`) — a data da volta, sem deixar o lançamento de hoje previsto.
+  A Agilité como o ditado escreve: `AGILITE = /\ba[gj]il+i[tc]/` (agilite, agility, agiliti, ajilite; "agilidade"
+  não casa). Leitor lado a lado com o da Agilité: 13 frases, 0 diferenças. Os dois lançamentos de 06/10 e 14/10
+  conferidos no banco (um de cada, sem repetição).
 - **Corte do "A receber vencido" (pedido do Anderson, 06/10 à noite: "deixe somente os que venceram hoje, pra
   seguirmos certo daqui pra frente"):** `cfg.caixa_receber_desde` = 2026-10-05 (Configurações → Geral, campo
   "Caixa: A receber vencido mostra só…"). Os 9 títulos antigos (29/01 a 07/08, R$ 11.540,90) saem do bloco do

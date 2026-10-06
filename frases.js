@@ -23,7 +23,7 @@
   const r2 = v => Math.round(Number(v || 0) * 100) / 100;
 
   // ------------------------------------------------------------ leitura (a MESMA da Agilité)
-  // Cópia de src/caixa/interpretar.js do agilite-sistema-gestao (commit 79fdfe7, 06/10/2026 — conferido
+  // Cópia de src/caixa/interpretar.js do agilite-sistema-gestao (commit b837d37, 06/10/2026 — conferido
   // linha a linha): a mesma frase dá o mesmo resultado nos dois caixas. Regra combinada: mudou lá, copiar
   // para cá; mudou aqui, avisar a Agilité para levar (e rodar os testes dos dois lados).
   const MESES = { jan: 1, fev: 2, mar: 3, abr: 4, mai: 5, jun: 6, jul: 7, ago: 8, set: 9, out: 10, nov: 11, dez: 12 };
@@ -32,7 +32,10 @@
   const REALIZADO = /\b(enviei|enviamos|mandei|mandamos|pago|paga|pagos|paguei|pagamos|pagou|saiu|entrou|entraram|recebi|recebemos|recebido|recebida|caiu|cairam|debitado|debitou|transferi|devolvi|depositado|depositaram|creditado)\b/;
   const PREVISTO = /\b(vai|vao|sera|serao|vou|vamos|ira|irao|irei|precisa|precisar|precisamos|vence|vencendo|vencimento|previsto|prevista|agendado|agendar|a pagar|a receber|tem que|temos que|devolveremos|devolverei)\b/;
   // trecho que fala da devolucao de um emprestimo ("sera devolvido 60 mil dia 14")
-  const DEVOLUCAO = /\b(devolv\w*|devolucao|pagar de volta)\b/;
+  // (06/10/2026: "vai retornar no dia 14/10" - retornar/voltar tambem e' devolucao)
+  const DEVOLUCAO = /\b(devolv\w*|devolucao|pagar de volta|retorn\w*|volta|voltar|voltara|volte)\b/;
+  // " e vai retornar dia 14" depois do valor: e' outro pedaco (a volta), nao muda o "saiu ... hoje"
+  const INICIO_DEVOLUCAO = /^(?:(?:vai|vao|sera|serao|ele|ela|eles|elas|que|depois|e)\s+)*(?:devolv|retorn|volt|pagar de volta)/;
 
   function isoDe(d) { return d.toISOString().slice(0, 10); }
   function addDias(iso, n) { const d = new Date(iso + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return isoDe(d); }
@@ -101,7 +104,7 @@
       const partes = p.split(/\s+e\s+/i);
       let atual = partes[0];
       for (let i = 1; i < partes.length; i++) {
-        if (temValor(atual) && temValor(partes[i])) { out.push(atual); atual = partes[i]; } else atual += ' e ' + partes[i];
+        if ((temValor(atual) && temValor(partes[i])) || (temValor(atual) && INICIO_DEVOLUCAO.test(baixo(partes[i])))) { out.push(atual); atual = partes[i]; } else atual += ' e ' + partes[i];
       }
       out.push(atual);
     }
@@ -267,7 +270,8 @@
   const dias = (a, b) => Math.round((Date.parse(a + 'T12:00:00Z') - Date.parse(b + 'T12:00:00Z')) / 864e5);
 
   // Categoria pela palavra (a primeira que casar). Agilité primeiro: marca entre empresas.
-  const AGILITE = /agilit/;
+  // o ditado escreve a Agilité de vários jeitos ("Agility", "ajilite", "agiliti")
+  const AGILITE = /\ba[gj]il+i[tc]/;
   const PALAVRAS = [
     // palavras que não deixam dúvida da categoria (FORTES, abaixo): igual à Agilité
     [/\bdiaria/, 'Diárias de cobertura'], [/\buniforme/, 'Uniformes'], [/\bsekron/, 'Sekron (monitoramento)'], [/\bexame|\baso\b|\bmedtrab/, 'Medicina do trabalho'],
@@ -301,7 +305,7 @@
   // anulam. Vale quando a frase cita a Agilité, tem palavra de transferência e não fala de material,
   // produto, reembolso, folha, salário ou benefício (esses continuam "Material vendido"/"Reembolso da folha").
   const CAT_TRANSF = 'Transferência entre empresas';
-  const TRANSF = /\b(transferi|transferimos|transferencia|transferido|enviei|enviamos|enviou|mandei|mandamos|mandou|emprestei|emprestamos|emprestou|emprestimo|adiantei|adiantamento|pix|devolucao|devolv\w*)\b/;
+  const TRANSF = /\b(transferi|transferimos|transferencia|transferido|enviei|enviamos|enviou|mandei|mandamos|mandou|emprestei|emprestamos|emprestou|emprestimo|adiantei|adiantamento|pix|devolucao|devolv\w*|retorn\w*|volta|voltar)\b/;
   const ehTransferencia = (it, texto) => { const t = baixo((it.frase || '') + ' ' + texto); return AGILITE.test(t) && TRANSF.test(t) && !/\b(material|produto|reembolso|folha|salario|beneficio)/.test(t); };
   const ehEmprestimo = (it, texto) => it.tipo === 'entrada' && (!!(it.parcelas && typeof it.parcelas === 'object') || !!it.emprestimo || it.valorDevolver != null || !!it.devolucaoPrevista || /\bemprest/.test(baixo(texto)));
   function categoriaDe(texto, tipo) {

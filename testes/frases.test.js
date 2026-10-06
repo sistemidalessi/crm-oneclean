@@ -245,3 +245,22 @@ test('transferência entre empresas (espelho da Agilité): entrada hoje, volta p
   assert.equal(um('paguei 3.000 reembolso folha agilité').categoria, 'Reembolso da folha à Agilité');
   assert.equal(um('transferi 500 pra Agilité, devolve dia 20').transferencia.volta, '2026-10-20');
 });
+
+test('transferência ditada (Agilité b837d37): "vai retornar dia 14" é a volta e "Agility" é a Agilité', () => {
+  const casos = [
+    'entrou r$ 1.600 da Agility hoje e vai retornar no dia 14/10',
+    'recebi 1.600 da agiliti pra pagar as contas de hoje e vai voltar dia 14',
+    'caiu 1.600 da agilite hoje, retorna dia 14'
+  ];
+  casos.forEach(t => {
+    const p = um(t);
+    assert.deepEqual([p.tipo, p.valor, p.data, p.situacao, p.categoria, p.entre_empresas], ['entrada', 1600, HOJE, 'realizado', 'Transferência entre empresas', true], t);
+    assert.deepEqual(p.transferencia, { volta: '2026-10-14', valor: 1600 }, t);
+  });
+  // o leitor (igual ao da Agilité): " e vai retornar…" é outro pedaço e não deixa a saída de hoje prevista
+  const it = F.interpretar('saiu r$ 1.600 para o fornecedor hoje e vai retornar no dia 14/10', HOJE).itens;
+  assert.equal(it.length, 1);
+  assert.deepEqual([it[0].tipo, it[0].valor, it[0].data, it[0].situacao, it[0].devolucaoPrevista], ['saida', 1600, HOJE, 'realizado', '2026-10-14']);
+  // "agilidade" não é a Agilité
+  assert.notEqual(um('paguei 300 consultoria de agilidade').categoria, 'Transferência entre empresas');
+});
