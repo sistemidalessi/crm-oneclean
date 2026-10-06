@@ -213,6 +213,16 @@
   const AGREGAR = new Set(['Salários', 'Benefícios (VT, VR, cesta)', 'FGTS e encargos', 'Pró-labore', 'Retiradas dos sócios', 'Reembolso da folha à Agilité', 'Comissões']);
   const PESSOAL = /comiss|salari|pro.?labore|retirada|ferias|rescis|adiantamento|vale.?(transporte|refei|alimenta)/;
   const semAc = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  // Reembolso da folha à Agilité que só diz o componente ("Reembolso folha 09/2026 — FGTS + consignado"):
+  // sai com a descrição, para a aba Geral da Agilité casar componente com componente. É o total dos
+  // funcionários, sem nome; qualquer palavra fora desta lista (um nome, por exemplo) volta a somar.
+  const COMPONENTES = new Set(['salario', 'salarios', 'liquido', 'liquidos', 'beneficio', 'beneficios', 'vr', 'va', 'vt', 'mobilidade', 'cesta', 'basica', 'ii',
+    'fgts', 'consignado', 'inss', 'encargos', 'ferias', '13o', '13', 'decimo', 'terceiro', 'rescisao', 'rescisoes', 'adiantamento', 'premio', 'assiduidade', 'e']);
+  function reembolsoComponente(l) {
+    if (l.categoria !== 'Reembolso da folha à Agilité') return false;
+    const m = /^reembolso (?:da )?(?:folha|beneficios)(?: a agilite)?(?: \d{2}\/\d{4})? — (.+)$/.exec(semAc(l.descricao).replace(/\s+/g, ' ').trim());
+    return !!m && m[1].split(/[^a-z0-9]+/).filter(Boolean).every(w => COMPONENTES.has(w));
+  }
   function resumoLeitura(d, o) {
     const hoje = o.hoje;
     const n = Math.min(90, Math.max(1, Math.round(Number(o.dias) || 30)));
@@ -224,7 +234,7 @@
     // nomes da equipe (palavras de 4+ letras): descrição ou fornecedor com um deles sai somado
     const nomes = [...new Set((d.pessoas || []).map(semAc).join(' ').split(/[^a-z]+/).filter(w => w.length >= 4))];
     const temPessoa = txt => { const t = ' ' + semAc(txt).replace(/[^a-z]+/g, ' ') + ' '; return nomes.some(w => t.indexOf(' ' + w + ' ') !== -1); };
-    const agregar = l => AGREGAR.has(l.categoria) || PESSOAL.test(semAc(l.descricao)) || temPessoa(l.descricao) || temPessoa(l.fornecedor);
+    const agregar = l => !reembolsoComponente(l) && (AGREGAR.has(l.categoria) || PESSOAL.test(semAc(l.descricao)) || temPessoa(l.descricao) || temPessoa(l.fornecedor));
     const entre = l => !!l.entre_empresas || ENTRE_EMPRESAS.test((l.categoria || '') + ' ' + (l.fornecedor || ''));
     const doLanc = (l, valor, situacao, extra) => {
       const ag = agregar(l);

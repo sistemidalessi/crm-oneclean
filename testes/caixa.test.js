@@ -227,3 +227,14 @@ test('material vendido à Agilité: previsão e título do FKN de mesmo valor co
   assert.equal(g3.filter(x => x.data === '2026-10-21' && x.secao === 'entrada').reduce((t, x) => t + x.valor, 0).toFixed(2), (5715.4 + 300).toFixed(2), 'recebida aparece feita, sem o título repetido');
   assert.ok(g3.some(x => x.chave === 'lanc:m0' && x.estado === 'feito') && !g3.some(x => x.chave === 'tit:00990/01'));
 });
+
+test('reembolso da folha à Agilité: sai com o componente; com nome de pessoa, volta a somar sem o nome', () => {
+  const L = (d, v) => ({ tipo: 'saida', categoria: 'Reembolso da folha à Agilité', descricao: d, valor: v, vencimento: '2026-10-14', situacao: 'aberto', entre_empresas: true });
+  const lancamentos = [L('Reembolso folha 09/2026 — Cesta II', 392.33), L('Reembolso folha 09/2026 — FGTS + consignado', 1167.9),
+    L('Reembolso benefícios 10/2026 — VR/VA, VT e cesta', 5404.4), L('Reembolso folha 09/2026 — VT Fulano', 50), L('Reembolso Beltrano', 25)];
+  const r = C.resumoLeitura({ lancamentos, saldos: [{ data: '2026-10-06', valor: 1 }], titulos: [] }, { hoje: '2026-10-06', dias: 10 });
+  const it = r.proximos_dias.find(x => x.data === '2026-10-14').itens;
+  assert.deepEqual(it.map(i => [i.descricao, i.valor, i.entre_empresas]), [['Reembolso benefícios 10/2026 — VR/VA, VT e cesta', 5404.4, true],
+    ['Reembolso folha 09/2026 — FGTS + consignado', 1167.9, true], ['Reembolso folha 09/2026 — Cesta II', 392.33, true], ['Reembolso da folha à Agilité', 75, true]]);
+  assert.doesNotMatch(JSON.stringify(r), /Fulano|Beltrano/);
+});
