@@ -3,6 +3,7 @@
    commit fixo junto com regras.js e nfe.js (o vigia manda os CSV salvos pelo FKN).
    - Estoque: CSV simples (exp_estoque.csv) ou a Listagem cadastral de produtos (SIFN108).
    - Contas a receber por cliente, em aberto (SIFN016).
+   - Contas a pagar por conta/fornecedor, em aberto (SIFN083) → Caixa (crm_fin_lancamentos).
    Depois de mexer aqui: commit + push, node ferramentas/fixa-motor-notas.js e publicar a função. */
 (function (raiz) {
   'use strict';
@@ -168,7 +169,114 @@
     return { recusa, avisos };
   }
 
-  const api = { lerEstoque, lerListagemProdutos, lerArquivoEstoque, ehListagemProdutos, codigoFKN, lerContasReceber, ehContasReceber, ligaEmpresas, dataFKN,
+  // ------------------------------------------------------------ contas a pagar (SIFN083)
+  // "Contas à Pagar por Conta/Fornecedor", em aberto. Blocos "CONTA:;00005 NOME;TEL:…;" com as linhas
+  // "DOCUM.;EMISSAO;VALOR;VCTO;ENTRADA;PORTADOR;OBSERVACOES / SUBCONTA;" e "TOTAL GERAL...:; x".
+  // Conta com código de 5 dígitos a partir de 10000 é conta de despesa do plano de contas (salário,
+  // energia, caminhão, despesas diversas); abaixo disso, fornecedor.
+  const ehContasPagar = t => /CONTAS A PAGAR/i.test(String(t).slice(0, 3000));
+  function lerContasPagar(texto) {
+    if (!ehContasPagar(texto)) throw new Error('não parece o relatório de contas a pagar do FKN (Contas à Pagar por Conta/Fornecedor, salvo em CSV)');
+    let conta = null, posicao = null, hora = null, totalGeral = null, cab = '';
+    const contas = new Map();
+    let soma = 0;
+    String(texto).split(/\r?\n/).forEach(l => {
+      let m;
+      if (!posicao && (m = /^;DATA:\s*(\d\d\/\d\d\/\d{4})/.exec(l))) { posicao = dataFKN(m[1]); return; }
+      if (!hora && (m = /^[^;]*;(\d\d:\d\d);\s*$/.exec(l))) { hora = m[1]; return; }
+      if (!cab && /CONTAS A PAGAR/i.test(l)) { cab = l; return; }
+      if ((m = /^CONTA:;\s*(\d+)\s+([^;]*);/.exec(l))) { conta = { codigo: m[1], nome: m[2].trim() }; return; }
+      if ((m = /TOTAL GERAL[.\s]*:;\s*([-\d.,]+)/.exec(l))) { totalGeral = R.numeroBR(m[1]); return; }
+      const c = l.split(';');
+      if (!conta || c.length < 5 || !c[0].trim() || !/^\d\d\/\d\d\/\d{4}$/.test((c[1] || '').trim()) || !/^\d\d\/\d\d\/\d{4}$/.test((c[3] || '').trim())) return;
+      const documento = c[0].trim().replace(/\s+/g, ' ');
+      const valor = R.numeroBR(c[2]) || 0;
+      soma += valor;
+      const chave = conta.codigo + '|' + documento;
+      const ant = contas.get(chave);
+      if (ant) { ant.valor = Math.round((ant.valor + valor) * 100) / 100; return; } // mesmo documento duas vezes: soma
+      contas.set(chave, { chave, conta_codigo: conta.codigo, conta_nome: conta.nome, documento, emissao: dataFKN(c[1]), valor,
+        vencimento: dataFKN(c[3]), entrada: dataFKN(c[4]), portador: (c[5] || '').trim() || null, obs: (c[6] || '').replace(/\s*\/\s*$/, '').trim() || null });
+    });
+    const lista = [...contas.values()].filter(x => x.vencimento);
+    if (!lista.length) throw new Error('não achei contas no relatório (use "Em aberto" e salve em CSV)');
+    soma = Math.round(soma * 100) / 100;
+    return { posicao, hora, cab, contas: lista, soma, totalGeral, confere: totalGeral == null || Math.abs(soma - totalGeral) < 0.02,
+      fornecedores: new Set(lista.filter(x => +x.conta_codigo < 10000).map(x => x.conta_codigo)).size };
+  }
+  function conferirContasPagar(texto, lido) {
+    const recusa = [], avisos = [];
+    const cab = (lido && lido.cab) || (/^.*CONTAS A PAGAR[^\n]*/im.exec(String(texto)) || [''])[0];
+    if (!/EM ABERTO/i.test(cab)) recusa.push('em "Listar títulos" escolha "Em aberto"');
+    const per = /EM:\s*(\d\d\/\d\d\/\d{4})\s*A\s*(\d\d\/\d\d\/\d{4})/i.exec(cab);
+    if (per && !(/^00\/00/.test(per[1]) && /^00\/00/.test(per[2]))) recusa.push('deixe o período em branco (veio ' + per[1] + ' a ' + per[2] + ')');
+    if (lido && lido.totalGeral == null) recusa.push('o arquivo veio sem o TOTAL GERAL no fim: salve com "Tudo" (não só a página)');
+    else if (lido && !lido.confere) recusa.push('a soma das contas não bate com o TOTAL GERAL: gere de novo');
+    return { recusa, avisos };
+  }
+  // Conta do FKN → lançamento do Caixa (saída).
+  function categoriaDaConta(nome) {
+    const n = R.normaliza(nome);
+    if (/salario/.test(n)) return 'Salários';
+    if (/pro ?labore/.test(n)) return 'Pró-labore';
+    if (/energia/.test(n)) return 'Energia';
+    if (/agua/.test(n)) return 'Água';
+    if (/caminhao|combustivel|frete|pedagio/.test(n)) return 'Frete e combustível';
+    if (/aluguel/.test(n)) return 'Aluguel';
+    if (/imposto|simples|icms|das\b/.test(n)) return 'Impostos';
+    return 'Outras saídas';
+  }
+  function lancamentoDoFkn(c) {
+    const despesa = +c.conta_codigo >= 10000;
+    return { tipo: 'saida', origem: 'fkn', chave_fkn: c.chave, valor: c.valor, vencimento: c.vencimento,
+      descricao: despesa ? (c.obs ? c.obs + ' (' + c.conta_nome + ')' : c.conta_nome) + ' · ' + c.documento : c.conta_nome + ' · ' + c.documento,
+      fornecedor: despesa ? null : c.conta_nome, categoria: despesa ? categoriaDaConta(c.conta_nome + ' ' + (c.obs || '')) : 'Fornecedores',
+      observacoes: [c.portador, despesa ? null : c.obs].filter(Boolean).join(' · ') || null };
+  }
+  // O que fazer com o retrato novo, dados os lançamentos que já existem:
+  //   - conta que já veio antes (mesma chave): atualiza valor e vencimento se mudaram;
+  //   - conta nova que já estava lançada à mão ou pela recorrente/planilha (saída em aberto, mesmo
+  //     valor, vencimento até 5 dias de diferença): só liga (chave_fkn), não duplica;
+  //   - conta nova antiga (venceu há mais de 60 dias ou emitida há mais de 1 ano): entra PAUSADA,
+  //     para conferir — o FKN tem pendências de anos atrás que nunca foram baixadas;
+  //   - conta que estava no retrato anterior e sumiu: paga fora do caixa (no dia do relatório).
+  function planoContasPagar(lido, existentes, opc) {
+    opc = opc || {};
+    const pos = lido.posicao || opc.hoje;
+    const corte = R.somaDias(pos, -(opc.diasAntiga || 60)), corteEmissao = R.somaDias(pos, -365);
+    const porChave = new Map((existentes || []).filter(l => l.chave_fkn).map(l => [l.chave_fkn, l]));
+    const livres = (existentes || []).filter(l => !l.chave_fkn && l.tipo === 'saida' && l.situacao === 'aberto' && l.origem !== 'titulo');
+    const usados = new Set();
+    const out = { inserir: [], atualizar: [], ligar: [], baixar: [], antigas: { qtd: 0, valor: 0 }, novas: { qtd: 0, valor: 0 } };
+    lido.contas.forEach(c => {
+      const ja = porChave.get(c.chave);
+      if (ja) {
+        const patch = {};
+        if (Math.abs(Number(ja.valor) - c.valor) >= 0.01) patch.valor = c.valor;
+        if (ja.vencimento !== c.vencimento && ja.situacao !== 'pago') patch.vencimento = c.vencimento;
+        if (Object.keys(patch).length) out.atualizar.push({ id: ja.id, patch });
+        return;
+      }
+      const par = livres.find(x => !usados.has(x.id) && Math.abs(Number(x.valor) - c.valor) < 0.01 && Math.abs(R.diasEntre(x.vencimento, c.vencimento)) <= 5);
+      if (par) { usados.add(par.id); out.ligar.push({ id: par.id, patch: { chave_fkn: c.chave }, descricao: par.descricao }); return; }
+      const antiga = c.vencimento < corte || (c.emissao && c.emissao < corteEmissao);
+      const l = lancamentoDoFkn(c);
+      if (antiga) {
+        l.situacao = 'pausado';
+        l.observacoes = 'pendência antiga do FKN (venceu em ' + R.dataBR(c.vencimento) + '): conferir se já foi paga' + (l.observacoes ? ' · ' + l.observacoes : '');
+        out.antigas.qtd++; out.antigas.valor = Math.round((out.antigas.valor + c.valor) * 100) / 100;
+      } else { l.situacao = 'aberto'; out.novas.qtd++; out.novas.valor = Math.round((out.novas.valor + c.valor) * 100) / 100; }
+      out.inserir.push(l);
+    });
+    const vistos = new Set(lido.contas.map(c => c.chave));
+    (existentes || []).forEach(x => {
+      if (x.chave_fkn && !vistos.has(x.chave_fkn) && (x.situacao === 'aberto' || x.situacao === 'pausado'))
+        out.baixar.push({ id: x.id, patch: { situacao: 'pago', pago_em: pos, baixa: 'fora', baixado_em: opc.agora || new Date().toISOString() } });
+    });
+    return out;
+  }
+
+  const api = { lerContasPagar, ehContasPagar, conferirContasPagar, planoContasPagar, lancamentoDoFkn, lerEstoque, lerListagemProdutos, lerArquivoEstoque, ehListagemProdutos, codigoFKN, lerContasReceber, ehContasReceber, ligaEmpresas, dataFKN,
     conferirListagemProdutos, conferirContasReceber };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else raiz.CRMFkn = api;

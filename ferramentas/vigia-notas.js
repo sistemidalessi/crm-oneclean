@@ -15,7 +15,7 @@
 // Sinal de vida: a cada 30 min (e ao ligar) avisa o CRM que está rodando, mesmo sem nota nova;
 // se o sinal parar, o CRM avisa o administrador (servidor desligado, tarefa parada).
 //
-// Arquivos do FKN (opcional): com --pasta-fkn "C:\CRM\FKN" o vigia também olha essa pasta e manda
+// Arquivos do FKN (opcional): com --pasta-fkn "C:\CRM\FKN" o vigia também olha essa pasta e manda (produtos, contas a receber e, desde 2026-10-06, contas a pagar)
 // ao CRM, assim que alguém salvar, a "Listagem cadastral de produtos" (estoque de Compras) e o
 // "Contas a receber por cliente — em aberto", em CSV. Reconhece pelo conteúdo (o nome não
 // importa); de cada tipo manda só o mais novo. Pode pôr mais de uma pasta separando com ";".
@@ -24,7 +24,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const VERSAO = '2026-10-05';
+const VERSAO = '2026-10-06';
 const SINAL_MS = 30 * 60 * 1000;
 
 const AQUI = __dirname;
@@ -125,12 +125,15 @@ function tipoFkn(buf) {
   const ini = buf.subarray(0, 4000).toString('latin1');
   if (/LISTAGEM CADASTRAL DE PRODUTOS/i.test(ini)) return 'produtos';
   if (/CONTAS A RECEBER/i.test(ini)) return 'receber';
+  if (/CONTAS A PAGAR/i.test(ini)) return 'pagar';
   return null;
 }
-const NOME_FKN = { produtos: 'listagem de produtos', receber: 'contas a receber' };
+const NOME_FKN = { produtos: 'listagem de produtos', receber: 'contas a receber', pagar: 'contas a pagar' };
 async function arquivosFkn(cfg, estado) {
   if (!cfg.pastaFkn) return;
-  if (!estado.fkn) estado.fkn = {};
+  // Versão nova pode conhecer um relatório que a anterior pulou (ex.: contas a pagar, 06/10/2026):
+  // ao trocar de versão, olha a pasta de novo uma vez (reenviar o mesmo retrato não muda nada).
+  if (!estado.fkn || estado.fknVersao !== VERSAO) { estado.fkn = {}; estado.fknVersao = VERSAO; }
   const agora = Date.now(), maisNovo = {};
   for (const dir of String(cfg.pastaFkn).split(';').map(x => x.trim()).filter(Boolean)) {
     let itens;
@@ -158,7 +161,7 @@ async function arquivosFkn(cfg, estado) {
       vivo();
       estado.ultimaFalha = '';
       estado.ultimoSinal = Date.now();
-      registra('FKN: ' + NOME_FKN[tipo] + ' (' + a.nome + ') enviada ao CRM' + (r.produtos ? ': ' + r.produtos + ' linhas' : r.titulos != null ? ': ' + r.titulos + ' títulos' + (r.semCliente ? ', ' + r.semCliente + ' sem cliente no CRM' : '') : ''));
+      registra('FKN: ' + NOME_FKN[tipo] + ' (' + a.nome + ') enviada ao CRM' + (r.produtos ? ': ' + r.produtos + ' linhas' : r.titulos != null ? ': ' + r.titulos + ' títulos' + (r.semCliente ? ', ' + r.semCliente + ' sem cliente no CRM' : '') : r.contas != null ? ': ' + r.contas + ' contas (' + r.novas + ' novas, ' + r.pagas + ' pagas)' : ''));
     } catch (e) {
       // Recusado pelo CRM (arquivo cortado, soma que não bate): não insiste até o arquivo mudar.
       if (/HTTP 422/.test(e.message)) estado.fkn[a.caminho] = a.marca;

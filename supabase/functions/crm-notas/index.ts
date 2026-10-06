@@ -10,7 +10,8 @@
 //   node ferramentas/fixa-motor-notas.js     (atualiza COMMIT e HASHES aqui)
 // e publicar de novo esta função. O teste testes/motor.test.js avisa se esquecer.
 // Também recebe do vigia os CSV salvos pelo FKN ({fkn: {nome, base64}}): a listagem de produtos
-// (estoque de Compras) e o contas a receber — lidos por fkn.js, o mesmo leitor da tela.
+// (estoque de Compras), o contas a receber e o contas a pagar (Caixa) — lidos por fkn.js, o mesmo
+// leitor da tela.
 // Deploy: verify_jwt DESLIGADO (a chave de integração é conferida aqui).
 import { createClient } from 'npm:@supabase/supabase-js@2.116.0';
 
@@ -80,7 +81,7 @@ async function arquivoFkn(db: any, integ: { id: string }, f: { nome?: string; ba
   const recusa = async (tipo: string, motivos: string[]) => {
     const texto = motivos.join('; ');
     await db.from('crm_integracao_log').insert({ integracao_id: integ.id, arquivos: 1, notas_novas: 0, valor: 0, fora: 0, erros: 1,
-      resumo: { fkn: (tipo === 'produtos' ? 'Listagem de produtos' : 'Contas a receber') + ' do FKN recusada: ' + texto, fkn_recusa: texto, fkn_tipo: tipo, arquivo: nome } });
+      resumo: { fkn: (tipo === 'produtos' ? 'Listagem de produtos' : tipo === 'pagar' ? 'Contas a pagar' : 'Contas a receber') + ' do FKN recusada: ' + texto, fkn_recusa: texto, fkn_tipo: tipo, arquivo: nome } });
     return resposta(422, { erro: texto });
   };
 
@@ -112,7 +113,30 @@ async function arquivoFkn(db: any, integ: { id: string }, f: { nome?: string; ba
     await registra('Contas a receber do FKN: ' + lig.titulos.length + ' títulos de ' + lido.clientes + ' clientes' + (lig.sem ? ' (' + lig.sem + ' sem cliente no CRM)' : ''), lig.titulos.length, lido.soma);
     return resposta(200, { ok: true, fkn: 'receber', titulos: lig.titulos.length, semCliente: lig.sem });
   }
-  return resposta(422, { erro: 'arquivo do FKN não reconhecido (só a listagem de produtos e o contas a receber, em CSV)' });
+  if (K.ehContasPagar(txt)) {
+    // Contas a pagar (Caixa, só do administrador): retrato — conta nova entra, a que sumiu é dada como
+    // paga fora do caixa; a que já estava lançada (recorrente/planilha/à mão) só é ligada (fkn.js).
+    let lido;
+    try { lido = K.lerContasPagar(txt); } catch (e) { return recusa('pagar', [e instanceof Error ? e.message : String(e)]); }
+    const conf = K.conferirContasPagar(txt, lido);
+    if (conf.recusa.length) return recusa('pagar', conf.recusa);
+    const existentes = await tudo(db, 'crm_fin_lancamentos', 'id,chave_fkn,situacao,tipo,valor,vencimento,origem,descricao') as { chave_fkn: string; situacao: string }[];
+    const doFkn = existentes.filter(x => x.chave_fkn && x.situacao !== 'pago').length;
+    if (doFkn >= 20 && lido.contas.length < doFkn * 0.4) return recusa('pagar', ['veio com ' + lido.contas.length + ' contas (o CRM tem ' + doFkn + ' do FKN em aberto): confira Conta 0 a 0, Situação GERAL e a filial']);
+    const p = K.planoContasPagar(lido, existentes, { hoje: lido.posicao, agora });
+    for (let i = 0; i < p.inserir.length; i += LOTE) {
+      const { error } = await db.from('crm_fin_lancamentos').insert(p.inserir.slice(i, i + LOTE));
+      if (error) throw new Error('crm_fin_lancamentos: ' + error.message);
+    }
+    for (const a of [...p.atualizar, ...p.ligar, ...p.baixar]) {
+      const { error } = await db.from('crm_fin_lancamentos').update(a.patch).eq('id', a.id);
+      if (error) throw new Error('crm_fin_lancamentos: ' + error.message);
+    }
+    await registra('Contas a pagar do FKN: ' + lido.contas.length + ' contas (' + p.inserir.length + ' novas' + (p.antigas.qtd ? ', ' + p.antigas.qtd + ' antigas pausadas' : '') +
+      (p.ligar.length ? ', ' + p.ligar.length + ' já lançadas' : '') + (p.baixar.length ? ', ' + p.baixar.length + ' pagas' : '') + ')', lido.contas.length, lido.soma);
+    return resposta(200, { ok: true, fkn: 'pagar', contas: lido.contas.length, novas: p.inserir.length, pagas: p.baixar.length });
+  }
+  return resposta(422, { erro: 'arquivo do FKN não reconhecido (só a listagem de produtos, o contas a receber e o contas a pagar, em CSV)' });
 }
 
 const MAX_ARQUIVOS = 60;

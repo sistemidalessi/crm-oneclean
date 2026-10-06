@@ -329,6 +329,37 @@
     });
   }
 
+  // Contas a pagar do FKN pela tela (o vigia faz o mesmo sozinho, pela função crm-notas): lê, confere,
+  // mostra o que vai mudar e aplica o plano de fkn.js (novas, já lançadas, antigas pausadas, pagas).
+  async function importarPagar(f) {
+    const K = raiz.CRMFkn;
+    const buf = await f.arrayBuffer();
+    let t;
+    try { t = new TextDecoder('utf-8', { fatal: true }).decode(buf); } catch (e) { t = new TextDecoder('windows-1252').decode(buf); }
+    const lido = K.lerContasPagar(t);
+    const conf = K.conferirContasPagar(t, lido);
+    if (conf.recusa.length) throw new Error('relatório recusado (nada foi trocado): ' + conf.recusa.join('; '));
+    const doFkn = F.lancamentos.filter(x => x.chave_fkn && x.situacao !== 'pago').length;
+    if (doFkn >= 20 && lido.contas.length < doFkn * 0.4) throw new Error('veio com ' + lido.contas.length + ' contas e o CRM tem ' + doFkn + ' do FKN em aberto: confira Conta 0 a 0, Situação GERAL e a filial');
+    const p = K.planoContasPagar(lido, F.lancamentos, { hoje: lido.posicao || hoje(), agora: agora() });
+    CRM.abrirForm({
+      titulo: 'Contas a pagar do FKN',
+      intro: 'Relatório de ' + R.dataBR(lido.posicao) + (lido.hora ? ' ' + lido.hora : '') + ': ' + lido.contas.length + ' contas, ' + R.moeda(lido.soma) + ' (bate com o total geral).\n' +
+        '• ' + p.novas.qtd + ' novas no caixa: ' + R.moeda(p.novas.valor) + '\n' +
+        (p.antigas.qtd ? '• ' + p.antigas.qtd + ' pendências antigas (vencidas há mais de 60 dias ou emitidas há mais de 1 ano): ' + R.moeda(p.antigas.valor) + ' → entram em "Contas pausadas" para conferir\n' : '') +
+        (p.ligar.length ? '• ' + p.ligar.length + ' já estavam lançadas (recorrente/planilha): só ligadas ao FKN — ' + p.ligar.map(x => x.descricao).join(', ') + '\n' : '') +
+        (p.atualizar.length ? '• ' + p.atualizar.length + ' com valor ou vencimento novo\n' : '') +
+        (p.baixar.length ? '• ' + p.baixar.length + ' sumiram do FKN: dadas como pagas (fora do caixa)\n' : ''),
+      campos: [], salvarTexto: 'Aplicar',
+      aoSalvar: async () => {
+        if (p.inserir.length) await CRM.store().inserirVarios('fin_lancamentos', p.inserir);
+        for (const a of [...p.atualizar, ...p.ligar, ...p.baixar]) await CRM.store().atualizar('fin_lancamentos', a.id, a.patch);
+        lidoEm = 0; await carrega();
+        CRM.toast('Contas a pagar do FKN aplicado: ' + p.inserir.length + ' novas, ' + p.baixar.length + ' pagas.');
+      }
+    });
+  }
+
   async function gerar(compet) {
     const novas = gerarMes(F.recorrentes, compet, F.lancamentos);
     if (!novas.length) { CRM.toast('Nada a gerar em ' + R.mesCurto(compet + '-01') + ': as contas desse mês já existem.'); return; }
@@ -423,7 +454,8 @@
       '<input type="search" data-cx-filtro="busca" placeholder="Buscar descrição, fornecedor, categoria" value="' + esc(filtro.busca) + '">' +
       sel('situacao', [['abertas', 'Em aberto'], ['vencidas', 'Vencidas'], ['pagas', 'Pagas'], ['pausadas', 'Pausadas'], ['todas', 'Todas']], filtro.situacao) +
       sel('tipo', [['', 'Saídas e entradas'], ['saida', 'Só saídas'], ['entrada', 'Só entradas']], filtro.tipo) +
-      '<button type="button" class="btn" data-acao="cx-nova" data-id="saida">+ Conta a pagar</button><button type="button" class="btn sec" data-acao="cx-nova" data-id="entrada">+ Entrada</button></div>' +
+      '<button type="button" class="btn" data-acao="cx-nova" data-id="saida">+ Conta a pagar</button><button type="button" class="btn sec" data-acao="cx-nova" data-id="entrada">+ Entrada</button>' +
+      '<label class="btn sec arquivo" title="No FKN: Contas à Pagar por Conta/Fornecedor (Sifn083), Em aberto, salvar em CSV. O vigia também manda sozinho.">Atualizar do FKN<input type="file" id="cxPagarFkn" accept=".csv,.txt,text/csv"></label></div>' +
       (l.length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>' + (filtro.situacao === 'pagas' ? 'Pago em' : 'Vencimento') + '</th><th>Descrição</th><th>Categoria</th><th class="num">Valor</th><th>Situação</th><th></th></tr></thead><tbody>' +
         l.map(x => '<tr class="clicavel" data-acao="cx-editar" data-id="' + esc(x.id) + '" tabindex="0"><td>' + esc(R.dataBR(filtro.situacao === 'pagas' ? x.pago_em : x.vencimento)) + '</td>' +
           '<td><strong>' + esc(x.descricao) + '</strong>' + (x.fornecedor || x.entre_empresas || x.origem !== 'tela' ? '<small>' + esc([x.fornecedor, x.entre_empresas ? 'entre empresas' : '', x.origem === 'recorrente' ? 'recorrente' : x.origem === 'fkn' ? 'do FKN' : x.origem === 'planilha' ? 'da planilha' : ''].filter(Boolean).join(' · ')) + '</small>' : '') + '</td>' +
@@ -468,6 +500,8 @@
         (vista === 'dia' ? grade(s) + blocosVencidos() : vista === 'recorrentes' ? listaRecorrentes() : listaContas());
     },
     depois(el) {
+      const arq = el.querySelector('#cxPagarFkn');
+      if (arq) arq.addEventListener('change', () => { const f = arq.files[0]; arq.value = ''; if (f) importarPagar(f).catch(CRM.falhou); });
       // filtros da lista
       el.querySelectorAll('[data-cx-filtro]').forEach(i => i.addEventListener(i.tagName === 'SELECT' ? 'change' : 'input', () => {
         filtro[i.dataset.cxFiltro] = i.value;

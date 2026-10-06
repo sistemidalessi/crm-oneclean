@@ -450,7 +450,7 @@
       const lemb = CRM.lembreteFkn ? CRM.lembreteFkn() : [];
       const recs = CRM.recusasFkn ? CRM.recusasFkn() : [];
       const quandoFkn = v => (v ? esc(R.dataBR(R.diaLocal(v)) + ' ' + R.horaLocal(v)) : 'nunca');
-      const NOME_REC = { produtos: 'A listagem de produtos', receber: 'O contas a receber' };
+      const NOME_REC = { produtos: 'A listagem de produtos', receber: 'O contas a receber', pagar: 'O contas a pagar' };
       const faixaFkn = (lemb.length || recs.length ? '<div class="faixa alerta lembrete-fkn">' +
         (lemb.length ? '<p><strong>Hora de puxar ' + (lemb.length > 1 ? 'os relatórios' : 'o relatório') + ' do FKN (' + esc(lemb[0].turno) + '):</strong> ' +
           lemb.map(x => esc(x.arquivo) + ' <small>(último: ' + quandoFkn(x.ultimo) + ')</small>').join(' · ') + '.</p>' : '') +

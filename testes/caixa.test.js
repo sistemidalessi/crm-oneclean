@@ -93,3 +93,52 @@ test('grade: previsto no próximo dia útil, vencidos fora, títulos no dia do c
   const sd = C.saldosGrade(dias, hoje, s, lancs, C.itensGrade(hoje, '2026-10-22', hoje, lancs, tits, {}));
   assert.deepEqual(sd, { '2026-10-07': null, '2026-10-08': 5000, '2026-10-09': 6070, '2026-10-13': 5670, '2026-10-14': 5920 });
 });
+
+// Contas a pagar do FKN (Sifn083), no formato real (dados fictícios).
+const K = require('../fkn.js');
+const PAGAR = [
+  'EMPRESA EXEMPLO LTDA;PAG.: 1 de 1;', ';DATA: 06/10/2026;', 'SISTEMA DE GESTAO EMPRESARIAL;12:01;',
+  'CONTAS A PAGAR POR CONTA: EM ABERTO - VENCIDAS EM:  00/00/0000 A 00/00/0000;FKN(083)-00;',
+  '   DOCUM.; EMISSAO;         VALOR;  VCTO; ENTRADA;PORTADOR;OBSERVACOES / SUBCONTA;', '',
+  'CONTA:;00005 FORNECEDOR PLASTICO LTDA;TEL:;',
+  '   000007022-2;23/09/2026;      1.864,50;13/10/2026;23/09/2026;BOLETO;PED.COMPRA 100596   /;',
+  '   30468-2;01/09/2020;      1.429,87;07/10/2020;02/09/2020;CHEQUE BRADE;;',
+  ';TOTAL DA CONTA:;      3.294,37; EM ABERTO:;      3.294,37;',
+  'CONTA:;11001 SALARIO;TEL:;',
+  '   SET/26;06/10/2026;     11.302,22;06/10/2026;06/10/2026;TRANSFERENCI;OPERACIONAL I;',
+  ';TOTAL DA CONTA:;     11.302,22; EM ABERTO:;   11.302,22;',
+  'CONTA:;16001 CAMINHAO KIA;TEL:;',
+  '   OUT/26 - I;02/10/2026;      3.523,86;07/10/2026;02/10/2026;BOLETO;COMBUSTIVEL;',
+  ';TOTAL DA CONTA:;      3.523,86; EM ABERTO:;    3.523,86;',
+  ';TOTAL GERAL...:;     18.120,45; EM ABERTO:;   18.120,45;'
+].join('\r\n');
+
+test('contas a pagar do FKN: lê, confere com o total geral e recusa filtro', () => {
+  const l = K.lerContasPagar(PAGAR);
+  assert.equal(l.posicao, '2026-10-06'); assert.equal(l.hora, '12:01');
+  assert.equal(l.contas.length, 4); assert.equal(l.soma, 18120.45); assert.ok(l.confere);
+  assert.deepEqual(K.conferirContasPagar(PAGAR, l).recusa, []);
+  assert.equal(l.contas[0].chave, '00005|000007022-2');
+  const filtrado = PAGAR.replace('00/00/0000 A 00/00/0000', '01/10/2026 A 31/10/2026');
+  assert.match(K.conferirContasPagar(filtrado, K.lerContasPagar(filtrado)).recusa.join(), /período em branco/);
+  const cortado = PAGAR.replace(/\r\n;TOTAL GERAL.*$/, '');
+  assert.match(K.conferirContasPagar(cortado, K.lerContasPagar(cortado)).recusa.join(), /TOTAL GERAL/);
+  const comb = K.lancamentoDoFkn(l.contas[3]);
+  assert.equal(comb.categoria, 'Frete e combustível'); assert.match(comb.descricao, /^COMBUSTIVEL \(CAMINHAO KIA\)/);
+});
+
+test('contas a pagar do FKN: novas, antigas pausadas, já lançadas ligadas e sumidas pagas', () => {
+  const l = K.lerContasPagar(PAGAR);
+  const exist = [
+    { id: 'r1', tipo: 'saida', situacao: 'aberto', origem: 'recorrente', valor: 11302.22, vencimento: '2026-10-06', descricao: 'Reembolso salários' },
+    { id: 'f1', tipo: 'saida', situacao: 'aberto', origem: 'fkn', chave_fkn: '00005|000007022-2', valor: 1800, vencimento: '2026-10-13' },
+    { id: 'f2', tipo: 'saida', situacao: 'aberto', origem: 'fkn', chave_fkn: '00009|SUMIU-01', valor: 50, vencimento: '2026-10-01' }
+  ];
+  const p = K.planoContasPagar(l, exist, { hoje: '2026-10-06', agora: 'x' });
+  assert.deepEqual(p.atualizar, [{ id: 'f1', patch: { valor: 1864.5 } }]);
+  assert.deepEqual(p.ligar.map(x => [x.id, x.patch.chave_fkn]), [['r1', '11001|SET/26']]);
+  assert.deepEqual(p.baixar.map(x => [x.id, x.patch.situacao, x.patch.pago_em, x.patch.baixa]), [['f2', 'pago', '2026-10-06', 'fora']]);
+  assert.deepEqual(p.inserir.map(x => [x.chave_fkn, x.situacao]), [['00005|30468-2', 'pausado'], ['16001|OUT/26 - I', 'aberto']]);
+  assert.match(p.inserir[0].observacoes, /pendência antiga/);
+  assert.equal(p.antigas.qtd, 1);
+});
