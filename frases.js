@@ -252,7 +252,9 @@
   // Palavras que não identificam nada: genéricas de conta e de razão social.
   const GENERICAS = new Set(('conta contas pagamento pagto boleto boletos nota notas fatura fornecedor fornecedores cliente clientes ' +
     'ltda eireli epp comercio comercial servicos servico industria cia sociedade empresa grupo brasil distribuidora dia mes valor ' +
-    'parcela parcelas referente total geral mais outro outra outros outras').split(' '));
+    'parcela parcelas referente total geral mais outro outra outros outras ' +
+    // (06/10: "saiu 502,05 compra de mercadoria" achou o cadastro "| A/C COMPRAS")
+    'compra compras mercadoria mercadorias produto produtos pedido pedidos material materiais venda vendas loja').split(' '));
   function tokens(s) {
     return [...new Set(baixo(s).replace(/[^a-z0-9]+/g, ' ').split(' ').filter(w => w.length >= 3 && !/^\d+$/.test(w) && !GENERICAS.has(w) && !/^(?:que|dos|das|com|pra|para|pro)$/.test(w)))];
   }

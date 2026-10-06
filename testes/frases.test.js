@@ -219,3 +219,8 @@ test('casar com conta já lançada: o nome do cliente não basta e a palavra for
   p = um('paguei sekron espaço exemplo 624', { lancamentos, clientes });
   assert.equal(p.acao, 'baixar:s1');
 });
+
+test('palavra genérica (compra, mercadoria) não acha cadastro de cliente', () => {
+  const p = um('saiu 502,05 compra de mercadoria', { clientes: [{ id: 'c', nome: '| A/C COMPRAS' }], fornecedores: [{ nome: 'MERCADORIAS EXEMPLO LTDA' }] });
+  assert.deepEqual([p.valor, p.situacao, p.categoria, p.fornecedor], [502.05, 'realizado', 'Fornecedores', '']);
+});
