@@ -184,7 +184,7 @@
     if (lendo) return;
     lendo = true;
     lidoEm = Date.now();
-    try { F = await CRM.store().carregarFin(); } catch (e) { if (!F) F = { recorrentes: [], lancamentos: [], saldos: [] }; CRM.falhou(e); }
+    try { F = await CRM.store().carregarFin(); } catch (e) { if (!F) F = { recorrentes: [], lancamentos: [], saldos: [], regras: [] }; CRM.falhou(e); }
     lendo = false;
     CRM.render();
   }
@@ -201,7 +201,8 @@
     const t = titulos().find(x => x.duplicata === dup);
     if (!t) return;
     await insere({ tipo: 'entrada', descricao: 'Recebido: ' + nomeTitulo(t) + ' · ' + t.duplicata, categoria: 'Duplicatas recebidas', valor: r2(t.valor),
-      vencimento: t.vencimento, situacao: 'pago', pago_em: dia, baixa: 'caixa', baixado_em: agora(), origem: 'titulo', titulo_duplicata: t.duplicata });
+      vencimento: t.vencimento, situacao: 'pago', pago_em: dia, baixa: 'caixa', baixado_em: agora(), origem: 'titulo', titulo_duplicata: t.duplicata,
+      entre_empresas: ENTRE_EMPRESAS.test(nomeTitulo(t)) });
     CRM.toast('Recebido em ' + dm(dia) + ': ' + R.moeda(t.valor));
   }
   // Dia da baixa: o da coluna, se já passou; senão hoje (não se paga no futuro).
@@ -265,11 +266,13 @@
     CRM.abrirForm({
       titulo: l.descricao,
       intro: [l.tipo === 'entrada' ? 'Entrada' : 'Saída', R.moeda(l.valor), (aberto ? 'vence ' : 'pago em ') + R.dataBR(aberto ? l.vencimento : l.pago_em),
-        l.categoria, l.entre_empresas ? 'entre empresas' : '', l.situacao === 'pago' && l.baixa === 'fora' ? 'pago fora do caixa do dia' : ''].filter(Boolean).join(' · '),
+        l.categoria, l.entre_empresas ? 'entre empresas' : '', l.situacao === 'pago' && l.baixa === 'fora' ? 'pago fora do caixa do dia' : ''].filter(Boolean).join(' · ') +
+        (l.frase ? '\nLançado pela frase: "' + l.frase + '"' : ''),
       campos: aberto ? [{ nome: 'valor', rotulo: 'Valor (R$)', tipo: 'numero', ajuda: 'a fatura chegou com outro valor?' }, { nome: 'vencimento', rotulo: 'Novo dia', tipo: 'data' }] : [],
       valores: { valor: l.valor, vencimento: l.vencimento },
       salvarTexto: aberto ? 'Ajustar' : 'Fechar',
-      rodape: (aberto ? rod('cx-pagar', (l.tipo === 'entrada' ? 'Recebi ' : 'Paguei ') + rotDia, 'verde') + rod('cx-pausar', 'Pausar') : rod('cx-desfazer', 'Desfazer a baixa')) + rod('cx-editar', 'Editar tudo'),
+      rodape: (l.frase ? rod('cx-desfrase', 'Desfazer a frase', 'perigo') : '') +
+        (aberto ? rod('cx-pagar', (l.tipo === 'entrada' ? 'Recebi ' : 'Paguei ') + rotDia, 'verde') + rod('cx-pausar', 'Pausar') : l.frase ? '' : rod('cx-desfazer', 'Desfazer a baixa')) + rod('cx-editar', 'Editar tudo'),
       aoSalvar: async v => { if (aberto) await grava(l.id, { valor: r2(v.valor), vencimento: v.vencimento || l.vencimento }); }
     });
   }
@@ -331,6 +334,96 @@
 
   // Contas a pagar do FKN pela tela (o vigia faz o mesmo sozinho, pela função crm-notas): lê, confere,
   // mostra o que vai mudar e aplica o plano de fkn.js (novas, já lançadas, antigas pausadas, pagas).
+  // ---- frases ("pedágio 350 pago hoje"): frases.js lê e propõe; aqui o administrador confere e grava
+  let rascunho = '';
+  function contextoFrases() {
+    const forn = new Map();
+    F.lancamentos.concat(F.recorrentes).forEach(x => { const n = String(x.fornecedor || '').trim(); if (n && !forn.has(n.toLowerCase())) forn.set(n.toLowerCase(), { nome: n }); });
+    return { hoje: hoje(), agora: agora(), lancamentos: F.lancamentos, titulos: titulos(), regras: F.regras || [], fornecedores: [...forn.values()],
+      clientes: (E().D.empresas || []).map(e => ({ id: e.id, nome: e.nome })), nomeTitulo, creditoTitulo: t => creditoTitulo(t.vencimento, d1()) };
+  }
+  // O "+" da célula: a mesma caixa de frases, com o dia e a seção da célula.
+  function formFrase(pre) {
+    CRM.abrirForm({
+      titulo: (pre.tipo === 'entrada' ? 'Entrada' : 'Saída') + ' em ' + R.dataBR(pre.data),
+      intro: 'Escreva do jeito que fala, uma frase por linha. Sem dia na frase, vale ' + dm(pre.data) + '; sem "recebi" ou "paguei", vale ' + (pre.tipo === 'entrada' ? 'entrada' : 'saída') + '.',
+      campos: [{ nome: 'texto', rotulo: 'O que aconteceu', tipo: 'textarea', largo: true, linhas: 3, obrigatorio: true, dica: pre.tipo === 'entrada' ? 'recebi 2.300 da Drogaria' : 'pedágio 350 pago, almoço 85' }],
+      valores: {}, salvarTexto: 'Conferir',
+      rodape: '<button type="button" class="btn sec" data-acao="cx-add-form" data-id="' + esc(pre.tipo) + '" data-dia="' + esc(pre.data) + '">Formulário completo</button>',
+      aoSalvar: async v => { conferirFrases(v.texto, { dataPadrao: pre.data, tipoPadrao: pre.tipo }); }
+    });
+  }
+  function conferirFrases(texto, opts) {
+    const P = raiz.CRMFrases;
+    const r = P.interpretar(texto, hoje(), opts);
+    if (!r.itens.length) throw new Error(r.avisos.join(' ') || 'escreva pelo menos uma frase com valor.');
+    const ctx = contextoFrases();
+    const ps = P.classificar(r.itens, ctx);
+    const op = (lista, val) => lista.map(o => '<option value="' + esc(o[0]) + '"' + (o[0] === val ? ' selected' : '') + '>' + esc(o[1]) + '</option>').join('');
+    const campo = (rot, html, cls) => '<label class="campo' + (cls ? ' ' + cls : '') + '"><span>' + esc(rot) + '</span>' + html + '</label>';
+    const linha = (p, i) => '<fieldset class="cx-conf" data-i="' + i + '"><legend>' + esc(p.trecho) + (ps.length > 1 ? ' <small>linha ' + p.linha + '</small>' : '') + '</legend>' +
+      (p.motivo ? '<p class="cx-conf-motivo">' + esc(p.motivo) + '</p>' : '') +
+      '<div class="campos">' +
+      campo('O que fazer', '<select name="a' + i + '">' + op(p.opcoes.map(o => [o.acao, o.rotulo]), p.acao) + '</select>', 'largo') +
+      campo('Tipo', '<select name="t' + i + '">' + op([['saida', 'Saída'], ['entrada', 'Entrada']], p.tipo) + '</select>', 'cx-n') +
+      campo('Valor (R$)', '<input type="number" name="v' + i + '" step="0.01" min="0.01" inputmode="decimal" value="' + esc(p.valor) + '">', 'cx-vd') +
+      campo('Dia', '<input type="date" name="d' + i + '" value="' + esc(p.data) + '">', 'cx-vd') +
+      campo('Situação', '<select name="s' + i + '">' + op([['realizado', p.tipo === 'entrada' ? 'Aconteceu (recebido)' : 'Aconteceu (pago)'], ['previsto', 'Previsto']], p.situacao) + '</select>', 'cx-n') +
+      campo('Descrição', '<input type="text" name="x' + i + '" value="' + esc(p.descricao) + '" autocomplete="off">', 'largo cx-n') +
+      campo('Categoria', '<input type="text" name="c' + i + '" value="' + esc(p.categoria) + '" list="cxCats" autocomplete="off">', 'cx-n') +
+      campo(p.tipo === 'entrada' ? 'De quem' : 'Fornecedor', '<input type="text" name="f' + i + '" value="' + esc(p.fornecedor) + '" list="cxForn" autocomplete="off">', 'cx-n') +
+      '<label class="campo check cx-n"><input type="checkbox" name="e' + i + '"' + (p.entre_empresas ? ' checked' : '') + '> Entre empresas (OneClean ↔ Agilité)</label>' +
+      (p.chave ? '<label class="campo check largo cx-n"><input type="checkbox" name="l' + i + '"> Lembrar categoria e fornecedor quando eu escrever "' + esc(p.rotulo || p.chave) + '"</label>' : '') +
+      '</div></fieldset>';
+    const listas = '<datalist id="cxCats">' + CATEGORIAS_SAIDA.concat(CATEGORIAS_ENTRADA).concat((F.regras || []).map(g => g.categoria)).filter((x, i, a) => x && a.indexOf(x) === i).map(c => '<option value="' + esc(c) + '">').join('') + '</datalist>' +
+      '<datalist id="cxForn">' + ctx.fornecedores.slice(0, 500).map(f => '<option value="' + esc(f.nome) + '">').join('') + '</datalist>';
+    CRM.abrirForm({
+      titulo: 'Conferir antes de gravar',
+      intro: ps.length + ' lançamento(s). Confira cada um: nada foi gravado ainda.' + (r.avisos.length ? '\n' + r.avisos.join('\n') : ''),
+      largura: 'largo', campos: [], htmlDepois: ps.map(linha).join('') + listas, salvarTexto: 'Gravar',
+      extras: form => {
+        // baixa de conta ou título: os campos de lançamento novo não valem (só o dia e o valor)
+        const mostra = fs => {
+          const a = fs.querySelector('select[name^="a"]').value;
+          fs.classList.toggle('cx-conf-baixa', /^(baixar|ajustar|titulo):/.test(a));
+          fs.classList.toggle('cx-conf-ignora', a === 'ignorar');
+        };
+        form.querySelectorAll('.cx-conf').forEach(fs => { mostra(fs); fs.querySelector('select[name^="a"]').addEventListener('change', () => mostra(fs)); });
+      },
+      aoSalvar: async (v, form) => {
+        const el = n => form.elements[n];
+        const lidas = ps.map((p, i) => Object.assign({}, p, {
+          acao: el('a' + i).value, tipo: el('t' + i).value, valor: r2(String(el('v' + i).value).replace(',', '.')), data: el('d' + i).value || p.data,
+          situacao: el('s' + i).value, descricao: el('x' + i).value.trim() || p.descricao, categoria: el('c' + i).value.trim(), fornecedor: el('f' + i).value.trim(),
+          entre_empresas: el('e' + i).checked || ENTRE_EMPRESAS.test(el('c' + i).value), lembrar: !!(el('l' + i) && el('l' + i).checked)
+        }));
+        lidas.forEach(p => {
+          if (p.acao === 'ignorar') return;
+          if (!(p.valor > 0)) throw new Error('"' + p.trecho + '": informe o valor.');
+          if (p.situacao === 'realizado' && p.data > hoje()) throw new Error('"' + p.trecho + '": o que já aconteceu não pode ter dia no futuro.');
+          if (/^(baixar|titulo):/.test(p.acao) && p.situacao !== 'realizado') throw new Error('"' + p.trecho + '": baixa é do que já aconteceu — troque a situação ou escolha "Lançar novo".');
+        });
+        const planos = lidas.map(p => P.gravacao(p, ctx));
+        let n = 0;
+        for (let i = 0; i < lidas.length; i++) {
+          const g = planos[i];
+          for (const a of g.atualizar) { troca(F.lancamentos, await CRM.store().atualizar('fin_lancamentos', a.id, a.patch)); n++; }
+          if (g.inserir.length) { (await CRM.store().inserirVarios('fin_lancamentos', g.inserir)).forEach(x => troca(F.lancamentos, x)); n += g.inserir.length; }
+          const p = lidas[i];
+          if (p.lembrar && p.chave && p.acao === 'novo') {
+            const dados = { tipo: p.tipo, chave: p.chave, categoria: p.categoria || null, fornecedor: p.fornecedor || null, entre_empresas: !!p.entre_empresas };
+            const ja = (F.regras || []).find(g => g.tipo === p.tipo && g.chave === p.chave);
+            F.regras = F.regras || [];
+            troca(F.regras, ja ? await CRM.store().atualizar('fin_regras', ja.id, dados) : await CRM.store().inserir('fin_regras', dados));
+          }
+        }
+        if (!opts || !opts.dataPadrao) rascunho = '';
+        CRM.render();
+        CRM.toast(n ? n + ' lançamento(s) gravado(s). Errou? Clique no item → "Desfazer a frase".' : 'Nada gravado.');
+      }
+    });
+  }
+
   async function importarPagar(f) {
     const K = raiz.CRMFkn;
     const buf = await f.arrayBuffer();
@@ -423,6 +516,11 @@
         '<tr class="saldo"><th class="lab">Saldo no fim do dia</th>' + saldoRow + '</tr>' +
       '</tbody></table></div></section>';
   }
+  function caixaFrases() {
+    return '<section class="cartao cx-frases"><label for="cxFrases"><strong>Escreva o que aconteceu</strong> <small>uma frase por linha — o CRM acha a conta ou o título que bate, a categoria e o fornecedor; nada é gravado antes de você conferir</small></label>' +
+      '<div class="cx-frases-linha"><textarea id="cxFrases" rows="2" placeholder="pedágio 350 pago hoje · recebi 2.300 da Drogaria ontem · aluguel galpão 4.500 dia 10">' + esc(rascunho) + '</textarea>' +
+      '<button type="button" class="btn" data-acao="cx-frases">Conferir</button></div></section>';
+  }
   function blocosVencidos() {
     const h = hoje();
     const v = vencidas(F.lancamentos, h);
@@ -487,7 +585,8 @@
     render() {
       if (!CRM.ehAdmin()) return '<div class="cartao"><p class="vazio">Esta tela é só do administrador.</p></div>';
       if (!F) { setTimeout(carrega, 0); return '<div class="cabecalho"><div><h1>Caixa</h1></div></div><div class="cartao"><p class="vazio">Carregando o caixa…</p></div>'; }
-      if (Date.now() - lidoEm > 60000) setTimeout(carrega, 0); // o que mudou em outro computador
+      const escrevendo = typeof document !== 'undefined' && document.activeElement && document.activeElement.id === 'cxFrases';
+      if (Date.now() - lidoEm > 60000 && !escrevendo) setTimeout(carrega, 0); // o que mudou em outro computador
       const s = saldoAtual(F.saldos, F.lancamentos);
       const pausadas = F.lancamentos.filter(x => x.situacao === 'pausado').length;
       const aba = (id, rot) => '<button type="button" class="' + (vista === id ? 'ativa' : '') + '" data-acao="cx-vista" data-id="' + id + '">' + esc(rot) + '</button>';
@@ -497,9 +596,14 @@
         '<small>' + (s.ancora ? 'banco ' + esc(R.moeda(s.ancora.valor)) + ' em ' + esc(R.dataBR(s.ancora.data)) + (s.n ? ' · +' + esc(R.moeda(s.entradas)) + ' −' + esc(R.moeda(s.saidas)) + ' baixados aqui' : '') : 'informe o saldo do banco') + '</small>' +
         '<button type="button" class="btn sec" data-acao="cx-conferir">Conferir com o banco</button></div></div>' +
         '<nav class="cx-abas">' + aba('dia', 'Dia a dia') + aba('contas', 'Contas a pagar') + aba('recorrentes', 'Recorrentes') + aba('pausadas', 'Contas pausadas' + (pausadas ? ' (' + pausadas + ')' : '')) + '</nav>' +
-        (vista === 'dia' ? grade(s) + blocosVencidos() : vista === 'recorrentes' ? listaRecorrentes() : listaContas());
+        (vista === 'dia' ? caixaFrases() + grade(s) + blocosVencidos() : vista === 'recorrentes' ? listaRecorrentes() : listaContas());
     },
     depois(el) {
+      const fr = el.querySelector('#cxFrases');
+      if (fr) {
+        fr.addEventListener('input', () => { rascunho = fr.value; });
+        fr.addEventListener('keydown', ev => { if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); CRM.acoes['cx-frases'](); } });
+      }
       const arq = el.querySelector('#cxPagarFkn');
       if (arq) arq.addEventListener('change', () => { const f = arq.files[0]; arq.value = ''; if (f) importarPagar(f).catch(CRM.falhou); });
       // filtros da lista
@@ -533,7 +637,15 @@
     'cx-nav': id => { inicio = +id === 0 ? null : R.somaDias(inicio || R.somaDias(hoje(), -1), +id); CRM.render(); },
     'cx-conferir': () => formConferir(),
     'cx-nova': id => formLanc(null, { tipo: id }),
-    'cx-add': (id, el) => formLanc(null, { tipo: id, data: comDia(el) }),
+    'cx-add': (id, el) => formFrase({ tipo: id, data: comDia(el) }),
+    'cx-add-form': (id, el) => { fecha(); const data = comDia(el); setTimeout(() => formLanc(null, { tipo: id, data }), 0); },
+    'cx-frases': () => { const t = $('#cxFrases'); if (t) rascunho = t.value; try { conferirFrases(rascunho, {}); } catch (e) { CRM.toast(e.message, true); } },
+    'cx-desfrase': id => {
+      fecha();
+      const d = raiz.CRMFrases.desfazer(lanc(id));
+      if (!d) return;
+      (d.remover ? remove(d.remover) : grava(d.id, d.patch)).then(() => CRM.toast(d.remover ? 'Frase desfeita: o lançamento saiu do caixa.' : 'Frase desfeita: a conta voltou a ser como era.')).catch(CRM.falhou);
+    },
     'cx-editar': id => { fecha(); const l = lanc(id); if (l) setTimeout(() => formLanc(l), 0); },
     'cx-item': (id, el) => menuItem(id, comDia(el)),
     'cx-ok': (id, el) => {

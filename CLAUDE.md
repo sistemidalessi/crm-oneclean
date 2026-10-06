@@ -739,6 +739,22 @@ Anderson: cada sistema cuida da sua empresa; o "Geral" (as duas) é de quem lê 
   paga / Pausar) e "A receber vencido" (fora da previsão até entrar); **Contas a pagar** (filtros,
   + Conta a pagar, + Entrada), **Recorrentes** ("Gerar mês" idempotente, mês atual e o próximo) e
   **Contas pausadas**. "Conferir com o banco" grava saldo novo e mostra a diferença.
+- **Caixa por frases (06/10, `frases.js`)**: caixa "Escreva o que aconteceu" no topo do Dia a dia (Ctrl+Enter
+  confere) e o "+" de cada célula abre a mesma caixa com o dia e a seção da célula ("Formulário completo"
+  leva ao formulário antigo). `interpretar()` é o leitor da Agilité (`src/caixa/interpretar.js` do
+  `agilite-sistema-gestao`), igual na leitura; `classificar()` propõe, nesta ordem: conta em aberto que
+  bate (valor ±8% ou R$ 60, vencimento ±20 dias, uma palavra em comum na descrição/fornecedor; genéricas
+  como "fornecedor", "conta", "ltda" não contam) → baixa (futuro: ajusta, ou "já está no caixa");
+  entrada × título não recebido (±0,5%; o nome desempata; vários títulos do mesmo cliente que somam o
+  valor) → baixa do título igual ao ✓; nome do fornecedor (FKN/recorrentes) ou cliente (empresas):
+  metade das palavras, duas, ou a primeira se tiver 5+ letras; regra lembrada (`crm_fin_regras`, chave
+  = palavras em ordem alfabética); categoria pela palavra (`PALAVRAS`). "Agilit" marca entre empresas
+  (inclusive título de cliente Agilité). **Conferência obrigatória** (tudo editável; nada gravado antes).
+  Lançamento por frase grava `frase` (a linha) e, quando baixa/ajusta conta que já existia,
+  `frase_antes` (estado anterior). **"Desfazer a frase"** no menu do item: volta `frase_antes` ou apaga o
+  que a frase criou (entrada de título apagada = título volta ao receber). `origem` continua 'tela' /
+  'titulo' (mudar o check do banco exige DROP, que trava pelo MCP). Testes com nomes fictícios
+  (`testes/frases.test.js`); conferido com nomes reais só localmente, fora do repositório.
 - **Dia útil** = bancário de São Bernardo do Campo: nacionais, 9/7 (SP), Carnaval, Sexta Santa,
   Corpus Christi e 20/08 (aniversário de SBC); **não** o 25/01 da capital. Conta que vence sem banco
   aparece no próximo dia útil com o aviso; o vencimento gravado não muda.

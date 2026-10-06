@@ -156,10 +156,15 @@ insert into crm_fin_lancamentos (descricao, valor, vencimento, recorrente_id, co
 insert into crm_fin_lancamentos (descricao, valor, vencimento, situacao) values ('pago sem data', 1, current_date, 'pago'); -- FALHA
 insert into crm_fin_saldos (data, valor) values (current_date, 8052.79) returning 'admin informou o saldo' as ok;
 update crm_fin_lancamentos set situacao = 'pago', pago_em = current_date, baixa = 'caixa', baixado_em = now() returning 'admin pagou no caixa' as ok;
+update crm_fin_lancamentos set frase = 'salário 3500 pago hoje', frase_antes = '{"situacao":"aberto"}' returning 'admin baixou por frase' as ok;
+insert into crm_fin_regras (tipo, chave, categoria) values ('saida', 'almoco', 'Alimentação') returning 'admin lembrou regra' as ok;
+insert into crm_fin_regras (tipo, chave, categoria) values ('saida', 'almoco', 'Outra'); -- FALHA (uma por palavra)
 select pg_temp.como('b0000000-0000-0000-0000-000000000002');
 select 'Gestora vê contas a pagar (NÃO devia)' t, count(*) from crm_fin_lancamentos having count(*) > 0;
 select 'Gestora vê recorrentes (NÃO devia)' t, count(*) from crm_fin_recorrentes having count(*) > 0;
 select 'Gestora vê saldo (NÃO devia)' t, count(*) from crm_fin_saldos having count(*) > 0;
+select 'Gestora vê regras do caixa (NÃO devia)' t, count(*) from crm_fin_regras having count(*) > 0;
+update crm_fin_regras set categoria = 'x' returning 'Gestora alterou regra (NÃO devia)';
 insert into crm_fin_lancamentos (descricao, valor, vencimento) values ('gestora', 1, current_date); -- FALHA
 insert into crm_fin_saldos (data, valor) values (current_date, 1); -- FALHA
 update crm_fin_lancamentos set valor = 0 returning 'Gestora alterou conta (NÃO devia)';
@@ -167,14 +172,17 @@ delete from crm_fin_lancamentos returning 'Gestora apagou conta (NÃO devia)';
 select pg_temp.como('c0000000-0000-0000-0000-000000000003');
 select 'Ana vê contas a pagar (NÃO devia)' t, count(*) from crm_fin_lancamentos having count(*) > 0;
 select 'Ana vê saldo (NÃO devia)' t, count(*) from crm_fin_saldos having count(*) > 0;
+select 'Ana vê regras do caixa (NÃO devia)' t, count(*) from crm_fin_regras having count(*) > 0;
+insert into crm_fin_regras (tipo, chave) values ('saida', 'ana'); -- FALHA
 insert into crm_fin_recorrentes (descricao, valor, dia) values ('ana', 1, 1); -- FALHA
 select pg_temp.como('f0000000-0000-0000-0000-000000000006');
 select 'Comprador vê contas a pagar (NÃO devia)' t, count(*) from crm_fin_lancamentos having count(*) > 0;
 select 'Comprador vê recorrentes (NÃO devia)' t, count(*) from crm_fin_recorrentes having count(*) > 0;
 select 'Comprador vê saldo (NÃO devia)' t, count(*) from crm_fin_saldos having count(*) > 0;
+select 'Comprador vê regras do caixa (NÃO devia)' t, count(*) from crm_fin_regras having count(*) > 0;
 update crm_fin_saldos set valor = 0 returning 'Comprador alterou saldo (NÃO devia)';
 select pg_temp.como('a0000000-0000-0000-0000-000000000001');
-select 'Admin vê financeiro' t, (select count(*) from crm_fin_lancamentos) l, (select count(*) from crm_fin_recorrentes) r, (select count(*) from crm_fin_saldos) s;
+select 'Admin vê financeiro' t, (select count(*) from crm_fin_lancamentos) l, (select count(*) from crm_fin_recorrentes) r, (select count(*) from crm_fin_saldos) s, (select count(*) from crm_fin_regras) g;
 select 'Financeiro no histórico (NÃO devia)' t, count(*) from crm_historico where tabela like 'crm_fin%' having count(*) > 0;
 -- Bruno desativado perde tudo
 reset role; update crm_usuarios set ativo=false where nome='Bruno'; set role authenticated; select pg_temp.como('d0000000-0000-0000-0000-000000000004');
@@ -185,6 +193,7 @@ select count(*) from crm_empresas; -- FALHA
 select count(*) from crm_notas; -- FALHA
 select count(*) from crm_fin_lancamentos; -- FALHA
 select count(*) from crm_fin_saldos; -- FALHA
+select count(*) from crm_fin_regras; -- FALHA
 select crm_proximo_vendedor(); -- FALHA
 select * from crm_duplicado_empresa('11222333000181', null, null); -- FALHA
 reset role;

@@ -14,12 +14,12 @@
   const TABELAS = ['usuarios', 'config', 'etapas', 'opcoes', 'produtos', 'modelos', 'metas', 'filtros',
     'empresas', 'contatos', 'negocios', 'negocio_itens', 'propostas', 'atividades', 'notas', 'nota_itens', 'titulos'];
   // Financeiro (contas a pagar e caixa): só o administrador; carregado à parte, ao abrir o Caixa.
-  const FIN = ['fin_recorrentes', 'fin_lancamentos', 'fin_saldos'];
+  const FIN = ['fin_recorrentes', 'fin_lancamentos', 'fin_saldos', 'fin_regras'];
   const CHAVE = { usuarios: 'user_id' };
   const chave = t => CHAVE[t] || 'id';
 
   function vazio() { const d = {}; TABELAS.forEach(t => { d[t] = []; }); return d; }
-  const finVazio = d => ({ recorrentes: (d && d.fin_recorrentes) || [], lancamentos: (d && d.fin_lancamentos) || [], saldos: (d && d.fin_saldos) || [] });
+  const finVazio = d => ({ recorrentes: (d && d.fin_recorrentes) || [], lancamentos: (d && d.fin_lancamentos) || [], saldos: (d && d.fin_saldos) || [], regras: (d && d.fin_regras) || [] });
 
   function uuid() {
     if (raiz.crypto && raiz.crypto.randomUUID) return raiz.crypto.randomUUID();
@@ -48,7 +48,8 @@
     titulos: { valor: 0, abono: false, origem: 'fkn' },
     fin_recorrentes: { tipo: 'saida', valor: 0, entre_empresas: false, ativo: true },
     fin_lancamentos: { tipo: 'saida', valor: 0, situacao: 'aberto', entre_empresas: false, origem: 'tela' },
-    fin_saldos: {}
+    fin_saldos: {},
+    fin_regras: { tipo: 'saida', entre_empresas: false }
   };
 
   // Filhos apagados junto (no Supabase é o "on delete cascade"/"set null").
@@ -271,7 +272,7 @@
 
   Supa.prototype.carregarFin = async function () {
     const r = await Promise.all(FIN.map(t => tudo(this.sb, t)));
-    return finVazio({ fin_recorrentes: r[0], fin_lancamentos: r[1], fin_saldos: r[2] });
+    return finVazio({ fin_recorrentes: r[0], fin_lancamentos: r[1], fin_saldos: r[2], fin_regras: r[3] });
   };
 
   Supa.prototype.usuarioAtual = async function (userId) {

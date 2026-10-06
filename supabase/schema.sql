@@ -820,11 +820,18 @@ create table if not exists public.crm_fin_lancamentos (
   chave_fkn         text,
   titulo_duplicata  text,
   observacoes       text,
+  frase             text,
+  frase_antes       jsonb,
   criado_por        uuid default auth.uid(),
   criado_em         timestamptz not null default now(),
   atualizado_em     timestamptz not null default now(),
   constraint crm_fin_lancamentos_pago_ck check (situacao <> 'pago' or pago_em is not null)
 );
+-- Lançado por frase ("pedágio 350 pago hoje", frases.js): frase = a linha escrita; frase_antes = como
+-- a conta estava antes da baixa ou do ajuste (o Desfazer volta para ela; sem frase_antes, o Desfazer
+-- apaga o lançamento que a frase criou).
+alter table public.crm_fin_lancamentos add column if not exists frase       text;
+alter table public.crm_fin_lancamentos add column if not exists frase_antes jsonb;
 create unique index if not exists crm_fin_lanc_recorrente_uq on public.crm_fin_lancamentos (recorrente_id, competencia) where recorrente_id is not null;
 create unique index if not exists crm_fin_lanc_fkn_uq on public.crm_fin_lancamentos (chave_fkn) where chave_fkn is not null;
 create unique index if not exists crm_fin_lanc_titulo_uq on public.crm_fin_lancamentos (titulo_duplicata) where titulo_duplicata is not null;
@@ -840,10 +847,24 @@ create table if not exists public.crm_fin_saldos (
   criado_por  uuid default auth.uid(),
   criado_em   timestamptz not null default now()
 );
+-- Regra aprendida das frases ("lembrar" na conferência): as palavras da frase (chave, em ordem) →
+-- categoria, fornecedor e entre empresas da próxima vez.
+create table if not exists public.crm_fin_regras (
+  id              uuid primary key default gen_random_uuid(),
+  tipo            text not null default 'saida' check (tipo in ('entrada','saida')),
+  chave           text not null check (length(btrim(chave)) > 0),
+  categoria       text,
+  fornecedor      text,
+  entre_empresas  boolean not null default false,
+  criado_por      uuid default auth.uid(),
+  criado_em       timestamptz not null default now(),
+  atualizado_em   timestamptz not null default now(),
+  unique (tipo, chave)
+);
 do $$
 declare t text;
 begin
-  foreach t in array array['crm_fin_recorrentes','crm_fin_lancamentos','crm_fin_saldos']
+  foreach t in array array['crm_fin_recorrentes','crm_fin_lancamentos','crm_fin_saldos','crm_fin_regras']
   loop
     if t <> 'crm_fin_saldos' then
       execute format('drop trigger if exists %I on public.%I', t || '_atualizado_em', t);

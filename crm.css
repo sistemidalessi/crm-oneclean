@@ -678,3 +678,14 @@ table.cx-grade td.alvo { outline: 2px dashed var(--azul); outline-offset: -3px; 
 .cx-venc td small { display: block; color: var(--suave); }
 tr.apagado td { opacity: .55; }
 @media (max-width: 700px) { .cx-saldo { align-items: flex-start; width: 100%; } }
+.cx-frases { padding: 10px 14px; }
+.cx-frases label small { color: var(--suave); font-size: .78rem; }
+.cx-frases-linha { display: flex; gap: 8px; align-items: stretch; margin-top: 6px; }
+.cx-frases-linha textarea { flex: 1; min-width: 0; resize: vertical; font: inherit; padding: 6px 8px; border: 1px solid var(--borda); border-radius: 6px; }
+.cx-conf { border: 1px solid var(--borda); border-radius: 8px; padding: 6px 10px 8px; margin: 0 0 10px; }
+.cx-conf legend { font-weight: 700; padding: 0 4px; }
+.cx-conf legend small { color: var(--suave); font-weight: 400; }
+.cx-conf-motivo { margin: 0 0 6px; font-size: .82rem; color: var(--verde); }
+.cx-conf-baixa .cx-n, .cx-conf-ignora .cx-n, .cx-conf-ignora .cx-vd { display: none; }
+.cx-conf-ignora { opacity: .6; }
+@media (max-width: 600px) { .cx-frases-linha { flex-direction: column; } }
