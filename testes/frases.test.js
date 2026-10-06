@@ -111,13 +111,13 @@ test('gravação e desfazer', () => {
   assert.deepEqual(g.atualizar[0].patch, { situacao: 'pago', pago_em: HOJE, baixa: 'caixa', baixado_em: agora, valor: 350, frase: 'pedágio 350 pago hoje',
     frase_antes: { situacao: 'aberto', pago_em: null, baixa: null, baixado_em: null, valor: 380, vencimento: '2026-10-15' } });
   const baixada = Object.assign({}, lancamentos[0], g.atualizar[0].patch);
-  assert.deepEqual(F.desfazer(baixada), { id: 'c3', patch: { situacao: 'aberto', pago_em: null, baixa: null, baixado_em: null, valor: 380, vencimento: '2026-10-15', frase: null, frase_antes: null } });
+  assert.deepEqual(F.desfazer(baixada).atualizar, [{ id: 'c3', patch: { situacao: 'aberto', pago_em: null, baixa: null, baixado_em: null, valor: 380, vencimento: '2026-10-15', frase: null, frase_antes: null } }]);
 
   p = um('recebi 2.301 drogaria ontem', { titulos });
   g = F.gravacao(p, { titulos, agora });
   assert.equal(g.inserir.length, 1);
   assert.deepEqual([g.inserir[0].origem, g.inserir[0].titulo_duplicata, g.inserir[0].valor, g.inserir[0].pago_em], ['titulo', '100-1', 2301, '2026-10-05']);
-  assert.deepEqual(F.desfazer(Object.assign({ id: 'n1' }, g.inserir[0])), { remover: 'n1' });
+  assert.deepEqual(F.desfazer(Object.assign({ id: 'n1' }, g.inserir[0])).remover, ['n1']);
 
   p = um('vai sair 12 mil de fornecedor dia 20');
   g = F.gravacao(p, { agora });
@@ -127,7 +127,7 @@ test('gravação e desfazer', () => {
   assert.deepEqual([g.inserir[0].situacao, g.inserir[0].pago_em, g.inserir[0].baixa], ['pago', HOJE, 'caixa']);
   assert.equal(F.desfazer({ id: 'x', situacao: 'pago' }), null, 'lançamento que não veio de frase');
   p.acao = 'ignorar';
-  assert.deepEqual(F.gravacao(p, { agora }), { inserir: [], atualizar: [], titulos: [] });
+  assert.deepEqual(F.gravacao(p, { agora }), { inserir: [], atualizar: [], titulos: [], recorrentes: [] });
 });
 
 test('receber pela frase um título com previsão ligada baixa a previsão (não cria outra entrada)', () => {
@@ -137,5 +137,85 @@ test('receber pela frase um título com previsão ligada baixa a previsão (não
   assert.equal(p.acao, 'titulo:00991/01');
   const g = F.gravacao(p, { lancamentos, titulos, agora: 'x' });
   assert.deepEqual([g.inserir.length, g.atualizar.length, g.atualizar[0].id, g.atualizar[0].patch.situacao], [0, 1, 'm1', 'pago']);
-  assert.deepEqual(F.desfazer(Object.assign({}, lancamentos[0], g.atualizar[0].patch)).patch.situacao, 'aberto');
+  assert.deepEqual(F.desfazer(Object.assign({}, lancamentos[0], g.atualizar[0].patch)).atualizar[0].patch.situacao, 'aberto');
+});
+
+// Critério de aceite combinado com o caixa da Agilité (06/10/2026): a mesma frase dá o mesmo resultado
+// nos dois sistemas. Mesmas frases do pedido, com nomes trocados por fictícios.
+test('aceite com a Agilité: separação, valores, parcelas e direção', () => {
+  let l = le('vt: 63 - vr: 152,67 - paseo');
+  assert.deepEqual(l.map(x => [x.tipo, x.valor, x.data, x.rotulo]), [['saida', 63, HOJE, 'vt paseo'], ['saida', 152.67, HOJE, 'vr paseo']]);
+  l = le('paguei Credor - I 1.764,46 parcela 05 de 48');
+  assert.deepEqual(l.map(x => [x.tipo, x.valor, x.parcelas || null]), [['saida', 1764.46, null]], 'não é R$ 5 nem parcelamento');
+  l = le('Cartão 12x de 350 notebook');
+  assert.deepEqual(l.map(x => [x.tipo, x.valor, x.parcelas, x.categoria]), [['saida', 350, 12, 'Cartões']]);
+  assert.equal(F.gravacao(l[0], { agora: 'x' }).inserir[0].parcelas, 12);
+  l = le('Monitora 244,27 dia 15');
+  assert.deepEqual(l.map(x => [x.tipo, x.valor, x.data, x.situacao]), [['saida', 244.27, '2026-10-15', 'previsto']]);
+  l = le('VT 300, VR 500 Condominio Alfa pago hoje');
+  assert.deepEqual(l.map(x => [x.tipo, x.valor, x.data, x.situacao, x.categoria, x.podeLembrar]), [['saida', 300, HOJE, 'realizado', 'Benefícios (VT, VR, cesta)', false], ['saida', 500, HOJE, 'realizado', 'Benefícios (VT, VR, cesta)', false]]);
+  l = le('recebi 12.328,72 Cliente Fulano ontem');
+  assert.deepEqual(l.map(x => [x.tipo, x.valor, x.data]), [['entrada', 12328.72, '2026-10-05']]);
+  assert.equal(F.extrairValor('100,000,00').valor, 100000);
+  assert.equal(F.extrairValor('1,570,77').valor, 1570.77);
+  assert.equal(F.extrairValor('100,000').valor, 100000);
+  l = le('entrada 5.000 reembolso Empresa Beta\nsaída 5.000 Monitora dia 15');
+  assert.deepEqual(l.map(x => [x.tipo, x.valor, !!x.emprestimo]), [['entrada', 5000, false], ['saida', 5000, false]], 'nomes diferentes: dois lançamentos');
+});
+
+test('aceite com a Agilité: empréstimos (devolução única, em outra linha e em parcelas)', () => {
+  let l = le('entrada de 29.000 Fulana - data de hoje\nsaída 29.000 Fulana - dia 14/10');
+  assert.equal(l.length, 1);
+  assert.deepEqual([l[0].tipo, l[0].valor, l[0].data, l[0].categoria, l[0].emprestimo.credor, l[0].emprestimo.devolve, l[0].emprestimo.em], ['entrada', 29000, HOJE, 'Empréstimos recebidos', 'Fulana', 29000, '2026-10-14']);
+  l = le('entrou 57550 de Banco Exemplo e será devolvido 60000 no dia 14/10, a diferença é juros');
+  assert.equal(l.length, 1);
+  assert.deepEqual([l[0].valor, l[0].data, l[0].emprestimo.devolve, l[0].emprestimo.em], [57550, HOJE, 60000, '2026-10-14']);
+  let g = F.gravacao(l[0], { agora: 'x' });
+  assert.deepEqual(g.inserir.map(x => [x.tipo, x.valor, x.vencimento, x.situacao, x.emprestimo || false, x.juros || null]),
+    [['entrada', 57550, HOJE, 'pago', true, null], ['saida', 60000, '2026-10-14', 'aberto', false, 2450]]);
+  l = le('entrou 48 mil do Fulano, sai dia 14');
+  assert.deepEqual([l.length, l[0].valor, l[0].data, l[0].emprestimo.devolve, l[0].emprestimo.em], [1, 48000, HOJE, 48000, '2026-10-14']);
+  for (const frase of ['empréstimo de R$ 100,000,00 - Credor Exemplo\ndevolução será 48 parcelas de R$ 3.292,29, todo dia 18 de cada mês, onde a primeira será 18/10.',
+    'empréstimo de R$ 100.000,00 do Credor, devolve em 48x de 3.292,29 a partir de 18/10']) {
+    l = le(frase);
+    assert.equal(l.length, 1, frase);
+    assert.deepEqual([l[0].tipo, l[0].valor, l[0].data, l[0].situacao], ['entrada', 100000, HOJE, 'realizado'], 'a entrada é de hoje e já aconteceu');
+    assert.deepEqual(l[0].emprestimo.parcelas, { n: 48, valor: 3292.29, primeira: '2026-10-18', dia: 18 });
+    g = F.gravacao(l[0], { agora: 'x' });
+    assert.equal(g.recorrentes.length, 1);
+    const rec = g.recorrentes[0];
+    assert.deepEqual([rec.valor, rec.parcelas, rec.dia, rec.inicio, rec.valor_contratado, rec.categoria], [3292.29, 48, 18, '2026-10-01', 100000, 'Empréstimos e giro']);
+    const p1 = g.inserir.find(x => x.recorrente_id === rec.id);
+    assert.deepEqual([p1.vencimento, p1.valor, p1.parcela, p1.juros], ['2026-10-18', 3292.29, 1, 2048.27], 'parcela 01 com os juros da Price');
+    assert.deepEqual(g.inserir[0].frase_antes.criou, { lancamentos: [p1.id], recorrentes: [rec.id] });
+  }
+});
+
+test('desfazer o empréstimo em parcelas: apaga tudo, ou só desliga a recorrente se já pagou parcela', () => {
+  const l = le('empréstimo de 100 mil do Credor, devolve em 48x de 3.292,29 a partir de 18/10');
+  const g = F.gravacao(l[0], { agora: 'x' });
+  const entrada = g.inserir[0], p1 = g.inserir[1], rid = g.recorrentes[0].id;
+  const p2 = { id: 'p2', recorrente_id: rid, situacao: 'aberto' };
+  let d = F.desfazer(entrada, { lancamentos: g.inserir.concat([p2]) });
+  assert.deepEqual([d.remover.sort(), d.recorrentesRemover, d.recorrentesDesligar], [[entrada.id, p1.id, 'p2'].sort(), [rid], []]);
+  d = F.desfazer(entrada, { lancamentos: [entrada, Object.assign({}, p1, { situacao: 'pago' }), p2] });
+  assert.deepEqual([d.remover.sort(), d.recorrentesRemover, d.recorrentesDesligar], [[entrada.id, 'p2'].sort(), [], [rid]]);
+});
+
+test('casar com conta já lançada: o nome do cliente não basta e a palavra forte não paga outra categoria', () => {
+  const lancamentos = [{ id: 's1', tipo: 'saida', descricao: 'Monitoramento Sekron — Espaço Exemplo', categoria: 'Sekron (monitoramento)', valor: 624, vencimento: '2026-10-15', situacao: 'aberto' }];
+  const clientes = [{ id: 'c1', nome: 'CONDOMINIO ESPACO EXEMPLO' }];
+  assert.equal(le('8 diárias julia Espaço e Vida 624').length, 1, '"Espaço e Vida" não parte a frase em dois itens');
+  let p = um('8 diárias julia Espaço Exemplo 624', { lancamentos, clientes });
+  assert.equal(p.valor, 624, '"8 diárias" é quantidade');
+  assert.equal(p.acao, 'novo');
+  assert.equal(p.categoria, 'Diárias de cobertura');
+  assert.ok(p.opcoes.some(o => o.acao === 'baixar:s1'), 'a conta continua nas opções');
+  p = um('8 diárias julia Espaço Exemplo 624', { lancamentos });
+  assert.equal(p.acao, 'novo', 'mesmo sem o cadastro do cliente, a palavra "diária" não paga o Sekron');
+  p = um('sekron espaço exemplo 624 dia 15', { lancamentos, clientes });
+  assert.equal(p.acao, 'ignorar', 'Sekron previsto igual à conta dele: "já está no caixa", não duplica');
+  assert.match(p.motivo, /já está no caixa/);
+  p = um('paguei sekron espaço exemplo 624', { lancamentos, clientes });
+  assert.equal(p.acao, 'baixar:s1');
 });

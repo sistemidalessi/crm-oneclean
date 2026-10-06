@@ -836,6 +836,13 @@ create table if not exists public.crm_fin_lancamentos (
 -- apaga o lançamento que a frase criou).
 alter table public.crm_fin_lancamentos add column if not exists frase       text;
 alter table public.crm_fin_lancamentos add column if not exists frase_antes jsonb;
+-- Empréstimo recebido (06/10/2026, frases iguais às da Agilité): a entrada é marcada (não é receita);
+-- a devolução em parcelas é uma recorrente com o valor contratado (ou a taxa) e cada parcela gerada
+-- leva a parte de juros da tabela Price (caixa-calculo.js, cronogramaPrice).
+alter table public.crm_fin_lancamentos add column if not exists emprestimo boolean not null default false;
+alter table public.crm_fin_lancamentos add column if not exists juros numeric(14,2) check (juros is null or juros >= 0);
+alter table public.crm_fin_recorrentes add column if not exists valor_contratado numeric(14,2) check (valor_contratado is null or valor_contratado > 0);
+alter table public.crm_fin_recorrentes add column if not exists taxa_mes_pct numeric(8,4) check (taxa_mes_pct is null or taxa_mes_pct >= 0);
 create unique index if not exists crm_fin_lanc_recorrente_uq on public.crm_fin_lancamentos (recorrente_id, competencia) where recorrente_id is not null;
 create unique index if not exists crm_fin_lanc_fkn_uq on public.crm_fin_lancamentos (chave_fkn) where chave_fkn is not null;
 create unique index if not exists crm_fin_lanc_titulo_uq on public.crm_fin_lancamentos (titulo_duplicata) where titulo_duplicata is not null;

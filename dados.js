@@ -47,7 +47,7 @@
     nota_itens: { quantidade: 0, valor_unitario: 0, valor_total: 0, ordem: 0 },
     titulos: { valor: 0, abono: false, origem: 'fkn' },
     fin_recorrentes: { tipo: 'saida', valor: 0, entre_empresas: false, ativo: true },
-    fin_lancamentos: { tipo: 'saida', valor: 0, situacao: 'aberto', entre_empresas: false, origem: 'tela' },
+    fin_lancamentos: { tipo: 'saida', valor: 0, situacao: 'aberto', entre_empresas: false, origem: 'tela', emprestimo: false },
     fin_saldos: {},
     fin_regras: { tipo: 'saida', entre_empresas: false }
   };

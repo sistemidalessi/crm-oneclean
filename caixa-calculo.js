@@ -53,6 +53,42 @@
   const creditoTitulo = (venc, d1) => { const pg = posterga(venc); return d1 === false ? pg : utilDepois(pg); };
 
   // ------------------------------------------------------------ recorrentes
+  // Empréstimo devolvido em parcelas fixas (tabela Price, igual à Agilité — recorrentes.js de lá):
+  // com o valor contratado (PV) acha a taxa mensal por Newton; com a taxa, acha o PV. Parcela k:
+  // juros = saldo antes × taxa, principal = parcela − juros (a última zera o saldo).
+  function taxaPorNewton(pmt, n, pv) {
+    if (!(pmt > 0 && n > 0 && pv > 0) || pmt * n <= pv) return 0; // sem juros (ou dado inconsistente)
+    let i = 0.02;
+    for (let it = 0; it < 100; it++) {
+      const f = pmt * (1 - Math.pow(1 + i, -n)) / i - pv;
+      const df = pmt * (n * Math.pow(1 + i, -n - 1) * i - (1 - Math.pow(1 + i, -n))) / (i * i);
+      const ni = i - f / df;
+      if (!isFinite(ni) || ni <= 0) { i = i / 2; continue; }
+      if (Math.abs(ni - i) < 1e-12) { i = ni; break; }
+      i = ni;
+    }
+    return i;
+  }
+  function cronogramaPrice(r) {
+    const pmt = Number(r.valor) || 0, n = Number(r.parcelas) || 0;
+    if (!(pmt > 0 && n > 0)) return null;
+    let i, pv;
+    if (Number(r.valor_contratado) > 0) { pv = Number(r.valor_contratado); i = taxaPorNewton(pmt, n, pv); }
+    else if (Number(r.taxa_mes_pct) > 0) { i = Number(r.taxa_mes_pct) / 100; pv = pmt * (1 - Math.pow(1 + i, -n)) / i; }
+    else return null;
+    if (!(i > 0)) return null;
+    const parcelas = [];
+    let saldo = pv;
+    for (let k = 1; k <= n; k++) {
+      const juros = r2(saldo * i);
+      let principal = r2(pmt - juros);
+      if (k === n) principal = r2(saldo);
+      parcelas.push({ k, juros, principal });
+      saldo = Math.max(0, saldo - principal);
+    }
+    return { taxaPct: i * 100, pv, totalJuros: r2(parcelas.reduce((t, x) => t + x.juros, 0)), parcelas };
+  }
+
   // "AAAA-MM" + dia → data, sem estourar o fim do mês (dia 31 em fevereiro → 28/29).
   function diaDoMes(compet, dia) {
     const [a, m] = compet.split('-').map(Number);
@@ -72,9 +108,13 @@
       let parcela = null;
       if (r.parcelas) { parcela = (r.parcela_inicio || 1) + mesesEntre(ini, compet); if (parcela > r.parcelas) return; }
       if (ja.has(r.id + '|' + compet)) return;
-      out.push({ tipo: r.tipo || 'saida', descricao: r.descricao + (parcela ? ' (' + String(parcela).padStart(2, '0') + ' de ' + r.parcelas + ')' : ''),
+      // empréstimo com juros (valor contratado ou taxa): a parcela leva a parte de juros
+      const pr = parcela ? cronogramaPrice(r) : null, pk = pr && pr.parcelas[parcela - 1];
+      out.push(Object.assign({ tipo: r.tipo || 'saida', descricao: r.descricao + (parcela ? ' (' + String(parcela).padStart(2, '0') + ' de ' + r.parcelas + ')' : ''),
         fornecedor: r.fornecedor || null, categoria: r.categoria || null, valor: r2(r.valor), vencimento: diaDoMes(compet, r.dia),
-        entre_empresas: !!r.entre_empresas, origem: 'recorrente', recorrente_id: r.id, competencia: compet + '-01', parcela, parcelas: r.parcelas || null });
+        entre_empresas: !!r.entre_empresas, origem: 'recorrente', recorrente_id: r.id, competencia: compet + '-01', parcela, parcelas: r.parcelas || null },
+        pk ? { juros: pk.juros, observacoes: 'Parcela ' + parcela + ' de ' + r.parcelas + ': juros R$ ' + pk.juros.toFixed(2).replace('.', ',') + ' + principal R$ ' + pk.principal.toFixed(2).replace('.', ',') +
+          ' (Price, ' + pr.taxaPct.toFixed(2).replace('.', ',') + '% a.m.)' } : {}));
     });
     return out;
   }
@@ -197,7 +237,7 @@
   const CATEGORIAS_SAIDA = ['Fornecedores', 'Salários', 'Benefícios (VT, VR, cesta)', 'FGTS e encargos', 'Pró-labore', 'Retiradas dos sócios',
     'Reembolso da folha à Agilité', 'Aluguel', 'Energia', 'Água', 'Telefone e internet', 'Contabilidade', 'Sistema (FKN)', 'Convênio médico',
     'Impostos', 'Reparcelamentos', 'Cartões', 'Empréstimos e giro', 'Frete e combustível', 'Tarifas bancárias', 'Outras saídas'];
-  const CATEGORIAS_ENTRADA = ['Duplicatas recebidas', 'Material vendido à Agilité', 'Outras entradas'];
+  const CATEGORIAS_ENTRADA = ['Duplicatas recebidas', 'Material vendido à Agilité', 'Empréstimos recebidos', 'Outras entradas'];
   // Passagem entre OneClean e Agilité: no "Geral" das duas empresas esses valores se anulam.
   const ENTRE_EMPRESAS = /agilit/i;
 
@@ -240,7 +280,8 @@
     const doLanc = (l, valor, situacao, extra) => {
       const ag = agregar(l);
       return Object.assign({ tipo: l.tipo === 'entrada' ? 'entrada' : 'saida', descricao: ag ? (l.categoria || 'Pessoal') : limpar(l.descricao), valor: r2(valor), situacao,
-        categoria: l.categoria || (ag ? 'Pessoal' : null), cliente_fornecedor: ag ? null : (limpar(l.fornecedor) || null), entre_empresas: entre(l) }, extra || {}, { _ag: ag });
+        categoria: l.categoria || (ag ? 'Pessoal' : null), cliente_fornecedor: ag ? null : (limpar(l.fornecedor) || null), entre_empresas: entre(l) },
+        l.emprestimo ? { emprestimo: true } : {}, Number(l.juros) > 0 ? { juros: r2(l.juros) } : {}, extra || {}, { _ag: ag });
     };
     const somar = (itens, chave) => {
       const out = [], idx = new Map();
@@ -325,7 +366,7 @@
     };
   }
 
-  const O = { resumoLeitura, limpar, ligacoesTitulos, ligadasPorTitulo, recebidosDe, feriados, feriado, util, posterga, utilDepois, porqueNaoUtil, creditoTitulo, pascoa, diaDoMes, gerarMes, ancora, saldoAtual,
+  const O = { cronogramaPrice, taxaPorNewton, resumoLeitura, limpar, ligacoesTitulos, ligadasPorTitulo, recebidosDe, feriados, feriado, util, posterga, utilDepois, porqueNaoUtil, creditoTitulo, pascoa, diaDoMes, gerarMes, ancora, saldoAtual,
     itensGrade, saldosGrade, vencidas, receberVencido, CATEGORIAS_SAIDA, CATEGORIAS_ENTRADA, ENTRE_EMPRESAS, soma };
   raiz.CRMCaixa = O;
   if (typeof module !== 'undefined') module.exports = O;

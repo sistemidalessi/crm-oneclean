@@ -215,7 +215,8 @@
       intro: 'Escreva do jeito que fala, uma frase por linha. Sem dia na frase, vale ' + dm(pre.data) + '; sem "recebi" ou "paguei", vale ' + (pre.tipo === 'entrada' ? 'entrada' : 'saída') + '.',
       campos: [{ nome: 'texto', rotulo: 'O que aconteceu', tipo: 'textarea', largo: true, linhas: 3, obrigatorio: true, dica: pre.tipo === 'entrada' ? 'recebi 2.300 da Drogaria' : 'pedágio 350 pago, almoço 85' }],
       valores: {}, salvarTexto: 'Conferir',
-      rodape: '<button type="button" class="btn sec" data-acao="cx-add-form" data-id="' + esc(pre.tipo) + '" data-dia="' + esc(pre.data) + '">Formulário completo</button>',
+      rodape: '<button type="button" class="btn sec" data-acao="cx-falar" data-id="form" title="Ditado (Chrome ou Edge)">🎤 Falar</button>' +
+        '<button type="button" class="btn sec" data-acao="cx-add-form" data-id="' + esc(pre.tipo) + '" data-dia="' + esc(pre.data) + '">Formulário completo</button>',
       aoSalvar: async v => { conferirFrases(v.texto, { dataPadrao: pre.data, tipoPadrao: pre.tipo }); }
     });
   }
@@ -239,8 +240,21 @@
       campo('Categoria', '<input type="text" name="c' + i + '" value="' + esc(p.categoria) + '" list="cxCats" autocomplete="off">', 'cx-n') +
       campo(p.tipo === 'entrada' ? 'De quem' : 'Fornecedor', '<input type="text" name="f' + i + '" value="' + esc(p.fornecedor) + '" list="cxForn" autocomplete="off">', 'cx-n') +
       '<label class="campo check cx-n"><input type="checkbox" name="e' + i + '"' + (p.entre_empresas ? ' checked' : '') + '> Entre empresas (OneClean ↔ Agilité)</label>' +
-      (p.chave ? '<label class="campo check largo cx-n"><input type="checkbox" name="l' + i + '"> Lembrar categoria e fornecedor quando eu escrever "' + esc(p.rotulo || p.chave) + '"</label>' : '') +
+      (p.tipo === 'entrada' ? emprestimoHTML(p, i) : '') +
+      (p.chave && p.podeLembrar ? '<label class="campo check largo cx-n" title="Grava uma regra: da próxima vez que aparecer &quot;' + esc(p.rotulo || p.chave) + '&quot;, o CRM já classifica igual a esta linha — categoria, fornecedor e entre empresas.">' +
+        '<input type="checkbox" name="l' + i + '"> da próxima vez, classificar "' + esc(p.rotulo || p.chave) + '" igual</label>' : '') +
       '</div></fieldset>';
+    // toda entrada: "se for empréstimo, devolve em … o valor de … — ou em n parcelas de …, a 1ª em …"
+    function emprestimoHTML(p, i) {
+      const e = p.emprestimo || {}, pc = e.parcelas || {};
+      return '<label class="campo check largo cx-n"><input type="checkbox" name="m' + i + '"' + (p.emprestimo ? ' checked' : '') + '> É empréstimo recebido (não é receita)</label>' +
+        campo('Se for empréstimo, devolve em', '<input type="date" name="md' + i + '" value="' + esc(e.em || '') + '">', 'cx-n cx-emp') +
+        campo('o valor de (R$)', '<input type="number" name="mv' + i + '" step="0.01" min="0" inputmode="decimal" value="' + esc(e.devolve != null ? e.devolve : '') + '" placeholder="o mesmo">', 'cx-n cx-emp') +
+        campo('— ou em quantas parcelas', '<input type="number" name="mn' + i + '" step="1" min="0" value="' + esc(pc.n || '') + '">', 'cx-n cx-emp') +
+        campo('de (R$)', '<input type="number" name="mp' + i + '" step="0.01" min="0" inputmode="decimal" value="' + esc(pc.valor || '') + '">', 'cx-n cx-emp') +
+        campo('a 1ª em', '<input type="date" name="m1' + i + '" value="' + esc(pc.primeira || '') + '">', 'cx-n cx-emp') +
+        campo('todo dia', '<input type="number" name="mdia' + i + '" step="1" min="1" max="31" value="' + esc(pc.dia || '') + '">', 'cx-n cx-emp');
+    }
     const listas = '<datalist id="cxCats">' + CATEGORIAS_SAIDA.concat(CATEGORIAS_ENTRADA).concat((F.regras || []).map(g => g.categoria)).filter((x, i, a) => x && a.indexOf(x) === i).map(c => '<option value="' + esc(c) + '">').join('') + '</datalist>' +
       '<datalist id="cxForn">' + ctx.fornecedores.slice(0, 500).map(f => '<option value="' + esc(f.nome) + '">').join('') + '</datalist>';
     CRM.abrirForm({
@@ -253,16 +267,36 @@
           const a = fs.querySelector('select[name^="a"]').value;
           fs.classList.toggle('cx-conf-baixa', /^(baixar|ajustar|titulo):/.test(a));
           fs.classList.toggle('cx-conf-ignora', a === 'ignorar');
+          const m = fs.querySelector('input[name^="m"][type="checkbox"]'), t = fs.querySelector('select[name^="t"]');
+          fs.classList.toggle('cx-sem-emp', !m || !m.checked || t.value !== 'entrada');
         };
-        form.querySelectorAll('.cx-conf').forEach(fs => { mostra(fs); fs.querySelector('select[name^="a"]').addEventListener('change', () => mostra(fs)); });
+        form.querySelectorAll('.cx-conf').forEach(fs => {
+          mostra(fs);
+          fs.querySelectorAll('select[name^="a"], select[name^="t"], input[name^="m"][type="checkbox"]').forEach(x => x.addEventListener('change', () => mostra(fs)));
+        });
       },
       aoSalvar: async (v, form) => {
         const el = n => form.elements[n];
-        const lidas = ps.map((p, i) => Object.assign({}, p, {
-          acao: el('a' + i).value, tipo: el('t' + i).value, valor: r2(String(el('v' + i).value).replace(',', '.')), data: el('d' + i).value || p.data,
-          situacao: el('s' + i).value, descricao: el('x' + i).value.trim() || p.descricao, categoria: el('c' + i).value.trim(), fornecedor: el('f' + i).value.trim(),
-          entre_empresas: el('e' + i).checked || ENTRE_EMPRESAS.test(el('c' + i).value), lembrar: !!(el('l' + i) && el('l' + i).checked)
-        }));
+        const num = n => { const x = el(n); const v = x ? Number(String(x.value).replace(',', '.')) : NaN; return isFinite(v) && v > 0 ? r2(v) : null; };
+        const lidas = ps.map((p, i) => {
+          const q = Object.assign({}, p, {
+            acao: el('a' + i).value, tipo: el('t' + i).value, valor: r2(String(el('v' + i).value).replace(',', '.')), data: el('d' + i).value || p.data,
+            situacao: el('s' + i).value, descricao: el('x' + i).value.trim() || p.descricao, categoria: el('c' + i).value.trim(), fornecedor: el('f' + i).value.trim(),
+            entre_empresas: el('e' + i).checked || ENTRE_EMPRESAS.test(el('c' + i).value), lembrar: !!(el('l' + i) && el('l' + i).checked)
+          });
+          // empréstimo: o que está na tela vale (a pessoa pode corrigir valor, data e parcelas)
+          q.emprestimo = null;
+          if (q.tipo === 'entrada' && el('m' + i) && el('m' + i).checked) {
+            const n = num('mn' + i), pv = num('mp' + i), primeira = el('m1' + i).value;
+            if (n && !pv) throw new Error('"' + p.trecho + '": informe o valor da parcela do empréstimo.');
+            if (n && pv && !primeira) throw new Error('"' + p.trecho + '": informe o dia da 1ª parcela do empréstimo.');
+            q.emprestimo = { credor: q.fornecedor || q.descricao, devolve: num('mv' + i), em: el('md' + i).value || null,
+              parcelas: n && pv ? { n: Math.round(n), valor: pv, primeira, dia: Math.round(num('mdia' + i) || +primeira.slice(8, 10)) } : null };
+            q.acao = 'novo';
+            if (!q.categoria || q.categoria === p.categoria) q.categoria = 'Empréstimos recebidos';
+          }
+          return q;
+        });
         lidas.forEach(p => {
           if (p.acao === 'ignorar') return;
           if (!(p.valor > 0)) throw new Error('"' + p.trecho + '": informe o valor.');
@@ -273,6 +307,7 @@
         let n = 0;
         for (let i = 0; i < lidas.length; i++) {
           const g = planos[i];
+          for (const r of g.recorrentes || []) troca(F.recorrentes, await CRM.store().inserir('fin_recorrentes', r));
           for (const a of g.atualizar) { troca(F.lancamentos, await CRM.store().atualizar('fin_lancamentos', a.id, a.patch)); n++; }
           if (g.inserir.length) { (await CRM.store().inserirVarios('fin_lancamentos', g.inserir)).forEach(x => troca(F.lancamentos, x)); n += g.inserir.length; }
           const p = lidas[i];
@@ -386,7 +421,8 @@
   function caixaFrases() {
     return '<section class="cartao cx-frases"><label for="cxFrases"><strong>Escreva o que aconteceu</strong> <small>uma frase por linha — o CRM acha a conta ou o título que bate, a categoria e o fornecedor; nada é gravado antes de você conferir</small></label>' +
       '<div class="cx-frases-linha"><textarea id="cxFrases" rows="2" placeholder="pedágio 350 pago hoje · recebi 2.300 da Drogaria ontem · aluguel galpão 4.500 dia 10">' + esc(rascunho) + '</textarea>' +
-      '<button type="button" class="btn" data-acao="cx-frases">Conferir</button></div></section>';
+      '<span class="cx-frases-botoes"><button type="button" class="btn sec" data-acao="cx-falar" data-id="caixa" title="Ditado (Chrome ou Edge): fale e confira o texto antes de Conferir">🎤 Falar</button>' +
+      '<button type="button" class="btn" data-acao="cx-frases">Conferir</button></span></div></section>';
   }
   function blocosVencidos() {
     const h = hoje();
@@ -423,7 +459,8 @@
       '<label class="btn sec arquivo" title="No FKN: Contas à Pagar por Conta/Fornecedor (Sifn083), Em aberto, salvar em CSV. O vigia também manda sozinho.">Atualizar do FKN<input type="file" id="cxPagarFkn" accept=".csv,.txt,text/csv"></label></div>' +
       (l.length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>' + (filtro.situacao === 'pagas' ? 'Pago em' : 'Vencimento') + '</th><th>Descrição</th><th>Categoria</th><th class="num">Valor</th><th>Situação</th><th></th></tr></thead><tbody>' +
         l.map(x => '<tr class="clicavel" data-acao="cx-editar" data-id="' + esc(x.id) + '" tabindex="0"><td>' + esc(R.dataBR(filtro.situacao === 'pagas' ? x.pago_em : x.vencimento)) + '</td>' +
-          '<td><strong>' + esc(x.descricao) + '</strong>' + (x.fornecedor || x.entre_empresas || x.origem !== 'tela' ? '<small>' + esc([x.fornecedor, x.entre_empresas ? 'entre empresas' : '', x.origem === 'recorrente' ? 'recorrente' : x.origem === 'fkn' ? 'do FKN' : x.origem === 'planilha' ? 'da planilha' : '', x.titulo_duplicata ? (x.situacao === 'pago' ? 'recebida pelo título ' : 'ligada ao título ') + x.titulo_duplicata : ''].filter(Boolean).join(' · ')) + '</small>' : '') + '</td>' +
+          '<td><strong>' + esc(x.descricao) + '</strong>' + (x.fornecedor || x.entre_empresas || x.origem !== 'tela' ? '<small>' + esc([x.fornecedor, x.entre_empresas ? 'entre empresas' : '', x.origem === 'recorrente' ? 'recorrente' : x.origem === 'fkn' ? 'do FKN' : x.origem === 'planilha' ? 'da planilha' : '', x.titulo_duplicata ? (x.situacao === 'pago' ? 'recebida pelo título ' : 'ligada ao título ') + x.titulo_duplicata : '', x.emprestimo ? 'empréstimo recebido (não é receita)' : '',
+            Number(x.juros) > 0 ? 'juros ' + R.moeda(x.juros) : ''].filter(Boolean).join(' · ')) + '</small>' : '') + '</td>' +
           '<td>' + esc(x.categoria || '') + '</td><td class="num ' + (x.tipo === 'entrada' ? 'cx-pos' : 'cx-neg') + '">' + (x.tipo === 'entrada' ? '+' : '−') + esc(R.moeda(x.valor)) + '</td><td>' + seloSituacao(x, h) + '</td>' +
           '<td class="acoes-linha">' + (x.situacao === 'aberto' ? '<button type="button" class="mini" data-acao="cx-pagar" data-id="' + esc(x.id) + '">' + (x.tipo === 'entrada' ? 'Recebi' : 'Paguei') + ' hoje</button>' : x.situacao === 'pausado' ? '<button type="button" class="mini" data-acao="cx-voltar" data-id="' + esc(x.id) + '">Voltar para o caixa</button>' : '') + '</td></tr>').join('') +
         '</tbody><tfoot><tr><td colspan="3">' + l.length + ' lançamento(s)</td><td class="num"><strong>' + esc(R.moeda(tot)) + '</strong></td><td colspan="2"></td></tr></tfoot></table></div>'
@@ -507,11 +544,41 @@
     'cx-add': (id, el) => formFrase({ tipo: id, data: comDia(el) }),
     'cx-add-form': (id, el) => { fecha(); const data = comDia(el); setTimeout(() => formLanc(null, { tipo: id, data }), 0); },
     'cx-frases': () => { const t = $('#cxFrases'); if (t) rascunho = t.value; try { conferirFrases(rascunho, {}); } catch (e) { CRM.toast(e.message, true); } },
-    'cx-desfrase': id => {
+    'cx-desfrase': async id => {
       fecha();
-      const d = raiz.CRMFrases.desfazer(lanc(id));
+      const d = raiz.CRMFrases.desfazer(lanc(id), { lancamentos: F.lancamentos });
       if (!d) return;
-      (d.remover ? remove(d.remover) : grava(d.id, d.patch)).then(() => CRM.toast(d.remover ? 'Frase desfeita: o lançamento saiu do caixa.' : 'Frase desfeita: a conta voltou a ser como era.')).catch(CRM.falhou);
+      try {
+        const st = CRM.store();
+        for (const a of d.atualizar) troca(F.lancamentos, await st.atualizar('fin_lancamentos', a.id, a.patch));
+        for (const x of d.remover) await st.remover('fin_lancamentos', x);
+        F.lancamentos = F.lancamentos.filter(x => d.remover.indexOf(x.id) === -1);
+        for (const r of d.recorrentesRemover) await st.remover('fin_recorrentes', r);
+        F.recorrentes = F.recorrentes.filter(x => d.recorrentesRemover.indexOf(x.id) === -1);
+        for (const r of d.recorrentesDesligar) troca(F.recorrentes, await st.atualizar('fin_recorrentes', r, { ativo: false }));
+        CRM.render();
+        CRM.toast(d.atualizar.length ? 'Frase desfeita: a conta voltou a ser como era.' : 'Frase desfeita: ' + d.remover.length + ' lançamento(s) saíram do caixa' +
+          (d.recorrentesRemover.length ? ' e a conta recorrente do empréstimo foi apagada' : d.recorrentesDesligar.length ? '; a recorrente do empréstimo foi desligada (já tinha parcela paga)' : '') + '.');
+      } catch (e) { CRM.falhou(e); }
+    },
+    // ditado do navegador (Chrome/Edge): escreve no campo; a pessoa confere antes de "Conferir"
+    'cx-falar': (id, el) => {
+      const SR = raiz.SpeechRecognition || raiz.webkitSpeechRecognition;
+      if (!SR) { CRM.toast('O ditado só funciona no Chrome ou no Edge.', true); return; }
+      const alvo = id === 'form' ? $('#dlgForm textarea[name="texto"]') : $('#cxFrases');
+      if (!alvo) return;
+      const r = new SR();
+      r.lang = 'pt-BR'; r.interimResults = false; r.continuous = false;
+      r.onresult = ev => {
+        const t = [].slice.call(ev.results).map(x => x[0].transcript).join(' ').trim();
+        alvo.value = (alvo.value.trim() ? alvo.value.replace(/\s*$/, '\n') : '') + t;
+        if (alvo.id === 'cxFrases') rascunho = alvo.value;
+        alvo.focus();
+      };
+      r.onerror = ev => CRM.toast('Ditado: ' + (ev.error === 'not-allowed' ? 'o navegador não deixou usar o microfone' : ev.error), true);
+      r.onend = () => el && el.classList.remove('gravando');
+      if (el) el.classList.add('gravando');
+      r.start();
     },
     'cx-editar': id => { fecha(); const l = lanc(id); if (l) setTimeout(() => formLanc(l), 0); },
     'cx-item': (id, el) => menuItem(id, comDia(el)),

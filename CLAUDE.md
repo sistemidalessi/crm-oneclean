@@ -855,6 +855,29 @@ Anderson: cada sistema cuida da sua empresa; o "Geral" (as duas) é de quem lê 
   Agilité (~dia 5)". Na leitura, reembolso cuja descrição só tem componente (lista `COMPONENTES`) sai
   com a descrição; com qualquer outra palavra (um nome) volta a somar sem nome. Não havia VR/VT/cesta de
   30/09 lançado no CRM (o Caixa começou em outubro).
+- **Frases iguais às da Agilité (06/10, noite, pedido da sessão da Agilité):** `interpretar()` agora é cópia
+  do `src/caixa/interpretar.js` dela (commit c81e82e): " - " e " / " separam itens; contexto antes/depois
+  vai na frente/atrás do nome; "100,000,00" com vírgula de milhar; "48x de 3.292,29" / "12x de 350" = valor
+  da parcela (o número fica guardado); "entrada"/"saída" e "empréstimo" sem verbo dão a direção; "será",
+  "vou"… = previsto; **empréstimo**: devolução na mesma frase ("será devolvido 60000 dia 14/10"), em outra
+  linha para o mesmo nome (até +25%) ou em parcelas ("48 parcelas de …, todo dia 18, a primeira 18/10").
+  **Só no CRM (avisado à Agilité):** número antes de unidade ("8 diárias", "3 FTs") é quantidade, não valor,
+  e não parte a frase no " e " ("Espaço e Vida").
+  Gravação do empréstimo (`gravaEmprestimo`): entrada `emprestimo = true`, categoria "Empréstimos recebidos"
+  (não é receita); devolução única = saída prevista com `juros`; parcelas = recorrente "Empréstimo — <credor>"
+  com `valor_contratado` e a parcela 01 já em Contas a pagar; cada parcela gerada (`gerarMes`) leva `juros` e
+  a observação juros + principal pela **tabela Price** (`cronogramaPrice`, taxa por Newton: 2,05% a.m. e
+  parcela 01 = juros R$ 2.048,27 + principal R$ 1.244,02 no exemplo de R$ 100 mil em 48× R$ 3.292,29).
+  O que a frase criou vai em `frase_antes.criou` da entrada: "Desfazer a frase" apaga entrada, devolução,
+  parcelas em aberto e a recorrente (ou só a desliga se já pagou parcela). Conferência: toda entrada tem
+  "É empréstimo recebido" com devolve em/valor ou parcelas/valor/1ª/dia, editáveis.
+  Casar com conta: palavra **forte** ("diária", "uniforme", "Sekron", "energia", "contabilidade", "exame/ASO")
+  não paga sozinha conta de outra categoria e o nome do cliente (condomínio) não conta como palavra em
+  comum — a conta fica nas opções. "Lembrar" virou "da próxima vez, classificar "…" igual" e só aparece em
+  conta nova fora de folha/benefício. Botão **🎤 Falar** (ditado do Chrome/Edge). Anexo de PDF/imagem/boleto
+  da Agilité: ainda não (fica para depois). Banco: `crm_fin_lancamentos.emprestimo/juros` e
+  `crm_fin_recorrentes.valor_contratado/taxa_mes_pct`; a leitura manda `emprestimo` e `juros` nos itens.
+  Testes com nomes fictícios; a tabela de aceite com os nomes reais rodou só localmente.
 - **Leitura conferida com os dados reais (06/10, 15h):** reembolsos em 06, 14, 20 e 30/10 e os 6 títulos
   da Agilité só em 21/10, todos entre empresas. Cliente cadastrado como "Empresa | Contato" (padrão do
   Agendor, 27 clientes com título) saía com o nome do contato: na leitura agora vai só a empresa.

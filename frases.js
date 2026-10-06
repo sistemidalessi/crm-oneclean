@@ -15,24 +15,30 @@
    "Agilité" marca entre empresas. Funções puras, testadas em testes/frases.test.js. */
 (function (raiz) {
   'use strict';
+  // caixa-calculo.js carrega depois deste arquivo no index.html: buscar na hora de usar
+  const CX = () => raiz.CRMCaixa || (typeof require !== 'undefined' ? require('./caixa-calculo.js') : null);
+  const novoId = () => (raiz.crypto && raiz.crypto.randomUUID ? raiz.crypto.randomUUID() : require('crypto').randomUUID());
   const semAcento = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '');
   const baixo = s => semAcento(s).toLowerCase();
   const r2 = v => Math.round(Number(v || 0) * 100) / 100;
 
-  // ------------------------------------------------------------ leitura (igual à da Agilité)
+  // ------------------------------------------------------------ leitura (a MESMA da Agilité)
+  // Cópia de src/caixa/interpretar.js do agilite-sistema-gestao (commit c81e82e, 06/10/2026): a mesma
+  // frase dá o mesmo resultado nos dois caixas. Mudou lá? Copiar de novo para cá (e rodar os testes).
   const MESES = { jan: 1, fev: 2, mar: 3, abr: 4, mai: 5, jun: 6, jul: 7, ago: 8, set: 9, out: 10, nov: 11, dez: 12 };
-  const ENTRADA = /\b(entrou|entraram|entra|entrar|recebi|recebemos|recebido|recebida|receber|caiu|cairam|cai|credito|creditado|deposito|depositado|depositaram)\b/;
-  const SAIDA = /\b(sai|sair|saiu|saida|pagar|pago|paga|paguei|pagamos|pagou|pagamento|devolver|devolvi|devolucao|debito|debitado|debitou|transferi|transferencia|pix)\b/;
+  const ENTRADA = /\b(entrada|entradas|entrou|entraram|entra|entrar|recebi|recebemos|recebido|recebida|receber|caiu|cairam|cai|credito|creditado|deposito|depositado|depositaram)\b/;
+  const SAIDA = /\b(sai|sair|saiu|saida|saidas|pagar|pago|paga|paguei|pagamos|pagou|pagamento|devolver|devolvi|devolvo|devolve|devolvido|devolvida|devolvidos|devolveremos|devolverei|devolucao|debito|debitado|debitou|transferi|transferencia|pix)\b/;
   const REALIZADO = /\b(pago|paga|pagos|paguei|pagamos|pagou|saiu|entrou|entraram|recebi|recebemos|recebido|recebida|caiu|cairam|debitado|debitou|transferi|devolvi|depositado|depositaram|creditado)\b/;
-  const PREVISTO = /\b(vai|vao|precisa|precisar|precisamos|vence|vencendo|vencimento|previsto|prevista|agendado|agendar|a pagar|a receber|tem que|temos que)\b/;
+  const PREVISTO = /\b(vai|vao|sera|serao|vou|vamos|ira|irao|irei|precisa|precisar|precisamos|vence|vencendo|vencimento|previsto|prevista|agendado|agendar|a pagar|a receber|tem que|temos que|devolveremos|devolverei)\b/;
+  // trecho que fala da devolucao de um emprestimo ("sera devolvido 60 mil dia 14")
+  const DEVOLUCAO = /\b(devolv\w*|devolucao|pagar de volta)\b/;
 
-  const isoDe = d => d.toISOString().slice(0, 10);
+  function isoDe(d) { return d.toISOString().slice(0, 10); }
   function addDias(iso, n) { const d = new Date(iso + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return isoDe(d); }
-  const diasNoMes = (a, m) => new Date(Date.UTC(a, m, 0)).getUTCDate();
-  const dataDe = (a, m, d) => a + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+  function diasNoMes(a, m) { return new Date(Date.UTC(a, m, 0)).getUTCDate(); }
 
-  // Data no texto: { data, trecho } ou { data: null }. "dia 14" sem mês: no mês corrente; se já
-  // passou e a frase fala do futuro, no mês que vem.
+  // Acha a data no texto. Devolve { data, resto } (resto = texto sem a data) ou { data: null }.
+  // "dia 14" sem mes: no mes corrente; se ja' passou e a frase fala do futuro, no mes que vem.
   function extrairData(txt, hoje, futuro) {
     const t = baixo(txt);
     const [ha, hm] = hoje.split('-').map(Number);
@@ -42,118 +48,203 @@
     if ((m = t.match(/\bamanha\b/))) return { data: addDias(hoje, 1), trecho: m[0] };
     if ((m = t.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2}|\d{4}))?\b/))) {
       const d = +m[1], mes = +m[2]; let a = m[3] ? +m[3] : ha; if (a < 100) a += 2000;
-      if (mes >= 1 && mes <= 12 && d >= 1 && d <= diasNoMes(a, mes)) return { data: dataDe(a, mes, d), trecho: m[0] };
+      if (mes >= 1 && mes <= 12 && d >= 1 && d <= diasNoMes(a, mes)) return { data: `${a}-${String(mes).padStart(2, '0')}-${String(d).padStart(2, '0')}`, trecho: m[0] };
     }
     if ((m = t.match(/\bdia\s+(\d{1,2})(?:\s+de\s+([a-z]{3})[a-z]*)?\b/))) {
       const d = +m[1]; let mes = m[2] && MESES[m[2]] ? MESES[m[2]] : hm, a = ha;
       if (!m[2]) {
-        if (futuro && d < +hoje.slice(8, 10)) { mes++; if (mes > 12) { mes = 1; a++; } }
+        const hd = +hoje.slice(8, 10);
+        if (futuro && d < hd) { mes++; if (mes > 12) { mes = 1; a++; } }
       } else if (mes < hm - 6) a++;
-      if (d >= 1 && d <= diasNoMes(a, mes)) return { data: dataDe(a, mes, d), trecho: m[0] };
+      if (d >= 1 && d <= diasNoMes(a, mes)) return { data: `${a}-${String(mes).padStart(2, '0')}-${String(d).padStart(2, '0')}`, trecho: m[0] };
     }
     return { data: null, trecho: null };
   }
 
-  // "12.898,29" "48 mil" "1,5 mil" "300" "R$ 1.200" "3k" → número. Ignora "05 de 48" (parcela).
+  // "12.898,29" "48 mil" "1,5 mil" "300" "R$ 1.200" "3k" -> numero. Ignora "05 de 48" (parcela).
   function extrairValor(txt) {
-    const t = baixo(txt).replace(/\b\d+\s*de\s*\d+\b/g, ' ');
-    const re = /(?:r\$\s*)?(\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d+(?:,\d{1,2})?|\d+\.\d{1,2})(\s*(?:mil|k)\b)?/g;
+    let t = baixo(txt).replace(/\b\d+\s*de\s*\d+\b/g, ' ');
+    // CRM (06/10/2026, ainda não na Agilité): "8 diárias … 624" — número logo antes de uma unidade é
+    // quantidade, não valor, quando sobra outro número na frase
+    const semQtd = t.replace(QUANTIDADE, ' ');
+    if (semQtd !== t && /\d/.test(semQtd)) t = semQtd;
+    // "100,000,00" e "100,000" (virgula como milhar, 06/10/2026) vem antes de "100,00"
+    const re = /(?:r\$\s*)?(\d{1,3}(?:,\d{3})+(?:[.,]\d{2})?(?!\d)|\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d+(?:,\d{1,2})?|\d+\.\d{1,2})(\s*(?:mil|k)\b)?/g;
     let m;
     while ((m = re.exec(t))) {
       let s = m[1];
-      if (/,/.test(s)) s = s.replace(/\./g, '').replace(',', '.');
+      if (/^\d{1,3}(?:,\d{3})+(?:[.,]\d{2})?$/.test(s)) {
+        const dec = s.match(/[.,](\d{2})$/);
+        s = (dec ? s.slice(0, -3) : s).replace(/,/g, '') + (dec ? '.' + dec[1] : '');
+      } else if (/,/.test(s)) s = s.replace(/\./g, '').replace(',', '.');
       else if (/^\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, '');
       let v = parseFloat(s);
       if (m[2]) v *= 1000;
-      if (v > 0) return { valor: r2(v), trecho: m[0] };
+      if (v > 0) return { valor: Math.round(v * 100) / 100, trecho: m[0] };
     }
     return { valor: null, trecho: null };
   }
 
-  const temValor = txt => extrairValor(txt.replace(/\b\d{1,2}\/\d{1,2}(\/\d{2,4})?\b/g, ' ').replace(/\bdia\s+\d{1,2}\b/gi, ' ')).valor != null;
+  const QUANTIDADE = /\b\d{1,3}\s+(?:diarias?|fts?|folguistas?|horas?|plantoes?|pessoas?|funcionari[oa]s?|unidades?|un|caixas?|cx|fardos?|pacotes?|galoes?|litros?|kits?|pecas?|rolos?)\b/g;
+  // (CRM: quantidade — "8 diárias" — também não é valor para partir a frase no " e ")
+  const temValor = (txt) => extrairValor(baixo(txt).replace(QUANTIDADE, ' ').replace(/\b\d{1,2}\/\d{1,2}(\/\d{2,4})?\b/g, ' ').replace(/\bdia\s+\d{1,2}\b/gi, ' ')).valor != null;
 
-  // Pedaços da frase: vírgula (fora de centavos), ";", " mas ", " depois ", " + " sempre separam;
-  // " e " separa quando os dois lados têm valor ("VT 300 e VR 500").
+  // Separa a frase em pedacos. Virgula, ";", " mas ", " depois " sempre separam;
+  // " e " separa quando os dois lados tem valor ("VT 300 e VR 500").
   function pedacos(linha) {
     const out = [];
-    String(linha).split(/;|,(?!\d)|(?<!\d),|\s+mas\s+|\s+depois\s+|\s+\+\s+/i).forEach(p => {
+    // virgula entre dois digitos e' centavo ("244,27"), nao separa.
+    // " - " e " / " com espaco dos dois lados tambem separam (06/10/2026: "vt: 63 - vr: 152,67 - paseo"
+    // virava um item so' de 63); o pedaco sem valor ("paseo") vira contexto e vale pros outros.
+    for (const p of String(linha).split(/;|,(?!\d)|(?<!\d),|\s+mas\s+|\s+depois\s+|\s+\+\s+|\s+[-–—]\s+|\s+\/\s+/i)) {
       const partes = p.split(/\s+e\s+/i);
       let atual = partes[0];
       for (let i = 1; i < partes.length; i++) {
         if (temValor(atual) && temValor(partes[i])) { out.push(atual); atual = partes[i]; } else atual += ' e ' + partes[i];
       }
       out.push(atual);
-    });
-    return out.map(s => s.trim()).filter(Boolean);
+    }
+    return out.map((s) => s.trim()).filter(Boolean);
   }
 
-  // palavras de controle; borda "de letra" com \p{L} (o \b do JS quebra em "almoço")
-  const TIRA = new RegExp('(?<![\\p{L}\\d])(?:entrou|entraram|entra|entrar|recebi|recebemos|recebido|recebida|receber|caiu|cairam|credito|creditado|deposito|depositado|depositaram|sai|sair|saiu|pagar|pago|pagos|paga|paguei|pagamos|pagou|pix|transferi|transferencia|vai|vao|precisa|precisar|precisamos|tem que|temos que|vence|vencendo|previsto|prevista|agendado|agendar|hoje|ontem|amanha|ja|foi|foram|que|o|a|os|as|um|uma|do|da|dos|das|de|pro|pra|para|no|na|em|com|valor|reais|referente|ref)(?![\\p{L}\\d])', 'giu');
-  const acentosComuns = s => s.replace(/amanhã/gi, 'amanha').replace(/débito/gi, 'debito').replace(/crédito/gi, 'credito').replace(/depósito/gi, 'deposito')
-    .replace(/caíram/gi, 'cairam').replace(/saída/gi, 'saida').replace(/já/gi, 'ja');
-  // O que sobra sem valor, data e palavras de controle: "do que se trata".
+  // palavras de controle; borda "de letra" com \p{L} (o \b do JS quebra em "almoço" e corta o "o")
+  const TIRA = new RegExp('(?<![\\p{L}\\d])(?:entrada|entradas|saida|saidas|data|emprestimo|devolucao|sera|serao|entrou|entraram|entra|entrar|recebi|recebemos|recebido|recebida|receber|caiu|cairam|credito|creditado|deposito|depositado|depositaram|sai|sair|saiu|pagar|pago|pagos|paga|paguei|pagamos|pagou|pix|transferi|transferencia|vai|vao|precisa|precisar|precisamos|tem que|temos que|vence|vencendo|previsto|prevista|agendado|agendar|hoje|ontem|amanha|ja|foi|foram|que|o|a|os|as|um|uma|do|da|dos|das|de|pro|pra|para|no|na|em|com|valor|reais|referente|ref)(?![\\p{L}\\d])', 'giu');
+  // Tira do texto valor, data e as palavras de controle; o que sobra e' o "do que se trata".
   function rotuloDe(txt, trechos) {
-    let s = (' ' + txt + ' ').replace(/\b(\d+)\s+de\s+(\d+)\b/gi, '$1/$2'); // "11 de 13" (parcela) → "11/13"
-    (trechos || []).filter(Boolean).forEach(tr => {
+    let s = ` ${txt} `.replace(/\b(\d+)\s+de\s+(\d+)\b/gi, '$1/$2'); // "11 de 13" (parcela) fica "11/13"
+    for (const tr of trechos.filter(Boolean)) {
       const i = baixo(s).indexOf(baixo(tr));
       if (i >= 0) s = s.slice(0, i) + ' ' + s.slice(i + tr.length);
-    });
-    s = acentosComuns(s.replace(/r\$/gi, ' ')).replace(TIRA, ' ');
+    }
+    s = s.replace(/r\$/gi, ' ');
+    s = semAcentoPreservando(s).replace(TIRA, ' ');
     return s.replace(/\s+/g, ' ').replace(/^[\s\-–—:.]+|[\s\-–—:.]+$/g, '').trim();
   }
+  // tira so' as palavras de controle; mantem acento do resto (regex roda sobre um espelho sem acento)
+  function semAcentoPreservando(s) {
+    // as palavras de controle nao tem acento depois de normalizar; trocamos as acentuadas comuns
+    return s.replace(/amanhã/gi, 'amanha').replace(/débito/gi, 'debito').replace(/crédito/gi, 'credito').replace(/depósito/gi, 'deposito')
+      .replace(/caíram/gi, 'cairam').replace(/saída/gi, 'saida').replace(/já/gi, 'ja')
+      .replace(/empréstimo/gi, 'emprestimo').replace(/devolução/gi, 'devolucao').replace(/será/gi, 'sera').replace(/serão/gi, 'serao');
+  }
 
-  // texto → { itens: [{ linha, frase, trecho, valor, data, tipo, situacao: 'realizado'|'previsto',
-  // rotulo, contexto, devolucaoPrevista }], avisos }. opts.dataPadrao / opts.tipoPadrao: digitado
-  // pelo "+" de uma célula da grade (o dia e a seção valem quando a frase não diz).
-  function interpretar(texto, hoje, opts) {
-    opts = opts || {};
+  // texto -> [{ linha, tipo, valor, data, situacao, rotulo, devolucaoPrevista }] + avisos
+  // opts.dataPadrao / opts.tipoPadrao: digitado numa celula da grade (o dia e a
+  // secao - entradas/saidas - valem quando a frase nao diz)
+  function interpretar(texto, hoje, opts = {}) {
     const itens = [], avisos = [];
-    String(texto || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean).forEach((linha, nLinha) => {
-      const doLinha = [], contextos = [];
-      pedacos(linha).forEach(p => {
+    String(texto || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean).forEach((linha, nLinha) => {
+      const ps = pedacos(linha);
+      const doLinha = [];
+      const contextos = [];
+      for (const p of ps) {
         const b = baixo(p);
         const futuro = PREVISTO.test(b);
         const dt = extrairData(p, hoje, futuro || /\b(sai|entra|vence)\b/.test(b));
         const semData = dt.trecho ? (() => { const i = baixo(p).indexOf(dt.trecho); return p.slice(0, i) + ' ' + p.slice(i + dt.trecho.length); })() : p;
-        const v = extrairValor(semData);
-        const dir = ENTRADA.test(b) ? 'entrada' : SAIDA.test(b) ? 'saida' : null;
-        const sit = REALIZADO.test(b) && !futuro ? 'realizado' : futuro ? 'previsto' : null;
-        if (v.valor == null) { contextos.push({ data: dt.data, dir, sit, rotulo: rotuloDe(semData, []), apos: doLinha.length }); return; }
-        doLinha.push({ linha: nLinha + 1, frase: linha, trecho: p, valor: v.valor, data: dt.data, tipo: dir, situacao: sit, rotulo: rotuloDe(semData, [v.trecho]) });
-      });
-      if (!doLinha.length) { avisos.push('Linha ' + (nLinha + 1) + ': não achei valor em "' + linha + '".'); return; }
-      // contexto sem valor: "sai dia 14" logo depois de uma entrada = devolução prevista dela; o resto
-      // (data, pago/previsto, nome) vale para os itens da frase que não têm o seu
-      const nomeExtra = [];
-      contextos.forEach(c => {
+        // "48 parcelas de R$ 3.292,29" / "12x de 500": o valor e' o da parcela, nao o 48
+        // (o numero nao pode ser rabo de outro - "1.764,46 parcela" - e "parcela 05 de 48" nao conta)
+        const mp = baixo(semData).match(/(?<![\d.,])(\d{1,3})\s*(?:x\b|vezes|parcelas?|prestac\w*)\s*(?:(?:iguais|mensais|fixas)\s*)*(?:de\s*(?:r\$\s*)?|r\$\s*)(\d[\d.,]*(?:\s*mil)?)/);
+        const vp = mp ? extrairValor(mp[2]) : null;
+        const v = vp && vp.valor != null ? { valor: vp.valor, trecho: semData.substr(baixo(semData).indexOf(mp[0]), mp[0].length) } : extrairValor(semData);
+        const parcelas = vp && vp.valor != null ? +mp[1] : null;
+        // "emprestimo de 100 mil" sem entrou/paguei = dinheiro que chegou
+        const dir = ENTRADA.test(b) ? 'entrada' : SAIDA.test(b) ? 'saida' : /\bemprestimo\b/.test(b) && !/\bparcela/.test(b) ? 'entrada' : null;
+        // data futura escrita no proprio trecho = previsto (nao herda o "entrou" de outro trecho)
+        const sit = REALIZADO.test(b) && !futuro ? 'realizado' : futuro ? 'previsto' : dt.data && dt.data > hoje ? 'previsto' : null;
+        if (v.valor == null) { contextos.push({ texto: p, data: dt.data, dir, sit, juros: /\bjuros\b/.test(b), rotulo: rotuloDe(semData, []) , apos: doLinha.length }); continue; }
+        const item = { linha: nLinha + 1, frase: linha, trecho: p, valor: v.valor, data: dt.data, tipo: dir, situacao: sit, rotulo: rotuloDe(semData, [v.trecho]) };
+        if (parcelas) item.parcelas = parcelas;
+        item.dataPropria = !!dt.data; item.sitPropria = !!sit;
+        if (/\bemprest/.test(baixo(linha))) item.emprestimo = true;
+        doLinha.push(item);
+      }
+      if (!doLinha.length) { avisos.push(`Linha ${nLinha + 1}: não achei valor em "${linha}".`); return; }
+      // devolucao com valor logo depois de uma entrada = o emprestimo e quanto/quando volta,
+      // nao uma segunda entrada (06/10/2026: "entrou 57550 de RGB e sera devolvido 60000
+      // no dia 14/10, a diferenca e' juros" -> 1 emprestimo de 57.550 que volta 60.000 em 14/10)
+      for (let k = 1; k < doLinha.length; k++) {
+        const it = doLinha[k], ant = doLinha[k - 1];
+        if (DEVOLUCAO.test(baixo(it.trecho)) && !it.parcelas && ant.tipo === 'entrada' && ant.valorDevolver == null) {
+          ant.devolucaoPrevista = it.data || null; ant.valorDevolver = it.valor;
+          doLinha.splice(k, 1);
+          for (const c of contextos) if (c.apos > k) c.apos--;
+          k--;
+        }
+      }
+      // contexto sem valor: "sai dia 14" logo depois de uma ENTRADA = devolucao prevista dela;
+      // o resto (data, pago/previsto, nome) vale pros itens da frase que nao tem o seu
+      let nomeExtra = [];
+      for (const c of contextos) {
         const ant = doLinha[c.apos - 1];
-        if (ant && ant.tipo === 'entrada' && c.dir === 'saida' && c.data) { ant.devolucaoPrevista = c.data; return; }
-        doLinha.forEach(it => {
+        // "a diferenca e' juros": so' explica a devolucao maior; nao vira nome
+        if (c.juros) { for (const it of doLinha) if (it.valorDevolver != null) it.jurosNaFrase = true; continue; }
+        if (ant && (ant.tipo === 'entrada') && c.dir === 'saida' && c.data) { ant.devolucaoPrevista = c.data; continue; }
+        for (const it of doLinha) {
           if (!it.data && c.data) it.data = c.data;
           if (!it.situacao && c.sit) it.situacao = c.sit;
-          if (!it.tipo && c.dir === 'entrada') it.tipo = 'entrada';
-        });
-        if (c.rotulo) nomeExtra.push(c.rotulo);
-      });
-      // situação: primeiro herda do item anterior ("vai sair 5 mil X e 2 mil Y"), depois da frase toda
+          if (!it.tipo && c.dir && !(c.dir === 'saida' && c.sit === 'realizado' && false)) it.tipo = c.dir === 'entrada' ? 'entrada' : it.tipo;
+        }
+        if (c.rotulo) nomeExtra.push({ r: c.rotulo, apos: c.apos });
+      }
+      // herda entre itens da mesma frase: data e situacao de quem tem; direcao de quem vem antes
+      // situacao: primeiro herda do item anterior ("vai sair 5 mil X e 2 mil Y"), depois da frase toda
       for (let k = 1; k < doLinha.length; k++) if (!doLinha[k].situacao && doLinha[k - 1].situacao) doLinha[k].situacao = doLinha[k - 1].situacao;
-      const sits = [...new Set(doLinha.map(i => i.situacao).filter(Boolean))];
+      const sits = [...new Set(doLinha.map((i) => i.situacao).filter(Boolean))];
+      for (const it of doLinha) if (!it.situacao && sits.length === 1) it.situacao = sits[0];
       let dirAnt = null;
-      doLinha.forEach(it => {
-        if (!it.situacao && sits.length === 1) it.situacao = sits[0];
-        // data só passa entre itens de mesma situação ("entrou 30 mil, vai sair 5 mil amanhã")
-        const datas = [...new Set(doLinha.filter(o => o.data && (!it.situacao || !o.situacao || o.situacao === it.situacao)).map(o => o.data))];
+      doLinha.forEach((it, k) => {
+        // data so' passa entre itens de mesma situacao ("entrou 30 mil, vai sair 5 mil amanha":
+        // a entrada e' de hoje, a saida e' amanha)
+        const datas = [...new Set(doLinha.filter((o) => o.data && (!it.situacao || !o.situacao || o.situacao === it.situacao)).map((o) => o.data))];
         if (!it.data && datas.length === 1) it.data = datas[0];
+        if (!it.situacao && sits.length === 1) it.situacao = sits[0];
         if (!it.tipo) it.tipo = dirAnt || opts.tipoPadrao || 'saida';
         dirAnt = it.tipo;
-        it.contexto = nomeExtra.join(' ').trim();
+        it.contexto = nomeExtra.map((x) => x.r).join(' ').trim();
+        // contexto escrito antes do item vai na frente, o de depois vai atras ("RGB - I" -> "RGB I"; "vt 63 - paseo" -> "vt paseo")
+        const ctxAntes = nomeExtra.filter((x) => x.apos <= k).map((x) => x.r).join(' ');
+        const ctxDepois = nomeExtra.filter((x) => x.apos > k).map((x) => x.r).join(' ');
         if (!it.data) it.data = opts.dataPadrao || hoje;
         if (!it.situacao) it.situacao = it.data > hoje ? 'previsto' : 'realizado';
         if (it.situacao === 'realizado' && it.data > hoje) it.situacao = 'previsto';
         if (!it.rotulo && it.contexto) { it.rotulo = it.contexto; it.contexto = ''; }
+        // rotulo de 1-2 letras ("I" de "RGB - I 1.764,46") sozinho nao diz nada: junta o contexto
+        else if (it.rotulo && it.rotulo.replace(/[^\p{L}\d]/gu, '').length < 3 && it.contexto) { it.rotulo = `${ctxAntes} ${it.rotulo} ${ctxDepois}`.replace(/\s+/g, ' ').trim(); it.contexto = ''; }
         itens.push(it);
       });
     });
+    // entrada de alguem numa linha e saida pro MESMO nome, de valor igual ou um pouco maior,
+    // numa data depois = emprestimo e a devolucao dele, nao duas contas (06/10/2026:
+    // "entrada de 29.000 Sirlene - data de hoje" + "saida 29.000 Sirlene - dia 14/10")
+    // devolucao em parcelas ("devolucao sera 48 parcelas de R$ 3.292,29, todo dia 18,
+    // a primeira 18/10") = como o emprestimo volta: liga na entrada anterior (mesma linha
+    // ou a de cima), nao vira uma conta (06/10/2026, emprestimo do Daniel Dalessi)
+    for (let j = 0; j < itens.length; j++) {
+      const it = itens[j];
+      if (!it.parcelas || !(DEVOLUCAO.test(baixo(it.frase)) || it.emprestimo)) continue;
+      let i = j - 1;
+      while (i >= 0 && !(itens[i].tipo === 'entrada' && itens[i].valorDevolver == null && !itens[i].parcelas)) i--;
+      if (i < 0 || itens[i].linha < it.linha - 2) continue;
+      const md = baixo(it.frase).match(/\b(?:todo|todos os)\s+dia[s]?\s+(\d{1,2})\b/);
+      itens[i].parcelas = { n: it.parcelas, valor: it.valor, primeira: it.data, dia: md ? +md[1] : +it.data.slice(8, 10) };
+      itens[i].emprestimo = true;
+      // na mesma linha a entrada herdou a data/previsto da 1a parcela: o dinheiro e' de hoje
+      if (itens[i].linha === it.linha && !itens[i].dataPropria) itens[i].data = opts.dataPadrao || hoje;
+      if (itens[i].linha === it.linha && !itens[i].sitPropria) itens[i].situacao = itens[i].data > hoje ? 'previsto' : 'realizado';
+      itens.splice(j, 1); j--;
+    }
+    const nomeDe = (s) => baixo(s).replace(/[^a-z0-9 ]+/g, ' ').split(/\s+/).filter((t) => t.length > 2 && !/^\d+$/.test(t)).sort().join(' ');
+    for (let i = 0; i < itens.length; i++) {
+      const e = itens[i];
+      if (e.tipo !== 'entrada' || e.valorDevolver != null || e.parcelas || !nomeDe(e.rotulo)) continue;
+      const j = itens.findIndex((s, k) => k !== i && s.tipo === 'saida' && s.linha !== e.linha && s.data > e.data
+        && nomeDe(s.rotulo) === nomeDe(e.rotulo) && s.valor >= e.valor - 0.01 && s.valor <= e.valor * 1.25);
+      if (j < 0) continue;
+      e.valorDevolver = itens[j].valor; e.devolucaoPrevista = itens[j].data;
+      itens.splice(j, 1);
+      if (j < i) i--;
+    }
     return { itens, avisos };
   }
 
@@ -173,6 +264,8 @@
   // Categoria pela palavra (a primeira que casar). Agilité primeiro: marca entre empresas.
   const AGILITE = /agilit/;
   const PALAVRAS = [
+    // palavras que não deixam dúvida da categoria (FORTES, abaixo): igual à Agilité
+    [/\bdiaria/, 'Diárias de cobertura'], [/\buniforme/, 'Uniformes'], [/\bsekron/, 'Sekron (monitoramento)'], [/\bexame|\baso\b|\bmedtrab/, 'Medicina do trabalho'],
     [/\btarifa|\biof\b|taxa bancaria|cesta de servic|\bmanutencao de conta/, 'Tarifas bancárias'],
     [/\bpro.?labore/, 'Pró-labore'],
     [/\bretirada/, 'Retiradas dos sócios'],
@@ -193,6 +286,12 @@
     [/pedag|combust|gasolina|diesel|etanol|\bfrete|caminhao|\bposto\b|abasteci|\boleo\b/, 'Frete e combustível'],
     [/fornecedor|mercadoria|\bcompra/, 'Fornecedores']
   ];
+  // Categoria que a palavra não deixa dúvida: "diária" nunca paga sozinha a conta do Sekron (fica nas
+  // opções, para escolher à mão). Igual à Agilité (06/10/2026).
+  const FORTES = new Set(['Diárias de cobertura', 'Uniformes', 'Sekron (monitoramento)', 'Energia', 'Contabilidade', 'Medicina do trabalho']);
+  // Folha e benefício: "lembrar" não aparece (uma regra "vt" com o fornecedor de hoje valeria para todo VT).
+  const FOLHA = new Set(['Salários', 'Benefícios (VT, VR, cesta)', 'FGTS e encargos', 'Pró-labore', 'Reembolso da folha à Agilité', 'Retiradas dos sócios']);
+  const ehEmprestimo = (it, texto) => it.tipo === 'entrada' && (!!(it.parcelas && typeof it.parcelas === 'object') || !!it.emprestimo || it.valorDevolver != null || !!it.devolucaoPrevista || /\bemprest/.test(baixo(texto)));
   function categoriaDe(texto, tipo) {
     const t = baixo(texto);
     if (AGILITE.test(t)) return { categoria: tipo === 'entrada' ? 'Material vendido à Agilité' : 'Reembolso da folha à Agilité', entre_empresas: true };
@@ -248,6 +347,18 @@
   const dm = s => s ? s.slice(8, 10) + '/' + s.slice(5, 7) : '';
   const maiuscula = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
 
+  const dataBR = s => s ? s.slice(8, 10) + '/' + s.slice(5, 7) + '/' + s.slice(0, 4) : '';
+  function motivoEmprestimo(valor, e) {
+    if (e.parcelas) {
+      const pc = e.parcelas, total = r2(pc.n * pc.valor);
+      return 'empréstimo recebido de ' + e.credor + ' (não é receita) — devolve em ' + pc.n + ' parcelas de ' + moeda(pc.valor) + ', todo dia ' + pc.dia + ', a 1ª em ' + dataBR(pc.primeira) +
+        '; total ' + moeda(total) + (total > valor ? ', juros ' + moeda(r2(total - valor)) + ' (parcela a parcela, tabela Price)' : ', sem juros') + '. As parcelas viram uma conta recorrente.';
+    }
+    const juros = e.devolve != null ? r2(e.devolve - valor) : 0;
+    return 'empréstimo recebido de ' + e.credor + ' (não é receita) — devolve ' + (e.devolve != null ? moeda(e.devolve) : 'o mesmo valor') + (e.em ? ' em ' + dataBR(e.em) : ' (falta a data: sem ela não entra a devolução no caixa)') +
+      (juros > 0 ? '; juros de ' + moeda(juros) : '');
+  }
+
   // itens de interpretar() → propostas. ctx: { hoje, lancamentos, titulos, recebidos (Set de
   // duplicatas já baixadas), creditoTitulo(t) → dia que cai, nomeTitulo(t), clientes [{id, nome}],
   // fornecedores [{nome}], regras }. Proposta: o item + { descricao, categoria, fornecedor,
@@ -266,13 +377,33 @@
       const toks = tokens(texto);
       const p = Object.assign({}, it, { opcoes: [], motivo: '', chave: chaveRegra(texto), fornecedor: '', lembrar: false });
       const realizado = it.situacao === 'realizado';
+      if (typeof it.parcelas === 'number') p.parcelas = it.parcelas; // "12x de 350": guarda o número de parcelas
+      // Empréstimo recebido (não é receita): devolve numa vez (valor/data) ou em parcelas (recorrente).
+      if (ehEmprestimo(it, texto)) {
+        const credor = maiuscula(it.rotulo || it.contexto || 'Empréstimo');
+        const pc = it.parcelas && typeof it.parcelas === 'object' ? it.parcelas : null;
+        p.emprestimo = { credor, devolve: pc ? null : (it.valorDevolver != null ? it.valorDevolver : it.valor), em: pc ? null : (it.devolucaoPrevista || null), parcelas: pc };
+        p.parcelas = null;
+        Object.assign(p, { acao: 'novo', categoria: 'Empréstimos recebidos', fornecedor: credor, descricao: 'Empréstimo — ' + credor, entre_empresas: AGILITE.test(baixo(texto)), podeLembrar: false });
+        p.opcoes = [{ acao: 'novo', rotulo: 'Lançar o empréstimo' }, { acao: 'ignorar', rotulo: 'Não lançar' }];
+        p.motivo = motivoEmprestimo(p.valor, p.emprestimo);
+        return p;
+      }
+      // o nome do cliente (condomínio) não prova que é a mesma conta: "8 diárias … Espaço e Vida" não
+      // paga "Sekron — Espaço e Vida" só pelo nome (06/10/2026, Agilité)
+      const cliente = it.tipo === 'saida' ? nomeDe(ctx.clientes, toks) : null;
+      const toksConta = cliente ? toks.filter(t => !tokens(cliente.nome).some(w => casaPalavra(t, w))) : toks;
+      const catPalavra = it.tipo === 'saida' ? ((PALAVRAS.find(x => x[0].test(baixo(texto))) || [])[1] || null) : null;
+      const conflita = l => FORTES.has(catPalavra) && !!l.categoria && l.categoria !== catPalavra;
       // 1. conta em aberto do mesmo tipo
       const tol = Math.max(60, it.valor * 0.08);
-      const contas = toks.length ? (ctx.lancamentos || []).filter(l => l.situacao === 'aberto' && !l.titulo_duplicata && l.tipo === it.tipo && !usados.has('l:' + l.id) &&
+      const contas = (ctx.lancamentos || []).filter(l => l.situacao === 'aberto' && !l.titulo_duplicata && l.tipo === it.tipo && !usados.has('l:' + l.id) &&
         Math.abs(Number(l.valor) - it.valor) <= tol && Math.abs(dias(l.vencimento, it.data)) <= 20)
-        .map(l => ({ l, c: emComum(toks, tokens([l.descricao, l.fornecedor].join(' '))) })).filter(x => x.c > 0)
-        .map(x => Object.assign(x, { nota: x.c * 10 - Math.abs(Number(x.l.valor) - it.valor) / tol * 3 - Math.abs(dias(x.l.vencimento, it.data)) / 20 * 2 }))
-        .sort((a, b) => b.nota - a.nota) : [];
+        .map(l => ({ l, c: emComum(toksConta, tokens([l.descricao, l.fornecedor].join(' '))) }))
+        .map(x => Object.assign(x, { nota: x.c * 10 - Math.abs(Number(x.l.valor) - it.valor) / tol * 3 - Math.abs(dias(x.l.vencimento, it.data)) / 20 * 2 - (conflita(x.l) ? 100 : 0) }))
+        .sort((a, b) => b.nota - a.nota);
+      // escolhe sozinha só com palavra em comum e sem conflito de categoria; as outras ficam nas opções
+      const conta = contas.length && contas[0].c > 0 && !conflita(contas[0].l) ? contas[0].l : null;
       const rotConta = l => (realizado ? (it.tipo === 'entrada' ? 'Receber' : 'Pagar') + ' a conta: ' : 'Ajustar a conta: ') + l.descricao + ' · ' + moeda(l.valor) + ' · vence ' + dm(l.vencimento);
       contas.slice(0, 4).forEach(x => p.opcoes.push({ acao: (realizado ? 'baixar:' : 'ajustar:') + x.l.id, rotulo: rotConta(x.l) }));
       // 2. entrada × título do contas a receber
@@ -312,7 +443,7 @@
         p.regra = regra.id || true;
       }
       if (AGILITE.test(baixo(p.categoria + ' ' + p.fornecedor))) p.entre_empresas = true;
-      p.descricao = maiuscula(it.rotulo || it.contexto || p.fornecedor || p.categoria);
+      p.descricao = maiuscula([it.rotulo, it.rotulo && it.contexto ? '— ' + it.contexto : ''].filter(Boolean).join(' ') || it.contexto || p.fornecedor || p.categoria);
 
       // ação proposta
       if (realizado && tits.length) {
@@ -320,8 +451,8 @@
         p.acao = 'titulo:' + g.map(t => t.duplicata).join(',');
         g.forEach(t => usados.add('t:' + t.duplicata));
         p.motivo = g.length > 1 ? 'a soma bate com ' + g.length + ' títulos de ' + nomeTit(g[0]) : 'bate com o título ' + g[0].duplicata + ' de ' + nomeTit(g[0]);
-      } else if (contas.length) {
-        const l = contas[0].l;
+      } else if (conta) {
+        const l = conta;
         usados.add('l:' + l.id);
         if (realizado) { p.acao = 'baixar:' + l.id; p.motivo = 'bate com a conta em aberto "' + l.descricao + '" (' + moeda(l.valor) + ', vence ' + dm(l.vencimento) + ')'; }
         else if (r2(l.valor) === it.valor && l.vencimento === it.data) { p.acao = 'ignorar'; p.motivo = 'já está no caixa: "' + l.descricao + '" (' + moeda(l.valor) + ', vence ' + dm(l.vencimento) + ')'; }
@@ -331,7 +462,11 @@
       } else {
         p.acao = 'novo';
         p.motivo = regra ? 'regra lembrada' : quem ? (it.tipo === 'entrada' ? 'de ' : 'para ') + quem.nome : '';
+        if (contas.length && contas[0].c > 0) p.motivo = (p.motivo ? p.motivo + ' · ' : '') + '"' + contas[0].l.descricao + '" é de outra categoria: ficou nas opções, se for ela';
       }
+      if (p.parcelas) p.motivo = (p.motivo ? p.motivo + ' · ' : '') + p.parcelas + ' parcelas de ' + moeda(p.valor);
+      // "lembrar" só onde faz diferença: conta nova fora de folha/benefício
+      p.podeLembrar = p.acao === 'novo' && !FOLHA.has(p.categoria);
       return p;
     });
   }
@@ -342,13 +477,14 @@
     const agora = ctx.agora || new Date().toISOString();
     const pago = p.situacao === 'realizado';
     const [acao, alvo] = [p.acao.split(':')[0], p.acao.slice(p.acao.indexOf(':') + 1)];
-    if (acao === 'ignorar') return { inserir: [], atualizar: [], titulos: [] };
+    if (acao === 'ignorar') return { inserir: [], atualizar: [], titulos: [], recorrentes: [] };
+    if (p.emprestimo && p.tipo === 'entrada') return gravaEmprestimo(p, agora);
     if (acao === 'baixar' || acao === 'ajustar') {
       const l = (ctx.lancamentos || []).find(x => x.id === alvo);
       if (!l) throw new Error('a conta "' + alvo + '" não está mais no caixa');
       const antes = { situacao: l.situacao, pago_em: l.pago_em || null, baixa: l.baixa || null, baixado_em: l.baixado_em || null, valor: l.valor, vencimento: l.vencimento };
       const patch = acao === 'baixar' ? { situacao: 'pago', pago_em: p.data, baixa: 'caixa', baixado_em: agora, valor: r2(p.valor) } : { valor: r2(p.valor), vencimento: p.data };
-      return { inserir: [], atualizar: [{ id: l.id, patch: Object.assign(patch, { frase: p.frase, frase_antes: antes }) }], titulos: [] };
+      return { inserir: [], atualizar: [{ id: l.id, patch: Object.assign(patch, { frase: p.frase, frase_antes: antes }) }], titulos: [], recorrentes: [] };
     }
     if (acao === 'titulo') {
       const dups = alvo.split(',');
@@ -363,19 +499,66 @@
       // um título só: grava o valor que entrou (juros ou desconto de centavos); vários: o de cada um
       return { atualizar, inserir: tits.filter(t => !ligada(t)).map(t => ({ tipo: 'entrada', descricao: 'Recebido: ' + nomeTit(t) + ' · ' + t.duplicata, categoria: 'Duplicatas recebidas',
         valor: valorDe(t), vencimento: t.vencimento, situacao: 'pago', pago_em: p.data, baixa: 'caixa', baixado_em: agora,
-        origem: 'titulo', titulo_duplicata: t.duplicata, frase: p.frase, entre_empresas: AGILITE.test(baixo(nomeTit(t))) })), titulos: dups };
+        origem: 'titulo', titulo_duplicata: t.duplicata, frase: p.frase, entre_empresas: AGILITE.test(baixo(nomeTit(t))) })), titulos: dups, recorrentes: [] };
     }
-    return { inserir: [{ tipo: p.tipo, descricao: p.descricao || p.categoria || 'Lançamento', fornecedor: p.fornecedor || null, categoria: p.categoria || null,
+    return { inserir: [Object.assign({ tipo: p.tipo, descricao: p.descricao || p.categoria || 'Lançamento', fornecedor: p.fornecedor || null, categoria: p.categoria || null,
       valor: r2(p.valor), vencimento: p.data, situacao: pago ? 'pago' : 'aberto', pago_em: pago ? p.data : null, baixa: pago ? 'caixa' : null,
-      baixado_em: pago ? agora : null, entre_empresas: !!p.entre_empresas, origem: 'tela', frase: p.frase }], atualizar: [], titulos: [] };
+      baixado_em: pago ? agora : null, entre_empresas: !!p.entre_empresas, origem: 'tela', frase: p.frase },
+      p.parcelas ? { parcelas: p.parcelas, observacoes: p.parcelas + ' parcelas de ' + moeda(p.valor) } : {})], atualizar: [], titulos: [], recorrentes: [] };
+  }
+
+  // Empréstimo recebido: a entrada (marcada como empréstimo, não é receita) e a devolução — numa vez
+  // (saída prevista no dia, com os juros) ou em parcelas (conta recorrente "Empréstimo — <credor>" com o
+  // valor contratado, juros pela tabela Price, e a 1ª parcela já em Contas a pagar). O que foi criado vai
+  // em frase_antes.criou da entrada: o Desfazer apaga tudo (ou só desliga a recorrente, se já pagou parcela).
+  function gravaEmprestimo(p, agora) {
+    const e = p.emprestimo, credor = e.credor || p.fornecedor || 'Empréstimo', pago = p.situacao === 'realizado';
+    const entrada = { id: novoId(), tipo: 'entrada', descricao: p.descricao || 'Empréstimo — ' + credor, fornecedor: credor, categoria: 'Empréstimos recebidos',
+      valor: r2(p.valor), vencimento: p.data, situacao: pago ? 'pago' : 'aberto', pago_em: pago ? p.data : null, baixa: pago ? 'caixa' : null, baixado_em: pago ? agora : null,
+      entre_empresas: !!p.entre_empresas, origem: 'tela', emprestimo: true, frase: p.frase, observacoes: motivoEmprestimo(p.valor, e) };
+    const inserir = [entrada], recorrentes = [];
+    if (e.parcelas && e.parcelas.n > 0 && e.parcelas.valor > 0 && e.parcelas.primeira) {
+      const pc = e.parcelas, total = r2(pc.n * pc.valor);
+      const rec = { id: novoId(), tipo: 'saida', descricao: ('Empréstimo — ' + credor).slice(0, 120), fornecedor: credor, categoria: 'Empréstimos e giro', valor: r2(pc.valor),
+        dia: Math.min(31, Math.max(1, pc.dia || +pc.primeira.slice(8, 10))), parcelas: pc.n, parcela_inicio: 1, inicio: pc.primeira.slice(0, 8) + '01', ativo: true, entre_empresas: !!p.entre_empresas,
+        valor_contratado: total > p.valor ? r2(p.valor) : null, taxa_mes_pct: total > p.valor ? null : 0,
+        observacoes: 'Empréstimo de ' + moeda(p.valor) + ' recebido em ' + dataBR(p.data) + ' (frase: "' + p.frase + '"). ' + pc.n + ' parcelas de ' + moeda(pc.valor) + ', total ' + moeda(total) +
+          (total > p.valor ? ', juros ' + moeda(r2(total - p.valor)) + ' (tabela Price).' : ', sem juros.') };
+      recorrentes.push(rec);
+      (CX() ? CX().gerarMes([rec], pc.primeira.slice(0, 7), []) : []).forEach(l => inserir.push(Object.assign({ id: novoId() }, l)));
+    } else if (e.em) {
+      const dev = r2(e.devolve != null ? e.devolve : p.valor), juros = r2(dev - p.valor);
+      inserir.push({ id: novoId(), tipo: 'saida', descricao: 'Devolução do empréstimo — ' + credor, fornecedor: credor, categoria: 'Empréstimos e giro', valor: dev, vencimento: e.em,
+        situacao: 'aberto', entre_empresas: !!p.entre_empresas, origem: 'tela', juros: juros > 0 ? juros : null,
+        observacoes: 'Devolve o empréstimo de ' + moeda(p.valor) + ' recebido em ' + dataBR(p.data) + (juros > 0 ? ': ' + moeda(p.valor) + ' + juros ' + moeda(juros) : '') + '.' });
+    }
+    entrada.frase_antes = { criou: { lancamentos: inserir.slice(1).map(l => l.id), recorrentes: recorrentes.map(r => r.id) } };
+    return { inserir, atualizar: [], titulos: [], recorrentes };
   }
 
   // Desfazer um lançamento feito por frase: volta a conta como estava (frase_antes) ou apaga o que a
-  // frase criou (lançamento novo ou baixa de título). → { remover: id } | { id, patch } | null.
-  function desfazer(l) {
+  // frase criou (lançamento novo, baixa de título, empréstimo com a devolução e as parcelas em aberto —
+  // a recorrente do empréstimo é apagada, ou só desligada se alguma parcela já foi paga).
+  // → { remover: [ids], atualizar: [{ id, patch }], recorrentesRemover: [ids], recorrentesDesligar: [ids] } | null
+  function desfazer(l, ctx) {
     if (!l || !l.frase) return null;
-    if (l.frase_antes) return { id: l.id, patch: Object.assign({}, l.frase_antes, { frase: null, frase_antes: null }) };
-    return { remover: l.id };
+    const out = { remover: [], atualizar: [], recorrentesRemover: [], recorrentesDesligar: [] };
+    const criou = l.frase_antes && l.frase_antes.criou;
+    if (criou) {
+      const lancs = (ctx && ctx.lancamentos) || [];
+      out.remover.push(l.id);
+      (criou.lancamentos || []).forEach(id => { const x = lancs.find(y => y.id === id); if (!x || x.situacao !== 'pago') out.remover.push(id); });
+      (criou.recorrentes || []).forEach(rid => {
+        const doRec = lancs.filter(y => y.recorrente_id === rid);
+        doRec.filter(y => y.situacao !== 'pago').forEach(y => out.remover.push(y.id));
+        (doRec.some(y => y.situacao === 'pago') ? out.recorrentesDesligar : out.recorrentesRemover).push(rid);
+      });
+      out.remover = [...new Set(out.remover)];
+      return out;
+    }
+    if (l.frase_antes) { out.atualizar.push({ id: l.id, patch: Object.assign({}, l.frase_antes, { frase: null, frase_antes: null }) }); return out; }
+    out.remover.push(l.id);
+    return out;
   }
 
   const O = { interpretar, extrairData, extrairValor, pedacos, rotuloDe, baixo, semAcento, tokens, categoriaDe, chaveRegra, regraDe, nomeDe, classificar, gravacao, desfazer };
