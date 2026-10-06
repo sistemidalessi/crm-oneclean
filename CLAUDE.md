@@ -878,6 +878,10 @@ Anderson: cada sistema cuida da sua empresa; o "Geral" (as duas) é de quem lê 
   da Agilité: ainda não (fica para depois). Banco: `crm_fin_lancamentos.emprestimo/juros` e
   `crm_fin_recorrentes.valor_contratado/taxa_mes_pct`; a leitura manda `emprestimo` e `juros` nos itens.
   Testes com nomes fictícios; a tabela de aceite com os nomes reais rodou só localmente.
+  1º uso real (06/10, 16:59): "saiu 502,05 compra de mercadoria" achou o cadastro de cliente "| A/C COMPRAS"
+  pela palavra "compra" — corrigido (compra, mercadoria, produto, pedido, material… são genéricas e não acham
+  nome) e o fornecedor do lançamento limpo no banco. O cadastro "| A/C COMPRAS" parece mal preenchido: o
+  Anderson vai conferir.
 - **Leitura conferida com os dados reais (06/10, 15h):** reembolsos em 06, 14, 20 e 30/10 e os 6 títulos
   da Agilité só em 21/10, todos entre empresas. Cliente cadastrado como "Empresa | Contato" (padrão do
   Agendor, 27 clientes com título) saía com o nome do contato: na leitura agora vai só a empresa.
