@@ -72,16 +72,19 @@
   // Resumo financeiro de um cliente (null se não deve nada ou se quem vê não tem acesso).
   CRM.financeiro = id => mapa().get(id) || null;
   const atraso = d => (d === 1 ? '1 dia' : d + ' dias');
+  // Vendedor não lê os títulos (06/10/2026): só sabe que o cliente da carteira tem título vencido e há
+  // quantos dias o mais antigo venceu (E.vencidos, pela função crm_titulos_vencidos) — sem valor.
+  const soVencido = id => (E().vencidos && E().vencidos.get(id)) || null;
   // Selo vermelho para quem tem título vencido (curto: lista; completo: ficha).
   CRM.seloFinanceiro = (id, completo) => {
     const f = CRM.financeiro(id);
-    if (!f || f.vencido <= 0) return '';
+    if (!f || f.vencido <= 0) { const d = soVencido(id); return d ? CRM.selo((completo ? 'Título vencido · ' : 'título vencido · ') + atraso(d), 'vermelho', 'Combine o pagamento antes de oferecer pedido novo') : ''; }
     return CRM.selo((completo ? 'Título vencido: ' : 'vencido ') + R.moeda(f.vencido) + ' · ' + atraso(f.maiorAtraso), 'vermelho');
   };
   // Linha de aviso (Fila do dia, WhatsApp de recompra).
   CRM.avisoFinanceiro = id => {
     const f = CRM.financeiro(id);
-    if (!f || f.vencido <= 0) return '';
+    if (!f || f.vencido <= 0) { const d = soVencido(id); return d ? 'Tem título vencido no FKN, o mais antigo há ' + atraso(d) + '. Combine o pagamento antes de oferecer pedido novo.' : ''; }
     return 'Tem ' + f.qtdVencidos + ' título(s) vencido(s) no FKN: ' + R.moeda(f.vencido) + ', o mais antigo há ' + atraso(f.maiorAtraso) + '. Combine o pagamento antes de oferecer pedido novo.';
   };
   const posicaoTxt = () => {
@@ -92,7 +95,11 @@
   // Seção da ficha do cliente.
   CRM.fichaFinanceiro = id => {
     const f = CRM.financeiro(id);
-    if (!f) return '';
+    if (!f) {
+      const d = soVencido(id);
+      return d ? '<section class="financeiro"><h3>Contas a receber</h3><p class="resumo-compras devendo">' + CRM.selo('título vencido', 'vermelho') +
+        ' o mais antigo há ' + esc(atraso(d)) + '.<br>Combine o pagamento antes de oferecer pedido novo.</p></section>' : '';
+    }
     const hoje = CRM.hoje();
     return '<section class="financeiro"><h3>Contas a receber <small>' + esc(posicaoTxt()) + '</small></h3>' +
       '<p class="resumo-compras' + (f.vencido > 0 ? ' devendo' : '') + '"><strong>' + esc(R.moeda(f.aberto)) + '</strong> em aberto em ' + f.qtd + ' título(s)' +

@@ -473,6 +473,15 @@
     const r = unwrap(await comTentativas(() => this.sb.rpc('crm_fkn_situacao')));
     return Object.assign({ estoque: null, receber: null, recusas: [] }, r || {});
   };
+  // Selo "título vencido" sem valor: [{ empresa_id, atraso }] (vendedor: só a carteira — ver schema.sql).
+  Supa.prototype.titulosVencidos = async function () {
+    return unwrap(await comTentativas(() => this.sb.rpc('crm_titulos_vencidos'))) || [];
+  };
+  Local.prototype.titulosVencidos = async function () {
+    const hoje = R.hojeISO(), m = new Map();
+    (this.ler().titulos || []).forEach(t => { if (t.empresa_id && t.vencimento < hoje) m.set(t.empresa_id, Math.max(m.get(t.empresa_id) || 0, R.diasEntre(t.vencimento, hoje))); });
+    return [...m].map(([empresa_id, atraso]) => ({ empresa_id, atraso }));
+  };
   Local.prototype.fknAtualizado = async function () {
     const est = await this.estoque(), tit = this.ler().titulos || [];
     const max = l => l.reduce((m, x) => (x.atualizado_em && x.atualizado_em > m ? x.atualizado_em : m), '') || null;

@@ -750,6 +750,24 @@ Anderson: cada sistema cuida da sua empresa; o "Geral" (as duas) é de quem lê 
   confirmar com o Anderson o crédito no BB e os feriados de SBC, primeira carga da planilha (opcional)
   e a leitura para a gestora das duas empresas (fase 2).
 
+## Permissões do financeiro (06/10/2026, pedido do Anderson)
+
+- **Contas a receber (`crm_titulos`)**: lê só **gestor e administrador** (`le` = `crm_eh_gestor()`;
+  aplicado em produção com `alter policy`). A **vendedora não lê títulos nem valores**: recebe só quais
+  clientes da carteira têm título vencido e o maior atraso, pela função `crm_titulos_vencidos()`
+  (`E.vencidos`, carregado no `recarregar`). O selo "título vencido · N dias" e o aviso "Combine o
+  pagamento antes de oferecer pedido novo" continuam na Recompra, na Fila do dia e na ficha, sem
+  valor e sem lista; `{titulos_vencidos}` nos modelos vira "o pagamento em aberto".
+- **Comprador**: só o relatório de **estoque**. A faixa "Hora de puxar…", o "!" do menu, a recusa e a
+  colinha mostram só a listagem de produtos (`CRM.lembreteFkn/recusasFkn`, `colinhaFkn`); as funções
+  `crm_fkn_atualizado/situacao` devolvem a data e a recusa do contas a receber só ao administrador.
+  Importar o contas a receber: só admin (cartão da Gestão).
+- **Contas a pagar e caixa**: só administrador (ver "Caixa").
+- **Pendente (Anderson):** a gestora também deixa de ver o contas a receber (ficha, Recompra, Fila do
+  dia, Gestão)? Hoje continua vendo. Atenção se tirar: a gestora grava títulos ao importar nota à mão e
+  muda `empresa_id` ao juntar duplicados — o insert com RETURNING e o update precisam de leitura; aí
+  ela passaria a usar o selo, como a vendedora, e essas duas rotinas teriam de ir para função do banco.
+
 ## Sequência do lead novo (30/09/2026)
 
 - `sequencia.js` (depois de `ajustes.js`) embrulha `CRM.auto.aoCriarEmpresa` e

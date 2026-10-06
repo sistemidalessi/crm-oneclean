@@ -537,7 +537,8 @@
     const pasta = esc(cfg.pasta_fkn || 'pasta que o vigia olha');
     const marca = (tipo, txt) => (recs || []).some(r => r.tipo === tipo) ? '<strong>' + txt + '</strong>' : txt;
     const lista = itens => '<ul class="checklist">' + itens.map(t => '<li>☐ ' + t + '</li>').join('') + '</ul>';
-    return '<details class="cartao colinha-fkn"' + (abrir ? ' open' : '') + '><summary><h2>Colinha: como puxar os relatórios do FKN <small>manhã e tarde · salvar em ' + pasta + '</small></h2></summary>' +
+    const admin = CRM.ehAdmin(); // o contas a receber é só do administrador; o comprador puxa só o estoque
+    return '<details class="cartao colinha-fkn"' + (abrir ? ' open' : '') + '><summary><h2>Colinha: como puxar ' + (admin ? 'os relatórios' : 'o relatório de estoque') + ' do FKN <small>manhã e tarde · salvar em ' + pasta + '</small></h2></summary>' +
       '<div class="g-duas">' +
       '<section>' + marca('produtos', '<h3>1. Listagem cadastral de produtos</h3>') + '<ol>' +
         '<li>No SIFWin: <strong>Cadastros → Produto → Listagens → Listagem cadastral</strong>.</li>' +
@@ -547,14 +548,14 @@
         '<li><strong>OK</strong> → no relatório, o <strong>disquete</strong> → <strong>Tudo</strong> → tipo <strong>CSV</strong> → salvar em <code>' + pasta + '</code> (pode substituir o antigo).</li></ol>' +
         '<p class="dica">Checklist antes de salvar:</p>' + lista(['empresa/filial a de sempre (o nome no topo do relatório é o mesmo da última vez)', 'os seis itens de "Listar dados" marcados',
           'nenhuma linha, família ou fornecedor filtrado; situação 0', 'salvo com "Tudo" (não só a página) e em CSV, não XLS', 'na pasta ' + pasta]) + '</section>' +
-      '<section>' + marca('receber', '<h3>2. Contas a receber por cliente</h3>') + '<ol>' +
+      (admin ? '<section>' + marca('receber', '<h3>2. Contas a receber por cliente</h3>') + '<ol>' +
         '<li>No SIFWin: <strong>Contas a Receber → Relatórios → Por cliente</strong>.</li>' +
         '<li>Cliente <strong>0</strong> (todos) · Portador <strong>0</strong> · Situação <strong>GERAL</strong> · Filial: a de sempre (todas, se tiver a opção).</li>' +
         '<li>Listar títulos: <strong>Em aberto</strong> (vencidos e a vencer). Período de vencimento <strong>em branco</strong>.</li>' +
         '<li>Marcar <strong>"Listar os dados cadastrais dos clientes"</strong> (traz o CNPJ, que liga o título ao cliente).</li>' +
         '<li><strong>OK</strong> → <strong>disquete</strong> → <strong>Tudo</strong> → <strong>CSV</strong> → salvar em <code>' + pasta + '</code>.</li></ol>' +
         '<p class="dica">Checklist antes de salvar:</p>' + lista(['"Em aberto" (não liquidados, não geral)', 'período de vencimento em branco', '"Listar os dados cadastrais dos clientes" marcado',
-          'cliente 0, portador 0, situação GERAL, filial de sempre', 'tem o TOTAL GERAL no fim (salvo com "Tudo"), em CSV', 'na pasta ' + pasta]) + '</section>' +
+          'cliente 0, portador 0, situação GERAL, filial de sempre', 'tem o TOTAL GERAL no fim (salvo com "Tudo"), em CSV', 'na pasta ' + pasta]) + '</section>' : '') +
       '</div><p class="dica">Em 1 ou 2 minutos o vigia manda ao CRM e o aviso some. Se faltar alguma opção, o CRM recusa o arquivo, não troca nada e o aviso diz o que marcar.</p></details>';
   }
 

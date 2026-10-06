@@ -87,6 +87,8 @@
       if (CRM.ehComprador() && store.clientesCompras) D.empresas = await store.clientesCompras();
       // Administrador: sinal de vida do vigia de notas (aviso se parar).
       if (CRM.ehAdmin() && store.vigias) E.vigias = await store.vigias().catch(() => E.vigias || []);
+      // Vendedor não lê os títulos (RLS): só quais clientes da carteira têm título vencido (selo sem valor).
+      if (!CRM.ehGestor() && !CRM.ehComprador() && store.titulosVencidos) E.vencidos = new Map((await store.titulosVencidos().catch(() => [])).map(x => [x.empresa_id, x.atraso]));
       // Administrador e comprador: quando chegaram os relatórios do FKN (lembrete em Compras).
       if ((CRM.ehAdmin() || CRM.ehComprador()) && store.fknAtualizado) E.fkn = await store.fknAtualizado().catch(() => E.fkn || null);
       E.D = D;
@@ -295,11 +297,12 @@
   // Relatórios do FKN que estão pendentes neste turno (manhã/tarde): [{ arquivo, ultimo, turno }].
   CRM.lembreteFkn = () => {
     if (!E.fkn || !(CRM.ehAdmin() || CRM.ehComprador())) return [];
-    return [['estoque', 'Listagem cadastral de produtos'], ['receber', 'Contas a receber por cliente (em aberto)']]
+    // O comprador puxa só o estoque; o contas a receber é só do administrador (06/10/2026).
+    return [['estoque', 'Listagem cadastral de produtos']].concat(CRM.ehAdmin() ? [['receber', 'Contas a receber por cliente (em aberto)']] : [])
       .map(([k, nome]) => { const l = DD.lembreteFkn(E.fkn[k]); return l ? { arquivo: nome, ultimo: E.fkn[k], turno: l.turno } : null; }).filter(Boolean);
   };
   // Último arquivo do FKN recusado (opção esquecida ao puxar), mais novo que a última entrega boa.
-  CRM.recusasFkn = () => (E.fkn && (CRM.ehAdmin() || CRM.ehComprador()) && E.fkn.recusas) || [];
+  CRM.recusasFkn = () => ((E.fkn && (CRM.ehAdmin() || CRM.ehComprador()) && E.fkn.recusas) || []).filter(r => CRM.ehAdmin() || r.tipo === 'produtos');
   CRM.recarregarFkn = async () => { if (store && store.fknAtualizado) { E.fkn = await store.fknAtualizado().catch(() => E.fkn); CRM.render(); } };
 
   let pendente = false;

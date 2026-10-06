@@ -770,7 +770,9 @@ alter table public.crm_estoque add column if not exists ult_entrada     date;
 alter table public.crm_estoque add column if not exists ult_saida       date;
 
 -- contas a receber (listagem SIFN016 do FKN, "em aberto"): retrato dos títulos; cada importação
--- troca o retrato inteiro. Quem vê: gestor e administrador, todos; vendedor, os da carteira dele.
+-- troca o retrato inteiro. Quem vê: gestor e administrador. Vendedor NÃO lê títulos nem valores
+-- (06/10/2026, pedido do Anderson): recebe só "tem título vencido" dos clientes da carteira, pela
+-- função crm_titulos_vencidos(). Comprador: nada.
 -- O administrador importa a listagem; as notas (vigia ou gestora) criam os títulos das parcelas.
 create table if not exists public.crm_titulos (
   id             uuid primary key default gen_random_uuid(),
@@ -807,19 +809,32 @@ drop policy if exists le on public.crm_titulos;
 drop policy if exists grava on public.crm_titulos;
 drop policy if exists altera on public.crm_titulos;
 drop policy if exists apaga on public.crm_titulos;
-create policy le on public.crm_titulos for select to authenticated
-  using ((select public.crm_eh_gestor()) or empresa_id in (select public.crm_empresas_minhas()));
+create policy le on public.crm_titulos for select to authenticated using ((select public.crm_eh_gestor()));
 -- gravar: a gestora também (a importação manual de notas cria os títulos das parcelas).
 create policy grava on public.crm_titulos for insert to authenticated with check ((select public.crm_eh_gestor()));
 -- alterar: a gestora também (ao juntar cadastros duplicados, o título vai para o cadastro que fica).
 create policy altera on public.crm_titulos for update to authenticated using ((select public.crm_eh_gestor())) with check ((select public.crm_eh_gestor()));
 create policy apaga on public.crm_titulos for delete to authenticated using ((select public.crm_eh_admin()));
 
--- Quando chegou cada relatório do FKN (lembrete em Compras): o comprador não lê os títulos, então
--- vê só as datas. Vendedor e gestor não recebem nada.
+-- Selo "título vencido" da Recompra, da Fila do dia e da ficha, sem valor e sem a lista de títulos:
+-- cliente com título vencido e o maior atraso em dias. Gestor/admin: todos; vendedor: a carteira.
+create or replace function public.crm_titulos_vencidos()
+returns table (empresa_id uuid, atraso integer) language sql stable security definer set search_path = public as $$
+  select t.empresa_id, max(((now() at time zone 'America/Sao_Paulo')::date - t.vencimento))::integer
+    from public.crm_titulos t
+   where t.empresa_id is not null and t.vencimento < (now() at time zone 'America/Sao_Paulo')::date
+     and (public.crm_eh_gestor() or (public.crm_eh_membro() and t.empresa_id in (select public.crm_empresas_minhas())))
+   group by t.empresa_id;
+$$;
+revoke all on function public.crm_titulos_vencidos() from public, anon;
+grant execute on function public.crm_titulos_vencidos() to authenticated;
+
+-- Quando chegou cada relatório do FKN (lembrete em Compras). O comprador puxa só o estoque
+-- (06/10/2026): a data do contas a receber é só do administrador. Vendedor e gestor: nada.
 create or replace function public.crm_fkn_atualizado()
 returns table (estoque timestamptz, receber timestamptz) language sql stable security definer set search_path = public as $$
-  select (select max(atualizado_em) from public.crm_estoque), (select max(atualizado_em) from public.crm_titulos)
+  select (select max(atualizado_em) from public.crm_estoque),
+         case when public.crm_eh_admin() then (select max(atualizado_em) from public.crm_titulos) end
    where public.crm_eh_admin() or public.crm_eh_comprador();
 $$;
 revoke all on function public.crm_fkn_atualizado() from public, anon;
@@ -831,9 +846,10 @@ returns jsonb language sql stable security definer set search_path = public as $
   with u as (select (select max(atualizado_em) from public.crm_estoque) estoque, (select max(atualizado_em) from public.crm_titulos) receber),
   r as (select distinct on (resumo->>'fkn_tipo') resumo->>'fkn_tipo' tipo, resumo->>'fkn_recusa' texto, resumo->>'arquivo' arquivo, quando
           from public.crm_integracao_log where resumo ? 'fkn_recusa' order by resumo->>'fkn_tipo', quando desc)
-  select jsonb_build_object('estoque', u.estoque, 'receber', u.receber,
+  select jsonb_build_object('estoque', u.estoque, 'receber', case when public.crm_eh_admin() then u.receber end,
     'recusas', coalesce((select jsonb_agg(jsonb_build_object('tipo', r.tipo, 'texto', r.texto, 'arquivo', r.arquivo, 'quando', r.quando))
-                           from r where r.quando > coalesce(case r.tipo when 'produtos' then u.estoque else u.receber end, '-infinity'::timestamptz)), '[]'::jsonb))
+                           from r where r.quando > coalesce(case r.tipo when 'produtos' then u.estoque else u.receber end, '-infinity'::timestamptz)
+                            and (r.tipo = 'produtos' or public.crm_eh_admin())), '[]'::jsonb))
     from u where public.crm_eh_admin() or public.crm_eh_comprador();
 $$;
 revoke all on function public.crm_fkn_situacao() from public, anon;
