@@ -752,21 +752,25 @@ Anderson: cada sistema cuida da sua empresa; o "Geral" (as duas) é de quem lê 
 
 ## Permissões do financeiro (06/10/2026, pedido do Anderson)
 
-- **Contas a receber (`crm_titulos`)**: lê só **gestor e administrador** (`le` = `crm_eh_gestor()`;
-  aplicado em produção com `alter policy`). A **vendedora não lê títulos nem valores**: recebe só quais
-  clientes da carteira têm título vencido e o maior atraso, pela função `crm_titulos_vencidos()`
-  (`E.vencidos`, carregado no `recarregar`). O selo "título vencido · N dias" e o aviso "Combine o
-  pagamento antes de oferecer pedido novo" continuam na Recompra, na Fila do dia e na ficha, sem
-  valor e sem lista; `{titulos_vencidos}` nos modelos vira "o pagamento em aberto".
+- **Contas a receber (`crm_titulos`): só o administrador lê a tabela** (`le` = `crm_eh_admin()`, em
+  produção por `alter policy`). Anderson: "tanto Isabela quanto os demais, somente o selo de duplicata
+  em atraso, podendo dar detalhes". Gestora e vendedoras recebem só as **duplicatas em atraso, com o
+  detalhe** (duplicata, NF, vencimento, valor, portador), pela função `crm_duplicatas_atraso()` —
+  gestora: todas; vendedora: as da carteira — em `E.atrasos` (carregado no `recarregar`). O selo
+  "vencido R$ … · N dias", o aviso "Combine o pagamento…" (Recompra, Fila do dia) e a seção
+  "Duplicatas em atraso" da ficha saem dessa lista; `{titulos_vencidos}` dos modelos também.
+- A gestora **grava títulos sem ler a tabela**: importação manual de nota → `crm_titulos_da_nota(novos,
+  cancelados)` (insere com `on conflict do nothing` e tira os da nota cancelada); juntar cadastros →
+  `crm_titulos_troca_empresa(de[], para)`. As duas recusam quem não é gestor/admin.
+- De manhã existiu a `crm_titulos_vencidos()` (só flag, sem valor); trocada pela de cima. No banco de
+  verdade ela ficou (o MCP trava em `drop`), sem uso — pode ser apagada pelo SQL Editor.
 - **Comprador**: só o relatório de **estoque**. A faixa "Hora de puxar…", o "!" do menu, a recusa e a
   colinha mostram só a listagem de produtos (`CRM.lembreteFkn/recusasFkn`, `colinhaFkn`); as funções
   `crm_fkn_atualizado/situacao` devolvem a data e a recusa do contas a receber só ao administrador.
-  Importar o contas a receber: só admin (cartão da Gestão).
 - **Contas a pagar e caixa**: só administrador (ver "Caixa").
-- **Pendente (Anderson):** a gestora também deixa de ver o contas a receber (ficha, Recompra, Fila do
-  dia, Gestão)? Hoje continua vendo. Atenção se tirar: a gestora grava títulos ao importar nota à mão e
-  muda `empresa_id` ao juntar duplicados — o insert com RETURNING e o update precisam de leitura; aí
-  ela passaria a usar o selo, como a vendedora, e essas duas rotinas teriam de ir para função do banco.
+- Ataque (`roda.sh`) cobre: gestora e vendedora não leem títulos; vendedora não vê atraso fora da
+  carteira nem título a vencer; comprador não lê títulos, atrasos, contas a pagar nem a data/recusa do
+  receber; só admin lê o financeiro.
 
 ## Sequência do lead novo (30/09/2026)
 

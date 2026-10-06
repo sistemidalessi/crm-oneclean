@@ -63,28 +63,28 @@
   const { esc } = CRM;
   const E = () => CRM.estado;
 
+  // Administrador: o contas a receber inteiro. Gestora e vendedoras: só as duplicatas em atraso
+  // (E.atrasos, pela função crm_duplicatas_atraso — 06/10/2026, pedido do Anderson).
+  const fonte = () => (CRM.ehAdmin() ? (E().D && E().D.titulos) || [] : E().atrasos || []);
   let cache = { ref: null, hoje: '', mapa: new Map() };
   const mapa = () => {
-    const l = (E().D && E().D.titulos) || [], hoje = CRM.hoje();
+    const l = fonte(), hoje = CRM.hoje();
     if (cache.ref !== l || cache.hoje !== hoje) cache = { ref: l, hoje, mapa: porEmpresa(l, hoje) };
     return cache.mapa;
   };
   // Resumo financeiro de um cliente (null se não deve nada ou se quem vê não tem acesso).
   CRM.financeiro = id => mapa().get(id) || null;
   const atraso = d => (d === 1 ? '1 dia' : d + ' dias');
-  // Vendedor não lê os títulos (06/10/2026): só sabe que o cliente da carteira tem título vencido e há
-  // quantos dias o mais antigo venceu (E.vencidos, pela função crm_titulos_vencidos) — sem valor.
-  const soVencido = id => (E().vencidos && E().vencidos.get(id)) || null;
   // Selo vermelho para quem tem título vencido (curto: lista; completo: ficha).
   CRM.seloFinanceiro = (id, completo) => {
     const f = CRM.financeiro(id);
-    if (!f || f.vencido <= 0) { const d = soVencido(id); return d ? CRM.selo((completo ? 'Título vencido · ' : 'título vencido · ') + atraso(d), 'vermelho', 'Combine o pagamento antes de oferecer pedido novo') : ''; }
+    if (!f || f.vencido <= 0) return '';
     return CRM.selo((completo ? 'Título vencido: ' : 'vencido ') + R.moeda(f.vencido) + ' · ' + atraso(f.maiorAtraso), 'vermelho');
   };
   // Linha de aviso (Fila do dia, WhatsApp de recompra).
   CRM.avisoFinanceiro = id => {
     const f = CRM.financeiro(id);
-    if (!f || f.vencido <= 0) { const d = soVencido(id); return d ? 'Tem título vencido no FKN, o mais antigo há ' + atraso(d) + '. Combine o pagamento antes de oferecer pedido novo.' : ''; }
+    if (!f || f.vencido <= 0) return '';
     return 'Tem ' + f.qtdVencidos + ' título(s) vencido(s) no FKN: ' + R.moeda(f.vencido) + ', o mais antigo há ' + atraso(f.maiorAtraso) + '. Combine o pagamento antes de oferecer pedido novo.';
   };
   const posicaoTxt = () => {
@@ -95,10 +95,14 @@
   // Seção da ficha do cliente.
   CRM.fichaFinanceiro = id => {
     const f = CRM.financeiro(id);
-    if (!f) {
-      const d = soVencido(id);
-      return d ? '<section class="financeiro"><h3>Contas a receber</h3><p class="resumo-compras devendo">' + CRM.selo('título vencido', 'vermelho') +
-        ' o mais antigo há ' + esc(atraso(d)) + '.<br>Combine o pagamento antes de oferecer pedido novo.</p></section>' : '';
+    if (!f) return '';
+    // Gestora e vendedoras: só as duplicatas em atraso (é o que elas recebem do banco).
+    if (!CRM.ehAdmin()) {
+      return '<section class="financeiro"><h3>Duplicatas em atraso</h3><p class="resumo-compras devendo">' + CRM.selo('vencido ' + R.moeda(f.vencido), 'vermelho') + ' ' +
+        f.qtdVencidos + ' duplicata(s), a mais antiga há ' + esc(atraso(f.maiorAtraso)) + '.<br>Combine o pagamento antes de oferecer pedido novo.</p>' +
+        '<ul class="lista titulos">' + f.titulos.map(t => '<li><span>' + esc(t.duplicata) + (t.nota_numero ? ' · NF ' + esc(t.nota_numero) : '') + '</span>' +
+          '<small>venceu ' + esc(R.dataBR(t.vencimento)) + ' ' + CRM.selo(atraso(R.diasEntre(t.vencimento, CRM.hoje())) + ' em atraso', 'vermelho') + (t.portador ? ' · ' + esc(t.portador) : '') + '</small>' +
+          '<strong>' + esc(R.moeda(t.valor)) + '</strong></li>').join('') + '</ul></section>';
     }
     const hoje = CRM.hoje();
     return '<section class="financeiro"><h3>Contas a receber <small>' + esc(posicaoTxt()) + '</small></h3>' +

@@ -539,9 +539,9 @@
     imp.etapa = 'rodando';
     CRM.render();
     const prog = t => { imp.progresso = t; const el = $('#progressoImport'); if (el) el.textContent = t; };
-    const ordem = ['opcoes', 'etapas', 'produtos', 'empresas', 'contatos', 'negocios', 'negocio_itens', 'atividades', 'notas', 'nota_itens', 'titulos'];
-    // Títulos das parcelas: o que já existe (do FKN ou de outra importação) não é mexido.
-    if (pl.criar.titulos) { const ja = new Set((E().D.titulos || []).map(t => t.duplicata)); pl.criar.titulos = pl.criar.titulos.filter(t => !ja.has(t.duplicata)); }
+    // Títulos das parcelas vão pela função do banco (a gestora não lê o contas a receber): o que já
+    // existe (do FKN ou de outra importação) não é mexido; os da nota cancelada saem.
+    const ordem = ['opcoes', 'etapas', 'produtos', 'empresas', 'contatos', 'negocios', 'negocio_itens', 'atividades', 'notas', 'nota_itens'];
     const inicio = Date.now();
     imp.resultado = { criados: {}, atualizados: 0, erros: [] };
     try {
@@ -562,10 +562,14 @@
         }
       };
       await Promise.all([trabalhador(), trabalhador(), trabalhador(), trabalhador()]);
-      // Nota cancelada: tira os títulos que vieram das parcelas dela.
-      const pre = new Set(pl.titulosCancelados || []);
-      const sair = (E().D.titulos || []).filter(t => t.origem === 'nota' && pre.has(String(t.duplicata).split('/')[0])).map(t => t.id);
-      if (sair.length) { try { await CRM.store().removerVarios('titulos', sair); } catch (e) { imp.resultado.erros.push('títulos da nota cancelada: ' + e.message); } }
+      // Títulos das parcelas (contas a receber) e, da nota cancelada, os que vieram dela.
+      if ((pl.criar.titulos || []).length || (pl.titulosCancelados || []).length) {
+        prog('Gravando ' + NOMES_IMPORT.titulos);
+        try {
+          const r = await CRM.store().titulosDaNota(pl.criar.titulos || [], pl.titulosCancelados || []);
+          imp.resultado.criados.titulos = (r && r.criados) || 0;
+        } catch (e) { imp.resultado.erros.push(NOMES_IMPORT.titulos + ': ' + e.message); }
+      }
       await CRM.recarregar();
     } catch (e) {
       imp.resultado.erros.push(e.message);
@@ -676,7 +680,8 @@
     ['telefone', 'whatsapp', 'email', 'segmento', 'ciclo_recompra_dias'].forEach(k => { if ((a[k] == null || a[k] === '') && b[k]) patch[k] = b[k]; });
     if (b.situacao === 'cliente' && a.situacao !== 'cliente') patch.situacao = 'cliente';
     if (b.grupo_id && !a.grupo_id && b.grupo_id !== a.id) patch.grupo_id = b.grupo_id;
-    for (const t of ['contatos', 'negocios', 'atividades', 'notas', 'titulos']) await CRM.atualizarVarios(t, (E().D[t] || []).filter(x => x.empresa_id === bId).map(x => x.id), { empresa_id: aId });
+    for (const t of ['contatos', 'negocios', 'atividades', 'notas']) await CRM.atualizarVarios(t, (E().D[t] || []).filter(x => x.empresa_id === bId).map(x => x.id), { empresa_id: aId });
+    await CRM.store().trocaEmpresaTitulos([bId], aId); // pela função do banco: a gestora não lê os títulos
     await CRM.atualizarVarios('empresas', E().D.empresas.filter(x => x.grupo_id === bId && x.id !== aId).map(x => x.id), { grupo_id: aId });
     await CRM.removerVarios('empresas', [bId]); // antes de completar: a trava de duplicado recusaria o CNPJ que ainda está no outro
     if (Object.keys(patch).length) await CRM.atualizar('empresas', aId, patch);
@@ -720,7 +725,8 @@
     // Guarda os códigos de origem (Agendor) dos que somem: reimportar não os recria.
     const ext = [...new Set([].concat(alvo.externos_mesclados || [], ...outros.map(id => { const o = CRM.empresa(id) || {}; return [o.externo_id].concat(o.externos_mesclados || []); })).filter(Boolean))];
     if (ext.length !== (alvo.externos_mesclados || []).length) patch.externos_mesclados = ext;
-    for (const t of ['contatos', 'negocios', 'atividades', 'notas', 'titulos']) await CRM.atualizarVarios(t, (E().D[t] || []).filter(x => s.has(x.empresa_id)).map(x => x.id), { empresa_id: marcado });
+    for (const t of ['contatos', 'negocios', 'atividades', 'notas']) await CRM.atualizarVarios(t, (E().D[t] || []).filter(x => s.has(x.empresa_id)).map(x => x.id), { empresa_id: marcado });
+    await CRM.store().trocaEmpresaTitulos(outros, marcado); // pela função do banco: a gestora não lê os títulos
     // Unidades do grupo que apontavam para um cadastro que some passam a apontar para o que fica.
     await CRM.atualizarVarios('empresas', E().D.empresas.filter(x => s.has(x.grupo_id) && x.id !== marcado).map(x => x.id), { grupo_id: marcado });
     // Apaga os repetidos antes de completar o que fica: senão a trava de duplicado recusaria

@@ -473,14 +473,39 @@
     const r = unwrap(await comTentativas(() => this.sb.rpc('crm_fkn_situacao')));
     return Object.assign({ estoque: null, receber: null, recusas: [] }, r || {});
   };
-  // Selo "título vencido" sem valor: [{ empresa_id, atraso }] (vendedor: só a carteira — ver schema.sql).
-  Supa.prototype.titulosVencidos = async function () {
-    return unwrap(await comTentativas(() => this.sb.rpc('crm_titulos_vencidos'))) || [];
+  // Duplicatas EM ATRASO, com detalhe (gestora e vendedoras não leem o contas a receber — ver schema.sql).
+  Supa.prototype.duplicatasAtraso = async function () {
+    return unwrap(await comTentativas(() => this.sb.rpc('crm_duplicatas_atraso'))) || [];
   };
-  Local.prototype.titulosVencidos = async function () {
-    const hoje = R.hojeISO(), m = new Map();
-    (this.ler().titulos || []).forEach(t => { if (t.empresa_id && t.vencimento < hoje) m.set(t.empresa_id, Math.max(m.get(t.empresa_id) || 0, R.diasEntre(t.vencimento, hoje))); });
-    return [...m].map(([empresa_id, atraso]) => ({ empresa_id, atraso }));
+  Local.prototype.duplicatasAtraso = async function () {
+    const hoje = R.hojeISO();
+    return (this.ler().titulos || []).filter(t => t.empresa_id && t.vencimento < hoje);
+  };
+  // Títulos das parcelas de nota importada à mão e os da nota cancelada (a gestora grava sem ler a tabela).
+  Supa.prototype.titulosDaNota = async function (novos, cancelados) {
+    return unwrap(await this.sb.rpc('crm_titulos_da_nota', { novos: novos || [], cancelados: cancelados || [] }));
+  };
+  Local.prototype.titulosDaNota = async function (novos, cancelados) {
+    const d = this.ler(), ja = new Set(d.titulos.map(t => t.duplicata)), pre = new Set(cancelados || []);
+    const antes = d.titulos.length;
+    d.titulos = d.titulos.filter(t => !(t.origem === 'nota' && pre.has(String(t.duplicata).split('/')[0])));
+    const removidos = antes - d.titulos.length;
+    const l = (novos || []).filter(t => !ja.has(t.duplicata)).map(t => this.novo(d, 'titulos', Object.assign({}, t, { origem: 'nota' })));
+    d.titulos.push(...l);
+    this.gravar(d);
+    return { criados: l.length, removidos };
+  };
+  // Juntar cadastros: os títulos vão para o que fica.
+  Supa.prototype.trocaEmpresaTitulos = async function (de, para) {
+    if (!de.length) return 0;
+    return unwrap(await this.sb.rpc('crm_titulos_troca_empresa', { de, para }));
+  };
+  Local.prototype.trocaEmpresaTitulos = async function (de, para) {
+    const d = this.ler(), s = new Set(de);
+    let n = 0;
+    d.titulos.forEach(t => { if (s.has(t.empresa_id)) { t.empresa_id = para; n++; } });
+    this.gravar(d);
+    return n;
   };
   Local.prototype.fknAtualizado = async function () {
     const est = await this.estoque(), tit = this.ler().titulos || [];

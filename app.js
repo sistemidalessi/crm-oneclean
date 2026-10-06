@@ -87,8 +87,9 @@
       if (CRM.ehComprador() && store.clientesCompras) D.empresas = await store.clientesCompras();
       // Administrador: sinal de vida do vigia de notas (aviso se parar).
       if (CRM.ehAdmin() && store.vigias) E.vigias = await store.vigias().catch(() => E.vigias || []);
-      // Vendedor não lê os títulos (RLS): só quais clientes da carteira têm título vencido (selo sem valor).
-      if (!CRM.ehGestor() && !CRM.ehComprador() && store.titulosVencidos) E.vencidos = new Map((await store.titulosVencidos().catch(() => [])).map(x => [x.empresa_id, x.atraso]));
+      // Só o administrador lê o contas a receber (RLS): gestora e vendedoras recebem as duplicatas em
+      // atraso (com detalhe) para o selo da Recompra, da Fila do dia e da ficha.
+      if (!CRM.ehAdmin() && !CRM.ehComprador() && store.duplicatasAtraso) E.atrasos = await store.duplicatasAtraso().catch(() => E.atrasos || []);
       // Administrador e comprador: quando chegaram os relatórios do FKN (lembrete em Compras).
       if ((CRM.ehAdmin() || CRM.ehComprador()) && store.fknAtualizado) E.fkn = await store.fknAtualizado().catch(() => E.fkn || null);
       E.D = D;

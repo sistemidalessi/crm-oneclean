@@ -770,9 +770,11 @@ alter table public.crm_estoque add column if not exists ult_entrada     date;
 alter table public.crm_estoque add column if not exists ult_saida       date;
 
 -- contas a receber (listagem SIFN016 do FKN, "em aberto"): retrato dos títulos; cada importação
--- troca o retrato inteiro. Quem vê: gestor e administrador. Vendedor NÃO lê títulos nem valores
--- (06/10/2026, pedido do Anderson): recebe só "tem título vencido" dos clientes da carteira, pela
--- função crm_titulos_vencidos(). Comprador: nada.
+-- troca o retrato inteiro. Quem lê a tabela: SÓ o administrador (06/10/2026, Anderson: "tanto
+-- Isabela quanto os demais, somente o selo de duplicata em atraso, podendo dar detalhes"). Gestora e
+-- vendedoras recebem só as duplicatas EM ATRASO (com detalhe) pela função crm_duplicatas_atraso();
+-- a gestora grava os títulos das notas que importa e leva os títulos ao juntar cadastros pelas
+-- funções crm_titulos_da_nota() e crm_titulos_troca_empresa(), sem ler a tabela. Comprador: nada.
 -- O administrador importa a listagem; as notas (vigia ou gestora) criam os títulos das parcelas.
 create table if not exists public.crm_titulos (
   id             uuid primary key default gen_random_uuid(),
@@ -809,25 +811,59 @@ drop policy if exists le on public.crm_titulos;
 drop policy if exists grava on public.crm_titulos;
 drop policy if exists altera on public.crm_titulos;
 drop policy if exists apaga on public.crm_titulos;
-create policy le on public.crm_titulos for select to authenticated using ((select public.crm_eh_gestor()));
+create policy le on public.crm_titulos for select to authenticated using ((select public.crm_eh_admin()));
 -- gravar: a gestora também (a importação manual de notas cria os títulos das parcelas).
 create policy grava on public.crm_titulos for insert to authenticated with check ((select public.crm_eh_gestor()));
 -- alterar: a gestora também (ao juntar cadastros duplicados, o título vai para o cadastro que fica).
 create policy altera on public.crm_titulos for update to authenticated using ((select public.crm_eh_gestor())) with check ((select public.crm_eh_gestor()));
 create policy apaga on public.crm_titulos for delete to authenticated using ((select public.crm_eh_admin()));
 
--- Selo "título vencido" da Recompra, da Fila do dia e da ficha, sem valor e sem a lista de títulos:
--- cliente com título vencido e o maior atraso em dias. Gestor/admin: todos; vendedor: a carteira.
-create or replace function public.crm_titulos_vencidos()
-returns table (empresa_id uuid, atraso integer) language sql stable security definer set search_path = public as $$
-  select t.empresa_id, max(((now() at time zone 'America/Sao_Paulo')::date - t.vencimento))::integer
+-- Duplicatas em atraso (selo da Recompra, da Fila do dia e da ficha, com o detalhe de cada uma). Só as
+-- vencidas — o resto do contas a receber fica com o administrador. Gestor/admin: todas; vendedor: as
+-- dos clientes da carteira. (A crm_titulos_vencidos(), de 06/10 de manhã, foi trocada por esta.)
+drop function if exists public.crm_titulos_vencidos();
+create or replace function public.crm_duplicatas_atraso()
+returns table (empresa_id uuid, duplicata text, nota_numero integer, parcela integer, vencimento date, valor numeric, abono boolean, portador text)
+language sql stable security definer set search_path = public as $$
+  select t.empresa_id, t.duplicata, t.nota_numero, t.parcela, t.vencimento, t.valor, t.abono, t.portador
     from public.crm_titulos t
    where t.empresa_id is not null and t.vencimento < (now() at time zone 'America/Sao_Paulo')::date
-     and (public.crm_eh_gestor() or (public.crm_eh_membro() and t.empresa_id in (select public.crm_empresas_minhas())))
-   group by t.empresa_id;
+     and (public.crm_eh_gestor() or (public.crm_eh_membro() and t.empresa_id in (select public.crm_empresas_minhas())));
 $$;
-revoke all on function public.crm_titulos_vencidos() from public, anon;
-grant execute on function public.crm_titulos_vencidos() to authenticated;
+-- Títulos das parcelas de nota importada à mão (gestora ou admin): grava os novos (o que já existe não
+-- é mexido) e tira os da nota cancelada que ainda não foram confirmados pelo FKN. Devolve quantos.
+create or replace function public.crm_titulos_da_nota(novos jsonb, cancelados text[] default '{}')
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare c integer := 0; r integer := 0;
+begin
+  if not public.crm_eh_gestor() then raise exception 'sem permissão'; end if;
+  insert into public.crm_titulos (duplicata, nota_numero, parcela, empresa_id, cliente_doc, cliente_nome, vendedor_nome, emitida_em, vencimento, valor, portador, origem)
+  select x.duplicata, x.nota_numero, x.parcela, x.empresa_id, x.cliente_doc, x.cliente_nome, x.vendedor_nome, x.emitida_em, x.vencimento, coalesce(x.valor, 0), x.portador, 'nota'
+    from jsonb_to_recordset(coalesce(novos, '[]'::jsonb)) as x(duplicata text, nota_numero integer, parcela integer, empresa_id uuid, cliente_doc text, cliente_nome text,
+         vendedor_nome text, emitida_em date, vencimento date, valor numeric, portador text)
+   where x.duplicata is not null and x.vencimento is not null
+  on conflict (duplicata) do nothing;
+  get diagnostics c = row_count;
+  if coalesce(array_length(cancelados, 1), 0) > 0 then
+    delete from public.crm_titulos where origem = 'nota' and split_part(duplicata, '/', 1) = any(cancelados);
+    get diagnostics r = row_count;
+  end if;
+  return jsonb_build_object('criados', c, 'removidos', r);
+end;
+$$;
+-- Juntar cadastros duplicados (gestora ou admin): os títulos vão para o cadastro que fica.
+create or replace function public.crm_titulos_troca_empresa(de uuid[], para uuid)
+returns integer language plpgsql security definer set search_path = public as $$
+declare n integer;
+begin
+  if not public.crm_eh_gestor() then raise exception 'sem permissão'; end if;
+  update public.crm_titulos set empresa_id = para where empresa_id = any(de);
+  get diagnostics n = row_count;
+  return n;
+end;
+$$;
+revoke all on function public.crm_duplicatas_atraso(), public.crm_titulos_da_nota(jsonb, text[]), public.crm_titulos_troca_empresa(uuid[], uuid) from public, anon;
+grant execute on function public.crm_duplicatas_atraso(), public.crm_titulos_da_nota(jsonb, text[]), public.crm_titulos_troca_empresa(uuid[], uuid) to authenticated;
 
 -- Quando chegou cada relatório do FKN (lembrete em Compras). O comprador puxa só o estoque
 -- (06/10/2026): a data do contas a receber é só do administrador. Vendedor e gestor: nada.
