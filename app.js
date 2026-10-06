@@ -334,6 +334,26 @@
       '<button type="button" class="mini" data-acao="ver-integracoes">ver integrações</button>';
   }
 
+  // Redesenhar a tela (depois de dar baixa, salvar, recarregar…) não pode tirar a pessoa do lugar
+  // (pedido do Anderson, 06/10/2026: "baixo um título e a página sobe lá em cima"): guarda e devolve a
+  // rolagem da página e da janela (celular), a das tabelas e grades com rolagem própria e os blocos
+  // recolhíveis abertos (fechados, a página encolhia e subia). Bloco pelo texto do resumo sem números.
+  const ROLAM = '.tabela-rolagem, .cx-grade-rolagem';
+  const chaveBloco = d => (d.className || '') + '|' + ((d.querySelector('summary') || {}).textContent || '').replace(/[\d.,R$%()\s]+/g, ' ').trim().slice(0, 80);
+  function guardaLugar(c) {
+    const abertos = {};
+    c.querySelectorAll('details').forEach(d => { abertos[chaveBloco(d)] = d.open; });
+    return { aba: E.aba, topo: c.scrollTop, jx: window.scrollX, jy: window.scrollY, abertos,
+      rolam: [...c.querySelectorAll(ROLAM)].map(e => [e.scrollTop, e.scrollLeft]) };
+  }
+  function voltaLugar(c, l) {
+    if (l.aba !== E.aba) return; // trocou de aba: começa do topo
+    c.querySelectorAll('details').forEach(d => { const k = chaveBloco(d); if (k in l.abertos) d.open = l.abertos[k]; });
+    c.querySelectorAll(ROLAM).forEach((e, i) => { const r = l.rolam[i]; if (r) { e.scrollTop = r[0]; e.scrollLeft = r[1]; } });
+    c.scrollTop = l.topo;
+    if (window.scrollY !== l.jy || window.scrollX !== l.jx) window.scrollTo(l.jx, l.jy);
+  }
+
   function renderAgora() {
     if (!E.eu) return;
     // Comprador: só Compras. Compras e Gestão: administrador. Configurações: gestor.
@@ -372,15 +392,15 @@
       return;
     }
     const tela = CRM.telas[E.aba] || CRM.telas.inicio;
-    const rolagem = c.scrollTop;
+    const lugar = guardaLugar(c);
     const foco = document.activeElement && document.activeElement.id && c.contains(document.activeElement) ? document.activeElement.id : null;
     c.innerHTML = tela.render(al);
     if (tela.depois) tela.depois(c);
     CRM.aplicaBarras(c);
-    c.scrollTop = rolagem;
+    voltaLugar(c, lugar);
     if (foco && document.getElementById(foco)) {
       const el = document.getElementById(foco);
-      el.focus();
+      el.focus({ preventScroll: true });
       // Só campos de texto aceitam cursor (caixa de marcar, data, número etc. dão erro).
       if (el.setSelectionRange && /^(text|textarea|search|tel|url|email|password|)$/.test(el.type || '') && typeof el.value === 'string') { try { el.setSelectionRange(el.value.length, el.value.length); } catch (e) { /* sem cursor */ } }
     }
@@ -391,6 +411,7 @@
     E.aba = aba; gravaPref('aba', aba);
     if (filtros) E.filtros[aba] = Object.assign({}, E.filtros[aba] || {}, filtros);
     $('#conteudo').scrollTop = 0;
+    if (window.scrollY) window.scrollTo(0, 0);
     CRM.render();
   };
 

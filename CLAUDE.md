@@ -835,6 +835,31 @@ Anderson: cada sistema cuida da sua empresa; o "Geral" (as duas) é de quem lê 
 - Daqui não dá para chamar a função (a rede da sessão barra `supabase.co`); o teste com a senha (saldo e
   saldo de cada dia contra a tela; 401/405) fica para quando o Anderson gerar a senha.
 
+## Acertos de 06/10 à tarde (achados pela aba Geral da Agilité)
+
+- **Material vendido à Agilité contado duas vezes** (recorrente da planilha em 20/10 + duplicata do FKN
+  em 21/10, R$ 5.715,40): o título é a fonte de verdade. `ligacoesTitulos` (`caixa-calculo.js`): previsão
+  de entrada em aberto, entre empresas, com o MESMO valor (±1 centavo) e vencimento a até 5 dias de um
+  título de sacado Agilité fica **ligada** (`titulo_duplicata` na previsão, `situacao = 'aberto'`) e sai da
+  grade e das vencidas; o título aparece uma vez, com o condomínio na descrição, `entre_empresas` e
+  `referente` na leitura. A tela grava as ligações ao abrir o Caixa; a grade e a leitura também ligam na
+  hora as que ainda não foram gravadas. Receber o título (✓, "Recebi" ou frase) **baixa a previsão
+  ligada** em vez de inserir outra entrada; "recebido" = `titulo_duplicata` com `situacao = 'pago'`.
+  As 6 de outubro ligadas no banco. Mês em que o valor real é diferente do recorrente não liga: aparece a
+  previsão e o título (ajustar o valor da previsão ou pausá-la).
+- **Reembolsos da folha dos 5** (valor certo = folha da Agilité): outubro acertado — salários 11.302,22
+  (06/10), **benefícios de outubro 5.404,40 (06/10, novo)**, Cesta II 392,33 (14/10), FGTS + consignado
+  1.167,90 (20/10), novembro em 30/10: VR 2.182,40 + VT 2.525,60 + cesta 696,40. Descrições com o
+  componente ("Reembolso folha 09/2026 — FGTS + consignado"); os recorrentes viraram "Reembolso folha — …"
+  / "Reembolso benefícios — …" com valor de previsão e a observação "ajustar todo mês com a folha da
+  Agilité (~dia 5)". Na leitura, reembolso cuja descrição só tem componente (lista `COMPONENTES`) sai
+  com a descrição; com qualquer outra palavra (um nome) volta a somar sem nome. Não havia VR/VT/cesta de
+  30/09 lançado no CRM (o Caixa começou em outubro).
+- **A página não sobe mais ao dar baixa** (pedido do Anderson): `renderAgora` (app.js) guarda e devolve a
+  rolagem da página e da janela (celular), a das `.tabela-rolagem`/`.cx-grade-rolagem` e os `<details>`
+  abertos (fechavam a cada redesenho: o bloco "A receber vencido" fechava e a página subia). Vale para
+  todas as telas; trocar de aba começa do topo. O foco devolvido não rola (`preventScroll`).
+
 ## Permissões do financeiro (06/10/2026, pedido do Anderson)
 
 - **Contas a receber (`crm_titulos`): só o administrador lê a tabela** (`le` = `crm_eh_admin()`, em
