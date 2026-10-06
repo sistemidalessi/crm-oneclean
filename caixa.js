@@ -9,7 +9,7 @@
   'use strict';
   const R = raiz.CRMRegras;
   const C = raiz.CRMCaixa;
-  const { feriado, posterga, porqueNaoUtil, creditoTitulo, gerarMes, saldoAtual, itensGrade, saldosGrade, vencidas, receberVencido,
+  const { feriado, posterga, porqueNaoUtil, creditoTitulo, gerarMes, saldoAtual, itensGrade, saldosGrade, vencidas, receberVencido, ligacoesTitulos, ligadasPorTitulo,
     CATEGORIAS_SAIDA, CATEGORIAS_ENTRADA, ENTRE_EMPRESAS } = C;
   const r2 = v => Math.round(Number(v || 0) * 100) / 100;
   const semana = s => new Date(s + 'T12:00:00Z').getUTCDay();
@@ -36,6 +36,13 @@
     lendo = true;
     lidoEm = Date.now();
     try { F = await CRM.store().carregarFin(); } catch (e) { if (!F) F = { recorrentes: [], lancamentos: [], saldos: [], regras: [] }; CRM.falhou(e); }
+    // previsão (ex.: material vendido à Agilité) que tem título igual do FKN: grava a ligação, para o
+    // ✓ do título baixar a previsão em vez de criar outra entrada (caixa-calculo.js, ligacoesTitulos)
+    try {
+      const lig = titulos().length ? ligacoesTitulos(F.lancamentos, titulos(), nomeTitulo) : [];
+      for (const x of lig) troca(F.lancamentos, await CRM.store().atualizar('fin_lancamentos', x.id, { titulo_duplicata: x.duplicata }));
+      if (lig.length) CRM.toast(lig.length + ' previsão(ões) ligada(s) ao título do FKN de mesmo valor: aparecem uma vez, no dia do título.');
+    } catch (e) { CRM.falhou(e); }
     lendo = false;
     CRM.render();
   }
@@ -51,6 +58,13 @@
   async function receberTitulo(dup, dia) {
     const t = titulos().find(x => x.duplicata === dup);
     if (!t) return;
+    // previsão ligada a este título: ela vira o recebimento (não cria outra entrada)
+    const lig = ligadasPorTitulo(F.lancamentos, titulos(), nomeTitulo).get(dup);
+    if (lig) {
+      await grava(lig.id, { situacao: 'pago', pago_em: dia, baixa: 'caixa', baixado_em: agora(), valor: r2(t.valor), titulo_duplicata: dup });
+      CRM.toast('Recebido em ' + dm(dia) + ': ' + R.moeda(t.valor) + ' (' + lig.descricao + ')');
+      return;
+    }
     await insere({ tipo: 'entrada', descricao: 'Recebido: ' + nomeTitulo(t) + ' · ' + t.duplicata, categoria: 'Duplicatas recebidas', valor: r2(t.valor),
       vencimento: t.vencimento, situacao: 'pago', pago_em: dia, baixa: 'caixa', baixado_em: agora(), origem: 'titulo', titulo_duplicata: t.duplicata,
       entre_empresas: ENTRE_EMPRESAS.test(nomeTitulo(t)) });
@@ -103,7 +117,8 @@
       const t = titulos().find(x => x.duplicata === id);
       if (!t) return;
       CRM.abrirForm({
-        titulo: 'Título a receber', intro: nomeTitulo(t) + ' · duplicata ' + t.duplicata + ' · ' + R.moeda(t.valor) + '\nVence ' + R.dataBR(t.vencimento) +
+        titulo: 'Título a receber', intro: nomeTitulo(t) + ' · duplicata ' + t.duplicata + ' · ' + R.moeda(t.valor) +
+          ((lig => lig ? '\nÉ a previsão "' + lig.descricao + '" (mesmo valor): receber o título dá baixa nela.' : '')(ligadasPorTitulo(F.lancamentos, titulos(), nomeTitulo).get(t.duplicata))) + '\nVence ' + R.dataBR(t.vencimento) +
           ', cai na conta ' + R.dataBR(creditoTitulo(t.vencimento, d1())) + '.\nO título sai do contas a receber quando a listagem do FKN mostrar que foi pago.',
         campos: [{ nome: 'dia', rotulo: 'Recebido em', tipo: 'data' }], valores: { dia },
         salvarTexto: 'Recebi', aoSalvar: async v => { await receberTitulo(t.duplicata, diaDaBaixa(v.dia || dia)); }
@@ -318,6 +333,7 @@
   function seloSituacao(l, h) {
     if (l.situacao === 'pausado') return selo('pausada', 'cinza');
     if (l.situacao === 'pago') return selo(l.tipo === 'entrada' ? 'recebida' : 'paga', 'verde');
+    if (l.titulo_duplicata) return selo('no título ' + l.titulo_duplicata, 'azul');
     return posterga(l.vencimento) < h ? selo('vencida', 'vermelho') : selo('em aberto', 'azul');
   }
   function cartao(x, dia) {
@@ -374,7 +390,7 @@
   }
   function blocosVencidos() {
     const h = hoje();
-    const v = vencidas(F.lancamentos, h);
+    const v = vencidas(F.lancamentos, h, titulos(), nomeTitulo);
     const rv = receberVencido(titulos(), F.lancamentos, h, d1());
     const tot = l => l.reduce((t, x) => t + Number(x.valor || 0), 0);
     const b = (acao, id, rot, cls) => '<button type="button" class="mini' + (cls ? ' ' + cls : '') + '" data-acao="' + acao + '" data-id="' + esc(id) + '">' + esc(rot) + '</button>';
@@ -389,7 +405,7 @@
   function listaContas() {
     const h = hoje();
     const busca = R.normaliza(filtro.busca || '');
-    let l = F.lancamentos.filter(x => !x.titulo_duplicata);
+    let l = F.lancamentos.filter(x => x.origem !== 'titulo');
     if (filtro.tipo) l = l.filter(x => x.tipo === filtro.tipo);
     if (filtro.situacao === 'abertas') l = l.filter(x => x.situacao === 'aberto');
     else if (filtro.situacao === 'vencidas') l = l.filter(x => x.situacao === 'aberto' && posterga(x.vencimento) < h);
@@ -407,7 +423,7 @@
       '<label class="btn sec arquivo" title="No FKN: Contas à Pagar por Conta/Fornecedor (Sifn083), Em aberto, salvar em CSV. O vigia também manda sozinho.">Atualizar do FKN<input type="file" id="cxPagarFkn" accept=".csv,.txt,text/csv"></label></div>' +
       (l.length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>' + (filtro.situacao === 'pagas' ? 'Pago em' : 'Vencimento') + '</th><th>Descrição</th><th>Categoria</th><th class="num">Valor</th><th>Situação</th><th></th></tr></thead><tbody>' +
         l.map(x => '<tr class="clicavel" data-acao="cx-editar" data-id="' + esc(x.id) + '" tabindex="0"><td>' + esc(R.dataBR(filtro.situacao === 'pagas' ? x.pago_em : x.vencimento)) + '</td>' +
-          '<td><strong>' + esc(x.descricao) + '</strong>' + (x.fornecedor || x.entre_empresas || x.origem !== 'tela' ? '<small>' + esc([x.fornecedor, x.entre_empresas ? 'entre empresas' : '', x.origem === 'recorrente' ? 'recorrente' : x.origem === 'fkn' ? 'do FKN' : x.origem === 'planilha' ? 'da planilha' : ''].filter(Boolean).join(' · ')) + '</small>' : '') + '</td>' +
+          '<td><strong>' + esc(x.descricao) + '</strong>' + (x.fornecedor || x.entre_empresas || x.origem !== 'tela' ? '<small>' + esc([x.fornecedor, x.entre_empresas ? 'entre empresas' : '', x.origem === 'recorrente' ? 'recorrente' : x.origem === 'fkn' ? 'do FKN' : x.origem === 'planilha' ? 'da planilha' : '', x.titulo_duplicata ? (x.situacao === 'pago' ? 'recebida pelo título ' : 'ligada ao título ') + x.titulo_duplicata : ''].filter(Boolean).join(' · ')) + '</small>' : '') + '</td>' +
           '<td>' + esc(x.categoria || '') + '</td><td class="num ' + (x.tipo === 'entrada' ? 'cx-pos' : 'cx-neg') + '">' + (x.tipo === 'entrada' ? '+' : '−') + esc(R.moeda(x.valor)) + '</td><td>' + seloSituacao(x, h) + '</td>' +
           '<td class="acoes-linha">' + (x.situacao === 'aberto' ? '<button type="button" class="mini" data-acao="cx-pagar" data-id="' + esc(x.id) + '">' + (x.tipo === 'entrada' ? 'Recebi' : 'Paguei') + ' hoje</button>' : x.situacao === 'pausado' ? '<button type="button" class="mini" data-acao="cx-voltar" data-id="' + esc(x.id) + '">Voltar para o caixa</button>' : '') + '</td></tr>').join('') +
         '</tbody><tfoot><tr><td colspan="3">' + l.length + ' lançamento(s)</td><td class="num"><strong>' + esc(R.moeda(tot)) + '</strong></td><td colspan="2"></td></tr></tfoot></table></div>'

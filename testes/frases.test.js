@@ -129,3 +129,13 @@ test('gravação e desfazer', () => {
   p.acao = 'ignorar';
   assert.deepEqual(F.gravacao(p, { agora }), { inserir: [], atualizar: [], titulos: [] });
 });
+
+test('receber pela frase um título com previsão ligada baixa a previsão (não cria outra entrada)', () => {
+  const lancamentos = [{ id: 'm1', tipo: 'entrada', descricao: 'Material vendido à Agilité — Alfa', valor: 798.79, vencimento: '2026-10-20', situacao: 'aberto', titulo_duplicata: '00991/01', entre_empresas: true }];
+  const titulos = [{ duplicata: '00991/01', cliente_nome: 'AGILITE FICTICIA', valor: 798.79, vencimento: '2026-10-20' }];
+  const p = um('recebi 798,79 da agilite hoje', { lancamentos, titulos });
+  assert.equal(p.acao, 'titulo:00991/01');
+  const g = F.gravacao(p, { lancamentos, titulos, agora: 'x' });
+  assert.deepEqual([g.inserir.length, g.atualizar.length, g.atualizar[0].id, g.atualizar[0].patch.situacao], [0, 1, 'm1', 'pago']);
+  assert.deepEqual(F.desfazer(Object.assign({}, lancamentos[0], g.atualizar[0].patch)).patch.situacao, 'aberto');
+});

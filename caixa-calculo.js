@@ -97,6 +97,41 @@
   }
 
   // ------------------------------------------------------------ grade
+  // ------------------------------------------------------------ previsão ligada a título
+  // A mesma venda por dois caminhos (06/10/2026): o recorrente "Material vendido à Agilité — <cond.>"
+  // (previsão, da planilha) e a duplicata que o FKN emitiu contra a Agilité. O título é a fonte de
+  // verdade: a previsão em aberto que tem o MESMO valor (±1 centavo), vencimento a até 5 dias e é
+  // entre empresas fica ligada a um título de sacado Agilité (titulo_duplicata na previsão) e some da
+  // grade — o título aparece uma vez, no dia do crédito. Receber o título baixa a previsão ligada (não
+  // cria outra entrada). Ligada = aberto com titulo_duplicata; recebido = pago com titulo_duplicata.
+  const ehEntreEmpresas = l => !!l.entre_empresas || ENTRE_EMPRESAS.test((l.categoria || '') + ' ' + (l.descricao || ''));
+  const recebidosDe = lancs => new Set((lancs || []).filter(l => l.titulo_duplicata && l.situacao === 'pago').map(l => l.titulo_duplicata));
+  const ligadaPersistida = l => l.situacao === 'aberto' && !!l.titulo_duplicata;
+  // → [{ id (previsão), duplicata }] das ligações que ainda não estão gravadas.
+  function ligacoesTitulos(lancs, titulos, nome) {
+    const nomeT = nome || (t => t.cliente || t.cliente_nome || '');
+    const usados = new Set((lancs || []).filter(l => l.titulo_duplicata).map(l => l.titulo_duplicata));
+    const prev = (lancs || []).filter(l => l.tipo === 'entrada' && l.situacao === 'aberto' && !l.titulo_duplicata && ehEntreEmpresas(l));
+    const tits = (titulos || []).filter(t => !usados.has(t.duplicata) && ENTRE_EMPRESAS.test(nomeT(t)));
+    const pares = [];
+    prev.forEach(l => tits.forEach(t => {
+      const dd = Math.abs(Math.round((dt(l.vencimento) - dt(t.vencimento)) / 864e5));
+      if (Math.abs(Number(l.valor) - Number(t.valor)) <= 0.01 && dd <= 5) pares.push({ l, t, dd });
+    }));
+    pares.sort((a, b) => a.dd - b.dd || String(a.t.duplicata).localeCompare(String(b.t.duplicata)));
+    const ja = new Set(), out = [];
+    pares.forEach(p => { if (ja.has('l' + p.l.id) || ja.has('t' + p.t.duplicata)) return; ja.add('l' + p.l.id); ja.add('t' + p.t.duplicata); out.push({ id: p.l.id, duplicata: p.t.duplicata }); });
+    return out;
+  }
+  // previsão ligada (gravada ou não) de cada título: duplicata → lançamento
+  function ligadasPorTitulo(lancs, titulos, nome) {
+    const m = new Map();
+    (lancs || []).forEach(l => { if (ligadaPersistida(l)) m.set(l.titulo_duplicata, l); });
+    const porId = new Map((lancs || []).map(l => [l.id, l]));
+    ligacoesTitulos(lancs, titulos, nome).forEach(x => m.set(x.duplicata, porId.get(x.id)));
+    return m;
+  }
+
   // Item: { chave, tipo: 'lanc'|'titulo', secao: 'entrada'|'saida', data, titulo, valor, estado:
   // 'feito'|'fora'|'previsto', obs, ref }. Vencidos (conta ou título que já devia ter acontecido)
   // ficam fora da grade e do saldo previsto: vão para os blocos próprios.
@@ -104,11 +139,14 @@
     opc = opc || {};
     const it = [];
     const add = o => { if (o.data >= de && o.data <= ate) it.push(o); };
-    const recebidos = new Set((lancs || []).filter(l => l.titulo_duplicata).map(l => l.titulo_duplicata));
+    const recebidos = recebidosDe(lancs);
+    const ligadas = ligadasPorTitulo(lancs, titulos, opc.nome);
+    const escondidas = new Set([...ligadas.values()].map(l => l.id));
     (lancs || []).forEach(l => {
       const secao = l.tipo === 'entrada' ? 'entrada' : 'saida';
       const base = { chave: 'lanc:' + l.id, tipo: 'lanc', secao, titulo: l.descricao, valor: r2(l.valor), ref: l };
       if (l.situacao === 'pausado') return;
+      if (l.situacao === 'aberto' && (l.titulo_duplicata || escondidas.has(l.id))) return; // o título representa
       if (l.situacao === 'pago') { add(Object.assign(base, { data: l.pago_em, estado: l.baixa === 'caixa' ? 'feito' : 'fora', obs: l.baixa === 'caixa' ? '' : 'pago fora do caixa do dia' })); return; }
       const pg = posterga(l.vencimento);
       if (pg < hoje) return;
@@ -118,8 +156,9 @@
       if (recebidos.has(t.duplicata)) return;
       const cr = creditoTitulo(t.vencimento, opc.d1);
       if (cr < hoje) return;
-      add({ chave: 'tit:' + t.duplicata, tipo: 'titulo', secao: 'entrada', data: cr, titulo: (opc.nome ? opc.nome(t) : t.cliente_nome || 'Cliente') + ' · ' + t.duplicata,
-        valor: r2(t.valor), estado: 'previsto', obs: 'título vence ' + dm(t.vencimento) + ', cai na conta ' + dm(cr), ref: t });
+      const lig = ligadas.get(t.duplicata);
+      add({ chave: 'tit:' + t.duplicata, tipo: 'titulo', secao: 'entrada', data: cr, titulo: (opc.nome ? opc.nome(t) : t.cliente_nome || 'Cliente') + ' · ' + t.duplicata + (lig ? ' · ' + lig.descricao : ''),
+        valor: r2(t.valor), estado: 'previsto', obs: 'título vence ' + dm(t.vencimento) + ', cai na conta ' + dm(cr), ref: t, ligada: lig || null });
     });
     return it;
   }
@@ -142,10 +181,15 @@
     });
     return out;
   }
-  const vencidas = (lancs, hoje) => (lancs || []).filter(l => l.situacao === 'aberto' && posterga(l.vencimento) < hoje)
-    .sort((a, b) => a.vencimento.localeCompare(b.vencimento) || b.valor - a.valor);
+  // titulos/nome: para não contar como vencida a previsão que um título representa (o título atrasado
+  // vai para "A receber vencido").
+  function vencidas(lancs, hoje, titulos, nome) {
+    const lig = new Set([...ligadasPorTitulo(lancs, titulos, nome).values()].map(l => l.id));
+    return (lancs || []).filter(l => l.situacao === 'aberto' && !l.titulo_duplicata && !lig.has(l.id) && posterga(l.vencimento) < hoje)
+      .sort((a, b) => a.vencimento.localeCompare(b.vencimento) || b.valor - a.valor);
+  }
   function receberVencido(titulos, lancs, hoje, d1) {
-    const recebidos = new Set((lancs || []).filter(l => l.titulo_duplicata).map(l => l.titulo_duplicata));
+    const recebidos = recebidosDe(lancs);
     return (titulos || []).filter(t => !recebidos.has(t.duplicata) && creditoTitulo(t.vencimento, d1) < hoje)
       .sort((a, b) => a.vencimento.localeCompare(b.vencimento));
   }
@@ -206,9 +250,9 @@
       const conta = sec => r2(doDia.filter(x => x.secao === sec && x.estado !== 'fora').reduce((t, x) => t + x.valor, 0));
       const itens = doDia.map(x => {
         if (x.tipo === 'titulo') {
-          const t = x.ref, nome = limpar(nomeT(t));
-          return { tipo: 'entrada', descricao: 'Título ' + t.duplicata + ' — ' + nome, valor: r2(x.valor), situacao: 'previsto', categoria: 'Duplicatas recebidas',
-            cliente_fornecedor: nome, entre_empresas: ENTRE_EMPRESAS.test(nome), _ag: false };
+          const t = x.ref, nome = limpar(nomeT(t)), lig = x.ligada;
+          return { tipo: 'entrada', descricao: 'Título ' + t.duplicata + ' — ' + nome + (lig ? ' · ' + limpar(lig.descricao) : ''), valor: r2(x.valor), situacao: 'previsto',
+            categoria: lig && lig.categoria ? lig.categoria : 'Duplicatas recebidas', cliente_fornecedor: nome, entre_empresas: ENTRE_EMPRESAS.test(nome) || !!(lig && ehEntreEmpresas(lig)), _ag: false };
         }
         return doLanc(x.ref, x.valor, x.estado === 'previsto' ? 'previsto' : 'aconteceu', x.estado === 'fora' ? { pago_fora: true } : null);
       });
@@ -219,7 +263,7 @@
     const comSaldo = proximos_dias.filter(x => x.saldo_fim_do_dia != null);
     const menor = comSaldo.reduce((m, x) => (m == null || x.saldo_fim_do_dia < m.saldo_fim_do_dia ? x : m), null);
 
-    const venc = vencidas(lancs, hoje);
+    const venc = vencidas(lancs, hoje, d.titulos, nomeT);
     const itensVenc = somar(venc.map(l => Object.assign(doLanc(l, l.valor, 'vencido'), { data: l.vencimento, paga_em: posterga(l.vencimento) })),
       i => [i.data, i.tipo, i.categoria, i.entre_empresas].join('|'));
 
@@ -238,10 +282,13 @@
     });
     const pausadas = [...grupos.values()].sort((a, b) => b.total - a.total);
 
-    const recebidos = new Set(lancs.filter(l => l.titulo_duplicata).map(l => l.titulo_duplicata));
+    const recebidos = recebidosDe(lancs);
+    const ligT = ligadasPorTitulo(lancs, d.titulos, nomeT);
     const tits = (d.titulos || []).filter(t => !recebidos.has(t.duplicata)).map(t => {
       const cai = creditoTitulo(t.vencimento, o.d1), nome = limpar(nomeT(t));
-      return { cliente: nome, duplicata: t.duplicata, valor: r2(t.valor), vencimento: t.vencimento, cai_na_conta: cai, atrasado: cai < hoje, entre_empresas: ENTRE_EMPRESAS.test(nome) };
+      const lig = ligT.get(t.duplicata);
+      return Object.assign({ cliente: nome, duplicata: t.duplicata, valor: r2(t.valor), vencimento: t.vencimento, cai_na_conta: cai, atrasado: cai < hoje,
+        entre_empresas: ENTRE_EMPRESAS.test(nome) || !!(lig && ehEntreEmpresas(lig)) }, lig ? { referente: limpar(lig.descricao) } : {});
     }).sort((a, b) => a.vencimento.localeCompare(b.vencimento) || a.duplicata.localeCompare(b.duplicata));
     const atrasados = tits.filter(t => t.atrasado);
 
@@ -267,7 +314,7 @@
     };
   }
 
-  const O = { resumoLeitura, limpar, feriados, feriado, util, posterga, utilDepois, porqueNaoUtil, creditoTitulo, pascoa, diaDoMes, gerarMes, ancora, saldoAtual,
+  const O = { resumoLeitura, limpar, ligacoesTitulos, ligadasPorTitulo, recebidosDe, feriados, feriado, util, posterga, utilDepois, porqueNaoUtil, creditoTitulo, pascoa, diaDoMes, gerarMes, ancora, saldoAtual,
     itensGrade, saldosGrade, vencidas, receberVencido, CATEGORIAS_SAIDA, CATEGORIAS_ENTRADA, ENTRE_EMPRESAS, soma };
   raiz.CRMCaixa = O;
   if (typeof module !== 'undefined') module.exports = O;

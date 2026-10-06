@@ -257,7 +257,8 @@
   function classificar(itens, ctx) {
     ctx = ctx || {};
     const usados = new Set();
-    const recebidos = ctx.recebidos || new Set((ctx.lancamentos || []).filter(l => l.titulo_duplicata).map(l => l.titulo_duplicata));
+    // recebido = entrada paga com o título; aberta com título = previsão ligada a ele (caixa-calculo.js)
+    const recebidos = ctx.recebidos || new Set((ctx.lancamentos || []).filter(l => l.titulo_duplicata && l.situacao === 'pago').map(l => l.titulo_duplicata));
     const nomeTit = ctx.nomeTitulo || (t => t.cliente_nome || 'Cliente');
     const credito = ctx.creditoTitulo || (t => t.vencimento);
     return (itens || []).map(it => {
@@ -267,7 +268,7 @@
       const realizado = it.situacao === 'realizado';
       // 1. conta em aberto do mesmo tipo
       const tol = Math.max(60, it.valor * 0.08);
-      const contas = toks.length ? (ctx.lancamentos || []).filter(l => l.situacao === 'aberto' && l.tipo === it.tipo && !usados.has('l:' + l.id) &&
+      const contas = toks.length ? (ctx.lancamentos || []).filter(l => l.situacao === 'aberto' && !l.titulo_duplicata && l.tipo === it.tipo && !usados.has('l:' + l.id) &&
         Math.abs(Number(l.valor) - it.valor) <= tol && Math.abs(dias(l.vencimento, it.data)) <= 20)
         .map(l => ({ l, c: emComum(toks, tokens([l.descricao, l.fornecedor].join(' '))) })).filter(x => x.c > 0)
         .map(x => Object.assign(x, { nota: x.c * 10 - Math.abs(Number(x.l.valor) - it.valor) / tol * 3 - Math.abs(dias(x.l.vencimento, it.data)) / 20 * 2 }))
@@ -354,10 +355,15 @@
       const tits = dups.map(d => (ctx.titulos || []).find(t => t.duplicata === d)).filter(Boolean);
       if (tits.length !== dups.length) throw new Error('título não encontrado no contas a receber');
       const nomeTit = ctx.nomeTitulo || (t => t.cliente_nome || 'Cliente');
+      // previsão ligada ao título (ex.: material vendido à Agilité): ela vira o recebimento
+      const ligada = t => (ctx.lancamentos || []).find(l => l.situacao === 'aberto' && l.titulo_duplicata === t.duplicata);
+      const valorDe = t => r2(tits.length === 1 ? p.valor : t.valor);
+      const atualizar = tits.filter(ligada).map(t => { const l = ligada(t); return { id: l.id, patch: { situacao: 'pago', pago_em: p.data, baixa: 'caixa', baixado_em: agora, valor: valorDe(t),
+        frase: p.frase, frase_antes: { situacao: l.situacao, pago_em: l.pago_em || null, baixa: l.baixa || null, baixado_em: l.baixado_em || null, valor: l.valor, vencimento: l.vencimento } } }; });
       // um título só: grava o valor que entrou (juros ou desconto de centavos); vários: o de cada um
-      return { inserir: tits.map(t => ({ tipo: 'entrada', descricao: 'Recebido: ' + nomeTit(t) + ' · ' + t.duplicata, categoria: 'Duplicatas recebidas',
-        valor: r2(tits.length === 1 ? p.valor : t.valor), vencimento: t.vencimento, situacao: 'pago', pago_em: p.data, baixa: 'caixa', baixado_em: agora,
-        origem: 'titulo', titulo_duplicata: t.duplicata, frase: p.frase, entre_empresas: AGILITE.test(baixo(nomeTit(t))) })), atualizar: [], titulos: dups };
+      return { atualizar, inserir: tits.filter(t => !ligada(t)).map(t => ({ tipo: 'entrada', descricao: 'Recebido: ' + nomeTit(t) + ' · ' + t.duplicata, categoria: 'Duplicatas recebidas',
+        valor: valorDe(t), vencimento: t.vencimento, situacao: 'pago', pago_em: p.data, baixa: 'caixa', baixado_em: agora,
+        origem: 'titulo', titulo_duplicata: t.duplicata, frase: p.frase, entre_empresas: AGILITE.test(baixo(nomeTit(t))) })), titulos: dups };
     }
     return { inserir: [{ tipo: p.tipo, descricao: p.descricao || p.categoria || 'Lançamento', fornecedor: p.fornecedor || null, categoria: p.categoria || null,
       valor: r2(p.valor), vencimento: p.data, situacao: pago ? 'pago' : 'aberto', pago_em: pago ? p.data : null, baixa: pago ? 'caixa' : null,

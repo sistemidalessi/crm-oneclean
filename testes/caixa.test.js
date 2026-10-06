@@ -190,3 +190,40 @@ test('leitura do caixa (Agilité "Geral" e gestora): bate com a grade, sem nome 
   assert.equal(r.menor_saldo.valor, Math.min(...r.proximos_dias.map(x => x.saldo_fim_do_dia)));
   assert.equal(r.totais_periodo.saldo_final, r.proximos_dias[9].saldo_fim_do_dia);
 });
+
+test('material vendido à Agilité: previsão e título do FKN de mesmo valor contam uma vez só', () => {
+  const hoje = '2026-10-06';
+  const valores = [2500.05, 1000.45, 829.89, 798.79, 494.31, 91.91];
+  const conds = ['Cond. Alfa', 'Beta', 'Gama', 'Delta', 'Cond. Épsilon', 'Zeta'];
+  const lancamentos = valores.map((v, i) => ({ id: 'm' + i, tipo: 'entrada', descricao: 'Material vendido à Agilité — ' + conds[i], categoria: 'Material vendido à Agilité',
+    valor: v, vencimento: '2026-10-20', situacao: 'aberto', origem: 'recorrente', entre_empresas: true }));
+  lancamentos.push({ id: 'x', tipo: 'entrada', descricao: 'Material vendido à Agilité — Eta', categoria: 'Material vendido à Agilité', valor: 300, vencimento: '2026-10-20', situacao: 'aberto', entre_empresas: true });
+  const titulos = valores.map((v, i) => ({ duplicata: '0099' + i + '/01', cliente: 'AGILITE FICTICIA SERVICOS', valor: v, vencimento: '2026-10-20' }));
+  titulos.push({ duplicata: '00500/01', cliente: 'OUTRO CLIENTE', valor: 300, vencimento: '2026-10-20' }); // mesmo valor, mas não é da Agilité
+  const lig = C.ligacoesTitulos(lancamentos, titulos, t => t.cliente);
+  assert.equal(lig.length, 6);
+  assert.deepEqual(lig.map(x => x.id).sort(), ['m0', 'm1', 'm2', 'm3', 'm4', 'm5']);
+  const g = C.itensGrade('2026-10-06', '2026-10-31', hoje, lancamentos, titulos, { nome: t => t.cliente });
+  const soma = d => g.filter(x => x.data === d && x.secao === 'entrada').reduce((t, x) => t + x.valor, 0);
+  assert.equal(Math.round(soma('2026-10-20') * 100) / 100, 300, 'em 20/10 só a previsão sem título igual');
+  assert.equal(Math.round(soma('2026-10-21') * 100) / 100, 5715.4 + 300, 'em 21/10 os seis títulos (uma vez) e o outro cliente');
+  assert.ok(g.find(x => x.chave === 'tit:00990/01').titulo.indexOf('Cond. Alfa') !== -1);
+  // passado o dia sem receber: o título vai para "A receber vencido" e a previsão não vira conta vencida
+  assert.deepEqual(C.vencidas(lancamentos, '2026-10-26', titulos, t => t.cliente).map(l => l.id), ['x']);
+  // leitura: entre empresas e o condomínio
+  const r = C.resumoLeitura({ lancamentos, saldos: [{ data: hoje, valor: 1000 }], titulos }, { hoje, dias: 30 });
+  const d21 = r.proximos_dias.find(x => x.data === '2026-10-21');
+  assert.equal(d21.entradas, 6015.4);
+  assert.ok(d21.itens.filter(i => i.cliente_fornecedor === 'AGILITE FICTICIA SERVICOS').every(i => i.entre_empresas && /Material vendido/.test(i.descricao)));
+  assert.equal(r.proximos_dias.find(x => x.data === '2026-10-20').entradas, 300);
+  assert.equal(r.titulos_a_receber.titulos.find(t => t.duplicata === '00990/01').referente, 'Material vendido à Agilité — Cond. Alfa');
+  // ligação gravada: igual; recebida (paga com o título) não aparece de novo nem deixa o título previsto
+  const gravadas = lancamentos.map(l => { const x = lig.find(y => y.id === l.id); return x ? Object.assign({}, l, { titulo_duplicata: x.duplicata }) : l; });
+  assert.equal(C.ligacoesTitulos(gravadas, titulos, t => t.cliente).length, 0);
+  const g2 = C.itensGrade('2026-10-06', '2026-10-31', hoje, gravadas, titulos, { nome: t => t.cliente });
+  assert.equal(g2.length, g.length);
+  gravadas[0] = Object.assign({}, gravadas[0], { situacao: 'pago', pago_em: '2026-10-21', baixa: 'caixa', baixado_em: '2026-10-21T15:00:00Z' });
+  const g3 = C.itensGrade('2026-10-06', '2026-10-31', '2026-10-21', gravadas, titulos, { nome: t => t.cliente });
+  assert.equal(g3.filter(x => x.data === '2026-10-21' && x.secao === 'entrada').reduce((t, x) => t + x.valor, 0).toFixed(2), (5715.4 + 300).toFixed(2), 'recebida aparece feita, sem o título repetido');
+  assert.ok(g3.some(x => x.chave === 'lanc:m0' && x.estado === 'feito') && !g3.some(x => x.chave === 'tit:00990/01'));
+});
