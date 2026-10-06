@@ -339,7 +339,8 @@
   // rolagem da página e da janela (celular), a das tabelas e grades com rolagem própria e os blocos
   // recolhíveis abertos (fechados, a página encolhia e subia). Bloco pelo texto do resumo sem números.
   const ROLAM = '.tabela-rolagem, .cx-grade-rolagem';
-  const chaveBloco = d => (d.className || '') + '|' + ((d.querySelector('summary') || {}).textContent || '').replace(/[\d.,R$%()\s]+/g, ' ').trim().slice(0, 80);
+  // data-chave fixa (ex.: "+ 7 saídas" de cada dia do Caixa); sem ela, a classe e o resumo sem números
+  const chaveBloco = d => d.dataset.chave || (d.className || '') + '|' + ((d.querySelector('summary') || {}).textContent || '').replace(/[\d.,R$%()\s]+/g, ' ').trim().slice(0, 80);
   function guardaLugar(c) {
     const abertos = {};
     c.querySelectorAll('details').forEach(d => { abertos[chaveBloco(d)] = d.open; });

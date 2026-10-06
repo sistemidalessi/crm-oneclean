@@ -919,6 +919,8 @@ Anderson: cada sistema cuida da sua empresa; o "Geral" (as duas) é de quem lê 
   rolagem da página e da janela (celular), a das `.tabela-rolagem`/`.cx-grade-rolagem` e os `<details>`
   abertos (fechavam a cada redesenho: o bloco "A receber vencido" fechava e a página subia). Vale para
   todas as telas; trocar de aba começa do topo. O foco devolvido não rola (`preventScroll`).
+  Bloco "+ N saídas/entradas" de cada dia tem `data-chave` fixa (dia + seção): antes todos tinham a mesma
+  chave (o resumo sem números) e o fechado de um dia fechava o aberto do outro a cada ✓ (06/10 à noite).
 
 ## Permissões do financeiro (06/10/2026, pedido do Anderson)
 

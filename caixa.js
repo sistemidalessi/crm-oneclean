@@ -420,7 +420,7 @@
       const doDia = itens.filter(x => x.data === d && x.secao === secao).sort((a, b) => (a.estado === 'previsto' ? 1 : 0) - (b.estado === 'previsto' ? 1 : 0) || b.valor - a.valor);
       const n = naoUtil(d);
       const cards = doDia.length > MAX
-        ? doDia.slice(0, MAX - 1).map(x => cartao(x, d)).join('') + '<details class="cx-mais"><summary>+ ' + (doDia.length - MAX + 1) + ' ' + (secao === 'entrada' ? 'entradas' : 'saídas') + ' · ' +
+        ? doDia.slice(0, MAX - 1).map(x => cartao(x, d)).join('') + '<details class="cx-mais" data-chave="mais-' + secao + '-' + d + '"><summary>+ ' + (doDia.length - MAX + 1) + ' ' + (secao === 'entrada' ? 'entradas' : 'saídas') + ' · ' +
           esc(R.moeda(doDia.slice(MAX - 1).reduce((t, x) => t + x.valor, 0))) + '</summary>' + doDia.slice(MAX - 1).map(x => cartao(x, d)).join('') + '</details>'
         : doDia.map(x => cartao(x, d)).join('');
       return '<td data-dia="' + d + '" class="' + (d === h ? 'hoje' : '') + (n ? ' ' + n.cls : '') + '">' + cards +
