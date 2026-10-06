@@ -245,3 +245,21 @@ test('leitura: cliente cadastrado como "Empresa | Contato" sai só com a empresa
   assert.equal(r.titulos_a_receber.titulos[0].cliente, 'GRAFICA EXEMPLO LTDA');
   assert.doesNotMatch(JSON.stringify(r), /Fulano/);
 });
+
+test('título em atraso remarcado: vai para o dia escolhido, em vermelho, e volta ao vencido se a data passar', () => {
+  const titulos = [{ duplicata: '001/01', cliente: 'COLEGIO EXEMPLO', valor: 544.36, vencimento: '2026-10-05', previsao: '2026-10-09' },
+    { duplicata: '002/01', cliente: 'COLEGIO EXEMPLO', valor: 431.55, vencimento: '2026-10-05' }];
+  const g = C.itensGrade('2026-10-06', '2026-10-20', '2026-10-06', [], titulos, { d1: true });
+  const t1 = g.find(x => x.chave === 'tit:001/01'), t2 = g.find(x => x.chave === 'tit:002/01');
+  assert.deepEqual([t1.data, t1.atrasado, t2.data, t2.atrasado], ['2026-10-09', true, '2026-10-06', false]);
+  assert.match(t1.obs, /em atraso/);
+  // remarcado para sábado: entra no próximo dia útil (12/10 é feriado → 13/10)
+  const sab = C.itensGrade('2026-10-06', '2026-10-20', '2026-10-06', [], [Object.assign({}, titulos[0], { previsao: '2026-10-10' })], { d1: true });
+  assert.equal(sab[0].data, '2026-10-13');
+  // passou a data remarcada sem receber: volta para "A receber vencido"
+  assert.deepEqual(C.receberVencido(titulos, [], '2026-10-14', true).map(t => t.duplicata), ['001/01', '002/01']);
+  assert.deepEqual(C.receberVencido(titulos, [], '2026-10-08', true).map(t => t.duplicata), ['002/01']);
+  const r = C.resumoLeitura({ lancamentos: [], saldos: [{ data: '2026-10-06', valor: 1 }], titulos }, { hoje: '2026-10-06', dias: 10, d1: true });
+  const lt = r.titulos_a_receber.titulos.find(t => t.duplicata === '001/01');
+  assert.deepEqual([lt.cai_na_conta, lt.atrasado], ['2026-10-09', true]);
+});

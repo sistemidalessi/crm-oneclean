@@ -890,6 +890,13 @@ Anderson: cada sistema cuida da sua empresa; o "Geral" (as duas) é de quem lê 
   embaixo, o ticket dos negócios ganhos; clique abre as notas do mês) e a ordem dos quadros passou a ser
   faturamento, projeção, conversão, ticket, clientes, abertos, ano. Relatórios ganhou "Ticket médio" ao
   lado de "Taxa ganhos vs perdidos" (por negócio ganho e, com notas, por nota).
+- **Título em atraso remarcado (pedido do Anderson, 06/10 à noite — 3 títulos do Colégio Palavra Viva vencidos
+  em 05/10):** arrastar o título na grade (ou clicar → "Ou remarcar para") grava `crm_titulos.previsao`; ele
+  passa a aparecer naquele dia (dia útil seguinte se cair sem banco), **em vermelho** ("em atraso: venceu …,
+  remarcado para …") e entra no saldo previsto; se a data passar sem receber, volta para "A receber vencido".
+  "Tirar a remarcação" volta ao normal. Ao receber, "Valor que entrou" grava o que caiu de fato (juros ou
+  parte), com a diferença na observação. A listagem do FKN não apaga a previsão (o upsert só grava as colunas
+  que traz). Na leitura: `cai_na_conta` = a data remarcada e `atrasado: true`.
 - **A página não sobe mais ao dar baixa** (pedido do Anderson): `renderAgora` (app.js) guarda e devolve a
   rolagem da página e da janela (celular), a das `.tabela-rolagem`/`.cx-grade-rolagem` e os `<details>`
   abertos (fechavam a cada redesenho: o bloco "A receber vencido" fechava e a página subia). Vale para

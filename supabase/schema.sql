@@ -919,6 +919,9 @@ create unique index if not exists crm_titulos_duplicata_uq on public.crm_titulos
 -- origem: 'fkn' (veio da listagem) ou 'nota' (criado pelas parcelas da NF-e, ainda não confirmado
 -- pelo FKN). A listagem só apaga título da nota criado antes da hora em que ela foi gerada.
 alter table public.crm_titulos add column if not exists origem text not null default 'fkn';
+-- previsao: título em atraso remarcado pelo administrador no Caixa (o dia em que espera receber; aparece
+-- em vermelho na grade). A listagem do FKN não mexe nela (o upsert só grava as colunas que traz).
+alter table public.crm_titulos add column if not exists previsao date;
 do $$ begin
   if not exists (select 1 from pg_constraint where conname = 'crm_titulos_origem_ck') then
     alter table public.crm_titulos add constraint crm_titulos_origem_ck check (origem in ('fkn', 'nota'));

@@ -656,6 +656,8 @@ table.cx-grade td.alvo { outline: 2px dashed var(--azul); outline-offset: -3px; 
 .cx-it.feito { background: var(--verde-fundo); border-color: var(--verde); }
 .cx-it.fora { background: var(--verde-fundo); border: 1px dashed var(--verde); opacity: .8; }
 .cx-it.vencido { border: 2px solid var(--vermelho); }
+.cx-it.atrasado { background: var(--vermelho-fundo); border: 2px solid var(--vermelho); }
+.cx-it.atrasado .cx-corpo .o { color: var(--vermelho); font-weight: 600; }
 .cx-it[draggable=true] { cursor: grab; }
 .cx-it.arrastando { opacity: .4; }
 .cx-corpo { display: block; width: 100%; text-align: left; background: none; border: 0; color: inherit; font: inherit; padding: 3px 6px; cursor: pointer; line-height: 1.25; }

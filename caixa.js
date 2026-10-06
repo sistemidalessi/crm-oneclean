@@ -55,20 +55,33 @@
 
   // ---- ações sobre um lançamento
   const pagar = (l, dia) => grava(l.id, { situacao: 'pago', pago_em: dia, baixa: 'caixa', baixado_em: agora() });
-  async function receberTitulo(dup, dia) {
+  // valor: o que entrou de fato (o cliente em atraso pagou com juros, ou só uma parte); sem ele, o do título
+  async function receberTitulo(dup, dia, valor) {
     const t = titulos().find(x => x.duplicata === dup);
     if (!t) return;
+    const v = valor > 0 ? r2(valor) : r2(t.valor);
     // previsão ligada a este título: ela vira o recebimento (não cria outra entrada)
     const lig = ligadasPorTitulo(F.lancamentos, titulos(), nomeTitulo).get(dup);
     if (lig) {
-      await grava(lig.id, { situacao: 'pago', pago_em: dia, baixa: 'caixa', baixado_em: agora(), valor: r2(t.valor), titulo_duplicata: dup });
-      CRM.toast('Recebido em ' + dm(dia) + ': ' + R.moeda(t.valor) + ' (' + lig.descricao + ')');
+      await grava(lig.id, { situacao: 'pago', pago_em: dia, baixa: 'caixa', baixado_em: agora(), valor: v, titulo_duplicata: dup });
+      CRM.toast('Recebido em ' + dm(dia) + ': ' + R.moeda(v) + ' (' + lig.descricao + ')');
       return;
     }
-    await insere({ tipo: 'entrada', descricao: 'Recebido: ' + nomeTitulo(t) + ' · ' + t.duplicata, categoria: 'Duplicatas recebidas', valor: r2(t.valor),
+    await insere({ tipo: 'entrada', descricao: 'Recebido: ' + nomeTitulo(t) + ' · ' + t.duplicata, categoria: 'Duplicatas recebidas', valor: v,
       vencimento: t.vencimento, situacao: 'pago', pago_em: dia, baixa: 'caixa', baixado_em: agora(), origem: 'titulo', titulo_duplicata: t.duplicata,
-      entre_empresas: ENTRE_EMPRESAS.test(nomeTitulo(t)) });
-    CRM.toast('Recebido em ' + dm(dia) + ': ' + R.moeda(t.valor));
+      entre_empresas: ENTRE_EMPRESAS.test(nomeTitulo(t)), observacoes: v !== r2(t.valor) ? 'Título de ' + R.moeda(t.valor) + '; entrou ' + R.moeda(v) + '.' : null });
+    CRM.toast('Recebido em ' + dm(dia) + ': ' + R.moeda(v));
+  }
+  // Título em atraso: o dia em que se espera receber (crm_titulos.previsao). null tira a remarcação.
+  async function remarcarTitulo(dup, dia) {
+    const t = titulos().find(x => x.duplicata === dup);
+    if (!t) return;
+    if (dia && dia < hoje()) throw new Error('escolha hoje ou um dia depois.');
+    const r = await CRM.store().atualizar('titulos', t.id, { previsao: dia || null });
+    const l = titulos(), i = l.indexOf(t);
+    if (i >= 0) l[i] = Object.assign({}, t, r);
+    CRM.render();
+    CRM.toast(dia ? t.duplicata + ' remarcado para ' + dm(dia) + ' (em vermelho: em atraso).' : 'Remarcação tirada: o título volta para o vencimento.');
   }
   // Dia da baixa: o da coluna, se já passou; senão hoje (não se paga no futuro).
   const diaDaBaixa = d => (d && d <= hoje() ? d : hoje());
@@ -116,12 +129,18 @@
     if (tp === 'tit') {
       const t = titulos().find(x => x.duplicata === id);
       if (!t) return;
+      const atrasado = posterga(t.vencimento) < hoje();
       CRM.abrirForm({
         titulo: 'Título a receber', intro: nomeTitulo(t) + ' · duplicata ' + t.duplicata + ' · ' + R.moeda(t.valor) +
           ((lig => lig ? '\nÉ a previsão "' + lig.descricao + '" (mesmo valor): receber o título dá baixa nela.' : '')(ligadasPorTitulo(F.lancamentos, titulos(), nomeTitulo).get(t.duplicata))) + '\nVence ' + R.dataBR(t.vencimento) +
-          ', cai na conta ' + R.dataBR(creditoTitulo(t.vencimento, d1())) + '.\nO título sai do contas a receber quando a listagem do FKN mostrar que foi pago.',
-        campos: [{ nome: 'dia', rotulo: 'Recebido em', tipo: 'data' }], valores: { dia },
-        salvarTexto: 'Recebi', aoSalvar: async v => { await receberTitulo(t.duplicata, diaDaBaixa(v.dia || dia)); }
+          (t.previsao ? ' · em atraso, remarcado para ' + R.dataBR(t.previsao) : atrasado ? ' · em atraso' : ', cai na conta ' + R.dataBR(creditoTitulo(t.vencimento, d1()))) +
+          '.\nO título sai do contas a receber quando a listagem do FKN mostrar que foi pago.',
+        campos: [{ nome: 'dia', rotulo: 'Recebido em', tipo: 'data' }, { nome: 'valor', rotulo: 'Valor que entrou (R$)', tipo: 'numero', ajuda: 'com juros ou só uma parte? ponha o que caiu na conta' },
+          { nome: 'nova', rotulo: 'Ou remarcar para', tipo: 'data', ajuda: 'o dia em que espera receber (aparece em vermelho na grade); também dá para arrastar o título' }],
+        valores: { dia, valor: r2(t.valor), nova: t.previsao || '' },
+        rodape: '<button type="button" class="btn sec" data-acao="cx-tit-remarcar" data-id="' + esc(t.duplicata) + '">Remarcar</button>' +
+          (t.previsao ? '<button type="button" class="btn sec" data-acao="cx-tit-desremarcar" data-id="' + esc(t.duplicata) + '">Tirar a remarcação</button>' : ''),
+        salvarTexto: 'Recebi', aoSalvar: async v => { await receberTitulo(t.duplicata, diaDaBaixa(v.dia || dia), v.valor); }
       });
       return;
     }
@@ -374,8 +393,9 @@
   function cartao(x, dia) {
     const ok = x.estado === 'previsto' ? '<button type="button" class="cx-ok" data-acao="cx-ok" data-id="' + esc(x.chave) + '" data-dia="' + esc(dia) + '" title="' +
       (x.secao === 'entrada' ? 'Recebi' : 'Paguei') + ' ' + (dia <= hoje() ? (dia === hoje() ? 'hoje' : 'em ' + dm(dia)) : 'hoje') + '">✓</button>' : '';
-    const arrasta = x.tipo === 'lanc' && x.estado === 'previsto' ? ' draggable="true" data-mover="' + esc(x.ref.id) + '"' : '';
-    return '<div class="cx-it ' + (x.secao === 'entrada' ? 'cx-ent' : 'cx-sai') + ' ' + x.estado + (ok ? ' comok' : '') + '"' + arrasta + '>' + ok +
+    // conta prevista e título (arrastar o título = remarcar: o cliente vai pagar em outro dia)
+    const arrasta = x.estado === 'previsto' ? ' draggable="true" data-mover="' + esc(x.tipo === 'lanc' ? x.ref.id : 'tit:' + x.ref.duplicata) + '"' : '';
+    return '<div class="cx-it ' + (x.secao === 'entrada' ? 'cx-ent' : 'cx-sai') + ' ' + x.estado + (x.atrasado ? ' atrasado' : '') + (ok ? ' comok' : '') + '"' + arrasta + '>' + ok +
       '<button type="button" class="cx-corpo" data-acao="cx-item" data-id="' + esc(x.chave) + '" data-dia="' + esc(dia) + '" title="' + esc(x.titulo + (x.obs ? ' — ' + x.obs : '')) + '">' +
       '<span class="t">' + esc(x.titulo) + '</span>' + (x.obs ? '<span class="o">' + esc(x.obs) + '</span>' : '') + '<span class="v">' + esc(R.moeda(x.valor)) + '</span></button></div>';
   }
@@ -409,7 +429,8 @@
       '<button type="button" class="mini" data-acao="cx-nav" data-id="15">15 dias ▶</button></h2>' +
       '<p class="cx-legenda"><span class="cx-it cx-ent feito"><span class="cx-corpo">aconteceu</span></span><span class="cx-it cx-sai previsto"><span class="cx-corpo">previsto</span></span>' +
       '<span class="cx-it cx-sai fora"><span class="cx-corpo">pago fora do caixa</span></span>' +
-      '<small>✓ paga ou recebe no dia da coluna · clique no item para ajustar valor e dia, pausar ou desfazer · arraste uma conta para outro dia · + lança no dia</small></p>' +
+      '<span class="cx-it cx-ent previsto atrasado"><span class="cx-corpo">em atraso, remarcado</span></span>' +
+      '<small>✓ paga ou recebe no dia da coluna · clique no item para ajustar valor e dia, pausar ou desfazer · arraste uma conta ou um título em atraso para outro dia · + lança no dia</small></p>' +
       '<div class="cx-grade-rolagem"><table class="cx-grade"><thead><tr><th class="lab"></th>' + th + '</tr></thead><tbody>' +
         '<tr class="sec"><th class="lab ent">Entradas</th>' + celulas('entrada') + '</tr>' +
         '<tr class="tot"><th class="lab">Total entradas</th>' + total('entrada') + '</tr>' +
@@ -436,7 +457,7 @@
       '</tbody></table></div></details>' : '') +
       (rv.length ? '<details class="cartao cx-venc"><summary><strong>A receber vencido: ' + rv.length + ' título(s) (' + esc(R.moeda(tot(rv))) + ')</strong> <small>já deviam ter caído na conta; fora da previsão até entrarem. Caiu? "Recebi hoje".</small></summary>' +
       '<div class="tabela-rolagem"><table class="tabela"><tbody>' + rv.map(t => '<tr><td>' + esc(nomeTitulo(t)) + '<small>duplicata ' + esc(t.duplicata) + '</small></td><td>vence ' + esc(R.dataBR(t.vencimento)) + '</td>' +
-        '<td class="num">' + esc(R.moeda(t.valor)) + '</td><td class="acoes-linha">' + b('cx-ok', 'tit:' + t.duplicata, 'Recebi hoje') + '</td></tr>').join('') + '</tbody></table></div></details>' : '');
+        '<td class="num">' + esc(R.moeda(t.valor)) + '</td><td class="acoes-linha">' + b('cx-ok', 'tit:' + t.duplicata, 'Recebi hoje') + b('cx-item', 'tit:' + t.duplicata, 'Remarcar ou valor') + '</td></tr>').join('') + '</tbody></table></div></details>' : '');
   }
   function listaContas() {
     const h = hoje();
@@ -528,6 +549,7 @@
         td.addEventListener('drop', ev => {
           ev.preventDefault(); td.classList.remove('alvo');
           const id = arrastando || ev.dataTransfer.getData('text/plain'); arrastando = null;
+          if (id.indexOf('tit:') === 0) { remarcarTitulo(id.slice(4), td.dataset.dia).catch(e => CRM.toast(e.message, true)); return; }
           const l = lanc(id);
           if (l && l.vencimento !== td.dataset.dia) grava(l.id, { vencimento: td.dataset.dia }).then(() => CRM.toast('Movida para ' + dm(td.dataset.dia) + '.')).catch(CRM.falhou);
         });
@@ -562,6 +584,13 @@
       } catch (e) { CRM.falhou(e); }
     },
     // ditado do navegador (Chrome/Edge): escreve no campo; a pessoa confere antes de "Conferir"
+    'cx-tit-remarcar': id => {
+      const n = $('#dlgForm [name="nova"]');
+      const dia = n && n.value;
+      if (!dia) { CRM.toast('Escolha a data em "Ou remarcar para".', true); return; }
+      remarcarTitulo(id, dia).then(fecha).catch(e => CRM.toast(e.message, true));
+    },
+    'cx-tit-desremarcar': id => { remarcarTitulo(id, null).then(fecha).catch(CRM.falhou); },
     'cx-falar': (id, el) => {
       const SR = raiz.SpeechRecognition || raiz.webkitSpeechRecognition;
       if (!SR) { CRM.toast('O ditado só funciona no Chrome ou no Edge.', true); return; }
