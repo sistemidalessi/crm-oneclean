@@ -772,8 +772,11 @@ Anderson: cada sistema cuida da sua empresa; o "Geral" (as duas) é de quem lê 
   "Em aberto", se tiver período, sem TOTAL GERAL, soma diferente ou menos de 40% do que já há.
   1º arquivo real (06/10 12:01): 361 contas, R$ 444.413,82 (soma = total), 63 fornecedores/contas;
   163 antigas (R$ 197.050,50) e 196 novas (R$ 235.690,92) pelo teste; salário e água da planilha
-  reconhecidos. Falta: o Anderson atualizar o vigia no servidor (README); lembrete do contas a pagar na
-  faixa do FKN (só admin) ainda não existe; leitura para a gestora das duas empresas (fase 2).
+  reconhecidos. **Vigia `2026-10-06` instalado no servidor às 12:22 de 06/10** — o `Invoke-WebRequest`
+  do Windows Server 2012 falha por TLS (nem com Tls12): baixar o vigia **pelo Node** (README). 1ª entrega
+  real: 361 contas → 194 abertas (R$ 234.532,91), 163 antigas pausadas (R$ 197.050,50), 4 ligadas às da
+  planilha (salário, energia do galpão, pedágio, água da casa). Falta: lembrete do contas a pagar na
+  faixa do FKN (só admin); leitura para a gestora das duas empresas (fase 2).
 
 ## Permissões do financeiro (06/10/2026, pedido do Anderson)
 

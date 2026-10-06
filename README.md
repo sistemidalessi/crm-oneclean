@@ -191,9 +191,20 @@ entregar notas e pode ser desligada a qualquer momento no CRM.
 Configurações → Integrações aparece "rodando há X min" (com a máquina e a versão); se passar
 de 75 min sem sinal, o administrador vê uma faixa vermelha no topo do CRM (servidor desligado
 ou tarefa parada). "Sem sinal — vigia antigo" quer dizer que o `vigia-notas.js` do servidor é
-anterior a 01/10/2026: atualizar assim (PowerShell como administrador). A 1ª linha liga o TLS 1.2:
-sem ela o Windows Server 2012 dá "Não foi possível criar um canal seguro para SSL/TLS" e o arquivo
-**não** é trocado (aconteceu em 06/10). O `?v=` evita o cache do GitHub logo depois de publicar:
+anterior a 01/10/2026: atualizar assim (PowerShell como administrador). **No servidor da OneClean
+(Windows Server 2012) o `Invoke-WebRequest` falha** com "Não foi possível criar um canal seguro para
+SSL/TLS" — mesmo com a linha do TLS 1.2 — e o arquivo **não** é trocado (06/10/2026). O que funciona
+é baixar pelo próprio Node do vigia:
+```
+Stop-ScheduledTask -TaskName "CRM - vigia de notas"
+cd C:\CRM
+node -e "require('https').get('https://raw.githubusercontent.com/sistemidalessi/crm-oneclean/main/ferramentas/vigia-notas.js?v=3',r=>{if(r.statusCode!==200){console.log('ERRO',r.statusCode);return}let d='';r.on('data',c=>d+=c);r.on('end',()=>{require('fs').writeFileSync('vigia-notas.js',d);console.log('baixado',d.length,'bytes')})}).on('error',e=>console.log('ERRO',e.message))"
+Select-String -Path C:\CRM\vigia-notas.js -Pattern "const VERSAO"
+Start-ScheduledTask -TaskName "CRM - vigia de notas"
+Get-Content C:\CRM\vigia-notas.log -Tail 5
+```
+(trocar o `?v=` a cada atualização evita o cache do GitHub logo depois de publicar). Em máquina
+mais nova, o jeito com PowerShell:
 ```
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 Stop-ScheduledTask -TaskName "CRM - vigia de notas"
