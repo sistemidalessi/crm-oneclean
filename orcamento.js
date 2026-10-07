@@ -183,7 +183,9 @@
     const vend = usuarioDo(o.vendedor);
     const etapa = etapaOrcamento();
     const prop = (E().D.propostas || []).find(p => p.numero_fkn === o.numero);
-    const lista = emp ? CRM.doEmpresa('negocios', emp.id).filter(x => x.status === 'aberto' || x.id === negocioId) : [];
+    // Só negócios do funil de vendas (07/10/2026: o import oferecia o negócio aberto do Pós-Vendas e a venda sumia do relatório).
+    const doFunilVendas = x => ((CRM.etapa(x.etapa_id) || {}).funil || 'Vendas') === funilVendas();
+    const lista = emp ? CRM.doEmpresa('negocios', emp.id).filter(x => (x.status === 'aberto' && doFunilVendas(x)) || x.id === negocioId) : [];
     if (negocioId && !lista.some(x => x.id === negocioId) && CRM.negocio(negocioId)) lista.push(CRM.negocio(negocioId));
     const sug = negocioDoOrcamento(negocioId, prop, lista, E().D.propostas);
     const padraoNeg = sug.padrao, abertos = sug.abertos;

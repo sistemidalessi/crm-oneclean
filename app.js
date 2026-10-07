@@ -244,14 +244,22 @@
         try { await CRM.atualizar('empresas', e.id, { situacao: 'cliente' }); } catch (x) { console.warn(x); }
       }
       const resp = n.responsavel_id || CRM.meuId();
-      if (E.cfg.auto_pos_venda) {
+      // Reabrir e ganhar de novo, ou várias vendas do mesmo cliente, não repetem as tarefas (08/10/2026:
+      // havia cliente com 3 "Recompra" abertas): pós-venda uma por negócio, recompra uma por cliente (a data anda).
+      const abertas = CRM.doEmpresa('atividades', n.empresa_id).filter(a => !a.concluida);
+      if (E.cfg.auto_pos_venda && !abertas.some(a => a.negocio_id === n.id && /^Pós-venda:/.test(a.descricao || ''))) {
         await A.tarefa({ empresa_id: n.empresa_id, negocio_id: n.id, tipo: 'ligacao', responsavel_id: resp,
           descricao: 'Pós-venda: confirmar entrega e satisfação (' + n.titulo + ')', data_hora: emDias(E.cfg.dias_pos_venda) });
       }
       if (E.cfg.auto_recompra) {
         const ciclo = R.cicloRecompra(e, e && E.ix.resumo.get(e.id), E.cfg);
-        await A.tarefa({ empresa_id: n.empresa_id, tipo: 'ligacao', responsavel_id: resp,
-          descricao: 'Recompra: oferecer reposição', data_hora: emDias(Math.max(1, ciclo - 3)) });
+        const quando = emDias(Math.max(1, ciclo - 3));
+        const ja = abertas.find(a => /^Recompra: oferecer/.test(a.descricao || ''));
+        if (ja) {
+          if (String(ja.data_hora || '') < quando) await CRM.atualizar('atividades', ja.id, { data_hora: quando }).catch(x => console.warn(x));
+        } else {
+          await A.tarefa({ empresa_id: n.empresa_id, tipo: 'ligacao', responsavel_id: resp, descricao: 'Recompra: oferecer reposição', data_hora: quando });
+        }
       }
     },
 

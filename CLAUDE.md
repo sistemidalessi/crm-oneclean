@@ -1041,6 +1041,21 @@ ligado ao domínio; **começa com fila de aprovação** (nada sai sozinho); reme
   Atividades dos outros: para o negócio aberto do cliente no Funil de Vendas (13) ou só na ficha da empresa (10).
   306 negócios e as 5 etapas apagados; sobra só o "Funil de Vendas" (a lista de funis sai das etapas).
   A **tarefa** automática "Pós-venda: confirmar entrega" ao ganhar (`auto_pos_venda`) continua — é tarefa, não funil.
+- **Venda em dobro no relatório (08/10/2026, achado pelo Anderson na lista "Negócios ganhos" do Alysson):** o import
+  do orçamento oferecia o negócio aberto do Pós-Vendas como "mesmo negócio"; o Alysson importava e dava ganho lá, a
+  venda não aparecia no relatório do Funil de Vendas, e ele criava um "PEDIDO …" ganho no Funil de Vendas. Na retirada
+  do Pós-Vendas (07/10) os ganhos de lá foram passados ao Funil de Vendas **sem procurar esses pedidos** → 5 vendas
+  contadas duas vezes (R$ 9.123,82 → R$ 4.739,36 de 05 a 11/10) e o Vital Inox também com um aberto do mesmo orçamento.
+  Corrigido: em cada par ficou um negócio só, no cadastro com CNPJ e notas, com título e valor do "PEDIDO" (o Emilio
+  Russeau ficou com R$ 2.631,19, o valor real) e orçamento, itens e histórico juntos; 6 negócios apagados; backup em
+  `crm_backup.pedidos_duplicados_2026_10_08*`. Tarefas repetidas (7 "Recompra" e 1 "Pós-venda") apagadas com backup
+  em `crm_backup.tarefas_repetidas_2026_10_08`. Auditoria do banco inteiro: nenhum outro par de ganhos repetidos;
+  Moinho Beer (ganho "2472" do Agendor em 30/09 e "PEDIDO FECHADO" em 01/10, uma nota só) deixado para a líder conferir.
+  **Travas no código:** "Ganhei" pergunta quando o cliente (mesmo cadastro ou mesmo CNPJ) já tem venda ganha com valor
+  até 5% diferente e até 3 dias de distância (`fichas.vendaParecida`); ganhar de novo não repete a tarefa de pós-venda
+  (uma por negócio) nem a de recompra (uma por cliente, a data anda); o import do orçamento só oferece negócios do funil
+  de vendas. Cadastros repetidos que causaram parte disso ("Nova Gestão RH" e "- 4R SERVICOS - STREET 100%", sem CNPJ,
+  vindos do Agendor) continuam lá: mesclar em Configurações → Duplicados.
 - `execute_sql` com `delete` solto fica parado até o tempo esgotar (a ferramenta espera confirmação); o formato
   `with alvo as (...), d as (delete ... using alvo ... returning 1) select count(*) from d` passa normalmente.
 - Na tela de cada pessoa os apagados somem na conferência de hora em hora da recarga leve, ou com F5 / "Recarregar dados".

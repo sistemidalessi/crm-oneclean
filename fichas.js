@@ -558,6 +558,17 @@
     });
   };
 
+  // Outra venda ganha do mesmo cliente (mesmo cadastro ou mesmo CNPJ) com valor até 5% diferente e fechada até 3 dias antes ou depois.
+  function vendaParecida(n, valor, fechado) {
+    const emp = CRM.empresa(n.empresa_id), doc = emp ? R.digitos(emp.cnpj || '') : '';
+    const v = Number(valor) || 0;
+    if (!v || !fechado) return null;
+    return E().D.negocios.find(x => x.id !== n.id && x.status === 'ganho' && x.fechado_em &&
+      (x.empresa_id === n.empresa_id || (doc.length >= 11 && R.digitos((CRM.empresa(x.empresa_id) || {}).cnpj || '') === doc)) &&
+      Math.abs(R.diasEntre(x.fechado_em, fechado)) <= 3 && Math.abs((Number(x.valor) || 0) - v) <= v * 0.05) || null;
+  }
+  fichas.vendaParecida = vendaParecida;
+
   fichas.formGanho = n => {
     CRM.abrirForm({
       titulo: '🏆 Ganhou: ' + n.titulo,
@@ -570,6 +581,10 @@
       intro: (E().cfg.auto_pos_venda || E().cfg.auto_recompra) ? 'O CRM vai agendar sozinho: ' + [E().cfg.auto_pos_venda ? 'pós-venda em ' + E().cfg.dias_pos_venda + ' dias' : '', E().cfg.auto_recompra ? 'lembrete de recompra' : ''].filter(Boolean).join(' e ') + '.' : null,
       salvarTexto: 'Marcar como ganho',
       aoSalvar: async v => {
+        // Trava de venda em dobro (08/10/2026: a mesma venda ganha em dois negócios do cliente dobrou o relatório).
+        const parecida = vendaParecida(n, v.valor, v.fechado_em);
+        if (parecida && !confirm('Este cliente já tem uma venda GANHA parecida:\n\n"' + parecida.titulo + '" — ' + R.moeda(parecida.valor) + ' em ' + R.dataBR(parecida.fechado_em) +
+          '\n\nSe for a mesma venda, cancele e use aquele negócio (senão o relatório conta duas vezes).\nÉ OUTRA venda? OK registra mesmo assim.')) return false;
         await CRM.auto.mudarNegocio(n, { status: 'ganho', valor: v.valor, fechado_em: v.fechado_em });
         if (v.obs) await CRM.inserir('atividades', { empresa_id: n.empresa_id, negocio_id: n.id, tipo: 'nota', descricao: v.obs, concluida: true, concluida_em: agoraISO(), data_hora: agoraISO(), responsavel_id: CRM.meuId() });
         CRM.toast('Parabéns! Venda registrada.');
