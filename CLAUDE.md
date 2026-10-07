@@ -929,6 +929,12 @@ Anderson: cada sistema cuida da sua empresa; o "Geral" (as duas) é de quem lê 
   Viva que sumiram na listagem de 07/10 08:40 (antes do gatilho) foram colocados à mão no bloco; os outros que
   sumiram entre 06/10 e 07/10 não têm como voltar (o registro da listagem só guarda a contagem) — o saldo do BB
   informado de novo acerta.
+- **07/10, consulta de boletos do BB (CBR):** 10 boletos liquidados em 06/10 (R$ 5.233,07, com R$ 67,65 de juros nos
+  3 do Palavra Viva) lançados como "Recebido" em 07/10 (D+1) e marcados "entrou" em `crm_fin_titulos_baixados` (7
+  deles tinham sumido na listagem de 07/10 08:40). Saldo do BB informado pelo Anderson: R$ 5.241,52 (o CRM dava
+  R$ 5.257,49); a diferença de R$ 15,97 lançada como "Tarifa Pix" (Tarifas bancárias), antes do saldo. Daqui para
+  frente ele avisa a taxa: "taxa pix 1,99 hoje" cai em Tarifas bancárias (`TAXA_BANCO` olha a frase inteira, porque
+  o leitor tira "pix" do nome).
 - **Corte do "A receber vencido" (pedido do Anderson, 06/10 à noite: "deixe somente os que venceram hoje, pra
   seguirmos certo daqui pra frente"):** `cfg.caixa_receber_desde` = 2026-10-05 (Configurações → Geral, campo
   "Caixa: A receber vencido mostra só…"). Os 9 títulos antigos (29/01 a 07/08, R$ 11.540,90) saem do bloco do

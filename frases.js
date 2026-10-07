@@ -308,6 +308,7 @@
   const TRANSF = /\b(transferi|transferimos|transferencia|transferido|enviei|enviamos|enviou|mandei|mandamos|mandou|emprestei|emprestamos|emprestou|emprestimo|adiantei|adiantamento|pix|devolucao|devolv\w*|retorn\w*|volta|voltar)\b/;
   const ehTransferencia = (it, texto) => { const t = baixo((it.frase || '') + ' ' + texto); return AGILITE.test(t) && TRANSF.test(t) && !/\b(material|produto|reembolso|folha|salario|beneficio)/.test(t); };
   const ehEmprestimo = (it, texto) => it.tipo === 'entrada' && (!!(it.parcelas && typeof it.parcelas === 'object') || !!it.emprestimo || it.valorDevolver != null || !!it.devolucaoPrevista || /\bemprest/.test(baixo(texto)));
+  const TAXA_BANCO = /\b(?:taxa|tarifa)s? (?:d[oe] )?(?:pix|ted|doc|boleto|banco|bb)\b/;
   function categoriaDe(texto, tipo) {
     const t = baixo(texto);
     if (AGILITE.test(t)) return { categoria: tipo === 'entrada' ? 'Material vendido à Agilité' : 'Reembolso da folha à Agilité', entre_empresas: true };
@@ -468,7 +469,9 @@
       // 3-5. cliente/fornecedor, regra aprendida, categoria
       const quem = it.tipo === 'entrada' ? nomeDe(ctx.clientes, toks) || nomeDe(ctx.fornecedores, toks) : nomeDe(ctx.fornecedores, toks) || nomeDe(ctx.clientes, toks);
       if (quem) p.fornecedor = quem.nome;
-      const cat = categoriaDe(texto + ' ' + (quem ? quem.nome : ''), it.tipo);
+      // "taxa pix": o leitor tira "pix" do nome (é palavra de saída); a taxa do banco olha a frase inteira
+      const taxaBanco = TAXA_BANCO.test(baixo(it.trecho || it.frase || '')) ? ' tarifa' : '';
+      const cat = categoriaDe(texto + ' ' + (quem ? quem.nome : '') + taxaBanco, it.tipo);
       p.categoria = cat.categoria;
       p.entre_empresas = cat.entre_empresas;
       if (it.tipo === 'entrada' && quem && ctx.clientes && ctx.clientes.indexOf(quem) !== -1 && !cat.entre_empresas) p.categoria = 'Duplicatas recebidas';

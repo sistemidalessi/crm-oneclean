@@ -264,3 +264,11 @@ test('transferência ditada (Agilité b837d37): "vai retornar dia 14" é a volta
   // "agilidade" não é a Agilité
   assert.notEqual(um('paguei 300 consultoria de agilidade').categoria, 'Transferência entre empresas');
 });
+
+test('taxa do Pix é tarifa bancária (07/10: o Anderson avisa a taxa para o saldo ficar certo)', () => {
+  ['taxa pix 1,99 hoje', 'paguei taxa do pix 3,00', 'taxa de boleto 2,50 hoje'].forEach(t => {
+    const p = um(t);
+    assert.deepEqual([p.tipo, p.situacao, p.categoria], ['saida', 'realizado', 'Tarifas bancárias'], t);
+  });
+  assert.notEqual(um('paguei taxa de lixo 80').categoria, 'Tarifas bancárias');
+});
