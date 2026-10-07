@@ -13,8 +13,8 @@
 // quem chama. Deploy: verify_jwt DESLIGADO (a senha é conferida aqui).
 import { createClient } from 'npm:@supabase/supabase-js@2.116.0';
 
-const COMMIT = '6df099ab34dea5594811db3bf3a0a8a7011dd6ee';
-const HASHES: Record<string, string> = { 'caixa-calculo.js': 'b499e2e046df9def39201c8ca6e94c80ccf5ee1bd44410ae1eda880f24eb2c79' };
+const COMMIT = 'b7bd69e3c4d7da4fa57cd5ef4c9d8f479e11ffd4';
+const HASHES: Record<string, string> = { 'caixa-calculo.js': '0de5ad814cfcc66f9fe03d616022a5951a7697da3a81fb4e86ca088e023dd93e' };
 const FONTE = 'https://raw.githubusercontent.com/sistemidalessi/crm-oneclean/' + COMMIT + '/';
 const PAGINA = 1000;
 
