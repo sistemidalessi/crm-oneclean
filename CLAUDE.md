@@ -1033,8 +1033,16 @@ ligado ao domínio; **começa com fila de aprovação** (nada sai sozinho); reme
   movidos para o negócio que ficou. Abertos no funil: 2.299 → 1.229; nenhum cliente com mais de um aberto; nenhuma
   atividade sem negócio. Feito por `execute_sql` em etapas (o `apply_migration` inteiro estourou os 60 s e foi
   desfeito sem aplicar nada); apagada em lotes.
-- **Pós-Vendas não foi mexido:** 298 abertos, quase todos na etapa "Contato", um por venda (o Agendor criava um a
-  cada ganho). Esperando o Anderson decidir (juntar, fechar os antigos ou deixar).
+- **Funil de Pós-Vendas retirado (07/10, noite, pedido do Anderson: "não vai ter utilidade nenhuma"):** herança do
+  Agendor (um negócio por venda ganha; 313 negócios, 298 abertos parados em "Contato"). Backup em
+  `crm_backup.tira_posvendas_2026_10_07_*` (etapas, negocios, itens, atividades, propostas). **7 negócios reais desta
+  semana** (orçamento do FKN importado e/ou ganho em 05–07/10 — o import oferecia o negócio aberto do Pós-Vendas como
+  "mesmo negócio") **passaram para o Funil de Vendas, etapa ORÇAMENTO ENVIADO**, com status, itens e propostas.
+  Atividades dos outros: para o negócio aberto do cliente no Funil de Vendas (13) ou só na ficha da empresa (10).
+  306 negócios e as 5 etapas apagados; sobra só o "Funil de Vendas" (a lista de funis sai das etapas).
+  A **tarefa** automática "Pós-venda: confirmar entrega" ao ganhar (`auto_pos_venda`) continua — é tarefa, não funil.
+- `execute_sql` com `delete` solto fica parado até o tempo esgotar (a ferramenta espera confirmação); o formato
+  `with alvo as (...), d as (delete ... using alvo ... returning 1) select count(*) from d` passa normalmente.
 - Na tela de cada pessoa os apagados somem na conferência de hora em hora da recarga leve, ou com F5 / "Recarregar dados".
 
 ## Permissões do financeiro (06/10/2026, pedido do Anderson)
