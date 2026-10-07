@@ -12,7 +12,7 @@
 
   // Ordem importa: pais antes de filhos (importação/upsert respeita as FKs).
   const TABELAS = ['usuarios', 'config', 'etapas', 'opcoes', 'produtos', 'modelos', 'metas', 'filtros',
-    'empresas', 'contatos', 'negocios', 'negocio_itens', 'propostas', 'atividades', 'notas', 'nota_itens', 'titulos'];
+    'empresas', 'contatos', 'negocios', 'negocio_itens', 'propostas', 'atividades', 'notas', 'nota_itens', 'titulos', 'email_campanhas', 'email_envios'];
   // Financeiro (contas a pagar e caixa): só o administrador; carregado à parte, ao abrir o Caixa.
   const FIN = ['fin_recorrentes', 'fin_lancamentos', 'fin_saldos', 'fin_regras', 'fin_titulos_baixados'];
   const CHAVE = { usuarios: 'user_id' };
@@ -51,12 +51,14 @@
     fin_lancamentos: { tipo: 'saida', valor: 0, situacao: 'aberto', entre_empresas: false, origem: 'tela', emprestimo: false },
     fin_saldos: {},
     fin_regras: { tipo: 'saida', entre_empresas: false },
-    fin_titulos_baixados: { valor: 0 }
+    fin_titulos_baixados: { valor: 0 },
+    email_campanhas: { ativa: true },
+    email_envios: { situacao: 'pulado', para: [] }
   };
 
   // Filhos apagados junto (no Supabase é o "on delete cascade"/"set null").
   const CASCATA = {
-    empresas: [['contatos', 'empresa_id', 'apaga'], ['negocios', 'empresa_id', 'apaga'], ['atividades', 'empresa_id', 'apaga'], ['notas', 'empresa_id', 'solta'], ['titulos', 'empresa_id', 'solta']],
+    empresas: [['contatos', 'empresa_id', 'apaga'], ['negocios', 'empresa_id', 'apaga'], ['atividades', 'empresa_id', 'apaga'], ['notas', 'empresa_id', 'solta'], ['titulos', 'empresa_id', 'solta'], ['email_envios', 'empresa_id', 'apaga']],
     notas: [['nota_itens', 'nota_id', 'apaga']],
     negocios: [['negocio_itens', 'negocio_id', 'apaga'], ['propostas', 'negocio_id', 'apaga'], ['atividades', 'negocio_id', 'solta']],
     contatos: [['negocios', 'contato_id', 'solta'], ['atividades', 'contato_id', 'solta']],
@@ -437,6 +439,32 @@
       throw new Error(msg);
     }
     return r.data;
+  };
+
+  // E-mails da cadência: a Edge Function crm-email envia pelo Brevo (a chave fica só no Supabase).
+  Supa.prototype.email = async function (corpo) {
+    const r = await this.sb.functions.invoke('crm-email', { body: corpo });
+    if (r.error) {
+      let msg = r.error.message;
+      try { const j = await r.error.context.json(); if (j && j.erro) msg = j.erro; } catch (e) { /* sem corpo */ }
+      throw new Error(msg);
+    }
+    return r.data;
+  };
+  // Modo local (demonstração e testes): "envia" sem sair do navegador — grava o envio e a atividade.
+  Local.prototype.email = async function (corpo) {
+    if (corpo.acao === 'situacao') return { ligado: true, local: true };
+    if (corpo.acao === 'aberturas') return { ok: true, abertos: 0, clicados: 0, devolvidos: 0 };
+    const d = this.ler(), e = d.empresas.find(x => x.id === corpo.empresa_id);
+    if (!e) throw new Error('cliente não encontrado');
+    if (e.email_sair_em) throw new Error('o cliente pediu para não receber estes e-mails');
+    const env = this.novo(d, 'email_envios', { empresa_id: e.id, responsavel_id: e.responsavel_id || null, tipo: corpo.tipo, campanha_id: corpo.campanha_id || null,
+      situacao: 'enviado', para: corpo.para || [], assunto: corpo.assunto, corpo: corpo.corpo, provedor_id: 'local' });
+    d.email_envios.push(env);
+    d.atividades.push(this.novo(d, 'atividades', { empresa_id: e.id, tipo: 'email', concluida: true, concluida_em: new Date().toISOString(), automatica: true,
+      responsavel_id: e.responsavel_id || null, descricao: 'E-mail da cadência: ' + corpo.assunto }));
+    this.gravar(d);
+    return { ok: true, envio: env };
   };
 
   // Mesma cascata aplicada na memória do app (depois de apagar no banco).

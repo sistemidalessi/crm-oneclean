@@ -957,6 +957,53 @@ Anderson: cada sistema cuida da sua empresa; o "Geral" (as duas) é de quem lê 
   Bloco "+ N saídas/entradas" de cada dia tem `data-chave` fixa (dia + seção): antes todos tinham a mesma
   chave (o resumo sem números) e o fechado de um dia fechava o aberto do outro a cada ✓ (06/10 à noite).
 
+## Cadência de e-mails (07/10/2026, ideia da líder de vendas, melhorada)
+
+Clientes que só tratam por e-mail recebem, **em nome da vendedora da carteira** (a resposta vai para ela),
+o lembrete de **reposição** no ritmo de compra deles (com o que costumam levar, pelas notas) e, no intervalo
+da cadência (quinzenal ou mensal), a **campanha de relacionamento** que a líder escreve. Decisões do Anderson
+(07/10): e-mails da OneClean ficam no **UOL Host** → envio por serviço próprio, o **Brevo** (grátis até 300/dia),
+ligado ao domínio; **começa com fila de aprovação** (nada sai sozinho); remetente = vendedora do cliente.
+
+- **Onde:** aba **E-mails** (`emails.js`, todos menos comprador) — fila do dia (editar assunto/texto, desmarcar
+  e-mail, Enviar / Enviar os N / Pular desta vez / Tirar da cadência), segurados e por quê, campanhas (só
+  gestor cria/edita; variáveis `{saudacao} {primeiro_nome} {contato} {empresa} {vendedor}
+  {vendedor_primeiro_nome} {minha_empresa} {itens}`), "Na cadência", "Quem pode entrar" (cliente com e-mail
+  e sem ligação/WhatsApp/visita/reunião há 90 dias, os que mais compraram primeiro) e resultado de 30 dias
+  (enviados, abertos, clicaram, **compraram até 15 dias depois** pelas notas). Ficha do cliente: "E-mails da
+  cadência" com "Mudar". Configurações → Geral: assunto e texto da reposição e limite por dia.
+- **Regra** (`cadencia.js`, pura, `testes/cadencia.test.js`; fora do `regras.js` de propósito: ele é o motor
+  fixado da `crm-notas`): reposição 3 dias antes do ritmo e uma vez por compra; relacionamento quando passou o
+  intervalo desde o último e-mail (enviado ou pulado; erro não conta), com a campanha mais nova que o cliente
+  ainda não recebeu (do segmento dele ou de todos). **Segura:** pediu para sair, sem e-mail, e-mail há menos
+  de 5 dias, negócio aberto que andou nos últimos `dias_parado` (os parados do Agendor não seguram),
+  duplicata em atraso, comprou há menos de 7 dias (relacionamento), sem campanha nova.
+- **Banco:** `crm_empresas.email_cadencia` ('quinzenal'|'mensal') e `email_sair_em` (só a função grava;
+  gatilho `crm_empresas_trava_sair` impede o CRM de desfazer — LGPD); `crm_email_campanhas` (membro lê, gestor
+  grava); `crm_email_envios` (lê quem vê a empresa; o app só grava `pulado`; `enviado`/`erro` vêm da função).
+  Ataque cobre.
+- **Envio:** Edge Function **`crm-email`** (verify_jwt ligado): acha o cliente **com o login de quem aprova**
+  (RLS), destinatários **do banco** (o app só pode tirar), limite por dia (`email_limite_dia`, 200), não envia
+  2 vezes em 4 dias, remetente = vendedora da carteira, HTML simples com logo e cor da instalação, rodapé com
+  "Não quer mais receber? Clique aqui" e `List-Unsubscribe`; grava o envio e a **atividade "email"** na ficha.
+  `acao: 'aberturas'` lê no Brevo aberturas, cliques e devolvidos dos últimos 30 dias. **`crm-email-sair`**
+  (verify_jwt desligado): o link abre `sair.html` (as funções não servem HTML) e só um clique confirma (antivírus
+  de e-mail abrem links sozinhos); token = HMAC do id da empresa com a chave de serviço. As duas testadas com
+  banco e Brevo simulados (outra carteira 404, destinatário de fora recusado, HTML escapado, repetido 409,
+  token trocado 400). Publicadas em 07/10 (v1).
+- **Falta o Anderson ligar o Brevo** (até lá a aba mostra "O envio ainda não está ligado"):
+  1. criar a conta em brevo.com (plano grátis);
+  2. Brevo → Remetentes, domínios e IPs → **Domínios** → adicionar `oneclean.com.br`; o Brevo mostra os
+     registros DNS (código do Brevo, DKIM e DMARC). Pôr no **painel do UOL Host** (DNS do domínio) sem mexer no
+     MX; se já existir um SPF (`v=spf1 …`), não criar outro — só acrescentar o `include` que o Brevo pedir;
+     voltar ao Brevo e clicar em autenticar;
+  3. Brevo → SMTP e API → **Chaves de API** → gerar "CRM OneClean" e copiar;
+  4. Supabase → projeto OneClean CRM → Edge Functions → **Secrets** → `BREVO_API_KEY` = a chave. **Nunca no
+     chat, no CRM ou no repositório**;
+  5. no CRM, aba E-mails: o aviso some; primeiro envio de teste para um cliente com o e-mail do próprio Anderson.
+- **Depois (fase 2):** envio automático por cliente (o servidor monta a fila todo dia: precisa de pg_cron e da
+  regra rodando na função) e a volta do e-mail (resposta do cliente vira atividade).
+
 ## Permissões do financeiro (06/10/2026, pedido do Anderson)
 
 - **Contas a receber (`crm_titulos`): só o administrador lê a tabela** (`le` = `crm_eh_admin()`, em

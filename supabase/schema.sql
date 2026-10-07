@@ -1087,6 +1087,82 @@ create policy le on public.crm_integracao_log for select to authenticated using 
 -- histórico: só gestor lê.
 create policy le on public.crm_historico for select to authenticated using ((select public.crm_eh_gestor()));
 
+-- =================================================================== cadência de e-mails (07/10/2026)
+-- Pedido da líder de vendas: clientes que só tratam por e-mail recebem, da vendedora da carteira,
+-- um e-mail de reposição no ritmo de compra deles e um de relacionamento (a "campanha" que a líder
+-- escreve) a cada quinze dias ou um mês. Começa com FILA DE APROVAÇÃO: o CRM monta a fila do dia na
+-- tela (regras.js, filaCadencia) e a vendedora ou a líder aprova; quem envia é a Edge Function
+-- crm-email-enviar (Brevo; a chave fica só no Supabase). email_sair_em: o cliente clicou em "não quero
+-- receber" (LGPD) — só a função grava; ninguém do CRM desfaz (trava abaixo).
+alter table public.crm_empresas add column if not exists email_cadencia text check (email_cadencia in ('quinzenal', 'mensal'));
+alter table public.crm_empresas add column if not exists email_sair_em timestamptz;
+create or replace function public.crm_empresas_trava_sair()
+returns trigger language plpgsql set search_path = public as $$
+begin
+  if current_user in ('authenticated', 'anon') and new.email_sair_em is distinct from old.email_sair_em then
+    new.email_sair_em := old.email_sair_em;
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists crm_empresas_trava_sair on public.crm_empresas;
+create trigger crm_empresas_trava_sair before update on public.crm_empresas for each row execute function public.crm_empresas_trava_sair();
+
+-- O texto de relacionamento que a líder escreve (variáveis como nos modelos: {saudacao}, {vendedor}…).
+-- Cada cliente recebe cada campanha uma vez; segmento vazio = todos.
+create table if not exists public.crm_email_campanhas (
+  id             uuid primary key default gen_random_uuid(),
+  assunto        text not null check (length(btrim(assunto)) > 0),
+  corpo          text not null check (length(btrim(corpo)) > 0),
+  segmento       text,
+  desde          date not null default current_date,
+  ativa          boolean not null default true,
+  criado_por     uuid default auth.uid(),
+  criado_em      timestamptz not null default now(),
+  atualizado_em  timestamptz not null default now()
+);
+-- Cada e-mail da cadência: 'enviado'/'erro' gravados pela função; 'pulado' (a vendedora pulou esta
+-- vez) pelo app. aberto_em/clicado_em: eventos do Brevo, lidos pela função ("Atualizar aberturas").
+create table if not exists public.crm_email_envios (
+  id             uuid primary key default gen_random_uuid(),
+  empresa_id     uuid not null references public.crm_empresas(id) on delete cascade,
+  responsavel_id uuid references public.crm_usuarios(user_id) on delete set null,
+  tipo           text not null check (tipo in ('reposicao', 'relacionamento')),
+  campanha_id    uuid references public.crm_email_campanhas(id) on delete set null,
+  situacao       text not null default 'enviado' check (situacao in ('enviado', 'erro', 'pulado')),
+  para           text[] not null default '{}',
+  assunto        text,
+  corpo          text,
+  erro           text,
+  provedor_id    text,
+  aberto_em      timestamptz,
+  clicado_em     timestamptz,
+  enviado_por    uuid default auth.uid(),
+  criado_em      timestamptz not null default now()
+);
+create index if not exists crm_email_envios_empresa_idx on public.crm_email_envios (empresa_id, criado_em);
+create index if not exists crm_email_envios_provedor_idx on public.crm_email_envios (provedor_id);
+drop trigger if exists crm_email_campanhas_atualizado_em on public.crm_email_campanhas;
+create trigger crm_email_campanhas_atualizado_em before update on public.crm_email_campanhas for each row execute function public.crm_toca_atualizado_em();
+alter table public.crm_email_campanhas enable row level security;
+alter table public.crm_email_envios enable row level security;
+revoke all on public.crm_email_campanhas, public.crm_email_envios from anon, public;
+grant select, insert, update, delete on public.crm_email_campanhas, public.crm_email_envios to authenticated;
+revoke truncate, references, trigger on public.crm_email_campanhas, public.crm_email_envios from authenticated;
+drop policy if exists le on public.crm_email_campanhas;
+drop policy if exists grava on public.crm_email_campanhas;
+create policy le on public.crm_email_campanhas for select to authenticated using ((select public.crm_eh_membro()));
+create policy grava on public.crm_email_campanhas for all to authenticated using ((select public.crm_eh_gestor())) with check ((select public.crm_eh_gestor()));
+drop policy if exists le on public.crm_email_envios;
+drop policy if exists pula on public.crm_email_envios;
+drop policy if exists apaga on public.crm_email_envios;
+create policy le on public.crm_email_envios for select to authenticated
+  using ((select public.crm_eh_gestor()) or empresa_id in (select public.crm_empresas_minhas()));
+-- o app só grava "pulado", em nome de quem está usando (o "enviado" vem da função, com a chave de serviço)
+create policy pula on public.crm_email_envios for insert to authenticated
+  with check (situacao = 'pulado' and enviado_por = (select auth.uid()) and public.crm_ve_empresa(empresa_id));
+create policy apaga on public.crm_email_envios for delete to authenticated using ((select public.crm_eh_gestor()));
+
 -- =================================================================== permissões de função
 revoke all on function public.crm_papel(), public.crm_eh_ativo(), public.crm_eh_membro(), public.crm_eh_gestor(), public.crm_eh_admin(), public.crm_eh_comprador(),
   public.crm_ve_empresa(uuid), public.crm_ve_negocio(uuid), public.crm_ve_nota(uuid), public.crm_edita_negocio(uuid),

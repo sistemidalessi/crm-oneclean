@@ -698,3 +698,18 @@ tr.apagado td { opacity: .55; }
 .cx-sem-emp .cx-emp { display: none; }
 @media (max-width: 600px) { .cx-frases-linha { flex-direction: column; } }
 .cx-antigos { margin: 0; color: var(--suave); font-size: .78rem; }
+
+/* sair.html: "não quero mais receber" dos e-mails da cadência */
+.pagina-sair { display: flex; min-height: 100vh; align-items: center; justify-content: center; padding: 16px; background: var(--fundo, #f3f5f7); }
+.sair-cartao { max-width: 460px; width: 100%; text-align: center; }
+.sair-cartao h1 { font-size: 1.25rem; margin: 8px 0 12px; }
+.sair-logo { max-height: 64px; max-width: 220px; margin: 4px auto 8px; display: block; }
+
+/* E-mails: cadência de relacionamento e reposição */
+.em-item { display: grid; gap: 8px; }
+.em-topo { display: flex; gap: 8px; align-items: flex-start; justify-content: space-between; }
+.em-topo .linha { flex: 1; }
+.em-para { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: .85rem; }
+.em-item textarea { width: 100%; font: inherit; min-height: 9rem; }
+.em-item .acoes { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; }
+.filtro-inline { display: flex; align-items: center; gap: 6px; font-size: .85rem; }

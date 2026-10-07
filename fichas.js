@@ -131,6 +131,7 @@
           dado('Endereço', endereco ? '<a href="https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(endereco) + '" target="_blank" rel="noopener noreferrer">' + esc(endereco) + '</a>' : '') +
           dado('Segmento', esc(e.segmento)) + dado('Origem', esc(e.origem)) +
           dado('Recompra', e.ciclo_recompra_dias ? 'a cada ' + e.ciclo_recompra_dias + ' dias' : '') +
+          dado('E-mails da cadência', CRM.cadenciaEmail ? CRM.cadenciaEmail(e) : '') +
           dado('Cadastro', esc(R.dataBR(e.criado_em))) +
         '</dl>' + (e.observacoes ? '<p class="obs">' + esc(e.observacoes) + '</p>' : '') + '</section>' +
         '<section><h3>Pessoas <button type="button" class="mini" data-acao="novo-contato">+ pessoa</button></h3>' +

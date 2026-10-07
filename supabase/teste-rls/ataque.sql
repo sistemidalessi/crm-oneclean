@@ -200,6 +200,25 @@ insert into crm_titulos (duplicata, vencimento, valor) values ('000003/01', curr
 select 'Título que voltou continua baixado (NÃO devia)' t, count(*) from crm_fin_titulos_baixados where duplicata = '000003/01' having count(*) > 0;
 delete from crm_titulos where duplicata = '000003/01';
 update crm_fin_titulos_baixados set resolvido = 'nao_entrou', resolvido_em = now() where duplicata = '000003/01' returning 'admin marcou não entrou' as ok;
+-- cadência de e-mails (07/10/2026): vendedora só pula (o envio vem da função), só na carteira dela; ninguém desfaz o "não quero receber"
+reset role; update crm_empresas set email_sair_em = now(), email_cadencia = 'mensal' where nome = 'Da Ana'; set role authenticated;
+select pg_temp.como('b0000000-0000-0000-0000-000000000002');
+insert into crm_email_campanhas (assunto, corpo) values ('Novidades de outubro', '{saudacao} Chegaram produtos novos.') returning 'gestora criou campanha' as ok;
+select pg_temp.como('c0000000-0000-0000-0000-000000000003');
+select 'Ana lê campanhas' t, count(*) from crm_email_campanhas;
+insert into crm_email_campanhas (assunto, corpo) values ('ana', 'ana'); -- FALHA
+insert into crm_email_envios (empresa_id, tipo, situacao, enviado_por) select id, 'reposicao', 'pulado', 'c0000000-0000-0000-0000-000000000003' from crm_empresas where nome = 'Da Ana' returning 'Ana pulou um e-mail da carteira dela' as ok;
+insert into crm_email_envios (empresa_id, tipo, situacao, enviado_por) select id, 'reposicao', 'enviado', 'c0000000-0000-0000-0000-000000000003' from crm_empresas where nome = 'Da Ana'; -- FALHA
+reset role; insert into crm_email_envios (empresa_id, tipo, situacao) select id, 'relacionamento', 'enviado' from crm_empresas where nome = 'Só do Bruno'; set role authenticated; select pg_temp.como('c0000000-0000-0000-0000-000000000003');
+select 'Ana vê e-mail da carteira do Bruno (NÃO devia)' t, count(*) from crm_email_envios e join crm_empresas x on x.id = e.empresa_id where x.nome = 'Só do Bruno' having count(*) > 0;
+insert into crm_email_envios (empresa_id, tipo, situacao, enviado_por) select id, 'reposicao', 'pulado', 'c0000000-0000-0000-0000-000000000003' from (select id from crm_empresas where nome = 'Só do Bruno' union all select null::uuid where false) z; -- não vê a empresa: nada (ou FALHA)
+update crm_empresas set email_sair_em = null where nome = 'Da Ana';
+select 'Ana desfez o "não quero receber" (NÃO devia)' t, count(*) from crm_empresas where nome = 'Da Ana' and email_sair_em is null having count(*) > 0;
+update crm_email_envios set situacao = 'enviado' returning 'Ana alterou e-mail enviado (NÃO devia)';
+select pg_temp.como('f0000000-0000-0000-0000-000000000006');
+select 'Comprador vê e-mails da cadência (NÃO devia)' t, count(*) from crm_email_envios having count(*) > 0;
+select pg_temp.como('a0000000-0000-0000-0000-000000000001');
+select 'Admin vê e-mails da cadência' t, count(*) from crm_email_envios;
 -- Bruno desativado perde tudo
 reset role; update crm_usuarios set ativo=false where nome='Bruno'; set role authenticated; select pg_temp.como('d0000000-0000-0000-0000-000000000004');
 select 'Bruno desativado vê' t, count(*) from crm_empresas;
@@ -211,6 +230,8 @@ select count(*) from crm_fin_lancamentos; -- FALHA
 select count(*) from crm_fin_saldos; -- FALHA
 select count(*) from crm_fin_regras; -- FALHA
 select count(*) from crm_fin_titulos_baixados; -- FALHA
+select count(*) from crm_email_envios; -- FALHA
+select count(*) from crm_email_campanhas; -- FALHA
 select crm_proximo_vendedor(); -- FALHA
 select * from crm_duplicado_empresa('11222333000181', null, null); -- FALHA
 reset role;

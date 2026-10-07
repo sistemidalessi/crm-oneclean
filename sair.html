@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Página do link "Não quero mais receber" dos e-mails da cadência (CSP como a do index.html). -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src https://*.supabase.co; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex">
+<title>Não receber mais e-mails</title>
+<link rel="stylesheet" href="crm.css">
+</head>
+<body class="pagina-sair">
+<main class="cartao sair-cartao">
+  <img id="sairLogo" class="sair-logo" alt="" hidden>
+  <h1>Não receber mais estes e-mails</h1>
+  <p id="sairTexto">Clique no botão para parar de receber os e-mails de relacionamento e de reposição.</p>
+  <p><button type="button" class="btn" id="sairBotao">Não quero mais receber</button></p>
+</main>
+<script src="config.js"></script>
+<script src="sair.js"></script>
+</body>
+</html>
