@@ -1057,6 +1057,8 @@ ligado ao domínio; **começa com fila de aprovação** (nada sai sozinho); reme
   de vendas. Cadastros repetidos que causaram parte disso ("Nova Gestão RH" e "- 4R SERVICOS - STREET 100%", sem CNPJ,
   vindos do Agendor) **juntados em 08/10 a pedido do Anderson** nos cadastros com CNPJ e notas (backup nas linhas 74 e
   75 de `crm_backup.mescla_empresas`; o WhatsApp e o contato dos que saíram ficaram na ficha e nas observações).
+  Negócio aberto "1493 - STREET 4R" (R$ 520,40, sobra do Agendor, igual ao ganho de 20/08) apagado a pedido do Anderson
+  (backup em `crm_backup.apaga_4r_aberto_2026_10_08`).
 - `execute_sql` com `delete` solto fica parado até o tempo esgotar (a ferramenta espera confirmação); o formato
   `with alvo as (...), d as (delete ... using alvo ... returning 1) select count(*) from d` passa normalmente.
 - Na tela de cada pessoa os apagados somem na conferência de hora em hora da recarga leve, ou com F5 / "Recarregar dados".
