@@ -274,6 +274,66 @@
     return d;
   };
 
+  // Recarga leve (07/10/2026): o projeto passou do limite de tráfego do plano grátis do Supabase —
+  // cada computador baixava TUDO (~24 MB, 14 MB só de itens de nota) a cada 5 minutos: ~870 cargas
+  // completas por dia. Agora a recarga automática traz só as linhas com atualizado_em depois de
+  // "desde"; as tabelas pequenas (ou sem atualizado_em confiável, como os títulos, cuja data é a da
+  // listagem do FKN) vêm inteiras. O que outro computador APAGOU sai pela conferência de ids (só a
+  // chave de cada linha), de hora em hora. Carga completa: ao entrar e em "Recarregar dados".
+  const INTEIRAS = ['usuarios', 'config', 'etapas', 'opcoes', 'modelos', 'metas', 'filtros', 'titulos', 'email_campanhas', 'email_envios'];
+  const PARCIAIS = TABELAS.filter(t => INTEIRAS.indexOf(t) === -1);
+  async function mudadas(sb, t, desde) {
+    const out = [];
+    for (let de = 0; ; de += PAGINA) {
+      const lote = unwrap(await comTentativas(() => sb.from(tab(t)).select('*').gt('atualizado_em', desde).order('atualizado_em').order(chave(t)).range(de, de + PAGINA - 1)));
+      out.push(...lote);
+      if (lote.length < PAGINA) return out;
+    }
+  }
+  async function chaves(sb, t) {
+    const out = [];
+    for (let de = 0; ; de += PAGINA) {
+      const lote = unwrap(await comTentativas(() => sb.from(tab(t)).select(chave(t)).order(chave(t)).range(de, de + PAGINA - 1)));
+      out.push(...lote.map(x => x[chave(t)]));
+      if (lote.length < PAGINA) return out;
+    }
+  }
+  // → { inteiras: { t: linhas }, mudadas: { t: linhas }, existentes: { t: [chaves] } | null }
+  Supa.prototype.carregarMudancas = async function (desde, conferirApagados) {
+    const [a, b, c] = await Promise.all([
+      Promise.all(INTEIRAS.map(t => tudo(this.sb, t))),
+      Promise.all(PARCIAIS.map(t => mudadas(this.sb, t, desde))),
+      conferirApagados ? Promise.all(PARCIAIS.map(t => chaves(this.sb, t))) : null
+    ]);
+    const r = { inteiras: {}, mudadas: {}, existentes: conferirApagados ? {} : null };
+    INTEIRAS.forEach((t, i) => { r.inteiras[t] = a[i]; });
+    PARCIAIS.forEach((t, i) => { r.mudadas[t] = b[i]; if (c) r.existentes[t] = c[i]; });
+    return r;
+  };
+  // Junta a recarga leve nos dados da tela (mesmo resultado de uma carga completa, se nada foi apagado
+  // sem a conferência). Devolve quantas linhas mudaram.
+  function aplicaMudancas(D, r) {
+    let n = 0;
+    Object.keys(r.inteiras).forEach(t => { D[t] = r.inteiras[t]; });
+    Object.keys(r.mudadas).forEach(t => {
+      const k = chave(t), pos = new Map((D[t] || []).map((x, i) => [x[k], i]));
+      r.mudadas[t].forEach(x => { const i = pos.get(x[k]); if (i == null) { pos.set(x[k], D[t].length); D[t].push(x); } else D[t][i] = x; n++; });
+    });
+    if (r.existentes) Object.keys(r.existentes).forEach(t => {
+      const k = chave(t), vivos = new Set(r.existentes[t]), antes = D[t].length;
+      D[t] = D[t].filter(x => vivos.has(x[k]));
+      n += antes - D[t].length;
+    });
+    return n;
+  }
+  // Marca para a próxima recarga leve: o atualizado_em mais novo visto (relógio do banco, não do
+  // computador), menos 2 minutos de folga (transação que gravou antes e confirmou depois).
+  function marcaRecarga(D) {
+    let m = '';
+    PARCIAIS.forEach(t => (D[t] || []).forEach(x => { if (x.atualizado_em && x.atualizado_em > m) m = x.atualizado_em; }));
+    return m ? new Date(Date.parse(m) - 120000).toISOString() : null;
+  }
+
   Supa.prototype.carregarFin = async function () {
     const r = await Promise.all(FIN.map(t => tudo(this.sb, t)));
     return finVazio({ fin_recorrentes: r[0], fin_lancamentos: r[1], fin_saldos: r[2], fin_regras: r[3], fin_titulos_baixados: r[4] });
@@ -544,6 +604,6 @@
     return { estoque: max(est), receber: max(tit), pagar: max((this.ler().fin_lancamentos || []).filter(x => x.chave_fkn)), recusas: [] };
   };
 
-  raiz.CRMDados = { TABELAS, chave, Local, Supa, uuid, vazio, LOCAL_ADMIN, cascataMemoria, situacaoVigia, PARADO_MIN, lembreteFkn };
+  raiz.CRMDados = { TABELAS, INTEIRAS, PARCIAIS, aplicaMudancas, marcaRecarga, chave, Local, Supa, uuid, vazio, LOCAL_ADMIN, cascataMemoria, situacaoVigia, PARADO_MIN, lembreteFkn };
   if (typeof module !== 'undefined' && module.exports) module.exports = raiz.CRMDados;
 })(typeof window !== 'undefined' ? window : globalThis);

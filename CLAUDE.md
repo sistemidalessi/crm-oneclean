@@ -31,6 +31,20 @@ dados precisavam vir de lá. A migração é o caminho mais sensível do sistema
 - Esta é a cópia viva do código. A origem foi `sistemi-dalessi/crm/`, que fica só
   como histórico; mudança nova entra aqui.
 
+## LIMITE DE TRÁFEGO DO SUPABASE (07/10/2026) — recarga leve
+
+O painel do Supabase mostrou **"Exceeding usage limits"** (plano grátis). Causa: cada computador baixava
+**tudo** a cada 5 minutos e ao voltar para a janela — ~870 cargas completas por dia, ~24 MB cada (14 MB só de
+`crm_nota_itens`); o banco tem só 33 MB, o problema era o **tráfego de saída** (5 GB/mês no grátis).
+Correção (`dados.js` `carregarMudancas`/`aplicaMudancas`/`marcaRecarga`, `app.js` `CRM.recarregar`):
+a recarga automática traz só as linhas com `atualizado_em` depois da marca (o mais novo visto, relógio do
+banco, menos 2 min); tabelas pequenas ou sem `atualizado_em` confiável (`INTEIRAS`: usuários, config, etapas,
+opções, modelos, metas, filtros, **títulos** — a data deles é a da listagem do FKN —, campanhas e envios de
+e-mail) vêm inteiras; **de hora em hora** a conferência do que foi apagado em outro computador (só as chaves).
+Carga completa só ao entrar (login zera a marca) e em "Recarregar dados". Teste: `testes/recarga.test.js`.
+**Não voltar** a recarregar tudo em timer. Tabela nova grande: entra em `PARCIAIS` (precisa de
+`atualizado_em` com gatilho).
+
 ## INCIDENTE 01/10/2026 (manhã): CRM vazio para todos os logins — resolvido
 
 Primeiro dia sem o Agendor: com a equipe toda abrindo o CRM, as leituras passavam do

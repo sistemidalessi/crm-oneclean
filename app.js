@@ -79,10 +79,27 @@
   // Leitura que falhou nunca vira tela vazia: sem nenhuma carga ainda, a tela diz que os dados
   // estão guardados e tenta de novo sozinha; com dados antigos na tela, avisa na faixa do topo.
   let novaTentativa = null;
-  CRM.recarregar = async function (silencioso) {
+  // Carga completa ao entrar, em "Recarregar dados" (completa: true) e se a última leve falhou; no
+  // resto (5 em 5 min, ao voltar à janela, depois de gravar), só o que mudou — e de hora em hora a
+  // conferência do que foi apagado em outro computador (dados.js, carregarMudancas; 07/10/2026).
+  const HORA = 3600000;
+  CRM.recarregar = async function (silencioso, opc) {
     clearTimeout(novaTentativa);
     try {
-      const D = await store.carregar();
+      const leve = !(opc && opc.completa) && E.D && E.marca && store.carregarMudancas;
+      let D;
+      if (leve) {
+        const conferir = Date.now() - (E.conferidoEm || 0) > HORA;
+        const r = await store.carregarMudancas(E.marca, conferir);
+        D = Object.assign({}, E.D);
+        DD.PARCIAIS.forEach(t => { D[t] = (D[t] || []).slice(); }); // a tela só troca se tudo der certo
+        DD.aplicaMudancas(D, r);
+        if (conferir) E.conferidoEm = Date.now();
+      } else {
+        D = await store.carregar();
+        E.conferidoEm = Date.now();
+      }
+      E.marca = DD.marcaRecarga(D) || E.marca;
       // Comprador não lê empresas (RLS): recebe só nome e ritmo, pela função do banco.
       if (CRM.ehComprador() && store.clientesCompras) D.empresas = await store.clientesCompras();
       // Administrador: sinal de vida do vigia de notas (aviso se parar).
@@ -441,7 +458,7 @@
 
   // ------------------------------------------------------------ ações por delegação
   const ACOES = CRM.acoes = {
-    'recarregar-dados': () => CRM.recarregar().then(() => { if (!E.falhaCarga) CRM.toast('Dados carregados.'); }),
+    'recarregar-dados': () => CRM.recarregar(false, { completa: true }).then(() => { if (!E.falhaCarga) CRM.toast('Dados carregados.'); }),
     'ver-integracoes': () => { CRM.gravaPref('ajustes', 'integracoes'); CRM.irPara('ajustes'); },
     aba: id => CRM.irPara(id),
     'abrir-empresa': id => CRM.fichas.abrirEmpresa(id),
@@ -456,7 +473,7 @@
       ['Registrar atividade', () => CRM.fichas.formRegistro(null, {}), 'tecla R']
     ].filter(Boolean)),
     'menu-usuario': (id, el) => CRM.menuFlutuante(el, [
-      ['Recarregar dados', () => CRM.recarregar().then(() => CRM.toast('Atualizado.'))],
+      ['Recarregar dados', () => CRM.recarregar(false, { completa: true }).then(() => CRM.toast('Atualizado.'))],
       ['Ativar lembretes na tela', pedirNotificacao],
       ['Atalhos do teclado', mostraAtalhos],
       store.modo === 'supabase' ? ['Alterar minha senha', formMinhaSenha] : ['Carregar dados de exemplo', () => CRM.ajustes.carregarExemplos()],
@@ -707,7 +724,8 @@
     $('#tela').innerHTML = '';
     $('#app').hidden = false;
     $('#faixaModo').hidden = store.modo !== 'local';
-    await CRM.recarregar();
+    E.marca = null; // login novo: carga completa (nunca juntar com os dados de quem saiu)
+    await CRM.recarregar(false, { completa: true });
     const atual = E.ix.porId.usuarios.get(E.eu.user_id);
     if (atual) E.eu = atual;
     document.title = nomeInstalacao() + ' · CRM';
@@ -792,7 +810,7 @@
     let recuperando = /type=recovery/.test(location.hash);
     sb.auth.onAuthStateChange(ev => {
       if (ev === 'PASSWORD_RECOVERY') { recuperando = true; telaNovaSenha(); }
-      if (ev === 'SIGNED_OUT') { E.eu = null; telaLogin(); }
+      if (ev === 'SIGNED_OUT') { E.eu = null; E.marca = null; telaLogin(); }
     });
     const s = await sb.auth.getSession();
     if (recuperando && s.data && s.data.session) { telaNovaSenha(); return; }
