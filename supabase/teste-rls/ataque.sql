@@ -184,6 +184,22 @@ update crm_fin_saldos set valor = 0 returning 'Comprador alterou saldo (NÃO dev
 select pg_temp.como('a0000000-0000-0000-0000-000000000001');
 select 'Admin vê financeiro' t, (select count(*) from crm_fin_lancamentos) l, (select count(*) from crm_fin_recorrentes) r, (select count(*) from crm_fin_saldos) s, (select count(*) from crm_fin_regras) g;
 select 'Financeiro no histórico (NÃO devia)' t, count(*) from crm_historico where tabela like 'crm_fin%' having count(*) > 0;
+-- títulos baixados no FKN (07/10/2026): o título que sai sem "Recebi" no Caixa fica guardado; recebido, nota cancelada e o que volta, não
+select pg_temp.como('a0000000-0000-0000-0000-000000000001');
+insert into crm_fin_lancamentos (tipo, descricao, valor, vencimento, situacao, pago_em, baixa, titulo_duplicata) values ('entrada', 'Recebido 000002/01', 200, current_date, 'pago', current_date, 'caixa', '000002/01');
+delete from crm_titulos where duplicata in ('000002/01', '000003/01');
+insert into crm_notas (chave, numero, emitida_em, cancelada) values (repeat('9',44), 9, now(), true);
+select pg_temp.como('b0000000-0000-0000-0000-000000000002');
+select 'Gestora tirou títulos da nota cancelada pela função' t, crm_titulos_da_nota('[]'::jsonb, array['000009']);
+select 'Gestora vê títulos baixados (NÃO devia)' t, count(*) from crm_fin_titulos_baixados having count(*) > 0;
+insert into crm_fin_titulos_baixados (duplicata, valor) values ('x', 1); -- FALHA
+select pg_temp.como('a0000000-0000-0000-0000-000000000001');
+select 'Baixados no FKN (só 000003/01 pendente; 000009/01 cancelada; 000002/01 recebido não entra)' t, string_agg(duplicata || ':' || coalesce(resolvido, 'pendente'), ',' order by duplicata) from crm_fin_titulos_baixados;
+select 'Recebido no Caixa virou baixado (NÃO devia)' t, count(*) from crm_fin_titulos_baixados where duplicata = '000002/01' having count(*) > 0;
+insert into crm_titulos (duplicata, vencimento, valor) values ('000003/01', current_date, 300);
+select 'Título que voltou continua baixado (NÃO devia)' t, count(*) from crm_fin_titulos_baixados where duplicata = '000003/01' having count(*) > 0;
+delete from crm_titulos where duplicata = '000003/01';
+update crm_fin_titulos_baixados set resolvido = 'nao_entrou', resolvido_em = now() where duplicata = '000003/01' returning 'admin marcou não entrou' as ok;
 -- Bruno desativado perde tudo
 reset role; update crm_usuarios set ativo=false where nome='Bruno'; set role authenticated; select pg_temp.como('d0000000-0000-0000-0000-000000000004');
 select 'Bruno desativado vê' t, count(*) from crm_empresas;
@@ -194,6 +210,7 @@ select count(*) from crm_notas; -- FALHA
 select count(*) from crm_fin_lancamentos; -- FALHA
 select count(*) from crm_fin_saldos; -- FALHA
 select count(*) from crm_fin_regras; -- FALHA
+select count(*) from crm_fin_titulos_baixados; -- FALHA
 select crm_proximo_vendedor(); -- FALHA
 select * from crm_duplicado_empresa('11222333000181', null, null); -- FALHA
 reset role;

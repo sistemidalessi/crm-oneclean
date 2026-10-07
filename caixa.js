@@ -9,7 +9,7 @@
   'use strict';
   const R = raiz.CRMRegras;
   const C = raiz.CRMCaixa;
-  const { feriado, posterga, porqueNaoUtil, creditoTitulo, gerarMes, saldoAtual, itensGrade, saldosGrade, vencidas, receberVencido, ligacoesTitulos, ligadasPorTitulo,
+  const { feriado, posterga, porqueNaoUtil, creditoTitulo, gerarMes, saldoAtual, itensGrade, saldosGrade, vencidas, receberVencido, baixadosPendentes, ancora, ligacoesTitulos, ligadasPorTitulo,
     CATEGORIAS_SAIDA, CATEGORIAS_ENTRADA, ENTRE_EMPRESAS } = C;
   const r2 = v => Math.round(Number(v || 0) * 100) / 100;
   const semana = s => new Date(s + 'T12:00:00Z').getUTCDay();
@@ -35,7 +35,7 @@
     if (lendo) return;
     lendo = true;
     lidoEm = Date.now();
-    try { F = await CRM.store().carregarFin(); } catch (e) { if (!F) F = { recorrentes: [], lancamentos: [], saldos: [], regras: [] }; CRM.falhou(e); }
+    try { F = await CRM.store().carregarFin(); } catch (e) { if (!F) F = { recorrentes: [], lancamentos: [], saldos: [], regras: [], baixados: [] }; CRM.falhou(e); }
     // previsão (ex.: material vendido à Agilité) que tem título igual do FKN: grava a ligação, para o
     // ✓ do título baixar a previsão em vez de criar outra entrada (caixa-calculo.js, ligacoesTitulos)
     try {
@@ -71,6 +71,45 @@
       vencimento: t.vencimento, situacao: 'pago', pago_em: dia, baixa: 'caixa', baixado_em: agora(), origem: 'titulo', titulo_duplicata: t.duplicata,
       entre_empresas: ENTRE_EMPRESAS.test(nomeTitulo(t)), observacoes: v !== r2(t.valor) ? 'Título de ' + R.moeda(t.valor) + '; entrou ' + R.moeda(v) + '.' : null });
     CRM.toast('Recebido em ' + dm(dia) + ': ' + R.moeda(v));
+  }
+  // Título baixado no FKN (sumiu da listagem do contas a receber) sem "Recebi" aqui: o administrador diz
+  // se o dinheiro entrou (dia e valor) ou não (abatimento, devolução, cancelamento). crm_fin_titulos_baixados.
+  const baixados = () => baixadosPendentes(F.baixados, F.lancamentos, titulos(), hoje(), d1());
+  const baixado = id => (F.baixados || []).find(x => x.id === id);
+  const ligadaAberta = dup => F.lancamentos.find(l => l.situacao === 'aberto' && l.titulo_duplicata === dup);
+  async function resolveBaixado(b, patch) {
+    const r = await CRM.store().atualizar('fin_titulos_baixados', b.id, Object.assign({ resolvido_em: patch.resolvido ? agora() : null }, patch));
+    F.baixados = F.baixados || [];
+    troca(F.baixados, r);
+    CRM.render();
+    return r;
+  }
+  async function entrouBaixado(b, dia, valor) {
+    const v = valor > 0 ? r2(valor) : r2(b.valor);
+    const nome = nomeTitulo(b);
+    const lig = ligadaAberta(b.duplicata); // previsão ligada ao título (ex.: material à Agilité): ela vira o recebimento
+    const l = lig ? await grava(lig.id, { situacao: 'pago', pago_em: dia, baixa: 'caixa', baixado_em: agora(), valor: v })
+      : await insere({ tipo: 'entrada', descricao: 'Recebido: ' + nome + ' · ' + b.duplicata, categoria: 'Duplicatas recebidas', valor: v,
+        vencimento: b.vencimento || dia, situacao: 'pago', pago_em: dia, baixa: 'caixa', baixado_em: agora(), origem: 'titulo', titulo_duplicata: b.duplicata,
+        entre_empresas: ENTRE_EMPRESAS.test(nome), observacoes: (v !== r2(b.valor) ? 'Título de ' + R.moeda(b.valor) + '; entrou ' + R.moeda(v) + '. ' : '') + 'Baixado no FKN.' });
+    await resolveBaixado(b, { resolvido: 'entrou', lancamento_id: l.id });
+    const a = ancora(F.saldos);
+    CRM.toast('Entrou em ' + dm(dia) + ': ' + R.moeda(v) + (a && dia < a.data ? ' — já estava no saldo do BB informado em ' + dm(a.data) + ' (não muda o saldo).' : ' — no saldo do caixa.'));
+  }
+  async function naoEntrouBaixado(b) {
+    const lig = ligadaAberta(b.duplicata);
+    if (lig) await grava(lig.id, { titulo_duplicata: null }); // a previsão ligada volta para a grade, para decidir à parte
+    await resolveBaixado(b, { resolvido: 'nao_entrou' });
+    CRM.toast(b.duplicata + ': não entrou no banco — saiu da lista, sem mexer no saldo.');
+  }
+  function formBaixado(b) {
+    CRM.abrirForm({
+      titulo: 'Baixado no FKN', intro: nomeTitulo(b) + ' · duplicata ' + b.duplicata + ' · ' + R.moeda(b.valor) + (b.vencimento ? '\nVenceu ' + R.dataBR(b.vencimento) : '') +
+        '.\nSaiu do contas a receber do FKN em ' + R.dataBR(String(b.sumiu_em || '').slice(0, 10)) + ' sem "Recebi" aqui. Diga quando e quanto entrou no Banco do Brasil.',
+      campos: [{ nome: 'dia', rotulo: 'Entrou em', tipo: 'data' }, { nome: 'valor', rotulo: 'Valor que entrou (R$)', tipo: 'numero', ajuda: 'com juros ou só uma parte? ponha o que caiu na conta' }],
+      valores: { dia: b.dia, valor: r2(b.valor) },
+      salvarTexto: 'Entrou', aoSalvar: async v => { await entrouBaixado(b, diaDaBaixa(v.dia || b.dia), v.valor); }
+    });
   }
   // Título em atraso: o dia em que se espera receber (crm_titulos.previsao). null tira a remarcação.
   async function remarcarTitulo(dup, dia) {
@@ -460,7 +499,11 @@
     const antigos = rvTodos.length - rv.length;
     const tot = l => l.reduce((t, x) => t + Number(x.valor || 0), 0);
     const b = (acao, id, rot, cls) => '<button type="button" class="mini' + (cls ? ' ' + cls : '') + '" data-acao="' + acao + '" data-id="' + esc(id) + '">' + esc(rot) + '</button>';
-    return (v.length ? '<details class="cartao cx-venc"><summary><strong>Contas vencidas sem baixa: ' + v.length + ' (' + esc(R.moeda(tot(v))) + ')</strong> <small>fora do saldo da grade. Já pagou? "Já estava paga". Vai negociar? "Pausar".</small></summary>' +
+    const bx = baixados();
+    return (bx.length ? '<details class="cartao cx-venc cx-baixados" data-chave="baixados-fkn" open><summary><strong>Baixados no FKN, sem entrada no caixa: ' + bx.length + ' (' + esc(R.moeda(tot(bx))) + ')</strong> <small>saíram do contas a receber do FKN sem "Recebi" aqui — fora do saldo até você dizer. Entrou no banco? "Entrou". Abatimento, devolução ou cancelamento? "Não entrou".</small></summary>' +
+      '<div class="tabela-rolagem"><table class="tabela"><tbody>' + bx.map(x => '<tr><td>' + esc(nomeTitulo(x)) + '<small>duplicata ' + esc(x.duplicata) + (x.vencimento ? ' · venceu ' + esc(R.dataBR(x.vencimento)) : '') + '</small></td><td>baixado no FKN ' + esc(dm(String(x.sumiu_em || '').slice(0, 10))) + '</td>' +
+        '<td class="num">' + esc(R.moeda(x.valor)) + '</td><td class="acoes-linha">' + b('cx-bx-entrou', x.id, 'Entrou…') + b('cx-bx-nao', x.id, 'Não entrou') + '</td></tr>').join('') + '</tbody></table></div></details>' : '') +
+      (v.length ? '<details class="cartao cx-venc"><summary><strong>Contas vencidas sem baixa: ' + v.length + ' (' + esc(R.moeda(tot(v))) + ')</strong> <small>fora do saldo da grade. Já pagou? "Já estava paga". Vai negociar? "Pausar".</small></summary>' +
       '<div class="tabela-rolagem"><table class="tabela"><tbody>' + v.map(l => '<tr><td>' + esc(l.descricao) + (l.categoria ? '<small>' + esc(l.categoria) + '</small>' : '') + '</td><td>' + esc(R.dataBR(l.vencimento)) + '</td>' +
         '<td class="num">' + esc(R.moeda(l.valor)) + '</td><td class="acoes-linha">' + b('cx-pagar', l.id, (l.tipo === 'entrada' ? 'Recebi' : 'Paguei') + ' hoje') + b('cx-japaga', l.id, 'Já estava paga') + b('cx-pausar', l.id, 'Pausar') + '</td></tr>').join('') +
       '</tbody></table></div></details>' : '') +
@@ -629,6 +672,8 @@
       if (l) pagar(l, dia).then(() => CRM.toast((l.tipo === 'entrada' ? 'Recebido' : 'Pago') + ' em ' + dm(dia) + ': ' + R.moeda(l.valor))).catch(CRM.falhou);
     },
     'cx-pagar': (id, el) => { fecha(); const l = lanc(id); if (l) pagar(l, diaDaBaixa(el && el.dataset.dia)).catch(CRM.falhou); },
+    'cx-bx-entrou': id => { const x = baixados().find(y => y.id === id); if (x) formBaixado(x); },
+    'cx-bx-nao': id => { const x = baixado(id); if (x) naoEntrouBaixado(x).catch(CRM.falhou); },
     'cx-japaga': id => { const l = lanc(id); if (l) grava(l.id, { situacao: 'pago', pago_em: l.vencimento, baixa: 'fora', baixado_em: agora() }).catch(CRM.falhou); },
     'cx-pausar': id => { fecha(); const l = lanc(id); if (l) grava(l.id, { situacao: 'pausado' }).then(() => CRM.toast('Conta pausada: saiu do caixa (aba Contas pausadas).')).catch(CRM.falhou); },
     'cx-voltar': id => { const l = lanc(id); if (l) grava(l.id, { situacao: 'aberto' }).catch(CRM.falhou); },
@@ -636,7 +681,10 @@
       fecha();
       const l = lanc(id);
       if (!l) return;
-      (l.origem === 'titulo' ? remove(l.id) : grava(l.id, { situacao: 'aberto', pago_em: null, baixa: null, baixado_em: null })).catch(CRM.falhou);
+      // recebimento de título baixado no FKN: desfeito, ele volta para "Baixados no FKN"
+      const bx = (F.baixados || []).find(x => x.lancamento_id === l.id);
+      (l.origem === 'titulo' ? remove(l.id) : grava(l.id, { situacao: 'aberto', pago_em: null, baixa: null, baixado_em: null }))
+        .then(() => bx && resolveBaixado(bx, { resolvido: null, lancamento_id: null })).catch(CRM.falhou);
     },
     'cx-rec-nova': () => formRecorrente(null),
     'cx-rec-editar': id => { const r = F && F.recorrentes.find(x => x.id === id); if (r) formRecorrente(r); },

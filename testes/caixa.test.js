@@ -263,3 +263,19 @@ test('título em atraso remarcado: vai para o dia escolhido, em vermelho, e volt
   const lt = r.titulos_a_receber.titulos.find(t => t.duplicata === '001/01');
   assert.deepEqual([lt.cai_na_conta, lt.atrasado], ['2026-10-09', true]);
 });
+
+test('baixados no FKN sem entrada no caixa: pendentes e o dia sugerido', () => {
+  const H = '2026-10-07';
+  const bx = [
+    { id: 'a', duplicata: '000010/01', valor: 431.55, vencimento: '2026-10-05', previsao: '2026-10-07', sumiu_em: '2026-10-07T11:40:10Z' },
+    { id: 'b', duplicata: '000011/01', valor: 100, vencimento: '2026-10-20', sumiu_em: '2026-10-07T11:40:10Z' }, // pago antes do vencimento
+    { id: 'c', duplicata: '000012/01', valor: 50, vencimento: '2026-10-01', sumiu_em: '2026-10-06T23:30:00Z' }, // 20h30 de 06/10 em Brasília
+    { id: 'd', duplicata: '000013/01', valor: 70, vencimento: '2026-10-01', resolvido: 'nao_entrou' },
+    { id: 'e', duplicata: '000014/01', valor: 80, vencimento: '2026-10-01' }, // recebido no Caixa
+    { id: 'f', duplicata: '000015/01', valor: 90, vencimento: '2026-10-01' } // voltou para a listagem
+  ];
+  const lancs = [{ id: 'l1', tipo: 'entrada', situacao: 'pago', titulo_duplicata: '000014/01', valor: 80, pago_em: '2026-10-02' }];
+  const p = C.baixadosPendentes(bx, lancs, [{ duplicata: '000015/01', vencimento: '2026-10-01', valor: 90 }], H, true);
+  assert.deepEqual(p.map(x => [x.duplicata, x.dia]), [['000012/01', '2026-10-02'], ['000010/01', '2026-10-07'], ['000011/01', '2026-10-07']]);
+  assert.equal(C.baixadosPendentes(null, [], [], H, true).length, 0);
+});

@@ -915,6 +915,20 @@ Anderson: cada sistema cuida da sua empresa; o "Geral" (as duas) é de quem lê 
   A Agilité como o ditado escreve: `AGILITE = /\ba[gj]il+i[tc]/` (agilite, agility, agiliti, ajilite; "agilidade"
   não casa). Leitor lado a lado com o da Agilité: 13 frases, 0 diferenças. Os dois lançamentos de 06/10 e 14/10
   conferidos no banco (um de cada, sem repetição).
+- **Baixados no FKN, sem entrada no caixa (07/10, pedido do Anderson, "opção 2"):** a listagem do contas a
+  receber do FKN só traz o que está em aberto; título baixado lá sumia do CRM e, se o dinheiro tinha entrado, o
+  saldo do caixa ficava abaixo do real. Agora o gatilho `crm_titulos_saiu` (after delete em `crm_titulos`,
+  security definer — vale para qualquer caminho: listagem, nota cancelada, tela) guarda o título em
+  `crm_fin_titulos_baixados` (RLS só admin, ataque cobre), **exceto** se já teve "Recebi" no Caixa; título de nota
+  cancelada já nasce `resolvido = 'cancelada'`; título que volta na listagem sai de lá (`crm_titulos_voltou`).
+  No Caixa, bloco aberto "Baixados no FKN, sem entrada no caixa" (`baixadosPendentes` em `caixa-calculo.js`):
+  "Entrou…" pede o dia (sugerido: o do crédito, sem passar do dia em que sumiu nem de hoje) e o valor → entrada
+  "Recebido: …" em Duplicatas recebidas (ou baixa a previsão ligada) e `resolvido = 'entrou'`; "Não entrou" →
+  `nao_entrou` (a previsão ligada, se houver, volta para a grade). Desfazer o recebimento devolve o título ao
+  bloco. **Não vira entrada sozinho**: baixa no FKN nem sempre é dinheiro no banco. Os 3 títulos do Colégio Palavra
+  Viva que sumiram na listagem de 07/10 08:40 (antes do gatilho) foram colocados à mão no bloco; os outros que
+  sumiram entre 06/10 e 07/10 não têm como voltar (o registro da listagem só guarda a contagem) — o saldo do BB
+  informado de novo acerta.
 - **Corte do "A receber vencido" (pedido do Anderson, 06/10 à noite: "deixe somente os que venceram hoje, pra
   seguirmos certo daqui pra frente"):** `cfg.caixa_receber_desde` = 2026-10-05 (Configurações → Geral, campo
   "Caixa: A receber vencido mostra só…"). Os 9 títulos antigos (29/01 a 07/08, R$ 11.540,90) saem do bloco do

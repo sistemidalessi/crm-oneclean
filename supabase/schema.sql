@@ -989,6 +989,66 @@ $$;
 revoke all on function public.crm_duplicatas_atraso(), public.crm_titulos_da_nota(jsonb, text[]), public.crm_titulos_troca_empresa(uuid[], uuid) from public, anon;
 grant execute on function public.crm_duplicatas_atraso(), public.crm_titulos_da_nota(jsonb, text[]), public.crm_titulos_troca_empresa(uuid[], uuid) to authenticated;
 
+-- Títulos baixados no FKN (07/10/2026, Anderson): a listagem do contas a receber só traz o que está
+-- em aberto, então o título baixado no FKN some do CRM — e o dinheiro, se entrou, não entrava no
+-- Caixa. Agora o título que sai da tabela sem ter sido recebido no Caixa fica guardado aqui e aparece
+-- no Caixa ("Baixados no FKN, sem entrada no caixa"): o administrador diz o dia e o valor que entraram
+-- ou "não entrou" (abatimento, devolução, cancelamento). Não vira entrada sozinho: baixa no FKN nem
+-- sempre é dinheiro no banco. Título de nota cancelada já nasce resolvido ('cancelada'); título que
+-- volta na listagem sai daqui. Só o administrador lê e grava (o gatilho grava por qualquer caminho).
+create table if not exists public.crm_fin_titulos_baixados (
+  id             uuid primary key default gen_random_uuid(),
+  duplicata      text not null,
+  nota_numero    integer,
+  empresa_id     uuid references public.crm_empresas(id) on delete set null,
+  cliente_nome   text,
+  vencimento     date,
+  previsao       date,
+  valor          numeric(14,2) not null default 0,
+  origem         text,
+  sumiu_em       timestamptz not null default now(),
+  resolvido      text check (resolvido in ('entrou', 'nao_entrou', 'cancelada')),
+  resolvido_em   timestamptz,
+  lancamento_id  uuid references public.crm_fin_lancamentos(id) on delete set null,
+  criado_em      timestamptz not null default now(),
+  atualizado_em  timestamptz not null default now()
+);
+create unique index if not exists crm_fin_titulos_baixados_aberto_uq on public.crm_fin_titulos_baixados (duplicata) where resolvido is null;
+drop trigger if exists crm_fin_titulos_baixados_atualizado_em on public.crm_fin_titulos_baixados;
+create trigger crm_fin_titulos_baixados_atualizado_em before update on public.crm_fin_titulos_baixados for each row execute function public.crm_toca_atualizado_em();
+alter table public.crm_fin_titulos_baixados enable row level security;
+revoke all on public.crm_fin_titulos_baixados from anon, public;
+grant select, insert, update, delete on public.crm_fin_titulos_baixados to authenticated;
+revoke truncate, references, trigger on public.crm_fin_titulos_baixados from authenticated;
+drop policy if exists so_admin on public.crm_fin_titulos_baixados;
+create policy so_admin on public.crm_fin_titulos_baixados for all to authenticated using ((select public.crm_eh_admin())) with check ((select public.crm_eh_admin()));
+
+create or replace function public.crm_titulo_saiu()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare num bigint := coalesce(old.nota_numero, nullif(regexp_replace(split_part(old.duplicata, '/', 1), '\D', '', 'g'), '')::bigint);
+begin
+  -- recebido no Caixa ("Recebi"): o dinheiro já está lá
+  if exists (select 1 from public.crm_fin_lancamentos where titulo_duplicata = old.duplicata and situacao = 'pago') then return old; end if;
+  insert into public.crm_fin_titulos_baixados (duplicata, nota_numero, empresa_id, cliente_nome, vencimento, previsao, valor, origem, resolvido, resolvido_em)
+  select old.duplicata, num, old.empresa_id, old.cliente_nome, old.vencimento, old.previsao, old.valor, old.origem, c.r, case when c.r is not null then now() end
+    from (select case when exists (select 1 from public.crm_notas where numero = num and cancelada) then 'cancelada' end r) c
+  on conflict (duplicata) where resolvido is null do nothing;
+  return old;
+end;
+$$;
+create or replace function public.crm_titulo_voltou()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  delete from public.crm_fin_titulos_baixados where duplicata = new.duplicata and resolvido is null;
+  return new;
+end;
+$$;
+revoke all on function public.crm_titulo_saiu(), public.crm_titulo_voltou() from public, anon, authenticated;
+drop trigger if exists crm_titulos_saiu on public.crm_titulos;
+create trigger crm_titulos_saiu after delete on public.crm_titulos for each row execute function public.crm_titulo_saiu();
+drop trigger if exists crm_titulos_voltou on public.crm_titulos;
+create trigger crm_titulos_voltou after insert on public.crm_titulos for each row execute function public.crm_titulo_voltou();
+
 -- Quando chegou cada relatório do FKN (lembrete em Compras). O comprador puxa só o estoque
 -- (06/10/2026): a data do contas a receber é só do administrador. Vendedor e gestor: nada.
 create or replace function public.crm_fkn_atualizado()

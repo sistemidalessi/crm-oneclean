@@ -243,6 +243,18 @@
       .sort((a, b) => a.vencimento.localeCompare(b.vencimento));
   }
 
+  // Títulos baixados no FKN sem entrada no Caixa (crm_fin_titulos_baixados, 07/10/2026): o título some
+  // da listagem do FKN quando é baixado lá, e a baixa no FKN não diz se nem quando o dinheiro entrou.
+  // Pendente = sem resolução, sem "Recebi" no Caixa e que não voltou para a listagem. O dia sugerido é
+  // o do crédito na conta, sem passar do dia em que sumiu nem de hoje.
+  function baixadosPendentes(baixados, lancs, titulos, hoje, d1) {
+    const recebidos = recebidosDe(lancs), abertos = new Set((titulos || []).map(t => t.duplicata));
+    const brt = ts => ts ? new Date(Date.parse(ts) - 3 * 3600e3).toISOString().slice(0, 10) : hoje;
+    return (baixados || []).filter(b => !b.resolvido && !recebidos.has(b.duplicata) && !abertos.has(b.duplicata))
+      .map(b => Object.assign({}, b, { dia: [b.vencimento ? diaDoTitulo(b, hoje, d1) : hoje, brt(b.sumiu_em), hoje].filter(Boolean).sort()[0] }))
+      .sort((a, b) => String(a.vencimento || '').localeCompare(String(b.vencimento || '')) || String(a.duplicata).localeCompare(String(b.duplicata)));
+  }
+
   const CATEGORIAS_SAIDA = ['Fornecedores', 'Salários', 'Benefícios (VT, VR, cesta)', 'FGTS e encargos', 'Pró-labore', 'Retiradas dos sócios',
     'Reembolso da folha à Agilité', 'Aluguel', 'Energia', 'Água', 'Telefone e internet', 'Contabilidade', 'Sistema (FKN)', 'Convênio médico',
     'Impostos', 'Reparcelamentos', 'Cartões', 'Empréstimos e giro', 'Frete e combustível', 'Tarifas bancárias', 'Transferência entre empresas', 'Outras saídas'];
@@ -377,7 +389,7 @@
   }
 
   const O = { cronogramaPrice, taxaPorNewton, resumoLeitura, limpar, ligacoesTitulos, ligadasPorTitulo, recebidosDe, feriados, feriado, util, posterga, utilDepois, porqueNaoUtil, creditoTitulo, pascoa, diaDoMes, gerarMes, ancora, saldoAtual,
-    itensGrade, saldosGrade, vencidas, receberVencido, CATEGORIAS_SAIDA, CATEGORIAS_ENTRADA, ENTRE_EMPRESAS, soma };
+    itensGrade, saldosGrade, vencidas, receberVencido, baixadosPendentes, CATEGORIAS_SAIDA, CATEGORIAS_ENTRADA, ENTRE_EMPRESAS, soma };
   raiz.CRMCaixa = O;
   if (typeof module !== 'undefined') module.exports = O;
 
