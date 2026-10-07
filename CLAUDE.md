@@ -1015,6 +1015,11 @@ ligado ao domínio; **começa com fila de aprovação** (nada sai sozinho); reme
   4. Supabase → projeto OneClean CRM → Edge Functions → **Secrets** → `BREVO_API_KEY` = a chave. **Nunca no
      chat, no CRM ou no repositório**;
   5. no CRM, aba E-mails: o aviso some; primeiro envio de teste para um cliente com o e-mail do próprio Anderson.
+- **Ligado em 07/10 à tarde:** conta Brevo do Anderson, domínio oneclean.com.br **autenticado** (TXT brevo-code +
+  CNAME brevo1/brevo2._domainkey no UOL Host; o DMARC já existia), remetente padrão OneClean <adm@oneclean.com.br>
+  (só para envios feitos dentro do Brevo; o CRM usa o da vendedora), `BREVO_API_KEY` nos Secrets. **1º envio real às
+  17:13** (teste na ficha "ANDERSON FERNANDES DALESSI", chegou); teste desfeito (segmento e cadência voltaram, campanha
+  de teste desativada). Manual para a líder: https://claude.ai/artifact/M3R8viBbhuPdZT7PstmkXf (doc Claude Docs).
 - **Depois (fase 2):** envio automático por cliente (o servidor monta a fila todo dia: precisa de pg_cron e da
   regra rodando na função) e a volta do e-mail (resposta do cliente vira atividade).
 
