@@ -1050,7 +1050,10 @@ ligado ao domínio; **começa com fila de aprovação** (nada sai sozinho); reme
   Russeau ficou com R$ 2.631,19, o valor real) e orçamento, itens e histórico juntos; 6 negócios apagados; backup em
   `crm_backup.pedidos_duplicados_2026_10_08*`. Tarefas repetidas (7 "Recompra" e 1 "Pós-venda") apagadas com backup
   em `crm_backup.tarefas_repetidas_2026_10_08`. Auditoria do banco inteiro: nenhum outro par de ganhos repetidos;
-  Moinho Beer (ganho "2472" do Agendor em 30/09 e "PEDIDO FECHADO" em 01/10, uma nota só) deixado para a líder conferir.
+  Moinho Beer (ganho "2472" do Agendor em 30/09 e "PEDIDO FECHADO" em 01/10, uma nota só de 02/10): a pedido do Anderson
+  apagados o "2472" (R$ 370,40) e o aberto "2471", sobra igual a ele (backup em `crm_backup.moinho_beer_2026_10_08`);
+  a venda fica em outubro com o valor do pedido. **Setembro ganho no CRM fica R$ 370,40 abaixo do relatório do Agendor**
+  (de propósito: era a mesma venda).
   **Travas no código:** "Ganhei" pergunta quando o cliente (mesmo cadastro ou mesmo CNPJ) já tem venda ganha com valor
   até 5% diferente e até 3 dias de distância (`fichas.vendaParecida`); ganhar de novo não repete a tarefa de pós-venda
   (uma por negócio) nem a de recompra (uma por cliente, a data anda); o import do orçamento só oferece negócios do funil
