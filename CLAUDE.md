@@ -1055,7 +1055,8 @@ ligado ao domínio; **começa com fila de aprovação** (nada sai sozinho); reme
   até 5% diferente e até 3 dias de distância (`fichas.vendaParecida`); ganhar de novo não repete a tarefa de pós-venda
   (uma por negócio) nem a de recompra (uma por cliente, a data anda); o import do orçamento só oferece negócios do funil
   de vendas. Cadastros repetidos que causaram parte disso ("Nova Gestão RH" e "- 4R SERVICOS - STREET 100%", sem CNPJ,
-  vindos do Agendor) continuam lá: mesclar em Configurações → Duplicados.
+  vindos do Agendor) **juntados em 08/10 a pedido do Anderson** nos cadastros com CNPJ e notas (backup nas linhas 74 e
+  75 de `crm_backup.mescla_empresas`; o WhatsApp e o contato dos que saíram ficaram na ficha e nas observações).
 - `execute_sql` com `delete` solto fica parado até o tempo esgotar (a ferramenta espera confirmação); o formato
   `with alvo as (...), d as (delete ... using alvo ... returning 1) select count(*) from d` passa normalmente.
 - Na tela de cada pessoa os apagados somem na conferência de hora em hora da recarga leve, ou com F5 / "Recarregar dados".
