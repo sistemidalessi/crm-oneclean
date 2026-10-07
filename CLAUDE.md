@@ -42,7 +42,7 @@ banco, menos 2 min); tabelas pequenas ou sem `atualizado_em` confiável (`INTEIR
 opções, modelos, metas, filtros, **títulos** — a data deles é a da listagem do FKN —, campanhas e envios de
 e-mail) vêm inteiras; **de hora em hora** a conferência do que foi apagado em outro computador (só as chaves).
 Carga completa só ao entrar (login zera a marca) e em "Recarregar dados". Teste: `testes/recarga.test.js`.
-**Não voltar** a recarregar tudo em timer. Tabela nova grande: entra em `PARCIAIS` (precisa de
+**Plano Pro** contratado pelo Anderson em 07/10 (US$ 25/mês, ciclo novo 07/10–07/11, 250 GB de tráfego, backup diário, limite de gastos ligado: não cobra extra). **Não voltar** a recarregar tudo em timer. Tabela nova grande: entra em `PARCIAIS` (precisa de
 `atualizado_em` com gatilho).
 
 ## INCIDENTE 01/10/2026 (manhã): CRM vazio para todos os logins — resolvido
