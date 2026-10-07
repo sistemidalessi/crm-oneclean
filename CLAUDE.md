@@ -1020,8 +1020,22 @@ ligado ao domínio; **começa com fila de aprovação** (nada sai sozinho); reme
   (só para envios feitos dentro do Brevo; o CRM usa o da vendedora), `BREVO_API_KEY` nos Secrets. **1º envio real às
   17:13** (teste na ficha "ANDERSON FERNANDES DALESSI", chegou); teste desfeito (segmento e cadência voltaram, campanha
   de teste desativada). Manual para a líder: https://claude.ai/artifact/M3R8viBbhuPdZT7PstmkXf (doc Claude Docs).
+- **Manual em PDF (07/10, noite):** a equipe não conseguia abrir o doc; PDF de 5 páginas entregue ao Anderson
+  (gerado fora do repositório — não versionar).
 - **Depois (fase 2):** envio automático por cliente (o servidor monta a fila todo dia: precisa de pg_cron e da
   regra rodando na função) e a volta do e-mail (resposta do cliente vira atividade).
+
+## Junção dos negócios duplicados do Funil de Vendas (07/10/2026, pedido da líder via Anderson)
+
+- Herança do Agendor: o mesmo cliente com vários negócios abertos no **Funil de Vendas**. Autorizado pelo Anderson:
+  ficou o negócio **com histórico** (mais atividades/propostas; empate → o mais recente) e os outros foram apagados.
+- 305 clientes, **1.070 negócios apagados** (backup em `crm_backup` antes), 523 atividades, 3 propostas e 32 itens
+  movidos para o negócio que ficou. Abertos no funil: 2.299 → 1.229; nenhum cliente com mais de um aberto; nenhuma
+  atividade sem negócio. Feito por `execute_sql` em etapas (o `apply_migration` inteiro estourou os 60 s e foi
+  desfeito sem aplicar nada); apagada em lotes.
+- **Pós-Vendas não foi mexido:** 298 abertos, quase todos na etapa "Contato", um por venda (o Agendor criava um a
+  cada ganho). Esperando o Anderson decidir (juntar, fechar os antigos ou deixar).
+- Na tela de cada pessoa os apagados somem na conferência de hora em hora da recarga leve, ou com F5 / "Recarregar dados".
 
 ## Permissões do financeiro (06/10/2026, pedido do Anderson)
 
