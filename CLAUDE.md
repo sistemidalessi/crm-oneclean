@@ -963,6 +963,13 @@ Anderson: cada sistema cuida da sua empresa; o "Geral" (as duas) é de quem lê 
     A senha guardada no CRM tinha 44 caracteres; a do servidor da Agilité (`data/caixa_espelho_secret`, gerada com
     `randomBytes(32).toString('hex')`) tem **64** (0-9 e a-f). Salvar a senha de novo em Integrações faz o que
     falhou ser reenviado no minuto seguinte (`crm_espelho_configura` zera a espera).
+  - **Funcionando nos dois sentidos desde 08/10 16:15** (a Agilité passou a aceitar `oneclean:<uuid>`). Testes reais:
+    14:47 par `agilite:123` (1.500 de 07/10) **adotou** os 2 lançamentos daqui; 14:50 a Agilité desfez → apagados aqui
+    também (por isso o empréstimo de 1.500 de 07/10 não existe mais nos dois lados — confirmar com o Anderson se
+    os 4.500 de 08/10 o substituem); 16:15 teste de R$ 10 do CRM gravado lá (ida 124/volta 125); 17:04 desfeito lá →
+    apagado aqui; 17:09 "saída de 4500 pra agilite e devolve dia 14/10" gravado lá (ida 129/volta 130).
+    Ainda não mandados: os 1.600 de 06/10 (lançados à mão nos dois lados antes do espelho) — mandar o par faz a
+    Agilité adotar o dela.
 - **Leitura do Caixa pela Agilité, 08/10:** as leituras de 07/10 12:29 tinham dado 401 (senha recusada). O Anderson
   gerou senha nova (10:18) e colou na Agilité; 3 leituras 200 às 10:21. A senha antiga (06/10) foi **desligada**
   (`ativo=false` em `crm_integracoes`, não apagada). A aba Geral da Agilité lê na hora em que é aberta (cache de 1 min,
