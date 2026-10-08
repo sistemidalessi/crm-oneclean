@@ -972,7 +972,7 @@ Anderson: cada sistema cuida da sua empresa; o "Geral" (as duas) é de quem lê 
     Agilité adotar o dela.
 - **Gestão → tabela Equipe (08/10, pedido do Anderson):** comprador (Wellington) fora; o administrador entra como
   **"Direto"** (notas "VENDEDOR: DIRETO", `nomes_nota` do admin), no fim e só se vendeu no ano, sem as colunas de
-  contato; linha **Total** embaixo = o faturamento do mês e do ano (o mesmo do quadro), com "Outros" quando há nota
+  contato; linha **Total** embaixo = o faturamento do mês e do ano (o mesmo do quadro), com "Ex-vendedores(as)" quando há nota
   de ex-vendedora ou cliente sem carteira, para a soma bater (`equipeTotal` em `gestao.js`, teste em `gestao.test.js`).
 - **Leitura do Caixa pela Agilité, 08/10:** as leituras de 07/10 12:29 tinham dado 401 (senha recusada). O Anderson
   gerou senha nova (10:18) e colou na Agilité; 3 leituras 200 às 10:21. A senha antiga (06/10) foi **desligada**

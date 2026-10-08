@@ -359,7 +359,7 @@
               : '<td class="num">' + u.clientesAtivos + '</td><td class="num">' + u.contatos + '</td><td class="num">' + u.contatosHoje + '</td>' +
                 '<td class="num">' + (u.atrasadas ? CRM.selo(String(u.atrasadas), u.atrasadas > 10 ? 'vermelho' : 'ambar') : '0') + '</td>') + '</tr>').join('') +
           (Math.abs(p.equipeTotal.outros.mes) >= 0.01 || Math.abs(p.equipeTotal.outros.ano) >= 0.01
-            ? '<tr><td>Outros <small>ex-vendedoras e clientes sem carteira</small></td><td class="num">' + esc(R.moeda(p.equipeTotal.outros.mes)) + '</td><td class="num">—</td><td class="num">' + esc(R.moeda(p.equipeTotal.outros.ano)) + '</td>' +
+            ? '<tr><td><strong>Ex-vendedores(as)</strong> <small>e clientes sem carteira</small></td><td class="num">' + esc(R.moeda(p.equipeTotal.outros.mes)) + '</td><td class="num">—</td><td class="num">' + esc(R.moeda(p.equipeTotal.outros.ano)) + '</td>' +
               '<td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">—</td></tr>' : '') +
           '</tbody><tfoot><tr class="total"><td><strong>Total</strong></td><td class="num">' + esc(R.moeda(p.equipeTotal.valorMes)) + '</td><td class="num">' + (p.equipeTotal.meta ? esc(R.moeda(p.equipeTotal.meta)) : '—') + '</td>' +
             '<td class="num">' + esc(R.moeda(p.equipeTotal.valorAno)) + '</td><td class="num">' + p.equipeTotal.clientesAtivos + '</td><td class="num">' + p.equipeTotal.contatos + '</td><td class="num">' + p.equipeTotal.contatosHoje + '</td>' +
