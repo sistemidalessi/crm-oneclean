@@ -953,7 +953,9 @@ Anderson: cada sistema cuida da sua empresa; o "Geral" (as duas) é de quem lê 
   - **Aplicado em produção por partes** (o `apply_migration` com `delete`/`drop` dentro fica parado esperando
     confirmação): extensões pg_cron e pg_net, tabelas, permissões, funções de envio, gatilho e cron. Por isso a
     senha de gravação ficou em `crm_fin_espelho_cfg` (sem mexer na regra `uso` de `crm_integracoes`) e o espelho
-    grava com `origem = 'tela'` (sem mexer na regra `origem`).
+    grava com `origem = 'tela'` (sem mexer na regra `origem`). A função `crm_espelho_aplicar` (tem `delete`) foi
+    rodada pelo **Anderson no SQL Editor** do Supabase em 08/10 (a confirmação da ferramenta não chegava na tela
+    dele) — conferida: só service_role executa. Para repetir: copiar a seção do `schema.sql` e rodar lá.
 - **Leitura do Caixa pela Agilité, 08/10:** as leituras de 07/10 12:29 tinham dado 401 (senha recusada). O Anderson
   gerou senha nova (10:18) e colou na Agilité; 3 leituras 200 às 10:21. A senha antiga (06/10) foi **desligada**
   (`ativo=false` em `crm_integracoes`, não apagada). A aba Geral da Agilité lê na hora em que é aberta (cache de 1 min,
