@@ -52,7 +52,10 @@
 
     // Equipe: faturamento pela carteira do cliente, meta, contatos e atrasadas.
     const metas = (D.metas || []).filter(m => m.mes === mes);
-    const equipe = (D.usuarios || []).filter(u => u.ativo !== false && u.papel !== 'admin').map(u => {
+    // (08/10/2026, Anderson) comprador não vende: fora. O administrador entra só como "Direto" (venda sem
+    // vendedora: "VENDEDOR: DIRETO" na nota, nomes_nota do admin), e só se vendeu no ano.
+    const ehDireto = u => u.papel === 'admin';
+    const equipe = (D.usuarios || []).filter(u => u.ativo !== false && u.papel !== 'comprador').map(u => {
       const doMes = atual.lista.filter(n => donoDe(ix, n) === u.user_id);
       const doAno = ano.lista.filter(n => donoDe(ix, n) === u.user_id);
       const ativs = (D.atividades || []).filter(a => a.responsavel_id === u.user_id && a.tipo !== 'sistema');
@@ -61,9 +64,17 @@
       const atrasadas = ativs.filter(a => !a.concluida && R.diaLocal(a.data_hora) < hoje).length;
       const meta = metas.filter(m => m.usuario_id === u.user_id).reduce((s, m) => s + num(m.valor), 0);
       const valorMes = somaValor(doMes);
-      return { user_id: u.user_id, nome: u.nome, papel: u.papel, valorMes, notasMes: doMes.length, valorAno: somaValor(doAno), meta, pctMeta: meta ? valorMes / meta * 100 : null,
+      const direto = ehDireto(u);
+      return { user_id: u.user_id, nome: direto ? 'Direto' : u.nome, papel: u.papel, direto, valorMes, notasMes: doMes.length, valorAno: somaValor(doAno), meta, pctMeta: meta ? valorMes / meta * 100 : null,
         contatos, contatosHoje, atrasadas, clientesAtivos: (D.empresas || []).filter(e => e.responsavel_id === u.user_id && compraram90.has(e.id)).length };
-    }).sort((a, b) => b.valorMes - a.valorMes || b.valorAno - a.valorAno);
+    }).filter(u => !u.direto || u.valorAno > 0)
+      .sort((a, b) => (a.direto ? 1 : 0) - (b.direto ? 1 : 0) || b.valorMes - a.valorMes || b.valorAno - a.valorAno);
+    // Total = o faturamento inteiro (o mesmo do quadro do mês): o que não é de ninguém da lista (ex-vendedora,
+    // cliente sem carteira) vira a linha "Outros", para a soma bater.
+    const somaEq = k => equipe.reduce((t, u) => t + (u[k] || 0), 0);
+    const outros = { mes: Math.round((atual.valor - somaEq('valorMes')) * 100) / 100, ano: Math.round((ano.valor - somaEq('valorAno')) * 100) / 100 };
+    const equipeTotal = { valorMes: atual.valor, valorAno: ano.valor, meta: somaEq('meta'), clientesAtivos: somaEq('clientesAtivos'),
+      contatos: somaEq('contatos'), contatosHoje: somaEq('contatosHoje'), atrasadas: somaEq('atrasadas'), outros };
 
     // Funil do mês (negócios) e o que está aberto — só o funil de vendas: o de pós-venda
     // acompanha pedido já vendido e inflaria "abertos" e a conversão.
@@ -88,7 +99,7 @@
       mes: { de: mes, ate: fimMes, atual, anterior, anteriorMesmoDia, variacao: variacao(atual.valor, anteriorMesmoDia.valor),
         variacaoTicket: anterior.notas ? variacao(atual.ticket, anterior.ticket) : null,
         projecao: diaDoMes ? atual.valor / diaDoMes * diasNoMes : 0, novos: novosMes },
-      ano, porMes: fat12.porMes, equipe, funil, funilVendas,
+      ano, porMes: fat12.porMes, equipe, equipeTotal, funil, funilVendas,
       base: { clientes: (D.empresas || []).filter(e => e.situacao === 'cliente').length, ativos: compraram90.size,
         leads: (D.empresas || []).filter(e => e.situacao === 'lead').length },
       topClientes: fat.topClientes.slice(0, 10), topProdutos: fat.topProdutosValor.slice(0, 10),
@@ -342,9 +353,17 @@
         '</div>' +
         // ---- equipe
         '<section class="cartao"><h2>Equipe <small>faturamento pela carteira do cliente</small></h2><div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Vendedora</th><th class="num">Mês</th><th class="num">Meta</th><th class="num">Ano</th><th class="num">Clientes ativos</th><th class="num">Contatos no mês</th><th class="num">Hoje</th><th class="num">Atrasadas</th></tr></thead><tbody>' +
-          p.equipe.map(u => '<tr><td><strong>' + esc(u.nome) + '</strong></td><td class="num">' + esc(R.moeda(u.valorMes)) + '</td><td class="num">' + (u.meta ? CRM.barra(u.valorMes, u.meta, R.pct(u.pctMeta)) : '—') + '</td>' +
-            '<td class="num">' + esc(R.moeda(u.valorAno)) + '</td><td class="num">' + u.clientesAtivos + '</td><td class="num">' + u.contatos + '</td><td class="num">' + u.contatosHoje + '</td>' +
-            '<td class="num">' + (u.atrasadas ? CRM.selo(String(u.atrasadas), u.atrasadas > 10 ? 'vermelho' : 'ambar') : '0') + '</td></tr>').join('') + '</tbody></table></div></section>' +
+          p.equipe.map(u => '<tr><td><strong>' + esc(u.nome) + '</strong>' + (u.direto ? ' <small>venda sem vendedora</small>' : '') + '</td><td class="num">' + esc(R.moeda(u.valorMes)) + '</td><td class="num">' + (u.meta ? CRM.barra(u.valorMes, u.meta, R.pct(u.pctMeta)) : '—') + '</td>' +
+            '<td class="num">' + esc(R.moeda(u.valorAno)) + '</td>' +
+            (u.direto ? '<td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">—</td>'
+              : '<td class="num">' + u.clientesAtivos + '</td><td class="num">' + u.contatos + '</td><td class="num">' + u.contatosHoje + '</td>' +
+                '<td class="num">' + (u.atrasadas ? CRM.selo(String(u.atrasadas), u.atrasadas > 10 ? 'vermelho' : 'ambar') : '0') + '</td>') + '</tr>').join('') +
+          (Math.abs(p.equipeTotal.outros.mes) >= 0.01 || Math.abs(p.equipeTotal.outros.ano) >= 0.01
+            ? '<tr><td>Outros <small>ex-vendedoras e clientes sem carteira</small></td><td class="num">' + esc(R.moeda(p.equipeTotal.outros.mes)) + '</td><td class="num">—</td><td class="num">' + esc(R.moeda(p.equipeTotal.outros.ano)) + '</td>' +
+              '<td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">—</td></tr>' : '') +
+          '</tbody><tfoot><tr class="total"><td><strong>Total</strong></td><td class="num">' + esc(R.moeda(p.equipeTotal.valorMes)) + '</td><td class="num">' + (p.equipeTotal.meta ? esc(R.moeda(p.equipeTotal.meta)) : '—') + '</td>' +
+            '<td class="num">' + esc(R.moeda(p.equipeTotal.valorAno)) + '</td><td class="num">' + p.equipeTotal.clientesAtivos + '</td><td class="num">' + p.equipeTotal.contatos + '</td><td class="num">' + p.equipeTotal.contatosHoje + '</td>' +
+            '<td class="num">' + p.equipeTotal.atrasadas + '</td></tr></tfoot></table></div></section>' +
         // ---- tops
         '<div class="g-duas">' +
           '<section class="cartao"><h2>Top 10 clientes <small>no ano</small></h2>' + listaTop(p.topClientes.map(x => ({ nome: x.nome, valor: x.valor, info: x.notas + ' notas · última ' + R.dataBR(x.ultima), id: x.empresa_id })), p.ano.valor) + '</section>' +

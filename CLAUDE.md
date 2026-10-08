@@ -970,6 +970,10 @@ Anderson: cada sistema cuida da sua empresa; o "Geral" (as duas) é de quem lê 
     apagado aqui; 17:09 "saída de 4500 pra agilite e devolve dia 14/10" gravado lá (ida 129/volta 130).
     Ainda não mandados: os 1.600 de 06/10 (lançados à mão nos dois lados antes do espelho) — mandar o par faz a
     Agilité adotar o dela.
+- **Gestão → tabela Equipe (08/10, pedido do Anderson):** comprador (Wellington) fora; o administrador entra como
+  **"Direto"** (notas "VENDEDOR: DIRETO", `nomes_nota` do admin), no fim e só se vendeu no ano, sem as colunas de
+  contato; linha **Total** embaixo = o faturamento do mês e do ano (o mesmo do quadro), com "Outros" quando há nota
+  de ex-vendedora ou cliente sem carteira, para a soma bater (`equipeTotal` em `gestao.js`, teste em `gestao.test.js`).
 - **Leitura do Caixa pela Agilité, 08/10:** as leituras de 07/10 12:29 tinham dado 401 (senha recusada). O Anderson
   gerou senha nova (10:18) e colou na Agilité; 3 leituras 200 às 10:21. A senha antiga (06/10) foi **desligada**
   (`ativo=false` em `crm_integracoes`, não apagada). A aba Geral da Agilité lê na hora em que é aberta (cache de 1 min,

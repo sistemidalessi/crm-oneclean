@@ -156,3 +156,19 @@ test('listagem de produtos: conferência do relatório puxado no FKN (o que falt
   assert.match(semDatas.avisos.join(), /Movimentação/);
   assert.match(K.conferirListagemProdutos('A;B\r\n1;2').recusa.join(), /não achei produtos/);
 });
+
+test('equipe: comprador fora, "Direto" (venda do administrador) no fim, total = faturamento do mês', () => {
+  const D = base();
+  D.usuarios.push({ user_id: 'cmp', nome: 'Comprador Exemplo', papel: 'comprador', ativo: true });
+  // venda direta (admin) e uma venda de ex-vendedora (sem dono): entram no total
+  D.notas.push({ id: 'nd', empresa_id: 'P', vendedor_id: 'adm', emitida_em: '2026-09-25T10:00:00-03:00', valor_total: 300, cancelada: false });
+  D.nota_itens.push({ id: 'ndi', nota_id: 'nd', cfop: '5102', descricao: 'DETERGENTE 5L', unidade: 'GL', quantidade: 12, valor_total: 300 });
+  D.notas.push({ id: 'nx', empresa_id: 'P', vendedor_nome: 'EX VENDEDORA', emitida_em: '2026-09-26T10:00:00-03:00', valor_total: 50, cancelada: false });
+  D.nota_itens.push({ id: 'nxi', nota_id: 'nx', cfop: '5102', descricao: 'PAPEL TOALHA', unidade: 'FD', quantidade: 5, valor_total: 50 });
+  const p = G.painel(D, R.indexa(D), R.config({}), HOJE);
+  assert.deepEqual(p.equipe.map(u => u.nome), ['Ana Exemplo', 'Direto'], 'comprador fora; Direto por último');
+  assert.equal(p.equipe[1].valorMes, 300);
+  assert.equal(p.equipeTotal.valorMes, 550, '200 da Ana + 300 Direto + 50 de ex-vendedora');
+  assert.equal(p.equipeTotal.outros.mes, 50);
+  assert.equal(p.equipeTotal.valorMes, p.mes.atual.valor, 'o total bate com o faturamento do mês');
+});
