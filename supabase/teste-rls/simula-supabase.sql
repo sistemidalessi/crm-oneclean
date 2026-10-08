@@ -2,7 +2,7 @@
 -- auth.users, auth.uid() e os privilégios padrão generosos que o Supabase dá.
 -- Usado só por teste-rls/roda.sh (nunca rodar no Supabase de verdade).
 -- Imita o essencial do Supabase: papéis, auth.users, auth.uid() e os privilégios padrão generosos.
-create role anon nologin; create role authenticated nologin;
+create role anon nologin; create role authenticated nologin; create role service_role nologin;
 grant usage on schema public to anon, authenticated;
 create schema auth; grant usage on schema auth to anon, authenticated;
 create table auth.users (id uuid primary key, email text);

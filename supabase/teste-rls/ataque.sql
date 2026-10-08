@@ -237,3 +237,90 @@ select * from crm_duplicado_empresa('11222333000181', null, null); -- FALHA
 reset role;
 select 'historico' t, tabela, acao, mudancas from crm_historico where acao='update';
 select 'etapa_desde mudou' t, (select count(*) from crm_negocios where etapa_desde > criado_em) ;
+
+-- =================================================================== espelho Agilité ↔ OneClean (08/10/2026)
+-- quem não é administrador não lê a fila, o registro, nem a senha; ninguém do app chama aplicar/pacote/tick
+reset role; set role authenticated; select pg_temp.como('b0000000-0000-0000-0000-000000000002');
+select 'Gestora lê a senha da Agilité (NÃO devia)' t, count(*) from crm_fin_espelho_cfg having count(*) >= 0; -- FALHA
+select 'Gestora vê a fila do espelho (NÃO devia)' t, count(*) from crm_fin_espelho_fila having count(*) > 0;
+select crm_espelho_configura('https://x.invalido/api', 'senha'); -- FALHA
+select crm_espelho_nova_senha(); -- FALHA
+select 'Gestora vê a situação do espelho (NÃO devia)' t from (select crm_espelho_situacao() s) x where s is not null;
+select crm_espelho_aplicar('{"versao":1,"origem":"agilite","par":"agilite:1","apagar":true}'); -- FALHA
+select crm_espelho_pacote('oneclean:00000000-0000-0000-0000-000000000000'); -- FALHA
+select crm_espelho_tick(); -- FALHA
+select pg_temp.como('a0000000-0000-0000-0000-000000000001');
+select 'Admin lê a senha da Agilité (NÃO devia)' t, count(*) from crm_fin_espelho_cfg having count(*) >= 0; -- FALHA
+select crm_espelho_aplicar('{"versao":1,"origem":"agilite","par":"agilite:1","apagar":true}'); -- FALHA
+select crm_espelho_configura('http://sem-https', 'x'); -- FALHA
+select 'admin configurou o espelho' t from (select crm_espelho_configura('https://agilite.exemplo/api/caixa/espelho', 'senha-de-teste')) x;
+select 'senha de gravação gerada' t from (select crm_espelho_nova_senha() k) x where length(k) = 64;
+select 'Situação não mostra a senha (NÃO devia)' t from (select crm_espelho_situacao()::text s) x where s like '%senha-de-teste%';
+select (crm_espelho_situacao() ->> 'tem_senha') = 'true' as espelho_tem_senha;
+reset role; set role anon;
+select count(*) from crm_fin_espelho_fila; -- FALHA
+select crm_espelho_situacao(); -- FALHA
+reset role;
+
+-- funcionamento (como a função crm-caixa-espelho e o pg_cron chamam)
+delete from crm_fin_lancamentos;
+delete from crm_fin_espelho_fila;
+-- 1) lançado no CRM: "emprestei 1.500 pra Agilité, devolve dia 14" (ida + volta criada pela frase)
+insert into crm_fin_lancamentos (id, tipo, descricao, fornecedor, categoria, valor, vencimento, situacao, pago_em, baixa, baixado_em, entre_empresas, frase_antes)
+values ('11111111-1111-1111-1111-111111111111', 'saida', 'Transferência para a Agilité', 'Agilité', 'Transferência entre empresas', 1500, '2026-10-07', 'pago', '2026-10-07', 'caixa', now(), true,
+        '{"criou":{"lancamentos":["22222222-2222-2222-2222-222222222222"],"recorrentes":[]}}'),
+       ('22222222-2222-2222-2222-222222222222', 'entrada', 'Agilité devolve a transferência', 'Agilité', 'Transferência entre empresas', 1500, '2026-10-14', 'aberto', null, null, null, true, null);
+insert into crm_fin_lancamentos (tipo, descricao, categoria, valor, vencimento) values ('saida', 'Fornecedor qualquer', 'Fornecedores', 10, '2026-10-09');
+select 'fila depois da frase' t, string_agg(par, ',') from crm_fin_espelho_fila;
+select case when (select count(*) from crm_fin_espelho_fila) = 1 and (select par from crm_fin_espelho_fila) = 'oneclean:11111111-1111-1111-1111-111111111111'
+  then 'ida e volta da frase = um par só' else 'par errado na fila (NÃO devia)' end;
+select case when p ->> 'apagar' is null and jsonb_array_length(p -> 'movimentos') = 2
+             and p -> 'movimentos' -> 0 ->> 'papel' = 'ida' and p -> 'movimentos' -> 0 ->> 'situacao' = 'realizado' and p -> 'movimentos' -> 0 ->> 'tipo' = 'saida'
+             and p -> 'movimentos' -> 1 ->> 'papel' = 'volta' and p -> 'movimentos' -> 1 ->> 'ref' = 'oneclean:22222222-2222-2222-2222-222222222222'
+  then 'pacote da OneClean certo' else 'pacote errado (NÃO devia): ' || p::text end
+  from (select crm_espelho_pacote('oneclean:11111111-1111-1111-1111-111111111111') p) x;
+select case when count(*) = 2 then 'par marcado nas duas linhas' else 'par não marcado (NÃO devia)' end from crm_fin_lancamentos where espelho_par = 'oneclean:11111111-1111-1111-1111-111111111111';
+-- 2) a Agilité deu ✓ na volta (ref original nosso): só data/valor/situação, sem eco
+delete from crm_fin_espelho_fila;
+select crm_espelho_aplicar('{"versao":1,"origem":"agilite","par":"oneclean:11111111-1111-1111-1111-111111111111","movimentos":[
+  {"ref":"oneclean:11111111-1111-1111-1111-111111111111","papel":"ida","data":"2026-10-07","tipo":"entrada","valor":1500,"descricao":"x","situacao":"realizado"},
+  {"ref":"oneclean:22222222-2222-2222-2222-222222222222","papel":"volta","data":"2026-10-13","tipo":"saida","valor":1500,"descricao":"x","situacao":"realizado"}]}') ->> 'atualizados' as atualizados_2;
+select case when situacao = 'pago' and pago_em = '2026-10-13' and baixa = 'caixa' then 'volta paga pela Agilité' else 'volta não atualizou (NÃO devia)' end from crm_fin_lancamentos where id = '22222222-2222-2222-2222-222222222222';
+select case when count(*) = 0 then 'sem eco' else 'eco na fila (NÃO devia)' end from crm_fin_espelho_fila;
+-- 3) par nascido na Agilité: cria a entrada e a saída prevista aqui (tipo invertido); de novo = atualiza
+select crm_espelho_aplicar('{"versao":1,"origem":"agilite","par":"agilite:45","movimentos":[
+  {"ref":"agilite:45","papel":"ida","data":"2026-10-08","tipo":"saida","valor":10,"descricao":"transferi 10 reais pra OneClean","situacao":"realizado"},
+  {"ref":"agilite:46","papel":"volta","data":"2026-10-09","tipo":"entrada","valor":10,"descricao":"OneClean devolve","situacao":"previsto"}]}') ->> 'novos' as novos_3;
+select crm_espelho_aplicar('{"versao":1,"origem":"agilite","par":"agilite:45","movimentos":[
+  {"ref":"agilite:45","papel":"ida","data":"2026-10-08","tipo":"saida","valor":10,"descricao":"x","situacao":"realizado"},
+  {"ref":"agilite:46","papel":"volta","data":"2026-10-10","tipo":"entrada","valor":10,"descricao":"x","situacao":"previsto"}]}') ->> 'novos' as novos_de_novo;
+select case when count(*) = 2 and bool_and(espelho_ref is not null and entre_empresas)
+             and count(*) filter (where tipo = 'entrada' and situacao = 'pago' and descricao = 'Transferência da Agilité') = 1
+             and count(*) filter (where tipo = 'saida' and situacao = 'aberto' and vencimento = '2026-10-10') = 1
+  then 'espelho da Agilité certo (sem duplicar)' else 'espelho errado (NÃO devia)' end from crm_fin_lancamentos where espelho_par = 'agilite:45';
+-- 4) o administrador dá ✓ aqui na devolução espelhada: vai para a fila com o ref original
+update crm_fin_lancamentos set situacao = 'pago', pago_em = '2026-10-10', baixa = 'caixa', baixado_em = now() where espelho_ref = 'agilite:46';
+select case when p -> 'movimentos' -> 1 ->> 'ref' = 'agilite:46' and p -> 'movimentos' -> 1 ->> 'situacao' = 'realizado' and p -> 'movimentos' -> 1 ->> 'tipo' = 'saida'
+  then 'aviso volta com o ref da Agilité' else 'aviso errado (NÃO devia): ' || p::text end
+  from crm_fin_espelho_fila f, lateral (select crm_espelho_pacote(f.par) p) x where f.par = 'agilite:45';
+-- 5) a Agilité desfez só a volta: o par chega sem ela → some aqui
+select crm_espelho_aplicar('{"versao":1,"origem":"agilite","par":"agilite:45","movimentos":[
+  {"ref":"agilite:45","papel":"ida","data":"2026-10-08","tipo":"saida","valor":10,"descricao":"x","situacao":"realizado"}]}') ->> 'apagados' as apagados_5;
+-- 6) a Agilité desfez a ida: apaga o par inteiro
+select crm_espelho_aplicar('{"versao":1,"origem":"agilite","par":"agilite:45","apagar":true}') ->> 'apagados' as apagados_6;
+select case when count(*) = 0 then 'par da Agilité apagado' else 'sobrou espelho (NÃO devia)' end from crm_fin_lancamentos where espelho_par = 'agilite:45';
+-- 7) adotar o lançamento manual (mesmo tipo invertido, dia e valor) em vez de duplicar
+insert into crm_fin_lancamentos (tipo, descricao, categoria, valor, vencimento, situacao, pago_em, baixa, baixado_em, entre_empresas)
+values ('entrada', 'Transferência da Agilité (à mão)', 'Transferência entre empresas', 1600, '2026-10-06', 'pago', '2026-10-06', 'caixa', now(), true);
+select crm_espelho_aplicar('{"versao":1,"origem":"agilite","par":"agilite:30","movimentos":[
+  {"ref":"agilite:30","papel":"ida","data":"2026-10-06","tipo":"saida","valor":1600,"descricao":"x","situacao":"realizado"}]}') ->> 'adotados' as adotados_7;
+select case when count(*) = 1 then 'lançamento manual adotado' else 'duplicou o manual (NÃO devia)' end from crm_fin_lancamentos where valor = 1600;
+-- 8) desfazer no CRM a ida da frase (apaga as duas): o aviso é "apagar o par"
+delete from crm_fin_espelho_fila;
+delete from crm_fin_lancamentos where id in ('11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222');
+select case when crm_espelho_pacote(par) ->> 'apagar' = 'true' then 'desfeito no CRM: apagar o par' else 'não pediu para apagar (NÃO devia)' end
+  from crm_fin_espelho_fila where par = 'oneclean:11111111-1111-1111-1111-111111111111';
+-- 9) formato inválido: recusa sem gravar
+select crm_espelho_aplicar('{"versao":1,"origem":"agilite","par":"agilite:1;drop","movimentos":[]}'); -- FALHA
+select crm_espelho_aplicar('{"versao":1,"origem":"oneclean","par":"agilite:1","apagar":true}'); -- FALHA
+select crm_espelho_aplicar('{"versao":1,"origem":"agilite","par":"agilite:2","movimentos":[{"ref":"agilite:2","tipo":"saida","valor":-5,"data":"2026-10-08","situacao":"realizado"}]}'); -- FALHA

@@ -1163,6 +1163,314 @@ create policy pula on public.crm_email_envios for insert to authenticated
   with check (situacao = 'pulado' and enviado_por = (select auth.uid()) and public.crm_ve_empresa(empresa_id));
 create policy apaga on public.crm_email_envios for delete to authenticated using ((select public.crm_eh_gestor()));
 
+-- =================================================================== espelho Agilité ↔ OneClean (08/10/2026)
+-- Pedido do Anderson: "quando eu fizer algo entre Agilité e OneClean, já se lançasse nas duas". Vale só a
+-- categoria "Transferência entre empresas" (empréstimo de uma empresa para a outra e a volta). Formato
+-- combinado com o sistema da Agilité (o mesmo nos dois sentidos):
+--   { versao: 1, origem: 'oneclean'|'agilite', par: '<origem>:<id da ida>', movimentos: [ { ref, papel: 'ida'|'volta',
+--     data, tipo (do ponto de vista de quem manda), valor, descricao, situacao: 'realizado'|'previsto' } ] }
+--   ou { versao: 1, origem, par, apagar: true }.
+-- Recebe: Edge Function crm-caixa-espelho (Bearer = senha de gravação; aqui só o SHA-256, em crm_fin_espelho_cfg) chama
+-- crm_espelho_aplicar(). Manda: o gatilho põe o par na fila; o pg_cron roda crm_espelho_tick() a cada
+-- minuto, que monta o par (crm_espelho_pacote) e faz o POST pelo pg_net; falhou, tenta de novo em 10 min.
+-- Sem eco: o que o espelho grava roda com crm.espelho = '1' e não volta para a fila. Lançamento que veio da
+-- Agilité = espelho_ref preenchido (origem fica 'tela').
+alter table public.crm_fin_lancamentos add column if not exists espelho_ref text;  -- ref da OUTRA empresa ('agilite:<id>')
+alter table public.crm_fin_lancamentos add column if not exists espelho_par text;  -- par a que pertence ('oneclean:<uuid>' ou 'agilite:<id>')
+create unique index if not exists crm_fin_lanc_espelho_ref_uq on public.crm_fin_lancamentos (espelho_ref) where espelho_ref is not null;
+create index if not exists crm_fin_lanc_espelho_par_idx on public.crm_fin_lancamentos (espelho_par) where espelho_par is not null;
+
+-- para onde mandar e com que senha (a da Agilité): ninguém do app lê; só as funções abaixo
+create table if not exists public.crm_fin_espelho_cfg (
+  id            smallint primary key default 1 check (id = 1),
+  url           text,          -- endereço da Agilité
+  senha         text,          -- senha de gravação da Agilité (o CRM manda)
+  token_hash    text,          -- SHA-256 da senha que a Agilité usa para gravar aqui
+  token_em      timestamptz,
+  atualizado_em timestamptz not null default now()
+);
+alter table public.crm_fin_espelho_cfg add column if not exists token_hash text;
+alter table public.crm_fin_espelho_cfg add column if not exists token_em timestamptz;
+alter table public.crm_fin_espelho_cfg enable row level security;
+revoke all on public.crm_fin_espelho_cfg from anon, authenticated, public;
+
+create table if not exists public.crm_fin_espelho_fila (
+  par           text primary key,
+  pendente      boolean not null default true,
+  mudou_em      timestamptz not null default now(),
+  enviar_depois timestamptz not null default now(),
+  tentativa_em  timestamptz,
+  request_id    bigint,
+  tentativas    integer not null default 0,
+  ultimo_status integer,
+  ultimo_erro   text,
+  enviado_em    timestamptz,
+  ultimo_pacote jsonb
+);
+alter table public.crm_fin_espelho_fila enable row level security;
+revoke all on public.crm_fin_espelho_fila from anon, authenticated, public;
+grant select on public.crm_fin_espelho_fila to authenticated;
+drop policy if exists so_admin_le on public.crm_fin_espelho_fila;
+create policy so_admin_le on public.crm_fin_espelho_fila for select to authenticated using ((select public.crm_eh_admin()));
+
+create table if not exists public.crm_fin_espelho_log (
+  id       bigserial primary key,
+  quando   timestamptz not null default now(),
+  sentido  text not null check (sentido in ('recebido','enviado')),
+  par      text,
+  status   integer,
+  detalhe  jsonb
+);
+alter table public.crm_fin_espelho_log enable row level security;
+revoke all on public.crm_fin_espelho_log from anon, authenticated, public;
+grant select on public.crm_fin_espelho_log to authenticated;
+drop policy if exists so_admin_le on public.crm_fin_espelho_log;
+create policy so_admin_le on public.crm_fin_espelho_log for select to authenticated using ((select public.crm_eh_admin()));
+
+-- par de um lançamento: o gravado; senão a ida que o criou (frase com "volta"); senão ele mesmo (é a ida)
+create or replace function public.crm_espelho_par_de(p_id uuid, p_par text)
+returns text language sql stable security definer set search_path = public as $$
+  select coalesce(p_par,
+    (select 'oneclean:' || i.id from public.crm_fin_lancamentos i
+      where i.frase_antes -> 'criou' -> 'lancamentos' ? p_id::text limit 1),
+    'oneclean:' || p_id);
+$$;
+
+-- lançamentos do par (o que está no CRM agora)
+create or replace function public.crm_espelho_linhas(p_par text)
+returns setof public.crm_fin_lancamentos language sql stable security definer set search_path = public as $$
+  with ida as (select case when p_par like 'oneclean:%' and substr(p_par, 10) ~ '^[0-9a-f-]{36}$' then substr(p_par, 10)::uuid end id)
+  select l.* from public.crm_fin_lancamentos l, ida
+   where l.categoria = 'Transferência entre empresas'
+     and (l.espelho_par = p_par or l.id = ida.id
+          or l.id::text in (select jsonb_array_elements_text(i.frase_antes -> 'criou' -> 'lancamentos')
+                              from public.crm_fin_lancamentos i where i.id = ida.id));
+$$;
+
+-- o par como a Agilité espera receber (e marca o par nas linhas, sem voltar para a fila)
+create or replace function public.crm_espelho_pacote(p_par text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare movs jsonb; tem_ida boolean;
+begin
+  select jsonb_agg(jsonb_build_object(
+           'ref', coalesce(l.espelho_ref, 'oneclean:' || l.id),
+           'papel', case when coalesce(l.espelho_ref, 'oneclean:' || l.id) = p_par then 'ida' else 'volta' end,
+           'data', case when l.situacao = 'pago' then l.pago_em else l.vencimento end,
+           'tipo', l.tipo, 'valor', l.valor, 'descricao', l.descricao,
+           'situacao', case when l.situacao = 'pago' then 'realizado' else 'previsto' end)
+         order by (coalesce(l.espelho_ref, 'oneclean:' || l.id) <> p_par), l.vencimento, l.criado_em),
+         bool_or(coalesce(l.espelho_ref, 'oneclean:' || l.id) = p_par)
+    into movs, tem_ida from public.crm_espelho_linhas(p_par) l;
+  -- sem a ida (desfeita): a transferência não existiu, a volta também não → apaga o par inteiro
+  if movs is null or not coalesce(tem_ida, false) then
+    return jsonb_build_object('versao', 1, 'origem', 'oneclean', 'par', p_par, 'apagar', true);
+  end if;
+  perform set_config('crm.espelho', '1', true);
+  update public.crm_fin_lancamentos set espelho_par = p_par
+   where espelho_par is null and id in (select id from public.crm_espelho_linhas(p_par));
+  perform set_config('crm.espelho', '', true);
+  return jsonb_build_object('versao', 1, 'origem', 'oneclean', 'par', p_par, 'movimentos', movs);
+end;
+$$;
+
+-- gatilho: transferência entre empresas lançada, ajustada, paga ou desfeita → o par vai para a fila
+create or replace function public.crm_espelho_marca()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare v_id uuid; v_par text; c_transf constant text := 'Transferência entre empresas';
+begin
+  if coalesce(current_setting('crm.espelho', true), '') = '1' then return null; end if;
+  if tg_op = 'INSERT' then
+    if new.categoria is distinct from c_transf then return null; end if;
+    v_id := new.id; v_par := new.espelho_par;
+  elsif tg_op = 'DELETE' then
+    if old.categoria is distinct from c_transf then return null; end if;
+    v_id := old.id; v_par := old.espelho_par;
+  else
+    if new.categoria is distinct from c_transf and old.categoria is distinct from c_transf then return null; end if;
+    if (new.tipo, new.valor, new.vencimento, new.situacao, new.pago_em, new.categoria, new.descricao)
+       is not distinct from (old.tipo, old.valor, old.vencimento, old.situacao, old.pago_em, old.categoria, old.descricao) then return null; end if;
+    v_id := new.id; v_par := coalesce(new.espelho_par, old.espelho_par);
+  end if;
+  v_par := public.crm_espelho_par_de(v_id, v_par);
+  insert into public.crm_fin_espelho_fila (par) values (v_par)
+  on conflict (par) do update set pendente = true, mudou_em = now(), enviar_depois = least(crm_fin_espelho_fila.enviar_depois, now());
+  return null;
+end;
+$$;
+drop trigger if exists crm_fin_lanc_espelho on public.crm_fin_lancamentos;
+create trigger crm_fin_lanc_espelho after insert or update or delete on public.crm_fin_lancamentos
+  for each row execute function public.crm_espelho_marca();
+
+-- recebe o par da Agilité (Edge Function crm-caixa-espelho, com a chave de serviço). 'tipo' vem do ponto
+-- de vista dela: aqui inverte. Ref 'oneclean:…' = um original nosso: só data, valor e situação.
+create or replace function public.crm_espelho_aplicar(p jsonb)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare
+  c_transf constant text := 'Transferência entre empresas';
+  v_par text := p ->> 'par'; m jsonb; refs text[] := '{}';
+  r text; t text; d date; v numeric; s text; papel text; lid uuid;
+  n_novo int := 0; n_atu int := 0; n_ado int := 0; n_del int := 0; k int;
+begin
+  if coalesce(p ->> 'versao', '') <> '1' then raise exception 'versao precisa ser 1'; end if;
+  if coalesce(p ->> 'origem', '') <> 'agilite' then raise exception 'origem precisa ser agilite'; end if;
+  if v_par is null or v_par !~ '^(agilite:[A-Za-z0-9_-]{1,64}|oneclean:[0-9a-f-]{36})$' then raise exception 'par inválido'; end if;
+  perform set_config('crm.espelho', '1', true);
+  if coalesce(p ->> 'apagar', '') = 'true' then
+    delete from public.crm_fin_lancamentos where id in (select id from public.crm_espelho_linhas(v_par));
+    get diagnostics n_del = row_count;
+    delete from public.crm_fin_espelho_fila where par = v_par;
+    insert into public.crm_fin_espelho_log (sentido, par, status, detalhe) values ('recebido', v_par, 200, jsonb_build_object('apagados', n_del));
+    return jsonb_build_object('ok', true, 'apagados', n_del);
+  end if;
+  if jsonb_typeof(p -> 'movimentos') is distinct from 'array' or jsonb_array_length(p -> 'movimentos') not between 1 and 20 then
+    raise exception 'movimentos precisa ser uma lista de 1 a 20';
+  end if;
+  for m in select * from jsonb_array_elements(p -> 'movimentos') loop
+    r := m ->> 'ref'; t := m ->> 'tipo'; s := m ->> 'situacao'; papel := coalesce(m ->> 'papel', 'volta');
+    if r is null or r !~ '^(agilite:[A-Za-z0-9_-]{1,64}|oneclean:[0-9a-f-]{36})$' then raise exception 'ref inválido: %', r; end if;
+    if t not in ('entrada', 'saida') then raise exception 'tipo inválido: %', t; end if;
+    if s not in ('realizado', 'previsto') then raise exception 'situacao inválida: %', s; end if;
+    if papel not in ('ida', 'volta') then raise exception 'papel inválido: %', papel; end if;
+    d := (m ->> 'data')::date; v := round((m ->> 'valor')::numeric, 2);
+    if d is null or v is null or v < 0 then raise exception 'data/valor inválidos em %', r; end if;
+    t := case t when 'entrada' then 'saida' else 'entrada' end;   -- do nosso lado
+    refs := refs || r;
+    if r like 'oneclean:%' then
+      update public.crm_fin_lancamentos set
+          vencimento = case when s = 'previsto' then d else vencimento end, valor = v,
+          situacao = case when s = 'realizado' then 'pago' else 'aberto' end,
+          pago_em = case when s = 'realizado' then d end,
+          baixa = case when s = 'realizado' then coalesce(baixa, 'caixa') end,
+          baixado_em = case when s = 'realizado' then coalesce(baixado_em, now()) end,
+          espelho_par = v_par
+       where id = substr(r, 10)::uuid and categoria = c_transf;
+      get diagnostics k = row_count; n_atu := n_atu + k;
+      continue;
+    end if;
+    select id into lid from public.crm_fin_lancamentos where espelho_ref = r;
+    if lid is null then  -- lançado à mão aqui antes do espelho existir: adota em vez de duplicar
+      select id into lid from public.crm_fin_lancamentos
+       where espelho_ref is null and categoria = c_transf and tipo = t and valor = v and (vencimento = d or pago_em = d)
+       order by criado_em limit 1;
+      if lid is not null then n_ado := n_ado + 1; end if;
+    else
+      n_atu := n_atu + 1;
+    end if;
+    if lid is not null then
+      update public.crm_fin_lancamentos set espelho_ref = r, espelho_par = v_par,
+          vencimento = case when s = 'previsto' then d else vencimento end, valor = v,
+          situacao = case when s = 'realizado' then 'pago' else 'aberto' end,
+          pago_em = case when s = 'realizado' then d end,
+          baixa = case when s = 'realizado' then coalesce(baixa, 'caixa') end,
+          baixado_em = case when s = 'realizado' then coalesce(baixado_em, now()) end
+       where id = lid;
+    else
+      insert into public.crm_fin_lancamentos (tipo, descricao, fornecedor, categoria, valor, vencimento, situacao, pago_em, baixa, baixado_em,
+          entre_empresas, origem, observacoes, espelho_ref, espelho_par, criado_por)
+      values (t,
+          case when papel = 'ida' then case when t = 'entrada' then 'Transferência da Agilité' else 'Transferência para a Agilité' end
+               else case when t = 'entrada' then 'Agilité devolve a transferência' else 'Devolução da transferência à Agilité' end end,
+          'Agilité', c_transf, v, d, case when s = 'realizado' then 'pago' else 'aberto' end, case when s = 'realizado' then d end,
+          case when s = 'realizado' then 'caixa' end, case when s = 'realizado' then now() end,
+          true, 'tela', left('Lançado no sistema da Agilité: ' || coalesce(m ->> 'descricao', ''), 300), r, v_par, null);
+      n_novo := n_novo + 1;
+    end if;
+    lid := null;
+  end loop;
+  -- o par vem completo: o que é dele e não veio foi desfeito do outro lado
+  delete from public.crm_fin_lancamentos where espelho_par = v_par and coalesce(espelho_ref, 'oneclean:' || id) <> all (refs);
+  get diagnostics n_del = row_count;
+  insert into public.crm_fin_espelho_log (sentido, par, status, detalhe)
+    values ('recebido', v_par, 200, jsonb_build_object('novos', n_novo, 'atualizados', n_atu, 'adotados', n_ado, 'apagados', n_del));
+  return jsonb_build_object('ok', true, 'novos', n_novo, 'atualizados', n_atu, 'adotados', n_ado, 'apagados', n_del);
+end;
+$$;
+
+-- a cada minuto (pg_cron): confere as respostas do pg_net e manda o que está na fila
+create or replace function public.crm_espelho_tick()
+returns void language plpgsql security definer set search_path = public as $$
+declare f record; c_url text; c_senha text; st integer; er text; ct text; pac jsonb; rid bigint;
+begin
+  for f in select * from public.crm_fin_espelho_fila where request_id is not null loop
+    select status_code, error_msg, left(content::text, 300) into st, er, ct from net._http_response where id = f.request_id;
+    if found then
+      if st = 200 then
+        update public.crm_fin_espelho_fila set request_id = null, ultimo_status = 200, ultimo_erro = null, enviado_em = f.tentativa_em,
+            tentativas = 0, pendente = (mudou_em > f.tentativa_em) where par = f.par;
+      else
+        update public.crm_fin_espelho_fila set request_id = null, ultimo_status = st, ultimo_erro = left(coalesce(er, ct, 'sem resposta'), 300),
+            enviar_depois = now() + interval '10 minutes', tentativas = tentativas + 1 where par = f.par;
+      end if;
+      insert into public.crm_fin_espelho_log (sentido, par, status, detalhe)
+        values ('enviado', f.par, st, jsonb_build_object('pacote', f.ultimo_pacote, 'resposta', coalesce(er, ct)));
+    elsif f.tentativa_em < now() - interval '3 minutes' then
+      update public.crm_fin_espelho_fila set request_id = null, ultimo_erro = 'sem resposta em 3 min',
+          enviar_depois = now() + interval '10 minutes', tentativas = tentativas + 1 where par = f.par;
+    end if;
+  end loop;
+  select url, senha into c_url, c_senha from public.crm_fin_espelho_cfg where id = 1;
+  if c_url is null or c_senha is null then return; end if;
+  -- espera 5 s depois da última mudança (a ida e a volta de uma frase chegam juntas)
+  for f in select * from public.crm_fin_espelho_fila
+            where pendente and request_id is null and enviar_depois <= now() and mudou_em < now() - interval '5 seconds'
+            order by mudou_em limit 20 loop
+    pac := public.crm_espelho_pacote(f.par);
+    rid := net.http_post(url := c_url, body := pac,
+             headers := jsonb_build_object('Content-Type', 'application/json', 'Authorization', 'Bearer ' || c_senha),
+             timeout_milliseconds := 20000);
+    update public.crm_fin_espelho_fila set request_id = rid, tentativa_em = now(), ultimo_pacote = pac where par = f.par;
+  end loop;
+end;
+$$;
+
+-- tela de Integrações (só o administrador): guarda endereço e senha da Agilité; a senha nunca volta para o app
+create or replace function public.crm_espelho_configura(p_url text, p_senha text)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  if not public.crm_eh_admin() then raise exception 'só o administrador'; end if;
+  if p_url is not null and p_url !~ '^https://[^\s]+$' then raise exception 'o endereço precisa começar com https://'; end if;
+  insert into public.crm_fin_espelho_cfg (id, url, senha) values (1, nullif(btrim(p_url), ''), nullif(btrim(p_senha), ''))
+  on conflict (id) do update set url = coalesce(nullif(btrim(p_url), ''), crm_fin_espelho_cfg.url),
+      senha = coalesce(nullif(btrim(p_senha), ''), crm_fin_espelho_cfg.senha), atualizado_em = now();
+end;
+$$;
+-- senha que a Agilité usa para gravar aqui: gerada no banco, mostrada uma vez, guardada só o SHA-256
+create or replace function public.crm_espelho_nova_senha()
+returns text language plpgsql security definer set search_path = public as $$
+declare tk text := replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', '');
+begin
+  if not public.crm_eh_admin() then raise exception 'só o administrador'; end if;
+  insert into public.crm_fin_espelho_cfg (id, token_hash, token_em) values (1, encode(sha256(convert_to(tk, 'UTF8')), 'hex'), now())
+  on conflict (id) do update set token_hash = excluded.token_hash, token_em = now(), atualizado_em = now();
+  return tk;
+end;
+$$;
+create or replace function public.crm_espelho_situacao()
+returns jsonb language sql stable security definer set search_path = public as $$
+  select case when public.crm_eh_admin() then jsonb_build_object(
+    'url', (select url from public.crm_fin_espelho_cfg where id = 1),
+    'tem_senha', coalesce((select senha is not null from public.crm_fin_espelho_cfg where id = 1), false),
+    'senha_recebe_em', (select token_em from public.crm_fin_espelho_cfg where id = 1 and token_hash is not null),
+    'pendentes', (select count(*) from public.crm_fin_espelho_fila where pendente),
+    'com_erro', (select count(*) from public.crm_fin_espelho_fila where pendente and ultimo_erro is not null),
+    'ultimo_erro', (select ultimo_erro from public.crm_fin_espelho_fila where pendente and ultimo_erro is not null order by mudou_em desc limit 1),
+    'ultimo_enviado', (select max(quando) from public.crm_fin_espelho_log where sentido = 'enviado' and status = 200),
+    'ultimo_recebido', (select max(quando) from public.crm_fin_espelho_log where sentido = 'recebido')) end;
+$$;
+revoke all on function public.crm_espelho_par_de(uuid, text), public.crm_espelho_linhas(text), public.crm_espelho_pacote(text),
+  public.crm_espelho_marca(), public.crm_espelho_aplicar(jsonb), public.crm_espelho_tick() from public, anon, authenticated;
+revoke all on function public.crm_espelho_configura(text, text), public.crm_espelho_situacao(), public.crm_espelho_nova_senha() from public, anon;
+grant execute on function public.crm_espelho_configura(text, text), public.crm_espelho_situacao(), public.crm_espelho_nova_senha() to authenticated;
+do $$ begin
+  if exists (select 1 from pg_roles where rolname = 'service_role') then
+    grant execute on function public.crm_espelho_aplicar(jsonb) to service_role;
+  end if;
+  -- no Supabase (pg_cron + pg_net instalados): a cada minuto
+  if exists (select 1 from pg_extension where extname = 'pg_cron') and exists (select 1 from pg_extension where extname = 'pg_net') then
+    perform cron.schedule('crm-espelho', '* * * * *', 'select public.crm_espelho_tick()');
+  end if;
+end $$;
+
 -- =================================================================== permissões de função
 revoke all on function public.crm_papel(), public.crm_eh_ativo(), public.crm_eh_membro(), public.crm_eh_gestor(), public.crm_eh_admin(), public.crm_eh_comprador(),
   public.crm_ve_empresa(uuid), public.crm_ve_negocio(uuid), public.crm_ve_nota(uuid), public.crm_edita_negocio(uuid),

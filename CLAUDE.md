@@ -935,6 +935,25 @@ Anderson: cada sistema cuida da sua empresa; o "Geral" (as duas) é de quem lê 
   empréstimo da OneClean à Agilité (sai 1.500 em 07/10, volta 14/10). Apagados dois errados das tentativas com o
   leitor antigo (entrada de 1.500 "Transferência da Agilité" repetida e R$ 7,00 "Empréstimo — /10.000 como Je
   devolver"), backup em `crm_backup.caixa_lanc_errados_2026_10_08`. Saldo do CRM depois: R$ 15.478,12.
+- **Espelho das transferências entre empresas (08/10/2026, pedido da Agilité: "já se lançasse nas duas"):** só a
+  categoria "Transferência entre empresas". Formato e regras combinados com o sistema da Agilité (par = ida + volta,
+  `tipo` do ponto de vista de quem manda, `ref` sempre o id original, par completo, mesmo ref = atualizar, adotar
+  o lançamento manual de mesmo tipo invertido/dia/valor, sem eco, desfazer a ida apaga o par) — tudo no
+  `schema.sql`, seção "espelho Agilité ↔ OneClean", e testado em `teste-rls/ataque.sql`.
+  - **Recebe:** Edge Function `crm-caixa-espelho` (verify_jwt desligado; Bearer = senha de gravação gerada em
+    Configurações → Integrações → "Espelho com a Agilité", `crm_espelho_nova_senha()`; só o SHA-256 em
+    `crm_fin_espelho_cfg.token_hash`) chama `crm_espelho_aplicar()` (só service_role). 200 / 401 / 400.
+  - **Manda:** gatilho `crm_fin_lanc_espelho` → `crm_fin_espelho_fila` → pg_cron `crm-espelho` (a cada minuto)
+    roda `crm_espelho_tick()`, que monta o par (`crm_espelho_pacote`) e faz o POST pelo **pg_net** para
+    `https://sistema.agiliteservice.com.br/api/caixa/espelho` com a senha da Agilité (colada pelo Anderson na mesma
+    tela, guardada em `crm_fin_espelho_cfg.senha`; nenhum usuário do app lê a tabela). Falhou → de novo em 10 min.
+    Espera 5 s depois da última mudança (ida e volta da frase saem juntas). Registro em `crm_fin_espelho_log`.
+  - Lançamento que veio da Agilité = `espelho_ref` preenchido ("veio do Caixa da Agilité" na lista); `espelho_par`
+    = par a que pertence. Sem eco: o espelho grava com `crm.espelho = '1'`.
+  - **Aplicado em produção por partes** (o `apply_migration` com `delete`/`drop` dentro fica parado esperando
+    confirmação): extensões pg_cron e pg_net, tabelas, permissões, funções de envio, gatilho e cron. Por isso a
+    senha de gravação ficou em `crm_fin_espelho_cfg` (sem mexer na regra `uso` de `crm_integracoes`) e o espelho
+    grava com `origem = 'tela'` (sem mexer na regra `origem`).
 - **Leitura do Caixa pela Agilité, 08/10:** as leituras de 07/10 12:29 tinham dado 401 (senha recusada). O Anderson
   gerou senha nova (10:18) e colou na Agilité; 3 leituras 200 às 10:21. A senha antiga (06/10) foi **desligada**
   (`ativo=false` em `crm_integracoes`, não apagada). A aba Geral da Agilité lê na hora em que é aberta (cache de 1 min,

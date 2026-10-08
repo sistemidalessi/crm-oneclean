@@ -480,8 +480,13 @@
   // Para o aviso do administrador: só o sinal de vida de cada vigia (RLS: só admin lê).
   Supa.prototype.vigias = async function () {
     const r = await this.sb.from('crm_integracoes').select('id,nome,ativo,ultimo_uso,ultimo_sinal,sinal,uso');
-    return r.error ? [] : r.data.filter(x => x.uso !== 'caixa'); // a senha de leitura do Caixa não é vigia
+    return r.error ? [] : r.data.filter(x => x.uso === 'notas' || !x.uso); // as senhas do Caixa (leitura e espelho) não são vigia
   };
+  // Espelho das transferências com a Agilité (08/10/2026): situação da fila e endereço/senha de lá (a senha
+  // vai para o banco e nunca volta para o app).
+  Supa.prototype.espelhoSituacao = async function () { return unwrap(await this.sb.rpc('crm_espelho_situacao')); };
+  Supa.prototype.espelhoNovaSenha = async function () { return unwrap(await this.sb.rpc('crm_espelho_nova_senha')); };
+  Supa.prototype.espelhoConfigura = async function (url, senha) { return unwrap(await this.sb.rpc('crm_espelho_configura', { p_url: url || null, p_senha: senha || null })); };
 
   Supa.prototype.historico = async function (filtro) {
     let q = this.sb.from('crm_historico').select('*').order('quando', { ascending: false }).limit(filtro.limite || 200);

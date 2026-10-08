@@ -797,12 +797,12 @@
     const admin = CRM.ehAdmin();
     const url = (window.CRM_CONFIG && window.CRM_CONFIG.supabaseUrl) || 'https://SEU-PROJETO.supabase.co';
     const quando = v => (v ? esc(R.dataBR(R.diaLocal(v)) + ' ' + R.horaLocal(v)) : '—');
-    const vigias = integ.chaves.filter(c => c.uso !== 'caixa');
+    const vigias = integ.chaves.filter(c => c.uso === 'notas' || !c.uso);
     return '<section class="cartao"><h2>Vigia de notas fiscais</h2>' +
       '<p>Um programinha no servidor onde fica a pasta de XML do emissor (UniNFe) olha a pasta a cada minuto e manda as notas novas para cá. ' +
       'Elas passam pelas mesmas regras da importação manual: <strong>só as da equipe</strong> (pelo vendedor escrito na nota), o cadastro do cliente é completado e nada duplica.</p>' +
       '<p class="dica">O programa não recebe senha nem acesso ao banco: só uma <strong>chave de integração</strong>, que serve apenas para entregar notas. Instalação: <code>ferramentas/vigia-notas.js</code> (README, "Vigia de notas").</p>' +
-      (chaveNova && chaveNova.uso !== 'caixa' ? '<div class="aviso-notas"><p><strong>Chave gerada para "' + esc(chaveNova.nome) + '".</strong> Copie agora: ela não aparece de novo (o CRM guarda só uma impressão digital dela).</p>' +
+      (chaveNova && chaveNova.uso === 'notas' ? '<div class="aviso-notas"><p><strong>Chave gerada para "' + esc(chaveNova.nome) + '".</strong> Copie agora: ela não aparece de novo (o CRM guarda só uma impressão digital dela).</p>' +
         '<p><code id="chaveGerada">' + esc(chaveNova.chave) + '</code> <button type="button" class="mini" data-acao="copiar-chave">copiar</button></p>' +
         '<p class="dica">No servidor, na pasta onde colocou o vigia-notas.js:</p><pre class="comando">node vigia-notas.js --configurar --url ' + esc(url) + ' --chave ' + esc(chaveNova.chave) +
         ' --pasta "D:\\...\\Enviados\\Autorizados"</pre></div>' : '') +
@@ -814,7 +814,7 @@
             '<button type="button" class="mini" data-acao="integ-excluir" data-id="' + esc(c.id) + '">excluir</button>' : '') + '</td></tr>').join('') + '</tbody></table>'
         : '<p class="vazio">' + (admin ? 'Nenhuma chave ainda.' : 'Só o administrador vê e gera as chaves.') + '</p>') +
       (admin ? '<p><button type="button" class="btn ouro" data-acao="integ-nova">Gerar chave para o vigia</button></p>' : '') + '</section>' +
-      (admin ? leituraCaixa(url, quando) : '') +
+      (admin ? leituraCaixa(url, quando) + espelhoAgilite(url, quando) : '') +
       '<section class="cartao"><h2>Últimas entregas <button type="button" class="mini" data-acao="integ-atualizar">atualizar</button></h2>' +
       (integ.registro.length ? '<table class="tabela"><thead><tr><th>Quando</th><th class="num">Arquivos</th><th class="num">Notas novas</th><th class="num">Valor</th><th class="num">Fora</th><th>Detalhes</th></tr></thead><tbody>' +
         integ.registro.map(l => {
@@ -836,7 +836,13 @@
     return (st.estado === 'ok' ? CRM.selo('rodando', 'verde') : CRM.selo('parado', 'vermelho')) + ' ' + esc(ha) +
       (det ? '<br><small>' + esc(det) + '</small>' : '') + falha;
   }
-  async function carregaIntegracoes() { try { integ = await CRM.store().integracoes(); CRM.render(); } catch (e) { CRM.falhou(e); } }
+  async function carregaIntegracoes() {
+    try {
+      integ = await CRM.store().integracoes();
+      integ.espelho = CRM.ehAdmin() && CRM.store().espelhoSituacao ? await CRM.store().espelhoSituacao().catch(() => null) : null;
+      CRM.render();
+    } catch (e) { CRM.falhou(e); }
+  }
   DEPOIS.integracoes = () => {
     $$('[data-integ-filtro]').forEach(s => s.addEventListener('change', async () => {
       try { await CRM.store().atualizar('integracoes', s.dataset.integFiltro, { filtro: s.value }); CRM.toast('Filtro da integração salvo.'); integ = null; CRM.render(); } catch (e) { CRM.falhou(e); }
@@ -859,15 +865,44 @@
         (c.ativo ? 'desligar' : 'ligar') + '</button> <button type="button" class="mini" data-acao="integ-excluir" data-id="' + esc(c.id) + '">excluir</button></td></tr>').join('') + '</tbody></table>' : '<p class="vazio">Nenhuma senha de leitura ainda.</p>') +
       '<p><button type="button" class="btn sec" data-acao="integ-nova-caixa">Gerar senha de leitura do Caixa</button> <small>Vazou ou trocou de computador? Gere outra e exclua a antiga.</small></p></section>';
   }
+  // Espelho das transferências entre empresas (08/10/2026, pedido do Anderson: "já se lançasse nas duas").
+  // Lançou, ajustou, deu ✓ ou desfez uma "Transferência entre empresas" aqui → o banco manda o par para a
+  // Agilité (em até 1 min; fora do ar, tenta de novo a cada 10 min). O que a Agilité lança chega por
+  // crm-caixa-espelho, com a senha de gravação gerada aqui.
+  const AGILITE_ESPELHO = 'https://sistema.agiliteservice.com.br/api/caixa/espelho';
+  function espelhoAgilite(url, quando) {
+    const s = integ.espelho || {};
+    const end = url + '/functions/v1/crm-caixa-espelho';
+    const situacao = !s.url || !s.tem_senha ? CRM.selo('falta configurar o envio', 'ambar')
+      : s.com_erro ? CRM.selo(s.com_erro + ' com erro: ' + (s.ultimo_erro || ''), 'vermelho')
+      : s.pendentes ? CRM.selo(s.pendentes + ' esperando envio', 'ambar') : CRM.selo('em dia', 'verde');
+    return '<section class="cartao"><h2>Espelho com a Agilité (transferências entre empresas)</h2>' +
+      '<p>Toda <strong>Transferência entre empresas</strong> (empréstimo de uma empresa para a outra e a volta) lançada, ajustada, paga ou desfeita aqui ' +
+      'vai sozinha para o Caixa do dia da Agilité, e a de lá vem para cá. Ninguém lança duas vezes. Reembolso da folha e material vendido à Agilité continuam como estão.</p>' +
+      '<p>Situação: ' + situacao + ' · último envio ' + quando(s.ultimo_enviado) + ' · último recebido ' + quando(s.ultimo_recebido) + '</p>' +
+      '<h3>1. Daqui para a Agilité</h3>' +
+      '<form class="form-linha" id="formEspelho"><label class="campo">Endereço da Agilité<input name="url" type="url" value="' + esc(s.url || AGILITE_ESPELHO) + '"></label>' +
+      '<label class="campo">Senha de gravação da Agilité <small>' + (s.tem_senha ? '(já guardada — só preencha para trocar)' : '(arquivo caixa_espelho_senha.txt no PC do escritório)') + '</small>' +
+      '<input name="senha" type="password" autocomplete="off" placeholder="' + (s.tem_senha ? '••••••••' : 'cole aqui') + '"></label>' +
+      '<button type="button" class="btn" data-acao="espelho-salvar">Salvar</button></form>' +
+      '<p class="dica">A senha vai direto para o banco e não aparece mais em lugar nenhum. <strong>Não mande por WhatsApp, e-mail nem chat.</strong></p>' +
+      '<h3>2. Da Agilité para cá</h3>' +
+      '<p>No sistema da Agilité, em Configurações → "Caixa da OneClean": <strong>Endereço de gravação do CRM</strong> = <code>' + esc(end) + '</code> e a <strong>Senha de gravação</strong> gerada abaixo.</p>' +
+      (chaveNova && chaveNova.uso === 'espelho' ? '<div class="aviso-notas"><p><strong>Senha gerada para "' + esc(chaveNova.nome) + '".</strong> Copie agora e cole direto no campo de Configurações do sistema da Agilité: ela não aparece de novo. ' +
+        '<strong>Não mande por WhatsApp, e-mail nem chat.</strong></p><p><code id="chaveGerada">' + esc(chaveNova.chave) + '</code> <button type="button" class="mini" data-acao="copiar-chave">copiar</button></p></div>' : '') +
+      '<p>' + (s.senha_recebe_em ? 'Senha de gravação criada em ' + quando(s.senha_recebe_em) + ' ' + CRM.selo('ativa', 'verde') : CRM.selo('nenhuma senha de gravação ainda', 'ambar')) + '</p>' +
+      '<p><button type="button" class="btn sec" data-acao="espelho-nova-senha">' + (s.senha_recebe_em ? 'Gerar outra senha (a atual deixa de valer)' : 'Gerar senha de gravação para a Agilité') + '</button></p></section>';
+  }
   async function novaChave(uso) {
+    uso = uso === 'caixa' ? 'caixa' : 'notas';
     const nome = (prompt(uso === 'caixa' ? 'Nome da senha (quem vai ler o Caixa):' : 'Nome da chave (onde o vigia vai rodar):', uso === 'caixa' ? 'Leitura do Caixa — sistema da Agilité' : 'Vigia de notas — servidor') || '').trim();
     if (!nome) return;
     const b = crypto.getRandomValues(new Uint8Array(32));
     const chave = btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
     const h = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(chave));
     const token_hash = [...new Uint8Array(h)].map(x => x.toString(16).padStart(2, '0')).join('');
-    await CRM.store().inserir('integracoes', { nome, token_hash, filtro: 'auto', uso: uso === 'caixa' ? 'caixa' : 'notas' });
-    chaveNova = { nome, chave, uso: uso === 'caixa' ? 'caixa' : 'notas' };
+    await CRM.store().inserir('integracoes', { nome, token_hash, filtro: 'auto', uso });
+    chaveNova = { nome, chave, uso };
     integ = null; CRM.render();
   }
 
@@ -1009,6 +1044,17 @@
     'integ-atualizar': () => { integ = null; CRM.render(); },
     'integ-nova': () => novaChave().catch(CRM.falhou),
     'integ-nova-caixa': () => novaChave('caixa').catch(CRM.falhou),
+    'espelho-nova-senha': async () => {
+      const s = (integ && integ.espelho) || {};
+      if (s.senha_recebe_em && !confirm('Gerar outra senha de gravação? A atual deixa de valer: cole a nova no sistema da Agilité logo em seguida.')) return;
+      try { const chave = await CRM.store().espelhoNovaSenha(); chaveNova = { nome: 'Espelho das transferências — sistema da Agilité', chave, uso: 'espelho' }; integ = null; CRM.render(); } catch (e) { CRM.falhou(e); }
+    },
+    'espelho-salvar': async () => {
+      const f = $('#formEspelho'); if (!f) return;
+      const url = f.elements.url.value.trim(), senha = f.elements.senha.value.trim();
+      if (!/^https:\/\//.test(url)) { CRM.toast('O endereço precisa começar com https://'); return; }
+      try { await CRM.store().espelhoConfigura(url, senha); f.elements.senha.value = ''; CRM.toast(senha ? 'Endereço e senha da Agilité guardados.' : 'Endereço guardado.'); integ = null; CRM.render(); } catch (e) { CRM.falhou(e); }
+    },
     'integ-ativar': async id => { const c = integ.chaves.find(x => x.id === id); try { await CRM.store().atualizar('integracoes', id, { ativo: !c.ativo }); integ = null; CRM.render(); } catch (e) { CRM.falhou(e); } },
     'integ-excluir': async id => {
       const c = integ.chaves.find(x => x.id === id);
