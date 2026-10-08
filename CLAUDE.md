@@ -935,6 +935,11 @@ Anderson: cada sistema cuida da sua empresa; o "Geral" (as duas) é de quem lê 
   empréstimo da OneClean à Agilité (sai 1.500 em 07/10, volta 14/10). Apagados dois errados das tentativas com o
   leitor antigo (entrada de 1.500 "Transferência da Agilité" repetida e R$ 7,00 "Empréstimo — /10.000 como Je
   devolver"), backup em `crm_backup.caixa_lanc_errados_2026_10_08`. Saldo do CRM depois: R$ 15.478,12.
+- **Leitura do Caixa pela Agilité, 08/10:** as leituras de 07/10 12:29 tinham dado 401 (senha recusada). O Anderson
+  gerou senha nova (10:18) e colou na Agilité; 3 leituras 200 às 10:21. A senha antiga (06/10) foi **desligada**
+  (`ativo=false` em `crm_integracoes`, não apagada). A aba Geral da Agilité lê na hora em que é aberta (cache de 1 min,
+  botão "Ler o CRM de novo"); o caixa próprio da Agilité NÃO recebe nada da OneClean — cada lado lança a sua ponta
+  da passagem entre empresas, e a coluna "diferença entre empresas" da Geral avisa quando só um lado lançou.
 - **"Paguei em <vencimento>" nas contas vencidas sem baixa (08/10, Anderson: "paguei ontem, só não dei baixa"):**
   baixa no caixa com a data do vencimento (`cx-nodia`), desconta do saldo se for depois do último saldo do BB
   informado. Os três botões têm dica: "Paguei hoje" (data de hoje, mexe no saldo), "Paguei em …" (data do vencimento,
