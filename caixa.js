@@ -440,9 +440,9 @@
       (x.secao === 'entrada' ? 'Recebi' : 'Paguei') + ' ' + (dia <= hoje() ? (dia === hoje() ? 'hoje' : 'em ' + dm(dia)) : 'hoje') + '">✓</button>' : '';
     // conta prevista e título (arrastar o título = remarcar: o cliente vai pagar em outro dia)
     const arrasta = x.estado === 'previsto' ? ' draggable="true" data-mover="' + esc(x.tipo === 'lanc' ? x.ref.id : 'tit:' + x.ref.duplicata) + '"' : '';
-    return '<div class="cx-it ' + (x.secao === 'entrada' ? 'cx-ent' : 'cx-sai') + ' ' + x.estado + (x.atrasado ? ' atrasado' : '') + (x.adiantado ? ' adiantado' : '') + (ok ? ' comok' : '') + '"' + arrasta + '>' + ok +
+    return '<div class="cx-it ' + (x.secao === 'entrada' ? 'cx-ent' : 'cx-sai') + ' ' + x.estado + (x.atrasado ? ' atrasado' : '') + (x.adiantado ? ' adiantado' : '') + (x.emprestimo ? ' emprestimo' : '') + (ok ? ' comok' : '') + '"' + arrasta + '>' + ok +
       '<button type="button" class="cx-corpo" data-acao="cx-item" data-id="' + esc(x.chave) + '" data-dia="' + esc(dia) + '" title="' + esc(x.titulo + (x.obs ? ' — ' + x.obs : '')) + '">' +
-      '<span class="t">' + (x.adiantado ? '<span class="cx-adi">⏩ adiantado</span> ' : '') + esc(x.titulo) + '</span>' + (x.obs ? '<span class="o">' + esc(x.obs) + '</span>' : '') + '<span class="v">' + esc(R.moeda(x.valor)) + '</span></button></div>';
+      '<span class="t">' + (x.adiantado ? '<span class="cx-adi">⏩ adiantado</span> ' : '') + (x.emprestimo ? '<span class="cx-emp">🔁 ' + (x.secao === 'entrada' ? 'empréstimo' : 'devolução') + '</span> ' : '') + esc(x.titulo) + '</span>' + (x.obs ? '<span class="o">' + esc(x.obs) + '</span>' : '') + '<span class="v">' + esc(R.moeda(x.valor)) + '</span></button></div>';
   }
   function grade(s) {
     const h = hoje();
@@ -476,6 +476,7 @@
       '<span class="cx-it cx-sai fora"><span class="cx-corpo">pago fora do caixa</span></span>' +
       '<span class="cx-it cx-ent previsto atrasado"><span class="cx-corpo">em atraso, remarcado</span></span>' +
       '<span class="cx-it cx-ent previsto adiantado"><span class="cx-corpo">⏩ o cliente adiantou</span></span>' +
+      '<span class="cx-it cx-ent previsto emprestimo"><span class="cx-corpo">🔁 empréstimo (entra e volta)</span></span>' +
       '<small>✓ paga ou recebe no dia da coluna · clique no item para ajustar valor e dia, pausar ou desfazer · arraste uma conta ou um título para outro dia · + lança no dia</small></p>' +
       '<div class="cx-grade-rolagem"><table class="cx-grade"><thead><tr><th class="lab"></th>' + th + '</tr></thead><tbody>' +
         '<tr class="sec"><th class="lab ent">Entradas</th>' + celulas('entrada') + '</tr>' +

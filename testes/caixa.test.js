@@ -299,3 +299,13 @@ test('título adiantado (remarcado para antes do vencimento): verde, não conta 
   assert.deepEqual([lt.cai_na_conta, lt.atrasado, lt.adiantado], ['2026-10-08', false, true]);
   assert.equal(r.titulos_a_receber.vencidos, 0);
 });
+
+test('empréstimo de acerto do caixa: a entrada e a devolução vêm marcadas (azul na grade)', () => {
+  const lancs = [
+    { id: 'e', tipo: 'entrada', descricao: 'Empréstimo — Fulana', categoria: 'Empréstimos recebidos', valor: 10000, vencimento: '2026-10-07', situacao: 'pago', pago_em: '2026-10-07', baixa: 'caixa', emprestimo: true },
+    { id: 'd', tipo: 'saida', descricao: 'Devolução do empréstimo — Fulana', categoria: 'Empréstimos e giro', valor: 10000, vencimento: '2026-10-09', situacao: 'aberto' },
+    { id: 'x', tipo: 'saida', descricao: 'Fornecedor qualquer', categoria: 'Fornecedores', valor: 100, vencimento: '2026-10-09', situacao: 'aberto' }];
+  const g = C.itensGrade('2026-10-07', '2026-10-21', '2026-10-08', lancs, [], { d1: true });
+  const m = Object.fromEntries(g.map(x => [x.ref.id, x.emprestimo]));
+  assert.deepEqual(m, { e: true, d: true, x: false });
+});

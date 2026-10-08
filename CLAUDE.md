@@ -918,6 +918,14 @@ Anderson: cada sistema cuida da sua empresa; o "Geral" (as duas) é de quem lê 
   "⏩ adiantado" ("adiantado: vencia …, o cliente paga em …"), `atrasado: false` e `adiantado: true` na grade e na
   leitura (não conta em `vencidos`). Se não pagar no dia adiantado, volta para o dia do vencimento (não vira vencido).
   `crm-caixa-leitura` v10 fixada no commit 7cc1d90.
+- **Empréstimo de acerto do caixa em azul (08/10, Anderson: "a Je me emprestou 10 mil para devolver até amanhã… deixar o
+  quadradinho em azul"):** na grade, a entrada do empréstimo (`emprestimo: true`), a "Devolução do empréstimo — …" e as
+  parcelas "Empréstimo — …" ganham fundo e borda azuis e a etiqueta "🔁 empréstimo" / "🔁 devolução"
+  (`ehEmprestimoLanc` em `caixa-calculo.js`, item `emprestimo` na grade); legenda "🔁 empréstimo (entra e volta)".
+  **Leitor de frases (mudou AQUI — avisar a Agilité para levar):** "me/nos emprestou", "peguei emprestado" e
+  "emprestado da/do" = entrada de empréstimo, realizada (`EMPRESTOU_PRA_MIM`); "… 10 mil ontem para devolver amanhã" separa
+  a cauda "para/pra/e devolver <data>" do pedaço com valor (`CAUDA_DEVOLUCAO` em `pedacos`) e a data vira a devolução;
+  "me, nos, emprestou, emprestado, peguei…" saem do nome. Antes, essa frase virava uma SAÍDA de 10 mil.
 - **"Paguei em <vencimento>" nas contas vencidas sem baixa (08/10, Anderson: "paguei ontem, só não dei baixa"):**
   baixa no caixa com a data do vencimento (`cx-nodia`), desconta do saldo se for depois do último saldo do BB
   informado. Os três botões têm dica: "Paguei hoje" (data de hoje, mexe no saldo), "Paguei em …" (data do vencimento,

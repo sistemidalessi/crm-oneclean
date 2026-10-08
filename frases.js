@@ -36,6 +36,11 @@
   const DEVOLUCAO = /\b(devolv\w*|devolucao|pagar de volta|retorn\w*|volta|voltar|voltara|volte)\b/;
   // " e vai retornar dia 14" depois do valor: e' outro pedaco (a volta), nao muda o "saiu ... hoje"
   const INICIO_DEVOLUCAO = /^(?:(?:vai|vao|sera|serao|ele|ela|eles|elas|que|depois|e)\s+)*(?:devolv|retorn|volt|pagar de volta)/;
+  // dinheiro que alguem emprestou PARA a empresa (08/10/2026: "a Je me emprestou 10 mil ontem para devolver
+  // amanha" virava saida): e' entrada de emprestimo, mesmo sem "entrou"
+  const EMPRESTOU_PRA_MIM = /\b(?:me|nos)\s+emprest\w*|\b(?:peguei|pegamos|pego)\s+emprestad\w*|\bemprestad[oa]s?\s+(?:da|do|de|pela|pelo)\b/;
+  // "... 10 mil ontem para devolver amanha": o "para devolver <data>" depois do valor e' a volta, outro pedaco
+  const CAUDA_DEVOLUCAO = /\s+(?:para|pra|e|que)\s+(?:(?:vou|vamos|vai|a gente)\s+)?(?:devolv|pagar de volta|retorn)\w*/;
 
   function isoDe(d) { return d.toISOString().slice(0, 10); }
   function addDias(iso, n) { const d = new Date(iso + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return isoDe(d); }
@@ -108,11 +113,18 @@
       }
       out.push(atual);
     }
-    return out.map((s) => s.trim()).filter(Boolean);
+    // "emprestou 10 mil ontem para devolver amanha": separa a cauda da devolucao (sem valor) do pedaco com valor
+    const final = [];
+    for (const p of out) {
+      const m = baixo(p).match(CAUDA_DEVOLUCAO);
+      if (m && m.index > 0 && temValor(p.slice(0, m.index)) && !temValor(p.slice(m.index))) final.push(p.slice(0, m.index), p.slice(m.index));
+      else final.push(p);
+    }
+    return final.map((s) => s.trim()).filter(Boolean);
   }
 
   // palavras de controle; borda "de letra" com \p{L} (o \b do JS quebra em "almoço" e corta o "o")
-  const TIRA = new RegExp('(?<![\\p{L}\\d])(?:entrada|entradas|saida|saidas|data|enviei|enviamos|mandei|mandamos|emprestimo|devolucao|sera|serao|entrou|entraram|entra|entrar|recebi|recebemos|recebido|recebida|receber|caiu|cairam|credito|creditado|deposito|depositado|depositaram|sai|sair|saiu|pagar|pago|pagos|paga|paguei|pagamos|pagou|pix|transferi|transferencia|vai|vao|precisa|precisar|precisamos|tem que|temos que|vence|vencendo|previsto|prevista|agendado|agendar|hoje|ontem|amanha|ja|foi|foram|que|o|a|os|as|um|uma|do|da|dos|das|de|pro|pra|para|no|na|em|com|valor|reais|referente|ref)(?![\\p{L}\\d])', 'giu');
+  const TIRA = new RegExp('(?<![\\p{L}\\d])(?:entrada|entradas|saida|saidas|data|enviei|enviamos|mandei|mandamos|emprestimo|emprestou|emprestaram|emprestado|emprestada|peguei|pegamos|me|nos|devolucao|sera|serao|entrou|entraram|entra|entrar|recebi|recebemos|recebido|recebida|receber|caiu|cairam|credito|creditado|deposito|depositado|depositaram|sai|sair|saiu|pagar|pago|pagos|paga|paguei|pagamos|pagou|pix|transferi|transferencia|vai|vao|precisa|precisar|precisamos|tem que|temos que|vence|vencendo|previsto|prevista|agendado|agendar|hoje|ontem|amanha|ja|foi|foram|que|o|a|os|as|um|uma|do|da|dos|das|de|pro|pra|para|no|na|em|com|valor|reais|referente|ref)(?![\\p{L}\\d])', 'giu');
   // Tira do texto valor, data e as palavras de controle; o que sobra e' o "do que se trata".
   function rotuloDe(txt, trechos) {
     let s = ` ${txt} `.replace(/\b(\d+)\s+de\s+(\d+)\b/gi, '$1/$2'); // "11 de 13" (parcela) fica "11/13"
@@ -153,9 +165,10 @@
         const v = vp && vp.valor != null ? { valor: vp.valor, trecho: semData.substr(baixo(semData).indexOf(mp[0]), mp[0].length) } : extrairValor(semData);
         const parcelas = vp && vp.valor != null ? +mp[1] : null;
         // "emprestimo de 100 mil" sem entrou/paguei = dinheiro que chegou
-        const dir = ENTRADA.test(b) ? 'entrada' : SAIDA.test(b) ? 'saida' : /\bemprestimo\b/.test(b) && !/\bparcela/.test(b) ? 'entrada' : null;
+        const pegou = EMPRESTOU_PRA_MIM.test(b);
+        const dir = pegou || ENTRADA.test(b) ? 'entrada' : SAIDA.test(b) ? 'saida' : /\bemprestimo\b/.test(b) && !/\bparcela/.test(b) ? 'entrada' : null;
         // data futura escrita no proprio trecho = previsto (nao herda o "entrou" de outro trecho)
-        const sit = REALIZADO.test(b) && !futuro ? 'realizado' : futuro ? 'previsto' : dt.data && dt.data > hoje ? 'previsto' : null;
+        const sit = (REALIZADO.test(b) || (pegou && /\b(?:emprestou|emprestaram|peguei|pegamos|emprestad\w*)\b/.test(b))) && !futuro ? 'realizado' : futuro ? 'previsto' : dt.data && dt.data > hoje ? 'previsto' : null;
         if (v.valor == null) { contextos.push({ texto: p, data: dt.data, dir, sit, juros: /\bjuros\b/.test(b), rotulo: rotuloDe(semData, []) , apos: doLinha.length }); continue; }
         const item = { linha: nLinha + 1, frase: linha, trecho: p, valor: v.valor, data: dt.data, tipo: dir, situacao: sit, rotulo: rotuloDe(semData, [v.trecho]) };
         if (parcelas) item.parcelas = parcelas;

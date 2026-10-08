@@ -185,6 +185,9 @@
   // Item: { chave, tipo: 'lanc'|'titulo', secao: 'entrada'|'saida', data, titulo, valor, estado:
   // 'feito'|'fora'|'previsto', obs, ref }. Vencidos (conta ou título que já devia ter acontecido)
   // ficam fora da grade e do saldo previsto: vão para os blocos próprios.
+  // Empréstimo de acerto do fluxo de caixa (08/10/2026, Anderson: "entra e sai… deixar o quadradinho em azul"):
+  // a entrada do empréstimo, a devolução e as parcelas dele. Na grade ganham a cor azul.
+  const ehEmprestimoLanc = l => !!l.emprestimo || /^(?:Devolução do empréstimo|Empréstimo —)/.test(l.descricao || '');
   function itensGrade(de, ate, hoje, lancs, titulos, opc) {
     opc = opc || {};
     const it = [];
@@ -194,7 +197,7 @@
     const escondidas = new Set([...ligadas.values()].map(l => l.id));
     (lancs || []).forEach(l => {
       const secao = l.tipo === 'entrada' ? 'entrada' : 'saida';
-      const base = { chave: 'lanc:' + l.id, tipo: 'lanc', secao, titulo: l.descricao, valor: r2(l.valor), ref: l };
+      const base = { chave: 'lanc:' + l.id, tipo: 'lanc', secao, titulo: l.descricao, valor: r2(l.valor), ref: l, emprestimo: ehEmprestimoLanc(l) };
       if (l.situacao === 'pausado') return;
       if (l.situacao === 'aberto' && (l.titulo_duplicata || escondidas.has(l.id))) return; // o título representa
       if (l.situacao === 'pago') { add(Object.assign(base, { data: l.pago_em, estado: l.baixa === 'caixa' ? 'feito' : 'fora', obs: l.baixa === 'caixa' ? '' : 'pago fora do caixa do dia' })); return; }

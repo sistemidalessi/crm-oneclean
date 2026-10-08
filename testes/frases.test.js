@@ -272,3 +272,16 @@ test('taxa do Pix é tarifa bancária (07/10: o Anderson avisa a taxa para o sal
   });
   assert.notEqual(um('paguei taxa de lixo 80').categoria, 'Tarifas bancárias');
 });
+
+test('"me emprestou ... para devolver amanhã": entrada de empréstimo com a devolução no dia (08/10/2026)', () => {
+  const ctx = { hoje: '2026-10-08' };
+  const a = F.classificar(F.interpretar('a Fulana me emprestou 10 mil ontem para devolver amanhã', '2026-10-08').itens, Object.assign({}, vazio, ctx));
+  assert.equal(a.length, 1);
+  assert.deepEqual([a[0].tipo, a[0].valor, a[0].data, a[0].situacao, a[0].categoria, a[0].emprestimo.credor, a[0].emprestimo.em],
+    ['entrada', 10000, '2026-10-07', 'realizado', 'Empréstimos recebidos', 'Fulana', '2026-10-09']);
+  const b = F.classificar(F.interpretar('peguei emprestado 5 mil do Beltrano hoje pra devolver dia 20', '2026-10-08').itens, Object.assign({}, vazio, ctx))[0];
+  assert.deepEqual([b.tipo, b.valor, b.data, b.emprestimo.credor, b.emprestimo.em], ['entrada', 5000, '2026-10-08', 'Beltrano', '2026-10-20']);
+  // o que já funcionava continua igual
+  const c = F.classificar(F.interpretar('devolvi 1.600 pra Agilité', '2026-10-08').itens, Object.assign({}, vazio, ctx))[0];
+  assert.deepEqual([c.tipo, c.valor], ['saida', 1600]);
+});

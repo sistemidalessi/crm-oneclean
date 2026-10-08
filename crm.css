@@ -663,6 +663,9 @@ table.cx-grade td.alvo { outline: 2px dashed var(--azul); outline-offset: -3px; 
 .cx-it.atrasado .cx-corpo .o { color: var(--vermelho); font-weight: 600; }
 .cx-it.adiantado { background: var(--verde-fundo); border: 2px solid var(--verde); }
 .cx-it.adiantado .cx-corpo .o { color: var(--verde); font-weight: 600; }
+.cx-it.emprestimo { background: var(--azul-fundo); border: 2px solid var(--azul); }
+.cx-it.emprestimo.feito { border-width: 1px; }
+.cx-emp { display: inline-block; font-size: .72em; font-weight: 700; color: #fff; background: var(--azul); border-radius: 4px; padding: 0 4px; margin-right: 2px; }
 .cx-adi { display: inline-block; font-size: .72em; font-weight: 700; color: #fff; background: var(--verde); border-radius: 4px; padding: 0 4px; margin-right: 2px; }
 .cx-it[draggable=true] { cursor: grab; }
 .cx-it.arrastando { opacity: .4; }
