@@ -40,6 +40,10 @@
     const anterior = resumoPeriodo(D, ix, mesPassado, R.somaDias(mes, -1));
     const anteriorMesmoDia = resumoPeriodo(D, ix, mesPassado, ateMesmoDia);
     const ano = resumoPeriodo(D, ix, hoje.slice(0, 4) + '-01-01', hoje);
+    // Equipe de vendas = tudo menos o Direto (venda do administrador, sem vendedora) — 08/10/2026, Anderson.
+    const admins = new Set((D.usuarios || []).filter(u => u.papel === 'admin').map(u => u.user_id));
+    const daEquipe = l => l.filter(n => !admins.has(donoDe(ix, n)));
+    const eqAtual = daEquipe(atual.lista), eqAntes = daEquipe(anteriorMesmoDia.lista), eqMesPassado = daEquipe(anterior.lista);
 
     // Clientes novos no mês: primeira nota de venda do cliente cai neste mês.
     const primeira = new Map();
@@ -98,7 +102,9 @@
     return {
       mes: { de: mes, ate: fimMes, atual, anterior, anteriorMesmoDia, variacao: variacao(atual.valor, anteriorMesmoDia.valor),
         variacaoTicket: anterior.notas ? variacao(atual.ticket, anterior.ticket) : null,
-        projecao: diaDoMes ? atual.valor / diaDoMes * diasNoMes : 0, novos: novosMes },
+        projecao: diaDoMes ? atual.valor / diaDoMes * diasNoMes : 0, novos: novosMes,
+        equipe: { valor: somaValor(eqAtual), notas: eqAtual.length, lista: eqAtual, anteriorMesmoDia: somaValor(eqAntes), anterior: somaValor(eqMesPassado),
+          variacao: variacao(somaValor(eqAtual), somaValor(eqAntes)) } },
       ano, porMes: fat12.porMes, equipe, equipeTotal, funil, funilVendas,
       base: { clientes: (D.empresas || []).filter(e => e.situacao === 'cliente').length, ativos: compraram90.size,
         leads: (D.empresas || []).filter(e => e.situacao === 'lead').length },
@@ -331,7 +337,7 @@
         (semNotas ? '<div class="cartao"><p class="vazio">Sem notas fiscais importadas: o faturamento, os tops e as compras aparecem quando as notas entrarem.</p></div>' : '') +
         // ---- números do mês
         '<section class="kpis">' +
-          kpi('Faturamento do mês', R.moeda(m.atual.valor), seta(m.variacao) + ' vs. mesmo ponto de ' + esc(R.mesCurto(R.somaMeses(m.de, -1))) + ' (' + esc(R.moeda(m.anteriorMesmoDia.valor)) + ')', 'azul', 'gestao-lista', 'mes') +
+          kpi('Faturamento do mês · Equipe de vendas', R.moeda(m.equipe.valor), seta(m.equipe.variacao) + ' vs. mesmo ponto de ' + esc(R.mesCurto(R.somaMeses(m.de, -1))) + ' (' + esc(R.moeda(m.equipe.anteriorMesmoDia)) + ') · ' + m.equipe.notas + ' notas, sem o Direto', 'azul', 'gestao-lista', 'mes-equipe') +
           kpi('Projeção do mês', R.moeda(m.projecao), 'no ritmo atual · mês passado fechou em ' + esc(R.moeda(m.anterior.valor))) +
           kpi('Conversão do mês', f.conversao == null ? '—' : R.pct(f.conversao), f.realizadas.qtd + ' ganhos · ' + f.perdidas.qtd + ' perdidos' + (p.funilVendas ? ' · ' + esc(p.funilVendas) : ''), '', 'gestao-lista', 'decididos') +
           // Ticket médio ao lado da conversão (pedido do Anderson, 06/10): por nota fiscal do mês (o que
@@ -341,6 +347,10 @@
           kpi('Clientes que compraram', String(m.atual.clientes), m.novos + ' novo(s) no mês', 'verde', 'gestao-lista', 'clientes') +
           kpi('Negócios abertos', R.moeda(f.abertas.valor), f.abertas.qtd + ' negócios · ponderado pela chance ' + esc(R.moeda(f.abertas.ponderado)) + (p.funilVendas ? ' · ' + esc(p.funilVendas) : ''), '', 'gestao-lista', 'abertos') +
           kpi('Faturamento no ano', R.moeda(p.ano.valor), p.ano.notas + ' notas · ' + p.ano.clientes + ' clientes', '', 'gestao-lista', 'ano') +
+        '</section>' +
+        // faturamento geral do mês (equipe + Direto), logo abaixo do da equipe
+        '<section class="kpis kpis-linha2">' +
+          kpi('Faturamento do mês · Geral (com o Direto)', R.moeda(m.atual.valor), seta(m.variacao) + ' vs. mesmo ponto de ' + esc(R.mesCurto(R.somaMeses(m.de, -1))) + ' (' + esc(R.moeda(m.anteriorMesmoDia.valor)) + ')', 'azul', 'gestao-lista', 'mes') +
         '</section>' +
         // ---- 12 meses + base
         '<div class="g-duas">' +
@@ -632,6 +642,7 @@
       const desde = R.dataBR(m.de);
       const f = {
         mes: () => Object.assign(notas('Notas do mês', m.atual.lista), { sub: desde + ' até hoje' }),
+        'mes-equipe': () => Object.assign(notas('Notas do mês · Equipe de vendas', m.equipe.lista), { sub: desde + ' até hoje · sem o Direto' }),
         ano: () => Object.assign(notas('Notas do ano', p.ano.lista), { sub: 'de 01/01 até hoje' }),
         clientes: () => ({ titulo: 'Clientes que compraram no mês', sub: desde + ' até hoje', tipo: 'empresas', itens: [...new Set(m.atual.lista.map(n => n.empresa_id).filter(Boolean))].map(id => CRM.empresa(id)).filter(Boolean) }),
         abertos: () => ({ titulo: 'Negócios abertos' + (p.funilVendas ? ' · ' + p.funilVendas : ''), tipo: 'negocios', itens: L.abertos || [], data: 'previsao_fechamento' }),

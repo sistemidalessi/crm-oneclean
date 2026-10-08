@@ -974,6 +974,8 @@ Anderson: cada sistema cuida da sua empresa; o "Geral" (as duas) é de quem lê 
   **"Direto"** (notas "VENDEDOR: DIRETO", `nomes_nota` do admin), no fim e só se vendeu no ano, sem as colunas de
   contato; linha **Total** embaixo = o faturamento do mês e do ano (o mesmo do quadro), com "Ex-vendedores(as)" quando há nota
   de ex-vendedora ou cliente sem carteira, para a soma bater (`equipeTotal` em `gestao.js`, teste em `gestao.test.js`).
+  No topo da Gestão, o 1º quadro é **"Faturamento do mês · Equipe de vendas"** (sem o Direto, `p.mes.equipe`, com
+  comparação no mesmo ponto do mês passado); o geral (com o Direto) desceu para uma fileira logo abaixo.
 - **Leitura do Caixa pela Agilité, 08/10:** as leituras de 07/10 12:29 tinham dado 401 (senha recusada). O Anderson
   gerou senha nova (10:18) e colou na Agilité; 3 leituras 200 às 10:21. A senha antiga (06/10) foi **desligada**
   (`ativo=false` em `crm_integracoes`, não apagada). A aba Geral da Agilité lê na hora em que é aberta (cache de 1 min,

@@ -172,6 +172,7 @@ input.curto { width: 120px; }
 .barra-acoes { display: flex; gap: 8px; flex-wrap: wrap; }
 
 .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+.kpis.kpis-linha2 { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); margin-top: 10px; }
 .kpi { background: var(--papel); border: 1px solid var(--borda); border-radius: 12px; padding: 12px 14px; display: grid; gap: 1px; box-shadow: var(--sombra); border-top: 3px solid var(--ouro); text-align: left; font: inherit; color: inherit; }
 .kpi span { color: var(--suave); font-size: .78rem; }
 .kpi strong { font-size: 1.3rem; font-variant-numeric: tabular-nums; }

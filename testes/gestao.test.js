@@ -172,3 +172,13 @@ test('equipe: comprador fora, "Direto" (venda do administrador) no fim, total = 
   assert.equal(p.equipeTotal.outros.mes, 50);
   assert.equal(p.equipeTotal.valorMes, p.mes.atual.valor, 'o total bate com o faturamento do mês');
 });
+
+test('faturamento do mês da equipe de vendas: tudo menos o Direto', () => {
+  const D = base();
+  D.notas.push({ id: 'nd2', empresa_id: 'P', vendedor_id: 'adm', emitida_em: '2026-09-25T10:00:00-03:00', valor_total: 300, cancelada: false });
+  D.nota_itens.push({ id: 'nd2i', nota_id: 'nd2', cfop: '5102', descricao: 'DETERGENTE 5L', unidade: 'GL', quantidade: 12, valor_total: 300 });
+  const p = G.painel(D, R.indexa(D), R.config({}), HOJE);
+  assert.equal(p.mes.atual.valor, 500, 'geral: 200 da Ana + 300 Direto');
+  assert.equal(p.mes.equipe.valor, 200, 'equipe: sem o Direto');
+  assert.equal(p.mes.equipe.notas, 1);
+});
