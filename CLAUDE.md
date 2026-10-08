@@ -913,6 +913,11 @@ Anderson: cada sistema cuida da sua empresa; o "Geral" (as duas) é de quem lê 
   "Tirar a remarcação" volta ao normal. Ao receber, "Valor que entrou" grava o que caiu de fato (juros ou
   parte), com a diferença na observação. A listagem do FKN não apaga a previsão (o upsert só grava as colunas
   que traz). Na leitura: `cai_na_conta` = a data remarcada e `atrasado: true`.
+  **Adiantado (08/10, Anderson: "trouxe para hoje porque o cliente adiantou e veio vermelho também"):** remarcado
+  para ANTES do dia em que cairia na conta (`adiantado()` em `caixa-calculo.js`) fica **verde** com a etiqueta
+  "⏩ adiantado" ("adiantado: vencia …, o cliente paga em …"), `atrasado: false` e `adiantado: true` na grade e na
+  leitura (não conta em `vencidos`). Se não pagar no dia adiantado, volta para o dia do vencimento (não vira vencido).
+  `crm-caixa-leitura` v10 fixada no commit 7cc1d90.
 - **Transferência entre empresas (06/10 à noite, espelho da Agilité, commit 79fdfe7 de lá):** categoria
   **"Transferência entre empresas"** (nome exato; nas listas de entrada e de saída; `ENTRE_EMPRESAS` também casa
   com ela): só caixa — não é receita, despesa nem empréstimo; na aba Geral da Agilité as duas pontas se anulam.
