@@ -42,6 +42,8 @@ Deno.serve(async (req) => {
   try { corpo = JSON.parse(texto); } catch { return resposta(400, { erro: 'JSON inválido.' }); }
   if (!corpo || typeof corpo !== 'object' || Array.isArray(corpo)) return resposta(400, { erro: 'Esperava um objeto.' });
 
+  // guarda o que chegou (para conferir depois o que a Agilité mandou; tabela só do administrador)
+  await db.from('crm_fin_espelho_log').insert({ sentido: 'recebido', par: String((corpo as Record<string, unknown>).par ?? '').slice(0, 80), status: null, detalhe: { pacote: corpo } });
   const { data, error } = await db.rpc('crm_espelho_aplicar', { p: corpo });
   if (error) {
     // erro de formato (raise da função) volta como 400 com a mensagem; o resto, 500 sem detalhe
