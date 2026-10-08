@@ -120,7 +120,8 @@
     const l = titulos(), i = l.indexOf(t);
     if (i >= 0) l[i] = Object.assign({}, t, r);
     CRM.render();
-    CRM.toast(dia ? t.duplicata + ' remarcado para ' + dm(dia) + ' (em vermelho: em atraso).' : 'Remarcação tirada: o título volta para o vencimento.');
+    const antes = dia && posterga(dia) < creditoTitulo(t.vencimento, d1());
+    CRM.toast(dia ? t.duplicata + ' remarcado para ' + dm(dia) + (antes ? ' (em verde: o cliente adiantou).' : ' (em vermelho: em atraso).') : 'Remarcação tirada: o título volta para o vencimento.');
   }
   // Dia da baixa: o da coluna, se já passou; senão hoje (não se paga no futuro).
   const diaDaBaixa = d => (d && d <= hoje() ? d : hoje());
@@ -172,10 +173,11 @@
       CRM.abrirForm({
         titulo: 'Título a receber', intro: nomeTitulo(t) + ' · duplicata ' + t.duplicata + ' · ' + R.moeda(t.valor) +
           ((lig => lig ? '\nÉ a previsão "' + lig.descricao + '" (mesmo valor): receber o título dá baixa nela.' : '')(ligadasPorTitulo(F.lancamentos, titulos(), nomeTitulo).get(t.duplicata))) + '\nVence ' + R.dataBR(t.vencimento) +
-          (t.previsao ? ' · em atraso, remarcado para ' + R.dataBR(t.previsao) : atrasado ? ' · em atraso' : ', cai na conta ' + R.dataBR(creditoTitulo(t.vencimento, d1()))) +
+          (t.previsao && t.previsao >= hoje() && posterga(t.previsao) < creditoTitulo(t.vencimento, d1()) ? ' · o cliente adiantou: remarcado para ' + R.dataBR(t.previsao)
+            : t.previsao ? ' · em atraso, remarcado para ' + R.dataBR(t.previsao) : atrasado ? ' · em atraso' : ', cai na conta ' + R.dataBR(creditoTitulo(t.vencimento, d1()))) +
           '.\nO título sai do contas a receber quando a listagem do FKN mostrar que foi pago.',
         campos: [{ nome: 'dia', rotulo: 'Recebido em', tipo: 'data' }, { nome: 'valor', rotulo: 'Valor que entrou (R$)', tipo: 'numero', ajuda: 'com juros ou só uma parte? ponha o que caiu na conta' },
-          { nome: 'nova', rotulo: 'Ou remarcar para', tipo: 'data', ajuda: 'o dia em que espera receber (aparece em vermelho na grade); também dá para arrastar o título' }],
+          { nome: 'nova', rotulo: 'Ou remarcar para', tipo: 'data', ajuda: 'o dia em que espera receber (depois do vencimento: vermelho; antes, o cliente adiantou: verde); também dá para arrastar o título' }],
         valores: { dia, valor: r2(t.valor), nova: t.previsao || '' },
         rodape: '<button type="button" class="btn sec" data-acao="cx-tit-remarcar" data-id="' + esc(t.duplicata) + '">Remarcar</button>' +
           (t.previsao ? '<button type="button" class="btn sec" data-acao="cx-tit-desremarcar" data-id="' + esc(t.duplicata) + '">Tirar a remarcação</button>' : ''),
@@ -438,9 +440,9 @@
       (x.secao === 'entrada' ? 'Recebi' : 'Paguei') + ' ' + (dia <= hoje() ? (dia === hoje() ? 'hoje' : 'em ' + dm(dia)) : 'hoje') + '">✓</button>' : '';
     // conta prevista e título (arrastar o título = remarcar: o cliente vai pagar em outro dia)
     const arrasta = x.estado === 'previsto' ? ' draggable="true" data-mover="' + esc(x.tipo === 'lanc' ? x.ref.id : 'tit:' + x.ref.duplicata) + '"' : '';
-    return '<div class="cx-it ' + (x.secao === 'entrada' ? 'cx-ent' : 'cx-sai') + ' ' + x.estado + (x.atrasado ? ' atrasado' : '') + (ok ? ' comok' : '') + '"' + arrasta + '>' + ok +
+    return '<div class="cx-it ' + (x.secao === 'entrada' ? 'cx-ent' : 'cx-sai') + ' ' + x.estado + (x.atrasado ? ' atrasado' : '') + (x.adiantado ? ' adiantado' : '') + (ok ? ' comok' : '') + '"' + arrasta + '>' + ok +
       '<button type="button" class="cx-corpo" data-acao="cx-item" data-id="' + esc(x.chave) + '" data-dia="' + esc(dia) + '" title="' + esc(x.titulo + (x.obs ? ' — ' + x.obs : '')) + '">' +
-      '<span class="t">' + esc(x.titulo) + '</span>' + (x.obs ? '<span class="o">' + esc(x.obs) + '</span>' : '') + '<span class="v">' + esc(R.moeda(x.valor)) + '</span></button></div>';
+      '<span class="t">' + (x.adiantado ? '<span class="cx-adi">⏩ adiantado</span> ' : '') + esc(x.titulo) + '</span>' + (x.obs ? '<span class="o">' + esc(x.obs) + '</span>' : '') + '<span class="v">' + esc(R.moeda(x.valor)) + '</span></button></div>';
   }
   function grade(s) {
     const h = hoje();
@@ -473,7 +475,8 @@
       '<p class="cx-legenda"><span class="cx-it cx-ent feito"><span class="cx-corpo">aconteceu</span></span><span class="cx-it cx-sai previsto"><span class="cx-corpo">previsto</span></span>' +
       '<span class="cx-it cx-sai fora"><span class="cx-corpo">pago fora do caixa</span></span>' +
       '<span class="cx-it cx-ent previsto atrasado"><span class="cx-corpo">em atraso, remarcado</span></span>' +
-      '<small>✓ paga ou recebe no dia da coluna · clique no item para ajustar valor e dia, pausar ou desfazer · arraste uma conta ou um título em atraso para outro dia · + lança no dia</small></p>' +
+      '<span class="cx-it cx-ent previsto adiantado"><span class="cx-corpo">⏩ o cliente adiantou</span></span>' +
+      '<small>✓ paga ou recebe no dia da coluna · clique no item para ajustar valor e dia, pausar ou desfazer · arraste uma conta ou um título para outro dia · + lança no dia</small></p>' +
       '<div class="cx-grade-rolagem"><table class="cx-grade"><thead><tr><th class="lab"></th>' + th + '</tr></thead><tbody>' +
         '<tr class="sec"><th class="lab ent">Entradas</th>' + celulas('entrada') + '</tr>' +
         '<tr class="tot"><th class="lab">Total entradas</th>' + total('entrada') + '</tr>' +

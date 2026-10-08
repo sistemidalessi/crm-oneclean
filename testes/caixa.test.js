@@ -279,3 +279,23 @@ test('baixados no FKN sem entrada no caixa: pendentes e o dia sugerido', () => {
   assert.deepEqual(p.map(x => [x.duplicata, x.dia]), [['000012/01', '2026-10-02'], ['000010/01', '2026-10-07'], ['000011/01', '2026-10-07']]);
   assert.equal(C.baixadosPendentes(null, [], [], H, true).length, 0);
 });
+
+test('título adiantado (remarcado para antes do vencimento): verde, não conta como atraso', () => {
+  // vence 09/10 (cai 13/10 com D+1 e o feriado de 12/10); o cliente vai pagar hoje, 08/10
+  const titulos = [{ duplicata: '003/01', cliente: 'COLEGIO EXEMPLO', valor: 300, vencimento: '2026-10-09', previsao: '2026-10-08' }];
+  const g = C.itensGrade('2026-10-07', '2026-10-21', '2026-10-08', [], titulos, { d1: true });
+  assert.deepEqual([g[0].data, g[0].atrasado, g[0].adiantado], ['2026-10-08', false, true]);
+  assert.match(g[0].obs, /adiantado/);
+  // remarcado para depois do vencimento continua em atraso (vermelho)
+  const dep = C.itensGrade('2026-10-07', '2026-10-21', '2026-10-08', [], [Object.assign({}, titulos[0], { vencimento: '2026-10-05' })], { d1: true });
+  assert.deepEqual([dep[0].atrasado, dep[0].adiantado], [true, false]);
+  // não pagou no dia adiantado: volta para o dia do vencimento, sem virar vencido
+  const dps = C.itensGrade('2026-10-09', '2026-10-23', '2026-10-09', [], titulos, { d1: true });
+  assert.deepEqual([dps[0].data, dps[0].atrasado, dps[0].adiantado], ['2026-10-13', false, false]);
+  assert.deepEqual(C.receberVencido(titulos, [], '2026-10-09', true), []);
+  // leitura (Agilité / gestora): adiantado, não atrasado
+  const r = C.resumoLeitura({ lancamentos: [], saldos: [{ data: '2026-10-08', valor: 1 }], titulos }, { hoje: '2026-10-08', dias: 10, d1: true });
+  const lt = r.titulos_a_receber.titulos[0];
+  assert.deepEqual([lt.cai_na_conta, lt.atrasado, lt.adiantado], ['2026-10-08', false, true]);
+  assert.equal(r.titulos_a_receber.vencidos, 0);
+});

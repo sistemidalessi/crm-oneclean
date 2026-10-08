@@ -143,6 +143,9 @@
   // previsto nesse dia, em vermelho; previsão que já passou volta para "A receber vencido".
   const remarcado = (t, hoje) => !!t.previsao && t.previsao >= hoje;
   const diaDoTitulo = (t, hoje, d1) => remarcado(t, hoje) ? posterga(t.previsao) : creditoTitulo(t.vencimento, d1);
+  // Remarcado para ANTES do dia em que cairia na conta: o cliente adiantou o pagamento (08/10/2026,
+  // Anderson: "veio vermelho também"). Fica verde, com a marca de adiantado, e não conta como atraso.
+  const adiantado = (t, hoje, d1) => remarcado(t, hoje) && posterga(t.previsao) < creditoTitulo(t.vencimento, d1);
 
   // ------------------------------------------------------------ previsão ligada a título
   // A mesma venda por dois caminhos (06/10/2026): o recorrente "Material vendido à Agilité — <cond.>"
@@ -204,10 +207,11 @@
       const cr = diaDoTitulo(t, hoje, opc.d1);
       if (cr < hoje) return;
       const lig = ligadas.get(t.duplicata);
-      const rem = remarcado(t, hoje);
+      const rem = remarcado(t, hoje), adi = adiantado(t, hoje, opc.d1);
       add({ chave: 'tit:' + t.duplicata, tipo: 'titulo', secao: 'entrada', data: cr, titulo: (opc.nome ? opc.nome(t) : t.cliente_nome || 'Cliente') + ' · ' + t.duplicata + (lig ? ' · ' + lig.descricao : ''),
-        valor: r2(t.valor), estado: 'previsto', atrasado: rem,
-        obs: rem ? 'em atraso: venceu ' + dm(t.vencimento) + ', remarcado para ' + dm(cr) : 'título vence ' + dm(t.vencimento) + ', cai na conta ' + dm(cr), ref: t, ligada: lig || null });
+        valor: r2(t.valor), estado: 'previsto', atrasado: rem && !adi, adiantado: adi,
+        obs: adi ? 'adiantado: vencia ' + dm(t.vencimento) + ', o cliente paga em ' + dm(cr)
+          : rem ? 'em atraso: venceu ' + dm(t.vencimento) + ', remarcado para ' + dm(cr) : 'título vence ' + dm(t.vencimento) + ', cai na conta ' + dm(cr), ref: t, ligada: lig || null });
     });
     return it;
   }
@@ -325,7 +329,7 @@
       const itens = doDia.map(x => {
         if (x.tipo === 'titulo') {
           const t = x.ref, nome = limpar(nomeT(t)), lig = x.ligada;
-          return { tipo: 'entrada', descricao: 'Título ' + t.duplicata + ' — ' + nome + (lig ? ' · ' + limpar(lig.descricao) : '') + (x.atrasado ? ' (em atraso, remarcado)' : ''), valor: r2(x.valor), situacao: 'previsto',
+          return { tipo: 'entrada', descricao: 'Título ' + t.duplicata + ' — ' + nome + (lig ? ' · ' + limpar(lig.descricao) : '') + (x.atrasado ? ' (em atraso, remarcado)' : x.adiantado ? ' (adiantado pelo cliente)' : ''), valor: r2(x.valor), situacao: 'previsto',
             categoria: lig && lig.categoria ? lig.categoria : 'Duplicatas recebidas', cliente_fornecedor: nome, entre_empresas: ENTRE_EMPRESAS.test(nome) || !!(lig && ehEntreEmpresas(lig)), _ag: false };
         }
         return doLanc(x.ref, x.valor, x.estado === 'previsto' ? 'previsto' : 'aconteceu', x.estado === 'fora' ? { pago_fora: true } : null);
@@ -361,7 +365,7 @@
     const tits = (d.titulos || []).filter(t => !recebidos.has(t.duplicata)).map(t => {
       const cai = diaDoTitulo(t, hoje, o.d1), nome = limpar(nomeT(t));
       const lig = ligT.get(t.duplicata);
-      return Object.assign({ cliente: nome, duplicata: t.duplicata, valor: r2(t.valor), vencimento: t.vencimento, cai_na_conta: cai, atrasado: cai < hoje || remarcado(t, hoje),
+      return Object.assign({ cliente: nome, duplicata: t.duplicata, valor: r2(t.valor), vencimento: t.vencimento, cai_na_conta: cai, atrasado: cai < hoje || (remarcado(t, hoje) && !adiantado(t, hoje, o.d1)), adiantado: adiantado(t, hoje, o.d1),
         entre_empresas: ENTRE_EMPRESAS.test(nome) || !!(lig && ehEntreEmpresas(lig)) }, lig ? { referente: limpar(lig.descricao) } : {});
     }).sort((a, b) => a.vencimento.localeCompare(b.vencimento) || a.duplicata.localeCompare(b.duplicata));
     const atrasados = tits.filter(t => t.atrasado);
