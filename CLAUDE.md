@@ -918,6 +918,10 @@ Anderson: cada sistema cuida da sua empresa; o "Geral" (as duas) é de quem lê 
   "⏩ adiantado" ("adiantado: vencia …, o cliente paga em …"), `atrasado: false` e `adiantado: true` na grade e na
   leitura (não conta em `vencidos`). Se não pagar no dia adiantado, volta para o dia do vencimento (não vira vencido).
   `crm-caixa-leitura` v10 fixada no commit 7cc1d90.
+- **"Paguei em <vencimento>" nas contas vencidas sem baixa (08/10, Anderson: "paguei ontem, só não dei baixa"):**
+  baixa no caixa com a data do vencimento (`cx-nodia`), desconta do saldo se for depois do último saldo do BB
+  informado. Os três botões têm dica: "Paguei hoje" (data de hoje, mexe no saldo), "Paguei em …" (data do vencimento,
+  mexe no saldo) e "Já estava paga" (`baixa: 'fora'`: o saldo do banco informado já desconta, não mexe no saldo).
 - **Transferência entre empresas (06/10 à noite, espelho da Agilité, commit 79fdfe7 de lá):** categoria
   **"Transferência entre empresas"** (nome exato; nas listas de entrada e de saída; `ENTRE_EMPRESAS` também casa
   com ela): só caixa — não é receita, despesa nem empréstimo; na aba Geral da Agilité as duas pontas se anulam.

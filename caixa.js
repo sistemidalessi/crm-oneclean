@@ -501,14 +501,16 @@
     const rv = desde ? rvTodos.filter(t => t.vencimento >= desde) : rvTodos;
     const antigos = rvTodos.length - rv.length;
     const tot = l => l.reduce((t, x) => t + Number(x.valor || 0), 0);
-    const b = (acao, id, rot, cls) => '<button type="button" class="mini' + (cls ? ' ' + cls : '') + '" data-acao="' + acao + '" data-id="' + esc(id) + '">' + esc(rot) + '</button>';
+    const b = (acao, id, rot, cls, dica) => '<button type="button" class="mini' + (cls ? ' ' + cls : '') + '" data-acao="' + acao + '" data-id="' + esc(id) + '"' + (dica ? ' title="' + esc(dica) + '"' : '') + '>' + esc(rot) + '</button>';
     const bx = baixados();
     return (bx.length ? '<details class="cartao cx-venc cx-baixados" data-chave="baixados-fkn" open><summary><strong>Baixados no FKN, sem entrada no caixa: ' + bx.length + ' (' + esc(R.moeda(tot(bx))) + ')</strong> <small>saíram do contas a receber do FKN sem "Recebi" aqui — fora do saldo até você dizer. Entrou no banco? "Entrou". Abatimento, devolução ou cancelamento? "Não entrou".</small></summary>' +
       '<div class="tabela-rolagem"><table class="tabela"><tbody>' + bx.map(x => '<tr><td>' + esc(nomeTitulo(x)) + '<small>duplicata ' + esc(x.duplicata) + (x.vencimento ? ' · venceu ' + esc(R.dataBR(x.vencimento)) : '') + '</small></td><td>baixado no FKN ' + esc(dm(String(x.sumiu_em || '').slice(0, 10))) + '</td>' +
         '<td class="num">' + esc(R.moeda(x.valor)) + '</td><td class="acoes-linha">' + b('cx-bx-entrou', x.id, 'Entrou…') + b('cx-bx-nao', x.id, 'Não entrou') + '</td></tr>').join('') + '</tbody></table></div></details>' : '') +
-      (v.length ? '<details class="cartao cx-venc"><summary><strong>Contas vencidas sem baixa: ' + v.length + ' (' + esc(R.moeda(tot(v))) + ')</strong> <small>fora do saldo da grade. Já pagou? "Já estava paga". Vai negociar? "Pausar".</small></summary>' +
+      (v.length ? '<details class="cartao cx-venc"><summary><strong>Contas vencidas sem baixa: ' + v.length + ' (' + esc(R.moeda(tot(v))) + ')</strong> <small>fora do saldo da grade. Pagou no vencimento e não deu baixa? "Paguei em …" (desconta do saldo). Já descontada no saldo do banco que você informou? "Já estava paga" (não mexe no saldo). Vai negociar? "Pausar".</small></summary>' +
       '<div class="tabela-rolagem"><table class="tabela"><tbody>' + v.map(l => '<tr><td>' + esc(l.descricao) + (l.categoria ? '<small>' + esc(l.categoria) + '</small>' : '') + '</td><td>' + esc(R.dataBR(l.vencimento)) + '</td>' +
-        '<td class="num">' + esc(R.moeda(l.valor)) + '</td><td class="acoes-linha">' + b('cx-pagar', l.id, (l.tipo === 'entrada' ? 'Recebi' : 'Paguei') + ' hoje') + b('cx-japaga', l.id, 'Já estava paga') + b('cx-pausar', l.id, 'Pausar') + '</td></tr>').join('') +
+        '<td class="num">' + esc(R.moeda(l.valor)) + '</td><td class="acoes-linha">' + b('cx-pagar', l.id, (l.tipo === 'entrada' ? 'Recebi' : 'Paguei') + ' hoje', '', 'baixa com a data de hoje e ' + (l.tipo === 'entrada' ? 'soma no' : 'desconta do') + ' saldo') +
+          b('cx-nodia', l.id, (l.tipo === 'entrada' ? 'Recebi' : 'Paguei') + ' em ' + dm(l.vencimento), '', 'aconteceu no vencimento, só faltou a baixa: entra no caixa de ' + dm(l.vencimento) + ' e ' + (l.tipo === 'entrada' ? 'soma no' : 'desconta do') + ' saldo') +
+          b('cx-japaga', l.id, 'Já estava paga', '', 'o saldo do banco que você informou já desconta: fica paga sem mexer no saldo') + b('cx-pausar', l.id, 'Pausar') + '</td></tr>').join('') +
       '</tbody></table></div></details>' : '') +
       (rv.length ? '<details class="cartao cx-venc"><summary><strong>A receber vencido: ' + rv.length + ' título(s) (' + esc(R.moeda(tot(rv))) + ')</strong> <small>já deviam ter caído na conta; fora da previsão até entrarem. Caiu? "Recebi hoje".</small></summary>' +
       '<div class="tabela-rolagem"><table class="tabela"><tbody>' + rv.map(t => '<tr><td>' + esc(nomeTitulo(t)) + '<small>duplicata ' + esc(t.duplicata) + '</small></td><td>vence ' + esc(R.dataBR(t.vencimento)) + '</td>' +
@@ -677,6 +679,9 @@
     'cx-pagar': (id, el) => { fecha(); const l = lanc(id); if (l) pagar(l, diaDaBaixa(el && el.dataset.dia)).catch(CRM.falhou); },
     'cx-bx-entrou': id => { const x = baixados().find(y => y.id === id); if (x) formBaixado(x); },
     'cx-bx-nao': id => { const x = baixado(id); if (x) naoEntrouBaixado(x).catch(CRM.falhou); },
+    // Pagou no vencimento e não deu baixa (08/10/2026, Anderson: "paguei ontem, só não dei baixa"): baixa
+    // no caixa com a data do vencimento — conta no saldo se for depois do último saldo do BB informado.
+    'cx-nodia': id => { const l = lanc(id); if (l) pagar(l, diaDaBaixa(l.vencimento)).then(() => CRM.toast((l.tipo === 'entrada' ? 'Recebido' : 'Pago') + ' em ' + dm(diaDaBaixa(l.vencimento)) + ': ' + R.moeda(l.valor) + ' (entrou no saldo).')).catch(CRM.falhou); },
     'cx-japaga': id => { const l = lanc(id); if (l) grava(l.id, { situacao: 'pago', pago_em: l.vencimento, baixa: 'fora', baixado_em: agora() }).catch(CRM.falhou); },
     'cx-pausar': id => { fecha(); const l = lanc(id); if (l) grava(l.id, { situacao: 'pausado' }).then(() => CRM.toast('Conta pausada: saiu do caixa (aba Contas pausadas).')).catch(CRM.falhou); },
     'cx-voltar': id => { const l = lanc(id); if (l) grava(l.id, { situacao: 'aberto' }).catch(CRM.falhou); },
