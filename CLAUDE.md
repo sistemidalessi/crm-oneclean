@@ -920,7 +920,8 @@ Anderson: cada sistema cuida da sua empresa; o "Geral" (as duas) é de quem lê 
   `crm-caixa-leitura` v10 fixada no commit 7cc1d90.
 - **Empréstimo de acerto do caixa em azul (08/10, Anderson: "a Je me emprestou 10 mil para devolver até amanhã… deixar o
   quadradinho em azul"):** na grade, a entrada do empréstimo (`emprestimo: true`), a "Devolução do empréstimo — …" e as
-  parcelas "Empréstimo — …" ganham fundo e borda azuis e a etiqueta "🔁 empréstimo" / "🔁 devolução"
+  parcelas "Empréstimo — …" ganham azul forte preenchido com letra branca (pedido do Anderson: destacar do "+ N
+  entradas") e a etiqueta "🔁 empréstimo" / "🔁 devolução"
   (`ehEmprestimoLanc` em `caixa-calculo.js`, item `emprestimo` na grade); legenda "🔁 empréstimo (entra e volta)".
   **Leitor de frases (mudou AQUI — avisar a Agilité para levar):** "me/nos emprestou", "peguei emprestado" e
   "emprestado da/do" = entrada de empréstimo, realizada (`EMPRESTOU_PRA_MIM`); "… 10 mil ontem para devolver amanhã" separa
