@@ -1432,6 +1432,8 @@ begin
   insert into public.crm_fin_espelho_cfg (id, url, senha) values (1, nullif(btrim(p_url), ''), nullif(btrim(p_senha), ''))
   on conflict (id) do update set url = coalesce(nullif(btrim(p_url), ''), crm_fin_espelho_cfg.url),
       senha = coalesce(nullif(btrim(p_senha), ''), crm_fin_espelho_cfg.senha), atualizado_em = now();
+  -- trocou endereço ou senha: o que falhou tenta de novo já no próximo minuto
+  update public.crm_fin_espelho_fila set enviar_depois = now() where pendente and request_id is null;
 end;
 $$;
 -- senha que a Agilité usa para gravar aqui: gerada no banco, mostrada uma vez, guardada só o SHA-256

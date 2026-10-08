@@ -959,6 +959,10 @@ Anderson: cada sistema cuida da sua empresa; o "Geral" (as duas) é de quem lê 
   - Os refs do CRM são `oneclean:<uuid>` (o exemplo do pedido usava número). 1º contato 08/10 14:40: a Agilité
     recusaria tudo daqui (`REF = /^(agilite|oneclean):\d+$/` em `src/caixa/espelho.js` de lá) — pedido à sessão
     da Agilité para aceitar `oneclean:<uuid>`. A função guarda o pacote recebido no registro (`detalhe.pacote`).
+  - 1º envio do CRM (teste de R$ 10 lançado pelo Anderson, 08/10 15:53): pacote certo, a Agilité respondeu **401**.
+    A senha guardada no CRM tinha 44 caracteres; a do servidor da Agilité (`data/caixa_espelho_secret`, gerada com
+    `randomBytes(32).toString('hex')`) tem **64** (0-9 e a-f). Salvar a senha de novo em Integrações faz o que
+    falhou ser reenviado no minuto seguinte (`crm_espelho_configura` zera a espera).
 - **Leitura do Caixa pela Agilité, 08/10:** as leituras de 07/10 12:29 tinham dado 401 (senha recusada). O Anderson
   gerou senha nova (10:18) e colou na Agilité; 3 leituras 200 às 10:21. A senha antiga (06/10) foi **desligada**
   (`ativo=false` em `crm_integracoes`, não apagada). A aba Geral da Agilité lê na hora em que é aberta (cache de 1 min,
