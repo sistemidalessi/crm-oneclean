@@ -353,7 +353,7 @@
         '</div>' +
         // ---- equipe
         '<section class="cartao"><h2>Equipe <small>faturamento pela carteira do cliente</small></h2><div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Vendedora</th><th class="num">Mês</th><th class="num">Meta</th><th class="num">Ano</th><th class="num">Clientes ativos</th><th class="num">Contatos no mês</th><th class="num">Hoje</th><th class="num">Atrasadas</th></tr></thead><tbody>' +
-          p.equipe.map(u => '<tr><td><strong>' + esc(u.nome) + '</strong>' + (u.direto ? ' <small>venda sem vendedora</small>' : '') + '</td><td class="num">' + esc(R.moeda(u.valorMes)) + '</td><td class="num">' + (u.meta ? CRM.barra(u.valorMes, u.meta, R.pct(u.pctMeta)) : '—') + '</td>' +
+          p.equipe.map(u => '<tr><td><strong>' + esc(u.nome) + '</strong>' + (u.direto ? ' <small>Venda sem vendedor(a)</small>' : '') + '</td><td class="num">' + esc(R.moeda(u.valorMes)) + '</td><td class="num">' + (u.meta ? CRM.barra(u.valorMes, u.meta, R.pct(u.pctMeta)) : '—') + '</td>' +
             '<td class="num">' + esc(R.moeda(u.valorAno)) + '</td>' +
             (u.direto ? '<td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">—</td>'
               : '<td class="num">' + u.clientesAtivos + '</td><td class="num">' + u.contatos + '</td><td class="num">' + u.contatosHoje + '</td>' +
