@@ -442,7 +442,7 @@
     const arrasta = x.estado === 'previsto' ? ' draggable="true" data-mover="' + esc(x.tipo === 'lanc' ? x.ref.id : 'tit:' + x.ref.duplicata) + '"' : '';
     return '<div class="cx-it ' + (x.secao === 'entrada' ? 'cx-ent' : 'cx-sai') + ' ' + x.estado + (x.atrasado ? ' atrasado' : '') + (x.adiantado ? ' adiantado' : '') + (x.emprestimo ? ' emprestimo' : '') + (ok ? ' comok' : '') + '"' + arrasta + '>' + ok +
       '<button type="button" class="cx-corpo" data-acao="cx-item" data-id="' + esc(x.chave) + '" data-dia="' + esc(dia) + '" title="' + esc(x.titulo + (x.obs ? ' — ' + x.obs : '')) + '">' +
-      '<span class="t">' + (x.adiantado ? '<span class="cx-adi">⏩ adiantado</span> ' : '') + (x.emprestimo ? '<span class="cx-etq-emp">🔁 ' + (x.secao === 'entrada' ? 'empréstimo' : 'devolução') + '</span> ' : '') + esc(x.titulo) + '</span>' + (x.obs ? '<span class="o">' + esc(x.obs) + '</span>' : '') + '<span class="v">' + esc(R.moeda(x.valor)) + '</span></button></div>';
+      '<span class="t">' + (x.adiantado ? '<span class="cx-adi">⏩ adiantado</span> ' : '') + (x.emprestimo ? '<span class="cx-etq-emp">🔁 ' + (x.ref && x.ref.categoria === 'Transferência entre empresas' ? 'entre empresas' : x.secao === 'entrada' ? 'empréstimo' : 'devolução') + '</span> ' : '') + esc(x.titulo) + '</span>' + (x.obs ? '<span class="o">' + esc(x.obs) + '</span>' : '') + '<span class="v">' + esc(R.moeda(x.valor)) + '</span></button></div>';
   }
   function grade(s) {
     const h = hoje();

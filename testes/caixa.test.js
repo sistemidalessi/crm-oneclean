@@ -304,8 +304,10 @@ test('empréstimo de acerto do caixa: a entrada e a devolução vêm marcadas (a
   const lancs = [
     { id: 'e', tipo: 'entrada', descricao: 'Empréstimo — Fulana', categoria: 'Empréstimos recebidos', valor: 10000, vencimento: '2026-10-07', situacao: 'pago', pago_em: '2026-10-07', baixa: 'caixa', emprestimo: true },
     { id: 'd', tipo: 'saida', descricao: 'Devolução do empréstimo — Fulana', categoria: 'Empréstimos e giro', valor: 10000, vencimento: '2026-10-09', situacao: 'aberto' },
-    { id: 'x', tipo: 'saida', descricao: 'Fornecedor qualquer', categoria: 'Fornecedores', valor: 100, vencimento: '2026-10-09', situacao: 'aberto' }];
+    { id: 'x', tipo: 'saida', descricao: 'Fornecedor qualquer', categoria: 'Fornecedores', valor: 100, vencimento: '2026-10-09', situacao: 'aberto' },
+    { id: 't', tipo: 'saida', descricao: 'Transferência para a Agilité', categoria: 'Transferência entre empresas', valor: 1500, vencimento: '2026-10-07', situacao: 'pago', pago_em: '2026-10-07', baixa: 'caixa', entre_empresas: true },
+    { id: 'v', tipo: 'entrada', descricao: 'Agilité devolve a transferência', categoria: 'Transferência entre empresas', valor: 1500, vencimento: '2026-10-14', situacao: 'aberto', entre_empresas: true }];
   const g = C.itensGrade('2026-10-07', '2026-10-21', '2026-10-08', lancs, [], { d1: true });
   const m = Object.fromEntries(g.map(x => [x.ref.id, x.emprestimo]));
-  assert.deepEqual(m, { e: true, d: true, x: false });
+  assert.deepEqual(m, { e: true, d: true, x: false, t: true, v: true });
 });

@@ -187,7 +187,8 @@
   // ficam fora da grade e do saldo previsto: vão para os blocos próprios.
   // Empréstimo de acerto do fluxo de caixa (08/10/2026, Anderson: "entra e sai… deixar o quadradinho em azul"):
   // a entrada do empréstimo, a devolução e as parcelas dele. Na grade ganham a cor azul.
-  const ehEmprestimoLanc = l => !!l.emprestimo || /^(?:Devolução do empréstimo|Empréstimo —)/.test(l.descricao || '');
+  // Transferência entre empresas (a OneClean empresta à Agilité ou o contrário, com a volta prevista) também.
+  const ehEmprestimoLanc = l => !!l.emprestimo || /^(?:Devolução do empréstimo|Empréstimo —)/.test(l.descricao || '') || l.categoria === 'Transferência entre empresas';
   function itensGrade(de, ate, hoje, lancs, titulos, opc) {
     opc = opc || {};
     const it = [];

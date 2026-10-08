@@ -285,3 +285,14 @@ test('"me emprestou ... para devolver amanhã": entrada de empréstimo com a dev
   const c = F.classificar(F.interpretar('devolvi 1.600 pra Agilité', '2026-10-08').itens, Object.assign({}, vazio, ctx))[0];
   assert.deepEqual([c.tipo, c.valor], ['saida', 1600]);
 });
+
+test('"1500 pra Agilité ontem e ela vai devolver dia 14": saída com volta, mesmo com "entra e volta" na frase (08/10/2026)', () => {
+  const ctx = Object.assign({}, vazio, { hoje: '2026-10-08' });
+  const a = F.classificar(F.interpretar('empréstimo entra e volta - 1500 pra agilite ontem e ela vai devolver dia 14/10', '2026-10-08').itens, ctx);
+  assert.equal(a.length, 1);
+  assert.deepEqual([a[0].tipo, a[0].valor, a[0].data, a[0].categoria, a[0].devolucaoPrevista], ['saida', 1500, '2026-10-07', 'Transferência entre empresas', '2026-10-14']);
+  const b = F.classificar(F.interpretar('ontem, 07/10 entrou 10.000 como empréstimo da Fulana para devolver amanhã, dia 09/10', '2026-10-08').itens, ctx)[0];
+  assert.deepEqual([b.tipo, b.valor, b.data, b.descricao, b.emprestimo.em], ['entrada', 10000, '2026-10-07', 'Empréstimo — Fulana', '2026-10-09']);
+  const c = F.classificar(F.interpretar('ontem a OneClean emprestou r$ 1500 para a Agilité que será devolvido dia 14', '2026-10-08').itens, ctx)[0];
+  assert.deepEqual([c.tipo, c.situacao, c.devolucaoPrevista], ['saida', 'realizado', '2026-10-14']);
+});

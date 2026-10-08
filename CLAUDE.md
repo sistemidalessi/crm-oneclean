@@ -927,6 +927,10 @@ Anderson: cada sistema cuida da sua empresa; o "Geral" (as duas) é de quem lê 
   "emprestado da/do" = entrada de empréstimo, realizada (`EMPRESTOU_PRA_MIM`); "… 10 mil ontem para devolver amanhã" separa
   a cauda "para/pra/e devolver <data>" do pedaço com valor (`CAUDA_DEVOLUCAO` em `pedacos`) e a data vira a devolução;
   "me, nos, emprestou, emprestado, peguei…" saem do nome. Antes, essa frase virava uma SAÍDA de 10 mil.
+  Mesmo dia, depois: **transferência entre empresas também em azul** ("🔁 entre empresas"; é empréstimo entre as
+  empresas, com volta); leitor: "1500 pra agilite ontem e ela vai devolver dia 14" = saída com volta mesmo com
+  "entra e volta" escrito na frase (`PARA_ALGUEM`: pedaço com valor e "pra/para/pro <alguém>" sem verbo = saída),
+  "que será devolvido dia 14" / "ela vai devolver" também separam a cauda, e "como"/"dia" saem do nome.
 - **"Paguei em <vencimento>" nas contas vencidas sem baixa (08/10, Anderson: "paguei ontem, só não dei baixa"):**
   baixa no caixa com a data do vencimento (`cx-nodia`), desconta do saldo se for depois do último saldo do BB
   informado. Os três botões têm dica: "Paguei hoje" (data de hoje, mexe no saldo), "Paguei em …" (data do vencimento,
