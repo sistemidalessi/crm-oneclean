@@ -931,6 +931,10 @@ Anderson: cada sistema cuida da sua empresa; o "Geral" (as duas) é de quem lê 
   empresas, com volta); leitor: "1500 pra agilite ontem e ela vai devolver dia 14" = saída com volta mesmo com
   "entra e volta" escrito na frase (`PARA_ALGUEM`: pedaço com valor e "pra/para/pro <alguém>" sem verbo = saída),
   "que será devolvido dia 14" / "ela vai devolver" também separam a cauda, e "como"/"dia" saem do nome.
+  Lançamentos reais de 08/10 (a pedido do Anderson): empréstimo da Je (entra 10.000 em 07/10, devolve 09/10) e
+  empréstimo da OneClean à Agilité (sai 1.500 em 07/10, volta 14/10). Apagados dois errados das tentativas com o
+  leitor antigo (entrada de 1.500 "Transferência da Agilité" repetida e R$ 7,00 "Empréstimo — /10.000 como Je
+  devolver"), backup em `crm_backup.caixa_lanc_errados_2026_10_08`. Saldo do CRM depois: R$ 15.478,12.
 - **"Paguei em <vencimento>" nas contas vencidas sem baixa (08/10, Anderson: "paguei ontem, só não dei baixa"):**
   baixa no caixa com a data do vencimento (`cx-nodia`), desconta do saldo se for depois do último saldo do BB
   informado. Os três botões têm dica: "Paguei hoje" (data de hoje, mexe no saldo), "Paguei em …" (data do vencimento,
