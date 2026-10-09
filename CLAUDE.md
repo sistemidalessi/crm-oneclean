@@ -1138,6 +1138,14 @@ ligado ao domínio; **começa com fila de aprovação** (nada sai sozinho); reme
   07/08 é a NF 2069 — e 13 atividades) foi para "JK COMERCIAL E DISTRIBUIDORA LTDA" (CNPJ, endereço, nota); WhatsApp do
   Junior na ficha, Agendor em `externos_mesclados`, nota "Cadastro mesclado" no histórico; backup na linha 76 de
   `crm_backup.mescla_empresas`; o cadastro antigo foi apagado (vazio).
+  **Busca dos casos iguais ao da JK (09/10, pedido do Anderson):** venda ganha de cadastro sem CNPJ com o mesmo valor
+  (até 3 dias) de uma nota de outro cadastro — sinal que a tela de Duplicados não usa (lá é nome/telefone/e-mail, e "JK"
+  não passava). **14 cadastros do Agendor juntados em 12** com CNPJ (35 negócios, 85 atividades; backup nas linhas
+  77–90 de `crm_backup.mescla_empresas` e pares em `crm_backup.junta_2026_10_09`): ADEVA (2), Intelectus, Living Moovie,
+  Salmazo, Trufer, Alcance, Laquiatto, e — apesar de marcados "outra empresa" em Duplicados, por decisão do Anderson —
+  Club Up, Plestin, Nova Portal (2), Senac Jabaquara e Magma Soldas. **Ficaram separados de propósito:** Ap+Elettro e El
+  Shadai (já ligados como grupo), "Ricardo Rodrigues Alves Colégio" × Instituto AD Liberty e as 4 unidades do Serviço
+  Promocional N. S. Aparecida (o Anderson preferiu deixar como estão); SESI/SENAI/Radisson são unidades diferentes.
 - `execute_sql` com `delete` solto fica parado até o tempo esgotar (a ferramenta espera confirmação); o formato
   `with alvo as (...), d as (delete ... using alvo ... returning 1) select count(*) from d` passa normalmente.
 - Na tela de cada pessoa os apagados somem na conferência de hora em hora da recarga leve, ou com F5 / "Recarregar dados".
