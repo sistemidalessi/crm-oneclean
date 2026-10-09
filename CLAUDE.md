@@ -1160,6 +1160,9 @@ ligado ao domínio; **começa com fila de aprovação** (nada sai sozinho); reme
   nem proposta) somavam R$ 12.413,63 por causa de 8 com valor herdado do Agendor; os 8 passaram a R$ 0,00 (os negócios
   continuam lá), backup em `crm_backup.ldr_alysson_valor_2026_10_09` (id, título, valor). LDR da Sarah e da Renata já estavam
   zerados; também zerado o único com valor em CONTATO FEITO ("2018 - Metalúrgica Duluma", R$ 405,58, Sarah; mesmo backup).
+  Respostas do Anderson (09/10): os R$ 4.500 de 08/10 substituem os R$ 1.500 de 07/10 e o par dos R$ 1.600 de 06/10 não vai
+  para a Agilité (os dois já resolvidos, não reabrir); a devolução da Je fica em 14/10 mesmo; "Água — galpão" (R$ 786,96,
+  venc. 07/10) não foi paga: saiu de pausada para aberta (aparece como vencida no Caixa).
 - `execute_sql` com `delete` solto fica parado até o tempo esgotar (a ferramenta espera confirmação); o formato
   `with alvo as (...), d as (delete ... using alvo ... returning 1) select count(*) from d` passa normalmente.
 - Na tela de cada pessoa os apagados somem na conferência de hora em hora da recarga leve, ou com F5 / "Recarregar dados".
