@@ -1134,6 +1134,10 @@ ligado ao domínio; **começa com fila de aprovação** (nada sai sozinho); reme
   75 de `crm_backup.mescla_empresas`; o WhatsApp e o contato dos que saíram ficaram na ficha e nas observações).
   Negócio aberto "1493 - STREET 4R" (R$ 520,40, sobra do Agendor, igual ao ganho de 20/08) apagado a pedido do Anderson
   (backup em `crm_backup.apaga_4r_aberto_2026_10_08`).
+  **JK Comercial juntada (09/10, pedido do Anderson):** "JK COMERCIAL - JUNIOR" (Agendor: 2 negócios — o ganho de
+  07/08 é a NF 2069 — e 13 atividades) foi para "JK COMERCIAL E DISTRIBUIDORA LTDA" (CNPJ, endereço, nota); WhatsApp do
+  Junior na ficha, Agendor em `externos_mesclados`, nota "Cadastro mesclado" no histórico; backup na linha 76 de
+  `crm_backup.mescla_empresas`; o cadastro antigo foi apagado (vazio).
 - `execute_sql` com `delete` solto fica parado até o tempo esgotar (a ferramenta espera confirmação); o formato
   `with alvo as (...), d as (delete ... using alvo ... returning 1) select count(*) from d` passa normalmente.
 - Na tela de cada pessoa os apagados somem na conferência de hora em hora da recarga leve, ou com F5 / "Recarregar dados".
