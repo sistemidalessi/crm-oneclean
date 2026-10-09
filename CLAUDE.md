@@ -1146,6 +1146,16 @@ ligado ao domínio; **começa com fila de aprovação** (nada sai sozinho); reme
   Club Up, Plestin, Nova Portal (2), Senac Jabaquara e Magma Soldas. **Ficaram separados de propósito:** Ap+Elettro e El
   Shadai (já ligados como grupo), "Ricardo Rodrigues Alves Colégio" × Instituto AD Liberty e as 4 unidades do Serviço
   Promocional N. S. Aparecida (o Anderson preferiu deixar como estão); SESI/SENAI/Radisson são unidades diferentes.
+  **O mesmo sinal entrou na tela de Duplicados (09/10, pedido do Anderson):** `CRMNfe.vendasIguaisNotas(empresas, negocios,
+  notas)` (puro, testado em `nfe.test.js`) acha venda ganha de cadastro sem CNPJ = nota de outro cadastro com CNPJ (centavo a
+  centavo, até 3 dias, fora do mesmo grupo). Em "Clientes das notas × cadastros antigos" vale 6 pontos e aparece em verde
+  ("venda de R$ X = NF n"); entra mesmo quando o nome não se parece, quando o cadastro da nota também veio do Agendor e quando
+  o cadastro foi marcado "outra empresa" antes (aquela marcação era só pelo nome). "É outra empresa" agora guarda o cadastro
+  **e cada par** `b:a` em `cfg.nao_mesclar_notas` (o par esconde também a venda igual); os 5 pares deixados separados pelo
+  Anderson (AD Liberty e N. S. Aparecida) já foram gravados assim. Junto: o "mesmo telefone" aparecia para quem não tinha
+  telefone nenhum (telefone vazio contava como igual e dava 3 pontos de graça) — corrigido; "É o mesmo" guarda o código do
+  Agendor do cadastro que some em `externos_mesclados`; e `crm_titulos_troca_empresa` também move os e-mails da cadência
+  (`crm_email_envios`, que a equipe não pode alterar e que sumiam junto com o cadastro apagado).
 - `execute_sql` com `delete` solto fica parado até o tempo esgotar (a ferramenta espera confirmação); o formato
   `with alvo as (...), d as (delete ... using alvo ... returning 1) select count(*) from d` passa normalmente.
 - Na tela de cada pessoa os apagados somem na conferência de hora em hora da recarga leve, ou com F5 / "Recarregar dados".

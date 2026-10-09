@@ -131,6 +131,37 @@
     return { comuns, dominio, nome: comuns >= 2 || (comuns >= 1 && Math.min(te.length, tn.size) === 1), forte: dominio || comuns >= 2 || unica };
   }
 
+  // Venda ganha num cadastro SEM CNPJ com o mesmo valor (centavo a centavo) e até 3 dias de uma nota
+  // de OUTRO cadastro, com CNPJ: quase sempre o mesmo cliente cadastrado duas vezes (Agendor × nota).
+  // Pega o que nome/telefone/e-mail não pegam ("JK COMERCIAL - JUNIOR" × "JK COMERCIAL E DISTRIBUIDORA
+  // LTDA" em 09/10/2026, e mais 14 na mesma busca). Cadastros do mesmo grupo ficam de fora.
+  // Devolve [{ a: id sem CNPJ, b: id da nota, negocio, nota }].
+  function vendasIguaisNotas(empresas, negocios, notas) {
+    const emp = new Map((empresas || []).map(e => [e.id, e]));
+    const centavos = v => Math.round(R.num(v) * 100);
+    const porValor = new Map();
+    (notas || []).forEach(n => {
+      const b = emp.get(n.empresa_id);
+      if (!b || n.cancelada || !R.chaveDoc(b.cnpj) || centavos(n.valor_total) <= 0) return;
+      const k = centavos(n.valor_total);
+      if (!porValor.has(k)) porValor.set(k, []);
+      porValor.get(k).push(n);
+    });
+    const grupo = x => x.grupo_id || x.id;
+    const out = [];
+    (negocios || []).forEach(g => {
+      const a = emp.get(g.empresa_id);
+      if (!a || g.status !== 'ganho' || !g.fechado_em || R.chaveDoc(a.cnpj)) return;
+      (porValor.get(centavos(g.valor)) || []).forEach(n => {
+        const b = emp.get(n.empresa_id);
+        if (b.id === a.id || grupo(a) === grupo(b)) return;
+        if (Math.abs(R.diasEntre(String(g.fechado_em).slice(0, 10), R.diaLocal(n.emitida_em))) > 3) return;
+        out.push({ a: a.id, b: b.id, negocio: g, nota: n });
+      });
+    });
+    return out;
+  }
+
   const prefixoDup = numero => String(numero || 0).padStart(6, '0');
   const PAGAMENTO = { '01': 'DINHEIRO', '02': 'CHEQUE', '03': 'CARTÃO CRÉDITO', '04': 'CARTÃO DÉBITO', '05': 'CRÉDITO LOJA', '15': 'BOLETO',
     '16': 'DEPÓSITO', '17': 'PIX', '18': 'TRANSFERÊNCIA', '90': 'SEM PAGAMENTO', '99': 'OUTROS' };
@@ -404,7 +435,7 @@
     return plano;
   }
 
-  const api = { lerXml, planeja, parecida, palavras };
+  const api = { lerXml, planeja, parecida, palavras, vendasIguaisNotas };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else raiz.CRMNfe = api;
 })(typeof window !== 'undefined' ? window : globalThis);

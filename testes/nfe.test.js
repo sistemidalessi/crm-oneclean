@@ -345,3 +345,28 @@ test('títulos das parcelas da nota (cobr/dup): duplicata "002527/01", não dupl
   assert.equal(pl2.criar.titulos.length, 0);
   assert.deepEqual(pl2.titulosCancelados, ['002527']);
 });
+
+test('vendasIguaisNotas: venda do cadastro sem CNPJ = nota de outro cadastro (mesmo valor, até 3 dias)', () => {
+  const empresas = [
+    { id: 'a', nome: 'ZETA COMERCIAL - FULANO', cnpj: null },
+    { id: 'b', nome: 'ZETA COMERCIAL E DISTRIBUIDORA LTDA', cnpj: '11.444.777/0001-61' },
+    { id: 'c', nome: 'OUTRA COM CNPJ', cnpj: '22.333.444/0001-81' },
+    { id: 'u', nome: 'UNIDADE SEM CNPJ', cnpj: null, grupo_id: 'b' }
+  ];
+  const negocios = [
+    { id: 'g1', empresa_id: 'a', status: 'ganho', valor: 349.37, fechado_em: '2026-08-07' },
+    { id: 'g2', empresa_id: 'a', status: 'ganho', valor: 100, fechado_em: '2026-08-01' },   // valor diferente
+    { id: 'g3', empresa_id: 'a', status: 'aberto', valor: 349.37, fechado_em: null },        // não ganho
+    { id: 'g4', empresa_id: 'c', status: 'ganho', valor: 349.37, fechado_em: '2026-08-07' }, // tem CNPJ
+    { id: 'g5', empresa_id: 'u', status: 'ganho', valor: 349.37, fechado_em: '2026-08-07' }, // mesmo grupo
+    { id: 'g6', empresa_id: 'a', status: 'ganho', valor: 500, fechado_em: '2026-08-01' }     // nota 5 dias depois
+  ];
+  const notas = [
+    { id: 'n1', numero: 2069, empresa_id: 'b', valor_total: '349.37', emitida_em: '2026-08-07T14:00:00-03:00' },
+    { id: 'n2', numero: 2070, empresa_id: 'b', valor_total: '100.01', emitida_em: '2026-08-01T14:00:00-03:00' },
+    { id: 'n3', numero: 2071, empresa_id: 'b', valor_total: '500.00', emitida_em: '2026-08-06T14:00:00-03:00' },
+    { id: 'n4', numero: 2072, empresa_id: 'b', valor_total: '349.37', emitida_em: '2026-08-08T14:00:00-03:00', cancelada: true }
+  ];
+  const r = N.vendasIguaisNotas(empresas, negocios, notas);
+  assert.deepEqual(r.map(x => [x.a, x.b, x.negocio.id, x.nota.numero]), [['a', 'b', 'g1', 2069]]);
+});

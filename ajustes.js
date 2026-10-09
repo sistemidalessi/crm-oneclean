@@ -632,18 +632,29 @@
     const nao = new Set(E().cfg.nao_mesclar_notas || []);
     const notasDe = id => ix.porEmpresa.notas.get(id) || [];
     const emails = new Map(), fones = new Map(), porFone = new Map();
-    const poe = (m, k, v) => { if (!k) return; const l = m.get(k) || []; if (!l.includes(v)) l.push(v); m.set(k, l); };
+    const poe = (m, k, v) => { if (!k || !v) return; const l = m.get(k) || []; if (!l.includes(v)) l.push(v); m.set(k, l); }; // sem telefone não é "mesmo telefone"
     D.contatos.forEach(c => { if (c.email) poe(emails, c.empresa_id, c.email); [c.telefone, c.celular, c.whatsapp].forEach(t => poe(fones, c.empresa_id, R.chaveTelefone(t))); });
     D.empresas.forEach(e => [e.telefone, e.whatsapp].forEach(t => poe(fones, e.id, R.chaveTelefone(t))));
     fones.forEach((l, id) => l.forEach(f => poe(porFone, f, id)));
     const porPalavra = new Map();
     const vivos = D.empresas.filter(e => !ehCasca(e));
     vivos.forEach(e => N.palavras((e.nome || '') + ' ' + (e.razao_social || '')).forEach(t => poe(porPalavra, t, e.id)));
-    const B = vivos.filter(e => !e.externo_id && R.chaveDoc(e.cnpj) && notasDe(e.id).length && !nao.has(e.id));
+    // venda do cadastro antigo com o mesmo valor e data de uma nota deste: entra mesmo quando o nome não
+    // se parece, quando este também veio do Agendor e quando já marcaram "outra empresa" só pelo nome
+    const exatas = new Map();
+    N.vendasIguaisNotas(vivos, D.negocios, D.notas).forEach(x => {
+      if (nao.has(x.b + ':' + x.a)) return;
+      if (!exatas.has(x.b)) exatas.set(x.b, new Map());
+      const m = exatas.get(x.b);
+      m.set(x.a, (m.get(x.a) || []).concat(x));
+    });
+    const B = vivos.filter(e => R.chaveDoc(e.cnpj) && notasDe(e.id).length && ((!e.externo_id && !nao.has(e.id)) || exatas.has(e.id)));
     const out = [];
     B.forEach(b => {
       const nomeB = b.razao_social || b.nome;
-      const ids = new Set();
+      const exB = exatas.get(b.id) || new Map();
+      const soExatas = !!b.externo_id || nao.has(b.id);
+      const ids = new Set(exB.keys());
       N.palavras(nomeB).forEach(t => (porPalavra.get(t) || []).forEach(id => ids.add(id)));
       (fones.get(b.id) || []).forEach(f => (porFone.get(f) || []).forEach(id => ids.add(id)));
       const compacto = R.normaliza(nomeB).replace(/[^a-z0-9]/g, '');
@@ -653,15 +664,18 @@
         const a = CRM.empresa(id);
         if (!a || a.id === b.id || a.grupo_id === b.id || b.grupo_id === a.id || (a.grupo_id && a.grupo_id === b.grupo_id)) return;
         if (R.chaveDoc(a.cnpj) && R.chaveDoc(a.cnpj) !== R.chaveDoc(b.cnpj)) return; // outro CNPJ: outra pessoa jurídica
+        const iguais = exB.get(a.id) || [];
+        if (soExatas && !iguais.length) return;
         const p = N.parecida(nomeB, a, emails.get(a.id));
         const fone = (fones.get(a.id) || []).some(f => (fones.get(b.id) || []).includes(f));
         const venda = CRM.doEmpresa('negocios', a.id).some(g => g.status === 'ganho' && g.fechado_em && R.num(g.valor) > 0 &&
           notasDe(b.id).some(n => Math.abs(R.diasEntre(g.fechado_em, R.diaLocal(n.emitida_em))) <= 7 && Math.abs(R.num(g.valor) - R.num(n.valor_total)) <= Math.max(5, 0.03 * R.num(n.valor_total))));
         const carteira = a.responsavel_id === b.responsavel_id, cidade = a.cidade && b.cidade && R.normaliza(a.cidade) === R.normaliza(b.cidade);
-        const pontos = (p.nome ? 2 : p.comuns ? 1 : 0) + (fone ? 3 : 0) + (p.dominio ? 3 : 0) + (venda ? 3 : 0) + (carteira ? 1 : 0) + (cidade ? 1 : 0);
+        const pontos = (p.nome ? 2 : p.comuns ? 1 : 0) + (fone ? 3 : 0) + (p.dominio ? 3 : 0) + (iguais.length ? 6 : venda ? 3 : 0) + (carteira ? 1 : 0) + (cidade ? 1 : 0);
         if (pontos < 5) return;
-        const motivos = [venda && 'venda ganha bate com a nota', p.dominio && 'e-mail com o nome da empresa', fone && 'mesmo telefone', p.comuns && p.comuns + ' palavra(s) do nome', carteira && 'mesma carteira', cidade && 'mesma cidade'].filter(Boolean);
-        cands.push({ a, pontos, motivos });
+        const motivos = [iguais.length ? iguais.slice(0, 3).map(x => 'venda de ' + R.moeda(x.negocio.valor) + ' = NF ' + x.nota.numero).join(' · ') + (iguais.length > 3 ? ' (+' + (iguais.length - 3) + ')' : '')
+            : venda && 'venda ganha bate com a nota', p.dominio && 'e-mail com o nome da empresa', fone && 'mesmo telefone', p.comuns && p.comuns + ' palavra(s) do nome', carteira && 'mesma carteira', cidade && 'mesma cidade'].filter(Boolean);
+        cands.push({ a, pontos, motivos, exata: !!iguais.length });
       });
       if (cands.length) out.push({ b, cands: cands.sort((x, y) => y.pontos - x.pontos), max: Math.max(...cands.map(c => c.pontos)) });
     });
@@ -673,14 +687,15 @@
     const info = x => esc([x.cnpj, x.cidade, 'carteira: ' + CRM.nomeUsuario(x.responsavel_id), (E().ix.porEmpresa.notas.get(x.id) || []).length + ' nota(s)',
       CRM.doEmpresa('negocios', x.id).length + ' negócio(s)', CRM.doEmpresa('atividades', x.id).length + ' atividade(s)'].filter(Boolean).join(' · '));
     return '<section class="cartao"><h2>Clientes das notas × cadastros antigos <small>' + pares.length + ' para conferir</small></h2>' +
-      '<p class="dica">Cliente criado pela nota fiscal que parece um cadastro que já existia (do Agendor, quase sempre sem CNPJ). <strong>É o mesmo</strong> junta tudo no cadastro antigo ' +
+      '<p class="dica">Cliente criado pela nota fiscal que parece um cadastro que já existia (do Agendor, quase sempre sem CNPJ). ' +
+      'O mais forte é ' + CRM.selo('venda de R$ … = NF …', 'verde') + ': uma venda ganha do cadastro antigo com o mesmo valor (centavo a centavo) e até 3 dias de uma nota deste. <strong>É o mesmo</strong> junta tudo no cadastro antigo ' +
       '(fica o nome e a carteira dele; razão social, CNPJ e endereço vêm da nota). <strong>Mesmo grupo</strong> mantém os dois separados e liga como matriz/filial ou unidade. ' +
       'Várias unidades? Ligue primeiro as unidades e por último junte o principal.</p>' +
       (pares.length ? pares.map(x => '<div class="grupo-dup"><p class="motivo-dup"><strong>' + esc(x.b.nome) + '</strong> <small>' + info(x.b) + '</small></p>' +
-        x.cands.map(c => '<div class="par-nota"><span><strong>' + esc(c.a.nome) + '</strong> <small>' + info(c.a) + '</small><br><small>' + c.motivos.map(m => CRM.selo(m, 'azul')).join(' ') + '</small></span>' +
+        x.cands.map(c => '<div class="par-nota"><span><strong>' + esc(c.a.nome) + '</strong> <small>' + info(c.a) + '</small><br><small>' + c.motivos.map((m, i) => CRM.selo(m, c.exata && i === 0 ? 'verde' : 'azul')).join(' ') + '</small></span>' +
           '<span class="botoes"><button type="button" class="btn sec" data-acao="nota-juntar" data-id="' + esc(x.b.id + ':' + c.a.id) + '">É o mesmo (juntar)</button> ' +
           '<button type="button" class="btn sec" data-acao="nota-grupo" data-id="' + esc(x.b.id + ':' + c.a.id) + '">Mesmo grupo (unidade)</button></span></div>').join('') +
-        '<p><button type="button" class="mini" data-acao="nota-outra" data-id="' + esc(x.b.id) + '">É outra empresa (não mostrar mais)</button></p></div>').join('')
+        '<p><button type="button" class="mini" data-acao="nota-outra" data-id="' + esc([x.b.id].concat(x.cands.map(c => x.b.id + ':' + c.a.id)).join('|')) + '">É outra empresa (não mostrar mais)</button></p></div>').join('')
         : '<p class="vazio">Nenhum cliente das notas parecido com cadastro antigo. 👍</p>') + '</section>';
   }
 
@@ -692,6 +707,8 @@
     ['telefone', 'whatsapp', 'email', 'segmento', 'ciclo_recompra_dias'].forEach(k => { if ((a[k] == null || a[k] === '') && b[k]) patch[k] = b[k]; });
     if (b.situacao === 'cliente' && a.situacao !== 'cliente') patch.situacao = 'cliente';
     if (b.grupo_id && !a.grupo_id && b.grupo_id !== a.id) patch.grupo_id = b.grupo_id;
+    const ext = [...new Set([].concat(a.externos_mesclados || [], b.externo_id || [], b.externos_mesclados || []).filter(Boolean))];
+    if (ext.length !== (a.externos_mesclados || []).length) patch.externos_mesclados = ext; // reimportar o Agendor não o recria
     for (const t of ['contatos', 'negocios', 'atividades', 'notas']) await CRM.atualizarVarios(t, (E().D[t] || []).filter(x => x.empresa_id === bId).map(x => x.id), { empresa_id: aId });
     await CRM.store().trocaEmpresaTitulos([bId], aId); // pela função do banco: a gestora não lê os títulos
     await CRM.atualizarVarios('empresas', E().D.empresas.filter(x => x.grupo_id === bId && x.id !== aId).map(x => x.id), { grupo_id: aId });
@@ -1037,7 +1054,8 @@
       if (!confirm('Juntar "' + eb.nome + '" em "' + ea.nome + '" (carteira: ' + CRM.nomeUsuario(ea.responsavel_id) + ')?\n\nNotas, negócios e histórico vão para o cadastro antigo; razão social, CNPJ e endereço vêm da nota. O cadastro da nota é apagado.')) return;
       juntaNota(b, a).then(() => CRM.toast('Juntado em "' + ea.nome + '".')).catch(CRM.falhou); },
     'nota-grupo': id => { const [b, a] = id.split(':'); grupoNota(b, a).then(() => CRM.toast('Ligados no mesmo grupo.')).catch(CRM.falhou); },
-    'nota-outra': async id => { try { await CRM.salvarConfig({ nao_mesclar_notas: [...new Set((E().cfg.nao_mesclar_notas || []).concat(id))] }); CRM.toast('Marcado como outra empresa.'); } catch (e) { CRM.falhou(e); } },
+    // guarda o cadastro (some o que é só parecido) e cada par (some também a venda igual à nota)
+    'nota-outra': async id => { try { await CRM.salvarConfig({ nao_mesclar_notas: [...new Set((E().cfg.nao_mesclar_notas || []).concat(id.split('|')))] }); CRM.toast('Marcado como outra empresa.'); } catch (e) { CRM.falhou(e); } },
     'apagar-cascas': async () => { const l = cascas(); if (!l.length || !confirm('Apagar ' + l.length + ' cadastro(s) vazio(s) que sobraram de mesclas?')) return;
       try { await CRM.removerVarios('empresas', l.map(x => x.id)); CRM.toast(l.length + ' cadastro(s) vazio(s) apagado(s).'); } catch (e) { CRM.falhou(e); } },
     'historico-atualizar': () => { historico = null; CRM.render(); },

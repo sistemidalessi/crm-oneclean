@@ -983,6 +983,8 @@ begin
   if not public.crm_eh_gestor() then raise exception 'sem permissão'; end if;
   update public.crm_titulos set empresa_id = para where empresa_id = any(de);
   get diagnostics n = row_count;
+  -- e-mails da cadência: o app não pode mudar a empresa deles, e apagar o cadastro os levaria junto (09/10/2026)
+  update public.crm_email_envios set empresa_id = para where empresa_id = any(de);
   return n;
 end;
 $$;

@@ -591,7 +591,7 @@
     this.gravar(d);
     return { criados: l.length, removidos };
   };
-  // Juntar cadastros: os títulos vão para o que fica.
+  // Juntar cadastros: os títulos e os e-mails da cadência vão para o que fica.
   Supa.prototype.trocaEmpresaTitulos = async function (de, para) {
     if (!de.length) return 0;
     return unwrap(await this.sb.rpc('crm_titulos_troca_empresa', { de, para }));
@@ -600,6 +600,7 @@
     const d = this.ler(), s = new Set(de);
     let n = 0;
     d.titulos.forEach(t => { if (s.has(t.empresa_id)) { t.empresa_id = para; n++; } });
+    (d.email_envios || []).forEach(x => { if (s.has(x.empresa_id)) x.empresa_id = para; });
     this.gravar(d);
     return n;
   };
