@@ -1158,7 +1158,8 @@ ligado ao domínio; **começa com fila de aprovação** (nada sai sozinho); reme
   (`crm_email_envios`, que a equipe não pode alterar e que sumiam junto com o cadastro apagado).
   **LDR do Alysson zerado (09/10, pedido do Anderson):** os 175 negócios abertos da etapa LDR (todos do Agendor, sem itens
   nem proposta) somavam R$ 12.413,63 por causa de 8 com valor herdado do Agendor; os 8 passaram a R$ 0,00 (os negócios
-  continuam lá), backup em `crm_backup.ldr_alysson_valor_2026_10_09` (id, título, valor).
+  continuam lá), backup em `crm_backup.ldr_alysson_valor_2026_10_09` (id, título, valor). LDR da Sarah e da Renata já estavam
+  zerados; também zerado o único com valor em CONTATO FEITO ("2018 - Metalúrgica Duluma", R$ 405,58, Sarah; mesmo backup).
 - `execute_sql` com `delete` solto fica parado até o tempo esgotar (a ferramenta espera confirmação); o formato
   `with alvo as (...), d as (delete ... using alvo ... returning 1) select count(*) from d` passa normalmente.
 - Na tela de cada pessoa os apagados somem na conferência de hora em hora da recarga leve, ou com F5 / "Recarregar dados".
