@@ -197,7 +197,8 @@
       campos: aberto ? [{ nome: 'valor', rotulo: 'Valor (R$)', tipo: 'numero', ajuda: 'a fatura chegou com outro valor?' }, { nome: 'vencimento', rotulo: 'Novo dia', tipo: 'data' }] : [],
       valores: { valor: l.valor, vencimento: l.vencimento },
       salvarTexto: aberto ? 'Ajustar' : 'Fechar',
-      rodape: (l.frase ? rod('cx-desfrase', 'Desfazer a frase', 'perigo') : '') +
+      rodape: (l.anexos && l.anexos.length ? rod('cx-anexo-abrir', '📎 Comprovante' + (l.anexos.length > 1 ? 's (' + l.anexos.length + ')' : '')) : '') +
+        (l.frase ? rod('cx-desfrase', 'Desfazer a frase', 'perigo') : '') +
         (aberto ? rod('cx-pagar', (l.tipo === 'entrada' ? 'Recebi ' : 'Paguei ') + rotDia, 'verde') + rod('cx-pausar', 'Pausar') : l.frase ? '' : rod('cx-desfazer', 'Desfazer a baixa')) + rod('cx-editar', 'Editar tudo'),
       aoSalvar: async v => { if (aberto) await grava(l.id, { valor: r2(v.valor), vencimento: v.vencimento || l.vencimento }); }
     });
@@ -262,6 +263,42 @@
   // mostra o que vai mudar e aplica o plano de fkn.js (novas, já lançadas, antigas pausadas, pagas).
   // ---- frases ("pedágio 350 pago hoje"): frases.js lê e propõe; aqui o administrador confere e grava
   let rascunho = '';
+  // documento colado, arrastado ou escolhido no 📎 (13/10/2026): { arquivo, nome, caminho (depois de enviado) }
+  let anexo = null;
+  const TIPOS_ANEXO = /^(image\/(png|jpeg|webp|gif)|application\/pdf)$/;
+  function poeAnexo(f) {
+    if (!f) return;
+    if (!TIPOS_ANEXO.test(f.type)) { CRM.toast('Só imagem (PNG, JPG) ou PDF.', true); return; }
+    if (f.size > 10 * 1024 * 1024) { CRM.toast('Arquivo maior que 10 MB.', true); return; }
+    anexo = { arquivo: f, nome: f.name || (f.type === 'application/pdf' ? 'documento.pdf' : 'imagem colada') };
+    CRM.render();
+  }
+  // movimento lido do documento → a frase que o leitor entende. O CNPJ/CPF acha o nome do cliente no CRM
+  // (o banco corta o nome: "SLIP QUIMIC"); números saem do nome e da descrição para o leitor não tomar por valor.
+  function fraseDoMovimento(m) {
+    const doc = String(m.documento || '').replace(/\D/g, '');
+    const emp = doc.length >= 11 && (E().D.empresas || []).find(e => String(e.cnpj || '').replace(/\D/g, '') === doc);
+    const limpa = t => String(t || '').replace(/\d+/g, ' ').replace(/[^\p{L}\s&.'-]/gu, ' ').replace(/\s+/g, ' ').trim();
+    const quem = limpa(emp ? emp.nome : m.quem);
+    // "Pix recebido": "pix" é palavra de saída para o leitor; numa entrada não ajuda em nada
+    const oQue = m.tipo === 'entrada' ? limpa(String(m.descricao || '').replace(/\bpix\b/gi, ' ')) : limpa(m.descricao);
+    const valor = R.moeda(m.valor).replace(/^R\$\s*/, '');
+    const dia = 'dia ' + m.data.slice(8, 10) + '/' + m.data.slice(5, 7);
+    if (m.tipo === 'entrada') return (m.situacao === 'previsto' ? 'vai entrar ' : 'recebi ') + valor + (quem ? ' de ' + quem : oQue ? ' ' + oQue : '') + ' ' + dia;
+    return (m.situacao === 'previsto' ? 'vai sair ' : 'paguei ') + valor + ' ' + [oQue, quem].filter(Boolean).join(' ') + ' ' + dia;
+  }
+  async function lerAnexo(nota) {
+    const st = CRM.store();
+    const botao = $('[data-acao="cx-frases"]');
+    if (botao) botao.disabled = true;
+    CRM.toast('Lendo o documento… (alguns segundos)');
+    try {
+      if (!anexo.caminho) anexo.caminho = await st.anexoEnviar(anexo.arquivo, hoje());
+      const r = await st.anexoLer(anexo.caminho, nota, hoje());
+      if (!r.movimentos || !r.movimentos.length) throw new Error('não achei nenhum movimento no documento' + (r.aviso ? ': ' + r.aviso : '.'));
+      conferirFrases(r.movimentos.map(fraseDoMovimento).join('\n'), { anexo: anexo.caminho, nomeAnexo: anexo.nome, avisoAnexo: r.aviso });
+    } finally { if (botao) botao.disabled = false; }
+  }
   function contextoFrases() {
     const forn = new Map();
     F.lancamentos.concat(F.recorrentes).forEach(x => { const n = String(x.fornecedor || '').trim(); if (n && !forn.has(n.toLowerCase())) forn.set(n.toLowerCase(), { nome: n }); });
@@ -321,7 +358,8 @@
       '<datalist id="cxForn">' + ctx.fornecedores.slice(0, 500).map(f => '<option value="' + esc(f.nome) + '">').join('') + '</datalist>';
     CRM.abrirForm({
       titulo: 'Conferir antes de gravar',
-      intro: ps.length + ' lançamento(s). Confira cada um: nada foi gravado ainda.' + (r.avisos.length ? '\n' + r.avisos.join('\n') : ''),
+      intro: (opts && opts.anexo ? 'Lido do documento "' + opts.nomeAnexo + '" (fica guardado no lançamento, 📎).' + (opts.avisoAnexo ? '\nAtenção: ' + opts.avisoAnexo : '') + '\n' : '') +
+        ps.length + ' lançamento(s). Confira cada um: nada foi gravado ainda.' + (r.avisos.length ? '\n' + r.avisos.join('\n') : ''),
       largura: 'largo', campos: [], htmlDepois: ps.map(linha).join('') + listas, salvarTexto: 'Gravar',
       extras: form => {
         // baixa de conta ou título: os campos de lançamento novo não valem (só o dia e o valor)
@@ -368,6 +406,11 @@
           if (/^(baixar|titulo):/.test(p.acao) && p.situacao !== 'realizado') throw new Error('"' + p.trecho + '": baixa é do que já aconteceu — troque a situação ou escolha "Lançar novo".');
         });
         const planos = lidas.map(p => P.gravacao(p, ctx));
+        // o documento lido fica no que foi lançado ou baixado
+        if (opts && opts.anexo) planos.forEach(g => {
+          g.inserir.forEach(x => { x.anexos = [opts.anexo]; });
+          g.atualizar.forEach(a => { const l = lanc(a.id); a.patch.anexos = [...new Set(((l && l.anexos) || []).concat(opts.anexo))]; });
+        });
         let n = 0;
         for (let i = 0; i < lidas.length; i++) {
           const g = planos[i];
@@ -383,6 +426,7 @@
           }
         }
         if (!opts || !opts.dataPadrao) rascunho = '';
+        if (opts && opts.anexo) anexo = null;
         CRM.render();
         CRM.toast(n ? n + ' lançamento(s) gravado(s). Errou? Clique no item → "Desfazer a frase".' : 'Nada gravado.');
       }
@@ -442,7 +486,7 @@
     const arrasta = x.estado === 'previsto' ? ' draggable="true" data-mover="' + esc(x.tipo === 'lanc' ? x.ref.id : 'tit:' + x.ref.duplicata) + '"' : '';
     return '<div class="cx-it ' + (x.secao === 'entrada' ? 'cx-ent' : 'cx-sai') + ' ' + x.estado + (x.atrasado ? ' atrasado' : '') + (x.adiantado ? ' adiantado' : '') + (x.emprestimo ? ' emprestimo' : '') + (ok ? ' comok' : '') + '"' + arrasta + '>' + ok +
       '<button type="button" class="cx-corpo" data-acao="cx-item" data-id="' + esc(x.chave) + '" data-dia="' + esc(dia) + '" title="' + esc(x.titulo + (x.obs ? ' — ' + x.obs : '')) + '">' +
-      '<span class="t">' + (x.adiantado ? '<span class="cx-adi">⏩ adiantado</span> ' : '') + (x.emprestimo ? '<span class="cx-etq-emp">🔁 ' + (x.ref && x.ref.categoria === 'Transferência entre empresas' ? 'entre empresas' : x.secao === 'entrada' ? 'empréstimo' : 'devolução') + '</span> ' : '') + esc(x.titulo) + '</span>' + (x.obs ? '<span class="o">' + esc(x.obs) + '</span>' : '') + '<span class="v">' + esc(R.moeda(x.valor)) + '</span></button></div>';
+      '<span class="t">' + (x.adiantado ? '<span class="cx-adi">⏩ adiantado</span> ' : '') + (x.emprestimo ? '<span class="cx-etq-emp">🔁 ' + (x.ref && x.ref.categoria === 'Transferência entre empresas' ? 'entre empresas' : x.secao === 'entrada' ? 'empréstimo' : 'devolução') + '</span> ' : '') + (x.ref && x.ref.anexos && x.ref.anexos.length ? '📎 ' : '') + esc(x.titulo) + '</span>' + (x.obs ? '<span class="o">' + esc(x.obs) + '</span>' : '') + '<span class="v">' + esc(R.moeda(x.valor)) + '</span></button></div>';
   }
   function grade(s) {
     const h = hoje();
@@ -490,7 +534,12 @@
     return '<section class="cartao cx-frases"><label for="cxFrases"><strong>Escreva o que aconteceu</strong> <small>uma frase por linha — o CRM acha a conta ou o título que bate, a categoria e o fornecedor; nada é gravado antes de você conferir</small></label>' +
       '<div class="cx-frases-linha"><textarea id="cxFrases" rows="2" placeholder="pedágio 350 pago hoje · recebi 2.300 da Drogaria ontem · aluguel galpão 4.500 dia 10">' + esc(rascunho) + '</textarea>' +
       '<span class="cx-frases-botoes"><button type="button" class="btn sec" data-acao="cx-falar" data-id="caixa" title="Ditado (Chrome ou Edge): fale e confira o texto antes de Conferir">🎤 Falar</button>' +
-      '<button type="button" class="btn" data-acao="cx-frases">Conferir</button></span></div></section>';
+      '<button type="button" class="btn sec" data-acao="cx-anexar" title="Print do banco, comprovante, boleto ou PDF — ou cole (Ctrl+V) / arraste aqui">📎 Anexar</button>' +
+      '<input type="file" id="cxAnexoArq" accept="image/png,image/jpeg,image/webp,image/gif,application/pdf" hidden>' +
+      '<button type="button" class="btn" data-acao="cx-frases">Conferir</button></span></div>' +
+      (anexo ? '<p class="cx-anexo">📎 <strong>' + esc(anexo.nome) + '</strong> <small>— o CRM lê o documento ao Conferir; o que você escrever acima vale como explicação (ex.: "entrou hoje")</small> ' +
+        '<button type="button" class="mini" data-acao="cx-anexo-tirar">tirar</button></p>'
+        : '<p class="cx-anexo-dica"><small>Também dá para colar (Ctrl+V) ou arrastar aqui o print do banco, o comprovante ou o PDF.</small></p>') + '</section>';
   }
   function blocosVencidos() {
     const h = hoje();
@@ -588,6 +637,21 @@
       if (fr) {
         fr.addEventListener('input', () => { rascunho = fr.value; });
         fr.addEventListener('keydown', ev => { if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); CRM.acoes['cx-frases'](); } });
+        // colar o print (Ctrl+V) ou arrastar o arquivo para a caixa de frases
+        fr.addEventListener('paste', ev => {
+          const f = [].slice.call((ev.clipboardData && ev.clipboardData.files) || []).find(x => TIPOS_ANEXO.test(x.type));
+          if (f) { ev.preventDefault(); rascunho = fr.value; poeAnexo(f); }
+        });
+        const caixa = fr.closest('.cx-frases');
+        caixa.addEventListener('dragover', ev => { if (ev.dataTransfer && [].slice.call(ev.dataTransfer.types || []).indexOf('Files') !== -1) { ev.preventDefault(); caixa.classList.add('cx-solta'); } });
+        caixa.addEventListener('dragleave', () => caixa.classList.remove('cx-solta'));
+        caixa.addEventListener('drop', ev => {
+          const f = ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0];
+          if (!f) return;
+          ev.preventDefault(); caixa.classList.remove('cx-solta'); rascunho = fr.value; poeAnexo(f);
+        });
+        const arqAnexo = el.querySelector('#cxAnexoArq');
+        if (arqAnexo) arqAnexo.addEventListener('change', () => { const f = arqAnexo.files[0]; arqAnexo.value = ''; rascunho = fr.value; poeAnexo(f); });
       }
       const arq = el.querySelector('#cxPagarFkn');
       if (arq) arq.addEventListener('change', () => { const f = arq.files[0]; arq.value = ''; if (f) importarPagar(f).catch(CRM.falhou); });
@@ -625,7 +689,21 @@
     'cx-nova': id => formLanc(null, { tipo: id }),
     'cx-add': (id, el) => formFrase({ tipo: id, data: comDia(el) }),
     'cx-add-form': (id, el) => { fecha(); const data = comDia(el); setTimeout(() => formLanc(null, { tipo: id, data }), 0); },
-    'cx-frases': () => { const t = $('#cxFrases'); if (t) rascunho = t.value; try { conferirFrases(rascunho, {}); } catch (e) { CRM.toast(e.message, true); } },
+    'cx-frases': () => {
+      const t = $('#cxFrases'); if (t) rascunho = t.value;
+      if (anexo) { lerAnexo(rascunho).catch(e => CRM.toast(e.message, true)); return; }
+      try { conferirFrases(rascunho, {}); } catch (e) { CRM.toast(e.message, true); }
+    },
+    'cx-anexar': () => { const i = $('#cxAnexoArq'); if (i) i.click(); },
+    'cx-anexo-tirar': () => { anexo = null; CRM.render(); },
+    'cx-anexo-abrir': async id => {
+      const l = lanc(id);
+      if (!l || !l.anexos) return;
+      for (const caminho of l.anexos) {
+        const w = raiz.open('', '_blank'); // abre já (antes de esperar o link), senão o navegador bloqueia
+        try { const u = await CRM.store().anexoLink(caminho); if (w) w.location = u; else raiz.open(u, '_blank'); } catch (e) { if (w) w.close(); CRM.falhou(e); }
+      }
+    },
     'cx-desfrase': async id => {
       fecha();
       const d = raiz.CRMFrases.desfazer(lanc(id), { lancamentos: F.lancamentos });

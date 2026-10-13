@@ -1182,6 +1182,17 @@ ligado ao domínio; **começa com fila de aprovação** (nada sai sozinho); reme
   A Agilité levou no mesmo dia (`b1919ca`). E veio de lá (`b266421`, pedido do Anderson): **dia da semana** ("pago na
   sexta-feira" = a última sexta; com verbo de futuro, a próxima; "segunda via"/"quarta parcela" não são data) e
   "lancei/lançamento" fora da descrição. A parte de FT/folga trabalhada é da folha da Agilité (`caixa_dia.js`), não do CRM.
+- **Anexo no Caixa lido pela IA (13/10, pedido do Anderson):** na caixa de frases dá para colar (Ctrl+V), arrastar ou escolher
+  no 📎 o print do extrato do BB, o comprovante de Pix, o boleto ou um PDF, e escrever "entrou na conta hoje". Ao **Conferir**:
+  o arquivo vai para o bucket **privado** `crm-caixa-anexos` (`caixa/AAAA-MM/<uuid>.<ext>`; só o administrador envia e lê; sem
+  política de apagar, de propósito) → a Edge Function **`crm-caixa-ler`** (verify_jwt ligado, só papel admin) baixa com a chave
+  de serviço e manda ao Claude (`claude-opus-5-5`, effort `low`, saída estruturada em JSON, `fallbacks: "default"`) → volta a
+  lista de movimentos (tipo, valor, dia, realizado/previsto, quem, CNPJ/CPF, descrição) → `caixa.js` (`fraseDoMovimento`) faz
+  uma frase por movimento (o CNPJ acha o nome do cliente no CRM; números saem do nome para o leitor não tomar por valor; "pix"
+  sai das entradas) → **a mesma conferência das frases** (acha o título ou a conta que bate). Gravado, o lançamento guarda o
+  caminho em `crm_fin_lancamentos.anexos` (text[]); o item mostra 📎 e a janela tem "📎 Comprovante" (link assinado de 1 min).
+  A chave **`ANTHROPIC_API_KEY`** fica só nos Secrets do Supabase (o Anderson cria no console da Anthropic); sem ela a função
+  responde 503 e o CRM avisa. No modo local o anexo não funciona (não há Storage). Custo: centavos por documento.
 - `execute_sql` com `delete` solto fica parado até o tempo esgotar (a ferramenta espera confirmação); o formato
   `with alvo as (...), d as (delete ... using alvo ... returning 1) select count(*) from d` passa normalmente.
 - Na tela de cada pessoa os apagados somem na conferência de hora em hora da recarga leve, ou com F5 / "Recarregar dados".

@@ -1526,3 +1526,23 @@ begin
     create policy crm_fotos_apaga on storage.objects for delete to authenticated using (bucket_id = 'crm-fotos' and (select public.crm_eh_gestor()));
   end if;
 end $$;
+
+-- =================================================================== anexos do Caixa (13/10/2026)
+-- Pedido do Anderson: colar o print do banco, o comprovante ou o boleto (imagem ou PDF) na caixa de frases,
+-- escrever "entrou na conta hoje" e o CRM lançar. O arquivo vai para o bucket PRIVADO crm-caixa-anexos
+-- (só o administrador envia e lê; o link para abrir é assinado e vale 1 minuto); a Edge Function
+-- crm-caixa-ler baixa o arquivo com a chave de serviço, lê com o Claude e devolve os movimentos, que viram
+-- frases na mesma conferência de sempre. O lançamento gravado guarda o caminho em anexos.
+-- Sem política de apagar de propósito: comprovante não some (Desfazer a frase tira só o lançamento).
+alter table public.crm_fin_lancamentos add column if not exists anexos text[];
+do $$
+begin
+  if not exists (select 1 from pg_namespace where nspname = 'storage') then return; end if;
+  insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+  values ('crm-caixa-anexos', 'crm-caixa-anexos', false, 10485760, array['image/png','image/jpeg','image/webp','image/gif','application/pdf'])
+  on conflict (id) do update set public = false, file_size_limit = 10485760, allowed_mime_types = excluded.allowed_mime_types;
+  if not exists (select 1 from pg_policies where schemaname = 'storage' and tablename = 'objects' and policyname = 'crm_caixa_anexos_le') then
+    create policy crm_caixa_anexos_le on storage.objects for select to authenticated using (bucket_id = 'crm-caixa-anexos' and (select public.crm_eh_admin()));
+    create policy crm_caixa_anexos_grava on storage.objects for insert to authenticated with check (bucket_id = 'crm-caixa-anexos' and (select public.crm_eh_admin()));
+  end if;
+end $$;

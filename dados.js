@@ -506,6 +506,38 @@
     return r.data;
   };
 
+  // Anexos do Caixa (13/10/2026): o arquivo vai para o bucket privado crm-caixa-anexos (só o administrador
+  // lê e envia); a Edge Function crm-caixa-ler lê com a IA e devolve os movimentos; o link para abrir é
+  // assinado e vale 1 minuto.
+  const ANEXOS = 'crm-caixa-anexos';
+  const erroDaFuncao = async r => {
+    let msg = r.error.message;
+    try { const j = await r.error.context.json(); if (j && j.erro) msg = j.erro; } catch (e) { /* sem corpo */ }
+    return new Error(msg);
+  };
+  Supa.prototype.anexoEnviar = async function (arquivo, hoje) {
+    const ext = (String(arquivo.name || '').split('.').pop() || '').toLowerCase().replace(/[^a-z]/g, '') ||
+      ({ 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif', 'application/pdf': 'pdf' }[arquivo.type] || 'bin');
+    const caminho = 'caixa/' + hoje.slice(0, 7) + '/' + uuid() + '.' + ext;
+    const r = await this.sb.storage.from(ANEXOS).upload(caminho, arquivo, { contentType: arquivo.type || undefined, upsert: false });
+    if (r.error) throw new Error('não consegui guardar o arquivo: ' + r.error.message);
+    return caminho;
+  };
+  Supa.prototype.anexoLer = async function (caminho, nota, hoje) {
+    const r = await this.sb.functions.invoke('crm-caixa-ler', { body: { caminho, nota, hoje } });
+    if (r.error) throw await erroDaFuncao(r);
+    return r.data;
+  };
+  Supa.prototype.anexoLink = async function (caminho) {
+    const r = await this.sb.storage.from(ANEXOS).createSignedUrl(caminho, 60);
+    if (r.error) throw new Error('não consegui abrir o comprovante: ' + r.error.message);
+    return r.data.signedUrl;
+  };
+  const SO_SUPABASE = () => Promise.reject(new Error('anexar documento só funciona com o Supabase ligado (o modo local não guarda arquivos)'));
+  Local.prototype.anexoEnviar = SO_SUPABASE;
+  Local.prototype.anexoLer = SO_SUPABASE;
+  Local.prototype.anexoLink = SO_SUPABASE;
+
   // E-mails da cadência: a Edge Function crm-email envia pelo Brevo (a chave fica só no Supabase).
   Supa.prototype.email = async function (corpo) {
     const r = await this.sb.functions.invoke('crm-email', { body: corpo });

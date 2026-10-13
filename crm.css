@@ -729,3 +729,8 @@ tr.apagado td { opacity: .55; }
 .em-item textarea { width: 100%; font: inherit; min-height: 9rem; }
 .em-item .acoes { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; }
 .filtro-inline { display: flex; align-items: center; gap: 6px; font-size: .85rem; }
+
+/* anexo na caixa de frases do Caixa (13/10/2026) */
+.cx-anexo, .cx-anexo-dica { margin: 6px 0 0; font-size: .85rem; color: var(--suave); }
+.cx-anexo { color: var(--texto); background: var(--realce); padding: 6px 10px; border-radius: 8px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.cx-frases.cx-solta { outline: 2px dashed var(--ouro); outline-offset: 2px; }
