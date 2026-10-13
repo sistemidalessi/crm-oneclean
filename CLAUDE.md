@@ -1193,6 +1193,9 @@ ligado ao domínio; **começa com fila de aprovação** (nada sai sozinho); reme
   caminho em `crm_fin_lancamentos.anexos` (text[]); o item mostra 📎 e a janela tem "📎 Comprovante" (link assinado de 1 min).
   A chave **`ANTHROPIC_API_KEY`** fica só nos Secrets do Supabase (o Anderson cria no console da Anthropic); sem ela a função
   responde 503 e o CRM avisa. No modo local o anexo não funciona (não há Storage). Custo: centavos por documento.
+  **Ligado em 13/10:** chave criada pelo Anderson no console da Anthropic (conta dele, workspace Default, limite de gasto
+  US$ 10/mês) e colada nos Secrets; 1ª leitura real às 14:31 (Pix de R$ 134,84 da Slip Química: o CNPJ achou o cadastro,
+  lançamento com 📎). Sem título em aberto daquele valor: foi venda paga direto no Pix.
 - `execute_sql` com `delete` solto fica parado até o tempo esgotar (a ferramenta espera confirmação); o formato
   `with alvo as (...), d as (delete ... using alvo ... returning 1) select count(*) from d` passa normalmente.
 - Na tela de cada pessoa os apagados somem na conferência de hora em hora da recarga leve, ou com F5 / "Recarregar dados".
