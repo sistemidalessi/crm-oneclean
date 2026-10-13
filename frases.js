@@ -24,7 +24,7 @@
 
   // ------------------------------------------------------------ leitura (a MESMA da Agilité)
   // Cópia de src/caixa/interpretar.js do agilite-sistema-gestao (commit b837d37, 06/10/2026 — conferido
-  // linha a linha): a mesma frase dá o mesmo resultado nos dois caixas. Regra combinada: mudou lá, copiar
+  // linha a linha; depois trazidos 1eea200 e b266421 e levado o f876978 = b1919ca de lá): a mesma frase dá o mesmo resultado nos dois caixas. Regra combinada: mudou lá, copiar
   // para cá; mudou aqui, avisar a Agilité para levar (e rodar os testes dos dois lados).
   const MESES = { jan: 1, fev: 2, mar: 3, abr: 4, mai: 5, jun: 6, jul: 7, ago: 8, set: 9, out: 10, nov: 11, dez: 12 };
   const ENTRADA = /\b(entrada|entradas|entrou|entraram|entra|entrar|recebi|recebemos|recebido|recebida|receber|caiu|cairam|cai|credito|creditado|deposito|depositado|depositaram)\b/;
@@ -59,6 +59,15 @@
     if ((m = t.match(/\bhoje\b/))) return { data: hoje, trecho: m[0] };
     if ((m = t.match(/\bontem\b/))) return { data: addDias(hoje, -1), trecho: m[0] };
     if ((m = t.match(/\bamanha\b/))) return { data: addDias(hoje, 1), trecho: m[0] };
+    // dia da semana (13/10/2026, Anderson: "pago na sexta-feira"): no passado = o ultimo daquele dia
+    // (hoje, se for hoje); com verbo de futuro = o proximo. "sexta-feira", "sexta feira", "sexta", "sabado".
+    // "segunda via", "quarta parcela" nao sao data (o que vem depois decide)
+    if ((m = t.match(/\b(domingo|sabado|segunda|terca|quarta|quinta|sexta)(?:[\s-]*feira)?\b(?!\s+(?:parcela|via|vez|prestacao|feira))/))) {
+      const alvo = ['domingo', 'segunda', 'terca', 'quarta', 'quinta', 'sexta', 'sabado'].indexOf(m[1]);
+      const dh = new Date(hoje + 'T12:00:00Z').getUTCDay();
+      const n = futuro ? ((alvo - dh + 7) % 7 || 7) : -((dh - alvo + 7) % 7);
+      return { data: addDias(hoje, n), trecho: m[0] };
+    }
     if ((m = t.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2}|\d{4}))?\b/))) {
       const d = +m[1], mes = +m[2]; let a = m[3] ? +m[3] : ha; if (a < 100) a += 2000;
       if (mes >= 1 && mes <= 12 && d >= 1 && d <= diasNoMes(a, mes)) return { data: `${a}-${String(mes).padStart(2, '0')}-${String(d).padStart(2, '0')}`, trecho: m[0] };
@@ -128,7 +137,7 @@
   }
 
   // palavras de controle; borda "de letra" com \p{L} (o \b do JS quebra em "almoço" e corta o "o")
-  const TIRA = new RegExp('(?<![\\p{L}\\d])(?:entrada|entradas|saida|saidas|data|enviei|enviamos|mandei|mandamos|emprestimo|emprestou|emprestaram|emprestado|emprestada|peguei|pegamos|me|nos|como|dia|devolucao|sera|serao|entrou|entraram|entra|entrar|recebi|recebemos|recebido|recebida|receber|caiu|cairam|credito|creditado|deposito|depositado|depositaram|sai|sair|saiu|pagar|pago|pagos|paga|paguei|pagamos|pagou|pix|transferi|transferencia|vai|vao|precisa|precisar|precisamos|tem que|temos que|vence|vencendo|previsto|prevista|agendado|agendar|hoje|ontem|amanha|ja|foi|foram|que|o|a|os|as|um|uma|do|da|dos|das|de|pro|pra|para|no|na|em|com|valor|reais|referente|ref)(?![\\p{L}\\d])', 'giu');
+  const TIRA = new RegExp('(?<![\\p{L}\\d])(?:entrada|entradas|saida|saidas|data|enviei|enviamos|mandei|mandamos|emprestimo|emprestou|emprestaram|emprestado|emprestada|peguei|pegamos|me|nos|como|dia|devolucao|sera|serao|entrou|entraram|entra|entrar|recebi|recebemos|recebido|recebida|receber|caiu|cairam|credito|creditado|deposito|depositado|depositaram|sai|sair|saiu|pagar|pago|pagos|paga|paguei|pagamos|pagou|pix|transferi|transferencia|vai|vao|precisa|precisar|precisamos|tem que|temos que|vence|vencendo|previsto|prevista|agendado|agendar|hoje|ontem|amanha|ja|foi|foram|que|o|a|os|as|um|uma|do|da|dos|das|de|pro|pra|para|no|na|em|com|valor|reais|referente|ref|lancar|lanca|lancei|lancado|lancada|lancamento|lancamentos)(?![\\p{L}\\d])', 'giu');
   // Tira do texto valor, data e as palavras de controle; o que sobra e' o "do que se trata".
   function rotuloDe(txt, trechos) {
     let s = ` ${txt} `.replace(/\b(\d+)\s+de\s+(\d+)\b/gi, '$1/$2'); // "11 de 13" (parcela) fica "11/13"
@@ -145,7 +154,7 @@
     // as palavras de controle nao tem acento depois de normalizar; trocamos as acentuadas comuns
     return s.replace(/amanhã/gi, 'amanha').replace(/débito/gi, 'debito').replace(/crédito/gi, 'credito').replace(/depósito/gi, 'deposito')
       .replace(/caíram/gi, 'cairam').replace(/saída/gi, 'saida').replace(/já/gi, 'ja')
-      .replace(/empréstimo/gi, 'emprestimo').replace(/devolução/gi, 'devolucao').replace(/será/gi, 'sera').replace(/serão/gi, 'serao');
+      .replace(/empréstimo/gi, 'emprestimo').replace(/devolução/gi, 'devolucao').replace(/será/gi, 'sera').replace(/serão/gi, 'serao').replace(/lanç/gi, 'lanc');
   }
 
   // texto -> [{ linha, tipo, valor, data, situacao, rotulo, devolucaoPrevista }] + avisos

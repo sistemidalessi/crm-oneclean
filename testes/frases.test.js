@@ -310,3 +310,17 @@ test('transferência: "e agilite devolverá dia 14" é a volta, a saída fica no
     assert.deepEqual(l[0].transferencia, { volta: '2026-10-14', valor: 700 }, t);
   }
 });
+
+// trazido da Agilité (b266421, 13/10/2026): dia da semana e "lancei/lançamento" fora da descrição
+test('dia da semana: passado = o último, futuro = o próximo; "segunda via" não é data', () => {
+  const H = '2026-10-13'; // terça
+  const v = Object.assign({}, vazio, { hoje: H });
+  const um1 = t => { const l = F.classificar(F.interpretar(t, H).itens, v); assert.equal(l.length, 1, t); return l[0]; };
+  assert.deepEqual([um1('pago 350 pedágio na sexta-feira').data, um1('pago 350 pedágio na sexta-feira').situacao], ['2026-10-09', 'realizado']);
+  assert.equal(um1('vai sair 1200 fornecedor na sexta').data, '2026-10-16');
+  assert.equal(um1('combustível 200 sábado').data, '2026-10-10');
+  assert.equal(um1('paguei 90 almoço terça').data, H);
+  const sv = um1('segunda via boleto 120 pago hoje');
+  assert.deepEqual([sv.data, sv.descricao], [H, 'Segunda via boleto']);
+  assert.equal(um1('lancei 80 almoço segunda').descricao, 'Almoço');
+});

@@ -1179,6 +1179,9 @@ ligado ao domínio; **começa com fila de aprovação** (nada sai sozinho); reme
   "Mais transferência" foi apagado; o espelho levou à Agilité às 13:25 (200; lá ida 136 atualizada e volta 138 criada).
   **Causa no leitor de frases** (corrigida em `frases.js`, `SUJEITO_VOLTA`): "e agilite devolverá dia 14" não era reconhecido
   como a volta (só "e ela/ele/vai devolver"), então o "dia 14" ia para a saída. **Avisar a Agilité para levar** (mesmo código).
+  A Agilité levou no mesmo dia (`b1919ca`). E veio de lá (`b266421`, pedido do Anderson): **dia da semana** ("pago na
+  sexta-feira" = a última sexta; com verbo de futuro, a próxima; "segunda via"/"quarta parcela" não são data) e
+  "lancei/lançamento" fora da descrição. A parte de FT/folga trabalhada é da folha da Agilité (`caixa_dia.js`), não do CRM.
 - `execute_sql` com `delete` solto fica parado até o tempo esgotar (a ferramenta espera confirmação); o formato
   `with alvo as (...), d as (delete ... using alvo ... returning 1) select count(*) from d` passa normalmente.
 - Na tela de cada pessoa os apagados somem na conferência de hora em hora da recarga leve, ou com F5 / "Recarregar dados".
