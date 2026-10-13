@@ -14,13 +14,13 @@
   const TABELAS = ['usuarios', 'config', 'etapas', 'opcoes', 'produtos', 'modelos', 'metas', 'filtros',
     'empresas', 'contatos', 'negocios', 'negocio_itens', 'propostas', 'atividades', 'notas', 'nota_itens', 'titulos', 'email_campanhas', 'email_envios'];
   // Financeiro (contas a pagar e caixa): só o administrador; carregado à parte, ao abrir o Caixa.
-  const FIN = ['fin_recorrentes', 'fin_lancamentos', 'fin_saldos', 'fin_regras', 'fin_titulos_baixados'];
+  const FIN = ['fin_recorrentes', 'fin_lancamentos', 'fin_saldos', 'fin_regras', 'fin_titulos_baixados', 'fin_excluidos'];
   const CHAVE = { usuarios: 'user_id' };
   const chave = t => CHAVE[t] || 'id';
 
   function vazio() { const d = {}; TABELAS.forEach(t => { d[t] = []; }); return d; }
   const finVazio = d => ({ recorrentes: (d && d.fin_recorrentes) || [], lancamentos: (d && d.fin_lancamentos) || [], saldos: (d && d.fin_saldos) || [], regras: (d && d.fin_regras) || [],
-    baixados: (d && d.fin_titulos_baixados) || [] });
+    baixados: (d && d.fin_titulos_baixados) || [], excluidos: (d && d.fin_excluidos) || [] });
 
   function uuid() {
     if (raiz.crypto && raiz.crypto.randomUUID) return raiz.crypto.randomUUID();
@@ -52,6 +52,7 @@
     fin_saldos: {},
     fin_regras: { tipo: 'saida', entre_empresas: false },
     fin_titulos_baixados: { valor: 0 },
+    fin_excluidos: { dados: {} },
     email_campanhas: { ativa: true },
     email_envios: { situacao: 'pulado', para: [] }
   };
@@ -336,7 +337,7 @@
 
   Supa.prototype.carregarFin = async function () {
     const r = await Promise.all(FIN.map(t => tudo(this.sb, t)));
-    return finVazio({ fin_recorrentes: r[0], fin_lancamentos: r[1], fin_saldos: r[2], fin_regras: r[3], fin_titulos_baixados: r[4] });
+    return finVazio({ fin_recorrentes: r[0], fin_lancamentos: r[1], fin_saldos: r[2], fin_regras: r[3], fin_titulos_baixados: r[4], fin_excluidos: r[5] });
   };
 
   Supa.prototype.usuarioAtual = async function (userId) {

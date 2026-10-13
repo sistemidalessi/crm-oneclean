@@ -123,7 +123,9 @@ async function arquivoFkn(db: any, integ: { id: string }, f: { nome?: string; ba
     const existentes = await tudo(db, 'crm_fin_lancamentos', 'id,chave_fkn,situacao,tipo,valor,vencimento,origem,descricao') as { chave_fkn: string; situacao: string }[];
     const doFkn = existentes.filter(x => x.chave_fkn && x.situacao !== 'pago').length;
     if (doFkn >= 20 && lido.contas.length < doFkn * 0.4) return recusa('pagar', ['veio com ' + lido.contas.length + ' contas (o CRM tem ' + doFkn + ' do FKN em aberto): confira Conta 0 a 0, Situação GERAL e a filial']);
-    const p = K.planoContasPagar(lido, existentes, { hoje: lido.posicao, agora });
+    // excluídas pelo administrador no Caixa (13/10/2026): não voltam a cada listagem
+    const excluidos = (await tudo(db, 'crm_fin_excluidos', 'chave_fkn') as { chave_fkn: string | null }[]).map(x => x.chave_fkn).filter(Boolean);
+    const p = K.planoContasPagar(lido, existentes, { hoje: lido.posicao, agora, excluidos });
     for (let i = 0; i < p.inserir.length; i += LOTE) {
       const { error } = await db.from('crm_fin_lancamentos').insert(p.inserir.slice(i, i + LOTE));
       if (error) throw new Error('crm_fin_lancamentos: ' + error.message);

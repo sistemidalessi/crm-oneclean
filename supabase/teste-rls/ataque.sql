@@ -200,6 +200,13 @@ insert into crm_titulos (duplicata, vencimento, valor) values ('000003/01', curr
 select 'Título que voltou continua baixado (NÃO devia)' t, count(*) from crm_fin_titulos_baixados where duplicata = '000003/01' having count(*) > 0;
 delete from crm_titulos where duplicata = '000003/01';
 update crm_fin_titulos_baixados set resolvido = 'nao_entrou', resolvido_em = now() where duplicata = '000003/01' returning 'admin marcou não entrou' as ok;
+-- lançamentos excluídos do Caixa (13/10/2026): só o admin; a lista que segura a conta do FKN não se altera
+insert into crm_fin_excluidos (chave_fkn, descricao, valor, dados) values ('00001|TESTE-01', 'Conta de teste', 10, '{"id":"x"}') returning 'admin guardou o excluído' as ok;
+update crm_fin_excluidos set chave_fkn = 'outra' returning 'admin alterou o excluído (NÃO devia)';
+select pg_temp.como('b0000000-0000-0000-0000-000000000002');
+select 'Gestora vê excluídos do Caixa (NÃO devia)' t, count(*) from crm_fin_excluidos having count(*) > 0;
+insert into crm_fin_excluidos (chave_fkn) values ('y'); -- FALHA
+select pg_temp.como('a0000000-0000-0000-0000-000000000001');
 -- cadência de e-mails (07/10/2026): vendedora só pula (o envio vem da função), só na carteira dela; ninguém desfaz o "não quero receber"
 reset role; update crm_empresas set email_sair_em = now(), email_cadencia = 'mensal' where nome = 'Da Ana'; set role authenticated;
 select pg_temp.como('b0000000-0000-0000-0000-000000000002');
@@ -230,6 +237,7 @@ select count(*) from crm_fin_lancamentos; -- FALHA
 select count(*) from crm_fin_saldos; -- FALHA
 select count(*) from crm_fin_regras; -- FALHA
 select count(*) from crm_fin_titulos_baixados; -- FALHA
+select count(*) from crm_fin_excluidos; -- FALHA
 select count(*) from crm_email_envios; -- FALHA
 select count(*) from crm_email_campanhas; -- FALHA
 select crm_proximo_vendedor(); -- FALHA

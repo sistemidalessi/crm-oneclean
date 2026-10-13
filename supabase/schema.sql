@@ -1546,3 +1546,29 @@ begin
     create policy crm_caixa_anexos_grava on storage.objects for insert to authenticated with check (bucket_id = 'crm-caixa-anexos' and (select public.crm_eh_admin()));
   end if;
 end $$;
+
+-- =================================================================== lançamentos excluídos do Caixa (13/10/2026)
+-- Pedido do Anderson: botão Excluir na janela do lançamento (conta do FKN lançada por engano: "não é
+-- nem pausar, seria excluir"). O lançamento apagado fica guardado aqui inteiro (dados), como cópia de
+-- segurança; se veio do FKN (chave_fkn), a chave entra na lista e a próxima listagem do contas a pagar
+-- (tela e vigia, fkn.js planoContasPagar) não cria a conta de novo. Só o administrador lê e grava; não
+-- há alteração (só desfazer, tirando a linha, para a conta voltar na próxima listagem).
+create table if not exists public.crm_fin_excluidos (
+  id             uuid primary key default gen_random_uuid(),
+  lancamento_id  uuid,
+  chave_fkn      text unique,
+  descricao      text,
+  valor          numeric(14,2),
+  vencimento     date,
+  dados          jsonb not null default '{}'::jsonb,
+  excluido_em    timestamptz not null default now(),
+  excluido_por   uuid default auth.uid(),
+  criado_em      timestamptz not null default now()
+);
+alter table public.crm_fin_excluidos add column if not exists criado_em timestamptz not null default now();
+alter table public.crm_fin_excluidos enable row level security;
+revoke all on public.crm_fin_excluidos from anon, public, authenticated;
+grant all on public.crm_fin_excluidos to authenticated;
+revoke update, truncate, references, trigger on public.crm_fin_excluidos from authenticated;
+drop policy if exists so_admin on public.crm_fin_excluidos;
+create policy so_admin on public.crm_fin_excluidos for all to authenticated using ((select public.crm_eh_admin())) with check ((select public.crm_eh_admin()));

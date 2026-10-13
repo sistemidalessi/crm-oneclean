@@ -1196,6 +1196,12 @@ ligado ao domínio; **começa com fila de aprovação** (nada sai sozinho); reme
   **Ligado em 13/10:** chave criada pelo Anderson no console da Anthropic (conta dele, workspace Default, limite de gasto
   US$ 10/mês) e colada nos Secrets; 1ª leitura real às 14:31 (Pix de R$ 134,84 da Slip Química: o CNPJ achou o cadastro,
   lançamento com 📎). Sem título em aberto daquele valor: foi venda paga direto no Pix.
+- **Excluir lançamento no Caixa (13/10, pedido do Anderson):** conta do FKN lançada por engano "não é nem pausar, seria
+  excluir". Botão **Excluir** na janela do lançamento (fora os lançados por frase: para esses é "Desfazer a frase"), na aba
+  Contas pausadas e no "Editar tudo" (que já tinha). O apagado fica guardado **inteiro** em `crm_fin_excluidos` (`dados` jsonb;
+  só admin; sem alteração). Se veio do FKN, a `chave_fkn` entra lá e `fkn.js` `planoContasPagar` (opção `excluidos`) **não
+  cria a conta de novo** — na tela "Atualizar do FKN" e no vigia (`crm-notas` lê a tabela). Para a conta voltar: tirar a linha
+  de `crm_fin_excluidos` (com backup) e puxar a listagem. Lançamento espelhado: apagar desfaz o espelho na Agilité (o aviso diz).
 - `execute_sql` com `delete` solto fica parado até o tempo esgotar (a ferramenta espera confirmação); o formato
   `with alvo as (...), d as (delete ... using alvo ... returning 1) select count(*) from d` passa normalmente.
 - Na tela de cada pessoa os apagados somem na conferência de hora em hora da recarga leve, ou com F5 / "Recarregar dados".

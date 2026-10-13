@@ -35,7 +35,7 @@
     if (lendo) return;
     lendo = true;
     lidoEm = Date.now();
-    try { F = await CRM.store().carregarFin(); } catch (e) { if (!F) F = { recorrentes: [], lancamentos: [], saldos: [], regras: [], baixados: [] }; CRM.falhou(e); }
+    try { F = await CRM.store().carregarFin(); } catch (e) { if (!F) F = { recorrentes: [], lancamentos: [], saldos: [], regras: [], baixados: [], excluidos: [] }; CRM.falhou(e); }
     // previsão (ex.: material vendido à Agilité) que tem título igual do FKN: grava a ligação, para o
     // ✓ do título baixar a previsão em vez de criar outra entrada (caixa-calculo.js, ligacoesTitulos)
     try {
@@ -51,6 +51,19 @@
   async function insere(obj) { const r = await CRM.store().inserir('fin_lancamentos', obj); troca(F.lancamentos, r); CRM.render(); return r; }
   async function remove(id) { await CRM.store().remover('fin_lancamentos', id); F.lancamentos = F.lancamentos.filter(x => x.id !== id); CRM.render(); }
   const fecha = () => { const d = $('#dlgForm'); if (d && d.open) d.close(); };
+  // Excluir de vez (13/10/2026, Anderson: conta do FKN lançada por engano — "não é nem pausar, seria
+  // excluir"). O lançamento fica guardado inteiro em crm_fin_excluidos (cópia de segurança); o que veio
+  // do FKN entra na lista que a próxima listagem do contas a pagar respeita (tela e vigia): não volta.
+  const textoExcluir = l => (l.chave_fkn ? 'Excluir esta conta do FKN? Ela sai do caixa e não volta nas próximas listagens do FKN.' : 'Excluir este lançamento? Ele sai do caixa.') +
+    (l.espelho_par || l.espelho_ref ? '\nO espelho no Caixa da Agilité também é desfeito.' : '') + '\n(Fica guardada uma cópia.)';
+  async function excluirLanc(l) {
+    const ja = l.chave_fkn && (F.excluidos || []).some(x => x.chave_fkn === l.chave_fkn);
+    const r = await CRM.store().inserir('fin_excluidos', { lancamento_id: l.id, chave_fkn: ja ? null : l.chave_fkn || null, descricao: l.descricao, valor: l.valor,
+      vencimento: l.vencimento || null, dados: Object.assign({}, l) });
+    (F.excluidos = F.excluidos || []).push(r);
+    await remove(l.id);
+  }
+  const chavesExcluidas = () => (F.excluidos || []).map(x => x.chave_fkn).filter(Boolean);
   const lanc = id => F && F.lancamentos.find(x => x.id === id);
 
   // ---- ações sobre um lançamento
@@ -156,8 +169,8 @@
         if (l) await grava(l.id, v);
         else await insere(Object.assign({ origem: 'tela' }, v));
       },
-      aoExcluir: l ? async () => { await remove(l.id); } : null,
-      textoExcluir: 'Excluir este lançamento? Não tem volta.'
+      aoExcluir: l ? async () => { await excluirLanc(l); CRM.toast('Lançamento excluído.'); } : null,
+      textoExcluir: l ? textoExcluir(l) : ''
     });
   }
 
@@ -199,7 +212,8 @@
       salvarTexto: aberto ? 'Ajustar' : 'Fechar',
       rodape: (l.anexos && l.anexos.length ? rod('cx-anexo-abrir', '📎 Comprovante' + (l.anexos.length > 1 ? 's (' + l.anexos.length + ')' : '')) : '') +
         (l.frase ? rod('cx-desfrase', 'Desfazer a frase', 'perigo') : '') +
-        (aberto ? rod('cx-pagar', (l.tipo === 'entrada' ? 'Recebi ' : 'Paguei ') + rotDia, 'verde') + rod('cx-pausar', 'Pausar') : l.frase ? '' : rod('cx-desfazer', 'Desfazer a baixa')) + rod('cx-editar', 'Editar tudo'),
+        (aberto ? rod('cx-pagar', (l.tipo === 'entrada' ? 'Recebi ' : 'Paguei ') + rotDia, 'verde') + rod('cx-pausar', 'Pausar') : l.frase ? '' : rod('cx-desfazer', 'Desfazer a baixa')) +
+        (l.frase ? '' : rod('cx-excluir', 'Excluir', 'perigo')) + rod('cx-editar', 'Editar tudo'),
       aoSalvar: async v => { if (aberto) await grava(l.id, { valor: r2(v.valor), vencimento: v.vencimento || l.vencimento }); }
     });
   }
@@ -443,7 +457,7 @@
     if (conf.recusa.length) throw new Error('relatório recusado (nada foi trocado): ' + conf.recusa.join('; '));
     const doFkn = F.lancamentos.filter(x => x.chave_fkn && x.situacao !== 'pago').length;
     if (doFkn >= 20 && lido.contas.length < doFkn * 0.4) throw new Error('veio com ' + lido.contas.length + ' contas e o CRM tem ' + doFkn + ' do FKN em aberto: confira Conta 0 a 0, Situação GERAL e a filial');
-    const p = K.planoContasPagar(lido, F.lancamentos, { hoje: lido.posicao || hoje(), agora: agora() });
+    const p = K.planoContasPagar(lido, F.lancamentos, { hoje: lido.posicao || hoje(), agora: agora(), excluidos: chavesExcluidas() });
     CRM.abrirForm({
       titulo: 'Contas a pagar do FKN',
       intro: 'Relatório de ' + R.dataBR(lido.posicao) + (lido.hora ? ' ' + lido.hora : '') + ': ' + lido.contas.length + ' contas, ' + R.moeda(lido.soma) + ' (bate com o total geral).\n' +
@@ -451,7 +465,8 @@
         (p.antigas.qtd ? '• ' + p.antigas.qtd + ' pendências antigas (vencidas há mais de 60 dias ou emitidas há mais de 1 ano): ' + R.moeda(p.antigas.valor) + ' → entram em "Contas pausadas" para conferir\n' : '') +
         (p.ligar.length ? '• ' + p.ligar.length + ' já estavam lançadas (recorrente/planilha): só ligadas ao FKN — ' + p.ligar.map(x => x.descricao).join(', ') + '\n' : '') +
         (p.atualizar.length ? '• ' + p.atualizar.length + ' com valor ou vencimento novo\n' : '') +
-        (p.baixar.length ? '• ' + p.baixar.length + ' sumiram do FKN: dadas como pagas (fora do caixa)\n' : ''),
+        (p.baixar.length ? '• ' + p.baixar.length + ' sumiram do FKN: dadas como pagas (fora do caixa)\n' : '') +
+        (p.excluidas ? '• ' + p.excluidas + ' excluída(s) por você no Caixa: ficam de fora\n' : ''),
       campos: [], salvarTexto: 'Aplicar',
       aoSalvar: async () => {
         if (p.inserir.length) await CRM.store().inserirVarios('fin_lancamentos', p.inserir);
@@ -592,7 +607,8 @@
           '<td><strong>' + esc(x.descricao) + '</strong>' + (x.fornecedor || x.entre_empresas || x.origem !== 'tela' ? '<small>' + esc([x.fornecedor, x.entre_empresas ? 'entre empresas' : '', x.origem === 'recorrente' ? 'recorrente' : x.origem === 'fkn' ? 'do FKN' : x.origem === 'planilha' ? 'da planilha' : '', x.titulo_duplicata ? (x.situacao === 'pago' ? 'recebida pelo título ' : 'ligada ao título ') + x.titulo_duplicata : '', x.emprestimo ? 'empréstimo recebido (não é receita)' : '', x.espelho_ref ? 'veio do Caixa da Agilité' : x.espelho_par ? 'espelhado no Caixa da Agilité' : '',
             Number(x.juros) > 0 ? 'juros ' + R.moeda(x.juros) : ''].filter(Boolean).join(' · ')) + '</small>' : '') + '</td>' +
           '<td>' + esc(x.categoria || '') + '</td><td class="num ' + (x.tipo === 'entrada' ? 'cx-pos' : 'cx-neg') + '">' + (x.tipo === 'entrada' ? '+' : '−') + esc(R.moeda(x.valor)) + '</td><td>' + seloSituacao(x, h) + '</td>' +
-          '<td class="acoes-linha">' + (x.situacao === 'aberto' ? '<button type="button" class="mini" data-acao="cx-pagar" data-id="' + esc(x.id) + '">' + (x.tipo === 'entrada' ? 'Recebi' : 'Paguei') + ' hoje</button>' : x.situacao === 'pausado' ? '<button type="button" class="mini" data-acao="cx-voltar" data-id="' + esc(x.id) + '">Voltar para o caixa</button>' : '') + '</td></tr>').join('') +
+          '<td class="acoes-linha">' + (x.situacao === 'aberto' ? '<button type="button" class="mini" data-acao="cx-pagar" data-id="' + esc(x.id) + '">' + (x.tipo === 'entrada' ? 'Recebi' : 'Paguei') + ' hoje</button>' : x.situacao === 'pausado' ? '<button type="button" class="mini" data-acao="cx-voltar" data-id="' + esc(x.id) + '">Voltar para o caixa</button>' +
+            '<button type="button" class="mini perigo" data-acao="cx-excluir" data-id="' + esc(x.id) + '">Excluir</button>' : '') + '</td></tr>').join('') +
         '</tbody><tfoot><tr><td colspan="3">' + l.length + ' lançamento(s)</td><td class="num"><strong>' + esc(R.moeda(tot)) + '</strong></td><td colspan="2"></td></tr></tfoot></table></div>'
         : '<p class="vazio">Nada aqui.</p>') + '</section>';
   }
@@ -762,6 +778,12 @@
     // no caixa com a data do vencimento — conta no saldo se for depois do último saldo do BB informado.
     'cx-nodia': id => { const l = lanc(id); if (l) pagar(l, diaDaBaixa(l.vencimento)).then(() => CRM.toast((l.tipo === 'entrada' ? 'Recebido' : 'Pago') + ' em ' + dm(diaDaBaixa(l.vencimento)) + ': ' + R.moeda(l.valor) + ' (entrou no saldo).')).catch(CRM.falhou); },
     'cx-japaga': id => { const l = lanc(id); if (l) grava(l.id, { situacao: 'pago', pago_em: l.vencimento, baixa: 'fora', baixado_em: agora() }).catch(CRM.falhou); },
+    'cx-excluir': id => {
+      const l = lanc(id);
+      if (!l || !confirm(textoExcluir(l))) return;
+      fecha();
+      excluirLanc(l).then(() => CRM.toast('Excluído: ' + l.descricao + ' (' + R.moeda(l.valor) + ').')).catch(CRM.falhou);
+    },
     'cx-pausar': id => { fecha(); const l = lanc(id); if (l) grava(l.id, { situacao: 'pausado' }).then(() => CRM.toast('Conta pausada: saiu do caixa (aba Contas pausadas).')).catch(CRM.falhou); },
     'cx-voltar': id => { const l = lanc(id); if (l) grava(l.id, { situacao: 'aberto' }).catch(CRM.falhou); },
     'cx-desfazer': id => {

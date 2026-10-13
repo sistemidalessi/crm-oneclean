@@ -141,6 +141,10 @@ test('contas a pagar do FKN: novas, antigas pausadas, já lançadas ligadas e su
   assert.deepEqual(p.inserir.map(x => [x.chave_fkn, x.situacao]), [['00005|30468-2', 'pausado'], ['16001|OUT/26 - I', 'aberto']]);
   assert.match(p.inserir[0].observacoes, /pendência antiga/);
   assert.equal(p.antigas.qtd, 1);
+  // conta excluída no Caixa não volta na próxima listagem
+  const p2 = K.planoContasPagar(l, exist, { hoje: '2026-10-06', agora: 'x', excluidos: ['16001|OUT/26 - I'] });
+  assert.deepEqual(p2.inserir.map(x => x.chave_fkn), ['00005|30468-2']);
+  assert.equal(p2.excluidas, 1);
 });
 
 test('leitura do caixa (Agilité "Geral" e gestora): bate com a grade, sem nome de pessoa', () => {

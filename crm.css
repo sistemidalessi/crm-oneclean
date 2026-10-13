@@ -83,6 +83,7 @@ code, kbd { background: var(--realce); border: 1px solid var(--borda); border-ra
 .mini:disabled { opacity: .4; cursor: default; }
 .mini.wa { color: var(--verde); border-color: var(--verde); }
 .mini.verde { color: var(--verde); border-color: var(--verde); }
+.mini.perigo { color: var(--vermelho); border-color: var(--vermelho); margin-left: 4px; }
 .link { appearance: none; border: 0; background: none; color: var(--azul); font: inherit; padding: 0; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
 .x { appearance: none; border: 0; background: none; color: var(--suave); font-size: 1.6rem; line-height: 1; cursor: pointer; padding: 0 4px; }
 input, select, textarea { font: inherit; color: var(--texto); background: var(--papel); border: 1px solid var(--borda); border-radius: 7px; padding: 6px 9px; min-width: 0; }

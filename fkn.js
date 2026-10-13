@@ -239,16 +239,19 @@
   //     valor, vencimento até 5 dias de diferença): só liga (chave_fkn), não duplica;
   //   - conta nova antiga (venceu há mais de 60 dias ou emitida há mais de 1 ano): entra PAUSADA,
   //     para conferir — o FKN tem pendências de anos atrás que nunca foram baixadas;
-  //   - conta que estava no retrato anterior e sumiu: paga fora do caixa (no dia do relatório).
+  //   - conta que estava no retrato anterior e sumiu: paga fora do caixa (no dia do relatório);
+  //   - conta EXCLUÍDA pelo administrador no Caixa (opc.excluidos: chaves de crm_fin_fkn_excluidos,
+  //     13/10/2026): fica de fora — não volta a cada listagem.
   function planoContasPagar(lido, existentes, opc) {
     opc = opc || {};
     const pos = lido.posicao || opc.hoje;
     const corte = R.somaDias(pos, -(opc.diasAntiga || 60)), corteEmissao = R.somaDias(pos, -365);
     const porChave = new Map((existentes || []).filter(l => l.chave_fkn).map(l => [l.chave_fkn, l]));
     const livres = (existentes || []).filter(l => !l.chave_fkn && l.tipo === 'saida' && l.situacao === 'aberto' && l.origem !== 'titulo');
-    const usados = new Set();
-    const out = { inserir: [], atualizar: [], ligar: [], baixar: [], antigas: { qtd: 0, valor: 0 }, novas: { qtd: 0, valor: 0 } };
+    const usados = new Set(), excluidos = new Set(opc.excluidos || []);
+    const out = { inserir: [], atualizar: [], ligar: [], baixar: [], excluidas: 0, antigas: { qtd: 0, valor: 0 }, novas: { qtd: 0, valor: 0 } };
     lido.contas.forEach(c => {
+      if (excluidos.has(c.chave)) { out.excluidas++; return; }
       const ja = porChave.get(c.chave);
       if (ja) {
         const patch = {};
