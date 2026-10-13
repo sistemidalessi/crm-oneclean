@@ -1205,7 +1205,8 @@ ligado ao domínio; **começa com fila de aprovação** (nada sai sozinho); reme
   Mesmo dia: a INOVEN 2000190729-02 foi excluída pelo Anderson pelo botão (conferida no banco), e as **6 parcelas em aberto
   da INOVEN** (R$ 4.350,67; boletos 2000190729, 2000194420, 2000197378) foram dadas como **pagas fora do caixa** a pedido dele:
   foram pagas no cartão de crédito e baixadas no FKN (backup em `crm_backup.fin_inoven_cartao_20261013`). O saldo do BB não muda;
-  o dinheiro sai na fatura do cartão.
+  o dinheiro sai na fatura do cartão. **Pendente:** foi **outro cartão** (não o "Cartão Inter" de R$ 605,92 no dia 15), que
+  ainda não está no Caixa: falta o Anderson dizer nome, dia de vencimento, valor da fatura e o parcelamento da INOVEN nele.
 - `execute_sql` com `delete` solto fica parado até o tempo esgotar (a ferramenta espera confirmação); o formato
   `with alvo as (...), d as (delete ... using alvo ... returning 1) select count(*) from d` passa normalmente.
 - Na tela de cada pessoa os apagados somem na conferência de hora em hora da recarga leve, ou com F5 / "Recarregar dados".
