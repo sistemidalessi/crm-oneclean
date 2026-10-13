@@ -1202,6 +1202,10 @@ ligado ao domínio; **começa com fila de aprovação** (nada sai sozinho); reme
   só admin; sem alteração). Se veio do FKN, a `chave_fkn` entra lá e `fkn.js` `planoContasPagar` (opção `excluidos`) **não
   cria a conta de novo** — na tela "Atualizar do FKN" e no vigia (`crm-notas` lê a tabela). Para a conta voltar: tirar a linha
   de `crm_fin_excluidos` (com backup) e puxar a listagem. Lançamento espelhado: apagar desfaz o espelho na Agilité (o aviso diz).
+  Mesmo dia: a INOVEN 2000190729-02 foi excluída pelo Anderson pelo botão (conferida no banco), e as **6 parcelas em aberto
+  da INOVEN** (R$ 4.350,67; boletos 2000190729, 2000194420, 2000197378) foram dadas como **pagas fora do caixa** a pedido dele:
+  foram pagas no cartão de crédito e baixadas no FKN (backup em `crm_backup.fin_inoven_cartao_20261013`). O saldo do BB não muda;
+  o dinheiro sai na fatura do cartão.
 - `execute_sql` com `delete` solto fica parado até o tempo esgotar (a ferramenta espera confirmação); o formato
   `with alvo as (...), d as (delete ... using alvo ... returning 1) select count(*) from d` passa normalmente.
 - Na tela de cada pessoa os apagados somem na conferência de hora em hora da recarga leve, ou com F5 / "Recarregar dados".
