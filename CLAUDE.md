@@ -1163,6 +1163,11 @@ ligado ao domínio; **começa com fila de aprovação** (nada sai sozinho); reme
   Respostas do Anderson (09/10): os R$ 4.500 de 08/10 substituem os R$ 1.500 de 07/10 e o par dos R$ 1.600 de 06/10 não vai
   para a Agilité (os dois já resolvidos, não reabrir); a devolução da Je fica em 14/10 mesmo; "Água — galpão" (R$ 786,96,
   venc. 07/10) não foi paga: saiu de pausada para aberta (aparece como vencida no Caixa).
+- **Histórico na janela da tarefa (13/10, pedido das vendedoras):** ao abrir uma tarefa (Início → "O que fazer hoje", agenda,
+  ficha) a janela mostra, abaixo dos campos, o "Histórico do cliente": última compra (ou "Ainda não comprou"), as
+  observações do cadastro e os 10 registros mais recentes (sem as movimentações automáticas), só leitura, com o botão
+  "ficha do cliente" (abre a ficha por cima; a tarefa continua aberta embaixo). `fichas.historicoNaTarefa`; tarefa nova sem
+  cliente escolhido não mostra nada.
 - `execute_sql` com `delete` solto fica parado até o tempo esgotar (a ferramenta espera confirmação); o formato
   `with alvo as (...), d as (delete ... using alvo ... returning 1) select count(*) from d` passa normalmente.
 - Na tela de cada pessoa os apagados somem na conferência de hora em hora da recarga leve, ou com F5 / "Recarregar dados".

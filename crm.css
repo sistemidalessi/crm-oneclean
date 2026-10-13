@@ -350,6 +350,12 @@ body.arrastando-card .zonas-fim { display: grid; grid-template-columns: 1fr 1fr;
 .mini-card span { font-weight: 600; font-size: .85rem; }
 .mini-card small { color: var(--suave); font-size: .76rem; }
 .resumo-compras { margin: 0; background: var(--verde-fundo); color: var(--verde); padding: 8px 10px; border-radius: 8px; font-size: .85rem; }
+.hist-tarefa { margin: 4px 18px 14px; padding-top: 12px; border-top: 1px solid var(--borda); display: grid; gap: 8px; }
+.hist-tarefa h3 { margin: 0; display: flex; align-items: center; gap: 8px; font-size: .95rem; }
+.hist-tarefa h3 small { color: var(--suave); font-weight: 400; }
+.hist-tarefa h3 .mini { margin-left: auto; }
+.hist-tarefa .obs-cliente { margin: 0; font-size: .85rem; white-space: pre-line; background: var(--realce); padding: 8px 10px; border-radius: 8px; }
+.hist-tarefa .linha-tempo { max-height: 280px; overflow-y: auto; margin-left: 6px; }
 .etapas-barra { list-style: none; margin: 0; padding: 10px 16px; display: flex; gap: 4px; border-bottom: 1px solid var(--borda); flex: none; overflow-x: auto; }
 .etapas-barra li { flex: 1; min-width: 110px; }
 .etapas-barra button, .etapas-barra span { appearance: none; width: 100%; border: 0; background: var(--realce); color: var(--suave); font: inherit; font-size: .8rem; padding: 7px 14px; cursor: pointer; clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 50%, calc(100% - 10px) 100%, 0 100%, 10px 50%); display: block; text-align: center; }

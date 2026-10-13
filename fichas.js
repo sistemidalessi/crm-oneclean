@@ -924,6 +924,29 @@
   };
 
   // ------------------------------------------------------------ tarefas e registros
+  // Na janela da tarefa (pedido das vendedoras, 13/10/2026): o que já se falou com o cliente, as
+  // observações e a última compra, para não precisar abrir a ficha antes de ligar. Só leitura.
+  function historicoNaTarefa(e, a) {
+    const r = CRM.resumo(e.id) || {};
+    const quando = x => x.concluida_em || x.data_hora;
+    const hist = CRM.doEmpresa('atividades', e.id).filter(x => x.concluida && x.tipo !== 'sistema' && (!a || x.id !== a.id))
+      .sort((x, y) => (quando(y) > quando(x) ? 1 : -1));
+    const compra = r.compras ? 'Última compra em ' + R.dataBR(r.ultimaCompra) + ' (' + R.diasEntre(r.ultimaCompra, CRM.hoje()) + ' dias) · ' +
+      r.compras + ' compra(s), ' + R.moeda(r.totalComprado) : 'Ainda não comprou.';
+    const item = x => {
+      const c = x.contato_id && CRM.contato(x.contato_id), neg = x.negocio_id && CRM.negocio(x.negocio_id);
+      return '<li class="t-' + esc(x.tipo) + '"><div class="lt-cab">' + CRM.iconeTipo(x.tipo) + '<span class="tipo">' + esc(R.rotulo(R.TIPOS_ATIVIDADE, x.tipo)) + '</span>' +
+        '<time>' + esc(R.dataHoraBR(quando(x))) + '</time><span class="quem">' + esc(R.primeiroNome(CRM.nomeUsuario(x.responsavel_id))) + '</span>' +
+        (c ? '<span class="quem">com ' + esc(c.nome) + '</span>' : '') + (neg ? '<span class="quem">' + esc(neg.titulo) + '</span>' : '') + '</div><p>' + esc(x.descricao) + '</p></li>';
+    };
+    return '<section class="hist-tarefa"><h3>Histórico do cliente <small>' + hist.length + ' registro(s)</small>' +
+      '<button type="button" class="mini" data-acao="abrir-empresa" data-id="' + esc(e.id) + '">ficha do cliente</button></h3>' +
+      '<p class="resumo-compras">' + esc(compra) + '</p>' +
+      (e.observacoes ? '<p class="obs-cliente"><strong>Observações:</strong> ' + esc(e.observacoes) + '</p>' : '') +
+      (hist.length ? '<ol class="linha-tempo">' + hist.slice(0, 10).map(item).join('') + '</ol>' +
+        (hist.length > 10 ? '<p class="mais">os 10 mais recentes — o resto na ficha do cliente</p>' : '') : '<p class="vazio">Nada registrado ainda com este cliente.</p>') + '</section>';
+  }
+
   fichas.formTarefa = (a, pre, intro) => {
     pre = pre || {};
     const eid = a ? a.empresa_id : pre.empresa_id;
@@ -946,7 +969,7 @@
     CRM.abrirForm({
       titulo: a ? 'Tarefa · ' + CRM.nomeEmpresa(a.empresa_id) : 'Nova tarefa' + (e ? ' · ' + e.nome : ''),
       intro, campos, valores, largura: 'largo',
-      htmlDepois: eid ? '' : datalistEmpresas(),
+      htmlDepois: e ? historicoNaTarefa(e, a) : eid ? '' : datalistEmpresas(),
       rodape: a ? '<a class="btn sec" target="_blank" rel="noopener noreferrer" href="' + esc(R.linkGoogleAgenda(a.descricao + ' — ' + CRM.nomeEmpresa(a.empresa_id), a.data_hora, 30, 'CRM: ' + CRM.nomeEmpresa(a.empresa_id))) + '">+ Google Agenda</a>' : '',
       extras: ligaDatalist,
       aoSalvar: async v => {
