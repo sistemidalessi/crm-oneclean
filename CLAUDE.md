@@ -1172,6 +1172,13 @@ ligado ao domínio; **começa com fila de aprovação** (nada sai sozinho); reme
   "Atrasadas de antes") **abre a ficha do cliente**; a tarefa se edita no lápis ✎ ao lado. Na ficha do cliente e no negócio
   (`itemTarefa(a, { editar: true })`) o clique continua editando a tarefa. Tarefa sem cliente abre a edição. O histórico
   na janela da tarefa ficou (aparece ao editar pelo lápis).
+- **R$ 700 de 09/10 à Agilité (acertado em 13/10):** no sistema da Agilité a frase "oneclean e agilite devolverá" (sem vírgula)
+  virou um movimento só (entrada prevista em 14/10, sem a ida) e o espelho trouxe isso como saída em aberto em 14/10; aqui o
+  Anderson tinha lançado "Mais transferência" em Outras saídas (fora do espelho). Acerto, com backup em
+  `crm_backup.transf_700_2026_10_13`: a linha do par `agilite:136` virou a ida paga em 09/10, entrou a volta (entrada 14/10) e o
+  "Mais transferência" foi apagado; o espelho levou à Agilité às 13:25 (200; lá ida 136 atualizada e volta 138 criada).
+  **Causa no leitor de frases** (corrigida em `frases.js`, `SUJEITO_VOLTA`): "e agilite devolverá dia 14" não era reconhecido
+  como a volta (só "e ela/ele/vai devolver"), então o "dia 14" ia para a saída. **Avisar a Agilité para levar** (mesmo código).
 - `execute_sql` com `delete` solto fica parado até o tempo esgotar (a ferramenta espera confirmação); o formato
   `with alvo as (...), d as (delete ... using alvo ... returning 1) select count(*) from d` passa normalmente.
 - Na tela de cada pessoa os apagados somem na conferência de hora em hora da recarga leve, ou com F5 / "Recarregar dados".

@@ -35,12 +35,14 @@
   // (06/10/2026: "vai retornar no dia 14/10" - retornar/voltar tambem e' devolucao)
   const DEVOLUCAO = /\b(devolv\w*|devolucao|pagar de volta|retorn\w*|volta|voltar|voltara|volte)\b/;
   // " e vai retornar dia 14" depois do valor: e' outro pedaco (a volta), nao muda o "saiu ... hoje"
-  const INICIO_DEVOLUCAO = /^(?:(?:vai|vao|sera|serao|ele|ela|eles|elas|que|depois|e)\s+)*(?:devolv|retorn|volt|pagar de volta)/;
+  // (13/10/2026: "700 oneclean e agilite devolverá dia 14" - a empresa pode ser o sujeito da volta)
+  const SUJEITO_VOLTA = '(?:a\\s+)?(?:a[gj]il+i[tc]\\w*|one\\s?clean)';
+  const INICIO_DEVOLUCAO = new RegExp('^(?:(?:vai|vao|sera|serao|ele|ela|eles|elas|que|depois|e|' + SUJEITO_VOLTA + ')\\s+)*(?:devolv|retorn|volt|pagar de volta)');
   // dinheiro que alguem emprestou PARA a empresa (08/10/2026: "a Je me emprestou 10 mil ontem para devolver
   // amanha" virava saida): e' entrada de emprestimo, mesmo sem "entrou"
   const EMPRESTOU_PRA_MIM = /\b(?:me|nos)\s+emprest\w*|\b(?:peguei|pegamos|pego)\s+emprestad\w*|\bemprestad[oa]s?\s+(?:da|do|de|pela|pelo)\b/;
   // "... 10 mil ontem para devolver amanha": o "para devolver <data>" depois do valor e' a volta, outro pedaco
-  const CAUDA_DEVOLUCAO = /\s+(?:para|pra|e|que)\s+(?:(?:vou|vamos|vai|a gente|sera|serao|ela|ele|eles|elas|vai ser)\s+)*(?:devolv|pagar de volta|retorn)\w*/;
+  const CAUDA_DEVOLUCAO = new RegExp('\\s+(?:para|pra|e|que)\\s+(?:(?:vou|vamos|vai|a gente|sera|serao|ela|ele|eles|elas|vai ser|' + SUJEITO_VOLTA + ')\\s+)*(?:devolv|pagar de volta|retorn)\\w*');
   // "1500 pra agilite ontem": dinheiro que foi PARA alguem = saida, mesmo com um "entra e volta" de rotulo na frase
   const PARA_ALGUEM = /\b(?:pra|para|pro)\s+(?:a|o)?\s*\p{L}/u;
 

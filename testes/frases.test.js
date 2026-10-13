@@ -296,3 +296,17 @@ test('"1500 pra Agilité ontem e ela vai devolver dia 14": saída com volta, mes
   const c = F.classificar(F.interpretar('ontem a OneClean emprestou r$ 1500 para a Agilité que será devolvido dia 14', '2026-10-08').itens, ctx)[0];
   assert.deepEqual([c.tipo, c.situacao, c.devolucaoPrevista], ['saida', 'realizado', '2026-10-14']);
 });
+
+// 13/10/2026: "700 oneclean e agilite devolverá dia 14" (sem vírgula) virou uma saída só, no dia 14 e sem a volta;
+// a empresa pode ser o sujeito da devolução ("e agilite devolverá", "e a Agility vai devolver")
+test('transferência: "e agilite devolverá dia 14" é a volta, a saída fica no dia', () => {
+  const H = '2026-10-09';
+  const v = Object.assign({}, vazio, { hoje: H });
+  for (const t of ['700 oneclean e agilite devolverá dia 14', 'emprestei 700 pra agilite e agilite devolverá dia 14',
+    'emprestei 700 pra agilite e a agility vai devolver dia 14', '700 pra agilite, agilite devolverá dia 14']) {
+    const l = F.classificar(F.interpretar(t, H).itens, v);
+    assert.equal(l.length, 1, t);
+    assert.deepEqual([l[0].tipo, l[0].valor, l[0].data, l[0].situacao, l[0].categoria], ['saida', 700, H, 'realizado', 'Transferência entre empresas'], t);
+    assert.deepEqual(l[0].transferencia, { volta: '2026-10-14', valor: 700 }, t);
+  }
+});
