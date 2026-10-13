@@ -161,7 +161,7 @@
       // ---- coluna 3: próximo passo, negócios, compras
       '<div class="ficha-col">' +
         '<section class="' + (pendentes.length ? '' : 'sem-proximo') + '"><h3>Próximo passo <button type="button" class="mini" data-acao="tarefa-empresa">+ tarefa</button></h3>' +
-          (pendentes.length ? '<ul class="lista tarefas">' + pendentes.map(a => CRM.itemTarefa(a, { resp: true })).join('') + '</ul>' : '<p class="vazio alerta">Nenhum próximo passo agendado.</p>') + '</section>' +
+          (pendentes.length ? '<ul class="lista tarefas">' + pendentes.map(a => CRM.itemTarefa(a, { resp: true, editar: true })).join('') + '</ul>' : '<p class="vazio alerta">Nenhum próximo passo agendado.</p>') + '</section>' +
         (CRM.fichaFinanceiro ? CRM.fichaFinanceiro(e.id) : '') +
         '<section><h3>Negócios em andamento <button type="button" class="mini" data-acao="negocio-empresa">+ negócio</button></h3>' +
           (abertos.length ? abertos.map(n => cartaoNegocio(n)).join('') : '<p class="vazio">Nenhum.</p>') + '</section>' +
@@ -309,7 +309,7 @@
       '</div>' +
       '<div class="ficha-col historico">' +
         '<section><h3>Próximo passo <button type="button" class="mini" data-acao="tarefa-negocio">+ tarefa</button></h3>' +
-          (pend.length ? '<ul class="lista tarefas">' + pend.map(a => CRM.itemTarefa(a, { resp: true })).join('') + '</ul>' : '<p class="vazio alerta">Nenhum próximo passo agendado.</p>') + '</section>' +
+          (pend.length ? '<ul class="lista tarefas">' + pend.map(a => CRM.itemTarefa(a, { resp: true, editar: true })).join('') + '</ul>' : '<p class="vazio alerta">Nenhum próximo passo agendado.</p>') + '</section>' +
         '<section><h3>Histórico do negócio <button type="button" class="mini" data-acao="registro-negocio">+ registrar</button></h3>' +
           (hist.length ? '<ol class="linha-tempo">' + hist.map(itemHistorico).join('') + '</ol>' : '<p class="vazio">Nada ainda.</p>') + '</section>' +
       '</div></div></div>';

@@ -1168,6 +1168,10 @@ ligado ao domínio; **começa com fila de aprovação** (nada sai sozinho); reme
   observações do cadastro e os 10 registros mais recentes (sem as movimentações automáticas), só leitura, com o botão
   "ficha do cliente" (abre a ficha por cima; a tarefa continua aberta embaixo). `fichas.historicoNaTarefa`; tarefa nova sem
   cliente escolhido não mostra nada.
+  **Mesmo dia, o que a líder queria de fato:** clicar na tarefa (Início → "O que fazer hoje" e "Próximos 3 dias", Atividades →
+  "Atrasadas de antes") **abre a ficha do cliente**; a tarefa se edita no lápis ✎ ao lado. Na ficha do cliente e no negócio
+  (`itemTarefa(a, { editar: true })`) o clique continua editando a tarefa. Tarefa sem cliente abre a edição. O histórico
+  na janela da tarefa ficou (aparece ao editar pelo lápis).
 - `execute_sql` com `delete` solto fica parado até o tempo esgotar (a ferramenta espera confirmação); o formato
   `with alvo as (...), d as (delete ... using alvo ... returning 1) select count(*) from d` passa normalmente.
 - Na tela de cada pessoa os apagados somem na conferência de hora em hora da recarga leve, ou com F5 / "Recarregar dados".

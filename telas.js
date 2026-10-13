@@ -32,19 +32,25 @@
   }
   CRM.acoesRapidas = acoesRapidas;
 
+  // Fora da ficha, clicar na tarefa abre a ficha do cliente (pedido da líder, 13/10/2026: lá estão o histórico,
+  // os negócios e o registro do contato); a tarefa se edita no lápis. Na ficha e no negócio (opts.editar),
+  // o clique continua editando a tarefa.
   function itemTarefa(a, opts) {
     const sit = R.situacaoTarefa(a, CRM.hoje());
     const neg = a.negocio_id && CRM.negocio(a.negocio_id);
+    const ficha = !(opts && opts.editar) && a.empresa_id && CRM.empresa(a.empresa_id);
     return '<li class="tarefa ' + sit + '">' +
       '<input type="checkbox" data-acao="concluir" data-id="' + esc(a.id) + '"' + (a.concluida ? ' checked' : '') + ' aria-label="Concluída">' +
       '<span class="hora">' + (sit === 'atrasada' ? esc(R.dataBR(a.data_hora).slice(0, 5)) : esc(R.horaLocal(a.data_hora))) + '</span>' +
       CRM.iconeTipo(a.tipo) +
-      '<button type="button" class="linha" data-acao="editar-tarefa" data-id="' + esc(a.id) + '">' +
+      (ficha ? '<button type="button" class="linha" data-acao="abrir-empresa" data-id="' + esc(a.empresa_id) + '" title="Abrir a ficha do cliente">'
+        : '<button type="button" class="linha" data-acao="editar-tarefa" data-id="' + esc(a.id) + '">') +
       '<strong>' + esc(a.descricao) + '</strong>' +
       '<small>' + esc(CRM.nomeEmpresa(a.empresa_id)) + (neg ? ' · ' + esc(neg.titulo) : '') +
       ((opts && opts.resp) || CRM.ehGestor() && !CRM.carteira() ? ' · ' + esc(CRM.nomeUsuario(a.responsavel_id)) : '') +
       (a.recorrencia ? ' · ↻ ' + esc(R.rotulo(R.RECORRENCIAS, a.recorrencia)) : '') +
       (sit === 'atrasada' ? ' ' + CRM.selo('atrasada', 'vermelho') : '') + '</small></button>' +
+      (ficha ? '<button type="button" class="mini editar-tarefa" data-acao="editar-tarefa" data-id="' + esc(a.id) + '" title="Editar a tarefa (data, tipo, responsável)" aria-label="Editar a tarefa">✎</button>' : '') +
       (CRM.sequencia ? CRM.sequencia.botao(a) : '') + acoesRapidas(a.empresa_id, a.contato_id) + '</li>';
   }
   CRM.itemTarefa = itemTarefa;
