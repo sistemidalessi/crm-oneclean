@@ -970,6 +970,12 @@ Anderson: cada sistema cuida da sua empresa; o "Geral" (as duas) é de quem lê 
     apagado aqui; 17:09 "saída de 4500 pra agilite e devolve dia 14/10" gravado lá (ida 129/volta 130).
     Ainda não mandados: os 1.600 de 06/10 (lançados à mão nos dois lados antes do espelho) — mandar o par faz a
     Agilité adotar o dela.
+  - **Baixa no espelho (14/10, pedido do Anderson: "quando eu ticar num, no outro já tem que estar OK"):** daqui já vai e
+    já chega — o ✓ manda o par com `situacao: 'realizado'` (o gatilho olha situação e `pago_em`) e `crm_espelho_aplicar`
+    marca pago o que chega "realizado". Em 14/10, 14:18–14:21, o Anderson deu ✓ nas 4 voltas de 14/10 (300, 700, 1.600,
+    4.500) e a Agilité respondeu ok (voltas 131, 138, 109, 130 lá; o par dos 1.600 foi adotado lá como ida 108/volta 109).
+    Até 14/10 a Agilité nunca mandou baixa (só criação). Prompt para a sessão da Agilité conferir os dois sentidos:
+    `sistemi-dalessi/docs/prompts/2026-10-14-agilite-espelho-baixa.md`.
 - **Gestão → tabela Equipe (08/10, pedido do Anderson):** comprador (Wellington) fora; o administrador entra como
   **"Direto"** (notas "VENDEDOR: DIRETO", `nomes_nota` do admin), no fim e só se vendeu no ano, sem as colunas de
   contato; linha **Total** embaixo = o faturamento do mês e do ano (o mesmo do quadro), com "Ex-vendedores(as)" quando há nota
