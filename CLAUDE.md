@@ -1205,8 +1205,8 @@ ligado ao domínio; **começa com fila de aprovação** (nada sai sozinho); reme
   Mesmo dia: a INOVEN 2000190729-02 foi excluída pelo Anderson pelo botão (conferida no banco), e as **6 parcelas em aberto
   da INOVEN** (R$ 4.350,67; boletos 2000190729, 2000194420, 2000197378) foram dadas como **pagas fora do caixa** a pedido dele:
   foram pagas no cartão de crédito e baixadas no FKN (backup em `crm_backup.fin_inoven_cartao_20261013`). O saldo do BB não muda;
-  o dinheiro sai na fatura do cartão. **Pendente:** foi **outro cartão** (não o "Cartão Inter" de R$ 605,92 no dia 15), que
-  ainda não está no Caixa: falta o Anderson dizer nome, dia de vencimento, valor da fatura e o parcelamento da INOVEN nele.
+  o dinheiro sai na fatura do cartão. Foi **outro cartão** (não o "Cartão Inter" de R$ 605,92 no dia 15): **o Anderson lança a
+  fatura no Caixa quando surgir** (decisão dele em 14/10) — não cobrar mais esse cadastro.
 - **Cobrança: cartório e boletos atualizados (14/10, pedido do Anderson).** Decisões dele: escolher os títulos do cartório
   (não o cliente inteiro); a vendedora vê o cartório e não cobra; boleto entra pelo PDF do BB lido pela IA; quem manda ao
   cliente é a vendedora, pelo WhatsApp dela.
