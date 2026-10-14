@@ -376,7 +376,9 @@
       '(top clientes, produtos mais vendidos, vendas por segmento) e as "compras anteriores" de cada cliente.</p>' +
       '<p>Escolha os <strong>XML</strong> (pode selecionar vários de uma vez) ou o <strong>.zip</strong> que o sistema de notas ou a contabilidade exporta. ' +
       'Os XML de cancelamento, se vierem juntos, marcam a nota como cancelada.</p>' +
-      '<input type="file" id="arqNotas" multiple accept=".xml,.zip,text/xml,application/xml,application/zip">' +
+      '<p><input type="file" id="arqNotas" multiple accept=".xml,.zip,text/xml,application/xml,application/zip"></p>' +
+      '<p>Ou <strong>escolha a pasta inteira</strong> (sem compactar; entram as subpastas): <label class="btn sec arquivo">Escolher pasta<input type="file" id="arqNotasPasta" webkitdirectory multiple></label></p>' +
+      '<p class="dica">Na OneClean: <code>\\\\Servidor\\sistema\\Unimake\\uninfe30\\63237702000103\\Enviados\\Autorizados</code> (no servidor, D:\\SISTEMA\\Unimake\\…).</p>' +
       '<p class="dica">O cliente é reconhecido pelo CNPJ, pela razão social ou pelo nome; se ainda não estiver no CRM, é cadastrado como cliente. Notas de entrada, de outra empresa e devoluções ficam de fora. Rodar de novo não duplica.</p></section>' +
       '<section class="cartao"><h2>3. Planilha (Excel ou CSV)</h2><p>Serve para a exportação em Excel do Agendor ou qualquer outra planilha. As colunas são reconhecidas pelo nome e você confere antes de importar.</p>' +
       '<p>O que tem na planilha: <select id="tipoImport">' + CRM.opcoesHTML(TIPOS_IMPORT, 'empresas') + '</select></p>' +
@@ -398,6 +400,8 @@
     });
     const arqNotas = $('#arqNotas');
     if (arqNotas) arqNotas.addEventListener('change', () => lerNotas([...arqNotas.files]).catch(CRM.falhou));
+    const arqNotasPasta = $('#arqNotasPasta');
+    if (arqNotasPasta) arqNotasPasta.addEventListener('change', () => lerNotas([...arqNotasPasta.files].filter(f => /\.(xml|zip)$/i.test(f.name))).catch(CRM.falhou));
     liga('arqPlanilha', async f => {
       const tipo = $('#tipoImport').value;
       let linhas;
