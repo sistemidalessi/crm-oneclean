@@ -781,3 +781,8 @@ tr.apagado td { opacity: .55; }
 .cx-soma { position: sticky; top: 0; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 8px 0; padding: 8px 12px; border-radius: 8px; background: var(--realce); border-left: 4px solid var(--ouro); }
 .cx-soma.vazio { background: none; border-left-color: transparent; padding-left: 0; color: var(--suave); font-size: .85rem; }
 .cx-soma .cx-soma-total strong { font-size: 1.15rem; }
+/* Fluxo de caixa: item marcado para somar (Ctrl+clique ou modo Somar) */
+.cx-grade .cx-it.cx-sel { outline: 3px solid var(--ouro); outline-offset: 1px; border-radius: 6px; }
+.cx-grade .cx-it.cx-sel .cx-corpo { background-image: linear-gradient(rgba(201, 161, 90, .18), rgba(201, 161, 90, .18)); }
+.cx-grade-cartao h2 .mini.ativo { background: var(--ouro); color: #1c1c1c; border-color: var(--ouro); }
+.cx-grade-cartao .cx-soma { margin: 4px 0 8px; }

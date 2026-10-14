@@ -1277,6 +1277,8 @@ ligado ao domínio; **começa com fila de aprovação** (nada sai sozinho); reme
   com quantidade, total a pagar (ou saídas, entradas e saldo, se misturar), "Copiar valor" e "Limpar". A marcação fica guardada
   ao filtrar/buscar (some ao recarregar a página); não muda nada no banco. A célula inteira da caixinha marca (o clique um pouco
   ao lado da caixinha abria a conta para editar — achado pelo Anderson no 1º uso).
+  **No fluxo de caixa (Dia a dia)** também: **Ctrl+clique** num item da grade marca para somar, ou o botão **"🧮 Somar"** liga o
+  modo em que o clique simples marca (em vez de abrir o item); barra igual no alto da grade, item marcado com contorno dourado.
 - **Volta do contato (14/10, pedido do Anderson):** o próximo passo da janela "Como foi…" tem também **"Em 15 dias"**.
 - **Regra (14/10, Anderson): título recebido antes do vencimento é ADIANTADO.** A Santa Casa (002435/01, R$ 7.422,15) venceria
   em 25/10 e pagou em 14/10: o "Recebi" gravou certo, mas o cartão não dizia que o cliente adiantou. Agora `caixa-calculo.js`

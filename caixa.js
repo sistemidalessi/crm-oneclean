@@ -505,8 +505,9 @@
       (x.secao === 'entrada' ? 'Recebi' : 'Paguei') + ' ' + (dia <= hoje() ? (dia === hoje() ? 'hoje' : 'em ' + dm(dia)) : 'hoje') + '">✓</button>' : '';
     // conta prevista e título (arrastar o título = remarcar: o cliente vai pagar em outro dia)
     const arrasta = x.estado === 'previsto' ? ' draggable="true" data-mover="' + esc(x.tipo === 'lanc' ? x.ref.id : 'tit:' + x.ref.duplicata) + '"' : '';
-    return '<div class="cx-it ' + (x.secao === 'entrada' ? 'cx-ent' : 'cx-sai') + ' ' + x.estado + (x.atrasado ? ' atrasado' : '') + (x.adiantado ? ' adiantado' : '') + (x.emprestimo ? ' emprestimo' : '') + (ok ? ' comok' : '') + '"' + arrasta + '>' + ok +
-      '<button type="button" class="cx-corpo" data-acao="cx-item" data-id="' + esc(x.chave) + '" data-dia="' + esc(dia) + '" title="' + esc(x.titulo + (x.obs ? ' — ' + x.obs : '')) + '">' +
+    const k = x.chave + '|' + dia;
+    return '<div class="cx-it ' + (x.secao === 'entrada' ? 'cx-ent' : 'cx-sai') + ' ' + x.estado + (naGrade.has(k) ? ' cx-sel' : '') + (x.atrasado ? ' atrasado' : '') + (x.adiantado ? ' adiantado' : '') + (x.emprestimo ? ' emprestimo' : '') + (ok ? ' comok' : '') + '"' + arrasta + '>' + ok +
+      '<button type="button" class="cx-corpo" data-acao="cx-item" data-id="' + esc(x.chave) + '" data-dia="' + esc(dia) + '" data-k="' + esc(k) + '" data-valor="' + Number(x.valor || 0) + '" data-secao="' + esc(x.secao) + '" title="' + esc(x.titulo + (x.obs ? ' — ' + x.obs : '') + ' (Ctrl+clique soma)') + '">' +
       '<span class="t">' + (x.adiantado ? '<span class="cx-adi">⏩ adiantado</span> ' : '') + (x.emprestimo ? '<span class="cx-etq-emp">🔁 ' + (x.ref && x.ref.categoria === 'Transferência entre empresas' ? 'entre empresas' : x.secao === 'entrada' ? 'empréstimo' : 'devolução') + '</span> ' : '') + (x.ref && x.ref.anexos && x.ref.anexos.length ? '📎 ' : '') + esc(x.titulo) + '</span>' + (x.obs ? '<span class="o">' + esc(x.obs) + '</span>' : '') + '<span class="v">' + esc(R.moeda(x.valor)) + '</span></button></div>';
   }
   function grade(s) {
@@ -536,13 +537,15 @@
     const saldoRow = dias.map(d => '<td class="num' + (saldos[d] != null && saldos[d] < 0 ? ' cx-neg' : '') + '"><strong>' + (saldos[d] == null ? '—' : esc(R.moeda(saldos[d]))) + '</strong></td>').join('');
     return '<section class="cartao cx-grade-cartao"><h2>Fluxo de caixa <small>' + esc(R.dataBR(de)) + ' a ' + esc(R.dataBR(ate)) + '</small><span class="flex"></span>' +
       '<button type="button" class="mini" data-acao="cx-nav" data-id="-15">◀ 15 dias</button><button type="button" class="mini" data-acao="cx-nav" data-id="0">Hoje</button>' +
-      '<button type="button" class="mini" data-acao="cx-nav" data-id="15">15 dias ▶</button></h2>' +
+      '<button type="button" class="mini" data-acao="cx-nav" data-id="15">15 dias ▶</button>' +
+      '<button type="button" class="mini' + (modoSoma ? ' ativo' : '') + '" data-acao="cx-modo-soma" title="liga/desliga: clicar nos itens soma (também dá com Ctrl+clique)">🧮 Somar</button></h2>' +
+      barraGrade() +
       '<p class="cx-legenda"><span class="cx-it cx-ent feito"><span class="cx-corpo">aconteceu</span></span><span class="cx-it cx-sai previsto"><span class="cx-corpo">previsto</span></span>' +
       '<span class="cx-it cx-sai fora"><span class="cx-corpo">pago fora do caixa</span></span>' +
       '<span class="cx-it cx-ent previsto atrasado"><span class="cx-corpo">em atraso, remarcado</span></span>' +
       '<span class="cx-it cx-ent previsto adiantado"><span class="cx-corpo">⏩ o cliente adiantou</span></span>' +
       '<span class="cx-it cx-ent previsto emprestimo"><span class="cx-corpo">🔁 empréstimo (entra e volta)</span></span>' +
-      '<small>✓ paga ou recebe no dia da coluna · clique no item para ajustar valor e dia, pausar ou desfazer · arraste uma conta ou um título para outro dia · + lança no dia</small></p>' +
+      '<small>✓ paga ou recebe no dia da coluna · clique no item para ajustar valor e dia, pausar ou desfazer · arraste uma conta ou um título para outro dia · + lança no dia · Ctrl+clique (ou 🧮 Somar) soma os itens</small></p>' +
       '<div class="cx-grade-rolagem"><table class="cx-grade"><thead><tr><th class="lab"></th>' + th + '</tr></thead><tbody>' +
         '<tr class="sec"><th class="lab ent">Entradas</th>' + celulas('entrada') + '</tr>' +
         '<tr class="tot"><th class="lab">Total entradas</th>' + total('entrada') + '</tr>' +
@@ -600,21 +603,35 @@
   // são pagos pela conta da Agilité e ele precisa do total para transferir). Shift+clique marca um intervalo.
   const marcados = new Set();
   let ultimoMarcado = null, ordemLista = [];
-  function somaMarcadas() {
-    const l = F.lancamentos.filter(x => marcados.has(x.id));
+  const somaMarcadas = () => resumoSoma(F.lancamentos.filter(x => marcados.has(x.id)));
+  const resumoSoma = l => {
     const saidas = l.filter(x => x.tipo !== 'entrada').reduce((t, x) => t + Number(x.valor || 0), 0);
     const entradas = l.filter(x => x.tipo === 'entrada').reduce((t, x) => t + Number(x.valor || 0), 0);
     return { n: l.length, saidas, entradas, total: entradas - saidas, so: !entradas ? Math.abs(saidas) : !saidas ? entradas : null };
-  }
-  function barraSoma() {
-    const m = somaMarcadas();
-    if (!m.n) return '<div class="cx-soma vazio" id="cxSoma">Marque as contas na caixinha à esquerda para somar (Shift+clique marca várias de uma vez).</div>';
+  };
+  // qual: 'lista' (Contas a pagar) ou 'grade' (fluxo de caixa)
+  function barraDe(m, qual, vazio, extra) {
+    const id = qual === 'grade' ? 'cxSomaGrade' : 'cxSoma';
+    if (!m.n) return vazio ? '<div class="cx-soma vazio" id="' + id + '">' + vazio + (extra || '') + '</div>' : '<div id="' + id + '" hidden></div>';
     const valor = m.so != null ? m.so : m.total;
-    return '<div class="cx-soma" id="cxSoma"><span><strong>' + m.n + '</strong> marcada(s)</span>' +
+    return '<div class="cx-soma" id="' + id + '"><span><strong>' + m.n + '</strong> marcado(s)</span>' +
       (m.saidas && m.entradas ? '<span>saídas −' + esc(R.moeda(m.saidas)) + '</span><span>entradas +' + esc(R.moeda(m.entradas)) + '</span>' : '') +
       '<span class="cx-soma-total">' + (m.so != null ? (m.entradas ? 'Total a receber' : 'Total a pagar') : 'Saldo') + ' <strong>' + esc(R.moeda(valor)) + '</strong></span>' +
       '<button type="button" class="mini" data-acao="cx-soma-copiar" data-id="' + Number(valor).toFixed(2) + '">Copiar valor</button>' +
-      '<button type="button" class="mini" data-acao="cx-soma-limpar">Limpar</button></div>';
+      '<button type="button" class="mini" data-acao="cx-soma-limpar" data-id="' + qual + '">Limpar</button>' + (extra || '') + '</div>';
+  }
+  const barraSoma = () => barraDe(somaMarcadas(), 'lista', 'Marque as contas na caixinha à esquerda para somar (Shift+clique marca várias de uma vez).');
+  // Fluxo de caixa (14/10, Anderson: "no fluxo de caixa eu conseguiria?"): Ctrl+clique num item marca para somar;
+  // o botão "🧮 Somar" liga o modo em que o clique simples marca (em vez de abrir o item).
+  const naGrade = new Map(); // chave|dia → { valor, tipo }
+  let modoSoma = false;
+  const barraGrade = () => barraDe(resumoSoma([...naGrade.values()]), 'grade', modoSoma ? 'Modo somar ligado: clique nos itens da grade para somar.' : '',
+    modoSoma ? '<button type="button" class="mini" data-acao="cx-modo-soma">Sair do modo somar</button>' : '');
+  function atualizaSomaGrade() {
+    if (typeof document === 'undefined') return;
+    const b = document.getElementById('cxSomaGrade');
+    if (b) b.outerHTML = barraGrade();
+    document.querySelectorAll('.cx-grade [data-k]').forEach(c => { const it = c.closest('.cx-it'); if (it) it.classList.toggle('cx-sel', naGrade.has(c.dataset.k)); });
   }
   function atualizaSoma() {
     const b = typeof document !== 'undefined' && document.getElementById('cxSoma');
@@ -759,7 +776,9 @@
     },
     'cx-marca-todas-celula': (id, el) => { const c = el.querySelector('input[type=checkbox]'); if (c) { c.checked = !c.checked; CRM.acoes['cx-marca-todas'](id, c); } },
     'cx-marca-todas': (id, el) => { ordemLista.forEach(x => (el.checked ? marcados.add(x) : marcados.delete(x))); atualizaSoma(); },
-    'cx-soma-limpar': () => { marcados.clear(); ultimoMarcado = null; atualizaSoma(); const t = document.querySelector('[data-acao="cx-marca-todas"]'); if (t) t.checked = false; },
+    'cx-soma-limpar': qual => {
+      if (qual === 'grade') { naGrade.clear(); atualizaSomaGrade(); return; }
+      marcados.clear(); ultimoMarcado = null; atualizaSoma(); const t = document.querySelector('[data-acao="cx-marca-todas"]'); if (t) t.checked = false; },
     'cx-soma-copiar': v => {
       const txt = Number(v).toFixed(2).replace('.', ',');
       (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject(new Error('sem área de transferência')))
@@ -830,7 +849,17 @@
       r.start();
     },
     'cx-editar': id => { fecha(); const l = lanc(id); if (l) setTimeout(() => formLanc(l), 0); },
-    'cx-item': (id, el) => menuItem(id, comDia(el)),
+    'cx-item': (id, el, ev) => {
+      if (el && el.dataset.k && (modoSoma || (ev && (ev.ctrlKey || ev.metaKey)))) {
+        if (ev) ev.preventDefault();
+        const k = el.dataset.k;
+        if (naGrade.has(k)) naGrade.delete(k); else naGrade.set(k, { valor: Number(el.dataset.valor) || 0, tipo: el.dataset.secao === 'entrada' ? 'entrada' : 'saida' });
+        atualizaSomaGrade();
+        return;
+      }
+      menuItem(id, comDia(el));
+    },
+    'cx-modo-soma': () => { modoSoma = !modoSoma; CRM.render(); },
     'cx-ok': (id, el) => {
       const dia = diaDaBaixa(el && el.dataset.dia);
       if (id.indexOf('tit:') === 0) return receberTitulo(id.slice(4), dia).catch(CRM.falhou);
