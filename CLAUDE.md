@@ -976,6 +976,9 @@ Anderson: cada sistema cuida da sua empresa; o "Geral" (as duas) é de quem lê 
     4.500) e a Agilité respondeu ok (voltas 131, 138, 109, 130 lá; o par dos 1.600 foi adotado lá como ida 108/volta 109).
     Até 14/10 a Agilité nunca mandou baixa (só criação). Prompt para a sessão da Agilité conferir os dois sentidos:
     `sistemi-dalessi/docs/prompts/2026-10-14-agilite-espelho-baixa.md`.
+    **Testado nos dois sentidos em 14/10 (par `agilite:168`, R$ 10):** 15:20 lançado lá → criado aqui; 15:21 OK lá → pago
+    aqui; 15:21 desfeito lá → aberto aqui; 15:26 OK de novo → pago; 15:29 ✓ do Anderson aqui na volta de 21/10 → 15:30
+    a Agilité respondeu ok (ida 168, volta 167). Falta só a Agilité apagar o teste (o par some dos dois lados).
 - **Gestão → tabela Equipe (08/10, pedido do Anderson):** comprador (Wellington) fora; o administrador entra como
   **"Direto"** (notas "VENDEDOR: DIRETO", `nomes_nota` do admin), no fim e só se vendeu no ano, sem as colunas de
   contato; linha **Total** embaixo = o faturamento do mês e do ano (o mesmo do quadro), com "Ex-vendedores(as)" quando há nota
