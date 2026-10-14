@@ -34,6 +34,10 @@ test('boleto lido: a linha manda no valor e no vencimento; sem linha válida, va
   const ok = C.confereBoleto({ linha_digitavel: linha, valor_cobrado: 905.12, vencimento: '2026-10-21' });
   assert.equal(ok.valor, 950.12); assert.equal(ok.vencimento, '2026-10-20'); assert.equal(ok.linhaOk, true);
   assert.equal(ok.avisos.length, 2);
+  // vencimento já passou: não é a 2ª via atualizada
+  const velho = C.confereBoleto({ linha_digitavel: linha, valor_cobrado: 950.12, vencimento: '2026-10-20' }, '2026-10-21');
+  assert.equal(velho.vencido, true); assert.match(velho.avisos[0], /NÃO É A 2ª VIA ATUALIZADA/);
+  assert.equal(C.confereBoleto({ linha_digitavel: linha, valor_cobrado: 950.12, vencimento: '2026-10-20' }, '2026-10-20').vencido, false, 'vence hoje ainda vale');
   const ruim = C.confereBoleto({ linha_digitavel: linha.slice(1), valor_cobrado: 950.12, vencimento: '2026-10-20' });
   assert.equal(ruim.linha, ''); assert.equal(ruim.valor, 950.12); assert.match(ruim.avisos[0], /sem a linha/);
 });

@@ -58,7 +58,9 @@
   // ---- o boleto lido pela IA: confere com a linha e acha o título em atraso
   // Valor e vencimento: a linha digitável válida manda (é o que o banco cobra); a leitura da IA só
   // serve quando a linha não deu.
-  function confereBoleto(b) {
+  // hoje: boleto com vencimento que já passou não é a 2ª via atualizada (14/10/2026: os 4 primeiros vieram com
+  // o vencimento e o valor de origem — a vendedora ia mandar "boleto atualizado, vence em 07/10").
+  function confereBoleto(b, hoje) {
     const l = lerLinha(b.linha_digitavel);
     const avisos = [];
     let valor = r2(b.valor_cobrado || b.valor_documento), vencimento = b.vencimento || null;
@@ -66,7 +68,9 @@
       if (l.valor > 0) { if (Math.abs(l.valor - valor) >= 0.01 && valor) avisos.push('o valor lido (' + R.moeda(valor) + ') não bate com o da linha (' + R.moeda(l.valor) + '): vale o da linha'); valor = l.valor; }
       if (l.vencimento) { if (vencimento && vencimento !== l.vencimento) avisos.push('vencimento lido ' + R.dataBR(vencimento) + ', o da linha é ' + R.dataBR(l.vencimento) + ': vale o da linha'); vencimento = l.vencimento; }
     } else avisos.push('linha digitável: ' + l.motivo + ' — vai sem a linha (a vendedora manda o PDF)');
-    return { valor, vencimento, linha: l.ok ? digitos(b.linha_digitavel) : '', linhaOk: l.ok, avisos };
+    const vencido = !!(hoje && vencimento && vencimento < hoje);
+    if (vencido) avisos.unshift('⚠ NÃO É A 2ª VIA ATUALIZADA: o vencimento (' + R.dataBR(vencimento) + ') já passou — gere no BB a 2ª via com data nova e juros');
+    return { valor, vencimento, linha: l.ok ? digitos(b.linha_digitavel) : '', linhaOk: l.ok, avisos, vencido };
   }
   // titulos: em atraso e fora do cartório, com .empresa_id; empresas: para o CNPJ. Ordem de certeza:
   // mesmo CNPJ e mesmo valor original; mesmo CNPJ e o número da nota no "Nº do documento"; o único
@@ -257,7 +261,7 @@
   function conferir(lidos, avisos) {
     const venc = vencidosACobrar(), empresas = E().D.empresas || [], usados = new Set();
     const itens = lidos.map(x => {
-      const conf = confereBoleto(x.b);
+      const conf = confereBoleto(x.b, hoje());
       const casa = casaBoleto(x.b, venc, empresas, usados);
       if (casa.titulo) usados.add(casa.titulo.duplicata);
       return Object.assign({}, x, { conf, casa });
@@ -265,7 +269,9 @@
     const doc = d => String(d || '').replace(/\D/g, '');
     const valores = {};
     const campos = itens.map((x, i) => {
-      valores['b' + i] = x.casa.titulo ? x.casa.titulo.duplicata : '';
+      // vencido não vai marcado: só se o administrador escolher o título de propósito
+      valores['b' + i] = x.casa.titulo && !x.conf.vencido ? x.casa.titulo.duplicata : '';
+      if (x.casa.titulo && !x.conf.vencido && Math.abs(Number(x.casa.titulo.valor) - x.conf.valor) < 0.01) x.conf.avisos.push('⚠ valor igual ao original, sem juros: confira se é a 2ª via atualizada');
       const docB = doc(x.b.documento);
       const ordem = venc.slice().sort((a, b) => {
         const pa = (x.casa.candidatos || []).indexOf(a) !== -1 || doc((CRM.empresa(a.empresa_id) || {}).cnpj) === docB ? 0 : 1;
@@ -296,6 +302,7 @@
           if (!dup) continue;
           const t = venc.find(y => y.duplicata === dup);
           if (!x.conf.vencimento || !(x.conf.valor > 0)) throw new Error('O boleto de ' + (x.b.pagador || '?') + ' veio sem valor ou vencimento: não dá para mandar.');
+          if (x.conf.vencido && !confirm('O boleto de ' + (x.b.pagador || '?') + ' venceu em ' + R.dataBR(x.conf.vencimento) + ': não é a 2ª via atualizada. A vendedora vai mandar "boleto atualizado, vence em ' + R.dataBR(x.conf.vencimento) + '". Mandar assim mesmo?')) continue;
           // PDF com vários boletos: cada um vai em arquivo próprio (a vendedora não pode receber o de outro cliente)
           let arquivo = x.caminho;
           if (x.varios) {
