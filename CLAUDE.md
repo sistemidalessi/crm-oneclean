@@ -978,7 +978,7 @@ Anderson: cada sistema cuida da sua empresa; o "Geral" (as duas) é de quem lê 
     `sistemi-dalessi/docs/prompts/2026-10-14-agilite-espelho-baixa.md`.
     **Testado nos dois sentidos em 14/10 (par `agilite:168`, R$ 10):** 15:20 lançado lá → criado aqui; 15:21 OK lá → pago
     aqui; 15:21 desfeito lá → aberto aqui; 15:26 OK de novo → pago; 15:29 ✓ do Anderson aqui na volta de 21/10 → 15:30
-    a Agilité respondeu ok (ida 168, volta 167). Falta só a Agilité apagar o teste (o par some dos dois lados).
+    a Agilité respondeu ok (ida 168, volta 167); 15:31 a Agilité apagou o teste → os 2 apagados aqui. Teste encerrado.
 - **Gestão → tabela Equipe (08/10, pedido do Anderson):** comprador (Wellington) fora; o administrador entra como
   **"Direto"** (notas "VENDEDOR: DIRETO", `nomes_nota` do admin), no fim e só se vendeu no ano, sem as colunas de
   contato; linha **Total** embaixo = o faturamento do mês e do ano (o mesmo do quadro), com "Ex-vendedores(as)" quando há nota
