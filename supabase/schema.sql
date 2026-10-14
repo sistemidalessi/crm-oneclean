@@ -1663,3 +1663,20 @@ begin
     create policy crm_boletos_grava on storage.objects for insert to authenticated with check (bucket_id = 'crm-boletos' and (select public.crm_eh_admin()));
   end if;
 end $$;
+
+-- =================================================================== XML das notas (14/10/2026)
+-- O XML autorizado (procNFe) de cada nota fica guardado no bucket PRIVADO crm-notas-xml (nfe/<chave>.xml),
+-- para o CRM montar a cópia da DANFE que vai junto com o boleto atualizado (Caixa → Cobrança). O vigia
+-- manda o XML e a crm-notas guarda (chave de serviço); a importação manual (XML/ZIP) guarda os que faltam.
+-- Só o administrador lê e envia; sem política de apagar.
+do $$
+begin
+  if not exists (select 1 from pg_namespace where nspname = 'storage') then return; end if;
+  insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+  values ('crm-notas-xml', 'crm-notas-xml', false, 2097152, array['text/xml','application/xml'])
+  on conflict (id) do update set public = false, file_size_limit = 2097152, allowed_mime_types = excluded.allowed_mime_types;
+  if not exists (select 1 from pg_policies where schemaname = 'storage' and tablename = 'objects' and policyname = 'crm_notas_xml_le') then
+    create policy crm_notas_xml_le on storage.objects for select to authenticated using (bucket_id = 'crm-notas-xml' and (select public.crm_eh_admin()));
+    create policy crm_notas_xml_grava on storage.objects for insert to authenticated with check (bucket_id = 'crm-notas-xml' and (select public.crm_eh_admin()));
+  end if;
+end $$;

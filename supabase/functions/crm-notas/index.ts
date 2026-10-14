@@ -196,8 +196,13 @@ Deno.serve(async (req) => {
 
   try {
     const N = await carregaMotor();
-    const lidos = arquivos.map(a => ({ nome: String(a.nome ?? '').slice(0, 200), doc: N.lerXml(String(a.xml ?? '')) }));
+    const lidos = arquivos.map(a => ({ nome: String(a.nome ?? '').slice(0, 200), doc: N.lerXml(String(a.xml ?? '')), xml: String(a.xml ?? '') }));
     const docs = lidos.map(l => l.doc).filter(Boolean);
+    // XML autorizado guardado (14/10/2026): o CRM monta dele a cópia da DANFE que vai com o boleto
+    // atualizado. Já guardado: o Storage recusa (sem sobrescrever) e segue.
+    await Promise.all(lidos.filter(l => l.doc && (l.doc as { tipo: string }).tipo === 'nota' && /<protNFe[\s>]/.test(l.xml)).map(l =>
+      db.storage.from('crm-notas-xml').upload('nfe/' + (l.doc as { chave: string }).chave + '.xml', new Blob([l.xml], { type: 'text/xml' }), { upsert: false, contentType: 'text/xml' })
+        .then(() => null, () => null)));
     const chaves = [...new Set(docs.map((d: { chave: string }) => d.chave))];
 
     // Só o que o planejador precisa (sem carregar o CRM inteiro).

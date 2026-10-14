@@ -1247,6 +1247,10 @@ ligado ao domínio; **começa com fila de aprovação** (nada sai sozinho); reme
   assinado por 7 dias**, telefone do cliente no CRM e a mensagem pronta para ela copiar; grava `crm_boletos.avisado_em`. Sem a
   API da Meta (fase 3) o CRM não manda sozinho. Cada cliente ganha a tarefa **"Cobrar boleto atualizado…"** da vendedora (sem
   repetir); ela é concluída quando a vendedora manda pelo CRM ou quando o administrador clica **"Já cobrou"** na aba Cobrança.
+- **XML das notas guardado (14/10):** bucket privado `crm-notas-xml` (`nfe/<chave>.xml`, só admin) com o procNFe de cada nota,
+  para a cópia da DANFE da cobrança. A `crm-notas` guarda o que o vigia manda (sem sobrescrever); a importação manual (XML/ZIP,
+  Configurações → Importar) guarda os que faltam, mesmo de nota já importada (`notasXmlGuardar`). Para trás: o Anderson arrasta
+  o ZIP de 2026 da pasta `D:\SISTEMA\Unimake\uninfe30\63237702000103\Enviados\Autorizados` (subpastas 202601…202610).
 - **Regra (14/10, Anderson): título recebido antes do vencimento é ADIANTADO.** A Santa Casa (002435/01, R$ 7.422,15) venceria
   em 25/10 e pagou em 14/10: o "Recebi" gravou certo, mas o cartão não dizia que o cliente adiantou. Agora `caixa-calculo.js`
   (`recebidoAntes`): entrada paga ligada a título com `pago_em` antes do vencimento (no dia útil) fica verde "⏩ adiantado" com

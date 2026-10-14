@@ -536,6 +536,38 @@
     if (r.error) throw new Error('não consegui abrir o comprovante: ' + r.error.message);
     return r.data.signedUrl;
   };
+  // XML autorizado das notas (bucket privado crm-notas-xml, 14/10/2026): a importação manual guarda os que o
+  // vigia ainda não guardou (para a cópia da DANFE da cobrança). Só sobe o que falta; aoAndar(feitos, total).
+  Supa.prototype.notasXmlGuardar = async function (lista, aoAndar) {
+    const ja = new Set();
+    for (let de = 0; ; de += 1000) {
+      const r = await this.sb.storage.from('crm-notas-xml').list('nfe', { limit: 1000, offset: de });
+      if (r.error) throw new Error('não consegui ver os XML guardados: ' + r.error.message);
+      r.data.forEach(o => ja.add(o.name));
+      if (r.data.length < 1000) break;
+    }
+    const falta = lista.filter(x => !ja.has(x.chave + '.xml'));
+    let feitos = 0, erros = 0;
+    const fila = falta.slice();
+    const um = async () => {
+      for (let x; (x = fila.shift());) {
+        const r = await this.sb.storage.from('crm-notas-xml').upload('nfe/' + x.chave + '.xml', new Blob([x.xml], { type: 'text/xml' }), { upsert: false, contentType: 'text/xml' });
+        if (r.error && !/exist/i.test(r.error.message)) erros++;
+        feitos++;
+        if (aoAndar && feitos % 25 === 0) aoAndar(feitos, falta.length);
+      }
+    };
+    await Promise.all([um(), um(), um(), um(), um(), um()]);
+    return { guardados: feitos - erros, jaTinha: lista.length - falta.length, erros };
+  };
+  Supa.prototype.notaXml = async function (chave) {
+    const r = await this.sb.storage.from('crm-notas-xml').download('nfe/' + chave + '.xml');
+    if (r.error) return null;
+    return await r.data.text();
+  };
+  Local.prototype.notasXmlGuardar = async function () { return { guardados: 0, jaTinha: 0, erros: 0 }; };
+  Local.prototype.notaXml = async function () { return null; };
+
   // PDFs dos boletos atualizados (bucket privado crm-boletos): o administrador envia; quem vê o boleto baixa.
   Supa.prototype.boletoEnviar = async function (arquivo, hoje) {
     const ext = arquivo.type === 'application/pdf' ? 'pdf' : ({ 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' }[arquivo.type] || 'pdf');

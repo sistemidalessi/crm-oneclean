@@ -462,7 +462,8 @@
     if (!arquivos.length) return;
     const docs = [];
     let lidos = 0, outros = 0;
-    const le = t => { lidos++; const d = N.lerXml(t); if (d) docs.push(d); else outros++; };
+    const xmls = new Map(); // chave → XML autorizado (com protocolo), para guardar (cópia da DANFE na cobrança)
+    const le = t => { lidos++; const d = N.lerXml(t); if (d) { docs.push(d); if (d.tipo === 'nota' && /<protNFe[\s>]/.test(t)) xmls.set(d.chave, t); } else outros++; };
     CRM.toast('Lendo ' + arquivos.length + ' arquivo(s)…');
     for (const f of arquivos) {
       if (/\.zip$/i.test(f.name)) {
@@ -471,6 +472,13 @@
       } else le(await f.text());
     }
     if (!docs.length) throw new Error('nenhuma NF-e encontrada (' + lidos + ' arquivo(s) lido(s)). Confira se são os XML das notas.');
+    // Administrador: guarda os XML que ainda não estão no CRM (mesmo de nota já importada), em segundo plano.
+    if (CRM.ehAdmin() && xmls.size && CRM.store().notasXmlGuardar) {
+      const lista = [...xmls.entries()].map(([chave, xml]) => ({ chave, xml }));
+      CRM.store().notasXmlGuardar(lista, (f, t) => CRM.toast('Guardando os XML das notas: ' + f + ' de ' + t + '…'))
+        .then(r => CRM.toast('XML das notas: ' + r.guardados + ' guardado(s) agora, ' + r.jaTinha + ' já estavam' + (r.erros ? ', ' + r.erros + ' com erro' : '') + '. A cobrança já pode mandar a cópia da DANFE.'))
+        .catch(CRM.falhou);
+    }
     // Padrão: só a equipe do CRM (pelo vendedor escrito na nota; sem isso, pela carteira do cliente).
     const filtro = docs.some(d => d.tipo === 'nota' && d.vendedor) ? 'vendedores' : 'carteira';
     imp = { origem: 'Notas fiscais', notas: docs, arquivosLidos: lidos, arquivosOutros: outros, op: { responsavelPadrao: null, cadastrarProdutos: true, mapaResponsaveis: {}, filtro, exVendedores: String(E().cfg.vendedores_antigos || '').split(',') } };
