@@ -207,6 +207,29 @@ select pg_temp.como('b0000000-0000-0000-0000-000000000002');
 select 'Gestora vê excluídos do Caixa (NÃO devia)' t, count(*) from crm_fin_excluidos having count(*) > 0;
 insert into crm_fin_excluidos (chave_fkn) values ('y'); -- FALHA
 select pg_temp.como('a0000000-0000-0000-0000-000000000001');
+-- cobrança (14/10/2026): cartório no título; boleto atualizado só para a carteira; vendedora só marca "cobrado"
+insert into crm_titulos (duplicata, vencimento, valor, empresa_id) select '000070/01', current_date - 10, 700, id from crm_empresas where nome = 'Da Ana';
+insert into crm_titulos (duplicata, vencimento, valor, empresa_id) select '000071/01', current_date - 10, 710, id from crm_empresas where nome = 'Só do Bruno';
+update crm_titulos set cartorio_em = current_date, cartorio_obs = 'protesto' where duplicata = '000071/01' returning 'admin mandou para cartório' as ok;
+insert into crm_boletos (duplicata, empresa_id, valor, vencimento, linha_digitavel, arquivo) select '000070/01', id, 720.5, current_date + 3, '00190000090000000000000000000000000000000072050', 'boletos/2026-10/a.pdf' from crm_empresas where nome = 'Da Ana' returning 'admin gravou boleto da Ana' as ok;
+insert into crm_boletos (duplicata, empresa_id, valor, vencimento, arquivo) select '000071/01', id, 730, current_date + 3, 'boletos/2026-10/b.pdf' from crm_empresas where nome = 'Só do Bruno';
+select pg_temp.como('c0000000-0000-0000-0000-000000000003');
+select 'Ana vê os boletos' t, string_agg(duplicata, ',') from crm_boletos;
+select 'Ana vê boleto do Bruno (NÃO devia)' t, count(*) from crm_boletos where duplicata = '000071/01' having count(*) > 0;
+insert into crm_boletos (duplicata, valor, vencimento) values ('x', 1, current_date); -- FALHA
+update crm_boletos set valor = 1 returning 'Ana alterou boleto (NÃO devia)';
+select 'Ana marcou cobrado (1)' t, crm_boleto_cobrado(array(select id from crm_boletos));
+reset role; select 'Ana marcou o do Bruno (NÃO devia)' t, count(*) from crm_boletos where duplicata = '000071/01' and cobrado_em is not null having count(*) > 0; set role authenticated; select pg_temp.como('c0000000-0000-0000-0000-000000000003');
+select 'Ana: atrasos com cartório' t, string_agg(duplicata || ':' || coalesce(cartorio_em::text, '-'), ',') from crm_atrasos() where duplicata like '00007%';
+select pg_temp.como('d0000000-0000-0000-0000-000000000004');
+select 'Bruno: o dele em cartório' t, count(*) from crm_atrasos() where duplicata = '000071/01' and cartorio_em is not null;
+select pg_temp.como('f0000000-0000-0000-0000-000000000006');
+select 'Comprador vê boletos (NÃO devia)' t, count(*) from crm_boletos having count(*) > 0;
+select 'Comprador vê atrasos (NÃO devia)' t, count(*) from crm_atrasos() having count(*) > 0;
+select pg_temp.como('b0000000-0000-0000-0000-000000000002');
+select 'Gestora vê os boletos' t, count(*) from crm_boletos;
+update crm_boletos set valor = 1 returning 'Gestora alterou boleto (NÃO devia)';
+select pg_temp.como('a0000000-0000-0000-0000-000000000001');
 -- cadência de e-mails (07/10/2026): vendedora só pula (o envio vem da função), só na carteira dela; ninguém desfaz o "não quero receber"
 reset role; update crm_empresas set email_sair_em = now(), email_cadencia = 'mensal' where nome = 'Da Ana'; set role authenticated;
 select pg_temp.como('b0000000-0000-0000-0000-000000000002');
@@ -238,6 +261,8 @@ select count(*) from crm_fin_saldos; -- FALHA
 select count(*) from crm_fin_regras; -- FALHA
 select count(*) from crm_fin_titulos_baixados; -- FALHA
 select count(*) from crm_fin_excluidos; -- FALHA
+select count(*) from crm_boletos; -- FALHA
+select * from crm_atrasos(); -- FALHA
 select count(*) from crm_email_envios; -- FALHA
 select count(*) from crm_email_campanhas; -- FALHA
 select crm_proximo_vendedor(); -- FALHA

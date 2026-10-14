@@ -107,6 +107,8 @@
       // Só o administrador lê o contas a receber (RLS): gestora e vendedoras recebem as duplicatas em
       // atraso (com detalhe) para o selo da Recompra, da Fila do dia e da ficha.
       if (!CRM.ehAdmin() && !CRM.ehComprador() && store.duplicatasAtraso) E.atrasos = await store.duplicatasAtraso().catch(() => E.atrasos || []);
+      // Boletos atualizados (cobrança, 14/10/2026): o administrador manda, a vendedora da carteira envia ao cliente.
+      if (!CRM.ehComprador() && store.boletos) E.boletos = await store.boletos().catch(() => E.boletos || []);
       // Administrador e comprador: quando chegaram os relatórios do FKN (lembrete em Compras).
       if ((CRM.ehAdmin() || CRM.ehComprador()) && store.fknAtualizado) E.fkn = await store.fknAtualizado().catch(() => E.fkn || null);
       E.D = D;

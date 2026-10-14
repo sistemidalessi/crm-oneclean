@@ -28,7 +28,7 @@
   }
 
   function atrasos() {
-    return new Set((E().D.empresas || []).filter(e => { const f = CRM.financeiro && CRM.financeiro(e.id); return f && f.vencido > 0; }).map(e => e.id));
+    return new Set((E().D.empresas || []).filter(e => { const f = CRM.financeiro && CRM.financeiro(e.id); return f && (f.vencido > 0 || f.cartorio > 0); }).map(e => e.id));
   }
   function fila() {
     const D = E().D, cfg = E().cfg;

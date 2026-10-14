@@ -67,6 +67,8 @@
     { nome: 'auto_recompra', rotulo: 'Venda ganha cria lembrete de recompra (no ciclo da empresa)', tipo: 'checkbox', largo: true },
     { nome: 'modelo_recompra', rotulo: 'Mensagem do botão "Recompra" (WhatsApp)', tipo: 'textarea', largo: true,
       ajuda: '{saudacao} = "Olá, Maria!"; {itens} = o que o cliente costuma levar (pelas notas); também {empresa}, {primeiro_nome}, {vendedor_primeiro_nome}, {minha_empresa}' },
+    { nome: 'modelo_boleto', rotulo: 'Mensagem do boleto atualizado (WhatsApp da cobrança)', tipo: 'textarea', largo: true,
+      ajuda: 'vazio = a mensagem padrão do CRM. {boletos} = cada boleto com valor, vencimento e linha digitável; {titulos_boleto} = "a NF 2300 (vencida em 01/10)"; também {saudacao}, {empresa}, {vendedor_primeiro_nome}, {minha_empresa}' },
     { nome: 'auto_retomar_perda', rotulo: 'Negócio perdido cria tarefa para retomar o contato', tipo: 'checkbox' },
     { nome: 'dias_retomar_perda', rotulo: '… depois de (dias)', tipo: 'numero', passo: '1', min: 1 },
     { nome: 'etapa_ao_enviar_proposta', rotulo: 'Ao enviar proposta, mover o negócio para a etapa', tipo: 'select', largo: true },

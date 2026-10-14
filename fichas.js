@@ -1047,7 +1047,7 @@
   // "o título da NF 2205 (R$ 917,88, vencido em 24/09)" — para o modelo de cobrança gentil.
   function titulosVencidos(e) {
     const f = CRM.financeiro ? CRM.financeiro(e.id) : null, hoje = CRM.hoje();
-    const l = f ? f.titulos.filter(t => t.vencimento < hoje) : [];
+    const l = f ? f.titulos.filter(t => t.vencimento < hoje && !t.cartorio_em) : []; // em cartório não se cobra (14/10/2026)
     if (!l.length) return 'o pagamento em aberto';
     const um = t => 'NF ' + (t.nota_numero || t.duplicata) + ' (' + R.moeda(t.valor) + ', vencido em ' + R.dataBR(t.vencimento).slice(0, 5) + ')';
     return (l.length === 1 ? 'o título da ' : 'os títulos ') + l.map(um).join(', ');

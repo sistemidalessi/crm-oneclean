@@ -15,6 +15,8 @@
     'empresas', 'contatos', 'negocios', 'negocio_itens', 'propostas', 'atividades', 'notas', 'nota_itens', 'titulos', 'email_campanhas', 'email_envios'];
   // Financeiro (contas a pagar e caixa): só o administrador; carregado à parte, ao abrir o Caixa.
   const FIN = ['fin_recorrentes', 'fin_lancamentos', 'fin_saldos', 'fin_regras', 'fin_titulos_baixados', 'fin_excluidos'];
+  // Boletos atualizados da cobrança (14/10/2026): carregados à parte (poucos, e o comprador não lê).
+  const A_PARTE = ['boletos'];
   const CHAVE = { usuarios: 'user_id' };
   const chave = t => CHAVE[t] || 'id';
 
@@ -81,7 +83,7 @@
     const base = vazio();
     if (d) TABELAS.forEach(t => { if (Array.isArray(d[t])) base[t] = d[t]; });
     // financeiro: mesma chave do navegador, fora do estado do CRM (só a tela Caixa lê)
-    FIN.forEach(t => { base[t] = d && Array.isArray(d[t]) ? d[t] : []; });
+    FIN.concat(A_PARTE).forEach(t => { base[t] = d && Array.isArray(d[t]) ? d[t] : []; });
     return base;
   };
 
@@ -110,7 +112,7 @@
   Local.prototype.carregar = function () {
     const d = this.ler();
     if (this.semeia(d)) this.gravar(d);
-    FIN.forEach(t => { delete d[t]; });
+    FIN.concat(A_PARTE).forEach(t => { delete d[t]; });
     return Promise.resolve(d);
   };
   Local.prototype.carregarFin = function () { return Promise.resolve(finVazio(this.ler())); };
@@ -534,10 +536,31 @@
     if (r.error) throw new Error('não consegui abrir o comprovante: ' + r.error.message);
     return r.data.signedUrl;
   };
+  // PDFs dos boletos atualizados (bucket privado crm-boletos): o administrador envia; quem vê o boleto baixa.
+  Supa.prototype.boletoEnviar = async function (arquivo, hoje) {
+    const ext = arquivo.type === 'application/pdf' ? 'pdf' : ({ 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' }[arquivo.type] || 'pdf');
+    const caminho = 'boletos/' + hoje.slice(0, 7) + '/' + uuid() + '.' + ext;
+    const r = await this.sb.storage.from('crm-boletos').upload(caminho, arquivo, { contentType: arquivo.type || 'application/pdf', upsert: false });
+    if (r.error) throw new Error('não consegui guardar o boleto: ' + r.error.message);
+    return caminho;
+  };
+  Supa.prototype.boletoLer = async function (caminho, hoje) {
+    const r = await this.sb.functions.invoke('crm-caixa-ler', { body: { modo: 'boleto', caminho, hoje } });
+    if (r.error) throw await erroDaFuncao(r);
+    return r.data;
+  };
+  Supa.prototype.boletoLink = async function (caminho, nome) {
+    const r = await this.sb.storage.from('crm-boletos').createSignedUrl(caminho, 300, nome ? { download: nome } : undefined);
+    if (r.error) throw new Error('não consegui abrir o boleto: ' + r.error.message);
+    return r.data.signedUrl;
+  };
   const SO_SUPABASE = () => Promise.reject(new Error('anexar documento só funciona com o Supabase ligado (o modo local não guarda arquivos)'));
   Local.prototype.anexoEnviar = SO_SUPABASE;
   Local.prototype.anexoLer = SO_SUPABASE;
   Local.prototype.anexoLink = SO_SUPABASE;
+  Local.prototype.boletoEnviar = SO_SUPABASE;
+  Local.prototype.boletoLer = SO_SUPABASE;
+  Local.prototype.boletoLink = SO_SUPABASE;
 
   // E-mails da cadência: a Edge Function crm-email envia pelo Brevo (a chave fica só no Supabase).
   Supa.prototype.email = async function (corpo) {
@@ -602,9 +625,27 @@
     const r = unwrap(await comTentativas(() => this.sb.rpc('crm_fkn_situacao')));
     return Object.assign({ estoque: null, receber: null, pagar: null, recusas: [] }, r || {});
   };
-  // Duplicatas EM ATRASO, com detalhe (gestora e vendedoras não leem o contas a receber — ver schema.sql).
+  // Duplicatas EM ATRASO, com detalhe e o cartório (gestora e vendedoras não leem o contas a receber — ver
+  // schema.sql; crm_atrasos substituiu crm_duplicatas_atraso em 14/10/2026).
   Supa.prototype.duplicatasAtraso = async function () {
-    return unwrap(await comTentativas(() => this.sb.rpc('crm_duplicatas_atraso'))) || [];
+    return unwrap(await comTentativas(() => this.sb.rpc('crm_atrasos'))) || [];
+  };
+  // Boletos atualizados dos últimos 90 dias (a vendedora recebe só os da carteira — RLS).
+  Supa.prototype.boletos = async function () {
+    const desde = new Date(Date.now() - 90 * 864e5).toISOString();
+    return unwrap(await comTentativas(() => this.sb.from('crm_boletos').select('*').gte('criado_em', desde).order('criado_em').limit(2000))) || [];
+  };
+  Local.prototype.boletos = async function () { return this.ler().boletos || []; };
+  // A vendedora mandou o boleto ao cliente (só pela função: ela não altera a tabela).
+  Supa.prototype.boletoCobrado = async function (ids) {
+    return unwrap(await this.sb.rpc('crm_boleto_cobrado', { ids }));
+  };
+  Local.prototype.boletoCobrado = async function (ids) {
+    const d = this.ler(), s = new Set(ids), agora = new Date().toISOString();
+    let n = 0;
+    d.boletos = (d.boletos || []).map(b => (s.has(b.id) && !b.cobrado_em ? (n++, Object.assign({}, b, { cobrado_em: agora, cobrado_por: LOCAL_ADMIN })) : b));
+    this.gravar(d);
+    return n;
   };
   Local.prototype.duplicatasAtraso = async function () {
     const hoje = R.hojeISO();

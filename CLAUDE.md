@@ -1207,6 +1207,28 @@ ligado ao domínio; **começa com fila de aprovação** (nada sai sozinho); reme
   foram pagas no cartão de crédito e baixadas no FKN (backup em `crm_backup.fin_inoven_cartao_20261013`). O saldo do BB não muda;
   o dinheiro sai na fatura do cartão. **Pendente:** foi **outro cartão** (não o "Cartão Inter" de R$ 605,92 no dia 15), que
   ainda não está no Caixa: falta o Anderson dizer nome, dia de vencimento, valor da fatura e o parcelamento da INOVEN nele.
+- **Cobrança: cartório e boletos atualizados (14/10, pedido do Anderson).** Decisões dele: escolher os títulos do cartório
+  (não o cliente inteiro); a vendedora vê o cartório e não cobra; boleto entra pelo PDF do BB lido pela IA; quem manda ao
+  cliente é a vendedora, pelo WhatsApp dela.
+  - **Cartório:** `crm_titulos.cartorio_em` / `cartorio_obs` (a listagem do FKN não mexe). Botão "Mandar para cartório" na
+    janela do título vencido e no "A receber vencido" (lista os vencidos do cliente, todos marcados). O título sai da grade e
+    do "A receber vencido" (`titulosCaixa()` em `caixa.js`; a `crm-caixa-leitura` também tira) e vai para o bloco **Em
+    cartório** (Recebi… com o valor que entrou; Tirar do cartório). Vendedora: `crm_atrasos()` (substitui
+    `crm_duplicatas_atraso`, que ficou por compatibilidade) traz `cartorio_em` sem a observação; selo roxo "em cartório — não
+    cobrar", fora do {titulos_vencidos} da cobrança gentil e segura a cadência de e-mails.
+  - **Boletos atualizados:** Caixa → aba **Cobrança**: arrastar os PDFs da 2ª via (vários, ou um PDF com vários) → bucket
+    privado `crm-boletos` → `crm-caixa-ler` com `modo: 'boleto'` (effort medium; página, pagador, CNPJ, nº do documento,
+    valor do documento, valor cobrado, vencimento, linha digitável) → `cobranca.js`: **a linha digitável é conferida pelos
+    quatro dígitos verificadores** e manda no valor e no vencimento (fator de vencimento reiniciado em 22/02/2025 = 1000);
+    linha que não confere vai embora (o boleto segue só com o PDF). `casaBoleto`: CNPJ + valor original, + nota no "Nº do
+    documento", único vencido do CNPJ, ou nota + valor sem CNPJ; em dúvida não escolhe. Conferência com um select por
+    boleto → "Mandar às vendedoras" grava `crm_boletos`. **PDF com vários boletos é separado por página** (pdf-lib em
+    `vendor/`, carregada só nessa hora): a vendedora nunca recebe o boleto de outro cliente; se não separar, vai sem PDF.
+  - **Vendedora:** `crm_boletos` lê só os da carteira (RLS); o PDF só baixa quem vê o boleto (política do bucket olha
+    `crm_boletos`). Fila do dia: item **Cobrança** antes de tudo; ficha: bloco amarelo com valor, vencimento, Copiar linha
+    digitável, Baixar PDF, **WhatsApp com o boleto** (mensagem `modelo_boleto` em Configurações, padrão em
+    `cobranca.js`; baixa o PDF para anexar — o link do WhatsApp não anexa) e "Já mandei". Marca `cobrado_em/por` pela
+    função `crm_boleto_cobrado` (ela não altera a tabela) e registra no histórico. Por duplicata vale o boleto mais novo.
 - `execute_sql` com `delete` solto fica parado até o tempo esgotar (a ferramenta espera confirmação); o formato
   `with alvo as (...), d as (delete ... using alvo ... returning 1) select count(*) from d` passa normalmente.
 - Na tela de cada pessoa os apagados somem na conferência de hora em hora da recarga leve, ou com F5 / "Recarregar dados".

@@ -5,6 +5,8 @@
 // é gravado aqui, e nada é lançado sem o administrador conferir.
 //   POST { acao: 'situacao' }                          → { ligado } (a chave da IA está configurada?)
 //   POST { caminho: 'caixa/AAAA-MM/…', nota?, hoje }  → { movimentos: [...], aviso }
+//   POST { modo: 'boleto', caminho: 'boletos/AAAA-MM/…' } → { boletos: [...], aviso } (14/10/2026: 2ª via
+//        atualizada do BB, no bucket crm-boletos — Caixa → Cobrança; o CRM acha o título e entrega à vendedora)
 // Só o administrador (o Caixa é só dele). A chave da Anthropic fica SÓ nos segredos do Supabase
 // (ANTHROPIC_API_KEY) — nunca no app, no repositório ou no chat. Deploy: verify_jwt ligado (o padrão).
 import { createClient } from 'npm:@supabase/supabase-js@2.116.0';
@@ -16,7 +18,7 @@ const CORS = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS'
 };
 const resposta = (status: number, corpo: unknown) => new Response(JSON.stringify(corpo), { status, headers: { ...CORS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
-const BUCKET = 'crm-caixa-anexos';
+const BUCKET = 'crm-caixa-anexos', BUCKET_BOLETOS = 'crm-boletos';
 const MAX_BYTES = 10 * 1024 * 1024;
 const IMAGENS: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif' };
 
@@ -57,6 +59,39 @@ const SISTEMA = 'Você lê documentos financeiros da OneClean (distribuidora de 
   'A anotação de quem colou vale como contexto (ex.: "entrou hoje" confirma que é entrada realizada), mas o documento manda nos números. ' +
   'Saldos, limites e totais do extrato não são movimentos.';
 
+// Boletos (2ª via atualizada): um item por boleto do arquivo (um PDF pode ter vários, um por página).
+const ESQUEMA_BOLETO = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['boletos', 'aviso'],
+  properties: {
+    boletos: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['pagina', 'pagador', 'documento', 'numero_documento', 'nosso_numero', 'valor_documento', 'valor_cobrado', 'vencimento', 'linha_digitavel'],
+        properties: {
+          pagina: { type: 'integer', description: 'página do PDF onde está o boleto (1 = primeira); imagem: 1' },
+          pagador: { type: 'string', description: 'nome do pagador (sacado), como está' },
+          documento: { type: 'string', description: 'CNPJ ou CPF do pagador, só dígitos; vazio se não aparece' },
+          numero_documento: { type: 'string', description: 'campo "Nº do documento" (costuma ser o número da nota ou da duplicata), como está' },
+          nosso_numero: { type: 'string', description: 'campo "Nosso número", como está' },
+          valor_documento: { type: 'number', description: 'valor original do título ("Valor do documento"); 0 se não aparece' },
+          valor_cobrado: { type: 'number', description: 'o total a pagar neste boleto, com juros e multa ("Valor cobrado" ou o valor atualizado da 2ª via); 0 se não aparece' },
+          vencimento: { type: 'string', description: 'vencimento deste boleto, AAAA-MM-DD' },
+          linha_digitavel: { type: 'string', description: 'linha digitável completa, só os 47 dígitos' }
+        }
+      }
+    },
+    aviso: { type: 'string', description: 'o que ficou ilegível ou em dúvida; vazio se nada' }
+  }
+};
+const SISTEMA_BOLETO = 'Você lê boletos bancários (2ª via atualizada, com juros e multa) que a OneClean emite pelo Banco do Brasil contra os clientes dela. ' +
+  'Devolva cada boleto do documento, um item por boleto, com a página em que ele está. Valor em reais com ponto decimal (950.12). Datas AAAA-MM-DD. ' +
+  'A linha digitável tem 47 dígitos: copie todos, só os números, conferindo dígito a dígito. CNPJ/CPF do pagador só com dígitos. ' +
+  'Não invente: campo ilegível fica vazio (ou 0) e você diz em "aviso". Recibo do pagador e ficha de compensação do mesmo boleto são um boleto só.';
+
 function base64(bytes: Uint8Array) {
   let s = '';
   for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
@@ -74,14 +109,15 @@ Deno.serve(async (req) => {
   const { data: eu } = await db.from('crm_usuarios').select('papel, ativo').eq('user_id', quem.user.id).maybeSingle();
   if (!eu || !eu.ativo || eu.papel !== 'admin') return resposta(403, { erro: 'só o administrador usa o Caixa' });
   const chave = Deno.env.get('ANTHROPIC_API_KEY') ?? '';
-  let c: { acao?: string; caminho?: string; nota?: string; hoje?: string };
+  let c: { acao?: string; modo?: string; caminho?: string; nota?: string; hoje?: string };
   try { c = await req.json(); } catch { return resposta(400, { erro: 'corpo inválido' }); }
   if (c.acao === 'situacao') return resposta(200, { ligado: !!chave });
   if (!chave) return resposta(503, { erro: 'a leitura de documentos ainda não está ligada: falta a chave da Anthropic nos segredos do Supabase (ANTHROPIC_API_KEY)' });
 
+  const boleto = c.modo === 'boleto';
   const caminho = String(c.caminho ?? '');
-  if (!/^caixa\/\d{4}-\d{2}\/[\w.-]{1,160}$/.test(caminho)) return resposta(400, { erro: 'arquivo inválido' });
-  const { data: arquivo, error: e1 } = await db.storage.from(BUCKET).download(caminho);
+  if (!(boleto ? /^boletos\/\d{4}-\d{2}\/[\w.-]{1,160}$/ : /^caixa\/\d{4}-\d{2}\/[\w.-]{1,160}$/).test(caminho)) return resposta(400, { erro: 'arquivo inválido' });
+  const { data: arquivo, error: e1 } = await db.storage.from(boleto ? BUCKET_BOLETOS : BUCKET).download(caminho);
   if (e1 || !arquivo) return resposta(404, { erro: 'arquivo não encontrado' });
   if (arquivo.size > MAX_BYTES) return resposta(413, { erro: 'arquivo maior que 10 MB' });
   const ext = (caminho.split('.').pop() ?? '').toLowerCase();
@@ -102,8 +138,8 @@ Deno.serve(async (req) => {
       max_tokens: 16000,
       betas: ['server-side-fallback-2026-07-01'],
       fallbacks: 'default',
-      output_config: { effort: 'low', format: { type: 'json_schema', schema: ESQUEMA } },
-      system: SISTEMA,
+      output_config: { effort: boleto ? 'medium' : 'low', format: { type: 'json_schema', schema: boleto ? ESQUEMA_BOLETO : ESQUEMA } },
+      system: boleto ? SISTEMA_BOLETO : SISTEMA,
       messages: [{ role: 'user', content: [bloco, { type: 'text', text: 'Hoje é ' + hoje + '.' + (nota ? '\nAnotação de quem colou: ' + nota : '') }] }]
       // deno-lint-ignore no-explicit-any
     } as any);
@@ -112,6 +148,16 @@ Deno.serve(async (req) => {
     // deno-lint-ignore no-explicit-any
     const texto = (r.content as any[]).filter(b => b.type === 'text').map(b => b.text).join('');
     const lido = JSON.parse(texto);
+    if (boleto) {
+      const d2 = (v: unknown) => Math.round((Number(v) || 0) * 100) / 100;
+      // deno-lint-ignore no-explicit-any
+      const boletos = (Array.isArray(lido.boletos) ? lido.boletos : []).filter((b: any) => /^\d{4}-\d{2}-\d{2}$/.test(String(b.vencimento)) && (Number(b.valor_cobrado) > 0 || Number(b.valor_documento) > 0)).slice(0, 60)
+        // deno-lint-ignore no-explicit-any
+        .map((b: any) => ({ pagina: Math.max(1, Math.min(500, Math.round(Number(b.pagina) || 1))), pagador: String(b.pagador ?? '').slice(0, 120), documento: String(b.documento ?? '').replace(/\D/g, '').slice(0, 14),
+          numero_documento: String(b.numero_documento ?? '').slice(0, 40), nosso_numero: String(b.nosso_numero ?? '').slice(0, 40), valor_documento: d2(b.valor_documento), valor_cobrado: d2(b.valor_cobrado),
+          vencimento: b.vencimento, linha_digitavel: String(b.linha_digitavel ?? '').replace(/\D/g, '').slice(0, 48) }));
+      return resposta(200, { boletos, aviso: String(lido.aviso ?? '').slice(0, 500) });
+    }
     // deno-lint-ignore no-explicit-any
     const movimentos = (Array.isArray(lido.movimentos) ? lido.movimentos : []).filter((m: any) =>
       (m.tipo === 'entrada' || m.tipo === 'saida') && Number(m.valor) > 0 && /^\d{4}-\d{2}-\d{2}$/.test(String(m.data))).slice(0, 40)

@@ -1572,3 +1572,92 @@ grant all on public.crm_fin_excluidos to authenticated;
 revoke update, truncate, references, trigger on public.crm_fin_excluidos from authenticated;
 drop policy if exists so_admin on public.crm_fin_excluidos;
 create policy so_admin on public.crm_fin_excluidos for all to authenticated using ((select public.crm_eh_admin())) with check ((select public.crm_eh_admin()));
+
+-- =================================================================== cobrança: cartório e boletos atualizados (14/10/2026)
+-- Pedido do Anderson. (1) Título mandado para o CARTÓRIO (protesto): sai da previsão do Caixa (não se
+-- sabe quando o cliente paga) e fica no bloco "Em cartório" com a data e a observação, para voltar
+-- quando pagar. A vendedora vê o selo "em cartório" e o título sai da mensagem de cobrança (não se
+-- cobra por fora o que está protestado). A listagem do FKN não mexe nestas colunas (o upsert só grava
+-- as que traz). (2) BOLETO ATUALIZADO (com juros, 2ª via do BB): o administrador arrasta os PDFs no
+-- Caixa → Cobrança, a IA (crm-caixa-ler, modo boleto) lê valor, vencimento e linha digitável, o CRM
+-- acha o título e grava aqui; a vendedora da carteira vê na Fila do dia e na ficha, manda pelo
+-- WhatsApp dela (mensagem pronta + PDF para anexar) e o CRM anota quem cobrou e quando.
+alter table public.crm_titulos add column if not exists cartorio_em date;
+alter table public.crm_titulos add column if not exists cartorio_obs text;
+
+-- Duplicatas em atraso com o cartório (substitui crm_duplicatas_atraso no app; a antiga fica por
+-- compatibilidade). A observação do cartório não vai para a vendedora: é do administrador.
+create or replace function public.crm_atrasos()
+returns table (empresa_id uuid, duplicata text, nota_numero integer, parcela integer, vencimento date, valor numeric, abono boolean, portador text, cartorio_em date)
+language sql stable security definer set search_path = public as $$
+  select t.empresa_id, t.duplicata, t.nota_numero, t.parcela, t.vencimento, t.valor, t.abono, t.portador, t.cartorio_em
+    from public.crm_titulos t
+   where t.empresa_id is not null and t.vencimento < (now() at time zone 'America/Sao_Paulo')::date
+     and (public.crm_eh_gestor() or (public.crm_eh_membro() and t.empresa_id in (select public.crm_empresas_minhas())));
+$$;
+revoke all on function public.crm_atrasos() from public, anon;
+grant execute on function public.crm_atrasos() to authenticated;
+
+create table if not exists public.crm_boletos (
+  id              uuid primary key default gen_random_uuid(),
+  duplicata       text not null,
+  empresa_id      uuid references public.crm_empresas(id) on delete set null,
+  nota_numero     integer,
+  valor_original  numeric(14,2),
+  valor           numeric(14,2) not null,          -- o que o cliente paga (com juros e multa)
+  vencimento      date not null,                   -- vencimento do boleto atualizado
+  linha_digitavel text,
+  arquivo         text,                            -- caminho no bucket crm-boletos
+  cobrado_em      timestamptz,
+  cobrado_por     uuid,
+  criado_por      uuid default auth.uid(),
+  criado_em       timestamptz not null default now(),
+  atualizado_em   timestamptz not null default now()
+);
+create index if not exists crm_boletos_empresa_idx on public.crm_boletos (empresa_id);
+create index if not exists crm_boletos_duplicata_idx on public.crm_boletos (duplicata);
+drop trigger if exists crm_boletos_atualizado_em on public.crm_boletos;
+create trigger crm_boletos_atualizado_em before update on public.crm_boletos for each row execute function public.crm_toca_atualizado_em();
+alter table public.crm_boletos enable row level security;
+revoke all on public.crm_boletos from anon, public, authenticated;
+grant select, insert, update, delete on public.crm_boletos to authenticated;
+-- administrador grava; gestora vê todos; vendedora vê os dos clientes da carteira (e só marca "cobrado"
+-- pela função abaixo)
+drop policy if exists le on public.crm_boletos;
+create policy le on public.crm_boletos for select to authenticated using ((select public.crm_eh_gestor()) or ((select public.crm_eh_membro()) and empresa_id in (select public.crm_empresas_minhas())));
+drop policy if exists grava on public.crm_boletos;
+create policy grava on public.crm_boletos for insert to authenticated with check ((select public.crm_eh_admin()));
+drop policy if exists altera on public.crm_boletos;
+create policy altera on public.crm_boletos for update to authenticated using ((select public.crm_eh_admin())) with check ((select public.crm_eh_admin()));
+drop policy if exists apaga on public.crm_boletos;
+create policy apaga on public.crm_boletos for delete to authenticated using ((select public.crm_eh_admin()));
+
+-- A vendedora (ou quem vê o boleto) marca que mandou ao cliente.
+create or replace function public.crm_boleto_cobrado(ids uuid[])
+returns integer language plpgsql security definer set search_path = public as $$
+declare n integer;
+begin
+  update public.crm_boletos b set cobrado_em = now(), cobrado_por = auth.uid()
+   where b.id = any(ids) and b.cobrado_em is null
+     and (public.crm_eh_gestor() or (public.crm_eh_membro() and b.empresa_id in (select public.crm_empresas_minhas())));
+  get diagnostics n = row_count;
+  return n;
+end;
+$$;
+revoke all on function public.crm_boleto_cobrado(uuid[]) from public, anon;
+grant execute on function public.crm_boleto_cobrado(uuid[]) to authenticated;
+
+-- PDFs dos boletos: bucket PRIVADO. O administrador envia; quem vê o boleto na tabela (a política de
+-- crm_boletos vale dentro desta) baixa o PDF dele — nunca o de outra carteira.
+do $$
+begin
+  if not exists (select 1 from pg_namespace where nspname = 'storage') then return; end if;
+  insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+  values ('crm-boletos', 'crm-boletos', false, 10485760, array['application/pdf','image/png','image/jpeg','image/webp'])
+  on conflict (id) do update set public = false, file_size_limit = 10485760, allowed_mime_types = excluded.allowed_mime_types;
+  if not exists (select 1 from pg_policies where schemaname = 'storage' and tablename = 'objects' and policyname = 'crm_boletos_le') then
+    create policy crm_boletos_le on storage.objects for select to authenticated using (bucket_id = 'crm-boletos' and
+      ((select public.crm_eh_admin()) or exists (select 1 from public.crm_boletos b where b.arquivo = name)));
+    create policy crm_boletos_grava on storage.objects for insert to authenticated with check (bucket_id = 'crm-boletos' and (select public.crm_eh_admin()));
+  end if;
+end $$;

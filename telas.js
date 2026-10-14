@@ -173,6 +173,8 @@
       porEmpresa.set(empresaId, it); itens.push(it);
     };
     const porHora = (a, b) => (a.data_hora < b.data_hora ? -1 : 1);
+    // boleto atualizado que o financeiro mandou (cobranca.js, 14/10/2026): vem antes de tudo
+    if (CRM.cobranca) CRM.cobranca.paraFila().forEach(x => poe('b:' + x.empresaId, x.empresaId, 'cobranca', x.motivo));
     al.atrasadas.slice().sort(porHora).forEach(a => poe('t:' + a.id, a.empresa_id, 'tarefa', 'Tarefa atrasada desde ' + R.dataBR(a.data_hora).slice(0, 5) + ': ' + a.descricao, { atividade: a }));
     al.deHoje.slice().sort(porHora).forEach(a => poe('t:' + a.id, a.empresa_id, 'tarefa', 'Tarefa de hoje às ' + R.horaLocal(a.data_hora) + ': ' + a.descricao, { atividade: a }));
     al.recompra.forEach(e => poe('r:' + e.id, e.id, 'recompra', 'Hora da recompra'));
@@ -182,13 +184,15 @@
     al.negociosParados.forEach(n => poe('n:' + n.id, n.empresa_id, 'parado', 'Negócio parado há ' + R.diasEntre(R.ultimoMovimento(n, E().ix), hoje) + ' dias: ' + n.titulo + ' (' + R.moeda(n.valor) + ')', { negocio: n }));
     return itens;
   }
-  const ROTULO_FILA = { tarefa: ['Tarefa', 'azul'], recompra: ['Recompra', 'verde'], lead: ['Lead novo', 'roxo'], contato: ['Sem contato', 'ambar'], parado: ['Negócio parado', 'ambar'] };
+  const ROTULO_FILA = { cobranca: ['Cobrança', 'vermelho'], tarefa: ['Tarefa', 'azul'], recompra: ['Recompra', 'verde'], lead: ['Lead novo', 'roxo'], contato: ['Sem contato', 'ambar'], parado: ['Negócio parado', 'ambar'] };
 
   function contextoFila(it) {
     const e = CRM.empresa(it.empresaId), r = CRM.resumo(e.id), hoje = CRM.hoje();
     const linhas = [];
     const fin = CRM.avisoFinanceiro ? CRM.avisoFinanceiro(e.id) : '';
     if (fin) linhas.push(CRM.selo('Financeiro', 'vermelho') + ' <strong>' + esc(fin) + '</strong>');
+    const bol = CRM.cobranca ? CRM.cobranca.blocoEmpresa(e.id, true) : '';
+    if (bol) linhas.push(bol);
     const c = contatoPrincipal(e.id);
     if (c) linhas.push('Falar com <strong>' + esc(c.nome) + '</strong>' + (c.cargo ? ' · ' + esc(c.cargo) : ''));
     linhas.push(r.ultimoContato ? 'Último contato ' + esc(R.dataBR(r.ultimoContato)) + ' (' + R.diasEntre(R.diaLocal(r.ultimoContato), hoje) + ' dias)' : 'Nenhum contato registrado ainda');
@@ -216,6 +220,7 @@
       if (maiorFila.dia !== hoje || itens.length > maiorFila.total) maiorFila = { dia: hoje, total: Math.max(itens.length, maiorFila.dia === hoje ? maiorFila.total : 0) };
       const total = maiorFila.total, resolvidos = total - itens.length;
       const botoes = [];
+      if (it.tipo === 'cobranca') botoes.push(CRM.cobranca.botoesEnvio(e.id, true));
       if (it.tipo === 'recompra') botoes.push('<button type="button" class="btn ouro" data-acao="whatsapp-recompra" data-id="' + esc(e.id) + '">WhatsApp de recompra</button>');
       const envio = it.tipo === 'tarefa' && CRM.sequencia ? CRM.sequencia.botao(it.atividade).replace('class="mini wa"', 'class="btn ouro"') : '';
       if (envio) botoes.push(envio);

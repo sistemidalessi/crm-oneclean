@@ -30,6 +30,9 @@
   const d1 = () => (E().cfg || {}).caixa_credito_d1 !== false;
   const nomeTitulo = t => { const e = t.empresa_id && CRM.empresa(t.empresa_id); return (e && e.nome) || t.cliente_nome || 'Cliente'; };
   const titulos = () => E().D.titulos || [];
+  // Título em cartório (14/10/2026) sai da previsão: não se sabe quando o cliente paga. Continua em
+  // titulos() (o "Recebi" e a frase acham ele) e no bloco "Em cartório".
+  const titulosCaixa = () => titulos().filter(t => !t.cartorio_em);
 
   async function carrega() {
     if (lendo) return;
@@ -188,12 +191,15 @@
           ((lig => lig ? '\nÉ a previsão "' + lig.descricao + '" (mesmo valor): receber o título dá baixa nela.' : '')(ligadasPorTitulo(F.lancamentos, titulos(), nomeTitulo).get(t.duplicata))) + '\nVence ' + R.dataBR(t.vencimento) +
           (t.previsao && t.previsao >= hoje() && posterga(t.previsao) < creditoTitulo(t.vencimento, d1()) ? ' · o cliente adiantou: remarcado para ' + R.dataBR(t.previsao)
             : t.previsao ? ' · em atraso, remarcado para ' + R.dataBR(t.previsao) : atrasado ? ' · em atraso' : ', cai na conta ' + R.dataBR(creditoTitulo(t.vencimento, d1()))) +
-          '.\nO título sai do contas a receber quando a listagem do FKN mostrar que foi pago.',
+          '.\nO título sai do contas a receber quando a listagem do FKN mostrar que foi pago.' +
+          (t.cartorio_em ? '\nEM CARTÓRIO desde ' + R.dataBR(t.cartorio_em) + (t.cartorio_obs ? ' — ' + t.cartorio_obs : '') + ': fora da previsão até o cliente pagar.' : ''),
         campos: [{ nome: 'dia', rotulo: 'Recebido em', tipo: 'data' }, { nome: 'valor', rotulo: 'Valor que entrou (R$)', tipo: 'numero', ajuda: 'com juros ou só uma parte? ponha o que caiu na conta' },
           { nome: 'nova', rotulo: 'Ou remarcar para', tipo: 'data', ajuda: 'o dia em que espera receber (depois do vencimento: vermelho; antes, o cliente adiantou: verde); também dá para arrastar o título' }],
         valores: { dia, valor: r2(t.valor), nova: t.previsao || '' },
-        rodape: '<button type="button" class="btn sec" data-acao="cx-tit-remarcar" data-id="' + esc(t.duplicata) + '">Remarcar</button>' +
-          (t.previsao ? '<button type="button" class="btn sec" data-acao="cx-tit-desremarcar" data-id="' + esc(t.duplicata) + '">Tirar a remarcação</button>' : ''),
+        rodape: (t.cartorio_em ? '' : '<button type="button" class="btn sec" data-acao="cx-tit-remarcar" data-id="' + esc(t.duplicata) + '">Remarcar</button>') +
+          (t.previsao && !t.cartorio_em ? '<button type="button" class="btn sec" data-acao="cx-tit-desremarcar" data-id="' + esc(t.duplicata) + '">Tirar a remarcação</button>' : '') +
+          (t.cartorio_em ? '<button type="button" class="btn sec" data-acao="cob-tirar-cartorio" data-id="' + esc(t.duplicata) + '">Tirar do cartório</button>'
+            : atrasado && t.empresa_id ? '<button type="button" class="btn perigo" data-acao="cob-cartorio" data-id="' + esc(t.duplicata) + '">Mandar para cartório</button>' : ''),
         salvarTexto: 'Recebi', aoSalvar: async v => { await receberTitulo(t.duplicata, diaDaBaixa(v.dia || dia), v.valor); }
       });
       return;
@@ -509,8 +515,8 @@
     const dias = Array.from({ length: 15 }, (_, i) => R.somaDias(de, i));
     const ate = dias[dias.length - 1];
     const opc = { d1: d1(), nome: nomeTitulo };
-    const itens = itensGrade(de, ate, h, F.lancamentos, titulos(), opc);
-    const previstos = ate >= h ? itensGrade(h, ate, h, F.lancamentos, titulos(), opc) : [];
+    const itens = itensGrade(de, ate, h, F.lancamentos, titulosCaixa(), opc);
+    const previstos = ate >= h ? itensGrade(h, ate, h, F.lancamentos, titulosCaixa(), opc) : [];
     const saldos = saldosGrade(dias, h, s, F.lancamentos, previstos);
     const naoUtil = d => { const f = feriado(d), w = semana(d); return f ? { cls: 'fer', rot: 'Feriado', nome: f.nome } : w === 6 ? { cls: 'fds', rot: 'Sábado' } : w === 0 ? { cls: 'fds', rot: 'Domingo' } : null; };
     const th = dias.map(d => { const n = naoUtil(d); return '<th class="' + (d === h ? 'hoje' : '') + (n ? ' ' + n.cls : '') + '">' + DIAS[semana(d)].slice(0, 3) + ' <strong>' + dm(d) + '</strong>' +
@@ -562,12 +568,14 @@
     // corte do Anderson (06/10/2026: "deixe somente os que venceram hoje, pra seguirmos certo daqui pra
     // frente"): título vencido antes da data fica fora do bloco — continua no contas a receber e na cobrança
     const desde = (E().cfg || {}).caixa_receber_desde || '';
-    const rvTodos = receberVencido(titulos(), F.lancamentos, h, d1());
+    const rvTodos = receberVencido(titulosCaixa(), F.lancamentos, h, d1());
     const rv = desde ? rvTodos.filter(t => t.vencimento >= desde) : rvTodos;
     const antigos = rvTodos.length - rv.length;
     const tot = l => l.reduce((t, x) => t + Number(x.valor || 0), 0);
     const b = (acao, id, rot, cls, dica) => '<button type="button" class="mini' + (cls ? ' ' + cls : '') + '" data-acao="' + acao + '" data-id="' + esc(id) + '"' + (dica ? ' title="' + esc(dica) + '"' : '') + '>' + esc(rot) + '</button>';
     const bx = baixados();
+    const recebidosJa = new Set(F.lancamentos.filter(l => l.titulo_duplicata && l.situacao === 'pago').map(l => l.titulo_duplicata));
+    const cart = titulos().filter(t => t.cartorio_em && !recebidosJa.has(t.duplicata)).sort((a, b) => a.cartorio_em.localeCompare(b.cartorio_em));
     return (bx.length ? '<details class="cartao cx-venc cx-baixados" data-chave="baixados-fkn" open><summary><strong>Baixados no FKN, sem entrada no caixa: ' + bx.length + ' (' + esc(R.moeda(tot(bx))) + ')</strong> <small>saíram do contas a receber do FKN sem "Recebi" aqui — fora do saldo até você dizer. Entrou no banco? "Entrou". Abatimento, devolução ou cancelamento? "Não entrou".</small></summary>' +
       '<div class="tabela-rolagem"><table class="tabela"><tbody>' + bx.map(x => '<tr><td>' + esc(nomeTitulo(x)) + '<small>duplicata ' + esc(x.duplicata) + (x.vencimento ? ' · venceu ' + esc(R.dataBR(x.vencimento)) : '') + '</small></td><td>baixado no FKN ' + esc(dm(String(x.sumiu_em || '').slice(0, 10))) + '</td>' +
         '<td class="num">' + esc(R.moeda(x.valor)) + '</td><td class="acoes-linha">' + b('cx-bx-entrou', x.id, 'Entrou…') + b('cx-bx-nao', x.id, 'Não entrou') + '</td></tr>').join('') + '</tbody></table></div></details>' : '') +
@@ -579,7 +587,12 @@
       '</tbody></table></div></details>' : '') +
       (rv.length ? '<details class="cartao cx-venc"><summary><strong>A receber vencido: ' + rv.length + ' título(s) (' + esc(R.moeda(tot(rv))) + ')</strong> <small>já deviam ter caído na conta; fora da previsão até entrarem. Caiu? "Recebi hoje".</small></summary>' +
       '<div class="tabela-rolagem"><table class="tabela"><tbody>' + rv.map(t => '<tr><td>' + esc(nomeTitulo(t)) + '<small>duplicata ' + esc(t.duplicata) + '</small></td><td>vence ' + esc(R.dataBR(t.vencimento)) + '</td>' +
-        '<td class="num">' + esc(R.moeda(t.valor)) + '</td><td class="acoes-linha">' + b('cx-ok', 'tit:' + t.duplicata, 'Recebi hoje') + b('cx-item', 'tit:' + t.duplicata, 'Remarcar ou valor') + '</td></tr>').join('') + '</tbody></table></div></details>' : '') +
+        '<td class="num">' + esc(R.moeda(t.valor)) + '</td><td class="acoes-linha">' + b('cx-ok', 'tit:' + t.duplicata, 'Recebi hoje') + b('cx-item', 'tit:' + t.duplicata, 'Remarcar ou valor') +
+          (t.empresa_id ? b('cob-cartorio', t.duplicata, 'Cartório', '', 'mandar este título (e outros vencidos do cliente) para o cartório: sai da previsão') : '') + '</td></tr>').join('') + '</tbody></table></div></details>' : '') +
+      (cart.length ? '<details class="cartao cx-venc cx-cartorio" data-chave="cartorio"><summary><strong>Em cartório: ' + cart.length + ' título(s) (' + esc(R.moeda(tot(cart))) + ')</strong> <small>fora da previsão até o cliente pagar. Pagou? "Recebi…" com o valor que entrou (com as custas). Voltou a negociar? "Tirar do cartório".</small></summary>' +
+      '<div class="tabela-rolagem"><table class="tabela"><tbody>' + cart.map(t => '<tr><td>' + esc(nomeTitulo(t)) + '<small>duplicata ' + esc(t.duplicata) + ' · venceu ' + esc(R.dataBR(t.vencimento)) + (t.cartorio_obs ? ' · ' + esc(t.cartorio_obs) : '') + '</small></td>' +
+        '<td>cartório desde ' + esc(R.dataBR(t.cartorio_em)) + '</td><td class="num">' + esc(R.moeda(t.valor)) + '</td><td class="acoes-linha">' + b('cx-item', 'tit:' + t.duplicata, 'Recebi…') + b('cob-tirar-cartorio', t.duplicata, 'Tirar do cartório') + '</td></tr>').join('') +
+      '</tbody></table></div></details>' : '') +
       (antigos ? '<p class="cx-antigos">' + antigos + ' título(s) vencido(s) antes de ' + esc(R.dataBR(desde)) + ' (' + esc(R.moeda(tot(rvTodos.filter(t => t.vencimento < desde)))) +
         ') ficam fora do Caixa — continuam no contas a receber e na cobrança. Configurações → Geral.</p>' : '');
   }
@@ -645,10 +658,12 @@
         '<div class="cx-saldo"><span>Saldo agora</span><strong class="' + (s.saldo < 0 ? 'cx-neg' : '') + '">' + (s.saldo == null ? '—' : esc(R.moeda(s.saldo))) + '</strong>' +
         '<small>' + (s.ancora ? 'banco ' + esc(R.moeda(s.ancora.valor)) + ' em ' + esc(R.dataBR(s.ancora.data)) + (s.n ? ' · +' + esc(R.moeda(s.entradas)) + ' −' + esc(R.moeda(s.saidas)) + ' baixados aqui' : '') : 'informe o saldo do banco') + '</small>' +
         '<button type="button" class="btn sec" data-acao="cx-conferir">Conferir com o banco</button></div></div>' +
-        '<nav class="cx-abas">' + aba('dia', 'Dia a dia') + aba('contas', 'Contas a pagar') + aba('recorrentes', 'Recorrentes') + aba('pausadas', 'Contas pausadas' + (pausadas ? ' (' + pausadas + ')' : '')) + '</nav>' +
-        (vista === 'dia' ? caixaFrases() + grade(s) + blocosVencidos() : vista === 'recorrentes' ? listaRecorrentes() : listaContas());
+        '<nav class="cx-abas">' + aba('dia', 'Dia a dia') + aba('contas', 'Contas a pagar') + aba('recorrentes', 'Recorrentes') + aba('pausadas', 'Contas pausadas' + (pausadas ? ' (' + pausadas + ')' : '')) +
+          (CRM.cobranca ? aba('cobranca', 'Cobrança' + (CRM.cobranca.contagem() ? ' (' + CRM.cobranca.contagem() + ')' : '')) : '') + '</nav>' +
+        (vista === 'dia' ? caixaFrases() + grade(s) + blocosVencidos() : vista === 'recorrentes' ? listaRecorrentes() : vista === 'cobranca' && CRM.cobranca ? CRM.cobranca.aba() : listaContas());
     },
     depois(el) {
+      if (vista === 'cobranca' && CRM.cobranca) CRM.cobranca.depoisAba(el);
       const fr = el.querySelector('#cxFrases');
       if (fr) {
         fr.addEventListener('input', () => { rascunho = fr.value; });

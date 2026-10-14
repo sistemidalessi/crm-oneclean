@@ -84,7 +84,7 @@ Deno.serve(async (req) => {
       tudo(db, 'crm_fin_lancamentos', 'id, tipo, descricao, fornecedor, categoria, valor, vencimento, situacao, pago_em, baixa, baixado_em, entre_empresas, origem, recorrente_id, titulo_duplicata, emprestimo, juros'),
       tudo(db, 'crm_fin_saldos', 'id, data, valor, criado_em'),
       tudo(db, 'crm_fin_recorrentes', 'id, descricao'),
-      tudo(db, 'crm_titulos', 'duplicata, empresa_id, cliente_nome, valor, vencimento, previsao', 'duplicata'),
+      tudo(db, 'crm_titulos', 'duplicata, empresa_id, cliente_nome, valor, vencimento, previsao, cartorio_em', 'duplicata'),
       tudo(db, 'crm_usuarios', 'user_id, nome', 'user_id'),
       db.from('crm_config').select('dados').eq('id', 1).maybeSingle()
     ]);
@@ -97,8 +97,9 @@ Deno.serve(async (req) => {
       if (error) throw new Error('crm_empresas: ' + error.message);
       for (const e of data ?? []) nomes.set(e.id, e.nome);
     }
+    // título em cartório (14/10/2026) fica fora da previsão, como na tela do Caixa
     // deno-lint-ignore no-explicit-any
-    const tits = (titulos as any[]).map(t => Object.assign({}, t, { cliente: (t.empresa_id && nomes.get(t.empresa_id)) || t.cliente_nome || 'Cliente' }));
+    const tits = (titulos as any[]).filter(t => !t.cartorio_em).map(t => Object.assign({}, t, { cliente: (t.empresa_id && nomes.get(t.empresa_id)) || t.cliente_nome || 'Cliente' }));
     // deno-lint-ignore no-explicit-any
     const dados = ((cfg as any).data && (cfg as any).data.dados) || {};
     const r = K.resumoLeitura({ lancamentos, saldos, recorrentes, titulos: tits, pessoas: (usuarios as { nome: string }[]).map(u => u.nome) },

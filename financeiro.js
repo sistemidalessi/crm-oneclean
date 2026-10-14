@@ -15,12 +15,14 @@
   const { lerContasReceber, ehContasReceber, ligaEmpresas, dataFKN } = K;
 
   // Resumo de uma lista de títulos no dia "hoje": em aberto, vencido, a vencer e o maior atraso.
+  // Título em cartório (cartorio_em, 14/10/2026) fica à parte: não é "vencido a cobrar".
   function resume(lista, hoje) {
-    const r = { aberto: 0, vencido: 0, aVencer: 0, qtd: lista.length, qtdVencidos: 0, maiorAtraso: 0, proximo: null, titulos: lista };
+    const r = { aberto: 0, vencido: 0, aVencer: 0, qtd: lista.length, qtdVencidos: 0, maiorAtraso: 0, proximo: null, titulos: lista, cartorio: 0, qtdCartorio: 0, cartorioDesde: null };
     lista.forEach(t => {
       const v = num(t.valor);
       r.aberto += v;
-      if (t.vencimento < hoje) { r.vencido += v; r.qtdVencidos++; r.maiorAtraso = Math.max(r.maiorAtraso, R.diasEntre(t.vencimento, hoje)); }
+      if (t.cartorio_em) { r.cartorio += v; r.qtdCartorio++; if (!r.cartorioDesde || t.cartorio_em < r.cartorioDesde) r.cartorioDesde = t.cartorio_em; }
+      else if (t.vencimento < hoje) { r.vencido += v; r.qtdVencidos++; r.maiorAtraso = Math.max(r.maiorAtraso, R.diasEntre(t.vencimento, hoje)); }
       else { r.aVencer += v; if (!r.proximo || t.vencimento < r.proximo) r.proximo = t.vencimento; }
     });
     return r;
@@ -78,15 +80,21 @@
   // Selo vermelho para quem tem título vencido (curto: lista; completo: ficha).
   CRM.seloFinanceiro = (id, completo) => {
     const f = CRM.financeiro(id);
-    if (!f || f.vencido <= 0) return '';
-    return CRM.selo((completo ? 'Título vencido: ' : 'vencido ') + R.moeda(f.vencido) + ' · ' + atraso(f.maiorAtraso), 'vermelho');
+    if (!f) return '';
+    return (f.vencido > 0 ? CRM.selo((completo ? 'Título vencido: ' : 'vencido ') + R.moeda(f.vencido) + ' · ' + atraso(f.maiorAtraso), 'vermelho') : '') +
+      (f.cartorio > 0 ? (f.vencido > 0 ? ' ' : '') + CRM.selo('em cartório' + (completo ? ': ' + R.moeda(f.cartorio) : ''), 'roxo') : '');
   };
   // Linha de aviso (Fila do dia, WhatsApp de recompra).
   CRM.avisoFinanceiro = id => {
     const f = CRM.financeiro(id);
-    if (!f || f.vencido <= 0) return '';
-    return 'Tem ' + f.qtdVencidos + ' título(s) vencido(s) no FKN: ' + R.moeda(f.vencido) + ', o mais antigo há ' + atraso(f.maiorAtraso) + '. Combine o pagamento antes de oferecer pedido novo.';
+    if (!f) return '';
+    const cart = f.cartorio > 0 ? 'Tem ' + f.qtdCartorio + ' título(s) EM CARTÓRIO desde ' + R.dataBR(f.cartorioDesde) + ' (' + R.moeda(f.cartorio) + '): não cobre — o assunto está com o financeiro.' : '';
+    if (f.vencido <= 0) return cart;
+    return 'Tem ' + f.qtdVencidos + ' título(s) vencido(s) no FKN: ' + R.moeda(f.vencido) + ', o mais antigo há ' + atraso(f.maiorAtraso) + '. Combine o pagamento antes de oferecer pedido novo.' + (cart ? ' ' + cart : '');
   };
+  // Na lista de títulos: selo de cartório e o boleto atualizado (cobranca.js).
+  const extraTitulo = t => (t.cartorio_em ? ' ' + CRM.selo('em cartório desde ' + R.dataBR(t.cartorio_em).slice(0, 5) + ' — não cobrar', 'roxo') : '') +
+    (CRM.cobranca && !t.cartorio_em ? CRM.cobranca.seloTitulo(t) : '');
   const posicaoTxt = () => {
     const l = (E().D && E().D.titulos) || [];
     const p = l.reduce((m, t) => (t.atualizado_em && t.atualizado_em > m ? t.atualizado_em : m), '');
@@ -98,22 +106,25 @@
     if (!f) return '';
     // Gestora e vendedoras: só as duplicatas em atraso (é o que elas recebem do banco).
     if (!CRM.ehAdmin()) {
-      return '<section class="financeiro"><h3>Duplicatas em atraso</h3><p class="resumo-compras devendo">' + CRM.selo('vencido ' + R.moeda(f.vencido), 'vermelho') + ' ' +
-        f.qtdVencidos + ' duplicata(s), a mais antiga há ' + esc(atraso(f.maiorAtraso)) + '.<br>Combine o pagamento antes de oferecer pedido novo.</p>' +
+      return '<section class="financeiro"><h3>Duplicatas em atraso</h3><p class="resumo-compras devendo">' +
+        (f.vencido > 0 ? CRM.selo('vencido ' + R.moeda(f.vencido), 'vermelho') + ' ' + f.qtdVencidos + ' duplicata(s), a mais antiga há ' + esc(atraso(f.maiorAtraso)) + '.<br>Combine o pagamento antes de oferecer pedido novo.' : '') +
+        (f.cartorio > 0 ? (f.vencido > 0 ? '<br>' : '') + CRM.selo('em cartório ' + R.moeda(f.cartorio), 'roxo') + ' ' + f.qtdCartorio + ' duplicata(s) protestada(s): não cobre, o assunto está com o financeiro.' : '') + '</p>' +
+        (CRM.cobranca ? CRM.cobranca.blocoEmpresa(id) : '') +
         '<ul class="lista titulos">' + f.titulos.map(t => '<li><span>' + esc(t.duplicata) + (t.nota_numero ? ' · NF ' + esc(t.nota_numero) : '') + '</span>' +
-          '<small>venceu ' + esc(R.dataBR(t.vencimento)) + ' ' + CRM.selo(atraso(R.diasEntre(t.vencimento, CRM.hoje())) + ' em atraso', 'vermelho') + (t.portador ? ' · ' + esc(t.portador) : '') + '</small>' +
+          '<small>venceu ' + esc(R.dataBR(t.vencimento)) + ' ' + CRM.selo(atraso(R.diasEntre(t.vencimento, CRM.hoje())) + ' em atraso', 'vermelho') + (t.portador ? ' · ' + esc(t.portador) : '') + extraTitulo(t) + '</small>' +
           '<strong>' + esc(R.moeda(t.valor)) + '</strong></li>').join('') + '</ul></section>';
     }
     const hoje = CRM.hoje();
     return '<section class="financeiro"><h3>Contas a receber <small>' + esc(posicaoTxt()) + '</small></h3>' +
       '<p class="resumo-compras' + (f.vencido > 0 ? ' devendo' : '') + '"><strong>' + esc(R.moeda(f.aberto)) + '</strong> em aberto em ' + f.qtd + ' título(s)' +
         (f.vencido > 0 ? '<br>' + CRM.selo('vencido ' + R.moeda(f.vencido), 'vermelho') + ' ' + f.qtdVencidos + ' título(s), o mais antigo há ' + esc(atraso(f.maiorAtraso)) : '<br>nada vencido') +
-        (f.proximo ? '<br>próximo vencimento ' + esc(R.dataBR(f.proximo)) : '') + '</p>' +
+        (f.cartorio > 0 ? '<br>' + CRM.selo('em cartório ' + R.moeda(f.cartorio), 'roxo') + ' ' + f.qtdCartorio + ' título(s), desde ' + esc(R.dataBR(f.cartorioDesde)) : '') +
+        (f.proximo ? '<br>próximo vencimento ' + esc(R.dataBR(f.proximo)) : '') + '</p>' + (CRM.cobranca ? CRM.cobranca.blocoEmpresa(id) : '') +
       '<ul class="lista titulos">' + f.titulos.map(t => {
         const venc = t.vencimento < hoje;
         return '<li><span>' + esc(t.duplicata) + (t.abono ? ' <small>(abono)</small>' : '') + ' · NF ' + esc(t.nota_numero || '') +
           (t.origem === 'nota' ? ' <small title="Criado pela parcela da nota fiscal; a próxima listagem do FKN confirma">(da nota)</small>' : '') + '</span>' +
-          '<small>vence ' + esc(R.dataBR(t.vencimento)) + (venc ? ' ' + CRM.selo(atraso(R.diasEntre(t.vencimento, hoje)) + ' em atraso', 'vermelho') : '') + (t.portador ? ' · ' + esc(t.portador) : '') + '</small>' +
+          '<small>vence ' + esc(R.dataBR(t.vencimento)) + (venc ? ' ' + CRM.selo(atraso(R.diasEntre(t.vencimento, hoje)) + ' em atraso', 'vermelho') : '') + (t.portador ? ' · ' + esc(t.portador) : '') + extraTitulo(t) + '</small>' +
           '<strong>' + esc(R.moeda(t.valor)) + '</strong></li>';
       }).join('') + '</ul></section>';
   };
@@ -135,6 +146,7 @@
         kpi('Vencido', R.moeda(p.total.vencido), p.total.qtdVencidos + ' títulos · ' + p.vencidos.length + ' clientes', p.total.vencido > 0 ? 'vermelho' : '') +
         kpi('Vence em 7 dias', R.moeda(p.vence7), 'a cobrar logo') +
         kpi('A vencer', R.moeda(p.total.aVencer), 'no prazo', 'verde') +
+        (p.total.cartorio > 0 ? kpi('Em cartório', R.moeda(p.total.cartorio), p.total.qtdCartorio + ' títulos · fora da cobrança', 'roxo') : '') +
       '</section>' +
       '<div class="g-duas">' +
         '<section><h3>Vencidos por cliente</h3>' + (p.vencidos.length ? '<ul class="lista">' + p.vencidos.slice(0, 15).map(c => '<li>' +
