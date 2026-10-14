@@ -774,8 +774,9 @@ tr.apagado td { opacity: .55; }
 .cob-avisar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .cob-sem-tel { color: var(--suave); font-size: .9em; }
 /* Caixa → Contas a pagar: marcar contas para somar (como no Excel) */
-.cx-contas th.cx-marca, .cx-contas td.cx-marca { width: 28px; padding-right: 0; text-align: center; }
-.cx-contas td.cx-marca input, .cx-contas th.cx-marca input { width: 16px; height: 16px; cursor: pointer; }
+.cx-contas th.cx-marca, .cx-contas td.cx-marca { width: 40px; padding: 0 4px; text-align: center; cursor: pointer; }
+.cx-contas td.cx-marca:hover, .cx-contas th.cx-marca:hover { background: var(--realce); }
+.cx-contas td.cx-marca input, .cx-contas th.cx-marca input { width: 18px; height: 18px; margin: 0; cursor: pointer; vertical-align: middle; }
 .cx-contas tr.cx-marcada td { background: var(--realce); }
 .cx-soma { position: sticky; top: 0; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 8px 0; padding: 8px 12px; border-radius: 8px; background: var(--realce); border-left: 4px solid var(--ouro); }
 .cx-soma.vazio { background: none; border-left-color: transparent; padding-left: 0; color: var(--suave); font-size: .85rem; }

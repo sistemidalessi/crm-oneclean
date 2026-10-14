@@ -642,8 +642,8 @@
       sel('tipo', [['', 'Saídas e entradas'], ['saida', 'Só saídas'], ['entrada', 'Só entradas']], filtro.tipo) +
       '<button type="button" class="btn" data-acao="cx-nova" data-id="saida">+ Conta a pagar</button><button type="button" class="btn sec" data-acao="cx-nova" data-id="entrada">+ Entrada</button>' +
       '<label class="btn sec arquivo" title="No FKN: Contas à Pagar por Conta/Fornecedor (Sifn083), Em aberto, salvar em CSV. O vigia também manda sozinho.">Atualizar do FKN<input type="file" id="cxPagarFkn" accept=".csv,.txt,text/csv"></label></div>' +
-      (l.length ? barraSoma() + '<div class="tabela-rolagem"><table class="tabela cx-contas"><thead><tr><th class="cx-marca"><input type="checkbox" data-acao="cx-marca-todas" title="marcar todas as da lista"' + (todos ? ' checked' : '') + '></th><th>' + (filtro.situacao === 'pagas' ? 'Pago em' : 'Vencimento') + '</th><th>Descrição</th><th>Categoria</th><th class="num">Valor</th><th>Situação</th><th></th></tr></thead><tbody>' +
-        l.map(x => '<tr class="clicavel' + (marcados.has(x.id) ? ' cx-marcada' : '') + '" data-acao="cx-editar" data-id="' + esc(x.id) + '" tabindex="0"><td class="cx-marca"><input type="checkbox" data-acao="cx-marca" data-id="' + esc(x.id) + '"' + (marcados.has(x.id) ? ' checked' : '') + ' aria-label="marcar para somar"></td><td>' + esc(R.dataBR(filtro.situacao === 'pagas' ? x.pago_em : x.vencimento)) + '</td>' +
+      (l.length ? barraSoma() + '<div class="tabela-rolagem"><table class="tabela cx-contas"><thead><tr><th class="cx-marca" data-acao="cx-marca-todas-celula"><input type="checkbox" data-acao="cx-marca-todas" title="marcar todas as da lista"' + (todos ? ' checked' : '') + '></th><th>' + (filtro.situacao === 'pagas' ? 'Pago em' : 'Vencimento') + '</th><th>Descrição</th><th>Categoria</th><th class="num">Valor</th><th>Situação</th><th></th></tr></thead><tbody>' +
+        l.map(x => '<tr class="clicavel' + (marcados.has(x.id) ? ' cx-marcada' : '') + '" data-acao="cx-editar" data-id="' + esc(x.id) + '" tabindex="0"><td class="cx-marca" data-acao="cx-marca-celula" data-id="' + esc(x.id) + '" title="marcar para somar"><input type="checkbox" data-acao="cx-marca" data-id="' + esc(x.id) + '"' + (marcados.has(x.id) ? ' checked' : '') + ' aria-label="marcar para somar"></td><td>' + esc(R.dataBR(filtro.situacao === 'pagas' ? x.pago_em : x.vencimento)) + '</td>' +
           '<td><strong>' + esc(x.descricao) + '</strong>' + (x.fornecedor || x.entre_empresas || x.origem !== 'tela' ? '<small>' + esc([x.fornecedor, x.entre_empresas ? 'entre empresas' : '', x.origem === 'recorrente' ? 'recorrente' : x.origem === 'fkn' ? 'do FKN' : x.origem === 'planilha' ? 'da planilha' : '', x.titulo_duplicata ? (x.situacao === 'pago' ? 'recebida pelo título ' : 'ligada ao título ') + x.titulo_duplicata : '', x.emprestimo ? 'empréstimo recebido (não é receita)' : '', x.espelho_ref ? 'veio do Caixa da Agilité' : x.espelho_par ? 'espelhado no Caixa da Agilité' : '',
             Number(x.juros) > 0 ? 'juros ' + R.moeda(x.juros) : ''].filter(Boolean).join(' · ')) + '</small>' : '') + '</td>' +
           '<td>' + esc(x.categoria || '') + '</td><td class="num ' + (x.tipo === 'entrada' ? 'cx-pos' : 'cx-neg') + '">' + (x.tipo === 'entrada' ? '+' : '−') + esc(R.moeda(x.valor)) + '</td><td>' + seloSituacao(x, h) + '</td>' +
@@ -750,6 +750,14 @@
       ultimoMarcado = id;
       atualizaSoma();
     },
+    // clique na célula, ao lado da caixinha (14/10: o clique um pouco fora da caixinha abria a conta para editar)
+    'cx-marca-celula': (id, el, ev) => {
+      const c = el.querySelector('input[type=checkbox]');
+      if (!c) return;
+      c.checked = !c.checked;
+      CRM.acoes['cx-marca'](id, c, ev);
+    },
+    'cx-marca-todas-celula': (id, el) => { const c = el.querySelector('input[type=checkbox]'); if (c) { c.checked = !c.checked; CRM.acoes['cx-marca-todas'](id, c); } },
     'cx-marca-todas': (id, el) => { ordemLista.forEach(x => (el.checked ? marcados.add(x) : marcados.delete(x))); atualizaSoma(); },
     'cx-soma-limpar': () => { marcados.clear(); ultimoMarcado = null; atualizaSoma(); const t = document.querySelector('[data-acao="cx-marca-todas"]'); if (t) t.checked = false; },
     'cx-soma-copiar': v => {
