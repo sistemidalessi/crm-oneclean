@@ -1614,6 +1614,8 @@ create table if not exists public.crm_boletos (
   criado_em       timestamptz not null default now(),
   atualizado_em   timestamptz not null default now()
 );
+-- avisado_em: o administrador mandou o boleto ao WhatsApp da vendedora (14/10/2026: nem todas usam o CRM)
+alter table public.crm_boletos add column if not exists avisado_em timestamptz;
 create index if not exists crm_boletos_empresa_idx on public.crm_boletos (empresa_id);
 create index if not exists crm_boletos_duplicata_idx on public.crm_boletos (duplicata);
 drop trigger if exists crm_boletos_atualizado_em on public.crm_boletos;

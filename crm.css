@@ -744,3 +744,5 @@ tr.apagado td { opacity: .55; }
 .cob-soltar { border: 2px dashed var(--borda); }
 .cob-soltar.cx-solta { border-color: var(--azul); background: var(--realce); }
 .cob-lendo { font-weight: 600; }
+.cob-avisar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.cob-sem-tel { color: var(--suave); font-size: .9em; }

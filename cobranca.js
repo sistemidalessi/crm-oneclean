@@ -136,7 +136,9 @@
     return lista.length === 1 ? um(lista[0]) : lista.slice(0, -1).map(um).join(', ') + ' e ' + um(lista[lista.length - 1]);
   }
   function mensagemBoleto(modelo, lista, vars) {
-    return R.aplicaModelo(modelo || MODELO_BOLETO, Object.assign({}, vars, { boletos: textoBoletos(lista), titulos_boleto: titulosBoleto(lista) }));
+    const t = R.aplicaModelo(modelo || MODELO_BOLETO, Object.assign({}, vars, { boletos: textoBoletos(lista), titulos_boleto: titulosBoleto(lista) }));
+    // sem linha digitável (não deu para conferir): só o PDF
+    return lista.some(b => b.linha_digitavel) ? t : t.replace('É só copiar a linha digitável no app do banco. Também te mando o PDF aqui.', 'Te mando o PDF do boleto aqui.');
   }
 
   const C = { lerLinha, linhaDeCodigo, formataLinha, dataDoFator, confereBoleto, casaBoleto, boletosPendentes, boletoAtual, mensagemBoleto, textoBoletos, MODELO_BOLETO };
@@ -212,6 +214,7 @@
     const F = CRM.fichas;
     const a = await F.registraAuto(e, c, peloZap ? 'whatsapp' : 'nota', 'Boleto atualizado enviado' + (peloZap ? ' pelo WhatsApp' + (c ? ' a ' + c.nome : '') : ' (por outro caminho)') + ': ' +
       lista.map(b => nomeNF(b) + ' ' + R.moeda(b.valor) + ', vence ' + R.dataBR(b.vencimento)).join('; ') + (texto ? '\n' + texto : ''));
+    await concluiTarefas(e.id);
     if (peloZap && a) F.esperaVolta(e, c, a, 'whatsapp');
     CRM.render();
   }
@@ -308,6 +311,7 @@
       aoSalvar: async v => {
         const st = CRM.store(), escolhidos = new Set();
         let n = 0, semPdf = 0;
+        const gravados = [];
         for (let i = 0; i < itens.length; i++) {
           const dup = v['b' + i];
           if (!dup) continue;
@@ -340,12 +344,88 @@
           const r = await st.inserir('boletos', { duplicata: t.duplicata, empresa_id: t.empresa_id, nota_numero: t.nota_numero || null, valor_original: Number(t.valor),
             valor: x.conf.valor, vencimento: x.conf.vencimento, linha_digitavel: x.conf.linha || null, arquivo });
           E().boletos = (E().boletos || []).concat([r]);
+          gravados.push(r);
           n++;
         }
+        await criaTarefas(gravados);
         CRM.render();
-        CRM.toast(n + ' boleto(s) mandado(s) às vendedoras' + (semPdf ? ' · ' + semPdf + ' sem o PDF (não consegui separar a página): vão só com a linha digitável' : '') + '.');
+        CRM.toast(n + ' boleto(s) gravado(s), com a tarefa de cobrar para cada vendedora' + (semPdf ? ' · ' + semPdf + ' sem o PDF (não consegui separar a página): vão só com a linha digitável' : '') + '.');
+        setTimeout(formAvisar, 0); // agora: mandar no WhatsApp de cada vendedora
       }
     });
+  }
+
+  // ---- administrador: avisar cada vendedora no WhatsApp dela (14/10/2026, Anderson: "gostaria que enviasse no
+  // WhatsApp delas" — a Silmara, por exemplo, não usa o CRM). Sem a API da Meta (fase 3) o CRM não manda
+  // sozinho: um clique por vendedora abre o WhatsApp do administrador com a mensagem pronta para ela — cada
+  // cliente com o valor, o link do PDF (vale 7 dias), o telefone que o CRM tem e a mensagem pronta para ela
+  // copiar e mandar ao cliente. Cada boleto também vira uma tarefa "Cobrar boleto atualizado" da vendedora.
+  const vendedoraDe = b => { const e = b.empresa_id && CRM.empresa(b.empresa_id); return (e && e.responsavel_id) || ''; };
+  const TAREFA = /^Cobrar boleto atualizado/;
+  async function criaTarefas(lista) {
+    const porEmp = new Map();
+    lista.forEach(b => { if (b.empresa_id) { if (!porEmp.has(b.empresa_id)) porEmp.set(b.empresa_id, []); porEmp.get(b.empresa_id).push(b); } });
+    for (const [id, l] of porEmp) {
+      const e = CRM.empresa(id);
+      if (!e || !e.responsavel_id) continue;
+      const ja = (E().D.atividades || []).some(a => a.empresa_id === id && !a.concluida && TAREFA.test(a.descricao || ''));
+      if (ja) continue;
+      await CRM.auto.tarefa({ empresa_id: id, tipo: 'tarefa', responsavel_id: e.responsavel_id, data_hora: new Date().toISOString(),
+        descricao: 'Cobrar boleto atualizado: ' + l.map(b => nomeNF(b) + ' ' + R.moeda(b.valor)).join(', ') + ' (o financeiro mandou o boleto e a mensagem pronta no seu WhatsApp)' });
+    }
+  }
+  async function concluiTarefas(empresaId) {
+    for (const a of (E().D.atividades || []).filter(x => x.empresa_id === empresaId && !x.concluida && TAREFA.test(x.descricao || ''))) {
+      try { await CRM.atualizar('atividades', a.id, { concluida: true, concluida_em: new Date().toISOString() }); } catch (e) { /* segue */ }
+    }
+  }
+  // boletos que ainda não foram para o WhatsApp da vendedora (e não foram cobrados), por vendedora
+  const paraAvisar = () => pendentes().filter(b => !b.avisado_em);
+  function porVendedora(lista) {
+    const g = new Map();
+    lista.forEach(b => { const u = vendedoraDe(b); if (!g.has(u)) g.set(u, []); g.get(u).push(b); });
+    return [...g.entries()].sort((a, b) => CRM.nomeUsuario(a[0]).localeCompare(CRM.nomeUsuario(b[0])));
+  }
+  const botaoAvisar = (u, l) => {
+    const usr = CRM.usuario(u), tel = usr && R.linkWhatsApp(usr.telefone);
+    const nome = u ? R.primeiroNome(CRM.nomeUsuario(u)) : 'Sem vendedora';
+    if (!u || !tel) return '<span class="cob-sem-tel">' + esc(nome) + ': ' + l.length + ' boleto(s) — ' + (u ? 'sem celular no cadastro (Configurações → Equipe)' : 'cliente sem vendedora na carteira') + '</span>';
+    return '<button type="button" class="btn ouro" data-acao="cob-avisar" data-id="' + esc(u) + '">📲 WhatsApp da ' + esc(nome) + ' (' + l.length + ' boleto' + (l.length > 1 ? 's' : '') + ')</button>';
+  };
+  function formAvisar() {
+    const g = porVendedora(paraAvisar());
+    if (!g.length) return;
+    CRM.abrirForm({
+      titulo: 'Mandar no WhatsApp das vendedoras',
+      intro: 'Um clique por vendedora: abre o seu WhatsApp na conversa com ela, com cada cliente, o valor atualizado, o link do PDF (vale 7 dias) e a mensagem pronta para ela mandar ao cliente. É só apertar enviar.\n' +
+        'A tarefa "Cobrar boleto atualizado" já está na agenda de cada uma.',
+      campos: [], salvarTexto: 'Fechar', aoSalvar: async () => {},
+      rodape: '<div class="cob-avisar">' + g.map(([u, l]) => botaoAvisar(u, l)).join('') + '</div>'
+    });
+  }
+  const telBR = t => { const d = String(t || '').replace(/\D/g, '').replace(/^55(?=\d{10,11}$)/, ''); return d.length === 11 ? '(' + d.slice(0, 2) + ') ' + d.slice(2, 7) + '-' + d.slice(7) : d.length === 10 ? '(' + d.slice(0, 2) + ') ' + d.slice(2, 6) + '-' + d.slice(6) : String(t || ''); };
+  async function textoVendedora(u, lista) {
+    const usr = CRM.usuario(u), F = CRM.fichas, nomeV = CRM.nomeUsuario(u);
+    const porEmp = new Map();
+    lista.forEach(b => { if (!porEmp.has(b.empresa_id)) porEmp.set(b.empresa_id, []); porEmp.get(b.empresa_id).push(b); });
+    const blocos = [];
+    let i = 0;
+    for (const [id, l] of porEmp) {
+      const e = CRM.empresa(id);
+      const c = F.escolheContato(e, null, x => R.linkWhatsApp(x.whatsapp || x.celular || x.telefone)) || F.escolheContato(e, null, () => true);
+      const vars = Object.assign(F.variaveis(e, c), { vendedor: nomeV, vendedor_primeiro_nome: R.primeiroNome(nomeV) });
+      const links = [];
+      for (const b of l) if (b.arquivo) links.push((l.length > 1 ? nomeNF(b) + ': ' : '') + await CRM.store().boletoLink(b.arquivo, 'Boleto ' + nomeNF(b).replace(/\//g, '-') + '.pdf', 7 * 86400));
+      const tel = F.telDe(e, c);
+      blocos.push('*' + (++i) + '/' + porEmp.size + ' · ' + e.nome + '*\n' +
+        l.map(b => nomeNF(b) + ': ' + R.moeda(b.valor) + (Number(b.valor) > Number(b.valor_original) + 0.005 ? ' (com juros; original ' + R.moeda(b.valor_original) + ')' : '')).join('\n') +
+        (links.length ? '\nPDF do boleto: ' + links.join('\n') : '\n(sem PDF: mande a linha digitável)') +
+        (tel ? '\nTelefone no CRM: ' + telBR(tel) + (c && c.nome ? ' (' + c.nome + ')' : '') : '\nSem telefone no CRM') +
+        '\n\nMensagem pronta para o cliente (copie e mande junto com o PDF):\n' + mensagemBoleto((E().cfg || {}).modelo_boleto, l, vars));
+    }
+    return 'Oi, ' + R.primeiroNome(nomeV) + '! Aqui é ' + R.primeiroNome((E().eu || {}).nome || '') + ', do financeiro da ' + CRM.nomeInstalacao() + '. ' +
+      (porEmp.size === 1 ? 'Boleto atualizado para você cobrar:' : porEmp.size + ' clientes com boleto atualizado para você cobrar:') + '\n\n' + blocos.join('\n\n────────\n\n') +
+      '\n\nQuando o cliente responder, me avise. Obrigado!';
   }
   function aba() {
     const venc = vencidosACobrar().sort((a, b) => a.vencimento.localeCompare(b.vencimento));
@@ -356,14 +436,20 @@
     const situacao = t => {
       const b = boletoAtual(E().boletos, t.duplicata);
       if (!b) return '<small>sem boleto atualizado</small>';
-      return b.cobrado_em ? CRM.selo('enviado ' + dm(R.diaLocal(b.cobrado_em)) + (b.cobrado_por ? ' · ' + R.primeiroNome(CRM.nomeUsuario(b.cobrado_por)) : ''), 'verde') + '<small>' + esc(R.moeda(b.valor)) + ' · vence ' + esc(dm(b.vencimento)) + '</small>'
-        : CRM.selo('com a vendedora', 'ambar') + '<small>' + esc(R.moeda(b.valor)) + ' · vence ' + esc(dm(b.vencimento)) + '</small>';
+      const det = '<small>' + esc(R.moeda(b.valor)) + (Number(b.valor) > Number(b.valor_original) + 0.005 ? ' com juros' : '') + '</small>';
+      if (b.cobrado_em) return CRM.selo('cobrado ' + dm(R.diaLocal(b.cobrado_em)) + (b.cobrado_por ? ' · ' + R.primeiroNome(CRM.nomeUsuario(b.cobrado_por)) : ''), 'verde') + det;
+      return (b.avisado_em ? CRM.selo('no WhatsApp da vendedora ' + dm(R.diaLocal(b.avisado_em)), 'azul') : CRM.selo('falta mandar à vendedora', 'ambar')) + det +
+        ' <button type="button" class="mini" data-acao="cob-ja-cobrou" data-id="' + esc(b.id) + '" title="a vendedora já mandou ao cliente: tira da Fila e conclui a tarefa">Já cobrou</button>';
     };
+    const avisar = porVendedora(paraAvisar());
     return '<section class="cartao cob-soltar" id="cobSoltar"><h2>Boletos atualizados</h2>' +
       (lendo ? '<p class="cob-lendo">Lendo os boletos… ' + lendo.feitos + ' de ' + lendo.total + '</p>' :
         '<p>Gere no Banco do Brasil a 2ª via atualizada (com juros) dos vencidos e <strong>arraste os PDFs aqui</strong> — vários de uma vez, ou um PDF com vários boletos. ' +
         'O CRM lê cada um (valor, vencimento, linha digitável), acha o título e você confere antes de mandar às vendedoras.</p>' +
         '<label class="btn sec arquivo">Escolher arquivos<input type="file" id="cobArq" multiple accept="application/pdf,image/png,image/jpeg,image/webp"></label>') + '</section>' +
+      (avisar.length ? '<section class="cartao cob-aviso"><h2>Mandar no WhatsApp das vendedoras <small>' + avisar.reduce((t, x) => t + x[1].length, 0) + ' boleto(s) ainda não foram</small></h2>' +
+        '<p>Um clique por vendedora: abre o seu WhatsApp na conversa com ela, com tudo pronto (valor, PDF, telefone do cliente e a mensagem para ela copiar).</p>' +
+        '<div class="cob-avisar">' + avisar.map(([u, l]) => botaoAvisar(u, l)).join('') + '</div></section>' : '') +
       '<section class="cartao"><h2>Vencidos para cobrar <small>' + venc.length + ' título(s) · ' + esc(R.moeda(tot(venc))) + '</small></h2>' +
       (venc.length ? [...porVend.entries()].sort((a, b) => CRM.nomeUsuario(a[0]).localeCompare(CRM.nomeUsuario(b[0]))).map(([u, l]) =>
         '<h3>' + esc(u ? CRM.nomeUsuario(u) : 'Sem vendedora') + ' <small>' + l.length + ' · ' + esc(R.moeda(tot(l))) + '</small></h3>' +
@@ -387,7 +473,7 @@
     zona.addEventListener('drop', ev => { if (!ev.dataTransfer || !ev.dataTransfer.files.length) return; ev.preventDefault(); zona.classList.remove('cx-solta'); lerArquivos(ev.dataTransfer.files).catch(CRM.falhou); });
   }
 
-  CRM.cobranca = { seloTitulo, blocoEmpresa, botoesEnvio, paraFila, formCartorio, aba, depoisAba, contagem: () => vencidosACobrar().length, pendentesDe };
+  CRM.cobranca = { seloTitulo, blocoEmpresa, botoesEnvio, paraFila, formCartorio, formAvisar, aba, depoisAba, contagem: () => vencidosACobrar().length, pendentesDe };
 
   Object.assign(CRM.acoes, {
     'cob-whats': (id, el) => {
@@ -406,6 +492,34 @@
         for (const b of lista) if (b.arquivo) { try { await baixa(b); baixou++; } catch (x) { CRM.falhou(x); } }
         await marcaCobrado(e, lista, c, texto, true);
         if (baixou) CRM.toast('O PDF do boleto foi baixado: anexe na conversa do WhatsApp (clipe → Documento).');
+      })().catch(CRM.falhou);
+    },
+    'cob-avisar': (u, el) => {
+      const usr = CRM.usuario(u), lista = paraAvisar().filter(b => vendedoraDe(b) === u);
+      if (!usr || !lista.length || !R.linkWhatsApp(usr.telefone)) return;
+      const w = raiz.open('', '_blank'); // abre já (o link do PDF demora um instante), senão o navegador bloqueia
+      (async () => {
+        const url = R.linkWhatsApp(usr.telefone, await textoVendedora(u, lista));
+        if (w) w.location = url; else raiz.open(url, '_blank', 'noopener');
+        const agora = new Date().toISOString();
+        for (const b of lista) {
+          const r = await CRM.store().atualizar('boletos', b.id, { avisado_em: agora });
+          E().boletos = (E().boletos || []).map(x => (x.id === b.id ? Object.assign({}, x, r) : x));
+        }
+        if (el) { el.disabled = true; el.textContent = '✓ ' + el.textContent.replace(/^📲\s*/, ''); }
+        CRM.render();
+        CRM.toast('WhatsApp da ' + R.primeiroNome(usr.nome) + ' aberto com ' + lista.length + ' boleto(s): é só apertar enviar.');
+      })().catch(e => { if (w) w.close(); CRM.falhou(e); });
+    },
+    'cob-ja-cobrou': id => {
+      const b = boleto(id), e = b && CRM.empresa(b.empresa_id);
+      if (!b || !confirm('A vendedora já mandou o boleto de ' + (e ? e.nome : nomeNF(b)) + ' ao cliente? Sai da Fila dela e a tarefa é concluída.')) return;
+      (async () => {
+        await CRM.store().boletoCobrado([b.id]);
+        const agora = new Date().toISOString();
+        E().boletos = (E().boletos || []).map(x => (x.id === b.id ? Object.assign({}, x, { cobrado_em: agora, cobrado_por: vendedoraDe(b) || CRM.meuId() }) : x));
+        if (b.empresa_id) await concluiTarefas(b.empresa_id);
+        CRM.render();
       })().catch(CRM.falhou);
     },
     'cob-feito': id => {

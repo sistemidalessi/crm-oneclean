@@ -1241,6 +1241,12 @@ ligado ao domínio; **começa com fila de aprovação** (nada sai sozinho); reme
   vendedora** (decisão do Anderson): o boleto chega a ela no CRM (Fila do dia, **sino** — conta os clientes com boleto e leva à
   Fila — e ficha); cliente sem celular (ou só fixo) abre o WhatsApp para ela escolher o contato. Os 4 clientes não têm pessoa com
   celular; El Shadai e Santa Casa só têm telefone fixo.
+- **Boleto no WhatsApp da vendedora (14/10, Anderson: a Silmara não usa o CRM).** Depois de "Mandar às vendedoras" abre
+  "Mandar no WhatsApp das vendedoras" (também na aba Cobrança enquanto houver boleto sem aviso): **um clique por vendedora** abre
+  o WhatsApp do administrador na conversa com ela (`crm_usuarios.telefone`), com cada cliente, valor com juros, **link do PDF
+  assinado por 7 dias**, telefone do cliente no CRM e a mensagem pronta para ela copiar; grava `crm_boletos.avisado_em`. Sem a
+  API da Meta (fase 3) o CRM não manda sozinho. Cada cliente ganha a tarefa **"Cobrar boleto atualizado…"** da vendedora (sem
+  repetir); ela é concluída quando a vendedora manda pelo CRM ou quando o administrador clica **"Já cobrou"** na aba Cobrança.
 - **Regra (14/10, Anderson): título recebido antes do vencimento é ADIANTADO.** A Santa Casa (002435/01, R$ 7.422,15) venceria
   em 25/10 e pagou em 14/10: o "Recebi" gravou certo, mas o cartão não dizia que o cliente adiantou. Agora `caixa-calculo.js`
   (`recebidoAntes`): entrada paga ligada a título com `pago_em` antes do vencimento (no dia útil) fica verde "⏩ adiantado" com

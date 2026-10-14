@@ -549,8 +549,9 @@
     if (r.error) throw await erroDaFuncao(r);
     return r.data;
   };
-  Supa.prototype.boletoLink = async function (caminho, nome) {
-    const r = await this.sb.storage.from('crm-boletos').createSignedUrl(caminho, 300, nome ? { download: nome } : undefined);
+  // segundos: 5 min para baixar na hora; o link que vai no WhatsApp da vendedora vale 7 dias
+  Supa.prototype.boletoLink = async function (caminho, nome, segundos) {
+    const r = await this.sb.storage.from('crm-boletos').createSignedUrl(caminho, segundos || 300, nome ? { download: nome } : undefined);
     if (r.error) throw new Error('não consegui abrir o boleto: ' + r.error.message);
     return r.data.signedUrl;
   };

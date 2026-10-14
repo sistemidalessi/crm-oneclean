@@ -83,5 +83,6 @@ test('pendentes da vendedora e a mensagem pronta', () => {
   assert.match(venc, /a NF 2286 \(vencida em 07\/10\)/);
   assert.match(venc, /NF 2286: R\$\s?3\.268,76 \(atualizado com juros e multa; valor original R\$\s?3\.099,36\)/);
   assert.match(venc, /banco calcula os encargos até o dia do pagamento/);
+  assert.doesNotMatch(venc, /copiar a linha digitável/, 'sem linha: só o PDF');
   assert.equal(C.boletosPendentes([Object.assign({}, boletos[1], { cobrado_em: 'x' })], atrasos).length, 0);
 });
