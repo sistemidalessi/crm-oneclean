@@ -1232,9 +1232,15 @@ ligado ao domínio; **começa com fila de aprovação** (nada sai sozinho); reme
 - **1º uso real dos boletos (14/10):** o Anderson arrastou 4 PDFs (El Shadai NF 2286, DCAS NF 2357, Pace NF 2363, Santa Casa
   NF 2382): casaram certo, um PDF por cliente, linhas válidas — mas eram os boletos **originais** (valor sem juros, vencimento
   já passado; a linha confirma). A pedido dele foram tirados da Fila (backup `crm_backup.boletos_originais_20261014`) para
-  refazer com a 2ª via de data nova. Trava nova: boleto com vencimento passado vem com "⚠ NÃO É A 2ª VIA ATUALIZADA" e em
-  "não mandar" (escolher mesmo assim pede confirmação); valor igual ao original avisa "sem juros". Os 4 clientes não têm pessoa
-  com celular; El Shadai e Santa Casa só têm telefone fixo.
+  refazer. **Era engano meu:** na 2ª via do BB a linha digitável e o código de barras **mantêm o valor e o vencimento
+  originais**; o valor com juros e multa vem só em "(=) Valor cobrado" e o banco calcula os encargos no pagamento (o Anderson
+  arrastou de novo e a tela mostrou R$ 3.268,76 cobrado × R$ 3.099,36 da linha). Corrigido no mesmo dia: `confereBoleto` usa o
+  vencimento e o original da linha e o **valor cobrado do PDF**; vencido não é erro (só avisa se não houver juros); o título
+  achado já vem selecionado; a mensagem diz "R$ 3.268,76 (atualizado com juros e multa; valor original R$ 3.099,36)" + "o banco
+  calcula os encargos até o dia do pagamento"; a instrução da IA diz que isso é normal no BB. **Quem fala com o cliente é a
+  vendedora** (decisão do Anderson): o boleto chega a ela no CRM (Fila do dia, **sino** — conta os clientes com boleto e leva à
+  Fila — e ficha); cliente sem celular (ou só fixo) abre o WhatsApp para ela escolher o contato. Os 4 clientes não têm pessoa com
+  celular; El Shadai e Santa Casa só têm telefone fixo.
 - **Regra (14/10, Anderson): título recebido antes do vencimento é ADIANTADO.** A Santa Casa (002435/01, R$ 7.422,15) venceria
   em 25/10 e pagou em 14/10: o "Recebi" gravou certo, mas o cartão não dizia que o cliente adiantou. Agora `caixa-calculo.js`
   (`recebidoAntes`): entrada paga ligada a título com `pago_em` antes do vencimento (no dia útil) fica verde "⏩ adiantado" com

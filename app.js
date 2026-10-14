@@ -403,9 +403,12 @@
     } else sel.hidden = true;
     $('#nomeTopo').textContent = nomeInstalacao() === 'CRM' ? 'Sistemi Dalessi' : nomeInstalacao();
     $('#usuarioTopo').innerHTML = CRM.avatar(E.eu) + '<span class="usu-nome">' + esc(E.eu.nome) + '<small>' + esc(R.rotulo(R.PAPEIS, E.eu.papel)) + '</small></span>';
-    const nAlertas = al.atrasadas.length + al.leadsSemAtendimento.length + al.negociosParados.length + al.clientesSemContato.length + al.recompra.length;
+    // boletos atualizados que o financeiro mandou e a vendedora ainda não enviou ao cliente (cobranca.js)
+    const nBoletos = CRM.cobranca && !CRM.ehComprador() ? CRM.cobranca.paraFila().length : 0;
+    const nAlertas = nBoletos + al.atrasadas.length + al.leadsSemAtendimento.length + al.negociosParados.length + al.clientesSemContato.length + al.recompra.length;
     $('#sino').innerHTML = '<span aria-hidden="true">🔔</span>' + (nAlertas ? '<span class="bolinha vermelha">' + nAlertas + '</span>' : '');
-    $('#sino').title = al.atrasadas.length + ' tarefa(s) atrasada(s), ' + al.leadsSemAtendimento.length + ' lead(s) sem atendimento, ' +
+    $('#sino').dataset.boletos = nBoletos;
+    $('#sino').title = (nBoletos ? nBoletos + ' cliente(s) com boleto atualizado para mandar (Fila do dia), ' : '') + al.atrasadas.length + ' tarefa(s) atrasada(s), ' + al.leadsSemAtendimento.length + ' lead(s) sem atendimento, ' +
       al.negociosParados.length + ' negócio(s) parado(s), ' + al.clientesSemContato.length + ' cliente(s) sem contato, ' + al.recompra.length + ' recompra(s)';
 
     atualizaFaixaCarga();
@@ -489,7 +492,7 @@
       store.modo === 'supabase' ? ['Alterar minha senha', formMinhaSenha] : ['Carregar dados de exemplo', () => CRM.ajustes.carregarExemplos()],
       store.modo === 'supabase' ? ['Sair', () => sb.auth.signOut()] : ['Apagar tudo deste navegador', () => CRM.ajustes.apagarTudoLocal()]
     ]),
-    sino: () => CRM.irPara('inicio')
+    sino: () => CRM.irPara(Number(($('#sino') || {}).dataset && $('#sino').dataset.boletos) > 0 ? 'fila' : 'inicio')
   };
 
   function ligarEventos() {

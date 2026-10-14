@@ -56,21 +56,27 @@
   }
 
   // ---- o boleto lido pela IA: confere com a linha e acha o título em atraso
-  // Valor e vencimento: a linha digitável válida manda (é o que o banco cobra); a leitura da IA só
-  // serve quando a linha não deu.
-  // hoje: boleto com vencimento que já passou não é a 2ª via atualizada (14/10/2026: os 4 primeiros vieram com
-  // o vencimento e o valor de origem — a vendedora ia mandar "boleto atualizado, vence em 07/10").
+  // Banco do Brasil (14/10/2026, 1º uso real): na 2ª via, a linha digitável continua com o valor e o
+  // vencimento ORIGINAIS; o valor com juros e multa vem só no campo "(=) Valor cobrado", e o banco calcula os
+  // encargos na hora do pagamento. Então a linha confere os dígitos e dá o vencimento e o valor originais, e
+  // o valor a cobrar é o "Valor cobrado" lido no PDF (sem ele, o da linha).
   function confereBoleto(b, hoje) {
     const l = lerLinha(b.linha_digitavel);
     const avisos = [];
-    let valor = r2(b.valor_cobrado || b.valor_documento), vencimento = b.vencimento || null;
-    if (l.ok) {
-      if (l.valor > 0) { if (Math.abs(l.valor - valor) >= 0.01 && valor) avisos.push('o valor lido (' + R.moeda(valor) + ') não bate com o da linha (' + R.moeda(l.valor) + '): vale o da linha'); valor = l.valor; }
-      if (l.vencimento) { if (vencimento && vencimento !== l.vencimento) avisos.push('vencimento lido ' + R.dataBR(vencimento) + ', o da linha é ' + R.dataBR(l.vencimento) + ': vale o da linha'); vencimento = l.vencimento; }
-    } else avisos.push('linha digitável: ' + l.motivo + ' — vai sem a linha (a vendedora manda o PDF)');
+    const cobrado = r2(b.valor_cobrado), doDoc = r2(b.valor_documento);
+    const original = l.ok && l.valor > 0 ? l.valor : doDoc || cobrado;
+    let vencimento = b.vencimento || null;
+    if (l.ok && l.vencimento) {
+      if (vencimento && vencimento !== l.vencimento) avisos.push('vencimento lido ' + R.dataBR(vencimento) + ', o da linha é ' + R.dataBR(l.vencimento) + ': vale o da linha');
+      vencimento = l.vencimento;
+    }
+    if (!l.ok) avisos.push('linha digitável: ' + l.motivo + ' — vai sem a linha (a vendedora manda o PDF)');
+    const valor = cobrado > 0 ? cobrado : original;
+    if (cobrado > 0 && cobrado < original - 0.005) avisos.push('valor cobrado (' + R.moeda(cobrado) + ') menor que o original (' + R.moeda(original) + '): desconto ou abatimento?');
+    const juros = r2(Math.max(0, valor - original));
     const vencido = !!(hoje && vencimento && vencimento < hoje);
-    if (vencido) avisos.unshift('⚠ NÃO É A 2ª VIA ATUALIZADA: o vencimento (' + R.dataBR(vencimento) + ') já passou — gere no BB a 2ª via com data nova e juros');
-    return { valor, vencimento, linha: l.ok ? digitos(b.linha_digitavel) : '', linhaOk: l.ok, avisos, vencido };
+    if (vencido && !(juros > 0)) avisos.push('venceu em ' + R.dataBR(vencimento) + ' e o boleto não mostra juros: o banco calcula os encargos na hora do pagamento');
+    return { valor, valorOriginal: original, juros, vencimento, linha: l.ok ? digitos(b.linha_digitavel) : '', linhaOk: l.ok, avisos, vencido };
   }
   // titulos: em atraso e fora do cartório, com .empresa_id; empresas: para o CNPJ. Ordem de certeza:
   // mesmo CNPJ e mesmo valor original; mesmo CNPJ e o número da nota no "Nº do documento"; o único
@@ -111,9 +117,19 @@
     'Consta em aberto {titulos_boleto}. Para facilitar, segue o boleto atualizado:\n\n{boletos}\n\n' +
     'É só copiar a linha digitável no app do banco. Também te mando o PDF aqui. Se já tiver pago, por favor desconsidere e me avise. Agradeço!';
   // Bloco {boletos}: uma linha por boleto, com valor, vencimento e a linha digitável.
+  // Boleto vencido (2ª via do BB): mostra o valor atualizado e o original, e avisa que o banco calcula os
+  // encargos do dia; boleto com data nova: o valor e o vencimento dele.
+  const venceuAntes = b => !!b.vencimento && b.vencimento < String(b.criado_em || '9999').slice(0, 10);
   function textoBoletos(lista) {
-    return lista.map(b => '• ' + (b.nota_numero ? 'NF ' + b.nota_numero : 'Duplicata ' + b.duplicata) + ': ' + R.moeda(b.valor) + ', vence em ' + R.dataBR(b.vencimento) +
-      (b.linha_digitavel ? '\n  Linha digitável: ' + formataLinha(b.linha_digitavel) : '')).join('\n');
+    const linhas = lista.map(b => {
+      const comJuros = Number(b.valor_original) > 0 && Number(b.valor) > Number(b.valor_original) + 0.005;
+      return '• ' + (b.nota_numero ? 'NF ' + b.nota_numero : 'Duplicata ' + b.duplicata) + ': ' + R.moeda(b.valor) +
+        (comJuros ? ' (atualizado com juros e multa; valor original ' + R.moeda(b.valor_original) + ')'
+          : venceuAntes(b) ? ' (venceu em ' + R.dataBR(b.vencimento).slice(0, 5) + ')' : ', vence em ' + R.dataBR(b.vencimento)) +
+        (b.linha_digitavel ? '\n  Linha digitável: ' + formataLinha(b.linha_digitavel) : '');
+    });
+    if (lista.some(venceuAntes)) linhas.push('Pagando pela linha digitável ou pelo PDF, o banco calcula os encargos até o dia do pagamento.');
+    return linhas.join('\n');
   }
   function titulosBoleto(lista) {
     const um = b => (b.nota_numero ? 'a NF ' + b.nota_numero : 'a duplicata ' + b.duplicata) + (b.titulo ? ' (vencida em ' + R.dataBR(b.titulo.vencimento).slice(0, 5) + ')' : '');
@@ -270,8 +286,7 @@
     const valores = {};
     const campos = itens.map((x, i) => {
       // vencido não vai marcado: só se o administrador escolher o título de propósito
-      valores['b' + i] = x.casa.titulo && !x.conf.vencido ? x.casa.titulo.duplicata : '';
-      if (x.casa.titulo && !x.conf.vencido && Math.abs(Number(x.casa.titulo.valor) - x.conf.valor) < 0.01) x.conf.avisos.push('⚠ valor igual ao original, sem juros: confira se é a 2ª via atualizada');
+      valores['b' + i] = x.casa.titulo ? x.casa.titulo.duplicata : '';
       const docB = doc(x.b.documento);
       const ordem = venc.slice().sort((a, b) => {
         const pa = (x.casa.candidatos || []).indexOf(a) !== -1 || doc((CRM.empresa(a.empresa_id) || {}).cnpj) === docB ? 0 : 1;
@@ -279,13 +294,15 @@
         return pa - pb || CRM.nomeEmpresa(a.empresa_id).localeCompare(CRM.nomeEmpresa(b.empresa_id));
       });
       return { nome: 'b' + i, tipo: 'select', largo: true,
-        rotulo: (x.b.pagador || 'Pagador não lido') + ' — ' + R.moeda(x.conf.valor) + ', vence ' + (x.conf.vencimento ? R.dataBR(x.conf.vencimento) : '?') + (x.varios ? ' (pág. ' + x.b.pagina + ' de ' + x.arquivo.name + ')' : ''),
+        rotulo: (x.b.pagador || 'Pagador não lido') + ' — ' + R.moeda(x.conf.valor) + (x.conf.juros > 0 ? ' (original ' + R.moeda(x.conf.valorOriginal) + ' + ' + R.moeda(x.conf.juros) + ' de juros e multa)' : '') +
+          (x.conf.vencimento ? (x.conf.vencido ? ', venceu ' : ', vence ') + R.dataBR(x.conf.vencimento) : '') + (x.varios ? ' (pág. ' + x.b.pagina + ' de ' + x.arquivo.name + ')' : ''),
         opcoes: [['', '— não mandar este boleto —']].concat(ordem.map(t => [t.duplicata, rotuloTitulo(t)])),
         ajuda: [x.casa.titulo ? 'achado por ' + x.casa.como : 'escolha o título deste boleto', x.conf.linhaOk ? 'linha digitável conferida ✓' : ''].concat(x.conf.avisos).filter(Boolean).join(' · ') };
     });
     CRM.abrirForm({
       titulo: 'Conferir os boletos', largura: 'largo',
-      intro: itens.length + ' boleto(s) lido(s). Confira o título de cada um: ao gravar, cada boleto vai para a vendedora da carteira (Fila do dia e ficha do cliente), com a mensagem pronta para o WhatsApp.' +
+      intro: itens.length + ' boleto(s) lido(s). Cada um já vem com o título achado; confira e clique em "Mandar às vendedoras": cada boleto vai para a vendedora da carteira do cliente ' +
+        '(Fila do dia, sino e ficha), com a mensagem pronta para ela mandar ao cliente. "Não mandar" só se o título estiver errado.' +
         (avisos.length ? '\nAtenção: ' + avisos.join(' · ') : ''),
       campos, valores, salvarTexto: 'Mandar às vendedoras',
       aoSalvar: async v => {
@@ -302,7 +319,6 @@
           if (!dup) continue;
           const t = venc.find(y => y.duplicata === dup);
           if (!x.conf.vencimento || !(x.conf.valor > 0)) throw new Error('O boleto de ' + (x.b.pagador || '?') + ' veio sem valor ou vencimento: não dá para mandar.');
-          if (x.conf.vencido && !confirm('O boleto de ' + (x.b.pagador || '?') + ' venceu em ' + R.dataBR(x.conf.vencimento) + ': não é a 2ª via atualizada. A vendedora vai mandar "boleto atualizado, vence em ' + R.dataBR(x.conf.vencimento) + '". Mandar assim mesmo?')) continue;
           // PDF com vários boletos: cada um vai em arquivo próprio (a vendedora não pode receber o de outro cliente)
           let arquivo = x.caminho;
           if (x.varios) {
@@ -379,9 +395,12 @@
       if (!e || !lista.length) return;
       const c = F.escolheContato(e, el && el.dataset.contato, x => R.linkWhatsApp(x.whatsapp || x.celular || x.telefone));
       const tel = F.telDe(e, c);
-      if (!R.linkWhatsApp(tel)) { CRM.toast('Sem número de WhatsApp com DDD neste cliente.', true); return; }
       const texto = mensagemBoleto((E().cfg || {}).modelo_boleto, lista, F.variaveis(e, c));
-      raiz.open(R.linkWhatsApp(tel, texto), '_blank', 'noopener'); // antes de qualquer espera (senão o navegador bloqueia)
+      // sem celular no cadastro (ou só telefone fixo): abre o WhatsApp para a vendedora escolher o contato
+      const fixo = /^(55)?\d{2}[2-5]\d{7}$/.test(String(tel || '').replace(/\D/g, ''));
+      const link = !fixo && R.linkWhatsApp(tel, texto) || 'https://wa.me/?text=' + encodeURIComponent(texto);
+      raiz.open(link, '_blank', 'noopener'); // antes de qualquer espera (senão o navegador bloqueia)
+      if (link.indexOf('https://wa.me/?') === 0) CRM.toast('Cliente sem celular no CRM: escolha o contato no WhatsApp. Depois cadastre o celular do financeiro na ficha.');
       (async () => {
         let baixou = 0;
         for (const b of lista) if (b.arquivo) { try { await baixa(b); baixou++; } catch (x) { CRM.falhou(x); } }

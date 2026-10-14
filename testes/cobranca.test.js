@@ -29,16 +29,18 @@ test('linha digitável: confere os dígitos e tira valor e vencimento', () => {
   assert.equal(C.dataDoFator('1000'), '2025-02-22');
 });
 
-test('boleto lido: a linha manda no valor e no vencimento; sem linha válida, vai sem ela', () => {
-  const linha = C.linhaDeCodigo(codigoTeste('2026-10-20', 950.12, '0000002956789001234567817'));
-  const ok = C.confereBoleto({ linha_digitavel: linha, valor_cobrado: 905.12, vencimento: '2026-10-21' });
-  assert.equal(ok.valor, 950.12); assert.equal(ok.vencimento, '2026-10-20'); assert.equal(ok.linhaOk, true);
-  assert.equal(ok.avisos.length, 2);
-  // vencimento já passou: não é a 2ª via atualizada
-  const velho = C.confereBoleto({ linha_digitavel: linha, valor_cobrado: 950.12, vencimento: '2026-10-20' }, '2026-10-21');
-  assert.equal(velho.vencido, true); assert.match(velho.avisos[0], /NÃO É A 2ª VIA ATUALIZADA/);
-  assert.equal(C.confereBoleto({ linha_digitavel: linha, valor_cobrado: 950.12, vencimento: '2026-10-20' }, '2026-10-20').vencido, false, 'vence hoje ainda vale');
-  const ruim = C.confereBoleto({ linha_digitavel: linha.slice(1), valor_cobrado: 950.12, vencimento: '2026-10-20' });
+test('boleto lido (2ª via do BB): vencimento e original da linha, valor cobrado do PDF; vencido não é erro', () => {
+  const linha = C.linhaDeCodigo(codigoTeste('2026-10-07', 3099.36, '0000002956789001234567817'));
+  // a 2ª via do BB: linha com o valor e o vencimento originais; "(=) Valor cobrado" com juros e multa
+  const bb = C.confereBoleto({ linha_digitavel: linha, valor_documento: 3099.36, valor_cobrado: 3268.76, vencimento: '2026-10-07' }, '2026-10-14');
+  assert.deepEqual([bb.valor, bb.valorOriginal, bb.juros, bb.vencimento, bb.vencido, bb.linhaOk], [3268.76, 3099.36, 169.4, '2026-10-07', true, true]);
+  assert.deepEqual(bb.avisos, []);
+  // sem o valor cobrado: vale o da linha; vencido sem juros só avisa
+  const sem = C.confereBoleto({ linha_digitavel: linha, valor_documento: 3099.36, valor_cobrado: 0, vencimento: '2026-10-07' }, '2026-10-14');
+  assert.equal(sem.valor, 3099.36); assert.match(sem.avisos[0], /banco calcula os encargos/);
+  // vencimento lido diferente: vale o da linha; linha ruim: vai sem ela
+  assert.match(C.confereBoleto({ linha_digitavel: linha, valor_cobrado: 3268.76, vencimento: '2026-10-08' }, '2026-10-14').avisos[0], /vale o da linha/);
+  const ruim = C.confereBoleto({ linha_digitavel: linha.slice(1), valor_cobrado: 950.12, vencimento: '2026-10-20' }, '2026-10-14');
   assert.equal(ruim.linha, ''); assert.equal(ruim.valor, 950.12); assert.match(ruim.avisos[0], /sem a linha/);
 });
 
@@ -76,5 +78,10 @@ test('pendentes da vendedora e a mensagem pronta', () => {
   assert.match(msg, /^Olá, Maria! .*Ana, da Empresa Teste/);
   assert.match(msg, /a NF 2300 \(vencida em 01\/10\)/);
   assert.match(msg, /NF 2300: R\$\s?510,40, vence em 20\/10\/2026\n {2}Linha digitável: 00000\.00000/);
+  // 2ª via de boleto vencido: valor atualizado, o original e o aviso dos encargos
+  const venc = C.mensagemBoleto(null, [{ duplicata: '002286/01', nota_numero: 2286, valor: 3268.76, valor_original: 3099.36, vencimento: '2026-10-07', criado_em: '2026-10-14T13:00:00Z', titulo: { vencimento: '2026-10-07' } }], { saudacao: 'Olá!', vendedor_primeiro_nome: 'Ana', minha_empresa: 'Empresa Teste' });
+  assert.match(venc, /a NF 2286 \(vencida em 07\/10\)/);
+  assert.match(venc, /NF 2286: R\$\s?3\.268,76 \(atualizado com juros e multa; valor original R\$\s?3\.099,36\)/);
+  assert.match(venc, /banco calcula os encargos até o dia do pagamento/);
   assert.equal(C.boletosPendentes([Object.assign({}, boletos[1], { cobrado_em: 'x' })], atrasos).length, 0);
 });
