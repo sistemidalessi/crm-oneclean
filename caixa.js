@@ -545,6 +545,7 @@
       '<span class="cx-it cx-ent previsto atrasado"><span class="cx-corpo">em atraso, remarcado</span></span>' +
       '<span class="cx-it cx-ent previsto adiantado"><span class="cx-corpo">⏩ o cliente adiantou</span></span>' +
       '<span class="cx-it cx-ent previsto emprestimo"><span class="cx-corpo">🔁 empréstimo (entra e volta)</span></span>' +
+      '<span class="cx-it cx-ent feito emprestimo"><span class="cx-corpo">🔁 empréstimo já pago</span></span>' +
       '<small>✓ paga ou recebe no dia da coluna · clique no item para ajustar valor e dia, pausar ou desfazer · arraste uma conta ou um título para outro dia · + lança no dia · Ctrl+clique (ou 🧮 Somar) soma os itens</small></p>' +
       '<div class="cx-grade-rolagem"><table class="cx-grade"><thead><tr><th class="lab"></th>' + th + '</tr></thead><tbody>' +
         '<tr class="sec"><th class="lab ent">Entradas</th>' + celulas('entrada') + '</tr>' +

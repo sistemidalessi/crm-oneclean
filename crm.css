@@ -702,6 +702,11 @@ table.cx-grade td.alvo { outline: 2px dashed var(--azul); outline-offset: -3px; 
 .cx-it.emprestimo { background: #2f5fb3; border: 2px solid #1d3f7d; }
 .cx-it.emprestimo .cx-corpo, .cx-it.emprestimo .cx-corpo .t, .cx-it.emprestimo .cx-corpo .o, .cx-it.emprestimo .cx-corpo .v { color: #fff; }
 .cx-it.emprestimo .cx-ok { background: #fff; color: #1d3f7d; border-color: #fff; }
+/* já pago/recebido (14/10, pedido do Anderson): continua azul, letra e borda verdes para diferenciar do previsto */
+.cx-it.emprestimo.feito, .cx-it.emprestimo.fora { border-color: #8fe36b; }
+.cx-it.emprestimo.fora { border-style: dashed; opacity: 1; }
+.cx-it.emprestimo:is(.feito, .fora) .cx-corpo, .cx-it.emprestimo:is(.feito, .fora) .cx-corpo .t, .cx-it.emprestimo:is(.feito, .fora) .cx-corpo .o, .cx-it.emprestimo:is(.feito, .fora) .cx-corpo .v { color: #b9f5a0; }
+.cx-legenda .cx-it.emprestimo.feito .cx-corpo { color: #b9f5a0; }
 .cx-etq-emp { display: inline-block; font-size: .72em; font-weight: 700; color: #1d3f7d; background: #fff; border-radius: 4px; padding: 0 4px; margin-right: 2px; }
 .cx-legenda .cx-it.emprestimo .cx-corpo { color: #fff; }
 .cx-adi { display: inline-block; font-size: .72em; font-weight: 700; color: #fff; background: var(--verde); border-radius: 4px; padding: 0 4px; margin-right: 2px; }
