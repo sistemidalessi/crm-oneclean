@@ -596,6 +596,31 @@
       (antigos ? '<p class="cx-antigos">' + antigos + ' título(s) vencido(s) antes de ' + esc(R.dataBR(desde)) + ' (' + esc(R.moeda(tot(rvTodos.filter(t => t.vencimento < desde)))) +
         ') ficam fora do Caixa — continuam no contas a receber e na cobrança. Configurações → Geral.</p>' : '');
   }
+  // Somar as contas marcadas, como selecionar células no Excel (14/10/2026, pedido do Anderson: os salários
+  // são pagos pela conta da Agilité e ele precisa do total para transferir). Shift+clique marca um intervalo.
+  const marcados = new Set();
+  let ultimoMarcado = null, ordemLista = [];
+  function somaMarcadas() {
+    const l = F.lancamentos.filter(x => marcados.has(x.id));
+    const saidas = l.filter(x => x.tipo !== 'entrada').reduce((t, x) => t + Number(x.valor || 0), 0);
+    const entradas = l.filter(x => x.tipo === 'entrada').reduce((t, x) => t + Number(x.valor || 0), 0);
+    return { n: l.length, saidas, entradas, total: entradas - saidas, so: !entradas ? Math.abs(saidas) : !saidas ? entradas : null };
+  }
+  function barraSoma() {
+    const m = somaMarcadas();
+    if (!m.n) return '<div class="cx-soma vazio" id="cxSoma">Marque as contas na caixinha à esquerda para somar (Shift+clique marca várias de uma vez).</div>';
+    const valor = m.so != null ? m.so : m.total;
+    return '<div class="cx-soma" id="cxSoma"><span><strong>' + m.n + '</strong> marcada(s)</span>' +
+      (m.saidas && m.entradas ? '<span>saídas −' + esc(R.moeda(m.saidas)) + '</span><span>entradas +' + esc(R.moeda(m.entradas)) + '</span>' : '') +
+      '<span class="cx-soma-total">' + (m.so != null ? (m.entradas ? 'Total a receber' : 'Total a pagar') : 'Saldo') + ' <strong>' + esc(R.moeda(valor)) + '</strong></span>' +
+      '<button type="button" class="mini" data-acao="cx-soma-copiar" data-id="' + Number(valor).toFixed(2) + '">Copiar valor</button>' +
+      '<button type="button" class="mini" data-acao="cx-soma-limpar">Limpar</button></div>';
+  }
+  function atualizaSoma() {
+    const b = typeof document !== 'undefined' && document.getElementById('cxSoma');
+    if (b) b.outerHTML = barraSoma();
+    if (typeof document !== 'undefined') document.querySelectorAll('[data-acao="cx-marca"]').forEach(c => { c.checked = marcados.has(c.dataset.id); const tr = c.closest('tr'); if (tr) tr.classList.toggle('cx-marcada', c.checked); });
+  }
   function listaContas() {
     const h = hoje();
     const busca = R.normaliza(filtro.busca || '');
@@ -608,6 +633,8 @@
     if (busca) l = l.filter(x => R.normaliza([x.descricao, x.fornecedor, x.categoria].join(' ')).indexOf(busca) !== -1);
     l.sort((a, b) => (filtro.situacao === 'pagas' ? String(b.pago_em).localeCompare(String(a.pago_em)) : a.vencimento.localeCompare(b.vencimento)) || b.valor - a.valor);
     const tot = l.reduce((t, x) => t + (x.tipo === 'entrada' ? 1 : -1) * Number(x.valor || 0), 0);
+    ordemLista = l.map(x => x.id);
+    const todos = l.length && l.every(x => marcados.has(x.id));
     const sel = (nome, ops, val) => '<select data-cx-filtro="' + nome + '">' + ops.map(o => '<option value="' + o[0] + '"' + (o[0] === val ? ' selected' : '') + '>' + esc(o[1]) + '</option>').join('') + '</select>';
     return '<section class="cartao"><div class="filtros-compras">' +
       '<input type="search" data-cx-filtro="busca" placeholder="Buscar descrição, fornecedor, categoria" value="' + esc(filtro.busca) + '">' +
@@ -615,14 +642,14 @@
       sel('tipo', [['', 'Saídas e entradas'], ['saida', 'Só saídas'], ['entrada', 'Só entradas']], filtro.tipo) +
       '<button type="button" class="btn" data-acao="cx-nova" data-id="saida">+ Conta a pagar</button><button type="button" class="btn sec" data-acao="cx-nova" data-id="entrada">+ Entrada</button>' +
       '<label class="btn sec arquivo" title="No FKN: Contas à Pagar por Conta/Fornecedor (Sifn083), Em aberto, salvar em CSV. O vigia também manda sozinho.">Atualizar do FKN<input type="file" id="cxPagarFkn" accept=".csv,.txt,text/csv"></label></div>' +
-      (l.length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>' + (filtro.situacao === 'pagas' ? 'Pago em' : 'Vencimento') + '</th><th>Descrição</th><th>Categoria</th><th class="num">Valor</th><th>Situação</th><th></th></tr></thead><tbody>' +
-        l.map(x => '<tr class="clicavel" data-acao="cx-editar" data-id="' + esc(x.id) + '" tabindex="0"><td>' + esc(R.dataBR(filtro.situacao === 'pagas' ? x.pago_em : x.vencimento)) + '</td>' +
+      (l.length ? barraSoma() + '<div class="tabela-rolagem"><table class="tabela cx-contas"><thead><tr><th class="cx-marca"><input type="checkbox" data-acao="cx-marca-todas" title="marcar todas as da lista"' + (todos ? ' checked' : '') + '></th><th>' + (filtro.situacao === 'pagas' ? 'Pago em' : 'Vencimento') + '</th><th>Descrição</th><th>Categoria</th><th class="num">Valor</th><th>Situação</th><th></th></tr></thead><tbody>' +
+        l.map(x => '<tr class="clicavel' + (marcados.has(x.id) ? ' cx-marcada' : '') + '" data-acao="cx-editar" data-id="' + esc(x.id) + '" tabindex="0"><td class="cx-marca"><input type="checkbox" data-acao="cx-marca" data-id="' + esc(x.id) + '"' + (marcados.has(x.id) ? ' checked' : '') + ' aria-label="marcar para somar"></td><td>' + esc(R.dataBR(filtro.situacao === 'pagas' ? x.pago_em : x.vencimento)) + '</td>' +
           '<td><strong>' + esc(x.descricao) + '</strong>' + (x.fornecedor || x.entre_empresas || x.origem !== 'tela' ? '<small>' + esc([x.fornecedor, x.entre_empresas ? 'entre empresas' : '', x.origem === 'recorrente' ? 'recorrente' : x.origem === 'fkn' ? 'do FKN' : x.origem === 'planilha' ? 'da planilha' : '', x.titulo_duplicata ? (x.situacao === 'pago' ? 'recebida pelo título ' : 'ligada ao título ') + x.titulo_duplicata : '', x.emprestimo ? 'empréstimo recebido (não é receita)' : '', x.espelho_ref ? 'veio do Caixa da Agilité' : x.espelho_par ? 'espelhado no Caixa da Agilité' : '',
             Number(x.juros) > 0 ? 'juros ' + R.moeda(x.juros) : ''].filter(Boolean).join(' · ')) + '</small>' : '') + '</td>' +
           '<td>' + esc(x.categoria || '') + '</td><td class="num ' + (x.tipo === 'entrada' ? 'cx-pos' : 'cx-neg') + '">' + (x.tipo === 'entrada' ? '+' : '−') + esc(R.moeda(x.valor)) + '</td><td>' + seloSituacao(x, h) + '</td>' +
           '<td class="acoes-linha">' + (x.situacao === 'aberto' ? '<button type="button" class="mini" data-acao="cx-pagar" data-id="' + esc(x.id) + '">' + (x.tipo === 'entrada' ? 'Recebi' : 'Paguei') + ' hoje</button>' : x.situacao === 'pausado' ? '<button type="button" class="mini" data-acao="cx-voltar" data-id="' + esc(x.id) + '">Voltar para o caixa</button>' +
             '<button type="button" class="mini perigo" data-acao="cx-excluir" data-id="' + esc(x.id) + '">Excluir</button>' : '') + '</td></tr>').join('') +
-        '</tbody><tfoot><tr><td colspan="3">' + l.length + ' lançamento(s)</td><td class="num"><strong>' + esc(R.moeda(tot)) + '</strong></td><td colspan="2"></td></tr></tfoot></table></div>'
+        '</tbody><tfoot><tr><td colspan="4">' + l.length + ' lançamento(s)</td><td class="num"><strong>' + esc(R.moeda(tot)) + '</strong></td><td colspan="2"></td></tr></tfoot></table></div>'
         : '<p class="vazio">Nada aqui.</p>') + '</section>';
   }
   function listaRecorrentes() {
@@ -714,6 +741,22 @@
 
   const comDia = el => (el && el.dataset.dia) || hoje();
   Object.assign(CRM.acoes, {
+    'cx-marca': (id, el, ev) => {
+      if (ev) ev.stopPropagation();
+      const liga = el.checked;
+      const a = ordemLista.indexOf(ultimoMarcado), b = ordemLista.indexOf(id);
+      if (ev && ev.shiftKey && a !== -1 && b !== -1) ordemLista.slice(Math.min(a, b), Math.max(a, b) + 1).forEach(x => (liga ? marcados.add(x) : marcados.delete(x)));
+      else if (liga) marcados.add(id); else marcados.delete(id);
+      ultimoMarcado = id;
+      atualizaSoma();
+    },
+    'cx-marca-todas': (id, el) => { ordemLista.forEach(x => (el.checked ? marcados.add(x) : marcados.delete(x))); atualizaSoma(); },
+    'cx-soma-limpar': () => { marcados.clear(); ultimoMarcado = null; atualizaSoma(); const t = document.querySelector('[data-acao="cx-marca-todas"]'); if (t) t.checked = false; },
+    'cx-soma-copiar': v => {
+      const txt = Number(v).toFixed(2).replace('.', ',');
+      (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject(new Error('sem área de transferência')))
+        .then(() => CRM.toast('Copiado: ' + txt)).catch(() => prompt('Copie o valor:', txt));
+    },
     'cx-vista': id => { vista = id; if (id === 'contas' && filtro.situacao === 'pausadas') filtro.situacao = 'abertas'; CRM.render(); },
     'cx-nav': id => { inicio = +id === 0 ? null : R.somaDias(inicio || R.somaDias(hoje(), -1), +id); CRM.render(); },
     'cx-conferir': () => formConferir(),

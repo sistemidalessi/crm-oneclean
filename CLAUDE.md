@@ -1272,6 +1272,10 @@ ligado ao domínio; **começa com fila de aprovação** (nada sai sozinho); reme
   **1º uso real (14/10, 12:01–12:03):** os 4 boletos (NF 2286, 2357, 2363, 2382) foram arrastados de novo, o CRM montou os 4
   PDFs completos (XML lido para cada DANFE, ~510 KB cada) e o Anderson mandou pelo **Compartilhar** à Silmara, à Isabela e à
   Renata (sem link gerado). Os boletos da 1ª tentativa (10:45) ficaram sem uso: vale o mais novo de cada duplicata.
+- **Somar contas marcadas (14/10, pedido do Anderson: os salários saem da conta da Agilité e ele precisa do total).** Caixa →
+  Contas a pagar: caixinha em cada linha (e "marcar todas" no cabeçalho), **Shift+clique** marca o intervalo, barra fixa no alto
+  com quantidade, total a pagar (ou saídas, entradas e saldo, se misturar), "Copiar valor" e "Limpar". A marcação fica guardada
+  ao filtrar/buscar (some ao recarregar a página); não muda nada no banco.
 - **Volta do contato (14/10, pedido do Anderson):** o próximo passo da janela "Como foi…" tem também **"Em 15 dias"**.
 - **Regra (14/10, Anderson): título recebido antes do vencimento é ADIANTADO.** A Santa Casa (002435/01, R$ 7.422,15) venceria
   em 25/10 e pagou em 14/10: o "Recebi" gravou certo, mas o cartão não dizia que o cliente adiantou. Agora `caixa-calculo.js`
