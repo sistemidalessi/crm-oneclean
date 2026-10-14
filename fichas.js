@@ -1101,7 +1101,7 @@
       campos: [
         { nome: 'resultado', rotulo: 'Resultado', tipo: 'select', opcoes: RESULTADOS, padrao: 'aguardando', largo: true },
         { nome: 'anotacao', rotulo: 'O que ficou combinado (opcional)', tipo: 'textarea', linhas: 2, largo: true, dica: 'ex.: pediu orçamento de papel toalha; quer entrega na segunda' },
-        { nome: 'proximo', rotulo: 'Próximo passo', tipo: 'select', opcoes: [['', 'Nenhum agora'], ['1', 'Amanhã'], ['2', 'Em 2 dias'], ['7', 'Em 1 semana'], ['30', 'Em 1 mês']],
+        { nome: 'proximo', rotulo: 'Próximo passo', tipo: 'select', opcoes: [['', 'Nenhum agora'], ['1', 'Amanhã'], ['2', 'Em 2 dias'], ['7', 'Em 1 semana'], ['15', 'Em 15 dias'], ['30', 'Em 1 mês']],
           padrao: v.jaAgendado ? '' : PROXIMO.aguardando[0], ajuda: v.jaAgendado ? 'o retorno já ficou agendado automaticamente' : '' },
         { nome: 'proximo_desc', rotulo: 'O que fazer', padrao: PROXIMO.aguardando[1] }
       ],
