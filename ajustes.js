@@ -469,12 +469,21 @@
     const xmls = new Map(); // chave → XML autorizado (com protocolo), para guardar (cópia da DANFE na cobrança)
     const le = t => { lidos++; const d = N.lerXml(t); if (d) { docs.push(d); if (d.tipo === 'nota' && /<protNFe[\s>]/.test(t)) xmls.set(d.chave, t); } else outros++; };
     CRM.toast('Lendo ' + arquivos.length + ' arquivo(s)…');
-    for (const f of arquivos) {
-      if (/\.zip$/i.test(f.name)) {
-        if (typeof DecompressionStream === 'undefined') throw new Error('este navegador não abre .zip; descompacte e escolha os XML');
-        (await window.CRMXlsx.lerZipTextos(f, /\.xml$/i)).forEach(x => le(x.texto));
-      } else le(await f.text());
-    }
+    // Pasta inteira pela rede (14/10/2026: ~2.500 XML): lê 8 de cada vez, mostra o andamento e um arquivo
+    // com problema não para os outros.
+    let feitos = 0, falhas = 0;
+    const leUm = async f => {
+      try {
+        if (/\.zip$/i.test(f.name)) {
+          if (typeof DecompressionStream === 'undefined') throw new Error('este navegador não abre .zip; descompacte e escolha os XML');
+          (await window.CRMXlsx.lerZipTextos(f, /\.xml$/i)).forEach(x => { try { le(x.texto); } catch (e) { falhas++; } });
+        } else le(await f.text());
+      } catch (e) { if (arquivos.length === 1) throw e; falhas++; }
+      if (++feitos % 100 === 0) CRM.toast('Lendo os arquivos: ' + feitos + ' de ' + arquivos.length + '…');
+    };
+    const fila = arquivos.slice();
+    await Promise.all(Array.from({ length: Math.min(8, fila.length) }, async () => { for (let f; (f = fila.shift());) await leUm(f); }));
+    if (falhas) CRM.toast(falhas + ' arquivo(s) não puderam ser lidos (os outros seguem).', true);
     if (!docs.length) throw new Error('nenhuma NF-e encontrada (' + lidos + ' arquivo(s) lido(s)). Confira se são os XML das notas.');
     // Administrador: guarda os XML que ainda não estão no CRM (mesmo de nota já importada), em segundo plano.
     if (CRM.ehAdmin() && xmls.size && CRM.store().notasXmlGuardar) {
