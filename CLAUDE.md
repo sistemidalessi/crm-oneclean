@@ -1269,6 +1269,9 @@ ligado ao domínio; **começa com fila de aprovação** (nada sai sozinho); reme
   (marca como cobrado). Sem Web Share no navegador, os botões não aparecem e fica o WhatsApp com link.
   Achado no caminho: `@media (max-width: 1000px)` escondia `.assinatura`, e o html2canvas desenha numa janela de 794 px —
   **a assinatura sumia também do PDF dos orçamentos**; `.proposta-doc .assinatura { display: block }` resolve os dois.
+  **1º uso real (14/10, 12:01–12:03):** os 4 boletos (NF 2286, 2357, 2363, 2382) foram arrastados de novo, o CRM montou os 4
+  PDFs completos (XML lido para cada DANFE, ~510 KB cada) e o Anderson mandou pelo **Compartilhar** à Silmara, à Isabela e à
+  Renata (sem link gerado). Os boletos da 1ª tentativa (10:45) ficaram sem uso: vale o mais novo de cada duplicata.
 - **Volta do contato (14/10, pedido do Anderson):** o próximo passo da janela "Como foi…" tem também **"Em 15 dias"**.
 - **Regra (14/10, Anderson): título recebido antes do vencimento é ADIANTADO.** A Santa Casa (002435/01, R$ 7.422,15) venceria
   em 25/10 e pagou em 14/10: o "Recebi" gravou certo, mas o cartão não dizia que o cliente adiantou. Agora `caixa-calculo.js`
