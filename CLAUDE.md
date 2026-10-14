@@ -1290,6 +1290,17 @@ ligado ao domínio; **começa com fila de aprovação** (nada sai sozinho); reme
   modo em que o clique simples marca (em vez de abrir o item); barra igual no alto da grade, item marcado com contorno dourado.
 - **Empréstimo/transferência já pago (14/10, pedido do Anderson):** o quadro azul continua azul, mas com **letra e borda verdes**
   quando já foi pago ou recebido (`.cx-it.emprestimo.feito/.fora`); o previsto segue com letra branca. Legenda "🔁 empréstimo já pago".
+- **PRÓXIMO (combinado em 14/10 para 15/10) — boleto à vendedora sem passar pelo compartilhar.** O Anderson reclamou que o
+  "📎 Compartilhar os PDFs" abre o compartilhar do Windows e ele ainda escolhe o WhatsApp e a vendedora. Limite do navegador:
+  o link do WhatsApp (wa.me) só leva texto; arquivo só pelo compartilhar, que não escolhe contato. Combinado:
+  1. **Agora, sem custo:** inverter os botões em `cobranca.js` (`botaoAvisar`, `formAvisar` e a aba Cobrança): o principal é
+     "📲 WhatsApp da <vendedora>" (abre a conversa dela com a mensagem e o link do PDF completo, 7 dias); "Compartilhar o
+     arquivo" vira a opção secundária. A vendedora abre o link no celular e compartilha o PDF ao cliente.
+  2. **API oficial da Meta (WhatsApp Cloud API, fase 3):** o "Mandar às vendedoras" envia sozinho, a cada vendedora, a mensagem
+     com o PDF anexado (depois, direto ao cliente). Precisa do Anderson: conta comercial da Meta verificada pelo CNPJ, número
+     só do CRM (chip novo, não a linha de uma vendedora), modelo de mensagem aprovado (categoria utilidade). Daqui: Edge
+     Function de envio (chave nos Secrets) e o botão. Passar ao Anderson o passo a passo da conta e confirmar o preço atual
+     por mensagem antes de ele contratar.
 - **Volta do contato (14/10, pedido do Anderson):** o próximo passo da janela "Como foi…" tem também **"Em 15 dias"**.
 - **Regra (14/10, Anderson): título recebido antes do vencimento é ADIANTADO.** A Santa Casa (002435/01, R$ 7.422,15) venceria
   em 25/10 e pagou em 14/10: o "Recebi" gravou certo, mas o cartão não dizia que o cliente adiantou. Agora `caixa-calculo.js`
