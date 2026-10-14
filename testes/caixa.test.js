@@ -304,6 +304,21 @@ test('título adiantado (remarcado para antes do vencimento): verde, não conta 
   assert.equal(r.titulos_a_receber.vencidos, 0);
 });
 
+test('título recebido antes do vencimento: adiantado (verde) no dia em que entrou; no vencimento ou depois, não', () => {
+  const lanc = (venc, pago) => ({ id: 'l' + pago, tipo: 'entrada', situacao: 'pago', baixa: 'caixa', origem: 'titulo', titulo_duplicata: '002435/01', descricao: 'Recebido: HOSPITAL EXEMPLO · 002435/01', valor: 7422.15, vencimento: venc, pago_em: pago });
+  const g = C.itensGrade('2026-10-10', '2026-10-30', '2026-10-14', [lanc('2026-10-25', '2026-10-14')], [], { d1: true });
+  assert.deepEqual([g[0].data, g[0].estado, g[0].adiantado], ['2026-10-14', 'feito', true]);
+  assert.match(g[0].obs, /adiantado: vencia 25\/10, o cliente pagou em 14\/10/);
+  assert.equal(C.itensGrade('2026-10-10', '2026-10-30', '2026-10-14', [lanc('2026-10-14', '2026-10-14')], [], { d1: true })[0].adiantado, false, 'no próprio dia');
+  assert.equal(C.itensGrade('2026-10-10', '2026-10-30', '2026-10-14', [lanc('2026-10-09', '2026-10-14')], [], { d1: true })[0].adiantado, false, 'atrasado');
+  // vencimento no sábado (paga na segunda): pago na segunda não é adiantado
+  assert.equal(C.itensGrade('2026-10-10', '2026-10-30', '2026-10-19', [lanc('2026-10-17', '2026-10-19')], [], { d1: true })[0].adiantado, false, 'fim de semana');
+  // leitura (Agilité / gestora) também marca
+  const r = C.resumoLeitura({ lancamentos: [lanc('2026-10-25', '2026-10-14')], saldos: [{ data: '2026-10-13', valor: 1 }], titulos: [] }, { hoje: '2026-10-14', dias: 5, d1: true });
+  const dia = r.proximos_dias.find(d => d.data === '2026-10-14');
+  assert.equal(dia.itens[0].adiantado, true);
+});
+
 test('empréstimo de acerto do caixa: a entrada e a devolução vêm marcadas (azul na grade)', () => {
   const lancs = [
     { id: 'e', tipo: 'entrada', descricao: 'Empréstimo — Fulana', categoria: 'Empréstimos recebidos', valor: 10000, vencimento: '2026-10-07', situacao: 'pago', pago_em: '2026-10-07', baixa: 'caixa', emprestimo: true },

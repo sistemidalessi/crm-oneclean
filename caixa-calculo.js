@@ -146,6 +146,10 @@
   // Remarcado para ANTES do dia em que cairia na conta: o cliente adiantou o pagamento (08/10/2026,
   // Anderson: "veio vermelho também"). Fica verde, com a marca de adiantado, e não conta como atraso.
   const adiantado = (t, hoje, d1) => remarcado(t, hoje) && posterga(t.previsao) < creditoTitulo(t.vencimento, d1);
+  // Título já RECEBIDO antes do vencimento (14/10/2026, Anderson: a Santa Casa venceria em 25/10 e pagou
+  // hoje — "vamos deixar como regra"): o cliente adiantou. Verde, com a marca; o dia e o valor são os do
+  // recebimento. Pago no próprio vencimento (ou depois) não é adiantado.
+  const recebidoAntes = l => l.tipo === 'entrada' && l.situacao === 'pago' && !!l.titulo_duplicata && !!l.vencimento && !!l.pago_em && l.pago_em < posterga(l.vencimento);
 
   // ------------------------------------------------------------ previsão ligada a título
   // A mesma venda por dois caminhos (06/10/2026): o recorrente "Material vendido à Agilité — <cond.>"
@@ -201,7 +205,12 @@
       const base = { chave: 'lanc:' + l.id, tipo: 'lanc', secao, titulo: l.descricao, valor: r2(l.valor), ref: l, emprestimo: ehEmprestimoLanc(l) };
       if (l.situacao === 'pausado') return;
       if (l.situacao === 'aberto' && (l.titulo_duplicata || escondidas.has(l.id))) return; // o título representa
-      if (l.situacao === 'pago') { add(Object.assign(base, { data: l.pago_em, estado: l.baixa === 'caixa' ? 'feito' : 'fora', obs: l.baixa === 'caixa' ? '' : 'pago fora do caixa do dia' })); return; }
+      if (l.situacao === 'pago') {
+        const adi = recebidoAntes(l);
+        add(Object.assign(base, { data: l.pago_em, estado: l.baixa === 'caixa' ? 'feito' : 'fora', adiantado: adi,
+          obs: (adi ? 'adiantado: vencia ' + dm(l.vencimento) + ', o cliente pagou em ' + dm(l.pago_em) : '') + (l.baixa === 'caixa' ? '' : (adi ? ' · ' : '') + 'pago fora do caixa do dia') }));
+        return;
+      }
       const pg = posterga(l.vencimento);
       if (pg < hoje) return;
       add(Object.assign(base, { data: pg, estado: 'previsto', obs: pg !== l.vencimento ? 'vence ' + dm(l.vencimento) + ', ' + porqueNaoUtil(l.vencimento) + ' → ' + (secao === 'entrada' ? 'entra' : 'paga') + ' no próximo dia útil' : '' }));
@@ -336,7 +345,7 @@
           return { tipo: 'entrada', descricao: 'Título ' + t.duplicata + ' — ' + nome + (lig ? ' · ' + limpar(lig.descricao) : '') + (x.atrasado ? ' (em atraso, remarcado)' : x.adiantado ? ' (adiantado pelo cliente)' : ''), valor: r2(x.valor), situacao: 'previsto',
             categoria: lig && lig.categoria ? lig.categoria : 'Duplicatas recebidas', cliente_fornecedor: nome, entre_empresas: ENTRE_EMPRESAS.test(nome) || !!(lig && ehEntreEmpresas(lig)), _ag: false };
         }
-        return doLanc(x.ref, x.valor, x.estado === 'previsto' ? 'previsto' : 'aconteceu', x.estado === 'fora' ? { pago_fora: true } : null);
+        return doLanc(x.ref, x.valor, x.estado === 'previsto' ? 'previsto' : 'aconteceu', Object.assign(x.estado === 'fora' ? { pago_fora: true } : {}, x.adiantado ? { adiantado: true } : {}));
       });
       return { data: dia, dia_util: util(dia), sem_banco: util(dia) ? null : porqueNaoUtil(dia), entradas: conta('entrada'), saidas: conta('saida'),
         saldo_fim_do_dia: saldos[dia] == null ? null : r2(saldos[dia]),

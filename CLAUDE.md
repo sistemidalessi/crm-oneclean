@@ -1229,6 +1229,10 @@ ligado ao domínio; **começa com fila de aprovação** (nada sai sozinho); reme
     digitável, Baixar PDF, **WhatsApp com o boleto** (mensagem `modelo_boleto` em Configurações, padrão em
     `cobranca.js`; baixa o PDF para anexar — o link do WhatsApp não anexa) e "Já mandei". Marca `cobrado_em/por` pela
     função `crm_boleto_cobrado` (ela não altera a tabela) e registra no histórico. Por duplicata vale o boleto mais novo.
+- **Regra (14/10, Anderson): título recebido antes do vencimento é ADIANTADO.** A Santa Casa (002435/01, R$ 7.422,15) venceria
+  em 25/10 e pagou em 14/10: o "Recebi" gravou certo, mas o cartão não dizia que o cliente adiantou. Agora `caixa-calculo.js`
+  (`recebidoAntes`): entrada paga ligada a título com `pago_em` antes do vencimento (no dia útil) fica verde "⏩ adiantado" com
+  "vencia dd/mm, o cliente pagou em dd/mm", também na leitura da Agilité (`adiantado: true`). Pago no vencimento ou depois, não.
 - `execute_sql` com `delete` solto fica parado até o tempo esgotar (a ferramenta espera confirmação); o formato
   `with alvo as (...), d as (delete ... using alvo ... returning 1) select count(*) from d` passa normalmente.
 - Na tela de cada pessoa os apagados somem na conferência de hora em hora da recarga leve, ou com F5 / "Recarregar dados".
