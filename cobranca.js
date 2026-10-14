@@ -177,6 +177,7 @@
     return ' ' + CRM.selo('boleto atualizado ' + R.moeda(b.valor) + ' · vence ' + dm(b.vencimento) + ' — enviar', 'ambar');
   }
   const botoesEnvio = (id, grande) => '<button type="button" class="' + (grande ? 'btn ouro' : 'mini wa') + '" data-acao="cob-whats" data-id="' + esc(id) + '">WhatsApp com o boleto</button> ' +
+    (podeCompartilhar() && pendentesDe(id).some(b => b.arquivo) ? '<button type="button" class="' + (grande ? 'btn sec' : 'mini') + '" data-acao="cob-compartilhar" data-id="' + esc(id) + '" title="manda o PDF de verdade (resumo, nota fiscal e boleto) pelo WhatsApp ou outro app">📎 Compartilhar o PDF</button> ' : '') +
     '<button type="button" class="' + (grande ? 'btn sec' : 'mini') + '" data-acao="cob-feito" data-id="' + esc(id) + '" title="mandou por outro caminho (e-mail, telefone): marca como enviado">Já mandei</button>';
   function blocoEmpresa(id, semBotoes) {
     const l = pendentesDe(id);
@@ -205,6 +206,170 @@
     const a = document.createElement('a');
     a.href = u; a.download = nome; a.rel = 'noopener';
     document.body.appendChild(a); a.click(); a.remove();
+  }
+  // ---- PDF completo (14/10/2026, pedido do Anderson: "cada boleto fosse mesmo em PDF, não o link", e o cliente
+  // pediu a cópia da nota): página 1 = resumo com a cara da instalação (valores, linha digitável, como pagar);
+  // depois a DANFE de cada nota, gerada do XML guardado (danfe.js); por fim o PDF do banco, como veio.
+  // Montado no navegador do administrador ao mandar às vendedoras; vira o "arquivo" do boleto (o do banco fica
+  // em arquivo_banco), então o link, o Baixar PDF e o Compartilhar já levam o completo.
+  const LARGURA = 794, ALTURA = 1123; // A4 a 96 dpi
+  const BANCOS = { '001': 'Banco do Brasil', '104': 'Caixa', '237': 'Bradesco', '341': 'Itaú', '033': 'Santander', '077': 'Inter', '756': 'Sicoob', '748': 'Sicredi' };
+  const doBanco = b => { const n = BANCOS[String(b.linha_digitavel || '').slice(0, 3)]; return n ? 'do ' + n : 'do banco'; };
+  const diaB = b => R.diaLocal(b.criado_em || new Date().toISOString());
+  const comJuros = b => Number(b.valor_original) > 0 && Number(b.valor) > Number(b.valor_original) + 0.005;
+  const nomeArquivo = (e, l) => ('Boleto atualizado - ' + l.map(nomeNF).join(', ') + ' - ' + (e ? e.nome : '')).replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120) + '.pdf';
+  function resumoHtml(e, l, danfes, pagBoleto) {
+    const cfg = E().cfg || {}, b0 = l[0], um = l.length === 1, h = diaB(b0);
+    const venceu = l.some(b => b.vencimento < h);
+    const doc = e && e.cnpj ? (R.digitos(e.cnpj).length === 11 ? 'CPF ' : 'CNPJ ') + e.cnpj : '';
+    const total = l.reduce((s, b) => s + Number(b.valor || 0), 0);
+    const notas = [...new Set(l.map(b => b.nota_numero).filter(Boolean))];
+    const sub = venceu ? 'pagando depois de ' + dm(h) + ', o banco soma os encargos do dia' : 'vence em ' + R.dataBR(b0.vencimento);
+    const valores = um
+      ? '<section class="valores"><div class="contas">' + (comJuros(b0)
+          ? '<div><span>Valor original</span><b>' + esc(R.moeda(b0.valor_original)) + '</b></div><div class="juros"><span>Juros e multa até ' + esc(dm(h)) + '</span><b>+ ' + esc(R.moeda(b0.valor - b0.valor_original)) + '</b></div>'
+          : '<div><span>Valor do boleto</span><b>' + esc(R.moeda(b0.valor)) + '</b></div>') +
+        '<div><span>' + (venceu ? 'Vencimento original' : 'Vencimento') + '</span><b>' + esc(R.dataBR(b0.vencimento)) + '</b></div></div>' +
+        '<div class="pagar"><span class="rot">Valor para pagar</span><strong>' + esc(R.moeda(b0.valor)) + '</strong><span class="sub">' + esc(sub) + '</span></div></section>'
+      : '<section class="valores"><div class="contas">' + l.map(b => '<div><span>' + esc(nomeNF(b)) + ' · vencimento ' + esc(dm(b.vencimento)) + (comJuros(b) ? ' · com juros' : '') + '</span><b>' + esc(R.moeda(b.valor)) + '</b></div>').join('') + '</div>' +
+        '<div class="pagar"><span class="rot">Total para pagar</span><strong>' + esc(R.moeda(total)) + '</strong><span class="sub">' + l.length + ' boletos · ' + esc(sub) + '</span></div></section>';
+    const linhas = l.filter(b => b.linha_digitavel);
+    const anexos = ['Este resumo'].concat(danfes.map(d => 'Cópia da nota fiscal (DANFE) ' + d.numero), [um ? 'Boleto atualizado ' + doBanco(b0) : 'Boletos atualizados ' + doBanco(b0)]);
+    return '<div class="proposta-doc bol">' +
+      '<div class="faixa-doc"></div>' +
+      '<header><img src="' + esc(CRM.logo()) + '" alt="' + esc(CRM.nomeInstalacao()) + '"><div class="doc-id"><strong>' + (um ? 'Boleto atualizado' : 'Boletos atualizados') + '</strong>' +
+        '<span>' + esc(um ? nomeNF(b0) + ' · duplicata ' + b0.duplicata : notas.length ? 'NF ' + notas.join(', ') : l.length + ' duplicatas') + '</span><span>Atualizado em ' + esc(R.dataBR(h)) + '</span></div></header>' +
+      '<section class="chamada"><h1>' + (um ? 'Seu boleto, já com tudo calculado' : 'Seus boletos, já com tudo calculado') + '</h1><p>Atualizamos ' + (um ? 'o boleto em aberto' : 'os boletos em aberto') + ' para facilitar o pagamento. ' +
+        (danfes.length ? 'Junto vão a cópia da nota fiscal e o boleto do banco.' : 'Junto vai o boleto do banco.') + '</p></section>' +
+      '<section class="preparado"><h2>Preparado para</h2><p class="nome">' + esc(String((e && (e.razao_social || e.nome)) || '').toUpperCase()) + '</p>' +
+        '<p>' + [doc, notas.length ? (notas.length === 1 ? 'Nota fiscal ' : 'Notas fiscais ') + notas.join(', ') : '', um ? (venceu ? 'venceu em ' : 'vence em ') + R.dataBR(b0.vencimento) : ''].filter(Boolean).map(esc).join('&nbsp; | &nbsp;') + '</p></section>' +
+      valores +
+      (linhas.length ? '<section class="linha"><h2>Linha digitável</h2>' + linhas.map(b => (linhas.length > 1 ? '<small>' + esc(nomeNF(b)) + '</small>' : '') + '<code>' + esc(formataLinha(b.linha_digitavel)) + '</code>').join('') +
+        '<small>Copie e cole no app do seu banco, em "Pagar boleto".</small></section>' : '') +
+      '<section class="passos"><div><b><i>1</i>Pelo app do banco</b><span>' + (linhas.length ? 'Pagar boleto → cole a linha digitável acima.' : 'Pagar boleto → leia o código de barras do boleto.') + '</span></div>' +
+        '<div><b><i>2</i>Pelo código de barras</b><span>Use o boleto ' + esc(doBanco(b0)) + ', na página ' + pagBoleto + '.</span></div>' +
+        '<div><b><i>3</i>Já pagou?</b><span>Desconsidere este aviso e responda a mensagem em que o recebeu, com o comprovante.</span></div></section>' +
+      '<section class="anexos"><h2>Neste arquivo</h2><div>' + anexos.map((a, i) => '<span><i>' + (i + 1) + '</i>' + esc(a) + '</span>').join('') + '</div></section>' +
+      '<div class="rodape"><footer>' + esc(cfg.proposta_rodape || CRM.nomeInstalacao()) + '</footer>' +
+        (cfg.sem_assinatura ? '' : '<p class="assinatura">Documento gerado pelo CRM <strong>Sistemi Dalessi</strong> · sistemas sob medida · ' + esc(CRM.ASSINATURA_EMAIL) + '</p>') + '</div></div>';
+  }
+  // logo da instalação em dataURL (para o quadro do emitente na DANFE); sem logo, a DANFE sai só com o texto
+  let logoDanfe = null;
+  const pegaLogo = () => logoDanfe || (logoDanfe = new Promise(ok => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const cv = document.createElement('canvas');
+        cv.width = img.naturalWidth; cv.height = img.naturalHeight;
+        cv.getContext('2d').drawImage(img, 0, 0);
+        ok({ data: cv.toDataURL('image/png'), formato: 'PNG', proporcao: img.naturalWidth / img.naturalHeight });
+      } catch (e) { ok(null); }
+    };
+    img.onerror = () => ok(null);
+    img.src = CRM.logo();
+  }));
+  // WEBP → PNG (o pdf-lib só embute PNG e JPG). Por data: URL, que a política de segurança da página aceita.
+  async function paraPng(blob) {
+    const u = await new Promise((ok, falha) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = () => falha(r.error); r.readAsDataURL(blob); });
+    const img = await new Promise((ok, falha) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => falha(new Error('imagem do boleto não abriu')); i.src = u; });
+    const cv = document.createElement('canvas');
+    cv.width = img.naturalWidth; cv.height = img.naturalHeight;
+    cv.getContext('2d').drawImage(img, 0, 0);
+    return await new Promise(ok => cv.toBlob(ok, 'image/png'));
+  }
+  // l: boletos do mesmo cliente. Devolve { blob, nome, danfes, semNota }.
+  async function montaPdf(e, l) {
+    await Promise.all(['vendor/html2canvas.min.js', 'vendor/jspdf.umd.min.js', 'vendor/pdf-lib.min.js'].map(carrega));
+    const st = CRM.store(), Dn = raiz.CRMDanfe;
+    const pdf = new raiz.jspdf.jsPDF({ unit: 'mm', format: 'a4', compress: true });
+    // DANFEs primeiro (da página 2 em diante), para o resumo saber em que página fica o boleto
+    const danfes = [], semNota = [], logo = await pegaLogo();
+    for (const n of [...new Set(l.map(b => b.nota_numero).filter(Boolean))]) {
+      const nota = (E().D.notas || []).find(x => String(x.numero) === String(n) && x.chave && !x.cancelada);
+      const xml = nota ? await st.notaXml(nota.chave).catch(() => null) : null;
+      const d = xml && Dn && Dn.ler(xml);
+      if (!d) { semNota.push(n); continue; }
+      pdf.addPage('a4', 'portrait');
+      Dn.desenha(pdf, d, { logo });
+      danfes.push({ numero: n });
+    }
+    const pagBoleto = pdf.getNumberOfPages() + 1;
+    // resumo na página 1
+    const palco = document.createElement('div');
+    palco.className = 'pdf-palco';
+    palco.innerHTML = resumoHtml(e, l, danfes, pagBoleto);
+    document.body.appendChild(palco);
+    try {
+      const doc = palco.firstElementChild;
+      const imgs = [...doc.querySelectorAll('img')].filter(i => !i.complete);
+      await Promise.race([Promise.all(imgs.map(i => new Promise(ok => { i.onload = i.onerror = ok; }))), new Promise(ok => setTimeout(ok, 4000))]);
+      const canvas = await raiz.html2canvas(doc, { scale: 2, backgroundColor: '#ffffff', logging: false, width: LARGURA, height: ALTURA, windowWidth: LARGURA, windowHeight: ALTURA + 50, scrollX: 0, scrollY: 0 });
+      pdf.setPage(1);
+      pdf.addImage(canvas.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, 210, 297);
+    } finally { palco.remove(); }
+    // boleto(s) do banco, como vieram
+    const P = raiz.PDFLib, out = await P.PDFDocument.load(pdf.output('arraybuffer'));
+    for (const b of l) {
+      const cam = b.arquivo_banco || b.arquivo;
+      if (!cam) continue;
+      const blob = await st.boletoArquivo(cam);
+      if (/\.pdf$/i.test(cam) || blob.type === 'application/pdf') {
+        const src = await P.PDFDocument.load(await blob.arrayBuffer(), { ignoreEncryption: true });
+        (await out.copyPages(src, src.getPageIndices())).forEach(p => out.addPage(p));
+      } else {
+        const png = /\.png$/i.test(cam) ? blob : /\.jpe?g$/i.test(cam) ? null : await paraPng(blob);
+        const img = png ? await out.embedPng(await png.arrayBuffer()) : await out.embedJpg(await blob.arrayBuffer());
+        const pg = out.addPage([595.28, 841.89]), m = 28, s = Math.min((595.28 - 2 * m) / img.width, (841.89 - 2 * m) / img.height);
+        pg.drawImage(img, { x: (595.28 - img.width * s) / 2, y: 841.89 - m - img.height * s, width: img.width * s, height: img.height * s });
+      }
+    }
+    out.setTitle(nomeArquivo(e, l).replace(/\.pdf$/, ''));
+    out.setProducer('CRM Sistemi Dalessi');
+    return { blob: new Blob([await out.save()], { type: 'application/pdf' }), nome: nomeArquivo(e, l), danfes, semNota };
+  }
+  // Monta o PDF de cada cliente e troca o arquivo dos boletos por ele. Devolve quantos clientes ficaram sem.
+  async function comporPdfs(lista) {
+    const porEmp = new Map();
+    lista.filter(b => b.empresa_id && (b.arquivo || b.arquivo_banco)).forEach(b => { if (!porEmp.has(b.empresa_id)) porEmp.set(b.empresa_id, []); porEmp.get(b.empresa_id).push(b); });
+    let falhas = 0, semNota = 0, k = 0;
+    for (const [id, l] of porEmp) {
+      CRM.toast('Montando o PDF de cada cliente (resumo, nota fiscal e boleto): ' + (++k) + ' de ' + porEmp.size + '…');
+      try {
+        const r = await montaPdf(CRM.empresa(id), l);
+        semNota += r.semNota.length;
+        const caminho = await CRM.store().boletoEnviar(r.blob, hoje());
+        for (const b of l) {
+          const novo = await CRM.store().atualizar('boletos', b.id, { arquivo: caminho, arquivo_banco: b.arquivo_banco || b.arquivo });
+          E().boletos = (E().boletos || []).map(x => (x.id === b.id ? Object.assign({}, x, novo) : x));
+        }
+      } catch (e) { falhas++; console.warn('PDF completo', e); }
+    }
+    return { falhas, semNota, clientes: porEmp.size };
+  }
+
+  // ---- Compartilhar: manda o arquivo de verdade (Windows e celular), em vez do link
+  const cacheArq = {};
+  const arquivoDe = (caminho, nome) => cacheArq[caminho] || (cacheArq[caminho] = CRM.store().boletoArquivo(caminho)
+    .then(bl => new File([bl], nome, { type: bl.type || 'application/pdf' })).catch(e => { delete cacheArq[caminho]; throw e; }));
+  const podeCompartilhar = () => {
+    try { return !!(navigator.canShare && navigator.canShare({ files: [new File(['%PDF'], 'a.pdf', { type: 'application/pdf' })] })); } catch (e) { return false; }
+  };
+  // um arquivo por cliente (os boletos do mesmo cliente dividem o PDF completo)
+  function arquivosDe(lista) {
+    const vistos = new Map();
+    lista.filter(b => b.arquivo).forEach(b => { if (!vistos.has(b.arquivo)) vistos.set(b.arquivo, []); vistos.get(b.arquivo).push(b); });
+    return Promise.all([...vistos.entries()].map(([cam, l]) => arquivoDe(cam, b2nome(l))));
+  }
+  const b2nome = l => (l[0].arquivo_banco ? nomeArquivo(CRM.empresa(l[0].empresa_id), l) : 'Boleto ' + l.map(nomeNF).join(', ').replace(/\//g, '-') + '.pdf');
+  // true = compartilhou; false = a pessoa cancelou; lança erro se não deu
+  async function compartilha(files, texto) {
+    if (!files.length) throw new Error('não há PDF para compartilhar');
+    try { if (navigator.clipboard && texto) await navigator.clipboard.writeText(texto); } catch (e) { /* segue sem copiar */ }
+    try { await navigator.share({ files, text: texto }); return true; } catch (e) {
+      if (e && e.name === 'AbortError') return false;
+      if (e && e.name === 'NotAllowedError') throw new Error('o PDF ficou pronto agora: clique de novo em Compartilhar');
+      throw e;
+    }
   }
   async function marcaCobrado(e, lista, c, texto, peloZap) {
     const ids = lista.map(b => b.id);
@@ -348,8 +513,11 @@
           n++;
         }
         await criaTarefas(gravados);
+        const pc = await comporPdfs(gravados);
         CRM.render();
-        CRM.toast(n + ' boleto(s) gravado(s), com a tarefa de cobrar para cada vendedora' + (semPdf ? ' · ' + semPdf + ' sem o PDF (não consegui separar a página): vão só com a linha digitável' : '') + '.');
+        CRM.toast(n + ' boleto(s) gravado(s), com a tarefa de cobrar para cada vendedora' + (semPdf ? ' · ' + semPdf + ' sem o PDF (não consegui separar a página): vão só com a linha digitável' : '') +
+          (pc.clientes ? ' · PDF completo (resumo, nota fiscal e boleto) de ' + (pc.clientes - pc.falhas) + ' cliente(s)' : '') +
+          (pc.falhas ? ', ' + pc.falhas + ' ficaram só com o boleto do banco' : '') + (pc.semNota ? ' · ' + pc.semNota + ' nota(s) sem o XML guardado: vão sem a DANFE' : '') + '.', !!pc.falhas);
         setTimeout(formAvisar, 0); // agora: mandar no WhatsApp de cada vendedora
       }
     });
@@ -390,21 +558,28 @@
     const usr = CRM.usuario(u), tel = usr && R.linkWhatsApp(usr.telefone);
     const nome = u ? R.primeiroNome(CRM.nomeUsuario(u)) : 'Sem vendedora';
     if (!u || !tel) return '<span class="cob-sem-tel">' + esc(nome) + ': ' + l.length + ' boleto(s) — ' + (u ? 'sem celular no cadastro (Configurações → Equipe)' : 'cliente sem vendedora na carteira') + '</span>';
-    return '<button type="button" class="btn ouro" data-acao="cob-avisar" data-id="' + esc(u) + '">📲 WhatsApp da ' + esc(nome) + ' (' + l.length + ' boleto' + (l.length > 1 ? 's' : '') + ')</button>';
+    const qt = ' (' + l.length + ' boleto' + (l.length > 1 ? 's' : '') + ')';
+    // Compartilhar (arquivo de verdade) quando o navegador deixa; senão o WhatsApp com o link do PDF
+    return '<span class="cob-vend">' + (podeCompartilhar() && l.some(b => b.arquivo) ? '<button type="button" class="btn ouro" data-acao="cob-avisar-pdf" data-id="' + esc(u) + '">📎 Compartilhar os PDFs com a ' + esc(nome) + qt + '</button>' +
+      '<button type="button" class="link" data-acao="cob-avisar" data-id="' + esc(u) + '">ou mandar com o link</button>'
+      : '<button type="button" class="btn ouro" data-acao="cob-avisar" data-id="' + esc(u) + '">📲 WhatsApp da ' + esc(nome) + qt + '</button>') + '</span>';
   };
+  const preCarrega = lista => { arquivosDe(lista).catch(() => {}); };
   function formAvisar() {
     const g = porVendedora(paraAvisar());
     if (!g.length) return;
+    preCarrega(paraAvisar());
     CRM.abrirForm({
       titulo: 'Mandar no WhatsApp das vendedoras',
-      intro: 'Um clique por vendedora: abre o seu WhatsApp na conversa com ela, com cada cliente, o valor atualizado, o link do PDF (vale 7 dias) e a mensagem pronta para ela mandar ao cliente. É só apertar enviar.\n' +
+      intro: (podeCompartilhar() ? 'Um clique por vendedora: "Compartilhar" abre a janela do Windows (ou do celular) para mandar os PDFs de verdade — escolha o WhatsApp e a conversa com ela; a mensagem vai junto (e fica copiada: se não aparecer, cole com Ctrl+V). ' +
+        '"Mandar com o link" abre o WhatsApp com o link do PDF (vale 7 dias).\n' : 'Um clique por vendedora: abre o seu WhatsApp na conversa com ela, com cada cliente, o valor atualizado, o link do PDF (vale 7 dias) e a mensagem pronta para ela mandar ao cliente. É só apertar enviar.\n') +
         'A tarefa "Cobrar boleto atualizado" já está na agenda de cada uma.',
       campos: [], salvarTexto: 'Fechar', aoSalvar: async () => {},
       rodape: '<div class="cob-avisar">' + g.map(([u, l]) => botaoAvisar(u, l)).join('') + '</div>'
     });
   }
   const telBR = t => { const d = String(t || '').replace(/\D/g, '').replace(/^55(?=\d{10,11}$)/, ''); return d.length === 11 ? '(' + d.slice(0, 2) + ') ' + d.slice(2, 7) + '-' + d.slice(7) : d.length === 10 ? '(' + d.slice(0, 2) + ') ' + d.slice(2, 6) + '-' + d.slice(6) : String(t || ''); };
-  async function textoVendedora(u, lista) {
+  async function textoVendedora(u, lista, anexo) {
     const usr = CRM.usuario(u), F = CRM.fichas, nomeV = CRM.nomeUsuario(u);
     const porEmp = new Map();
     lista.forEach(b => { if (!porEmp.has(b.empresa_id)) porEmp.set(b.empresa_id, []); porEmp.get(b.empresa_id).push(b); });
@@ -415,11 +590,11 @@
       const c = F.escolheContato(e, null, x => R.linkWhatsApp(x.whatsapp || x.celular || x.telefone)) || F.escolheContato(e, null, () => true);
       const vars = Object.assign(F.variaveis(e, c), { vendedor: nomeV, vendedor_primeiro_nome: R.primeiroNome(nomeV) });
       const links = [];
-      for (const b of l) if (b.arquivo) links.push((l.length > 1 ? nomeNF(b) + ': ' : '') + await CRM.store().boletoLink(b.arquivo, 'Boleto ' + nomeNF(b).replace(/\//g, '-') + '.pdf', 7 * 86400));
+      if (!anexo) for (const b of l) if (b.arquivo) links.push((l.length > 1 ? nomeNF(b) + ': ' : '') + await CRM.store().boletoLink(b.arquivo, 'Boleto ' + nomeNF(b).replace(/\//g, '-') + '.pdf', 7 * 86400));
       const tel = F.telDe(e, c);
       blocos.push('*' + (++i) + '/' + porEmp.size + ' · ' + e.nome + '*\n' +
         l.map(b => nomeNF(b) + ': ' + R.moeda(b.valor) + (Number(b.valor) > Number(b.valor_original) + 0.005 ? ' (com juros; original ' + R.moeda(b.valor_original) + ')' : '')).join('\n') +
-        (links.length ? '\nPDF do boleto: ' + links.join('\n') : '\n(sem PDF: mande a linha digitável)') +
+        (anexo ? (l.some(b => b.arquivo) ? '\nPDF: vai anexo nesta conversa' : '\n(sem PDF: mande a linha digitável)') : links.length ? '\nPDF do boleto: ' + links.join('\n') : '\n(sem PDF: mande a linha digitável)') +
         (tel ? '\nTelefone no CRM: ' + telBR(tel) + (c && c.nome ? ' (' + c.nome + ')' : '') : '\nSem telefone no CRM') +
         '\n\nMensagem pronta para o cliente (copie e mande junto com o PDF):\n' + mensagemBoleto((E().cfg || {}).modelo_boleto, l, vars));
     }
@@ -438,8 +613,10 @@
       if (!b) return '<small>sem boleto atualizado</small>';
       const det = '<small>' + esc(R.moeda(b.valor)) + (Number(b.valor) > Number(b.valor_original) + 0.005 ? ' com juros' : '') + '</small>';
       if (b.cobrado_em) return CRM.selo('cobrado ' + dm(R.diaLocal(b.cobrado_em)) + (b.cobrado_por ? ' · ' + R.primeiroNome(CRM.nomeUsuario(b.cobrado_por)) : ''), 'verde') + det;
+      const refaz = b.arquivo && !b.arquivo_banco ? ' <button type="button" class="mini" data-acao="cob-pdf" data-id="' + esc(b.id) + '" title="junta o resumo e a cópia da nota fiscal (DANFE) ao boleto do banco">Montar PDF com a nota</button>' : '';
+      const ver = b.arquivo ? ' <button type="button" class="mini" data-acao="cob-baixar" data-id="' + esc(b.id) + '">Ver PDF</button>' : '';
       return (b.avisado_em ? CRM.selo('no WhatsApp da vendedora ' + dm(R.diaLocal(b.avisado_em)), 'azul') : CRM.selo('falta mandar à vendedora', 'ambar')) + det +
-        ' <button type="button" class="mini" data-acao="cob-ja-cobrou" data-id="' + esc(b.id) + '" title="a vendedora já mandou ao cliente: tira da Fila e conclui a tarefa">Já cobrou</button>';
+        ' <button type="button" class="mini" data-acao="cob-ja-cobrou" data-id="' + esc(b.id) + '" title="a vendedora já mandou ao cliente: tira da Fila e conclui a tarefa">Já cobrou</button>' + ver + refaz;
     };
     const avisar = porVendedora(paraAvisar());
     return '<section class="cartao cob-soltar" id="cobSoltar"><h2>Boletos atualizados</h2>' +
@@ -464,6 +641,7 @@
         '</tbody></table></div><p class="dica">Pagou? Dê "Recebi…" no bloco "Em cartório" do Dia a dia, com o valor que entrou.</p></section>' : '');
   }
   function depoisAba(el) {
+    if (paraAvisar().length && podeCompartilhar()) preCarrega(paraAvisar());
     const arq = el.querySelector('#cobArq');
     if (arq) arq.addEventListener('change', () => { const f = [].slice.call(arq.files); arq.value = ''; lerArquivos(f).catch(CRM.falhou); });
     const zona = el.querySelector('#cobSoltar');
@@ -473,7 +651,7 @@
     zona.addEventListener('drop', ev => { if (!ev.dataTransfer || !ev.dataTransfer.files.length) return; ev.preventDefault(); zona.classList.remove('cx-solta'); lerArquivos(ev.dataTransfer.files).catch(CRM.falhou); });
   }
 
-  CRM.cobranca = { seloTitulo, blocoEmpresa, botoesEnvio, paraFila, formCartorio, formAvisar, aba, depoisAba, contagem: () => vencidosACobrar().length, pendentesDe };
+  CRM.cobranca = { montaPdf, resumoHtml, seloTitulo, blocoEmpresa, botoesEnvio, paraFila, formCartorio, formAvisar, aba, depoisAba, contagem: () => vencidosACobrar().length, pendentesDe };
 
   Object.assign(CRM.acoes, {
     'cob-whats': (id, el) => {
@@ -510,6 +688,46 @@
         CRM.render();
         CRM.toast('WhatsApp da ' + R.primeiroNome(usr.nome) + ' aberto com ' + lista.length + ' boleto(s): é só apertar enviar.');
       })().catch(e => { if (w) w.close(); CRM.falhou(e); });
+    },
+    // administrador → vendedora: os PDFs de verdade pela janela de compartilhar (WhatsApp do Windows ou do celular)
+    'cob-avisar-pdf': (u, el) => {
+      const usr = CRM.usuario(u), lista = paraAvisar().filter(b => vendedoraDe(b) === u);
+      if (!usr || !lista.length) return;
+      (async () => {
+        const [files, texto] = await Promise.all([arquivosDe(lista), textoVendedora(u, lista, true)]);
+        if (!(await compartilha(files, texto))) return;
+        const agora = new Date().toISOString();
+        for (const b of lista) {
+          const r = await CRM.store().atualizar('boletos', b.id, { avisado_em: agora });
+          E().boletos = (E().boletos || []).map(x => (x.id === b.id ? Object.assign({}, x, r) : x));
+        }
+        if (el) { el.disabled = true; el.textContent = '✓ ' + el.textContent.replace(/^📎\s*/, ''); }
+        CRM.render();
+        CRM.toast(files.length + ' PDF(s) compartilhado(s) com a ' + R.primeiroNome(usr.nome) + '. A mensagem também ficou copiada: se não apareceu junto, cole na conversa (Ctrl+V).');
+      })().catch(CRM.falhou);
+    },
+    // vendedora → cliente: o PDF completo de verdade, com a mensagem pronta
+    'cob-compartilhar': (id, el) => {
+      const e = CRM.empresa(id), lista = pendentesDe(id), F = CRM.fichas;
+      if (!e || !lista.length) return;
+      const c = F.escolheContato(e, el && el.dataset.contato, x => R.linkWhatsApp(x.whatsapp || x.celular || x.telefone));
+      const texto = mensagemBoleto((E().cfg || {}).modelo_boleto, lista, F.variaveis(e, c)).replace('Também te mando o PDF aqui.', 'O PDF vai junto.');
+      (async () => {
+        if (!(await compartilha(await arquivosDe(lista), texto))) return;
+        await marcaCobrado(e, lista, c, texto, true);
+      })().catch(CRM.falhou);
+    },
+    // administrador: monta o PDF completo de um boleto mandado antes (só tinha o PDF do banco)
+    'cob-pdf': id => {
+      const b0 = boleto(id);
+      if (!b0 || !b0.empresa_id) return;
+      const l = (E().boletos || []).filter(b => b.empresa_id === b0.empresa_id && !b.cobrado_em && !b.arquivo_banco && b.arquivo &&
+        boletoAtual(E().boletos, b.duplicata) === b);
+      (async () => {
+        const r = await comporPdfs(l.length ? l : [b0]);
+        CRM.render();
+        CRM.toast(r.falhas ? 'Não consegui montar o PDF (veja o console); o boleto do banco continua valendo.' : 'PDF completo pronto' + (r.semNota ? ' (sem a DANFE: a nota não tem o XML guardado)' : '') + '. Clique em "Ver PDF" para conferir.', !!r.falhas);
+      })().catch(CRM.falhou);
     },
     'cob-ja-cobrou': id => {
       const b = boleto(id), e = b && CRM.empresa(b.empresa_id);

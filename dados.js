@@ -591,6 +591,13 @@
   Local.prototype.anexoEnviar = SO_SUPABASE;
   Local.prototype.anexoLer = SO_SUPABASE;
   Local.prototype.anexoLink = SO_SUPABASE;
+  // o arquivo em si (para montar o PDF completo e para o Compartilhar mandar o arquivo de verdade)
+  Supa.prototype.boletoArquivo = async function (caminho) {
+    const r = await this.sb.storage.from('crm-boletos').download(caminho);
+    if (r.error) throw new Error('não consegui baixar o boleto: ' + r.error.message);
+    return r.data;
+  };
+  Local.prototype.boletoArquivo = SO_SUPABASE;
   Local.prototype.boletoEnviar = SO_SUPABASE;
   Local.prototype.boletoLer = SO_SUPABASE;
   Local.prototype.boletoLink = SO_SUPABASE;

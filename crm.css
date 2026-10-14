@@ -461,7 +461,7 @@ body.arrastando-card .zonas-fim { display: grid; grid-template-columns: 1fr 1fr;
 .proposta-doc .cta .vai { font-size: 11pt; padding: 2.2mm 5mm; border-radius: 999px; background: var(--dv); color: var(--dp); white-space: nowrap; }
 .proposta-doc .pre { white-space: pre-wrap; }
 .proposta-doc footer { margin-top: 3mm; color: var(--cz); font-size: 9pt; }
-.proposta-doc .assinatura { margin: 1.5mm 0 0; padding: 0; color: #9aa3a8; font-size: 7pt; letter-spacing: .02em; }
+.proposta-doc .assinatura { display: block; margin: 1.5mm 0 0; padding: 0; color: #9aa3a8; font-size: 7pt; letter-spacing: .02em; }
 .proposta-doc .assinatura strong { font-weight: 600; color: #7d878c; }
 .proposta-doc tr { break-inside: avoid; }
 /* Orçamento comprido (mais de 12 itens): tudo um pouco menor para caber na primeira folha. */
@@ -493,6 +493,33 @@ body.arrastando-card .zonas-fim { display: grid; grid-template-columns: 1fr 1fr;
 .pdf-palco { position: absolute; left: -10000px; top: 0; width: 794px; background: #fff; }
 .pdf-palco .proposta-doc { display: flow-root; padding-bottom: 6mm; }
 .pdf-palco .proposta-doc .cartoes strong { letter-spacing: 0; }
+/* PDF do boleto atualizado (página 1: resumo; depois a DANFE e o boleto do banco) — modelo aprovado em 14/10/2026 */
+.pdf-palco .proposta-doc.bol { width: 794px; min-height: 1123px; height: 1123px; box-sizing: border-box; position: relative; padding-bottom: 0; }
+.bol .valores { display: grid; grid-template-columns: 1.15fr 1fr; gap: 5mm; margin-top: 5mm; align-items: stretch; }
+.bol .contas { display: grid; gap: 0; padding: 4mm 6mm; border-radius: 10px; background: #f4f8fa; }
+.bol .contas div { display: flex; justify-content: space-between; gap: 4mm; padding: 1.6mm 0; border-bottom: 1px dashed #d5e1e6; color: #5f6b70; font-size: 10.5pt; }
+.bol .contas div:last-child { border-bottom: 0; }
+.bol .contas b { color: #1c1c1c; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.bol .contas .juros b { color: #b5552b; }
+.bol .pagar { display: grid; align-content: center; gap: 2px; padding: 4mm 6mm; border-radius: 10px; border-left: 4px solid var(--dv); background: #edf7f8; }
+.bol .pagar .rot { color: var(--dd); font-size: 10pt; font-weight: 700; text-transform: uppercase; letter-spacing: .3px; }
+.bol .pagar strong { color: #1c1c1c; font-size: 26pt; font-weight: 700; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.bol .pagar .sub { color: #5f6b70; font-size: 8.8pt; }
+.bol .linha { margin-top: 5mm; padding: 4mm 6mm; border-radius: 10px; background: var(--de); color: #fff; }
+.bol .linha h2 { color: var(--dv); margin-bottom: 2mm; }
+.bol .linha code { display: block; font: 700 12.6pt/1.3 'Consolas', 'Courier New', monospace; letter-spacing: .2px; word-spacing: 2px; white-space: nowrap; color: #fff; background: none; border: 0; border-radius: 0; padding: 0; }
+.bol .linha small { display: block; margin-top: 1.5mm; color: #b9d3dc; font-size: 8.8pt; }
+.bol .passos { margin-top: 5mm; display: grid; grid-template-columns: repeat(3, 1fr); gap: 4mm; }
+.bol .passos div { padding: 3mm 4mm; border-radius: 10px; background: #f4f8fa; display: grid; gap: 1mm; align-content: start; }
+.bol .passos b { color: var(--dd); font-size: 9pt; text-transform: uppercase; letter-spacing: .2px; }
+.bol .passos b i { display: inline-grid; place-items: center; width: 18px; height: 18px; margin-right: 5px; border-radius: 50%; background: var(--dv); color: #1c1c1c; font-style: normal; font-size: 8.5pt; }
+.bol .passos span { color: #5f6b70; font-size: 9pt; line-height: 1.4; }
+.bol .anexos { margin-top: 5mm; }
+.bol .anexos div { display: flex; gap: 3mm; flex-wrap: wrap; }
+.bol .anexos span { display: inline-flex; align-items: center; gap: 6px; padding: 2mm 4mm; border-radius: 999px; background: #edf7f8; color: #163e50; font-size: 9.5pt; font-weight: 600; }
+.bol .anexos i { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--dv); color: #1c1c1c; font-style: normal; font-size: 8.5pt; }
+.bol .rodape { position: absolute; left: 11mm; right: 11mm; bottom: 12mm; }
+.cob-vend { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 2px; }
 
 /* ---------- telas menores (notebook) ---------- */
 @media (max-width: 1280px) {

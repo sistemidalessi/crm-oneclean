@@ -1251,6 +1251,25 @@ ligado ao domínio; **começa com fila de aprovação** (nada sai sozinho); reme
   para a cópia da DANFE da cobrança. A `crm-notas` guarda o que o vigia manda (sem sobrescrever); a importação manual (XML/ZIP,
   Configurações → Importar) guarda os que faltam, mesmo de nota já importada (`notasXmlGuardar`). Para trás: o Anderson arrasta
   o ZIP de 2026 da pasta `D:\SISTEMA\Unimake\uninfe30\63237702000103\Enviados\Autorizados` (subpastas 202601…202610).
+  O ZIP de 2 GB do Windows não abriu (ZIP64): agora `xlsx-leitor.js` lê ZIP64, avisa RAR/7z, e a importação tem **"Escolher
+  pasta"** (lê as subpastas pela rede `\\Servidor\sistema\Unimake\…\Autorizados`), lendo 8 por vez com andamento a cada 100
+  (um arquivo ruim não para os outros). **Feito em 14/10 pelo Anderson: 2.650 XML; todas as 2.633 notas do CRM têm o XML.**
+  A tela de conferência que abre depois pode ser cancelada (guardar o XML não depende de "Importar agora").
+- **PDF completo do boleto (14/10, pedido do Anderson: "cada boleto fosse mesmo em PDF, não o link" + o cliente pediu a cópia
+  da nota).** Página 1 = resumo com a cara da instalação (modelo aprovado: valor original, juros, valor para pagar, linha
+  digitável, como pagar, "Neste arquivo"; **sem** botão e sem contato da vendedora); depois a **DANFE** de cada nota, gerada do
+  XML guardado (`danfe.js`: layout retrato do manual, CODE-128C da chave conferido com leitor de código de barras, várias folhas,
+  logo da instalação no quadro do emitente, desenho em vetor no jsPDF); por fim o PDF do banco como veio (pdf-lib). Montado no
+  navegador do admin logo depois de "Mandar às vendedoras" (`comporPdfs`): vira o `arquivo` do boleto e o do banco fica em
+  `crm_boletos.arquivo_banco` (só admin lê) — então link, Baixar PDF e WhatsApp já levam o completo. Boleto mandado antes:
+  aba Cobrança → **"Montar PDF com a nota"**; **"Ver PDF"** para conferir. Nota sem XML: vai sem a DANFE (o aviso diz).
+  **Compartilhar** (Web Share com arquivo; Windows 10+/Chrome/Edge e celular): "📎 Compartilhar os PDFs com a <vendedora>" manda
+  os arquivos de verdade com a mensagem (que também fica copiada, porque o WhatsApp do Windows às vezes não leva o texto);
+  "ou mandar com o link" é o caminho antigo. A vendedora tem "📎 Compartilhar o PDF" na ficha/Fila para mandar ao cliente
+  (marca como cobrado). Sem Web Share no navegador, os botões não aparecem e fica o WhatsApp com link.
+  Achado no caminho: `@media (max-width: 1000px)` escondia `.assinatura`, e o html2canvas desenha numa janela de 794 px —
+  **a assinatura sumia também do PDF dos orçamentos**; `.proposta-doc .assinatura { display: block }` resolve os dois.
+- **Volta do contato (14/10, pedido do Anderson):** o próximo passo da janela "Como foi…" tem também **"Em 15 dias"**.
 - **Regra (14/10, Anderson): título recebido antes do vencimento é ADIANTADO.** A Santa Casa (002435/01, R$ 7.422,15) venceria
   em 25/10 e pagou em 14/10: o "Recebi" gravou certo, mas o cartão não dizia que o cliente adiantou. Agora `caixa-calculo.js`
   (`recebidoAntes`): entrada paga ligada a título com `pago_em` antes do vencimento (no dia útil) fica verde "⏩ adiantado" com
