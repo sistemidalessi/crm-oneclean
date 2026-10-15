@@ -513,11 +513,14 @@ recusas mais novas que a última entrega boa) faz o aviso de Compras dizer o que
 - **Saldo × atual:** o FKN dá `atual` e `saldo`; **saldo = atual − pendente de cliente** (já
   reservado). Usamos o saldo.
 - **Embalagens (variante 1, 2, 3):** o mesmo código tem a unidade (variante 0, a que sai na nota)
-  e caixas fechadas com estoque próprio ("CX C/4", "CX 2"…), gravadas como `010284.1`, `.2`.
-  `juntaVariantes` soma tudo em unidades (fator = custo da caixa ÷ custo da unidade; se não bater,
-  o número do nome) — saldo, pedido, mínimo e máximo — e a sugestão mostra também em caixas (a
-  maior). Na listagem real de 01/10: 2.265 linhas → 1.697 produtos, 495 com caixa, 58 com mais
-  de uma. Não separar de novo: a caixa contada à parte aparecia como "parada" e a unidade como "em falta".
+  e as caixas fechadas ("CX C/4", "CX 2"…), gravadas como `010284.1`, `.2`. **A caixa é o MESMO
+  estoque da unidade visto em caixas** (saldo, atual, pedido, reservado, mínimo e máximo da caixa =
+  os da unidade ÷ fator, sem fração): conferido em 15/10/2026 nos 574 pares da listagem real, todos
+  batem. Até 15/10 o `juntaVariantes` somava a caixa na unidade e **contava o estoque duas vezes**
+  (Estoque a custo R$ 383 mil → real R$ 275 mil; parado R$ 98 mil → real R$ 79 mil; a sugestão de
+  compra saía a menos em ~390 produtos). Agora a caixa só dá o fator (sugestão em caixas e o "= N cx
+  de F" embaixo do saldo) e some da lista. **Nunca somar a caixa de novo** nem separá-la (aparecia
+  como "parada").
 - **Conta de compra:** comprar = max(precisa, mínimo do FKN) − saldo − já pedido ao fornecedor
   (saldo negativo conta 0); inativo no FKN não entra; "pelo mínimo" quando foi o mínimo que mandou.
   **Pedido por fornecedor:** a sugestão agrupada por fornecedor, com exportação de cada pedido;

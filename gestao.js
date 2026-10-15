@@ -126,8 +126,11 @@
     const m = /C\/\s*(\d+)/i.exec(c.descricao || '') || /CX\.?\s*(\d+)\s*X/i.exec(c.descricao || '');
     return m && +m[1] > 1 ? +m[1] : null;
   }
-  // Junta a caixa fechada na unidade (estoque, pedido e mínimo em unidades) e devolve uma linha
-  // por produto, sem mexer no que veio do banco.
+  // Uma linha por produto. A caixa fechada (variante 1, 2…) é o MESMO estoque da unidade visto em
+  // caixas: o FKN mostra saldo, pedido, reservado e mínimo da caixa = os da unidade ÷ fator, sem
+  // fração (conferido em 15/10/2026 nos 574 pares da listagem real: todos batem). Somar contava o
+  // estoque duas vezes (R$ 107 mil a mais no "Estoque a custo" e compra sugerida a menos). Então a
+  // caixa NÃO soma: só guarda o fator (para a sugestão em caixas) e some da lista.
   function juntaVariantes(estoque) {
     const porCod = new Map();
     (estoque || []).forEach(x => porCod.set(codigoFKN(x.codigo), Object.assign({}, x, { codigo: codigoFKN(x.codigo), quantidade: num(x.quantidade), custo_total: num(x.custo_total),
@@ -135,18 +138,11 @@
     porCod.forEach((c, cod) => {
       const m = /^(.+)\.(\d+)$/.exec(cod), u = m && porCod.get(m[1]);
       if (!u) return;
+      porCod.delete(cod);
       const f = fatorCaixa(u, c);
       if (!f) return;
-      // Pode ter mais de uma embalagem (caixa com 4, caixa com 2…): todas entram no saldo; a
-      // sugestão de compra em caixas usa a maior.
       u.embalagens = (u.embalagens || []).concat({ codigo: cod, fator: f, saldo: c.quantidade });
       if (!u.caixa || f > u.caixa.fator) u.caixa = u.embalagens[u.embalagens.length - 1];
-      u.quantidade += c.quantidade * f;
-      u.custo_total += c.custo_total;
-      u.pend_fornecedor += c.pend_fornecedor * f;
-      u.estoque_min += c.estoque_min * f;
-      u.estoque_max += c.estoque_max * f;
-      porCod.delete(cod);
     });
     return [...porCod.values()];
   }
@@ -211,7 +207,7 @@
     // Com o estoque do FKN: necessidade no período = o maior entre a previsão dos clientes e o
     // consumo médio dos últimos 90 dias. Comprar = necessidade (com piso no estoque mínimo do FKN)
     // − saldo − o que já foi pedido ao fornecedor (saldo negativo conta zero). A caixa fechada
-    // entra no saldo da unidade (juntaVariantes).
+    // é o mesmo estoque da unidade (juntaVariantes não soma).
     const itensEst = juntaVariantes(estoque);
     const est = new Map(itensEst.map(x => [x.codigo, x]));
     const estPorNome = new Map(itensEst.map(x => [R.normaliza(x.descricao), x]));
@@ -518,7 +514,7 @@
           l.slice(0, LIMITE_COMPRAS).map(g => '<tr><td>' + esc(R.nomeDeItem(g.descricao)) + ' <small>' + esc(g.codigo || '') + '</small>' + (g.inativo ? ' ' + CRM.selo('inativo no FKN', 'etiqueta') : '') + '</td>' +
             '<td class="forn" title="' + esc(g.fornecedor || '') + '"><small>' + esc(g.fornecedor || '—') + '</small></td><td>' + curva(g) + '</td>' +
             '<td class="num">' + (g.saldo == null ? '—' : g.saldo < 0 ? CRM.selo(qtd(g.saldo), 'vermelho') : qtd(g.saldo)) + ' <small>' + esc(g.unidade) + '</small>' +
-              (g.embalagens && g.embalagens.some(x => x.saldo) ? '<br><small>' + g.embalagens.filter(x => x.saldo).map(x => qtd(x.saldo) + ' cx de ' + x.fator).join(' + ') + '</small>' : '') + '</td>' +
+              (g.caixa && g.caixa.saldo > 0 ? '<br><small>= ' + qtd(g.caixa.saldo) + ' cx de ' + g.caixa.fator + (g.saldo - g.caixa.saldo * g.caixa.fator > 0 ? ' + ' + qtd(g.saldo - g.caixa.saldo * g.caixa.fator) : '') + '</small>' : '') + '</td>' +
             '<td class="num">' + (g.minimo ? qtd(g.minimo) : '—') + '</td><td class="num">' + (g.pedido ? qtd(g.pedido) : '—') + '</td>' +
             '<td class="num">' + (g.consumoDia ? qtd(g.consumoDia * 30) : '—') + '</td>' +
             '<td class="num">' + (g.cobertura == null ? '—' : g.cobertura < 1 ? CRM.selo('acabou', 'vermelho') : Math.round(g.cobertura) + ' dias') + '</td>' +
