@@ -4,6 +4,13 @@ Lido todo dia útil pelo **Vigia da legislação (fiscal OneClean)** (tarefa age
 **o que o sistema usa hoje**; os achados vão para `registro.md`. Atualizar este arquivo quando o sistema mudar
 (quem muda é a sessão de desenvolvimento, nunca o vigia).
 
+> **Regra do vigia (não pode ser quebrada):** o vigia só altera `docs/legislacao/registro.md`. Nunca `fiscal.js`,
+> testes, `CLAUDE.md`, este arquivo ou qualquer outro — mesmo que a correção pareça óbvia ou que um `CLAUDE.md` fale em
+> "já fazer o certo" (isso vale para a sessão de desenvolvimento). O que o código precisa mudar vai escrito em "O que
+> muda no sistema". Em 15/10 o vigia mexeu em `fiscal.js` e `CLAUDE.md`; não repetir. Antes do commit: `git status
+> --short` e só `registro.md` pode aparecer. Entradas "A CONFIRMAR": tentar confirmar na fonte oficial e acrescentar
+> "Confirmado em <data>: …" ou "Não confirmado: …" na própria entrada.
+
 ## A empresa
 - **OneClean** — distribuidora de produtos de limpeza, descartáveis, EPIs e copa; São Bernardo do Campo/SP;
   **Lucro Real**; vende quase só dentro de SP (contribuintes e não contribuintes). Vendas para outros estados:
