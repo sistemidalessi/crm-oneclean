@@ -34,7 +34,9 @@
   const n2 = v => (v == null || v === '' ? null : Math.round(Number(v) * 10000) / 10000);
   const ehVenda = cfop => /^5(1|4)/.test(String(cfop || ''));
   const ehST = cfop => /^54/.test(String(cfop || ''));
-  const ehPapelHigienico = d => /\b(PAPEL|PAP\.?|P\.)\s*HIG/i.test(String(d || ''));
+  // Só o próprio papel: a descrição começa por "PAPEL HIG…"/"PAP. HIG…"/"P.HIG…". Dispenser, suporte e papeleira
+  // ("DISP.PAPEL HIG.", "SUP. PAPELEIRA … PAP.HIG") são de plástico/inox e têm outro NCM e PIS/COFINS normal.
+  const ehPapelHigienico = d => /^\s*(PAPEL|PAP\.?|P\.)\s*HIG/i.test(String(d || ''));
   const ehToalha = d => /\bTOALHA/i.test(String(d || ''));
   const fmtNcm = v => (/^\d{8}$/.test(String(v || '')) ? v.slice(0, 4) + '.' + v.slice(4, 6) + '.' + v.slice(6) : String(v || '—'));
   const dataBR = v => (v ? String(v).slice(8, 10) + '/' + String(v).slice(5, 7) + '/' + String(v).slice(0, 4) : '');
@@ -107,6 +109,14 @@
           (venda.cst_pis || '—') + (n2(venda.aliq_pis) ? ' e ' + String(venda.aliq_pis).replace('.', ',') + '% de PIS' : '') +
           '. Proposta corrigida para CST 06 (alíquota zero). Se foi pago PIS/COFINS sobre estas vendas, dá para recuperar (até 5 anos): falar com o contador.', true);
         Object.assign(venda, { cst_pis: '06', aliq_pis: 0, cst_cofins: '06', aliq_cofins: 0 });
+      } else if (ncm === NCM_PAPEL_HIGIENICO) {
+        // a regra atual está certa, mas vendas antigas podem ter saído com PIS/COFINS cobrado
+        const cobradas = vendas.filter(c => c.cst_pis === '01' || c.cst_cofins === '01');
+        if (cobradas.length) {
+          const de = cobradas.map(c => c.primeira).sort()[0], ate = cobradas.map(c => c.ultima).sort().pop();
+          alerta('atencao', 'Papel higiênico com PIS/COFINS cobrado (CST 01) em ' + cobradas.reduce((s, c) => s + (c.n || 0), 0) + ' venda(s), de ' +
+            dataBR(de) + ' a ' + dataBR(ate) + '. A regra atual (CST 06, alíquota zero) está certa; se foi pago, dá para recuperar (até 5 anos): falar com o contador.');
+        }
       } else if (venda.cst_pis === '01' && (n2(venda.aliq_pis) !== PIS_LUCRO_REAL || n2(venda.aliq_cofins) !== COFINS_LUCRO_REAL)) {
         alerta('erro', 'PIS/COFINS com ' + String(venda.aliq_pis).replace('.', ',') + '% e ' + String(venda.aliq_cofins).replace('.', ',') +
           '%: no Lucro Real (não cumulativo) é 1,65% e 7,6%. Proposta corrigida.', true);

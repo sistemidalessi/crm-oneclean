@@ -1842,6 +1842,10 @@ begin
         numero = nullif(d#>>'{dest,numero}', ''), complemento = nullif(d#>>'{dest,complemento}', ''), bairro = nullif(d#>>'{dest,bairro}', ''),
         cidade = coalesce(nullif(d#>>'{dest,cidade}', ''), cidade), uf = coalesce(nullif(d#>>'{dest,uf}', ''), uf)
       where id = eid and coalesce(logradouro, '') = '' and coalesce(d#>>'{dest,logradouro}', '') <> '';
+      -- mesma rua sem o número (cadastro do Agendor): o número (e o complemento, se faltar) vem da nota
+      update public.crm_empresas set numero = nullif(d#>>'{dest,numero}', ''), complemento = coalesce(nullif(complemento, ''), nullif(d#>>'{dest,complemento}', ''))
+      where id = eid and coalesce(numero, '') = '' and coalesce(d#>>'{dest,numero}', '') <> ''
+        and upper(btrim(logradouro)) = upper(btrim(d#>>'{dest,logradouro}'));
     end if;
     n := n + 1;
   end loop;

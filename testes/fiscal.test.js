@@ -103,6 +103,17 @@ test('limpeza fora da ST em SP desde 01/08/2026 (Portaria SRE 20/2026): 5405/CST
   assert.equal(F.ehLimpezaForaST('48181000', []), false);
 });
 
+test('verificações: dispenser/suporte de papel higiênico não é papel; papel já certo avisa do PIS/COFINS cobrado antes', () => {
+  let r = F.analisa({ codigo: 'F', descricao: 'DISP.PAPEL HIG. BCO VELOX PREMISSE', ncms: { 39259090: { n: 5, ultima: '2026-09-01' } }, cests: [], gtins: [], origens: ['0'], combos: [combo({})] });
+  assert.deepEqual([r.ncm, r.alertas.length, r.regra.venda.cst_pis], ['39259090', 0, '01']);
+  r = F.analisa({ codigo: 'G', descricao: 'SUP. PAPELEIRA TAMPA P/ROLO PAP.HIG.INOX', ncms: { 96031000: { n: 2, ultima: '2026-09-01' } }, cests: [], gtins: [], origens: ['0'], combos: [combo({})] });
+  assert.deepEqual([r.ncm, r.alertas.length], ['96031000', 0]);
+  r = F.analisa({ codigo: 'H', descricao: 'PAPEL HIGIENICO 8 X 300 BRANCO PANDA', ncms: { 48181000: { n: 51, ultima: '2026-08-03' } }, cests: [], gtins: [], origens: ['0'],
+    combos: [combo({ n: 20, primeira: '2026-01-08', ultima: '2026-03-30' }), combo({ cst_pis: '06', aliq_pis: null, cst_cofins: '06', aliq_cofins: null, n: 31, primeira: '2026-04-02', ultima: '2026-08-03' })] });
+  assert.equal(r.regra.venda.cst_pis, '06');
+  assert.match(r.alertas.map(a => a.texto).join(' '), /PIS\/COFINS cobrado \(CST 01\) em 20 venda\(s\), de 08\/01\/2026 a 30\/03\/2026/);
+});
+
 test('clientes: o que falta para emitir a nota', () => {
   const empresas = [
     { id: 'a', cnpj: '44.555.666/0001-99', ind_ie: '1', ie: '635000000111', codigo_municipio: '3548708', logradouro: 'RUA A', numero: '10', cep: '09700000' },

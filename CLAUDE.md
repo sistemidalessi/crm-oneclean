@@ -1138,6 +1138,17 @@ Sefaz por um serviço fiscal na VPS da Agilité; notas de compra pelo DF-e; bole
   com 5405/CST 60 para **5102, CST 00, 18%** (alerta `erro` corrigido); se o FKN emitiu com ST depois de 01/08, o alerta pede
   conferência das notas com o contador (estoque de 31/07: CAT 28/2020). A lista de NCM ficou **incompleta** (a rede da sessão
   barra o site da Sefaz): conferir com o texto oficial ou o contador e completar a constante.
+- **Leitura dos XML (15/10, fim da tarde; 2.609 notas válidas, 36.067 itens, 1.189 produtos):** todo papel
+  higiênico saiu com PIS/COFINS **CST 01 (1,65% + 7,6%) até ~01/04/2026** e CST 06 (alíquota zero) depois — alguém
+  corrigiu em abril —, **menos o 300005**, que no dia 23/04 trocou para o NCM 4818.20.00 e **voltou a sair com CST 01**
+  (segue assim até hoje, ~R$ 2.300/mês). PIS+COFINS destacados no papel higiênico nas notas do CRM (dez/2025 a
+  15/10/2026): **R$ 24 mil** (R$ 19 mil só do 300005); anos anteriores não estão no CRM — conferir com o contador.
+  Papel higiênico sai às vezes com ST (5405/CST 60) e às vezes sem (5102/CST 00 18%), conforme o produto.
+  **Erro meu corrigido no mesmo dia:** a regra tomava "DISP.PAPEL HIG.", "DISPENSER P.HIG" e "SUP. PAPELEIRA …
+  PAP.HIG" por papel higiênico; agora só conta a descrição que **começa** por PAPEL/PAP./P. HIG. As 4 propostas
+  foram acertadas no banco. Também: papel com a regra atual certa mas vendas antigas com CST 01 ganha o aviso
+  "PIS/COFINS cobrado … falar com o contador". `crm_fiscal_grava` completa o **número** do endereço quando o cadastro
+  (Agendor) tem a mesma rua sem número (18 clientes; a última nota de cada um ficou para reler).
 - **Vigia da legislação fiscal** (tarefa agendada da conta do Anderson, como o "Vigia da legislação (DP
   Agilité)"): lê `docs/legislacao/monitoramento.md` (o que o sistema usa) e `docs/legislacao/registro.md` (o que
   já foi avisado), pesquisa as fontes oficiais e grava achado novo **só** no `registro.md` (commit no main).
