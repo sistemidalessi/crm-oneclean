@@ -1133,6 +1133,11 @@ Sefaz por um serviço fiscal na VPS da Agilité; notas de compra pelo DF-e; bole
 - **Achado de 15/10** (antes de ler os XML): o produto 300005 "PAPEL HIGIENICO ROLAO LUXO POP" saiu com NCM
   4818.10.00 até 15/04/2026 e **4818.20.00 desde 23/04/2026** (691 itens); "TOALHA BOB.BCO.6X20X200" saiu com o
   NCM do papel higiênico. A verificação de PIS/COFINS só aparece depois de ler os XML.
+- **Limpeza fora da ST em SP (15/10, achado do vigia):** a Portaria SRE 20/2026 revogou o Anexo XIII da CAT 68/2019 a partir de
+  01/08/2026. `analisa` reconhece o produto de limpeza (CEST do segmento 11 ou NCM de `LIMPEZA_FORA_ST_SP`) e corrige a proposta
+  com 5405/CST 60 para **5102, CST 00, 18%** (alerta `erro` corrigido); se o FKN emitiu com ST depois de 01/08, o alerta pede
+  conferência das notas com o contador (estoque de 31/07: CAT 28/2020). A lista de NCM ficou **incompleta** (a rede da sessão
+  barra o site da Sefaz): conferir com o texto oficial ou o contador e completar a constante.
 - **Vigia da legislação fiscal** (tarefa agendada da conta do Anderson, como o "Vigia da legislação (DP
   Agilité)"): lê `docs/legislacao/monitoramento.md` (o que o sistema usa) e `docs/legislacao/registro.md` (o que
   já foi avisado), pesquisa as fontes oficiais e grava achado novo **só** no `registro.md` (commit no main).

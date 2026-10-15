@@ -17,7 +17,7 @@ Lido todo dia útil pelo **Vigia da legislação (fiscal OneClean)** (tarefa age
 | Notas Técnicas da NF-e | acompanhar toda NT nova (campos, regras de validação, prazos de produção e homologação) | serviço fiscal (a fazer) |
 | Reforma Tributária (IBS/CBS) | campos novos na NF-e a partir de 2026 (LC 214/2025); 2026 é o ano de teste; PIS/COFINS dão lugar à CBS a partir de 2027 | `fiscal.js`, serviço fiscal |
 | CFOP usados | 5102 (venda), 5405 (venda com ST já recolhido), 5922/5117 (entrega futura, raro), 5910 (bonificação), 1202/1411 (devolução de cliente), 5949 (remessa em troca) | `fiscal.js` |
-| ICMS SP | alíquota interna geral 18%; CST 00 na venda sem ST; **ST**: CST 60 e CEST obrigatório (tabela do Convênio ICMS 142/2018) | `fiscal.js` (verificações) |
+| ICMS SP | alíquota interna geral 18%; CST 00 na venda sem ST; **ST**: CST 60 e CEST obrigatório (tabela do Convênio ICMS 142/2018); **produtos de limpeza fora da ST desde 01/08/2026** (Portaria SRE 20/2026 revogou o Anexo XIII da CAT 68/2019): 5102, CST 00, 18% — reconhecidos por CEST 11.xxx.xx ou NCM da lista `LIMPEZA_FORA_ST_SP` (incompleta: conferir com o texto oficial) | `fiscal.js` (verificações, `LIMPEZA_FORA_ST_SP`) |
 | PIS/COFINS | não cumulativos, **1,65% e 7,6%** (Leis 10.637/2002 e 10.833/2003); **papel higiênico 4818.10.00 com alíquota zero** (Lei 10.925/2004, art. 1º, XXVIII), CST 06; higiene pessoal do regime monofásico (Lei 10.147/2000) com alíquota zero na revenda | `fiscal.js` (verificações) |
 | Notas de compra | distribuição de DF-e (Ambiente Nacional) e manifestação do destinatário (ciência da operação) | serviço fiscal (a fazer) |
 | Boleto | API de cobrança do Banco do Brasil (registro e aviso de pagamento); CNAB como plano B | a fazer (Fase 5) |

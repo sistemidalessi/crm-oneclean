@@ -7,13 +7,30 @@
    - papel higiênico (NCM 4818.10.00): PIS/COFINS com alíquota zero na venda (Lei 10.925/2004, art. 1º, XXVIII,
      incluído pela Lei 12.839/2013) → CST 06;
    - Lucro Real: PIS/COFINS não cumulativos, 1,65% e 7,6%;
-   - item com ICMS-ST (CFOP 5405): CST 60 (ou CSOSN 500) e CEST obrigatório; sem ST (5102), nunca CST 60. */
+   - item com ICMS-ST (CFOP 5405): CST 60 (ou CSOSN 500) e CEST obrigatório; sem ST (5102), nunca CST 60;
+   - produtos de limpeza FORA da ST em SP desde 01/08/2026: a Portaria SRE 20/2026 (DOE 05/05/2026) revogou o
+     Anexo XIII da Portaria CAT 68/2019 (e a SRE 55/2025, base de cálculo). Venda interna volta a ser 5102, CST 00,
+     18% (alíquota interna geral). Estoque de 31/07/2026: Portaria CAT 28/2020 (com o contador). */
 (function (raiz) {
   'use strict';
 
   const NCM_PAPEL_HIGIENICO = '48181000';
   const PIS_LUCRO_REAL = 1.65, COFINS_LUCRO_REAL = 7.6;
   const CST_ST = ['60', '500'];
+  // Antigo Anexo XIII da Portaria CAT 68/2019 (produtos de limpeza), revogado pela Portaria SRE 20/2026 a partir de
+  // 01/08/2026. Reconhecido pelo CEST do segmento 11 (produtos de limpeza no Convênio ICMS 142/2018, o mesmo do anexo)
+  // ou pelo NCM. A lista de NCM abaixo é a que deu para confirmar em 15/10/2026 sem o texto oficial (a rede da sessão
+  // barra o site da Sefaz): itens 11.001 (2828.90.11/19, 3206.41.00, 3402.20.00 / 3402.50.00, 3808.94.19), 11.002 e
+  // 11.003 (3401.20.90, 3808.94.19) e 11.007 (posição 3402 inteira). Conferir com o texto consolidado
+  // (https://legislacao.fazenda.sp.gov.br/paginas/Portaria-CAT-68-de-2019.aspx) ou o contador e completar aqui.
+  const LIMPEZA_FORA_ST_SP = {
+    desde: '2026-08-01',
+    cestSegmento: '11',
+    ncmPrefixos: ['28289011', '28289019', '32064100', '34012090', '3402', '38089419']
+  };
+  const ALIQ_ICMS_SP = 18;
+  const ehLimpezaForaST = (ncm, cests) => (cests || []).some(c => String(c || '').replace(/\D/g, '').slice(0, 2) === LIMPEZA_FORA_ST_SP.cestSegmento) ||
+    LIMPEZA_FORA_ST_SP.ncmPrefixos.some(p => String(ncm || '').indexOf(p) === 0);
   const n2 = v => (v == null || v === '' ? null : Math.round(Number(v) * 10000) / 10000);
   const ehVenda = cfop => /^5(1|4)/.test(String(cfop || ''));
   const ehST = cfop => /^54/.test(String(cfop || ''));
@@ -53,7 +70,24 @@
     }
 
     // 2) ICMS e ST
-    if (venda) {
+    const limpeza = ehLimpezaForaST(ncm, r.cests) || ncms.some(x => ehLimpezaForaST(x.ncm));
+    let limpezaCorrigida = false;
+    if (venda && limpeza) {
+      const stDepois = vendas.filter(c => (ehST(c.cfop) || CST_ST.indexOf(String(c.cst_icms)) !== -1) && String(c.ultima || '') >= LIMPEZA_FORA_ST_SP.desde)
+        .sort((a, b) => String(b.ultima).localeCompare(String(a.ultima)))[0];
+      const depois = stDepois ? ' O FKN ainda emitiu com ST depois de 01/08/2026 (última em ' + dataBR(stDepois.ultima) +
+        '): as notas desde então merecem conferência com o contador. O estoque de 31/07/2026 segue a Portaria CAT 28/2020.' : '';
+      if (ehST(venda.cfop) || CST_ST.indexOf(String(venda.cst_icms)) !== -1) {
+        alerta('erro', 'Produto de limpeza saiu da substituição tributária em SP a partir de 01/08/2026 (Portaria SRE 20/2026 revogou o Anexo XIII ' +
+          'da Portaria CAT 68/2019), e as notas usam CFOP ' + venda.cfop + ' e CST ' + (venda.cst_icms || 'vazio') +
+          '. Proposta corrigida para CFOP 5102, CST 00 e ICMS de 18%; o CEST deixa de ser obrigatório.' + depois, true);
+        Object.assign(venda, { cfop: '5102', cst_icms: '00', aliq_icms: ALIQ_ICMS_SP, red_bc_icms: null });
+        limpezaCorrigida = true;
+      } else if (stDepois) {
+        alerta('atencao', 'Produto de limpeza (fora da ST em SP desde 01/08/2026, Portaria SRE 20/2026).' + depois);
+      }
+    }
+    if (venda && !limpezaCorrigida) {
       if (ehST(venda.cfop) && CST_ST.indexOf(String(venda.cst_icms)) === -1)
         alerta('erro', 'Venda com ST (CFOP ' + venda.cfop + ') e CST de ICMS ' + (venda.cst_icms || 'vazio') + ': com ICMS-ST já recolhido o CST é 60.');
       if (!ehST(venda.cfop) && CST_ST.indexOf(String(venda.cst_icms)) !== -1)
@@ -104,7 +138,7 @@
     return out;
   }
 
-  const api = { NCM_PAPEL_HIGIENICO, analisa, clientes, fmtNcm, ehVenda, ehST };
+  const api = { NCM_PAPEL_HIGIENICO, LIMPEZA_FORA_ST_SP, ehLimpezaForaST, analisa, clientes, fmtNcm, ehVenda, ehST };
   raiz.CRMFiscal = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);

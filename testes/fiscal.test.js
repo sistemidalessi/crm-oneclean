@@ -49,7 +49,7 @@ test('verificações: papel higiênico (NCM e PIS/COFINS) corrigidos na proposta
 });
 
 test('verificações: ST, CEST, Lucro Real, toalha com NCM de papel higiênico e produto sem problema', () => {
-  let r = F.analisa({ codigo: 'A', descricao: 'DETERGENTE 5L', ncms: { 34022000: { n: 3, ultima: '2026-10-01' } }, cests: [], gtins: [], origens: ['0'],
+  let r = F.analisa({ codigo: 'A', descricao: 'SACO P/ LIXO 60L', ncms: { 39232190: { n: 3, ultima: '2026-10-01' } }, cests: [], gtins: [], origens: ['0'],
     combos: [combo({ cfop: '5405', cst_icms: '00' })] });
   assert.deepEqual(r.alertas.map(a => a.nivel), ['erro', 'erro'], 'CST errado para ST e sem CEST');
   r = F.analisa({ codigo: 'B', descricao: 'ALCOOL 70', ncms: { 22071090: { n: 3, ultima: '2026-10-01' } }, cests: [], gtins: [], origens: ['0'],
@@ -65,6 +65,42 @@ test('verificações: ST, CEST, Lucro Real, toalha com NCM de papel higiênico e
     combos: [combo({ cfop: '5405', cst_icms: '60', aliq_icms: null, n: 40, ultima: '2026-10-10' }), combo({ cfop: '5405', cst_icms: '60', aliq_icms: null, n: 10, ultima: '2026-03-01' })] });
   assert.deepEqual(r.alertas, [], 'sem problema, sem alerta');
   assert.deepEqual([r.regra.venda.cfop, r.cest, r.gtin], ['5405', '1006100', '7890000000000']);
+});
+
+test('limpeza fora da ST em SP desde 01/08/2026 (Portaria SRE 20/2026): 5405/CST 60 vira 5102/00/18%', () => {
+  const st = { cfop: '5405', cst_icms: '60', aliq_icms: null, cst_pis: '01', aliq_pis: 1.65, cst_cofins: '01', aliq_cofins: 7.6 };
+  // pelo CEST do segmento 11, com venda com ST depois de 01/08
+  let r = F.analisa({ codigo: 'L1', descricao: 'DETERGENTE NEUTRO 5L', ncms: { 34022000: { n: 30, primeira: '2026-01-10', ultima: '2026-10-10' } },
+    cests: ['1100500'], gtins: [], origens: ['0'], combos: [combo(Object.assign({}, st, { n: 30, ultima: '2026-10-10' }))] });
+  assert.deepEqual([r.regra.venda.cfop, r.regra.venda.cst_icms, r.regra.venda.aliq_icms], ['5102', '00', 18]);
+  assert.deepEqual([r.regra.venda.cst_pis, r.regra.venda.aliq_pis], ['01', 1.65], 'PIS/COFINS não mudam');
+  assert.equal(r.alertas.length, 1);
+  assert.equal(r.alertas[0].nivel, 'erro');
+  assert.equal(r.alertas[0].corrigido, true);
+  assert.match(r.alertas[0].texto, /Portaria SRE 20\/2026/);
+  assert.match(r.alertas[0].texto, /01\/08\/2026/);
+  assert.match(r.alertas[0].texto, /última em 10\/10\/2026\): as notas desde então merecem conferência com o contador/);
+  assert.match(r.alertas[0].texto, /CAT 28\/2020/);
+  // só pelo NCM (sem CEST nas notas), última venda com ST antes de 01/08: corrige sem falar das notas novas
+  r = F.analisa({ codigo: 'L2', descricao: 'DESINFETANTE 5L', ncms: { 38089419: { n: 5, ultima: '2026-07-20' } }, cests: [], gtins: [], origens: ['0'],
+    combos: [combo(Object.assign({}, st, { ultima: '2026-07-20' }))] });
+  assert.equal(r.regra.venda.cfop, '5102');
+  assert.deepEqual(r.alertas.map(a => a.nivel), ['erro'], 'sem o alerta de CEST obrigatório');
+  assert.doesNotMatch(r.alertas[0].texto, /merecem conferência/);
+  // já sai certo (5102/00), mas o FKN emitiu com ST depois de 01/08: só atenção
+  r = F.analisa({ codigo: 'L3', descricao: 'AGUA SANITARIA 5L', ncms: { 28289011: { n: 9, ultima: '2026-10-12' } }, cests: [], gtins: [], origens: ['0'],
+    combos: [combo({ ultima: '2026-10-12', n: 4 }), combo(Object.assign({}, st, { ultima: '2026-08-20', n: 5 }))] });
+  assert.equal(r.regra.venda.cfop, '5102');
+  assert.ok(r.alertas.some(a => a.nivel === 'atencao' && /última em 20\/08\/2026/.test(a.texto)));
+  // fora da lista: continua como antes (ST coerente, sem alerta)
+  r = F.analisa({ codigo: 'X', descricao: 'SACO P/ LIXO 100L', ncms: { 39232190: { n: 50, ultima: '2026-10-10' } }, cests: ['1006100'], gtins: [], origens: ['0'],
+    combos: [combo(Object.assign({}, st, { ultima: '2026-10-10' }))] });
+  assert.deepEqual([r.regra.venda.cfop, r.regra.venda.cst_icms, r.alertas.length], ['5405', '60', 0]);
+  // papel higiênico não é afetado
+  r = F.analisa({ codigo: 'P', descricao: 'PAPEL HIGIENICO ROLAO', ncms: { 48181000: { n: 5, ultima: '2026-10-10' } }, cests: [], gtins: [], origens: ['0'],
+    combos: [combo({ cst_pis: '06', aliq_pis: 0, cst_cofins: '06', aliq_cofins: 0, ultima: '2026-10-10' })] });
+  assert.deepEqual([r.regra.venda.cfop, r.regra.venda.cst_icms, r.regra.venda.aliq_icms, r.alertas.length], ['5102', '00', 18, 0]);
+  assert.equal(F.ehLimpezaForaST('48181000', []), false);
 });
 
 test('clientes: o que falta para emitir a nota', () => {
