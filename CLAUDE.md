@@ -1306,8 +1306,10 @@ ligado ao domínio; **começa com fila de aprovação** (nada sai sozinho); reme
   2. **API oficial da Meta (WhatsApp Cloud API, fase 3):** o "Mandar às vendedoras" envia sozinho, a cada vendedora, a mensagem
      com o PDF anexado (depois, direto ao cliente). Precisa do Anderson: conta comercial da Meta verificada pelo CNPJ, número
      só do CRM (chip novo, não a linha de uma vendedora), modelo de mensagem aprovado (categoria utilidade). Daqui: Edge
-     Function de envio (chave nos Secrets) e o botão. Passar ao Anderson o passo a passo da conta e confirmar o preço atual
-     por mensagem antes de ele contratar.
+     Function de envio (chave nos Secrets) e o botão. **15/10: passo a passo entregue ao Anderson** em
+     `sistemi-dalessi/docs/meta-whatsapp-passo-a-passo.md` (utilidade no Brasil ≈ US$ 0,0068/mensagem pela tabela de 01/10/2026,
+     segundo fornecedores; 1.000 respostas grátis/mês por número). Esperando ele: chip novo, verificação da empresa, app +
+     número, cartão, token `WHATSAPP_TOKEN` nos Secrets e os IDs do número e da conta.
 - **Volta do contato (14/10, pedido do Anderson):** o próximo passo da janela "Como foi…" tem também **"Em 15 dias"**.
 - **Regra (14/10, Anderson): título recebido antes do vencimento é ADIANTADO.** A Santa Casa (002435/01, R$ 7.422,15) venceria
   em 25/10 e pagou em 14/10: o "Recebi" gravou certo, mas o cartão não dizia que o cliente adiantou. Agora `caixa-calculo.js`
