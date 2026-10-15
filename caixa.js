@@ -234,6 +234,8 @@
       campos: [{ nome: 'valor', rotulo: 'Saldo no banco (R$)', tipo: 'numero', obrigatorio: true, min: -1e9 }, { nome: 'data', rotulo: 'Saldo do dia', tipo: 'data', obrigatorio: true },
         { nome: 'observacao', rotulo: 'Observação', largo: true }],
       valores: { data: hoje() },
+      // a diferença aparece enquanto digita (15/10: o Anderson esperava ver a diferença antes de salvar)
+      htmlDepois: s.saldo == null ? '' : '<p class="cx-dif-conf" id="cxDifConf" hidden></p>',
       salvarTexto: 'Usar este saldo',
       aoSalvar: async v => {
         const r = await CRM.store().inserir('fin_saldos', { data: v.data, valor: r2(v.valor), observacao: v.observacao || null });
@@ -246,6 +248,26 @@
         else CRM.toast(dif == null || !dif ? 'Saldo do banco gravado.' : 'Saldo do banco gravado. Diferença para o CRM: ' + (dif > 0 ? '+' : '') + R.moeda(dif) + '.');
       }
     });
+    const dlg = typeof document !== 'undefined' && document.getElementById('dlgForm');
+    const linha = dlg && dlg.querySelector('#cxDifConf');
+    if (!linha) return;
+    const campoV = dlg.querySelector('[name="valor"]'), campoD = dlg.querySelector('[name="data"]'), botao = dlg.querySelector('button[type=submit]');
+    const mostra = () => {
+      const t = String(campoV.value || '').trim();
+      const v = t ? Number(t.replace(/\./g, '').replace(',', '.')) : NaN;
+      const valido = t && isFinite(Number(t)) ? Number(t) : v;
+      if (!isFinite(valido) || !t) { linha.hidden = true; botao.textContent = 'Usar este saldo'; return; }
+      const dif = r2(valido - s.saldo);
+      const passado = campoD.value && campoD.value < hoje();
+      linha.hidden = false;
+      if (!dif) { linha.className = 'cx-dif-conf ok'; linha.textContent = '✓ Igual ao CRM: nada a acertar.'; botao.textContent = 'Usar este saldo'; return; }
+      linha.className = 'cx-dif-conf ' + (dif < 0 ? 'menos' : 'mais');
+      linha.textContent = 'Diferença: ' + R.moeda(Math.abs(dif)) + (dif < 0 ? ' a menos no banco (saiu e não está no CRM)' : ' a mais no banco (entrou e não está no CRM)') +
+        (passado ? ' — saldo de dia passado: confira as baixas feitas depois dele.' : '. Ao salvar, você escolhe o que foi (tarifas, juros, conta esquecida…) para lançar.');
+      botao.textContent = passado ? 'Usar este saldo' : 'Usar este saldo e lançar a diferença';
+    };
+    campoV.addEventListener('input', mostra); campoD.addEventListener('change', mostra);
+    mostra();
   }
   // Diferença entre o banco e o CRM na conferência (15/10/2026, Anderson: "senão essa diferença vai ficar perdida; foram
   // tarifas bancárias"): oferece lançar a diferença, já paga FORA do caixa (o saldo do banco informado já a desconta, então

@@ -1297,6 +1297,10 @@ ligado ao domínio; **começa com fila de aprovação** (nada sai sozinho); reme
   mais, Rendimento, Estorno de tarifa, Outra entrada — ou "Não lançar". O lançado fica **pago fora do caixa** (`baixa: 'fora'`)
   no dia do saldo, então não mexe no saldo (o banco já conta). Valor editável (parte da diferença); aviso se a diferença passar
   de R$ 300 (pode ser baixa esquecida). Saldo de dia passado com baixas depois dele: só o aviso, sem a janela.
+  15/10, 1º uso: o Anderson digitou o saldo e esperou ver a diferença **antes** de salvar (a janela só abria depois) →
+  agora a diferença aparece na hora, enquanto digita (`#cxDifConf`, vermelho/verde), e o botão vira "Usar este saldo e lançar
+  a diferença". Caso real: CRM 33.784,97 × banco 31.913,29 = 1.871,68 = **1.804,30 do "Recebi" da Santa Casa (002382/01, 09:12)
+  que o banco ainda não creditou** + 67,38 de tarifas. Ou seja: diferença grande costuma ser crédito do dia seguinte.
 - **PRÓXIMO (combinado em 14/10 para 15/10) — boleto à vendedora sem passar pelo compartilhar.** O Anderson reclamou que o
   "📎 Compartilhar os PDFs" abre o compartilhar do Windows e ele ainda escolhe o WhatsApp e a vendedora. Limite do navegador:
   o link do WhatsApp (wa.me) só leva texto; arquivo só pelo compartilhar, que não escolhe contato. Combinado:
