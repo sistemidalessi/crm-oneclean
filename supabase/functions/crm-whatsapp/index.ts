@@ -3,6 +3,7 @@
 // boleto do banco) anexo, pelo número da OneClean na Meta. Sem a API, o navegador só abria a conversa com link.
 //   POST { acao: 'situacao' }                 → { ligado, numero, modelo } (o que a Meta diz do número e do modelo)
 //   POST { acao: 'criar_modelo' }             → cria o modelo "boleto_vendedora" (categoria utilidade, PDF no cabeçalho)
+//   POST { acao: 'registrar', pin }           → registra o número na Cloud API (PIN de 6 dígitos escolhido pelo admin)
 //   POST { acao: 'teste' }                    → manda o modelo com um PDF de exemplo ao celular de quem chamou
 //   POST { acao: 'enviar', boletos: [ids] }   → um envio por cliente (os boletos do cliente dividem o PDF completo)
 // Só o administrador. A chave da Meta fica SÓ nos segredos do Supabase (WHATSAPP_TOKEN, token permanente de um
@@ -94,7 +95,7 @@ Deno.serve(async (req) => {
   const phoneId = Deno.env.get('WHATSAPP_PHONE_ID') ?? '';
   const wabaId = Deno.env.get('WHATSAPP_WABA_ID') ?? '';
   const appId = Deno.env.get('WHATSAPP_APP_ID') ?? '';
-  let c: { acao?: string; boletos?: string[] };
+  let c: { acao?: string; boletos?: string[]; pin?: string };
   try { c = await req.json(); } catch { return resposta(400, { erro: 'corpo inválido' }); }
   const faltam = [!token && 'WHATSAPP_TOKEN', !phoneId && 'WHATSAPP_PHONE_ID', !wabaId && 'WHATSAPP_WABA_ID'].filter(Boolean);
 
@@ -142,6 +143,14 @@ Deno.serve(async (req) => {
           { type: 'FOOTER', text: 'OneClean · financeiro' }]
       }));
       return resposta(200, { ok: true, modelo: r });
+    }
+
+    if (c.acao === 'registrar') {
+      // registra o número na Cloud API com o PIN de 6 dígitos (verificação em duas etapas) que o administrador escolhe
+      const pin = digitos(c.pin);
+      if (pin.length !== 6) return resposta(400, { erro: 'o PIN precisa ter 6 números' });
+      await graph(token, '/' + phoneId + '/register', jsonPost({ messaging_product: 'whatsapp', pin }));
+      return resposta(200, { ok: true });
     }
 
     if (c.acao === 'teste') {

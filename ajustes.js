@@ -920,11 +920,12 @@
       (w.diagnostico ? '<details open><summary>O que a Meta diz do token (para o suporte)</summary><pre class="wa-diag">' + esc(JSON.stringify(Object.assign({}, w.diagnostico, { erro: undefined }), null, 1)) + '</pre></details>' : '') +
       '<p class="dica">O passo a passo está em sistemi-dalessi/docs/meta-whatsapp-passo-a-passo.md. A chave da Meta vai só nos segredos do Supabase, nunca no chat.</p></section>';
     const n = w.numero || {}, m = w.modelo;
-    const nome = { APPROVED: ['aprovado', 'verde'], PENDING_REVIEW: ['em análise', 'ambar'], DECLINED: ['recusado', 'vermelho'] }[n.name_status] || [n.name_status || '?', 'cinza'];
+    const nome = { APPROVED: ['aprovado', 'verde'], AVAILABLE_WITHOUT_REVIEW: ['liberado', 'verde'], PENDING_REVIEW: ['em análise', 'ambar'], DECLINED: ['recusado', 'vermelho'] }[n.name_status] || [n.name_status || '?', 'cinza'];
+    const st = { CONNECTED: ['conectado', 'verde'], PENDING: ['falta registrar', 'ambar'], DISCONNECTED: ['desconectado', 'vermelho'], FLAGGED: ['sinalizado pela Meta', 'vermelho'], RESTRICTED: ['restrito', 'vermelho'] }[n.status] || [String(n.status || '?').toLowerCase(), 'ambar'];
     const ms = m ? (STATUS_META[m.status] || [m.status, 'cinza']) : null;
     return '<section class="cartao"><h2>WhatsApp oficial (Meta)</h2>' +
       '<p>Número <strong>' + esc(n.display_phone_number || '') + '</strong> · nome <strong>' + esc(n.verified_name || '') + '</strong> ' + CRM.selo('nome ' + nome[0], nome[1]) +
-      ' ' + (n.status ? CRM.selo('número ' + String(n.status).toLowerCase(), n.status === 'CONNECTED' ? 'verde' : 'ambar') : '') + '</p>' +
+      ' ' + (n.status ? CRM.selo('número ' + st[0], st[1]) : '') + (n.status && n.status !== 'CONNECTED' ? ' <button type="button" class="btn sec" data-acao="wa-registrar">Registrar o número</button>' : '') + '</p>' +
       '<p>Modelo "boleto_vendedora": ' + (ms ? CRM.selo(ms[0], ms[1]) + (m.rejected_reason && m.rejected_reason !== 'NONE' ? ' <small>' + esc(m.rejected_reason) + '</small>' : '') : CRM.selo('ainda não criado', 'ambar')) + '</p>' +
       '<p>' + (!m || m.status === 'REJECTED' ? '<button type="button" class="btn sec" data-acao="wa-criar-modelo">Criar o modelo de mensagem</button> ' : '') +
       (m && m.status === 'APPROVED' ? '<button type="button" class="btn sec" data-acao="wa-teste">Mandar um teste para o meu celular</button>' : '') + '</p>' +
@@ -1120,6 +1121,17 @@
     'wa-criar-modelo': async () => {
       try { await CRM.store().whatsapp({ acao: 'criar_modelo' }); CRM.toast('Modelo enviado para a Meta aprovar (de minutos a 1 dia).'); integ = null; CRM.render(); } catch (e) { CRM.falhou(e); }
     },
+    'wa-registrar': () => CRM.abrirForm({
+      titulo: 'Registrar o número na Meta',
+      intro: 'Escolha um PIN de 6 números (a "verificação em duas etapas" do número). Guarde num lugar seguro: ele só é pedido se um dia for preciso registrar o número de novo. Não mande o PIN por chat nem WhatsApp.',
+      campos: [{ nome: 'pin', rotulo: 'PIN de 6 números', tipo: 'tel', obrigatorio: true }],
+      salvarTexto: 'Registrar',
+      aoSalvar: async v => {
+        if (!/^\d{6}$/.test(String(v.pin || '').trim())) throw new Error('O PIN precisa ter exatamente 6 números.');
+        await CRM.store().whatsapp({ acao: 'registrar', pin: String(v.pin).trim() });
+        CRM.toast('Número registrado na Meta.'); integ = null; CRM.render();
+      }
+    }),
     'wa-teste': async () => {
       try { const r = await CRM.store().whatsapp({ acao: 'teste' }); CRM.toast('Teste enviado para ' + r.para + '. Confira o WhatsApp do seu celular.'); } catch (e) { CRM.falhou(e); }
     },
