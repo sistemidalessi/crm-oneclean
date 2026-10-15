@@ -559,10 +559,10 @@
     const nome = u ? R.primeiroNome(CRM.nomeUsuario(u)) : 'Sem vendedora';
     if (!u || !tel) return '<span class="cob-sem-tel">' + esc(nome) + ': ' + l.length + ' boleto(s) — ' + (u ? 'sem celular no cadastro (Configurações → Equipe)' : 'cliente sem vendedora na carteira') + '</span>';
     const qt = ' (' + l.length + ' boleto' + (l.length > 1 ? 's' : '') + ')';
-    // Compartilhar (arquivo de verdade) quando o navegador deixa; senão o WhatsApp com o link do PDF
-    return '<span class="cob-vend">' + (podeCompartilhar() && l.some(b => b.arquivo) ? '<button type="button" class="btn ouro" data-acao="cob-avisar-pdf" data-id="' + esc(u) + '">📎 Compartilhar os PDFs com a ' + esc(nome) + qt + '</button>' +
-      '<button type="button" class="link" data-acao="cob-avisar" data-id="' + esc(u) + '">ou mandar com o link</button>'
-      : '<button type="button" class="btn ouro" data-acao="cob-avisar" data-id="' + esc(u) + '">📲 WhatsApp da ' + esc(nome) + qt + '</button>') + '</span>';
+    // 15/10/2026 (Anderson: o Compartilhar ainda pedia escolher o WhatsApp e a vendedora): o principal abre direto a conversa
+    // dela, com a mensagem e o link do PDF completo; mandar o arquivo em si (compartilhar do Windows) fica como segunda opção.
+    return '<span class="cob-vend"><button type="button" class="btn ouro" data-acao="cob-avisar" data-id="' + esc(u) + '">📲 WhatsApp da ' + esc(nome) + qt + '</button>' +
+      (podeCompartilhar() && l.some(b => b.arquivo) ? '<button type="button" class="link" data-acao="cob-avisar-pdf" data-id="' + esc(u) + '">ou compartilhar o arquivo</button>' : '') + '</span>';
   };
   const preCarrega = lista => { arquivosDe(lista).catch(() => {}); };
   function formAvisar() {
@@ -571,8 +571,8 @@
     preCarrega(paraAvisar());
     CRM.abrirForm({
       titulo: 'Mandar no WhatsApp das vendedoras',
-      intro: (podeCompartilhar() ? 'Um clique por vendedora: "Compartilhar" abre a janela do Windows (ou do celular) para mandar os PDFs de verdade — escolha o WhatsApp e a conversa com ela; a mensagem vai junto (e fica copiada: se não aparecer, cole com Ctrl+V). ' +
-        '"Mandar com o link" abre o WhatsApp com o link do PDF (vale 7 dias).\n' : 'Um clique por vendedora: abre o seu WhatsApp na conversa com ela, com cada cliente, o valor atualizado, o link do PDF (vale 7 dias) e a mensagem pronta para ela mandar ao cliente. É só apertar enviar.\n') +
+      intro: 'Um clique por vendedora: abre o seu WhatsApp direto na conversa com ela, com cada cliente, o valor atualizado, o link do PDF completo (resumo, nota fiscal e boleto; vale 7 dias) e a mensagem pronta para ela mandar ao cliente. É só apertar enviar.\n' +
+        (podeCompartilhar() ? 'Prefere mandar o arquivo em si? "ou compartilhar o arquivo" abre a janela de compartilhar (aí você escolhe o WhatsApp e a vendedora).\n' : '') +
         'A tarefa "Cobrar boleto atualizado" já está na agenda de cada uma.',
       campos: [], salvarTexto: 'Fechar', aoSalvar: async () => {},
       rodape: '<div class="cob-avisar">' + g.map(([u, l]) => botaoAvisar(u, l)).join('') + '</div>'
@@ -594,7 +594,9 @@
       const tel = F.telDe(e, c);
       blocos.push('*' + (++i) + '/' + porEmp.size + ' · ' + e.nome + '*\n' +
         l.map(b => nomeNF(b) + ': ' + R.moeda(b.valor) + (Number(b.valor) > Number(b.valor_original) + 0.005 ? ' (com juros; original ' + R.moeda(b.valor_original) + ')' : '')).join('\n') +
-        (anexo ? (l.some(b => b.arquivo) ? '\nPDF: vai anexo nesta conversa' : '\n(sem PDF: mande a linha digitável)') : links.length ? '\nPDF do boleto: ' + links.join('\n') : '\n(sem PDF: mande a linha digitável)') +
+        (anexo ? (l.some(b => b.arquivo) ? '\nPDF: vai anexo nesta conversa' : '\n(sem PDF: mande a linha digitável)')
+          : links.length ? '\n' + (l.some(b => b.arquivo_banco) ? 'PDF completo (resumo, nota fiscal e boleto)' : 'PDF do boleto') + ': ' + links.join('\n') +
+            '\n(abra o link no celular e use o Compartilhar para mandar o PDF ao cliente)' : '\n(sem PDF: mande a linha digitável)') +
         (tel ? '\nTelefone no CRM: ' + telBR(tel) + (c && c.nome ? ' (' + c.nome + ')' : '') : '\nSem telefone no CRM') +
         '\n\nMensagem pronta para o cliente (copie e mande junto com o PDF):\n' + mensagemBoleto((E().cfg || {}).modelo_boleto, l, vars));
     }

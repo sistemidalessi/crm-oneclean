@@ -1300,9 +1300,9 @@ ligado ao domínio; **começa com fila de aprovação** (nada sai sozinho); reme
 - **PRÓXIMO (combinado em 14/10 para 15/10) — boleto à vendedora sem passar pelo compartilhar.** O Anderson reclamou que o
   "📎 Compartilhar os PDFs" abre o compartilhar do Windows e ele ainda escolhe o WhatsApp e a vendedora. Limite do navegador:
   o link do WhatsApp (wa.me) só leva texto; arquivo só pelo compartilhar, que não escolhe contato. Combinado:
-  1. **Agora, sem custo:** inverter os botões em `cobranca.js` (`botaoAvisar`, `formAvisar` e a aba Cobrança): o principal é
-     "📲 WhatsApp da <vendedora>" (abre a conversa dela com a mensagem e o link do PDF completo, 7 dias); "Compartilhar o
-     arquivo" vira a opção secundária. A vendedora abre o link no celular e compartilha o PDF ao cliente.
+  1. **FEITO em 15/10:** botões invertidos em `cobranca.js` (`botaoAvisar`, `formAvisar`): o principal é "📲 WhatsApp da
+     <vendedora>" (abre a conversa dela com a mensagem e o link do "PDF completo (resumo, nota fiscal e boleto)", 7 dias, e a
+     dica "abra o link no celular e use o Compartilhar"); "ou compartilhar o arquivo" ficou como segunda opção.
   2. **API oficial da Meta (WhatsApp Cloud API, fase 3):** o "Mandar às vendedoras" envia sozinho, a cada vendedora, a mensagem
      com o PDF anexado (depois, direto ao cliente). Precisa do Anderson: conta comercial da Meta verificada pelo CNPJ, número
      só do CRM (chip novo, não a linha de uma vendedora), modelo de mensagem aprovado (categoria utilidade). Daqui: Edge
