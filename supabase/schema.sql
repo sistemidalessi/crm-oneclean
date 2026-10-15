@@ -1722,3 +1722,168 @@ alter table public.crm_email_envios add column if not exists oferta_id uuid refe
 alter table public.crm_email_envios drop constraint if exists crm_email_envios_tipo_check;
 alter table public.crm_email_envios add constraint crm_email_envios_tipo_check check (tipo in ('reposicao', 'relacionamento', 'oferta'));
 create index if not exists crm_email_envios_oferta_idx on public.crm_email_envios (oferta_id) where oferta_id is not null;
+
+-- =================================================================== fiscal: Fase 1 da saída do FKN (15/10/2026)
+-- A tributação de cada item das notas autorizadas (CST, alíquotas, CEST, GTIN, origem), lida do XML guardado
+-- em crm-notas-xml: é o ponto de partida da regra fiscal de cada produto (o que a contabilidade já recebe todo
+-- mês). Fica numa tabela À PARTE de crm_nota_itens de propósito: o app não carrega isto ao abrir (tráfego);
+-- só a tela Fiscal, do administrador, lê o resumo pela função crm_fiscal_resumo. Plano: docs/plano-sair-do-fkn.md
+-- (repositório sistemi-dalessi).
+create table if not exists public.crm_fiscal_itens (
+  nota_item_id  uuid primary key references public.crm_nota_itens(id) on delete cascade,
+  nota_id       uuid not null references public.crm_notas(id) on delete cascade,
+  ordem         integer not null,
+  codigo        text,
+  emitida_em    timestamptz,
+  ncm           text,
+  cfop          text,
+  gtin          text,
+  cest          text,
+  origem        text,
+  cst_icms      text,     -- CST (ou CSOSN) do ICMS
+  aliq_icms     numeric(7,4),
+  red_bc_icms   numeric(7,4),
+  v_bc_icms     numeric(14,2),
+  v_icms        numeric(14,2),
+  v_bc_st       numeric(14,2),
+  v_icms_st     numeric(14,2),
+  v_st_ret      numeric(14,2),  -- ICMS-ST retido antes (CST 60)
+  cst_pis       text,
+  aliq_pis      numeric(7,4),
+  v_pis         numeric(14,2),
+  cst_cofins    text,
+  aliq_cofins   numeric(7,4),
+  v_cofins      numeric(14,2),
+  cst_ipi       text,
+  v_ipi         numeric(14,2),
+  lido_em       timestamptz not null default now()
+);
+create index if not exists crm_fiscal_itens_codigo_idx on public.crm_fiscal_itens (codigo);
+create index if not exists crm_fiscal_itens_nota_idx on public.crm_fiscal_itens (nota_id);
+-- A regra fiscal de cada produto (proposta pelas notas, conferida pelo administrador). O CRM emite por ela
+-- a partir da Fase 4.
+create table if not exists public.crm_fiscal_produtos (
+  codigo        text primary key,
+  descricao     text,
+  unidade       text,
+  ncm           text,
+  cest          text,
+  gtin          text,
+  origem        text,
+  regra         jsonb not null default '{}'::jsonb,  -- { venda: { cfop, cst_icms, aliq_icms, cst_pis, aliq_pis, cst_cofins, aliq_cofins } }
+  alertas       jsonb not null default '[]'::jsonb,
+  situacao      text not null default 'proposta' check (situacao in ('proposta', 'conferido')),
+  conferido_por uuid,
+  conferido_em  timestamptz,
+  criado_em     timestamptz not null default now(),
+  atualizado_em timestamptz not null default now()
+);
+drop trigger if exists crm_fiscal_produtos_atualizado_em on public.crm_fiscal_produtos;
+create trigger crm_fiscal_produtos_atualizado_em before update on public.crm_fiscal_produtos for each row execute function public.crm_toca_atualizado_em();
+alter table public.crm_fiscal_itens enable row level security;
+alter table public.crm_fiscal_produtos enable row level security;
+revoke all on public.crm_fiscal_itens, public.crm_fiscal_produtos from anon, public;
+grant select, insert, update, delete on public.crm_fiscal_itens, public.crm_fiscal_produtos to authenticated;
+revoke truncate, references, trigger on public.crm_fiscal_itens, public.crm_fiscal_produtos from authenticated;
+drop policy if exists admin on public.crm_fiscal_itens;
+drop policy if exists admin on public.crm_fiscal_produtos;
+create policy admin on public.crm_fiscal_itens for all to authenticated using ((select public.crm_eh_admin())) with check ((select public.crm_eh_admin()));
+create policy admin on public.crm_fiscal_produtos for all to authenticated using ((select public.crm_eh_admin())) with check ((select public.crm_eh_admin()));
+-- Destinatário da nota e dados fiscais do cliente (para emitir NF-e): IE, indicador da IE (1 contribuinte,
+-- 2 isento, 9 não contribuinte) e o código IBGE do município.
+alter table public.crm_notas add column if not exists dest_ie text;
+alter table public.crm_notas add column if not exists dest_ind_ie text;
+alter table public.crm_notas add column if not exists dest_cmun text;
+alter table public.crm_notas add column if not exists fiscal_lido_em timestamptz;
+alter table public.crm_empresas add column if not exists ie text;
+alter table public.crm_empresas add column if not exists ind_ie text;
+alter table public.crm_empresas add column if not exists codigo_municipio text;
+
+-- Grava a tributação lida do XML de um lote de notas: [{ chave, dest: {ie, ind_ie, cmun, cep, logradouro, numero,
+-- complemento, bairro, cidade, uf}, itens: [{ ordem, codigo, ncm, cfop, gtin, cest, origem, cst_icms, … }] }].
+-- O item é achado pela nota (chave) e pela ordem; o cadastro do cliente só é COMPLETADO (campo vazio), nunca
+-- trocado; o endereço só entra inteiro, quando o cadastro não tem nenhum. Só o administrador ou a chave de serviço (crm-notas, o vigia).
+create or replace function public.crm_fiscal_grava(lote jsonb)
+returns integer language plpgsql security definer set search_path = public as $$
+declare
+  d jsonb; nid uuid; eid uuid; quando timestamptz; n integer := 0;
+begin
+  if not (public.crm_eh_admin() or coalesce(auth.role(), '') = 'service_role') then
+    raise exception 'só o administrador';
+  end if;
+  for d in select * from jsonb_array_elements(coalesce(lote, '[]'::jsonb)) loop
+    select id, empresa_id, emitida_em into nid, eid, quando from public.crm_notas where chave = d->>'chave';
+    if nid is null then continue; end if;
+    update public.crm_notas set dest_ie = nullif(d#>>'{dest,ie}', ''), dest_ind_ie = nullif(d#>>'{dest,ind_ie}', ''),
+      dest_cmun = nullif(d#>>'{dest,cmun}', ''), fiscal_lido_em = now() where id = nid;
+    insert into public.crm_fiscal_itens (nota_item_id, nota_id, ordem, codigo, emitida_em, ncm, cfop, gtin, cest, origem,
+      cst_icms, aliq_icms, red_bc_icms, v_bc_icms, v_icms, v_bc_st, v_icms_st, v_st_ret, cst_pis, aliq_pis, v_pis,
+      cst_cofins, aliq_cofins, v_cofins, cst_ipi, v_ipi, lido_em)
+    select i.id, nid, i.ordem, nullif(x->>'codigo', ''), quando, nullif(x->>'ncm', ''), nullif(x->>'cfop', ''), nullif(x->>'gtin', ''),
+      nullif(x->>'cest', ''), nullif(x->>'origem', ''), nullif(x->>'cst_icms', ''), (x->>'aliq_icms')::numeric, (x->>'red_bc_icms')::numeric,
+      (x->>'v_bc_icms')::numeric, (x->>'v_icms')::numeric, (x->>'v_bc_st')::numeric, (x->>'v_icms_st')::numeric, (x->>'v_st_ret')::numeric,
+      nullif(x->>'cst_pis', ''), (x->>'aliq_pis')::numeric, (x->>'v_pis')::numeric, nullif(x->>'cst_cofins', ''), (x->>'aliq_cofins')::numeric,
+      (x->>'v_cofins')::numeric, nullif(x->>'cst_ipi', ''), (x->>'v_ipi')::numeric, now()
+    from jsonb_array_elements(coalesce(d->'itens', '[]'::jsonb)) x
+    join public.crm_nota_itens i on i.nota_id = nid and i.ordem = (x->>'ordem')::integer
+    on conflict (nota_item_id) do update set codigo = excluded.codigo, ncm = excluded.ncm, cfop = excluded.cfop, gtin = excluded.gtin,
+      cest = excluded.cest, origem = excluded.origem, cst_icms = excluded.cst_icms, aliq_icms = excluded.aliq_icms, red_bc_icms = excluded.red_bc_icms,
+      v_bc_icms = excluded.v_bc_icms, v_icms = excluded.v_icms, v_bc_st = excluded.v_bc_st, v_icms_st = excluded.v_icms_st, v_st_ret = excluded.v_st_ret,
+      cst_pis = excluded.cst_pis, aliq_pis = excluded.aliq_pis, v_pis = excluded.v_pis, cst_cofins = excluded.cst_cofins, aliq_cofins = excluded.aliq_cofins,
+      v_cofins = excluded.v_cofins, cst_ipi = excluded.cst_ipi, v_ipi = excluded.v_ipi, lido_em = now();
+    if eid is not null then
+      update public.crm_empresas set
+        ie = coalesce(nullif(ie, ''), nullif(d#>>'{dest,ie}', '')),
+        ind_ie = coalesce(nullif(ind_ie, ''), nullif(d#>>'{dest,ind_ie}', '')),
+        codigo_municipio = coalesce(nullif(codigo_municipio, ''), nullif(d#>>'{dest,cmun}', ''))
+      where id = eid and (coalesce(ie, '') = '' or coalesce(ind_ie, '') = '' or coalesce(codigo_municipio, '') = '');
+      -- endereço: só quando o cadastro não tem endereço nenhum (não mistura o do Agendor com o da nota)
+      update public.crm_empresas set cep = nullif(d#>>'{dest,cep}', ''), logradouro = nullif(d#>>'{dest,logradouro}', ''),
+        numero = nullif(d#>>'{dest,numero}', ''), complemento = nullif(d#>>'{dest,complemento}', ''), bairro = nullif(d#>>'{dest,bairro}', ''),
+        cidade = coalesce(nullif(d#>>'{dest,cidade}', ''), cidade), uf = coalesce(nullif(d#>>'{dest,uf}', ''), uf)
+      where id = eid and coalesce(logradouro, '') = '' and coalesce(d#>>'{dest,logradouro}', '') <> '';
+    end if;
+    n := n + 1;
+  end loop;
+  return n;
+end;
+$$;
+revoke all on function public.crm_fiscal_grava(jsonb) from public, anon;
+grant execute on function public.crm_fiscal_grava(jsonb) to authenticated, service_role;
+
+-- Resumo por produto para a tela Fiscal: NCM, CEST, GTIN e origem vistos e cada combinação de tributação
+-- (CFOP + CST + alíquotas) com quantas vezes e a última data. Só o administrador.
+create or replace function public.crm_fiscal_resumo()
+returns table (codigo text, descricao text, unidade text, notas bigint, ultima date, ncms jsonb, cests jsonb, gtins jsonb, origens jsonb, combos jsonb)
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if not public.crm_eh_admin() then raise exception 'só o administrador'; end if;
+  return query
+  with f as (
+    select fi.*, ni.descricao, ni.unidade from public.crm_fiscal_itens fi join public.crm_nota_itens ni on ni.id = fi.nota_item_id
+    join public.crm_notas n on n.id = fi.nota_id where not n.cancelada and fi.codigo is not null
+  ), conta as (
+    select f.codigo, jsonb_build_object('cfop', f.cfop, 'cst_icms', f.cst_icms, 'aliq_icms', f.aliq_icms, 'red_bc_icms', f.red_bc_icms,
+      'cst_pis', f.cst_pis, 'aliq_pis', f.aliq_pis, 'cst_cofins', f.cst_cofins, 'aliq_cofins', f.aliq_cofins,
+      'n', count(*), 'ultima', max(f.emitida_em)::date, 'primeira', min(f.emitida_em)::date) c
+    from f group by f.codigo, f.cfop, f.cst_icms, f.aliq_icms, f.red_bc_icms, f.cst_pis, f.aliq_pis, f.cst_cofins, f.aliq_cofins
+  ), combos as (
+    select conta.codigo, jsonb_agg(conta.c order by (conta.c->>'n')::int desc) combos from conta group by conta.codigo
+  ), ncm_g as (
+    select f.codigo, f.ncm, jsonb_build_object('n', count(*), 'ultima', max(f.emitida_em)::date, 'primeira', min(f.emitida_em)::date) v
+    from f where f.ncm is not null group by f.codigo, f.ncm
+  ), ncm_a as (
+    select ncm_g.codigo, jsonb_object_agg(ncm_g.ncm, ncm_g.v) ncms from ncm_g group by ncm_g.codigo
+  ), ag as (
+    select f.codigo, (array_agg(f.descricao order by f.emitida_em desc))[1] descricao, (array_agg(f.unidade order by f.emitida_em desc))[1] unidade,
+      count(distinct f.nota_id) notas, max(f.emitida_em)::date ultima,
+      to_jsonb(array_remove(array_agg(distinct f.cest), null)) cests, to_jsonb(array_remove(array_agg(distinct f.gtin), null)) gtins,
+      to_jsonb(array_remove(array_agg(distinct f.origem), null)) origens
+    from f group by f.codigo
+  )
+  select ag.codigo, ag.descricao, ag.unidade, ag.notas, ag.ultima, coalesce(ncm_a.ncms, '{}'::jsonb), ag.cests, ag.gtins, ag.origens, combos.combos
+  from ag left join ncm_a on ncm_a.codigo = ag.codigo left join combos on combos.codigo = ag.codigo;
+end;
+$$;
+revoke all on function public.crm_fiscal_resumo() from public, anon;
+grant execute on function public.crm_fiscal_resumo() to authenticated;

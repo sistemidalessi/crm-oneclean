@@ -605,6 +605,13 @@
           imp.resultado.criados.titulos = (r && r.criados) || 0;
         } catch (e) { imp.resultado.erros.push(NOMES_IMPORT.titulos + ': ' + e.message); }
       }
+      // Tributação de cada item (Fase 1 fiscal): só o administrador grava (crm_fiscal_itens).
+      if (imp.notas && CRM.ehAdmin() && CRM.store().fiscalGrava) {
+        prog('Gravando a tributação das notas');
+        const lote = N.loteFiscal(imp.notas);
+        try { for (let k = 0; k < lote.length; k += 40) await CRM.store().fiscalGrava(lote.slice(k, k + 40)); }
+        catch (e) { imp.resultado.erros.push('tributação das notas: ' + e.message); }
+      }
       await CRM.recarregar();
     } catch (e) {
       imp.resultado.erros.push(e.message);

@@ -567,6 +567,77 @@
     return await r.data.text();
   };
   Local.prototype.notasXmlGuardar = async function () { return { guardados: 0, jaTinha: 0, erros: 0 }; };
+
+  // Fiscal (Fase 1 da saída do FKN, 15/10/2026): tributação lida do XML e a regra de cada produto. Só o
+  // administrador; nada disto é carregado ao abrir o CRM (tráfego).
+  Supa.prototype.fiscalGrava = async function (lote) { return unwrap(await this.sb.rpc('crm_fiscal_grava', { lote })); };
+  Supa.prototype.fiscalResumo = async function () {
+    const out = [];
+    for (let de = 0; ; de += PAGINA) {
+      const l = unwrap(await this.sb.rpc('crm_fiscal_resumo').order('codigo').range(de, de + PAGINA - 1));
+      out.push(...l);
+      if (l.length < PAGINA) return out;
+    }
+  };
+  Supa.prototype.notasSemFiscal = async function () {
+    const out = [];
+    for (let de = 0; ; de += PAGINA) {
+      const l = unwrap(await this.sb.from('crm_notas').select('chave').is('fiscal_lido_em', null).eq('cancelada', false).order('chave').range(de, de + PAGINA - 1));
+      out.push(...l.map(x => x.chave));
+      if (l.length < PAGINA) return out;
+    }
+  };
+  Supa.prototype.fiscalProdutos = async function () {
+    const out = [];
+    for (let de = 0; ; de += PAGINA) {
+      const l = unwrap(await this.sb.from('crm_fiscal_produtos').select('*').order('codigo').range(de, de + PAGINA - 1));
+      out.push(...l);
+      if (l.length < PAGINA) return out;
+    }
+  };
+  Supa.prototype.fiscalProdutosSalvar = async function (linhas) {
+    for (let i = 0; i < linhas.length; i += LOTE) unwrap(await this.sb.from('crm_fiscal_produtos').upsert(linhas.slice(i, i + LOTE), { onConflict: 'codigo', defaultToNull: false }));
+    return linhas.length;
+  };
+  // Modo local (demonstração e testes): guarda tudo na memória do navegador.
+  Local.prototype.fiscalGrava = async function (lote) {
+    const d = this.ler(); this._fiscal = this._fiscal || [];
+    (lote || []).forEach(n => {
+      const nota = d.notas.find(x => x.chave === n.chave); if (!nota) return;
+      nota.fiscal_lido_em = new Date().toISOString();
+      n.itens.forEach(it => {
+        const ni = d.nota_itens.find(x => x.nota_id === nota.id && x.ordem === it.ordem) || {};
+        this._fiscal = this._fiscal.filter(f => !(f.chave === n.chave && f.ordem === it.ordem));
+        this._fiscal.push(Object.assign({ chave: n.chave, emitida_em: nota.emitida_em, cancelada: nota.cancelada, descricao: ni.descricao, unidade: ni.unidade }, it));
+      });
+    });
+    this.gravar(d);
+    return (lote || []).length;
+  };
+  Local.prototype.fiscalResumo = async function () {
+    const g = new Map();
+    (this._fiscal || []).filter(f => !f.cancelada && f.codigo).forEach(f => {
+      const r = g.get(f.codigo) || { codigo: f.codigo, descricao: f.descricao || f.codigo, unidade: f.unidade || null, notas: 0, ultima: '', ncms: {}, cests: [], gtins: [], origens: [], combos: [] };
+      const dia = String(f.emitida_em).slice(0, 10);
+      r.notas++; if (dia > r.ultima) r.ultima = dia;
+      if (f.ncm) { const x = r.ncms[f.ncm] || (r.ncms[f.ncm] = { n: 0, ultima: '', primeira: '9999' }); x.n++; if (dia > x.ultima) x.ultima = dia; if (dia < x.primeira) x.primeira = dia; }
+      [['cest', 'cests'], ['gtin', 'gtins'], ['origem', 'origens']].forEach(([k, l]) => { if (f[k] && r[l].indexOf(f[k]) === -1) r[l].push(f[k]); });
+      const ch = ['cfop', 'cst_icms', 'aliq_icms', 'red_bc_icms', 'cst_pis', 'aliq_pis', 'cst_cofins', 'aliq_cofins'].map(k => f[k]).join('|');
+      let c = r.combos.find(x => x._k === ch);
+      if (!c) { c = { _k: ch, cfop: f.cfop, cst_icms: f.cst_icms, aliq_icms: f.aliq_icms, red_bc_icms: f.red_bc_icms, cst_pis: f.cst_pis, aliq_pis: f.aliq_pis, cst_cofins: f.cst_cofins, aliq_cofins: f.aliq_cofins, n: 0, ultima: '', primeira: '9999' }; r.combos.push(c); }
+      c.n++; if (dia > c.ultima) c.ultima = dia; if (dia < c.primeira) c.primeira = dia;
+      g.set(f.codigo, r);
+    });
+    return [...g.values()];
+  };
+  Local.prototype.notasSemFiscal = async function () { return this.ler().notas.filter(n => !n.fiscal_lido_em && !n.cancelada && n.chave).map(n => n.chave); };
+  Local.prototype.fiscalProdutos = async function () { return (this._fiscalProdutos || []).slice(); };
+  Local.prototype.fiscalProdutosSalvar = async function (linhas) {
+    const m = new Map((this._fiscalProdutos || []).map(p => [p.codigo, p]));
+    linhas.forEach(l => m.set(l.codigo, Object.assign({}, m.get(l.codigo) || {}, l)));
+    this._fiscalProdutos = [...m.values()];
+    return linhas.length;
+  };
   Local.prototype.notaXml = async function () { return null; };
 
   // PDFs dos boletos atualizados (bucket privado crm-boletos): o administrador envia; quem vê o boleto baixa.

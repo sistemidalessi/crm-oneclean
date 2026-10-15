@@ -34,6 +34,26 @@
   const arred = v => Math.round(v * 100) / 100;
   const tem = (xml, tag) => new RegExp('<' + PREF + tag + '[\\s>]').test(xml);
 
+  // Tributação do item (Fase 1 da saída do FKN, 15/10/2026): CST/CSOSN e alíquotas de ICMS, PIS, COFINS e IPI,
+  // CEST, GTIN e origem — o ponto de partida da regra fiscal de cada produto (crm_fiscal_itens). Vai em
+  // item.fiscal, separado do que é gravado em crm_nota_itens.
+  const numOuNulo = v => (v === '' ? null : numero(v));
+  function fiscalDoItem(det) {
+    const p = bloco(det, 'prod'), imp = bloco(det, 'imposto');
+    const icms = bloco(imp, 'ICMS'), pis = bloco(imp, 'PIS'), cofins = bloco(imp, 'COFINS'), ipi = bloco(imp, 'IPI');
+    const gtin = valor(p, 'cEAN');
+    return {
+      gtin: /^\d{8,14}$/.test(gtin) ? gtin : null, cest: valor(p, 'CEST') || null,
+      origem: valor(icms, 'orig') || null, cst_icms: valor(icms, 'CST') || valor(icms, 'CSOSN') || null,
+      aliq_icms: numOuNulo(valor(icms, 'pICMS')), red_bc_icms: numOuNulo(valor(icms, 'pRedBC')),
+      v_bc_icms: numOuNulo(valor(icms, 'vBC')), v_icms: numOuNulo(valor(icms, 'vICMS')),
+      v_bc_st: numOuNulo(valor(icms, 'vBCST')), v_icms_st: numOuNulo(valor(icms, 'vICMSST')), v_st_ret: numOuNulo(valor(icms, 'vICMSSTRet')),
+      cst_pis: valor(pis, 'CST') || null, aliq_pis: numOuNulo(valor(pis, 'pPIS')), v_pis: numOuNulo(valor(pis, 'vPIS')),
+      cst_cofins: valor(cofins, 'CST') || null, aliq_cofins: numOuNulo(valor(cofins, 'pCOFINS')), v_cofins: numOuNulo(valor(cofins, 'vCOFINS')),
+      cst_ipi: valor(ipi, 'CST') || null, v_ipi: numOuNulo(valor(ipi, 'vIPI'))
+    };
+  }
+
   // Vendedor: a NF-e não tem campo próprio; os sistemas costumam escrever nas informações
   // complementares ("Vendedor: 012 - SILMARA") ou num campo livre <obsCont xCampo="Vendedor">.
   function vendedorNoXml(adic) {
@@ -75,7 +95,8 @@
         codigo: valor(p, 'cProd') || null, descricao: valor(p, 'xProd') || 'Item', ncm: valor(p, 'NCM') || null,
         cfop: valor(p, 'CFOP') || null, unidade: valor(p, 'uCom') || null,
         quantidade: numero(valor(p, 'qCom')), valor_unitario: numero(valor(p, 'vUnCom')),
-        valor_total: arred(numero(valor(p, 'vProd')) - numero(valor(p, 'vDesc')))
+        valor_total: arred(numero(valor(p, 'vProd')) - numero(valor(p, 'vDesc'))),
+        fiscal: fiscalDoItem(d.corpo)
       };
     });
     // Parcelas (duplicatas) da cobrança: <cobr><dup><nDup>001</nDup><dVenc>…</dVenc><vDup>…</vDup>.
@@ -93,7 +114,8 @@
       cliente: {
         doc: R.digitos(valor(dest, 'CNPJ') || valor(dest, 'CPF')), nome: valor(dest, 'xNome'), email: valor(dest, 'email'),
         telefone: valor(end, 'fone'), cep: valor(end, 'CEP'), logradouro: valor(end, 'xLgr'), numero: valor(end, 'nro'),
-        complemento: valor(end, 'xCpl'), bairro: valor(end, 'xBairro'), cidade: valor(end, 'xMun'), uf: valor(end, 'UF')
+        complemento: valor(end, 'xCpl'), bairro: valor(end, 'xBairro'), cidade: valor(end, 'xMun'), uf: valor(end, 'UF'),
+        ie: valor(dest, 'IE'), ind_ie: valor(dest, 'indIEDest'), cmun: valor(end, 'cMun')
       },
       vendedor: vendedorNoXml(bloco(c, 'infAdic')),
       valor_produtos: numero(valor(tot, 'vProd')), valor_total: numero(valor(tot, 'vNF')), itens,
@@ -421,6 +443,7 @@
       d.itens.forEach(it => {
         const p = produtoDo(it);
         const item = Object.assign({ id: uuid(), nota_id: n.id, produto_id: p ? p.id : null }, it);
+        delete item.fiscal; // vai para crm_fiscal_itens (loteFiscal), não para crm_nota_itens
         Object.keys(item).forEach(k => { if (item[k] == null) delete item[k]; });
         plano.criar.nota_itens.push(item); conta('nota_itens', 'criados');
       });
@@ -435,7 +458,17 @@
     return plano;
   }
 
-  const api = { lerXml, planeja, parecida, palavras, vendasIguaisNotas };
+  // Lote para public.crm_fiscal_grava: só notas autorizadas (o banco acha cada item pela chave e pela ordem).
+  function loteFiscal(docs) {
+    return (docs || []).filter(d => d && d.tipo === 'nota' && d.autorizada && d.itens && d.itens.length).map(d => ({
+      chave: d.chave,
+      dest: { ie: d.cliente.ie || '', ind_ie: d.cliente.ind_ie || '', cmun: d.cliente.cmun || '', cep: d.cliente.cep || '', logradouro: d.cliente.logradouro || '',
+        numero: d.cliente.numero || '', complemento: d.cliente.complemento || '', bairro: d.cliente.bairro || '', cidade: d.cliente.cidade || '', uf: d.cliente.uf || '' },
+      itens: d.itens.map(it => Object.assign({ ordem: it.ordem, codigo: it.codigo, ncm: it.ncm, cfop: it.cfop }, it.fiscal || {}))
+    }));
+  }
+
+  const api = { lerXml, planeja, parecida, palavras, vendasIguaisNotas, loteFiscal };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else raiz.CRMNfe = api;
 })(typeof window !== 'undefined' ? window : globalThis);

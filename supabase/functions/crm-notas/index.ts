@@ -11,7 +11,7 @@
 // e publicar de novo esta função. O teste testes/motor.test.js avisa se esquecer.
 // Também recebe do vigia os CSV salvos pelo FKN ({fkn: {nome, base64}}): a listagem de produtos
 // (estoque de Compras), o contas a receber e o contas a pagar (Caixa) — lidos por fkn.js, o mesmo
-// leitor da tela.
+// leitor da tela. Desde 15/10/2026 grava também a tributação de cada item (crm_fiscal_grava).
 // Deploy: verify_jwt DESLIGADO (a chave de integração é conferida aqui).
 import { createClient } from 'npm:@supabase/supabase-js@2.116.0';
 
@@ -247,6 +247,16 @@ Deno.serve(async (req) => {
     for (const pre of plano.titulosCancelados || []) {
       const { error } = await db.from('crm_titulos').delete().eq('origem', 'nota').like('duplicata', pre + '/%');
       if (error) erros.push('títulos da nota cancelada ' + pre + ': ' + error.message);
+    }
+
+    // Tributação de cada item (Fase 1 fiscal, 15/10/2026): crm_fiscal_itens, pela função do banco (acha o item
+    // pela chave e pela ordem; nota que não entrou é pulada).
+    if (N.loteFiscal) {
+      const lote = N.loteFiscal(docs);
+      for (let i = 0; i < lote.length; i += 40) {
+        const { error } = await db.rpc('crm_fiscal_grava', { lote: lote.slice(i, i + 40) });
+        if (error) erros.push('tributação das notas: ' + error.message);
+      }
     }
 
     // Situação de cada arquivo, para o vigia registrar.

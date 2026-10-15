@@ -1109,6 +1109,34 @@ ligado ao domínio; **começa com fila de aprovação** (nada sai sozinho); reme
 - **Depois (fase 2):** envio automático por cliente (o servidor monta a fila todo dia: precisa de pg_cron e da
   regra rodando na função) e a volta do e-mail (resposta do cliente vira atividade).
 
+## Fiscal — Fase 1 da saída do FKN (15/10/2026, pedido do Anderson)
+
+Plano completo em `docs/plano-sair-do-fkn.md` do repositório **sistemi-dalessi** (decisões: NF-e direto na
+Sefaz por um serviço fiscal na VPS da Agilité; notas de compra pelo DF-e; boleto pela API do BB).
+- **Tributação de cada item lida do XML** (`nfe.js fiscalDoItem`: CST/CSOSN, alíquotas e valores de ICMS, ST,
+  PIS, COFINS e IPI, CEST, GTIN, origem; do destinatário: IE, indicador da IE, código do município) →
+  **`crm_fiscal_itens`** (tabela à parte, só admin, NÃO carregada ao abrir o CRM) pela função
+  **`crm_fiscal_grava(lote)`** (admin ou chave de serviço; acha o item pela chave + ordem; no cliente só
+  **completa** IE, indicador e município vazios, e o endereço inteiro quando não há nenhum).
+  Grava: a importação manual (admin), a `crm-notas` (vigia, desde 15/10) e o botão "Ler a tributação" da aba Fiscal
+  para as notas antigas (baixa o XML guardado, 6 de cada vez).
+- **`crm_fiscal_resumo()`** agrega por produto (NCM vistos com datas, CEST, GTIN, origem e cada combinação
+  CFOP + CST + alíquotas com contagem e datas). **`fiscal.js analisa`** monta a proposta (a combinação de venda
+  mais recente) e as **verificações**; o que é erro conhecido **já vem corrigido na proposta** (pedido do Anderson:
+  "o que verificar de erro, a partir daqui já fazemos o certo"): papel higiênico = NCM 4818.10.00 e PIS/COFINS
+  CST 06 (alíquota zero, Lei 10.925/2004 art. 1º XXVIII); CST 01 fora de 1,65%/7,6% vira 1,65%/7,6% (Lucro Real);
+  ST (5405) exige CST 60 e CEST; CST 60 com 5102 é erro; toalha com NCM de papel higiênico; NCM, GTIN, origem ou
+  tributação que mudaram no histórico. **`crm_fiscal_produtos`**: a regra (proposta/conferido), só admin.
+- **Aba Fiscal** (só admin): 1) ler a tributação das notas; 2) regra de cada produto com filtros (erro, olhar,
+  sem alerta, conferidos), ✎ ajustar, "Conferido", "Marcar os sem alerta", **exportar a tabela para o "de acordo"
+  do contador**; 3) clientes com nota que ainda não têm o necessário para a NF-e.
+- **Achado de 15/10** (antes de ler os XML): o produto 300005 "PAPEL HIGIENICO ROLAO LUXO POP" saiu com NCM
+  4818.10.00 até 15/04/2026 e **4818.20.00 desde 23/04/2026** (691 itens); "TOALHA BOB.BCO.6X20X200" saiu com o
+  NCM do papel higiênico. A verificação de PIS/COFINS só aparece depois de ler os XML.
+- **Vigia da legislação fiscal** (tarefa agendada da conta do Anderson, como o "Vigia da legislação (DP
+  Agilité)"): lê `docs/legislacao/monitoramento.md` (o que o sistema usa) e `docs/legislacao/registro.md` (o que
+  já foi avisado), pesquisa as fontes oficiais e grava achado novo **só** no `registro.md` (commit no main).
+
 ## Ofertas: queima de estoque (15/10/2026, pedido do Anderson)
 
 "Fazer girar" o estoque parado (sem venda em 90 dias) com preço de custo + margem pequena, por e-mail
