@@ -1290,6 +1290,13 @@ ligado ao domínio; **começa com fila de aprovação** (nada sai sozinho); reme
   modo em que o clique simples marca (em vez de abrir o item); barra igual no alto da grade, item marcado com contorno dourado.
 - **Empréstimo/transferência já pago (14/10, pedido do Anderson):** o quadro azul continua azul, mas com **letra e borda verdes**
   quando já foi pago ou recebido (`.cx-it.emprestimo.feito/.fora`); o previsto segue com letra branca. Legenda "🔁 empréstimo já pago".
+- **Diferença na conferência com o banco (15/10, pedido do Anderson: CRM R$ 31.980,67 × banco R$ 31.913,29 — "senão essa
+  diferença vai ficar perdida; foram tarifas bancárias").** Depois de "Usar este saldo", se o banco der diferente do CRM, abre
+  "Diferença de R$ X a menos/a mais no banco" (`formDiferenca` em `caixa.js`) para lançar: conta em aberto do mesmo valor
+  ("Era a conta …", até 3, vencendo até 7 dias depois), Tarifas bancárias, Juros/IOF, Outra saída (categoria) — ou, se entrou a
+  mais, Rendimento, Estorno de tarifa, Outra entrada — ou "Não lançar". O lançado fica **pago fora do caixa** (`baixa: 'fora'`)
+  no dia do saldo, então não mexe no saldo (o banco já conta). Valor editável (parte da diferença); aviso se a diferença passar
+  de R$ 300 (pode ser baixa esquecida). Saldo de dia passado com baixas depois dele: só o aviso, sem a janela.
 - **PRÓXIMO (combinado em 14/10 para 15/10) — boleto à vendedora sem passar pelo compartilhar.** O Anderson reclamou que o
   "📎 Compartilhar os PDFs" abre o compartilhar do Windows e ele ainda escolhe o WhatsApp e a vendedora. Limite do navegador:
   o link do WhatsApp (wa.me) só leva texto; arquivo só pelo compartilhar, que não escolhe contato. Combinado:

@@ -239,8 +239,57 @@
         const r = await CRM.store().inserir('fin_saldos', { data: v.data, valor: r2(v.valor), observacao: v.observacao || null });
         F.saldos.push(r);
         const dif = s.saldo == null ? null : r2(v.valor - s.saldo);
-        CRM.toast(dif == null || !dif ? 'Saldo do banco gravado.' : 'Saldo do banco gravado. Diferença para o CRM: ' + (dif > 0 ? '+' : '') + R.moeda(dif) + '.');
+        // saldo de um dia passado com baixas depois dele: a comparação com o "agora" do CRM não vale
+        const baixouDepois = F.lancamentos.some(l => l.situacao === 'pago' && l.baixa === 'caixa' && l.pago_em > v.data);
         CRM.render();
+        if (dif && !baixouDepois) setTimeout(() => formDiferenca(dif, v.data, s.saldo, r2(v.valor)), 0);
+        else CRM.toast(dif == null || !dif ? 'Saldo do banco gravado.' : 'Saldo do banco gravado. Diferença para o CRM: ' + (dif > 0 ? '+' : '') + R.moeda(dif) + '.');
+      }
+    });
+  }
+  // Diferença entre o banco e o CRM na conferência (15/10/2026, Anderson: "senão essa diferença vai ficar perdida; foram
+  // tarifas bancárias"): oferece lançar a diferença, já paga FORA do caixa (o saldo do banco informado já a desconta, então
+  // não mexe no saldo), na categoria certa. Conta em aberto do mesmo valor vira opção ("era esta conta").
+  function formDiferenca(dif, dia, saldoCrm, saldoBanco) {
+    const saida = dif < 0, valor = Math.abs(dif);
+    const iguais = F.lancamentos.filter(l => l.situacao === 'aberto' && (l.tipo === 'entrada') === !saida && Math.abs(Number(l.valor) - valor) < 0.005 && l.vencimento <= R.somaDias(dia, 7))
+      .sort((a, b) => a.vencimento.localeCompare(b.vencimento)).slice(0, 3);
+    const opcoes = iguais.map(l => ['conta:' + l.id, 'Era a conta "' + l.descricao + '" (' + R.dataBR(l.vencimento) + ') — dar como paga']).concat(saida
+      ? [['tarifa', 'Tarifas bancárias (boleto, Pix, manutenção da conta)'], ['juros', 'Juros ou IOF do banco'], ['outra', 'Outra saída que não foi lançada'], ['nada', 'Não lançar (só acertar o saldo)']]
+      : [['rendimento', 'Rendimento da conta'], ['estorno', 'Estorno ou devolução de tarifa'], ['outra', 'Outra entrada que não foi lançada'], ['nada', 'Não lançar (só acertar o saldo)']]);
+    const grande = valor >= 300;
+    CRM.abrirForm({
+      titulo: 'Diferença de ' + R.moeda(valor) + (saida ? ' a menos no banco' : ' a mais no banco'),
+      intro: 'Saldo do banco gravado: ' + R.moeda(saldoBanco) + ' em ' + R.dataBR(dia) + '. Pelo CRM era ' + R.moeda(saldoCrm) + '.\n' +
+        (saida ? 'Saiu do banco ' : 'Entrou no banco ') + R.moeda(valor) + ' que não estava no CRM. Lance aqui para não perder: fica como ' + (saida ? 'paga' : 'recebida') +
+        ' em ' + R.dataBR(dia) + ' e não mexe no saldo (o banco já conta).' +
+        (grande ? '\nValor alto para ser só tarifa: confira antes se não falta dar baixa em alguma conta ou título do dia.' : ''),
+      campos: [{ nome: 'como', rotulo: 'O que foi', tipo: 'select', opcoes, largo: true },
+        { nome: 'valor', rotulo: 'Valor (R$)', tipo: 'numero', dica: 'pode ser só uma parte da diferença' },
+        { nome: 'categoria', rotulo: 'Categoria (para "Outra")', sugestoes: saida ? CATEGORIAS_SAIDA : CATEGORIAS_ENTRADA },
+        { nome: 'descricao', rotulo: 'Descrição (opcional)', largo: true, dica: saida ? 'ex.: tarifas de boleto de outubro' : 'ex.: rendimento da aplicação' }],
+      valores: { como: iguais.length ? opcoes[0][0] : (saida ? 'tarifa' : 'rendimento'), valor },
+      salvarTexto: 'Lançar',
+      aoSalvar: async v => {
+        if (v.como === 'nada') { CRM.toast('Saldo do banco gravado; a diferença de ' + R.moeda(valor) + ' não foi lançada.'); return; }
+        const val = r2(v.valor);
+        if (!(val > 0)) throw new Error('Informe o valor.');
+        const baixa = { situacao: 'pago', pago_em: dia, baixa: 'fora', baixado_em: agora() };
+        if (String(v.como).indexOf('conta:') === 0) {
+          const l = lanc(v.como.slice(6));
+          if (!l) throw new Error('Conta não encontrada.');
+          await grava(l.id, Object.assign({ valor: val }, baixa));
+          CRM.toast('"' + l.descricao + '" dada como paga em ' + R.dataBR(dia) + '.');
+          return;
+        }
+        const PADRAO = { tarifa: ['Tarifas bancárias', 'Tarifas bancárias'], juros: ['Tarifas bancárias', 'Juros e IOF do banco'],
+          rendimento: ['Outras entradas', 'Rendimento da conta'], estorno: ['Outras entradas', 'Estorno de tarifa do banco'] }[v.como];
+        const categoria = PADRAO ? PADRAO[0] : String(v.categoria || '').trim() || (saida ? 'Outras saídas' : 'Outras entradas');
+        const descricao = String(v.descricao || '').trim() || (PADRAO ? PADRAO[1] : saida ? 'Saída não lançada' : 'Entrada não lançada') + ' (conferência de ' + R.dataBR(dia).slice(0, 5) + ')';
+        await insere(Object.assign({ tipo: saida ? 'saida' : 'entrada', descricao, categoria, valor: val, vencimento: dia, origem: 'tela',
+          observacoes: 'Diferença na conferência com o banco em ' + R.dataBR(dia) + ': CRM ' + R.moeda(saldoCrm) + ', banco ' + R.moeda(saldoBanco) + '.' }, baixa));
+        CRM.toast(R.moeda(val) + ' lançado em ' + categoria + ' (' + (saida ? 'pago' : 'recebido') + ' em ' + R.dataBR(dia) + ', sem mexer no saldo).' +
+          (val < valor - 0.005 ? ' Faltam ' + R.moeda(valor - val) + ' da diferença.' : ''));
       }
     });
   }
