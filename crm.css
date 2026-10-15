@@ -796,3 +796,4 @@ tr.apagado td { opacity: .55; }
 .cx-dif-conf.menos { background: var(--vermelho-fundo); color: var(--vermelho); }
 .cx-dif-conf.mais { background: var(--verde-fundo); color: var(--verde); }
 .cx-dif-conf.ok { background: var(--verde-fundo); color: var(--verde); }
+.wa-diag { white-space: pre-wrap; font-size: .75rem; background: var(--realce); padding: 8px; border-radius: 6px; max-height: 260px; overflow: auto; }

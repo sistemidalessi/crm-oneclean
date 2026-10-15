@@ -101,7 +101,25 @@ Deno.serve(async (req) => {
   try {
     if (c.acao === 'situacao') {
       if (faltam.length) return resposta(200, { ligado: false, faltam });
-      const numero = await graph(token, '/' + phoneId + '?fields=display_phone_number,verified_name,name_status,status,quality_rating,code_verification_status');
+      let numero: Record<string, unknown>;
+      try {
+        numero = await graph(token, '/' + phoneId + '?fields=display_phone_number,verified_name,name_status,status,quality_rating,code_verification_status');
+      } catch (e1) {
+        // diagnóstico (nunca devolve o token): permissões e contas que o token enxerga, e os números de cada conta
+        const diag: Record<string, unknown> = { erro: String((e1 as Error).message) };
+        try {
+          const dt = await graph(token, '/debug_token?input_token=' + encodeURIComponent(token));
+          const d = (dt.data || {}) as Record<string, unknown>;
+          diag.valido = d.is_valid; diag.app = d.app_id; diag.tipo = d.type; diag.expira = d.expires_at;
+          diag.permissoes = d.scopes;
+          diag.alvos = ((d.granular_scopes as { scope: string; target_ids?: string[] }[]) || []).map(g => g.scope + ': ' + (g.target_ids || ['todos']).join(','));
+        } catch (e2) { diag.debug = String((e2 as Error).message); }
+        try {
+          const nums = await graph(token, '/' + wabaId + '/phone_numbers?fields=id,display_phone_number,verified_name,status');
+          diag.numeros_da_conta = nums.data;
+        } catch (e3) { diag.conta = String((e3 as Error).message); }
+        return resposta(200, { ligado: false, erro: diag.erro, diagnostico: diag });
+      }
       const lm = await graph(token, '/' + wabaId + '/message_templates?name=' + MODELO + '&fields=name,status,language,rejected_reason');
       const modelo = ((lm.data as Record<string, unknown>[]) || []).find(m => m.language === 'pt_BR') || null;
       return resposta(200, { ligado: true, numero, modelo });

@@ -917,6 +917,7 @@
     if (!w) return '';
     if (!w.ligado) return '<section class="cartao"><h2>WhatsApp oficial (Meta)</h2><p>' + CRM.selo('não ligado', 'ambar') + ' ' +
       esc(w.erro || (w.faltam ? 'falta nos segredos do Supabase: ' + w.faltam.join(', ') : '')) + '</p>' +
+      (w.diagnostico ? '<details open><summary>O que a Meta diz do token (para o suporte)</summary><pre class="wa-diag">' + esc(JSON.stringify(Object.assign({}, w.diagnostico, { erro: undefined }), null, 1)) + '</pre></details>' : '') +
       '<p class="dica">O passo a passo está em sistemi-dalessi/docs/meta-whatsapp-passo-a-passo.md. A chave da Meta vai só nos segredos do Supabase, nunca no chat.</p></section>';
     const n = w.numero || {}, m = w.modelo;
     const nome = { APPROVED: ['aprovado', 'verde'], PENDING_REVIEW: ['em análise', 'ambar'], DECLINED: ['recusado', 'vermelho'] }[n.name_status] || [n.name_status || '?', 'cinza'];
