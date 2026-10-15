@@ -1149,6 +1149,14 @@ Sefaz por um serviço fiscal na VPS da Agilité; notas de compra pelo DF-e; bole
   foram acertadas no banco. Também: papel com a regra atual certa mas vendas antigas com CST 01 ganha o aviso
   "PIS/COFINS cobrado … falar com o contador". `crm_fiscal_grava` completa o **número** do endereço quando o cadastro
   (Agendor) tem a mesma rua sem número (18 clientes; a última nota de cada um ficou para reler).
+- **Releitura feita pelo Anderson às 20:23 (15/10):** propostas refeitas com as duas correções (1.190 produtos): 89 de
+  limpeza com erro corrigido (ST → 5102/00/18%), 6 papéis com PIS/COFINS cobrado na última venda (300005 incluso), 25
+  papéis certos hoje com o aviso do PIS/COFINS cobrado até março, dispensers acertados. Endereços: 15 dos 18 completados;
+  faltam 3 (Rua Cristoforo Mantegazza, Av. Cons. Rodrigues Alves, Rua da Mooca — a rua da nota não bate com a do
+  cadastro; completar à mão). **Retomar daqui (16/10):** ver o que o vigia da legislação gravou de manhã (e se só mexeu
+  no `registro.md`); levar ao contador PIS/COFINS do papel, limpeza com ST desde 01/08 e a dúvida da perfumaria/higiene
+  (papel e toalha) fora da ST desde 01/04; depois do "de acordo", corrigir no FKN o 300005 e a ST da limpeza; seguir a
+  Fase 2 do `plano-sair-do-fkn.md` (estoque no CRM em paralelo).
 - **Vigia da legislação fiscal** (tarefa agendada da conta do Anderson, como o "Vigia da legislação (DP
   Agilité)"): lê `docs/legislacao/monitoramento.md` (o que o sistema usa) e `docs/legislacao/registro.md` (o que
   já foi avisado), pesquisa as fontes oficiais e grava achado novo **só** no `registro.md` (commit no main).
