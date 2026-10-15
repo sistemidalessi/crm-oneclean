@@ -6,6 +6,21 @@ urgência. O vigia só escreve aqui; quem muda o sistema é a sessão de desenvo
 
 <!-- novas entradas abaixo desta linha -->
 
+## 15/10/2026 — Perfumaria e higiene pessoal fora da ST em SP desde 01/04/2026 (A CONFIRMAR para papel)
+- **O que mudou:** notícias de contabilidades citam a **Portaria SRE 94/2025** (DOE 23/12/2025), que revogou o
+  **Anexo XI da Portaria CAT 68/2019** (perfumaria e higiene pessoal) e a SRE 48/2025 (MVA), com efeito em
+  **01/04/2026**. Uma fonte cita "SRE 09/2026" e uma exclusão de "papel e papelaria" em 01/07/2026 — não confirmado.
+- **Link oficial:** https://legislacao.fazenda.sp.gov.br/paginas/Portaria-CAT-68-de-2019.aspx (a rede da sessão barrou
+  o site; texto oficial **não lido**).
+- **Ponto em aberto:** se o papel higiênico (CEST 20.042.00, 4818.10.00) e as toalhas/interfolhas de papel (CEST
+  20.044.00, 4818.20.00) estavam no Anexo XI de SP. Nas notas do CRM, desde 01/04/2026 saíram **R$ 692 mil** em itens de
+  CEST do segmento 20 com **5405/CST 60** (toalha bobina, papel higiênico 300005 e mexedor de café são quase tudo) e
+  R$ 354 mil com 5102/CST 00. Também há CEST incoerente com o NCM no cadastro do FKN (ex.: mexedor de café 3924.10.00
+  com CEST 20.062.00; gel clarificante 2827.32.00 com CEST 20.044.00).
+- **O que muda no sistema:** se confirmado, `fiscal.js` trata o segmento 20 como fora da ST desde 01/04/2026 (igual à
+  limpeza desde 01/08) e as notas com 5405 depois disso vão para o contador. Até lá, **nada no código**.
+- **Urgência:** **alta** — valor grande; confirmar com o contador e com o texto oficial.
+
 ## 15/10/2026 — ICMS-ST em SP: produtos de limpeza fora da ST desde 01/08/2026
 - **O que mudou:** a Portaria SRE nº 20/2026 (DOE 05/05/2026) revogou os Anexos XII (ração) e XIII (**produtos de
   limpeza**: detergentes, desinfetantes, multiuso, sabões, água sanitária, alvejantes) da Portaria CAT 68/2019 e a
