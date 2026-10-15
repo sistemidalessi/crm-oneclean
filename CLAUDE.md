@@ -1136,6 +1136,8 @@ Sefaz por um serviço fiscal na VPS da Agilité; notas de compra pelo DF-e; bole
 - **Vigia da legislação fiscal** (tarefa agendada da conta do Anderson, como o "Vigia da legislação (DP
   Agilité)"): lê `docs/legislacao/monitoramento.md` (o que o sistema usa) e `docs/legislacao/registro.md` (o que
   já foi avisado), pesquisa as fontes oficiais e grava achado novo **só** no `registro.md` (commit no main).
+  Tarefa `trig_01Fj1PUHgs6Tv7x8dcNogmZx`, dias úteis às 6:52 (Brasília), sessão nova a cada rodada (abre o repositório
+  com add_repo), aviso no celular do Anderson; 1ª rodada disparada à mão em 15/10 ~16:40.
 
 ## Ofertas: queima de estoque (15/10/2026, pedido do Anderson)
 
