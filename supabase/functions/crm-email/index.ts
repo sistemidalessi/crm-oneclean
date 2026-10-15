@@ -2,6 +2,8 @@
 // do cliente (a resposta do cliente vai para ela). Chamada pelo CRM com o login de quem aprova a fila.
 //   POST { acao: 'situacao' }                     → { ligado } (a chave do Brevo está configurada?)
 //   POST { acao: 'enviar', empresa_id, tipo, campanha_id?, assunto, corpo, para?, sair_url, marca }
+//   POST { acao: 'enviar', tipo: 'oferta', oferta_id, destaques?: [códigos], ... } → queima de estoque (15/10/2026):
+//        a tabela de preços sai do BANCO (crm_ofertas) no lugar de {itens}; cada cliente recebe cada oferta uma vez
 //   POST { acao: 'aberturas' }                    → lê no Brevo quem abriu/clicou nos últimos 30 dias
 // Segurança: o cliente só é achado se quem chama enxerga a empresa (RLS, com o login dele); os
 // destinatários vêm do BANCO (o app pode só tirar algum, nunca pôr outro); limite por dia; quem pediu
@@ -26,9 +28,29 @@ async function assina(texto: string) {
   return [...new Uint8Array(s)].slice(0, 16).map(x => x.toString(16).padStart(2, '0')).join('');
 }
 
+const moeda = (v: number) => { const [i, d] = Math.abs(Number(v) || 0).toFixed(2).split('.'); return 'R$ ' + i.replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ',' + d; };
+type ItemOferta = { codigo: string; descricao: string; unidade?: string; preco: number; preco_tabela?: number | null };
+// Tabela da oferta (preços do banco): os itens que o cliente já comprou primeiro.
+function tabelaOferta(itens: ItemOferta[], cor: string, validade: string) {
+  const linhas = itens.map(it => {
+    const de = Number(it.preco_tabela) > Number(it.preco) + 0.005 ? Number(it.preco_tabela) : 0;
+    const pct = de ? Math.round((1 - Number(it.preco) / de) * 100) : 0;
+    return '<tr><td style="padding:8px 6px;border-bottom:1px solid #e5e9ee">' + esc(it.descricao) + (it.unidade ? ' <span style="color:#6b7785">(' + esc(it.unidade) + ')</span>' : '') + '</td>' +
+      '<td style="padding:8px 6px;border-bottom:1px solid #e5e9ee;text-align:right;white-space:nowrap">' + (de && pct >= 3 ? '<s style="color:#9aa5b1">' + moeda(de) + '</s><br>' : '') +
+      '<strong style="color:' + cor + ';font-size:16px">' + moeda(it.preco) + '</strong>' + (de && pct >= 3 ? '<br><span style="font-size:12px;color:#2f8132">-' + pct + '%</span>' : '') + '</td></tr>';
+  }).join('');
+  return '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:4px 0 16px;border-collapse:collapse;font-size:14px">' +
+    '<tr><th align="left" style="padding:6px;border-bottom:2px solid ' + cor + '">Produto</th><th align="right" style="padding:6px;border-bottom:2px solid ' + cor + '">Preço</th></tr>' + linhas + '</table>' +
+    '<p style="margin:0 0 14px;font-size:12px;color:#6b7785">Válido até ' + esc(validade) + ' ou enquanto durar o estoque. Preço unitário, sem frete.</p>';
+}
+const textoOferta = (itens: ItemOferta[]) => itens.map(it => '• ' + it.descricao + (it.unidade ? ' (' + it.unidade + ')' : '') + ': ' + moeda(it.preco) +
+  (Number(it.preco_tabela) > Number(it.preco) + 0.005 ? ' (de ' + moeda(Number(it.preco_tabela)) + ')' : '')).join('\n');
+
 // Texto da fila (com quebras de linha) → HTML simples, que abre bem em qualquer leitor de e-mail.
-function html(corpo: string, m: { nome: string; cor: string; logo: string }, rodape: string, sair: string) {
-  const paragrafos = esc(corpo).split(/\n{2,}/).map(p => '<p style="margin:0 0 14px">' + p.replace(/\n/g, '<br>') + '</p>').join('');
+// Com "tabela" (oferta), o parágrafo {itens} vira a tabela de preços.
+function html(corpo: string, m: { nome: string; cor: string; logo: string }, rodape: string, sair: string, tabela = '') {
+  const paragrafos = esc(corpo).split(/\n{2,}/).map(p => (tabela && p.trim() === '{itens}' ? tabela
+    : '<p style="margin:0 0 14px">' + p.replace(/\n/g, '<br>') + '</p>' + (tabela && p.includes('{itens}') ? tabela : ''))).join('').replace(/\{itens\}/g, '');
   return '<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>' +
     '<body style="margin:0;padding:0;background:#f3f5f7"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f5f7"><tr><td align="center" style="padding:24px 12px">' +
     '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:#ffffff;border-radius:10px;overflow:hidden;font-family:Arial,Helvetica,sans-serif;color:#1f2933">' +
@@ -82,7 +104,7 @@ Deno.serve(async (req) => {
   const tipo = String(c.tipo ?? '');
   const assunto = String(c.assunto ?? '').trim().slice(0, 200);
   const corpo = String(c.corpo ?? '').trim().slice(0, 20000);
-  if (!['reposicao', 'relacionamento'].includes(tipo)) return resposta(400, { erro: 'tipo inválido' });
+  if (!['reposicao', 'relacionamento', 'oferta'].includes(tipo)) return resposta(400, { erro: 'tipo inválido' });
   if (!assunto || !corpo) return resposta(400, { erro: 'assunto e texto são obrigatórios' });
   let sair: URL;
   try { sair = new URL(String(c.sair_url ?? '')); } catch { return resposta(400, { erro: 'endereço de descadastro inválido' }); }
@@ -106,8 +128,25 @@ Deno.serve(async (req) => {
   const inicioDia = new Date(hojeSP() + 'T00:00:00-03:00').toISOString();
   const { count } = await db.from('crm_email_envios').select('id', { count: 'exact', head: true }).eq('situacao', 'enviado').gte('criado_em', inicioDia);
   if ((count ?? 0) >= limite) return resposta(429, { erro: 'chegou ao limite de ' + limite + ' e-mails da cadência por dia; o resto fica para amanhã' });
-  const { data: recente } = await db.from('crm_email_envios').select('criado_em').eq('empresa_id', emp.id).eq('situacao', 'enviado').gte('criado_em', new Date(Date.now() - 4 * 864e5).toISOString()).limit(1);
-  if (recente && recente.length) return resposta(409, { erro: 'este cliente já recebeu um e-mail da cadência nos últimos dias' });
+  // oferta: ativa, no prazo, uma vez por cliente; a tabela de preços vem do banco (o app não manda preço)
+  let oferta: { id: string; validade: string; itens: ItemOferta[] } | null = null;
+  let itensOferta: ItemOferta[] = [];
+  if (tipo === 'oferta') {
+    const { data: o } = await db.from('crm_ofertas').select('id, validade, ativa, itens').eq('id', String(c.oferta_id ?? '')).maybeSingle();
+    if (!o) return resposta(400, { erro: 'oferta não encontrada' });
+    if (!o.ativa || String(o.validade) < hojeSP()) return resposta(409, { erro: 'a oferta está encerrada ou vencida' });
+    const { data: ja } = await db.from('crm_email_envios').select('id').eq('empresa_id', emp.id).eq('oferta_id', o.id).eq('situacao', 'enviado').limit(1);
+    if (ja && ja.length) return resposta(409, { erro: 'este cliente já recebeu esta oferta' });
+    oferta = o as typeof oferta;
+    const destaques = Array.isArray(c.destaques) ? (c.destaques as unknown[]).map(String) : [];
+    const ord = new Map(destaques.map((k, i) => [k, i]));
+    itensOferta = ((o.itens ?? []) as ItemOferta[]).filter(it => it && it.descricao && Number(it.preco) > 0).slice(0, 60)
+      .sort((a, b) => (ord.get(String(a.codigo)) ?? 1e6) - (ord.get(String(b.codigo)) ?? 1e6));
+    if (!itensOferta.length) return resposta(400, { erro: 'a oferta não tem itens' });
+  } else {
+    const { data: recente } = await db.from('crm_email_envios').select('criado_em').eq('empresa_id', emp.id).eq('situacao', 'enviado').gte('criado_em', new Date(Date.now() - 4 * 864e5).toISOString()).limit(1);
+    if (recente && recente.length) return resposta(409, { erro: 'este cliente já recebeu um e-mail da cadência nos últimos dias' });
+  }
   let campanha: string | null = null;
   if (c.campanha_id) {
     const { data: k } = await db.from('crm_email_campanhas').select('id').eq('id', String(c.campanha_id)).maybeSingle();
@@ -128,15 +167,18 @@ Deno.serve(async (req) => {
   sair.search = '?t=' + emp.id + '.' + await assina('sair:' + emp.id);
   const rodape = 'Este e-mail foi enviado por ' + rem.nome + ' (' + rem.email + '), da ' + marca.nome + '. É só responder para falar com ' + String(rem.nome).split(' ')[0] + '.';
 
+  const validadeBR = oferta ? String(oferta.validade).split('-').reverse().join('/') : '';
+  const tabela = oferta ? tabelaOferta(itensOferta, marca.cor, validadeBR) : '';
+  const corpoTexto = oferta ? corpo.replace(/\{itens\}/g, textoOferta(itensOferta)) : corpo;
   const r = await fetch('https://api.brevo.com/v3/smtp/email', {
     method: 'POST', headers: { 'api-key': chave, 'content-type': 'application/json', accept: 'application/json' },
     body: JSON.stringify({ sender: { name: rem.nome + ' · ' + marca.nome, email: rem.email }, replyTo: { name: rem.nome, email: rem.email },
-      to: para.map(email => ({ email })), subject: assunto, htmlContent: html(corpo, marca, rodape, sair.href),
-      textContent: corpo + '\n\n--\n' + rodape + '\nNão quer mais receber estes e-mails? ' + sair.href,
-      headers: { 'List-Unsubscribe': '<' + sair.href + '>' }, tags: ['cadencia', tipo] })
+      to: para.map(email => ({ email })), subject: assunto, htmlContent: html(corpo, marca, rodape, sair.href, tabela),
+      textContent: corpoTexto + '\n\n--\n' + rodape + '\nNão quer mais receber estes e-mails? ' + sair.href,
+      headers: { 'List-Unsubscribe': '<' + sair.href + '>' }, tags: [oferta ? 'oferta' : 'cadencia', tipo] })
   });
   const j = await r.json().catch(() => ({}));
-  const base = { empresa_id: emp.id, responsavel_id: rem.user_id, tipo, campanha_id: campanha, para, assunto, corpo, enviado_por: eu.user_id };
+  const base = { empresa_id: emp.id, responsavel_id: rem.user_id, tipo, campanha_id: campanha, oferta_id: oferta ? oferta.id : null, para, assunto, corpo: corpoTexto, enviado_por: eu.user_id };
   if (!r.ok) {
     const erro = 'o Brevo recusou (' + r.status + '): ' + String((j as Record<string, unknown>).message ?? '').slice(0, 300);
     await db.from('crm_email_envios').insert({ ...base, situacao: 'erro', erro });
@@ -144,6 +186,6 @@ Deno.serve(async (req) => {
   }
   const { data: env } = await db.from('crm_email_envios').insert({ ...base, situacao: 'enviado', provedor_id: String((j as Record<string, unknown>).messageId ?? '') }).select().single();
   await db.from('crm_atividades').insert({ empresa_id: emp.id, tipo: 'email', concluida: true, concluida_em: new Date().toISOString(), automatica: true,
-    responsavel_id: rem.user_id, criado_por: eu.user_id, descricao: 'E-mail da cadência (' + (tipo === 'reposicao' ? 'reposição' : 'relacionamento') + '): ' + assunto + ' — para ' + para.join(', ') });
+    responsavel_id: rem.user_id, criado_por: eu.user_id, descricao: (oferta ? 'E-mail da oferta (queima de estoque): ' : 'E-mail da cadência (' + (tipo === 'reposicao' ? 'reposição' : 'relacionamento') + '): ') + assunto + ' — para ' + para.join(', ') });
   return resposta(200, { ok: true, envio: env });
 });

@@ -1688,3 +1688,37 @@ begin
     create policy crm_notas_xml_grava on storage.objects for insert to authenticated with check (bucket_id = 'crm-notas-xml' and (select public.crm_eh_admin()));
   end if;
 end $$;
+
+-- =================================================================== ofertas: queima de estoque (15/10/2026)
+-- Pedido do Anderson: girar o estoque parado (sem venda em 90 dias) com preço de custo + margem pequena,
+-- por e-mail (Brevo, em nome da vendedora, crm-email tipo 'oferta') e WhatsApp (a vendedora abre a
+-- conversa com o texto pronto). O administrador monta a oferta em Compras (lê o custo do estoque); a
+-- oferta guarda SÓ o preço de oferta e o de tabela, nunca o custo (a equipe toda lê a oferta).
+create table if not exists public.crm_ofertas (
+  id             uuid primary key default gen_random_uuid(),
+  titulo         text not null check (length(btrim(titulo)) > 0),
+  validade       date not null,
+  itens          jsonb not null default '[]'::jsonb, -- [{ codigo, descricao, unidade, saldo, preco, preco_tabela, familia }]
+  assunto        text not null default '',
+  corpo          text not null default '',
+  whatsapp       text not null default '',
+  ativa          boolean not null default true,
+  criado_por     uuid default auth.uid(),
+  criado_em      timestamptz not null default now(),
+  atualizado_em  timestamptz not null default now()
+);
+drop trigger if exists crm_ofertas_atualizado_em on public.crm_ofertas;
+create trigger crm_ofertas_atualizado_em before update on public.crm_ofertas for each row execute function public.crm_toca_atualizado_em();
+alter table public.crm_ofertas enable row level security;
+revoke all on public.crm_ofertas from anon, public;
+grant select, insert, update, delete on public.crm_ofertas to authenticated;
+revoke truncate, references, trigger on public.crm_ofertas from authenticated;
+drop policy if exists le on public.crm_ofertas;
+drop policy if exists grava on public.crm_ofertas;
+create policy le on public.crm_ofertas for select to authenticated using ((select public.crm_eh_membro()));
+create policy grava on public.crm_ofertas for all to authenticated using ((select public.crm_eh_gestor())) with check ((select public.crm_eh_gestor()));
+-- o e-mail da oferta entra no mesmo histórico da cadência (tipo 'oferta'); cada cliente recebe cada oferta uma vez
+alter table public.crm_email_envios add column if not exists oferta_id uuid references public.crm_ofertas(id) on delete set null;
+alter table public.crm_email_envios drop constraint if exists crm_email_envios_tipo_check;
+alter table public.crm_email_envios add constraint crm_email_envios_tipo_check check (tipo in ('reposicao', 'relacionamento', 'oferta'));
+create index if not exists crm_email_envios_oferta_idx on public.crm_email_envios (oferta_id) where oferta_id is not null;

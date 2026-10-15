@@ -80,7 +80,7 @@
   function formCampanha(c) {
     const segs = (E().D.opcoes || []).filter(o => o.tipo === 'segmento').map(o => [o.nome, o.nome]);
     CRM.abrirForm({
-      titulo: c ? 'Campanha' : 'Nova campanha', largura: 'larga',
+      titulo: c ? 'Campanha' : 'Nova campanha', largura: 'largo',
       intro: 'Vai para os clientes da cadência, em nome da vendedora de cada um. Variáveis: ' + VARIAVEIS + ' — {itens} é o que o cliente costuma levar.',
       campos: [{ nome: 'assunto', rotulo: 'Assunto', obrigatorio: true, largo: true, dica: 'Novidades da {minha_empresa} para {empresa}' },
         { nome: 'corpo', rotulo: 'Texto', tipo: 'textarea', linhas: 10, obrigatorio: true, largo: true,

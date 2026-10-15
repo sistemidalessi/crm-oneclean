@@ -273,6 +273,7 @@ body.arrastando-card .zonas-fim { display: grid; grid-template-columns: 1fr 1fr;
 /* ---------- diálogos ---------- */
 .dlg { border: 1px solid var(--borda); border-radius: 14px; padding: 0; background: var(--papel); color: var(--texto); width: min(620px, calc(100vw - 32px)); max-height: calc(100vh - 32px); box-shadow: 0 20px 60px rgba(0, 0, 0, .3); }
 .dlg.largo { width: min(820px, calc(100vw - 32px)); }
+.dlg.extra { width: min(1180px, calc(100vw - 32px)); }
 .dlg::backdrop { background: rgba(10, 18, 32, .55); }
 .ficha-dlg { width: min(1440px, calc(100vw - 32px)); height: calc(100vh - 32px); }
 .ficha-dlg.media { width: min(1180px, calc(100vw - 64px)); height: calc(100vh - 64px); }
@@ -797,3 +798,15 @@ tr.apagado td { opacity: .55; }
 .cx-dif-conf.mais { background: var(--verde-fundo); color: var(--verde); }
 .cx-dif-conf.ok { background: var(--verde-fundo); color: var(--verde); }
 .wa-diag { white-space: pre-wrap; font-size: .75rem; background: var(--realce); padding: 8px; border-radius: 6px; max-height: 260px; overflow: auto; }
+
+/* Ofertas: queima de estoque (15/10/2026) */
+.of-montar .of-busca { min-width: 240px; flex: 1; }
+.of-tabela { max-height: 52vh; overflow: auto; }
+.of-tabela input.of-preco { width: 92px; text-align: right; }
+.of-tabela td small { display: block; color: var(--suave); }
+pre.of-previa { white-space: pre-wrap; font-family: inherit; font-size: .88rem; background: var(--realce); padding: 10px 12px; border-radius: 8px; margin: 4px 0 10px; }
+.abas-mini { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
+.abas-mini .mini.ativo { background: var(--marinho); color: #fff; border-color: var(--marinho); }
+.filtros-linha { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; margin: 4px 0 8px; }
+.of-chamada { border-left: 4px solid var(--ouro); }
+.of-chamada p { margin: 4px 0; }

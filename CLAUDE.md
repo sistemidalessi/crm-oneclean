@@ -1109,6 +1109,35 @@ ligado ao domínio; **começa com fila de aprovação** (nada sai sozinho); reme
 - **Depois (fase 2):** envio automático por cliente (o servidor monta a fila todo dia: precisa de pg_cron e da
   regra rodando na função) e a volta do e-mail (resposta do cliente vira atividade).
 
+## Ofertas: queima de estoque (15/10/2026, pedido do Anderson)
+
+"Fazer girar" o estoque parado (sem venda em 90 dias) com preço de custo + margem pequena, por e-mail
+e WhatsApp. Valor real do parado em 15/10: **R$ 79 mil em 271 produtos** (depois da correção das caixas).
+- **Montar (só administrador):** Compras → cartão "🔥 Queima de estoque" → "Montar oferta" (ou aba
+  Ofertas → "Nova oferta"). Lista o parado com custo, preço de tabela (FKN), preço de oferta editável
+  (custo + margem, padrão 10%, para cima no centavo), "Já compraram" e valor parado; vêm marcados os 25 de
+  maior valor que algum cliente já comprou. Campo opcional **"Impostos + comissão + frete sobre a venda (%)"**:
+  mostra a sobra de cada item, avisa prejuízo e tem "Subir ao mínimo sem prejuízo". **No Lucro Real,
+  custo + 10% pode dar prejuízo** (avisado ao Anderson); o percentual certo é do contador.
+- **`crm_ofertas`** (RLS: equipe lê, gestor/admin grava; ataque OK: vendedora lê e não grava, comprador e
+  anônimo não veem). **Nunca guarda o custo** (`itemParaGravar`): só preço de oferta, de tabela, saldo na
+  criação, família e os códigos da mesma família (`familia_codigos`, para achar quem compra parecido).
+- **Aba Ofertas (equipe toda; comprador não):** produtos e preços, prévia do e-mail e do WhatsApp,
+  resultado (e-mails, aberturas, vendido dos itens desde a criação e vendido a quem recebeu) e **quem recebe**
+  (`ofertas.js publico`): já comprou o item, compra a mesma família (12 meses) e, se marcar, todo cliente que
+  comprou em 12 meses. Segura duplicata em atraso/cartório, quem pediu para sair, sem e-mail e quem já recebeu.
+  A vendedora vê só a carteira dela (RLS).
+- **E-mail:** `crm-email` com `tipo: 'oferta'` + `oferta_id` + `destaques` (v10). Oferta ativa e no prazo,
+  **uma vez por cliente** (não usa a trava de 4 dias da cadência), mesmo limite diário. A linha `{itens}` do
+  texto vira a **tabela de preços tirada do banco** (o app não manda preço), com o que o cliente já comprou
+  primeiro; o texto puro leva a lista. `crm_email_envios.oferta_id` e tipo `'oferta'`.
+- **WhatsApp:** botão por cliente abre a conversa da vendedora com o texto e a lista (destaques primeiro),
+  registra a atividade e espera a volta do contato (mesmo caminho da ficha). Sem API: a Meta cobra marketing caro.
+- **"✨ Escrever com IA"** (Textos e IA): Edge Function **`crm-oferta-texto`** (v1, só admin/gestor) — Claude
+  escreve assunto, e-mail e WhatsApp com as variáveis do CRM e a linha `{itens}`; não escreve preço nem
+  "preço de custo"/"parado". Usa a mesma `ANTHROPIC_API_KEY` do Caixa (limite US$ 10/mês).
+- Regra pura em `ofertas.js` (testes `testes/ofertas.test.js`); a tela vem no mesmo arquivo.
+
 ## Junção dos negócios duplicados do Funil de Vendas (07/10/2026, pedido da líder via Anderson)
 
 - Herança do Agendor: o mesmo cliente com vários negócios abertos no **Funil de Vendas**. Autorizado pelo Anderson:

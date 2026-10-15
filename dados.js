@@ -12,7 +12,7 @@
 
   // Ordem importa: pais antes de filhos (importação/upsert respeita as FKs).
   const TABELAS = ['usuarios', 'config', 'etapas', 'opcoes', 'produtos', 'modelos', 'metas', 'filtros',
-    'empresas', 'contatos', 'negocios', 'negocio_itens', 'propostas', 'atividades', 'notas', 'nota_itens', 'titulos', 'email_campanhas', 'email_envios'];
+    'empresas', 'contatos', 'negocios', 'negocio_itens', 'propostas', 'atividades', 'notas', 'nota_itens', 'titulos', 'email_campanhas', 'email_envios', 'ofertas'];
   // Financeiro (contas a pagar e caixa): só o administrador; carregado à parte, ao abrir o Caixa.
   const FIN = ['fin_recorrentes', 'fin_lancamentos', 'fin_saldos', 'fin_regras', 'fin_titulos_baixados', 'fin_excluidos'];
   // Boletos atualizados da cobrança (14/10/2026): carregados à parte (poucos, e o comprador não lê).
@@ -56,7 +56,8 @@
     fin_titulos_baixados: { valor: 0 },
     fin_excluidos: { dados: {} },
     email_campanhas: { ativa: true },
-    email_envios: { situacao: 'pulado', para: [] }
+    email_envios: { situacao: 'pulado', para: [] },
+    ofertas: { itens: [], assunto: '', corpo: '', whatsapp: '', ativa: true }
   };
 
   // Filhos apagados junto (no Supabase é o "on delete cascade"/"set null").
@@ -283,7 +284,7 @@
   // "desde"; as tabelas pequenas (ou sem atualizado_em confiável, como os títulos, cuja data é a da
   // listagem do FKN) vêm inteiras. O que outro computador APAGOU sai pela conferência de ids (só a
   // chave de cada linha), de hora em hora. Carga completa: ao entrar e em "Recarregar dados".
-  const INTEIRAS = ['usuarios', 'config', 'etapas', 'opcoes', 'modelos', 'metas', 'filtros', 'titulos', 'email_campanhas', 'email_envios'];
+  const INTEIRAS = ['usuarios', 'config', 'etapas', 'opcoes', 'modelos', 'metas', 'filtros', 'titulos', 'email_campanhas', 'email_envios', 'ofertas'];
   const PARCIAIS = TABELAS.filter(t => INTEIRAS.indexOf(t) === -1);
   async function mudadas(sb, t, desde) {
     const out = [];
@@ -619,6 +620,13 @@
     }
     return r.data;
   };
+  // Textos da oferta de queima de estoque escritos pela IA (crm-oferta-texto).
+  Supa.prototype.ofertaTexto = async function (corpo) {
+    const r = await this.sb.functions.invoke('crm-oferta-texto', { body: corpo });
+    if (r.error) throw await erroDaFuncao(r);
+    return r.data;
+  };
+  Local.prototype.ofertaTexto = async function () { throw new Error('a IA só escreve com o Supabase ligado'); };
   // Modo local (demonstração e testes): "envia" sem sair do navegador — grava o envio e a atividade.
   Local.prototype.email = async function (corpo) {
     if (corpo.acao === 'situacao') return { ligado: true, local: true };
@@ -626,7 +634,7 @@
     const d = this.ler(), e = d.empresas.find(x => x.id === corpo.empresa_id);
     if (!e) throw new Error('cliente não encontrado');
     if (e.email_sair_em) throw new Error('o cliente pediu para não receber estes e-mails');
-    const env = this.novo(d, 'email_envios', { empresa_id: e.id, responsavel_id: e.responsavel_id || null, tipo: corpo.tipo, campanha_id: corpo.campanha_id || null,
+    const env = this.novo(d, 'email_envios', { empresa_id: e.id, responsavel_id: e.responsavel_id || null, tipo: corpo.tipo, campanha_id: corpo.campanha_id || null, oferta_id: corpo.oferta_id || null,
       situacao: 'enviado', para: corpo.para || [], assunto: corpo.assunto, corpo: corpo.corpo, provedor_id: 'local' });
     d.email_envios.push(env);
     d.atividades.push(this.novo(d, 'atividades', { empresa_id: e.id, tipo: 'email', concluida: true, concluida_em: new Date().toISOString(), automatica: true,

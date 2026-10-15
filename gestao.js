@@ -473,6 +473,7 @@
       const e = c.estoque;
       const l = filtraProdutos(c);
       ultimo = Object.assign({}, ultimo || {}, { c, filtrados: l });
+      CRM.comprasAtual = () => (estoque ? c : null); // a oferta de queima de estoque (ofertas.js) monta a partir daqui
       const botao = '<label class="btn sec arquivo" title="No FKN: Listagem cadastral de produtos (SIFN108), salvar em CSV. O CSV simples de estoque também serve.">Atualizar estoque (listagem do FKN)<input type="file" id="gEstoque" accept=".csv,.txt,text/csv"></label>';
       const velho = e && e.em && R.diasEntre(R.diaLocal(e.em), hoje) > 3;
       const curva = g => (g.classe === '—' ? '<small>—</small>' : CRM.selo(g.classe, g.classe === 'A' ? 'verde' : g.classe === 'B' ? 'azul' : 'etiqueta'));
@@ -496,7 +497,7 @@
           kpi('Em falta', String(c.ruptura.length), 'vendeu em 90 dias e está zerado', c.ruptura.length ? 'vermelho' : '', 'compras-kpi', 'falta') +
           kpi('Estoque parado', R.moeda(e.valorParado), c.parado.length + ' produtos sem venda em 90 dias', '', 'compras-kpi', 'parado') +
           kpi('Curva A', String(c.abc.A.length), 'produtos que fazem 80% do faturamento', '', 'compras-kpi', 'A') +
-        '</section>' : '') +
+        '</section>' : '') + (CRM.ofertas ? CRM.ofertas.botaoCompras(c) : '') +
         '<section class="cartao"><div class="filtros-compras">' +
           '<input type="search" id="cBusca" placeholder="Pesquisar produto ou código" value="' + esc(fc.busca) + '" aria-label="Pesquisar produto ou código">' +
           '<select id="cMostrar" aria-label="O que mostrar">' + CRM.opcoesHTML(MOSTRAR, fc.mostrar) + '</select>' +
