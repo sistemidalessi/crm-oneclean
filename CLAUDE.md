@@ -1317,7 +1317,7 @@ ligado ao domínio; **começa com fila de aprovação** (nada sai sozinho); reme
      verificada" por ora — sem verificação, até 250 destinatários/dia); app **CRM OneClean** (caso de uso WhatsApp); conta do
      WhatsApp Business **2185767059033904**; número = **linha fixa do galpão +55 11 2786-8106** (verificada por ligação; a linha
      comercial 98719-0372 NÃO serve: já está no WhatsApp e o caminho direto da Meta não tem coexistência — não migrar);
-     ID do número **1346241728578504**; status "Pendente" (nome OneClean em análise; "Registrar" falha até aprovar); cartão
+     ID do número **1346241728578054** (eu tinha lido 8578504 no print e o Secret ficou errado; corrigido em 15/10); status "Pendente" (nome OneClean em análise; "Registrar" falha até aprovar); cartão
      cadastrado; usuário do sistema **CRM OneClean** (61595458738738) criado. Falta: atribuir app + conta ao usuário do sistema,
      gerar o token (nunca expira) → Secret `WHATSAPP_TOKEN`; Secrets `WHATSAPP_PHONE_ID`, `WHATSAPP_WABA_ID`, `WHATSAPP_APP_ID`;
      registrar o número (PIN de 6 dígitos, com o Anderson); "Criar o modelo" em Integrações; teste no celular dele.
