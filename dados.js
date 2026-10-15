@@ -603,6 +603,13 @@
   Local.prototype.boletoLink = SO_SUPABASE;
 
   // E-mails da cadência: a Edge Function crm-email envia pelo Brevo (a chave fica só no Supabase).
+  // WhatsApp oficial da Meta (15/10/2026): Edge Function crm-whatsapp (só admin; a chave da Meta fica no Supabase)
+  Supa.prototype.whatsapp = async function (corpo) {
+    const r = await this.sb.functions.invoke('crm-whatsapp', { body: corpo });
+    if (r.error) throw await erroDaFuncao(r);
+    return r.data;
+  };
+  Local.prototype.whatsapp = async function (corpo) { return corpo && corpo.acao === 'situacao' ? { ligado: false, faltam: ['modo local'] } : Promise.reject(new Error('o WhatsApp da Meta só funciona com o Supabase ligado')); };
   Supa.prototype.email = async function (corpo) {
     const r = await this.sb.functions.invoke('crm-email', { body: corpo });
     if (r.error) {

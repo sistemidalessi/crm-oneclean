@@ -854,7 +854,7 @@
             '<button type="button" class="mini" data-acao="integ-excluir" data-id="' + esc(c.id) + '">excluir</button>' : '') + '</td></tr>').join('') + '</tbody></table>'
         : '<p class="vazio">' + (admin ? 'Nenhuma chave ainda.' : 'Só o administrador vê e gera as chaves.') + '</p>') +
       (admin ? '<p><button type="button" class="btn ouro" data-acao="integ-nova">Gerar chave para o vigia</button></p>' : '') + '</section>' +
-      (admin ? leituraCaixa(url, quando) + espelhoAgilite(url, quando) : '') +
+      (admin ? leituraCaixa(url, quando) + espelhoAgilite(url, quando) + whatsappMeta() : '') +
       '<section class="cartao"><h2>Últimas entregas <button type="button" class="mini" data-acao="integ-atualizar">atualizar</button></h2>' +
       (integ.registro.length ? '<table class="tabela"><thead><tr><th>Quando</th><th class="num">Arquivos</th><th class="num">Notas novas</th><th class="num">Valor</th><th class="num">Fora</th><th>Detalhes</th></tr></thead><tbody>' +
         integ.registro.map(l => {
@@ -880,6 +880,7 @@
     try {
       integ = await CRM.store().integracoes();
       integ.espelho = CRM.ehAdmin() && CRM.store().espelhoSituacao ? await CRM.store().espelhoSituacao().catch(() => null) : null;
+      integ.whatsapp = CRM.ehAdmin() && CRM.store().whatsapp ? await CRM.store().whatsapp({ acao: 'situacao' }).catch(e => ({ ligado: false, erro: e.message })) : null;
       CRM.render();
     } catch (e) { CRM.falhou(e); }
   }
@@ -909,6 +910,25 @@
   // Lançou, ajustou, deu ✓ ou desfez uma "Transferência entre empresas" aqui → o banco manda o par para a
   // Agilité (em até 1 min; fora do ar, tenta de novo a cada 10 min). O que a Agilité lança chega por
   // crm-caixa-espelho, com a senha de gravação gerada aqui.
+  // WhatsApp oficial da Meta (15/10/2026): o CRM manda sozinho o boleto atualizado, com o PDF completo, à vendedora.
+  const STATUS_META = { APPROVED: ['aprovado', 'verde'], PENDING: ['em análise na Meta', 'ambar'], REJECTED: ['recusado', 'vermelho'], PAUSED: ['pausado', 'ambar'], DISABLED: ['desligado', 'vermelho'] };
+  function whatsappMeta() {
+    const w = integ.whatsapp;
+    if (!w) return '';
+    if (!w.ligado) return '<section class="cartao"><h2>WhatsApp oficial (Meta)</h2><p>' + CRM.selo('não ligado', 'ambar') + ' ' +
+      esc(w.erro || (w.faltam ? 'falta nos segredos do Supabase: ' + w.faltam.join(', ') : '')) + '</p>' +
+      '<p class="dica">O passo a passo está em sistemi-dalessi/docs/meta-whatsapp-passo-a-passo.md. A chave da Meta vai só nos segredos do Supabase, nunca no chat.</p></section>';
+    const n = w.numero || {}, m = w.modelo;
+    const nome = { APPROVED: ['aprovado', 'verde'], PENDING_REVIEW: ['em análise', 'ambar'], DECLINED: ['recusado', 'vermelho'] }[n.name_status] || [n.name_status || '?', 'cinza'];
+    const ms = m ? (STATUS_META[m.status] || [m.status, 'cinza']) : null;
+    return '<section class="cartao"><h2>WhatsApp oficial (Meta)</h2>' +
+      '<p>Número <strong>' + esc(n.display_phone_number || '') + '</strong> · nome <strong>' + esc(n.verified_name || '') + '</strong> ' + CRM.selo('nome ' + nome[0], nome[1]) +
+      ' ' + (n.status ? CRM.selo('número ' + String(n.status).toLowerCase(), n.status === 'CONNECTED' ? 'verde' : 'ambar') : '') + '</p>' +
+      '<p>Modelo "boleto_vendedora": ' + (ms ? CRM.selo(ms[0], ms[1]) + (m.rejected_reason && m.rejected_reason !== 'NONE' ? ' <small>' + esc(m.rejected_reason) + '</small>' : '') : CRM.selo('ainda não criado', 'ambar')) + '</p>' +
+      '<p>' + (!m || m.status === 'REJECTED' ? '<button type="button" class="btn sec" data-acao="wa-criar-modelo">Criar o modelo de mensagem</button> ' : '') +
+      (m && m.status === 'APPROVED' ? '<button type="button" class="btn sec" data-acao="wa-teste">Mandar um teste para o meu celular</button>' : '') + '</p>' +
+      '<p class="dica">Com o modelo aprovado e o número conectado, a Cobrança ganha "Enviar pelo WhatsApp da OneClean": cada vendedora recebe o boleto com o PDF completo anexo, sem você abrir nada.</p></section>';
+  }
   const AGILITE_ESPELHO = 'https://sistema.agiliteservice.com.br/api/caixa/espelho';
   function espelhoAgilite(url, quando) {
     const s = integ.espelho || {};
@@ -1095,6 +1115,12 @@
       const url = f.elements.url.value.trim(), senha = f.elements.senha.value.trim();
       if (!/^https:\/\//.test(url)) { CRM.toast('O endereço precisa começar com https://'); return; }
       try { await CRM.store().espelhoConfigura(url, senha); f.elements.senha.value = ''; CRM.toast(senha ? 'Endereço e senha da Agilité guardados.' : 'Endereço guardado.'); integ = null; CRM.render(); } catch (e) { CRM.falhou(e); }
+    },
+    'wa-criar-modelo': async () => {
+      try { await CRM.store().whatsapp({ acao: 'criar_modelo' }); CRM.toast('Modelo enviado para a Meta aprovar (de minutos a 1 dia).'); integ = null; CRM.render(); } catch (e) { CRM.falhou(e); }
+    },
+    'wa-teste': async () => {
+      try { const r = await CRM.store().whatsapp({ acao: 'teste' }); CRM.toast('Teste enviado para ' + r.para + '. Confira o WhatsApp do seu celular.'); } catch (e) { CRM.falhou(e); }
     },
     'integ-ativar': async id => { const c = integ.chaves.find(x => x.id === id); try { await CRM.store().atualizar('integracoes', id, { ativo: !c.ativo }); integ = null; CRM.render(); } catch (e) { CRM.falhou(e); } },
     'integ-excluir': async id => {

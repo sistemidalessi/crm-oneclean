@@ -1619,6 +1619,11 @@ alter table public.crm_boletos add column if not exists avisado_em timestamptz;
 -- PDF completo (14/10/2026): arquivo passa a ser o PDF montado pelo CRM (resumo + DANFE + boleto do banco) e
 -- arquivo_banco guarda o PDF que veio do banco (só o administrador lê; serve para remontar).
 alter table public.crm_boletos add column if not exists arquivo_banco text;
+-- WhatsApp oficial da Meta (15/10/2026): o envio automático à vendedora (Edge Function crm-whatsapp)
+alter table public.crm_boletos add column if not exists wa_msg text;      -- id da mensagem na Meta
+alter table public.crm_boletos add column if not exists wa_status text;   -- enviado | entregue | lido | falhou
+alter table public.crm_boletos add column if not exists wa_em timestamptz;
+alter table public.crm_boletos add column if not exists wa_erro text;
 create index if not exists crm_boletos_empresa_idx on public.crm_boletos (empresa_id);
 create index if not exists crm_boletos_duplicata_idx on public.crm_boletos (duplicata);
 drop trigger if exists crm_boletos_atualizado_em on public.crm_boletos;

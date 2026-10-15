@@ -565,9 +565,20 @@
       (podeCompartilhar() && l.some(b => b.arquivo) ? '<button type="button" class="link" data-acao="cob-avisar-pdf" data-id="' + esc(u) + '">ou compartilhar o arquivo</button>' : '') + '</span>';
   };
   const preCarrega = lista => { arquivosDe(lista).catch(() => {}); };
+  // WhatsApp oficial da Meta (15/10/2026): pronto quando o número está conectado e o modelo aprovado
+  let wa = null, waLido = 0;
+  function waSituacao() {
+    if (!CRM.ehAdmin() || !CRM.store().whatsapp || Date.now() - waLido < 600000) return;
+    waLido = Date.now();
+    CRM.store().whatsapp({ acao: 'situacao' }).then(r => { const antes = !!(wa && wa.pronto); wa = r; wa.pronto = !!(r.ligado && r.modelo && r.modelo.status === 'APPROVED' && r.numero && r.numero.status === 'CONNECTED'); if (wa.pronto !== antes) CRM.render(); }).catch(() => {});
+  }
+  const waPronto = () => !!(wa && wa.pronto);
+  const botaoMeta = n => (waPronto() ? '<p><button type="button" class="btn ouro" data-acao="cob-meta">📤 Enviar a todas pelo WhatsApp da OneClean (' + n + ' boleto' + (n > 1 ? 's' : '') + ')</button> ' +
+    '<small>cada vendedora recebe sozinha o boleto com o PDF completo anexo</small></p>' : '');
   function formAvisar() {
     const g = porVendedora(paraAvisar());
     if (!g.length) return;
+    waSituacao();
     preCarrega(paraAvisar());
     CRM.abrirForm({
       titulo: 'Mandar no WhatsApp das vendedoras',
@@ -575,7 +586,7 @@
         (podeCompartilhar() ? 'Prefere mandar o arquivo em si? "ou compartilhar o arquivo" abre a janela de compartilhar (aí você escolhe o WhatsApp e a vendedora).\n' : '') +
         'A tarefa "Cobrar boleto atualizado" já está na agenda de cada uma.',
       campos: [], salvarTexto: 'Fechar', aoSalvar: async () => {},
-      rodape: '<div class="cob-avisar">' + g.map(([u, l]) => botaoAvisar(u, l)).join('') + '</div>'
+      rodape: botaoMeta(paraAvisar().length) + '<div class="cob-avisar">' + g.map(([u, l]) => botaoAvisar(u, l)).join('') + '</div>'
     });
   }
   const telBR = t => { const d = String(t || '').replace(/\D/g, '').replace(/^55(?=\d{10,11}$)/, ''); return d.length === 11 ? '(' + d.slice(0, 2) + ') ' + d.slice(2, 7) + '-' + d.slice(7) : d.length === 10 ? '(' + d.slice(0, 2) + ') ' + d.slice(2, 6) + '-' + d.slice(6) : String(t || ''); };
@@ -617,7 +628,9 @@
       if (b.cobrado_em) return CRM.selo('cobrado ' + dm(R.diaLocal(b.cobrado_em)) + (b.cobrado_por ? ' · ' + R.primeiroNome(CRM.nomeUsuario(b.cobrado_por)) : ''), 'verde') + det;
       const refaz = b.arquivo && !b.arquivo_banco ? ' <button type="button" class="mini" data-acao="cob-pdf" data-id="' + esc(b.id) + '" title="junta o resumo e a cópia da nota fiscal (DANFE) ao boleto do banco">Montar PDF com a nota</button>' : '';
       const ver = b.arquivo ? ' <button type="button" class="mini" data-acao="cob-baixar" data-id="' + esc(b.id) + '">Ver PDF</button>' : '';
-      return (b.avisado_em ? CRM.selo('no WhatsApp da vendedora ' + dm(R.diaLocal(b.avisado_em)), 'azul') : CRM.selo('falta mandar à vendedora', 'ambar')) + det +
+      const meta = b.wa_status === 'falhou' ? ' ' + CRM.selo('WhatsApp da OneClean falhou', 'vermelho') + (b.wa_erro ? ' <small>' + esc(b.wa_erro) + '</small>' : '')
+        : b.wa_status ? ' ' + CRM.selo('pelo WhatsApp da OneClean: ' + b.wa_status, 'verde') : '';
+      return (b.avisado_em ? CRM.selo('no WhatsApp da vendedora ' + dm(R.diaLocal(b.avisado_em)), 'azul') : CRM.selo('falta mandar à vendedora', 'ambar')) + meta + det +
         ' <button type="button" class="mini" data-acao="cob-ja-cobrou" data-id="' + esc(b.id) + '" title="a vendedora já mandou ao cliente: tira da Fila e conclui a tarefa">Já cobrou</button>' + ver + refaz;
     };
     const avisar = porVendedora(paraAvisar());
@@ -628,7 +641,7 @@
         '<label class="btn sec arquivo">Escolher arquivos<input type="file" id="cobArq" multiple accept="application/pdf,image/png,image/jpeg,image/webp"></label>') + '</section>' +
       (avisar.length ? '<section class="cartao cob-aviso"><h2>Mandar no WhatsApp das vendedoras <small>' + avisar.reduce((t, x) => t + x[1].length, 0) + ' boleto(s) ainda não foram</small></h2>' +
         '<p>Um clique por vendedora: abre o seu WhatsApp na conversa com ela, com tudo pronto (valor, PDF, telefone do cliente e a mensagem para ela copiar).</p>' +
-        '<div class="cob-avisar">' + avisar.map(([u, l]) => botaoAvisar(u, l)).join('') + '</div></section>' : '') +
+        botaoMeta(avisar.reduce((t, x) => t + x[1].length, 0)) + '<div class="cob-avisar">' + avisar.map(([u, l]) => botaoAvisar(u, l)).join('') + '</div></section>' : '') +
       '<section class="cartao"><h2>Vencidos para cobrar <small>' + venc.length + ' título(s) · ' + esc(R.moeda(tot(venc))) + '</small></h2>' +
       (venc.length ? [...porVend.entries()].sort((a, b) => CRM.nomeUsuario(a[0]).localeCompare(CRM.nomeUsuario(b[0]))).map(([u, l]) =>
         '<h3>' + esc(u ? CRM.nomeUsuario(u) : 'Sem vendedora') + ' <small>' + l.length + ' · ' + esc(R.moeda(tot(l))) + '</small></h3>' +
@@ -643,6 +656,7 @@
         '</tbody></table></div><p class="dica">Pagou? Dê "Recebi…" no bloco "Em cartório" do Dia a dia, com o valor que entrou.</p></section>' : '');
   }
   function depoisAba(el) {
+    waSituacao();
     if (paraAvisar().length && podeCompartilhar()) preCarrega(paraAvisar());
     const arq = el.querySelector('#cobArq');
     if (arq) arq.addEventListener('change', () => { const f = [].slice.call(arq.files); arq.value = ''; lerArquivos(f).catch(CRM.falhou); });
@@ -730,6 +744,25 @@
         CRM.render();
         CRM.toast(r.falhas ? 'Não consegui montar o PDF (veja o console); o boleto do banco continua valendo.' : 'PDF completo pronto' + (r.semNota ? ' (sem a DANFE: a nota não tem o XML guardado)' : '') + '. Clique em "Ver PDF" para conferir.', !!r.falhas);
       })().catch(CRM.falhou);
+    },
+    // WhatsApp oficial da Meta: um clique, todas as vendedoras recebem sozinhas (com o PDF completo anexo)
+    'cob-meta': (id, el) => {
+      const lista = paraAvisar();
+      if (!lista.length) return;
+      if (el) el.disabled = true;
+      (async () => {
+        const r = await CRM.store().whatsapp({ acao: 'enviar', boletos: lista.map(b => b.id) });
+        const res = (r && r.resultado) || [], agora = new Date().toISOString();
+        const okIds = new Set([].concat(...res.filter(x => x.ok).map(x => x.boletos)));
+        const erros = new Map();
+        res.filter(x => !x.ok).forEach(x => x.boletos.forEach(i => erros.set(i, x.erro)));
+        E().boletos = (E().boletos || []).map(b => okIds.has(b.id) ? Object.assign({}, b, { avisado_em: agora, wa_status: 'enviado', wa_erro: null })
+          : erros.has(b.id) ? Object.assign({}, b, { wa_status: 'falhou', wa_erro: erros.get(b.id) }) : b);
+        fechaForm();
+        CRM.render();
+        const falhas = res.filter(x => !x.ok);
+        CRM.toast(res.filter(x => x.ok).length + ' cliente(s) enviados pelo WhatsApp da OneClean' + (falhas.length ? ' · ' + falhas.length + ' falharam: ' + falhas.map(x => x.empresa + ' (' + x.erro + ')').join('; ') + ' — use o botão da vendedora para esses' : '') + '.', !!falhas.length);
+      })().catch(e => { if (el) el.disabled = false; CRM.falhou(e); });
     },
     'cob-ja-cobrou': id => {
       const b = boleto(id), e = b && CRM.empresa(b.empresa_id);

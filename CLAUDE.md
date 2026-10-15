@@ -1312,8 +1312,21 @@ ligado ao domínio; **começa com fila de aprovação** (nada sai sozinho); reme
      só do CRM (chip novo, não a linha de uma vendedora), modelo de mensagem aprovado (categoria utilidade). Daqui: Edge
      Function de envio (chave nos Secrets) e o botão. **15/10: passo a passo entregue ao Anderson** em
      `sistemi-dalessi/docs/meta-whatsapp-passo-a-passo.md` (utilidade no Brasil ≈ US$ 0,0068/mensagem pela tabela de 01/10/2026,
-     segundo fornecedores; 1.000 respostas grátis/mês por número). Esperando ele: chip novo, verificação da empresa, app +
-     número, cartão, token `WHATSAPP_TOKEN` nos Secrets e os IDs do número e da conta.
+     segundo fornecedores; 1.000 respostas grátis/mês por número).
+     **15/10, feito com o Anderson (prints):** portfólio **OneClean** criado na Meta (ao lado da Agilité; "não precisa ser
+     verificada" por ora — sem verificação, até 250 destinatários/dia); app **CRM OneClean** (caso de uso WhatsApp); conta do
+     WhatsApp Business **2185767059033904**; número = **linha fixa do galpão +55 11 2786-8106** (verificada por ligação; a linha
+     comercial 98719-0372 NÃO serve: já está no WhatsApp e o caminho direto da Meta não tem coexistência — não migrar);
+     ID do número **1346241728578504**; status "Pendente" (nome OneClean em análise; "Registrar" falha até aprovar); cartão
+     cadastrado; usuário do sistema **CRM OneClean** (61595458738738) criado. Falta: atribuir app + conta ao usuário do sistema,
+     gerar o token (nunca expira) → Secret `WHATSAPP_TOKEN`; Secrets `WHATSAPP_PHONE_ID`, `WHATSAPP_WABA_ID`, `WHATSAPP_APP_ID`;
+     registrar o número (PIN de 6 dígitos, com o Anderson); "Criar o modelo" em Integrações; teste no celular dele.
+     **Código pronto:** Edge Function `crm-whatsapp` v1 (verify_jwt; só admin): `situacao`, `criar_modelo` (modelo
+     `boleto_vendedora`, pt_BR, utilidade, PDF no cabeçalho — exemplo pela carga retomável do app), `teste` (PDF de exemplo ao
+     celular do admin) e `enviar` (um envio por cliente à vendedora da carteira, PDF completo por link assinado de 7 dias;
+     grava `crm_boletos.wa_msg/wa_status/wa_em/wa_erro`). Tela: cartão "WhatsApp oficial (Meta)" em Configurações → Integrações
+     e, na Cobrança, "📤 Enviar a todas pelo WhatsApp da OneClean" (só com número CONNECTED e modelo APPROVED). Falta o
+     webhook de entregue/lido (atualizar `wa_status`).
 - **Volta do contato (14/10, pedido do Anderson):** o próximo passo da janela "Como foi…" tem também **"Em 15 dias"**.
 - **Regra (14/10, Anderson): título recebido antes do vencimento é ADIANTADO.** A Santa Casa (002435/01, R$ 7.422,15) venceria
   em 25/10 e pagou em 14/10: o "Recebi" gravou certo, mas o cartão não dizia que o cliente adiantou. Agora `caixa-calculo.js`
