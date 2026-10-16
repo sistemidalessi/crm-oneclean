@@ -1,7 +1,7 @@
 /* CRM Sistemi Dalessi — sequência de follow-up do lead novo.
    Lead cadastrado ganha o 1º passo (em vez de "Fazer o primeiro contato"); cada passo concluído
    agenda o próximo, contando os dias a partir de hoje. A sequência para sozinha quando o lead
-   deixa de ser lead (virou prospect/cliente) ou ganha um negócio — é assim que a vendedora diz
+   deixa de ser lead (virou prospect/cliente) ou ganha um negócio — é assim que o(a) vendedor(a) diz
    "respondeu". Passos com mensagem têm o botão que abre o WhatsApp/e-mail com o texto pronto e
    já conclui o passo. Os passos ficam em Configurações → Sequência do lead (cfg.sequencia_lead).
    Parte pura (CRMSequencia.*) testada em testes/sequencia.test.js. */

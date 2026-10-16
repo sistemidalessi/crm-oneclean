@@ -40,7 +40,7 @@
     const anterior = resumoPeriodo(D, ix, mesPassado, R.somaDias(mes, -1));
     const anteriorMesmoDia = resumoPeriodo(D, ix, mesPassado, ateMesmoDia);
     const ano = resumoPeriodo(D, ix, hoje.slice(0, 4) + '-01-01', hoje);
-    // Equipe de vendas = tudo menos o Direto (venda do administrador, sem vendedora) — 08/10/2026, Anderson.
+    // Equipe de vendas = tudo menos o Direto (venda do administrador, sem vendedor(a)) — 08/10/2026, Anderson.
     const admins = new Set((D.usuarios || []).filter(u => u.papel === 'admin').map(u => u.user_id));
     const daEquipe = l => l.filter(n => !admins.has(donoDe(ix, n)));
     const eqAtual = daEquipe(atual.lista), eqAntes = daEquipe(anteriorMesmoDia.lista), eqMesPassado = daEquipe(anterior.lista);
@@ -57,7 +57,7 @@
     // Equipe: faturamento pela carteira do cliente, meta, contatos e atrasadas.
     const metas = (D.metas || []).filter(m => m.mes === mes);
     // (08/10/2026, Anderson) comprador não vende: fora. O administrador entra só como "Direto" (venda sem
-    // vendedora: "VENDEDOR: DIRETO" na nota, nomes_nota do admin), e só se vendeu no ano.
+    // vendedor(a): "VENDEDOR: DIRETO" na nota, nomes_nota do admin), e só se vendeu no ano.
     const ehDireto = u => u.papel === 'admin';
     const equipe = (D.usuarios || []).filter(u => u.ativo !== false && u.papel !== 'comprador').map(u => {
       const doMes = atual.lista.filter(n => donoDe(ix, n) === u.user_id);
@@ -73,7 +73,7 @@
         contatos, contatosHoje, atrasadas, clientesAtivos: (D.empresas || []).filter(e => e.responsavel_id === u.user_id && compraram90.has(e.id)).length };
     }).filter(u => !u.direto || u.valorAno > 0)
       .sort((a, b) => (a.direto ? 1 : 0) - (b.direto ? 1 : 0) || b.valorMes - a.valorMes || b.valorAno - a.valorAno);
-    // Total = o faturamento inteiro (o mesmo do quadro do mês): o que não é de ninguém da lista (ex-vendedora,
+    // Total = o faturamento inteiro (o mesmo do quadro do mês): o que não é de ninguém da lista (ex-vendedor(a),
     // cliente sem carteira) vira a linha "Outros", para a soma bater.
     const somaEq = k => equipe.reduce((t, u) => t + (u[k] || 0), 0);
     const outros = { mes: Math.round((atual.valor - somaEq('valorMes')) * 100) / 100, ano: Math.round((ano.valor - somaEq('valorAno')) * 100) / 100 };
@@ -358,7 +358,7 @@
           '</dl></section>' +
         '</div>' +
         // ---- equipe
-        '<section class="cartao"><h2>Equipe <small>faturamento pela carteira do cliente</small></h2><div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Vendedora</th><th class="num">Mês</th><th class="num">Meta</th><th class="num">Ano</th><th class="num">Clientes ativos</th><th class="num">Contatos no mês</th><th class="num">Hoje</th><th class="num">Atrasadas</th></tr></thead><tbody>' +
+        '<section class="cartao"><h2>Equipe <small>faturamento pela carteira do cliente</small></h2><div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Vendedor(a)</th><th class="num">Mês</th><th class="num">Meta</th><th class="num">Ano</th><th class="num">Clientes ativos</th><th class="num">Contatos no mês</th><th class="num">Hoje</th><th class="num">Atrasadas</th></tr></thead><tbody>' +
           p.equipe.map(u => '<tr><td><strong>' + esc(u.nome) + '</strong>' + (u.direto ? ' <small>Venda sem vendedor(a)</small>' : '') + '</td><td class="num">' + esc(R.moeda(u.valorMes)) + '</td><td class="num">' + (u.meta ? CRM.barra(u.valorMes, u.meta, R.pct(u.pctMeta)) : '—') + '</td>' +
             '<td class="num">' + esc(R.moeda(u.valorAno)) + '</td>' +
             (u.direto ? '<td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">—</td>'
@@ -556,7 +556,12 @@
     const neg = lista.filter(x => x.quantidade < 0).length;
     CRM.toast('Gravando o estoque: ' + lista.length + ' produtos…');
     const n = await CRM.store().salvarEstoque(lista, (i, tot) => CRM.toast('Gravando o estoque: ' + i + ' de ' + tot + '…'));
-    CRM.toast('Estoque atualizado: ' + n + ' produtos' + (neg ? ' (' + neg + ' com saldo negativo no FKN)' : '') + '.');
+    // estoque do CRM (16/10/2026): a hora da listagem e a conferência CRM × FKN, como no vigia
+    let conf = null;
+    if (G.ehListagemProdutos(txt) && CRM.store().estoqueFoto) conf = await CRM.store().estoqueFoto(K.posicaoListagem(txt), n).catch(() => null);
+    const c = conf && conf.conferencia;
+    CRM.toast('Estoque atualizado: ' + n + ' produtos' + (neg ? ' (' + neg + ' com saldo negativo no FKN)' : '') +
+      (c ? ' · estoque CRM × FKN: ' + c.diferentes + ' diferença(s), ' + c.sem_explicacao + ' sem explicação' : '') + '.');
     estoque = null; CRM.render();
     if (CRM.recarregarFkn) CRM.recarregarFkn();
   }

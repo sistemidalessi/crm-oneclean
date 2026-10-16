@@ -54,7 +54,7 @@
     { tipo: 'secao', rotulo: 'Propostas e orçamentos' },
     { nome: 'proposta_chamada', rotulo: 'Frase de destaque no alto da proposta', largo: true, dica: 'ex.: Seu abastecimento, com mais praticidade.', ajuda: 'em branco, a proposta sai sem a frase' },
     { nome: 'proposta_subchamada', rotulo: 'Linha abaixo da frase', largo: true, dica: 'ex.: Limpeza, higiene e descartáveis para sua empresa.' },
-    { nome: 'proposta_cta', rotulo: 'Texto do botão de WhatsApp da proposta', largo: true, dica: 'Vamos programar sua entrega?', ajuda: 'o botão leva ao WhatsApp da vendedora responsável (telefone do cadastro dela), com a mensagem de confirmação pronta' },
+    { nome: 'proposta_cta', rotulo: 'Texto do botão de WhatsApp da proposta', largo: true, dica: 'Vamos programar sua entrega?', ajuda: 'o botão leva ao WhatsApp do(a) vendedor(a) responsável (telefone do cadastro dela), com a mensagem de confirmação pronta' },
     { nome: 'caixa_receber_desde', rotulo: 'Caixa: "A receber vencido" mostra só títulos vencidos a partir de', tipo: 'data', ajuda: 'os mais antigos continuam no contas a receber e na cobrança; vazio = todos' },
     { nome: 'sem_assinatura', rotulo: 'Tirar a assinatura "Orçamento gerado pelo CRM Sistemi Dalessi" do rodapé', tipo: 'checkbox', ajuda: 'linha discreta no pé de cada proposta e orçamento em PDF' },
     { nome: 'proposta_rodape', rotulo: 'Rodapé da proposta (dados da empresa)', largo: true, tipo: 'textarea', linhas: 2, dica: 'ex.: OneClean · CNPJ 00.000.000/0001-00 · (11) 4000-0000 · contato@empresa.com.br', ajuda: 'sai no fim de toda proposta e orçamento em PDF' },
@@ -516,7 +516,7 @@
       (r.emitente ? '<br><small>Emitente: ' + esc(r.emitente.nome) + ' · ' + esc(r.emitente.doc) + ' · ' + imp.arquivosLidos + ' arquivo(s) lido(s)' +
         (imp.arquivosOutros ? ', ' + imp.arquivosOutros + ' sem NF-e' : '') + '</small>' : '') + '</p><ul>' +
       '<li>' + r.empresasLigadas + ' cliente(s) já cadastrado(s) reconhecido(s)' + (r.cnpjsCompletados ? ', ' + r.cnpjsCompletados + ' com o CNPJ completado agora' : '') +
-        (r.ligadasPorNome ? ' (' + r.ligadasPorNome + ' sem CNPJ, achado(s) pelo nome ou e-mail na carteira da vendedora)' : '') + '</li>' +
+        (r.ligadasPorNome ? ' (' + r.ligadasPorNome + ' sem CNPJ, achado(s) pelo nome ou e-mail na carteira do(a) vendedor(a))' : '') + '</li>' +
       (r.filiaisNovas ? '<li>' + r.filiaisNovas + ' filial(is) nova(s) de cliente que já existia, ligada(s) ao grupo dele</li>' : '') +
       (r.camposCompletados ? '<li>' + r.camposCompletados + ' dado(s) de cadastro completados com a nota (CNPJ, razão social, e-mail, telefone, endereço — só o que estava vazio)</li>' : '') +
       (r.dadosDeOutroCadastro ? '<li>' + r.dadosDeOutroCadastro + ' dado(s) da nota não usados porque já são de outro cliente (possível duplicado: veja Configurações → Duplicados)</li>' : '') +
@@ -917,7 +917,7 @@
   // Lançou, ajustou, deu ✓ ou desfez uma "Transferência entre empresas" aqui → o banco manda o par para a
   // Agilité (em até 1 min; fora do ar, tenta de novo a cada 10 min). O que a Agilité lança chega por
   // crm-caixa-espelho, com a senha de gravação gerada aqui.
-  // WhatsApp oficial da Meta (15/10/2026): o CRM manda sozinho o boleto atualizado, com o PDF completo, à vendedora.
+  // WhatsApp oficial da Meta (15/10/2026): o CRM manda sozinho o boleto atualizado, com o PDF completo, ao(à) vendedor(a).
   const STATUS_META = { APPROVED: ['aprovado', 'verde'], PENDING: ['em análise na Meta', 'ambar'], REJECTED: ['recusado', 'vermelho'], PAUSED: ['pausado', 'ambar'], DISABLED: ['desligado', 'vermelho'] };
   function whatsappMeta() {
     const w = integ.whatsapp;
@@ -936,7 +936,7 @@
       '<p>Modelo "boleto_vendedora": ' + (ms ? CRM.selo(ms[0], ms[1]) + (m.rejected_reason && m.rejected_reason !== 'NONE' ? ' <small>' + esc(m.rejected_reason) + '</small>' : '') : CRM.selo('ainda não criado', 'ambar')) + '</p>' +
       '<p>' + (!m || m.status === 'REJECTED' ? '<button type="button" class="btn sec" data-acao="wa-criar-modelo">Criar o modelo de mensagem</button> ' : '') +
       (m && m.status === 'APPROVED' ? '<button type="button" class="btn sec" data-acao="wa-teste">Mandar um teste para o meu celular</button>' : '') + '</p>' +
-      '<p class="dica">Com o modelo aprovado e o número conectado, a Cobrança ganha "Enviar pelo WhatsApp da OneClean": cada vendedora recebe o boleto com o PDF completo anexo, sem você abrir nada.</p></section>';
+      '<p class="dica">Com o modelo aprovado e o número conectado, a Cobrança ganha "Enviar pelo WhatsApp da OneClean": cada vendedor(a) recebe o boleto com o PDF completo anexo, sem você abrir nada.</p></section>';
   }
   const AGILITE_ESPELHO = 'https://sistema.agiliteservice.com.br/api/caixa/espelho';
   function espelhoAgilite(url, quando) {

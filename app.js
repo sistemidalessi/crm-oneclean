@@ -104,10 +104,10 @@
       if (CRM.ehComprador() && store.clientesCompras) D.empresas = await store.clientesCompras();
       // Administrador: sinal de vida do vigia de notas (aviso se parar).
       if (CRM.ehAdmin() && store.vigias) E.vigias = await store.vigias().catch(() => E.vigias || []);
-      // Só o administrador lê o contas a receber (RLS): gestora e vendedoras recebem as duplicatas em
+      // Só o administrador lê o contas a receber (RLS): gestora e vendedores(as) recebem as duplicatas em
       // atraso (com detalhe) para o selo da Recompra, da Fila do dia e da ficha.
       if (!CRM.ehAdmin() && !CRM.ehComprador() && store.duplicatasAtraso) E.atrasos = await store.duplicatasAtraso().catch(() => E.atrasos || []);
-      // Boletos atualizados (cobrança, 14/10/2026): o administrador manda, a vendedora da carteira envia ao cliente.
+      // Boletos atualizados (cobrança, 14/10/2026): o administrador manda, o(a) vendedor(a) da carteira envia ao cliente.
       if (!CRM.ehComprador() && store.boletos) E.boletos = await store.boletos().catch(() => E.boletos || []);
       // Administrador e comprador: quando chegaram os relatórios do FKN (lembrete em Compras).
       if ((CRM.ehAdmin() || CRM.ehComprador()) && store.fknAtualizado) E.fkn = await store.fknAtualizado().catch(() => E.fkn || null);
@@ -403,7 +403,7 @@
     } else sel.hidden = true;
     $('#nomeTopo').textContent = nomeInstalacao() === 'CRM' ? 'Sistemi Dalessi' : nomeInstalacao();
     $('#usuarioTopo').innerHTML = CRM.avatar(E.eu) + '<span class="usu-nome">' + esc(E.eu.nome) + '<small>' + esc(R.rotulo(R.PAPEIS, E.eu.papel)) + '</small></span>';
-    // boletos atualizados que o financeiro mandou e a vendedora ainda não enviou ao cliente (cobranca.js)
+    // boletos atualizados que o financeiro mandou e o(a) vendedor(a) ainda não enviou ao cliente (cobranca.js)
     const nBoletos = CRM.cobranca && !CRM.ehComprador() ? CRM.cobranca.paraFila().length : 0;
     const nAlertas = nBoletos + al.atrasadas.length + al.leadsSemAtendimento.length + al.negociosParados.length + al.clientesSemContato.length + al.recompra.length;
     $('#sino').innerHTML = '<span aria-hidden="true">🔔</span>' + (nAlertas ? '<span class="bolinha vermelha">' + nAlertas + '</span>' : '');

@@ -30,7 +30,7 @@ const ESQUEMA = {
 
 const SISTEMA = `Você escreve mensagens comerciais da OneClean, distribuidora de produtos de limpeza, descartáveis, EPIs e copa
 em São Bernardo do Campo (atende Grande São Paulo, ABC e Baixada Santista). Os clientes são empresas: condomínios,
-escolas, clínicas, restaurantes, indústrias. Quem assina é a vendedora da carteira do cliente.
+escolas, clínicas, restaurantes, indústrias. Quem assina é o(a) vendedor(a) da carteira do cliente.
 
 A tarefa: o texto de uma oferta de QUEIMA DE ESTOQUE, com preço especial por tempo limitado. Escreva em português do
 Brasil, tom cordial, direto e profissional (B2B), sem exagero nem promessa que a empresa não pode cumprir.

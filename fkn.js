@@ -53,7 +53,7 @@
       }
       if (!p) return;
       if ((m = /ESTOQUE:;\s*m[ií]n:\s*([-\d.,]+);\s*m[aá]x:\s*([-\d.,]+);\s*atual:\s*([-\d.,]+);\s*saldo:\s*([-\d.,]+);\s*PEND:\s*cli:\s*([-\d.,]+);\s*for:\s*([-\d.,]+)/i.exec(l)))
-        Object.assign(p, { estoque_min: n(m[1]), estoque_max: n(m[2]), quantidade: n(m[4]), pend_cliente: n(m[5]), pend_fornecedor: n(m[6]) });
+        Object.assign(p, { estoque_min: n(m[1]), estoque_max: n(m[2]), estoque_atual: n(m[3]), quantidade: n(m[4]), pend_cliente: n(m[5]), pend_fornecedor: n(m[6]) });
       else if ((m = /comp:\s*([-\d.,]+);\s*cus:\s*([-\d.,]+);\s*ven:\s*([-\d.,]+)/i.exec(l)))
         Object.assign(p, { custo_compra: n(m[1]), custo_unit: n(m[2]), preco_venda: n(m[3]) });
       else if ((m = /Fornecedor:\s*(\d+)\s*([^;]*)/i.exec(l)))
@@ -66,6 +66,17 @@
     // Entra o que está ativo e o inativo que ainda tem saldo ou pedido em aberto.
     return lista.filter(x => x.situacao !== 'INATIVO' || x.quantidade || x.pend_fornecedor).map(x => Object.assign(x, {
       custo_total: x.quantidade > 0 ? Math.round(x.quantidade * (x.custo_unit || 0) * 100) / 100 : 0 }));
+  }
+  // Hora em que a listagem foi gerada no FKN (cabeçalho ";DATA: 16/10/2026;" e "…;14:14;"), horário de Brasília → ISO.
+  // O estoque do CRM compara os dois saldos nessa hora (16/10/2026). Sem cabeçalho: null.
+  function posicaoListagem(texto) {
+    const ini = String(texto).split(/\r?\n/).slice(0, 8);
+    let d = null, h = null, m;
+    ini.forEach(l => {
+      if (!d && (m = /^;DATA:\s*(\d\d)\/(\d\d)\/(\d{4})/.exec(l))) d = m[3] + '-' + m[2] + '-' + m[1];
+      if (!h && (m = /;(\d\d:\d\d);\s*$/.exec(l))) h = m[1];
+    });
+    return d ? new Date(d + 'T' + (h || '00:00') + ':00-03:00').toISOString() : null;
   }
   // Qualquer um dos dois arquivos do FKN: listagem cadastral (completa) ou o CSV simples de estoque.
   const lerArquivoEstoque = t => (ehListagemProdutos(t) ? lerListagemProdutos(t) : lerEstoque(t));
@@ -280,7 +291,7 @@
     return out;
   }
 
-  const api = { lerContasPagar, ehContasPagar, conferirContasPagar, planoContasPagar, lancamentoDoFkn, lerEstoque, lerListagemProdutos, lerArquivoEstoque, ehListagemProdutos, codigoFKN, lerContasReceber, ehContasReceber, ligaEmpresas, dataFKN,
+  const api = { lerContasPagar, ehContasPagar, conferirContasPagar, planoContasPagar, lancamentoDoFkn, lerEstoque, lerListagemProdutos, posicaoListagem, lerArquivoEstoque, ehListagemProdutos, codigoFKN, lerContasReceber, ehContasReceber, ligaEmpresas, dataFKN,
     conferirListagemProdutos, conferirContasReceber };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else raiz.CRMFkn = api;

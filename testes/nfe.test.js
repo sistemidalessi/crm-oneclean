@@ -58,7 +58,7 @@ test('lê XML com prefixo de namespace e evento de cancelamento; ignora o que n�
 
 test('planeja: liga pela razão social ou pelo nome antes do "|", completa o CNPJ, cria cliente novo com segmento', () => {
   const D = base();
-  D.usuarios = [{ user_id: 'u1', nome: 'Vendedora Um' }];
+  D.usuarios = [{ user_id: 'u1', nome: 'Vendedor(a) Um' }];
   D.empresas = [
     { id: 'e1', nome: 'ESCOLA MODELO | Joana', situacao: 'lead', responsavel_id: 'u1' },
     { id: 'e2', nome: 'Metal Forte', razao_social: 'METAL FORTE INDUSTRIA E COMERCIO LTDA', cnpj: null, situacao: 'cliente' }
@@ -118,7 +118,7 @@ test('planeja: liga pela razão social ou pelo nome antes do "|", completa o CNP
 
 test('faturamento: total, top clientes e produtos, segmento, clientes novos; cancelada e remessa fora', () => {
   const D = base();
-  D.usuarios = [{ user_id: 'u1', nome: 'Vendedora Um' }];
+  D.usuarios = [{ user_id: 'u1', nome: 'Vendedor(a) Um' }];
   D.empresas = [{ id: 'e1', nome: 'Escola A', segmento: 'Escola', responsavel_id: 'u1' }, { id: 'e2', nome: 'Indústria B', segmento: 'Indústria' }];
   const nota = (id, emp, dia, valor, extra) => Object.assign({ id, chave: id, empresa_id: emp, emitida_em: R.momento(dia, '10:00'), valor_total: valor, cancelada: false }, extra || {});
   D.notas = [nota('n1', 'e1', '2026-09-02', 500), nota('n2', 'e1', '2026-09-10', 300), nota('n3', 'e2', '2026-09-12', 1000),
@@ -211,7 +211,7 @@ test('completar cadastro pela nota: não usa telefone/e-mail que já é de outro
 });
 
 // 01/10/2026: o Agendor quase não tinha CNPJ e a 1ª nota de cliente antigo criava cadastro repetido.
-test('nota acha cliente sem CNPJ da mesma vendedora (domínio do e-mail ou nome próprio); dois parecidos não arrisca', () => {
+test('nota acha cliente sem CNPJ da mesmo(a) vendedor(a) (domínio do e-mail ou nome próprio); dois parecidos não arrisca', () => {
   const D = base();
   D.usuarios = [{ user_id: 'u1', nome: 'Ana', ativo: true }, { user_id: 'u2', nome: 'Bia', ativo: true }];
   D.empresas = [
@@ -237,7 +237,7 @@ test('nota acha cliente sem CNPJ da mesma vendedora (domínio do e-mail ou nome 
   assert.equal(p1.situacao, 'cliente');
   assert.equal(notaDe(4).empresa_id, 'e5', 'cadastro de uma palavra própria só');
   assert.ok(!['e2', 'e3'].includes(notaDe(2).empresa_id), 'dois parecidos: cria outro (vai para Duplicados)');
-  assert.notEqual(notaDe(3).empresa_id, 'e4', 'parecido de outra vendedora: não liga');
+  assert.notEqual(notaDe(3).empresa_id, 'e4', 'parecido de outro(a) vendedor(a): não liga');
   assert.equal(pl.ligadasPorNome.length, 2);
   assert.equal(pl.resumoNotas.ligadasPorNome, 2);
 });
@@ -302,19 +302,19 @@ test('vendedor da nota: "nome na nota" (DIRETO) vira o usuário, a nota guarda q
   const fat = R.faturamento(D, ix, '2026-10-01', { periodo: R.periodo('ano', '2026-10-01') });
   const por = Object.fromEntries(fat.porVendedor.map(v => [v.nome, v.valor]));
   assert.equal(por['Anderson'], 100); assert.equal(por['Silmara Externa'], 100); assert.equal(por['Ana'], 50, 'nota sem vendedor: pela carteira');
-  // Ex-vendedora (Configurações → Geral): a nota entra sem dono e o cliente novo fica sem carteira.
+  // Ex-vendedor(a) (Configurações → Geral): a nota entra sem dono e o cliente novo fica sem carteira.
   const plx = N.planeja(Object.assign(base(), { usuarios: D.usuarios }), [N.lerXml(xml({ n: 21, dest: 'CLIENTE DA NICOLLY LTDA', cnpjDest: '77666555000144', itens: it, adic: 'VENDEDOR: NICOLLY;' }))],
     { filtro: 'auto', exVendedores: ['NICOLLY', ' Julia '] });
-  assert.equal(plx.criar.notas.length, 1, 'nota de ex-vendedora entra');
+  assert.equal(plx.criar.notas.length, 1, 'nota de ex-vendedor(a) entra');
   assert.equal(plx.criar.notas[0].vendedor_id, undefined); assert.equal(plx.criar.notas[0].vendedor_nome, 'NICOLLY');
   assert.ok(!plx.criar.empresas[0].responsavel_id, 'cliente novo dela fica sem carteira');
   assert.equal(N.planeja(Object.assign(base(), { usuarios: D.usuarios }), [N.lerXml(xml({ n: 22, dest: 'X LTDA', cnpjDest: '77666555000144', itens: it, adic: 'VENDEDOR: NICOLLY;' }))], { filtro: 'auto' }).criar.notas.length, 0, 'sem a lista, continua de fora');
   D.notas.push({ id: 'x5', chave: chave(5), emitida_em: '2026-09-22T10:00:00Z', empresa_id: 'c1', valor_total: 70, vendedor_nome: 'NICOLLY' });
   const fx = R.faturamento(D, R.indexa(D), '2026-10-01', { periodo: R.periodo('ano', '2026-10-01') });
   const px = Object.fromEntries(fx.porVendedor.map(v => [v.nome, v.valor]));
-  assert.equal(px['NICOLLY (ex-vendedor)'], 70); assert.equal(px['Ana'], 50, 'a venda da ex-vendedora não vai para a dona atual da carteira');
+  assert.equal(px['NICOLLY (ex-vendedor)'], 70); assert.equal(px['Ana'], 50, 'a venda da ex-vendedor(a) não vai para a dona atual da carteira');
   D.notas.pop();
-  // Histórico de ex-vendedora no nome do dono: aparece separado dentro da linha dele.
+  // Histórico de ex-vendedor(a) no nome do dono: aparece separado dentro da linha dele.
   D.notas.push({ id: 'x4', chave: chave(6), emitida_em: '2026-09-21T10:00:00Z', empresa_id: 'c1', valor_total: 30, vendedor_id: 'dono', vendedor_nome: 'NICOLLY' });
   const fat2 = R.faturamento(D, R.indexa(D), '2026-10-01', { periodo: R.periodo('ano', '2026-10-01') });
   const dono = fat2.porVendedor.find(v => v.nome === 'Anderson');

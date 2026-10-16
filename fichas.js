@@ -697,7 +697,7 @@
   // Proposta / orçamento no layout da empresa (modelo aprovado pelo Anderson em 02/10): faixa no
   // alto, logo e número, frase de destaque, "Preparado para", cartões de frete/entrega/pagamento,
   // produtos numerados, entrega e atendimento ao lado do total e o botão "Confirmar pelo WhatsApp",
-  // que no PDF é um link clicável para o WhatsApp da vendedora responsável. Serve para a proposta
+  // que no PDF é um link clicável para o WhatsApp do(a) vendedor(a) responsável. Serve para a proposta
   // gerada no CRM e para o orçamento importado do FKN (p.dados: pagamento, frete, entrega…).
   // "11944884942" → "(11) 94488-4942" (o cadastro aceita só números).
   const telBonito = t => { const d = R.digitos(t).replace(/^55(?=\d{10,11}$)/, ''); return d.length === 11 ? '(' + d.slice(0, 2) + ') ' + d.slice(2, 7) + '-' + d.slice(7) : d.length === 10 ? '(' + d.slice(0, 2) + ') ' + d.slice(2, 6) + '-' + d.slice(6) : String(t || ''); };
@@ -924,7 +924,7 @@
   };
 
   // ------------------------------------------------------------ tarefas e registros
-  // Na janela da tarefa (pedido das vendedoras, 13/10/2026): o que já se falou com o cliente, as
+  // Na janela da tarefa (pedido dos(as) vendedores(as), 13/10/2026): o que já se falou com o cliente, as
   // observações e a última compra, para não precisar abrir a ficha antes de ligar. Só leitura.
   function historicoNaTarefa(e, a) {
     const r = CRM.resumo(e.id) || {};
@@ -1074,7 +1074,7 @@
   }
 
   // ------------------------------------------------------------ volta do WhatsApp / e-mail
-  // Depois de abrir o WhatsApp (ou o e-mail), quando a vendedora volta para o CRM aparece um
+  // Depois de abrir o WhatsApp (ou o e-mail), quando o(a) vendedor(a) volta para o CRM aparece um
   // quadro rápido: como foi, o que ficou combinado e o próximo passo — assim a conversa não some
   // e o cliente não fica sem retorno. "Depois" fecha sem mexer em nada.
   const RESULTADOS = [['aguardando', 'Mandei, estou aguardando a resposta'], ['respondeu', 'Respondeu, conversamos'], ['orcamento', 'Pediu orçamento'],

@@ -454,6 +454,39 @@
     return l.length;
   };
 
+  // Estoque do CRM (Fase 2, 16/10/2026): livro de movimentos e saldo, só administrador e comprador. Tudo que grava
+  // passa por funções do banco (o livro não se edita): foto da listagem do FKN, começar, contagem/ajuste.
+  Supa.prototype.estoqueFoto = async function (gerado, linhas) { return unwrap(await this.sb.rpc('crm_estoque_foto', { p_gerado: gerado || null, p_linhas: linhas || null })); };
+  Supa.prototype.estoqueIniciar = async function () { return unwrap(await this.sb.rpc('crm_estoque_iniciar')); };
+  Supa.prototype.estoqueContagem = async function (lote, tipo, motivo) { return unwrap(await this.sb.rpc('crm_estoque_contagem', { lote, p_tipo: tipo, p_motivo: motivo })); };
+  Supa.prototype.estoqueSaldo = async function () {
+    const out = [];
+    for (let de = 0; ; de += PAGINA) {
+      const l = unwrap(await this.sb.from('crm_estoque_saldo').select('*').order('codigo').range(de, de + PAGINA - 1));
+      out.push(...l);
+      if (l.length < PAGINA) return out;
+    }
+  };
+  Supa.prototype.estoqueMovs = async function (codigo, limite) {
+    return unwrap(await this.sb.from('crm_estoque_mov').select('*').eq('codigo', codigo).order('quando', { ascending: false }).limit(limite || 200));
+  };
+  Supa.prototype.estoqueFotos = async function (limite) { return unwrap(await this.sb.from('crm_estoque_fotos').select('*').order('gerado_em', { ascending: false }).limit(limite || 60)); };
+  Supa.prototype.estoqueDifs = async function (fotoId) { return unwrap(await this.sb.from('crm_estoque_difs').select('*').eq('foto_id', fotoId).order('codigo').limit(5000)); };
+  Supa.prototype.estoqueUnidades = async function () { return unwrap(await this.sb.from('crm_estoque_unidades').select('*').order('codigo').limit(5000)); };
+  Supa.prototype.estoqueUnidadeSalvar = async function (codigo, unidade, fator) {
+    return unwrap(await this.sb.from('crm_estoque_unidades').upsert({ codigo, unidade, fator, origem: 'manual', atualizado_em: new Date().toISOString() }, { onConflict: 'codigo,unidade' }).select().single());
+  };
+  // modo local (teste/demonstração): o livro fica na memória
+  Local.prototype.estoqueFoto = async function () { return { foto: null, conferencia: null }; };
+  Local.prototype.estoqueIniciar = async function () { throw new Error('o estoque do CRM só funciona ligado ao banco'); };
+  Local.prototype.estoqueContagem = async function () { throw new Error('o estoque do CRM só funciona ligado ao banco'); };
+  Local.prototype.estoqueSaldo = async function () { return []; };
+  Local.prototype.estoqueMovs = async function () { return []; };
+  Local.prototype.estoqueFotos = async function () { return []; };
+  Local.prototype.estoqueDifs = async function () { return []; };
+  Local.prototype.estoqueUnidades = async function () { return []; };
+  Local.prototype.estoqueUnidadeSalvar = async function () { throw new Error('o estoque do CRM só funciona ligado ao banco'); };
+
   // Contas a receber (listagem do FKN): retrato novo a cada importação — grava por duplicata,
   // apaga o que não veio (foi pago) e devolve a lista como ficou.
   // geradoEm: hora em que o FKN gerou o relatório — título criado pela nota depois disso fica.
@@ -653,7 +686,7 @@
     if (r.error) throw await erroDaFuncao(r);
     return r.data;
   };
-  // segundos: 5 min para baixar na hora; o link que vai no WhatsApp da vendedora vale 7 dias
+  // segundos: 5 min para baixar na hora; o link que vai no WhatsApp do(a) vendedor(a) vale 7 dias
   Supa.prototype.boletoLink = async function (caminho, nome, segundos) {
     const r = await this.sb.storage.from('crm-boletos').createSignedUrl(caminho, segundos || 300, nome ? { download: nome } : undefined);
     if (r.error) throw new Error('não consegui abrir o boleto: ' + r.error.message);
@@ -751,18 +784,18 @@
     const r = unwrap(await comTentativas(() => this.sb.rpc('crm_fkn_situacao')));
     return Object.assign({ estoque: null, receber: null, pagar: null, recusas: [] }, r || {});
   };
-  // Duplicatas EM ATRASO, com detalhe e o cartório (gestora e vendedoras não leem o contas a receber — ver
+  // Duplicatas EM ATRASO, com detalhe e o cartório (gestora e vendedores(as) não leem o contas a receber — ver
   // schema.sql; crm_atrasos substituiu crm_duplicatas_atraso em 14/10/2026).
   Supa.prototype.duplicatasAtraso = async function () {
     return unwrap(await comTentativas(() => this.sb.rpc('crm_atrasos'))) || [];
   };
-  // Boletos atualizados dos últimos 90 dias (a vendedora recebe só os da carteira — RLS).
+  // Boletos atualizados dos últimos 90 dias (o(a) vendedor(a) recebe só os da carteira — RLS).
   Supa.prototype.boletos = async function () {
     const desde = new Date(Date.now() - 90 * 864e5).toISOString();
     return unwrap(await comTentativas(() => this.sb.from('crm_boletos').select('*').gte('criado_em', desde).order('criado_em').limit(2000))) || [];
   };
   Local.prototype.boletos = async function () { return this.ler().boletos || []; };
-  // A vendedora mandou o boleto ao cliente (só pela função: ela não altera a tabela).
+  // O(a) vendedor(a) mandou o boleto ao cliente (só pela função: ela não altera a tabela).
   Supa.prototype.boletoCobrado = async function (ids) {
     return unwrap(await this.sb.rpc('crm_boleto_cobrado', { ids }));
   };

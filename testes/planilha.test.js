@@ -178,34 +178,34 @@ test('formato real do Agendor da OneClean (conferência de 29/09/2026)', () => {
   assert.equal(P.tipoAtividade('Email'), 'email');
   assert.equal(P.tipoAtividade('WhatsApp'), 'whatsapp');
   const bruto = {
-    users: [{ id: 1, name: 'Vendedora Um', contact: { email: 'um@oneclean.com.br', whatsapp: '11999990000' } }],
+    users: [{ id: 1, name: 'Vendedor(a) Um', contact: { email: 'um@oneclean.com.br', whatsapp: '11999990000' } }],
     funnels: [
       { id: 869737, name: 'Funil de Vendas', dealStages: [{ id: 3665823, name: 'LDR', sequence: 1 }, { id: 3665824, name: 'CONTATO FEITO', sequence: 2 }, { id: 3665826, name: 'ORÇAMENTO ENVIADO', sequence: 4 }] },
       { id: 869740, name: 'Funil de Pós-Vendas', dealStages: [{ id: 3665829, name: 'Contato', sequence: 1 }] }
     ],
     organizations: [
       { id: 10, name: 'Cliente A', legalName: 'Cliente A Ltda', email: 'a@x.com', contact: { email: 'a@x.com', whatsapp: '(11) 98888-7777', work: '(11) 3333-4444' },
-        category: { id: 4054282, name: 'Primeira compra' }, ownerUser: { id: 1, name: 'Vendedora Um' }, ranking: 0, createdAt: '2024-02-01T12:00:00Z' },
-      { id: 11, name: 'Cliente B', email: null, contact: {}, category: null, ownerUser: { id: 1, name: 'Vendedora Um' } }
+        category: { id: 4054282, name: 'Primeira compra' }, ownerUser: { id: 1, name: 'Vendedor(a) Um' }, ranking: 0, createdAt: '2024-02-01T12:00:00Z' },
+      { id: 11, name: 'Cliente B', email: null, contact: {}, category: null, ownerUser: { id: 1, name: 'Vendedor(a) Um' } }
     ],
-    people: [{ id: 5, name: 'Comprador', email: 'c@x.com', contact: { email: 'c@x.com' }, organization: { id: 10, name: 'Cliente A' }, ownerUser: { id: 1, name: 'Vendedora Um' } }],
+    people: [{ id: 5, name: 'Comprador', email: 'c@x.com', contact: { email: 'c@x.com' }, organization: { id: 10, name: 'Cliente A' }, ownerUser: { id: 1, name: 'Vendedor(a) Um' } }],
     deals: [
       { id: 100, title: 'Pedido ganho', value: 1500, dealStage: { id: 3665826, name: 'ORÇAMENTO ENVIADO', sequence: 4, funnel: { id: 869737, name: 'Funil de Vendas' } },
-        dealStatus: { id: 2, name: 'Ganho' }, organization: { id: 11, name: 'Cliente B' }, owner: { id: 1, name: 'Vendedora Um' },
+        dealStatus: { id: 2, name: 'Ganho' }, organization: { id: 11, name: 'Cliente B' }, owner: { id: 1, name: 'Vendedor(a) Um' },
         startTime: '2026-08-01T10:00:00Z', endTime: '2026-08-20T10:00:00Z', wonAt: '2026-08-19T15:00:00Z' },
       { id: 101, title: 'Pedido perdido', value: 900, dealStage: { id: 3665824, name: 'CONTATO FEITO', funnel: { id: 869737, name: 'Funil de Vendas' } },
-        dealStatus: { id: 3, name: 'Perdido' }, organization: { id: 10, name: 'Cliente A' }, owner: { id: 1, name: 'Vendedora Um' },
+        dealStatus: { id: 3, name: 'Perdido' }, organization: { id: 10, name: 'Cliente A' }, owner: { id: 1, name: 'Vendedor(a) Um' },
         lossReason: { id: 3272327, name: 'Preço acima da concorrência', description: 'pediu 10% a menos' }, lostAt: '2026-09-02T10:00:00Z', startTime: '2026-08-10T10:00:00Z' },
       { id: 102, title: 'Negócio avulso sem empresa', value: 50, dealStatus: { id: 1, name: 'Em andamento' },
-        dealStage: { id: 3665829, name: 'Contato', funnel: { id: 869740, name: 'Funil de Pós-Vendas' } }, owner: { id: 1, name: 'Vendedora Um' }, startTime: '2026-09-01T10:00:00Z' }
+        dealStage: { id: 3665829, name: 'Contato', funnel: { id: 869740, name: 'Funil de Pós-Vendas' } }, owner: { id: 1, name: 'Vendedor(a) Um' }, startTime: '2026-09-01T10:00:00Z' }
     ],
     tasks: [
-      { id: 900, text: 'Ligar', type: 'Ligação', dueDate: '2026-09-10T13:00:00Z', finishedAt: '2026-09-10T13:20:00Z', assignedUsers: [{ id: 1, name: 'Vendedora Um' }], user: { id: 1, name: 'Vendedora Um' }, deal: { id: 100, title: 'Pedido ganho' } },
-      { id: 901, text: 'Mandar orçamento', type: null, dueDate: '2026-10-02T13:00:00Z', assignedUsers: [{ id: 1, name: 'Vendedora Um' }], organization: { id: 10, name: 'Cliente A' } }
+      { id: 900, text: 'Ligar', type: 'Ligação', dueDate: '2026-09-10T13:00:00Z', finishedAt: '2026-09-10T13:20:00Z', assignedUsers: [{ id: 1, name: 'Vendedor(a) Um' }], user: { id: 1, name: 'Vendedor(a) Um' }, deal: { id: 100, title: 'Pedido ganho' } },
+      { id: 901, text: 'Mandar orçamento', type: null, dueDate: '2026-10-02T13:00:00Z', assignedUsers: [{ id: 1, name: 'Vendedor(a) Um' }], organization: { id: 10, name: 'Cliente A' } }
     ]
   };
   const D = base();
-  D.usuarios = [{ user_id: 'u1', nome: 'Vendedora Um', email: 'um@oneclean.com.br' }];
+  D.usuarios = [{ user_id: 'u1', nome: 'Vendedor(a) Um', email: 'um@oneclean.com.br' }];
   const plano = P.planeja(D, P.converteAgendor(bruto), {});
   const a = plano.criar.empresas.find(e => e.nome === 'Cliente A');
   assert.equal(a.situacao, 'cliente', 'Primeira compra = cliente');
@@ -240,10 +240,10 @@ test('formato real do Agendor da OneClean (conferência de 29/09/2026)', () => {
 });
 
 test('negócios sem empresa do mesmo cliente não viram empresas repetidas (formato do pós-venda da OneClean)', () => {
-  const org = { id: 20, name: 'ESCOLA MODELO | JOAO', ownerUser: { id: 1, name: 'Vendedora Um' } };
-  const semEmpresa = (id, title) => ({ id, title, dealStatus: { id: 1 }, owner: { id: 1, name: 'Vendedora Um' } });
+  const org = { id: 20, name: 'ESCOLA MODELO | JOAO', ownerUser: { id: 1, name: 'Vendedor(a) Um' } };
+  const semEmpresa = (id, title) => ({ id, title, dealStatus: { id: 1 }, owner: { id: 1, name: 'Vendedor(a) Um' } });
   const bruto = {
-    users: [{ id: 1, name: 'Vendedora Um' }],
+    users: [{ id: 1, name: 'Vendedor(a) Um' }],
     organizations: [org],
     deals: [
       semEmpresa(1, '1261 - ESCOLA MODELO | JOAO'), semEmpresa(2, '901 - ESCOLA MODELO | JOAO'),
@@ -254,7 +254,7 @@ test('negócios sem empresa do mesmo cliente não viram empresas repetidas (form
     people: [{ id: 9, name: 'ESCOLA MODELO | JOAO' }]
   };
   const D = base();
-  D.usuarios = [{ user_id: 'u1', nome: 'Vendedora Um' }];
+  D.usuarios = [{ user_id: 'u1', nome: 'Vendedor(a) Um' }];
   const plano = P.planeja(D, P.converteAgendor(bruto), {});
   const nomes = plano.criar.empresas.map(e => e.nome).sort();
   assert.deepEqual(nomes, ['Atendimento - COLEGIO TESTE', 'Atendimento - COLEGIO TESTE | Carla', 'CENTRO EDUCACIONAL AURORA',

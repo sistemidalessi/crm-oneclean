@@ -301,7 +301,7 @@
       const m = porRaiz.get(d.cliente.doc.slice(0, 8));
       return m ? (m.grupo_id && porId.get(m.grupo_id)) || m : null;
     };
-    // Sem CNPJ nem nome igual: o cliente da mesma vendedora, sem CNPJ, que se parece com o da
+    // Sem CNPJ nem nome igual: o cliente da mesmo(a) vendedor(a), sem CNPJ, que se parece com o da
     // nota — só se for UM (dois parecidos = não arrisca; cria e aparece em Duplicados).
     const emailsDe = new Map();
     (D.contatos || []).forEach(c => { if (c.email) { const l = emailsDe.get(c.empresa_id) || []; l.push(c.email); emailsDe.set(c.empresa_id, l); } });

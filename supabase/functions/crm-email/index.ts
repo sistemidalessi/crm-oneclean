@@ -1,4 +1,4 @@
-// Edge Function: envia os e-mails da CADÊNCIA (07/10/2026) pelo Brevo, em nome da vendedora da carteira
+// Edge Function: envia os e-mails da CADÊNCIA (07/10/2026) pelo Brevo, em nome do(a) vendedor(a) da carteira
 // do cliente (a resposta do cliente vai para ela). Chamada pelo CRM com o login de quem aprova a fila.
 //   POST { acao: 'situacao' }                     → { ligado } (a chave do Brevo está configurada?)
 //   POST { acao: 'enviar', empresa_id, tipo, campanha_id?, assunto, corpo, para?, sair_url, marca }
@@ -154,13 +154,13 @@ Deno.serve(async (req) => {
     campanha = k.id;
   }
 
-  // remetente: a vendedora da carteira (a resposta vai para ela); sem vendedora, quem aprovou
+  // remetente: o(a) vendedor(a) da carteira (a resposta vai para ela); sem vendedor(a), quem aprovou
   let rem = eu;
   if (emp.responsavel_id && emp.responsavel_id !== eu.user_id) {
     const { data: v } = await db.from('crm_usuarios').select('user_id, nome, email, papel, ativo').eq('user_id', emp.responsavel_id).maybeSingle();
     if (v && v.ativo && EMAIL.test(String(v.email ?? ''))) rem = v;
   }
-  if (!EMAIL.test(String(rem.email ?? ''))) return resposta(400, { erro: 'a vendedora não tem e-mail no cadastro do CRM' });
+  if (!EMAIL.test(String(rem.email ?? ''))) return resposta(400, { erro: 'o(a) vendedor(a) não tem e-mail no cadastro do CRM' });
   const m = (c.marca ?? {}) as Record<string, unknown>;
   const marca = { nome: String(m.nome ?? '').slice(0, 60) || 'CRM', cor: /^#[0-9a-f]{6}$/i.test(String(m.cor ?? '')) ? String(m.cor) : '#334e68', logo: '' };
   try { const l = new URL(String(m.logo ?? '')); if (l.origin === sair.origin) marca.logo = l.href; } catch { /* sem logo */ }

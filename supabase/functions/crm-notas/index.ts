@@ -93,8 +93,13 @@ async function arquivoFkn(db: any, integ: { id: string }, f: { nome?: string; ba
     if (count && lista.length < count / 2) return recusa('produtos', ['veio com ' + lista.length + ' produtos (o CRM tem ' + count + '): confira se nenhuma linha, família ou fornecedor ficou filtrado e salve com "Tudo"']);
     await grava('crm_estoque', lista, 'codigo');
     const valor = lista.reduce((s: number, x: { custo_total: number }) => s + (x.custo_total || 0), 0);
-    await registra('Listagem de produtos do FKN: ' + lista.length + ' linhas' + (conf.avisos.length ? ' (atenção: ' + conf.avisos.join('; ') + ')' : ''), lista.length, valor);
-    return resposta(200, { ok: true, fkn: 'produtos', produtos: lista.length });
+    // Estoque do CRM (Fase 2, 16/10/2026): guarda a hora em que a listagem foi gerada e, com o livro começado,
+    // o banco compara os dois saldos nessa hora (crm_estoque_foto → crm_estoque_conferir).
+    const foto = await db.rpc('crm_estoque_foto', { p_gerado: K.posicaoListagem ? K.posicaoListagem(txt) : null, p_linhas: lista.length });
+    const conf2 = foto.data && foto.data.conferencia;
+    await registra('Listagem de produtos do FKN: ' + lista.length + ' linhas' + (conf.avisos.length ? ' (atenção: ' + conf.avisos.join('; ') + ')' : '') +
+      (foto.error ? ' (conferência do estoque falhou: ' + foto.error.message + ')' : conf2 ? ' · estoque CRM × FKN: ' + conf2.diferentes + ' diferença(s), ' + conf2.sem_explicacao + ' sem explicação' : ''), lista.length, valor);
+    return resposta(200, { ok: true, fkn: 'produtos', produtos: lista.length, conferencia: conf2 || null });
   }
   if (K.ehContasReceber(txt)) {
     let lido;

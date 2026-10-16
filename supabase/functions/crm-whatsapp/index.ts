@@ -1,5 +1,5 @@
 // Edge Function: WhatsApp oficial da Meta (Cloud API) — 15/10/2026, pedido do Anderson: no "Mandar às
-// vendedoras" o CRM manda SOZINHO, a cada vendedora, o boleto atualizado com o PDF completo (resumo, DANFE e
+// vendedores(as)" o CRM manda SOZINHO, a cada vendedor(a), o boleto atualizado com o PDF completo (resumo, DANFE e
 // boleto do banco) anexo, pelo número da OneClean na Meta. Sem a API, o navegador só abria a conversa com link.
 //   POST { acao: 'situacao' }                 → { ligado, numero, modelo } (o que a Meta diz do número e do modelo)
 //   POST { acao: 'criar_modelo' }             → cria o modelo "boleto_vendedora" (categoria utilidade, PDF no cabeçalho)
@@ -65,7 +65,7 @@ async function graph(token: string, caminho: string, init: RequestInit = {}) {
 }
 const jsonPost = (corpo: unknown): RequestInit => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corpo) });
 
-// texto do modelo (pt_BR, utilidade). {{1}} vendedora · {{2}} cliente · {{3}} nota e valor · {{4}} linha digitável
+// texto do modelo (pt_BR, utilidade). {{1}} vendedor(a) · {{2}} cliente · {{3}} nota e valor · {{4}} linha digitável
 const CORPO = 'Olá, {{1}}! O financeiro atualizou o boleto de {{2}}: {{3}}. Linha digitável: {{4}}. ' +
   'O PDF completo (resumo, nota fiscal e boleto do banco) está anexo: encaminhe ao cliente. Quando ele responder, avise o financeiro.';
 
@@ -186,9 +186,9 @@ Deno.serve(async (req) => {
         const e = empresa.get(empId), u = e && usuario.get(e.responsavel_id);
         const r: Record<string, unknown> = { empresa: e ? e.nome : empId, vendedora: u ? u.nome : null, boletos: l!.map(b => b.id) };
         try {
-          if (!u) throw new Error('cliente sem vendedora na carteira');
+          if (!u) throw new Error('cliente sem vendedor(a) na carteira');
           const para = telefoneWa(u.telefone);
-          if (!para) throw new Error('vendedora sem celular no cadastro');
+          if (!para) throw new Error('vendedor(a) sem celular no cadastro');
           const arq = l!.find(b => b.arquivo)?.arquivo;
           if (!arq) throw new Error('boleto sem PDF');
           const nf = l!.map(b => (b.nota_numero ? 'NF ' + b.nota_numero : 'duplicata ' + b.duplicata) + ', ' + moeda(Number(b.valor)) +

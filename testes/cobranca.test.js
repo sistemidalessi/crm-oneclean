@@ -1,4 +1,4 @@
-// Cobrança (14/10/2026): linha digitável, boleto lido pela IA × título em atraso, mensagem da vendedora.
+// Cobrança (14/10/2026): linha digitável, boleto lido pela IA × título em atraso, mensagem do(a) vendedor(a).
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const C = require('../cobranca.js');
@@ -68,7 +68,7 @@ test('boleto acha o título: CNPJ e valor, nota, único do CNPJ; cartório e já
   assert.equal(C.casaBoleto({ numero_documento: '0002300', valor_documento: 500 }, tits, empresas).titulo.duplicata, '002300/01');
 });
 
-test('pendentes da vendedora e a mensagem pronta', () => {
+test('pendentes do(a) vendedor(a) e a mensagem pronta', () => {
   const atrasos = [{ duplicata: '002300/01', nota_numero: 2300, vencimento: '2026-10-01', valor: 500 }, { duplicata: '002400/01', vencimento: '2026-10-01', valor: 300, cartorio_em: '2026-10-10' }];
   const boletos = [
     { id: 'b0', duplicata: '002300/01', nota_numero: 2300, valor: 505, vencimento: '2026-10-15', criado_em: '2026-10-10T10:00:00Z' },

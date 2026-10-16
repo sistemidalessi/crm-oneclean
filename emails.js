@@ -1,9 +1,9 @@
 /* CRM Sistemi Dalessi — E-mails: cadência de relacionamento e reposição (07/10/2026, ideia da líder de
    vendas). Clientes que só tratam por e-mail entram na cadência (quinzenal ou mensal, na ficha). Todo
    dia o CRM monta a FILA (cadencia.js, filaCadencia): o lembrete de reposição no ritmo de compra do
-   cliente e, no intervalo da cadência, a campanha que a líder escreveu. A vendedora (ou a líder)
+   cliente e, no intervalo da cadência, a campanha que a líder escreveu. O(a) vendedor(a) (ou a líder)
    confere, mexe no texto se quiser e aprova; quem envia é a Edge Function crm-email (Brevo), em nome
-   da vendedora da carteira. Por enquanto nada sai sem aprovação. */
+   do(a) vendedor(a) da carteira. Por enquanto nada sai sem aprovação. */
 (function (raiz) {
   'use strict';
   const R = raiz.CRMRegras;
@@ -81,7 +81,7 @@
     const segs = (E().D.opcoes || []).filter(o => o.tipo === 'segmento').map(o => [o.nome, o.nome]);
     CRM.abrirForm({
       titulo: c ? 'Campanha' : 'Nova campanha', largura: 'largo',
-      intro: 'Vai para os clientes da cadência, em nome da vendedora de cada um. Variáveis: ' + VARIAVEIS + ' — {itens} é o que o cliente costuma levar.',
+      intro: 'Vai para os clientes da cadência, em nome do(a) vendedor(a) de cada um. Variáveis: ' + VARIAVEIS + ' — {itens} é o que o cliente costuma levar.',
       campos: [{ nome: 'assunto', rotulo: 'Assunto', obrigatorio: true, largo: true, dica: 'Novidades da {minha_empresa} para {empresa}' },
         { nome: 'corpo', rotulo: 'Texto', tipo: 'textarea', linhas: 10, obrigatorio: true, largo: true,
           dica: '{saudacao}\n\nAqui é {vendedor_primeiro_nome}, da {minha_empresa}. Chegaram novidades…\n\nUm abraço,\n{vendedor}' },
@@ -139,8 +139,8 @@
         (CRM.ehAdmin() ? '— veja o passo a passo no CLAUDE.md, seção "Cadência de e-mails".' : '. Avise o administrador.') + '</p></div>';
       const segPorMotivo = new Map();
       f.segurados.forEach(s => { const k = s.motivo.split(':')[0].replace(/ em \d\d\/\d\d\/\d{4}$/, '').replace(/há \d+ dia\(s\)/, 'há poucos dias'); segPorMotivo.set(k, (segPorMotivo.get(k) || []).concat([s])); });
-      return '<div class="cabecalho"><div><h1>E-mails</h1><p class="sub">cadência de relacionamento e reposição para quem trata por e-mail · cada e-mail sai em nome da vendedora do cliente, depois da sua aprovação</p></div>' +
-        (CRM.ehGestor() ? '<label class="filtro-inline">Vendedora <select data-em-vend>' + CRM.opcoesHTML([['', 'Todas']].concat(vends.map(u => [u.user_id, u.nome])), filtroVend) + '</select></label>' : '') + '</div>' + aviso +
+      return '<div class="cabecalho"><div><h1>E-mails</h1><p class="sub">cadência de relacionamento e reposição para quem trata por e-mail · cada e-mail sai em nome do(a) vendedor(a) do cliente, depois da sua aprovação</p></div>' +
+        (CRM.ehGestor() ? '<label class="filtro-inline">Vendedor(a) <select data-em-vend>' + CRM.opcoesHTML([['', 'Todos(as)']].concat(vends.map(u => [u.user_id, u.nome])), filtroVend) + '</select></label>' : '') + '</div>' + aviso +
         '<section class="cartao"><h2>Fila de hoje: ' + f.prontos.length + ' e-mail(s) <small>confira, ajuste o texto se quiser e envie; "Pular" deixa para o próximo ciclo</small></h2>' +
         (f.prontos.length > 1 ? '<p class="acoes"><button type="button" class="btn" data-acao="em-enviar-todos"' + (enviando ? ' disabled' : '') + '>Enviar os ' + f.prontos.length + '</button></p>' : '') +
         (f.prontos.length ? '' : '<p class="vazio">Nada para enviar hoje. 👍' + (f.semCampanha ? ' ' + f.semCampanha + ' cliente(s) esperando uma campanha nova.' : '') + '</p>') + '</section>' +
@@ -182,7 +182,7 @@
     },
     'em-enviar-todos': async () => {
       const l = fila().prontos.slice();
-      if (!l.length || enviando || !confirm('Enviar os ' + l.length + ' e-mails da fila, cada um em nome da vendedora do cliente?')) return;
+      if (!l.length || enviando || !confirm('Enviar os ' + l.length + ' e-mails da fila, cada um em nome do(a) vendedor(a) do cliente?')) return;
       enviando = true; CRM.render();
       let ok = 0; const falhas = [];
       for (const p of l) { try { await envia(p); ok++; } catch (e) { falhas.push(CRM.nomeEmpresa(p.empresa_id) + ': ' + e.message); if (/limite|não está ligado/.test(e.message)) break; } }

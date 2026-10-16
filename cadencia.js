@@ -12,7 +12,7 @@
       'Quer que eu separe o de sempre? É só responder este e-mail que eu preparo o pedido para você.\n\nUm abraço,\n{vendedor}\n{minha_empresa}',
     email_limite_dia: 200 // e-mails da cadência por dia, somando todo mundo (o Brevo grátis dá 300); a função confere
   };
-  // Clientes que só tratam por e-mail: a vendedora (ou a líder) marca a cadência na ficha (quinzenal ou
+  // Clientes que só tratam por e-mail: o(a) vendedor(a) (ou a líder) marca a cadência na ficha (quinzenal ou
   // mensal). Todo dia o CRM monta a FILA: reposição quando chega o ritmo de compra do cliente (com o que
   // ele costuma levar) e, no intervalo da cadência, a campanha de relacionamento que a líder escreveu.
   // Segura quem pediu para sair, está sem e-mail, tem negócio em andamento, duplicata em atraso ou
@@ -65,7 +65,7 @@
       const r = ix.resumo.get(e.id) || {};
       // negócio aberto que andou nos últimos dias (os parados/esquecidos do Agendor não seguram)
       const andando = (ix.porEmpresa.negocios.get(e.id) || []).some(n => n.status === 'aberto' && diasEntre(diaLocal(n.etapa_desde || n.criado_em), hoje) <= (num(cfg.dias_parado) || 15));
-      if (andando) return segura(e, 'negócio em andamento: a vendedora já está falando com ele');
+      if (andando) return segura(e, 'negócio em andamento: o(a) vendedor(a) já está falando com ele');
       if (opc.atraso && opc.atraso.has(e.id)) return segura(e, 'duplicata em atraso');
       const v = variaveisEmail(e, ix, opc);
       const item = (tipo, campanha, assunto, corpo, motivo) => prontos.push({ empresa_id: e.id, responsavel_id: e.responsavel_id || null, tipo, campanha_id: campanha ? campanha.id : null,

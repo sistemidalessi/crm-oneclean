@@ -6,7 +6,7 @@
 //   POST { acao: 'situacao' }                          → { ligado } (a chave da IA está configurada?)
 //   POST { caminho: 'caixa/AAAA-MM/…', nota?, hoje }  → { movimentos: [...], aviso }
 //   POST { modo: 'boleto', caminho: 'boletos/AAAA-MM/…' } → { boletos: [...], aviso } (14/10/2026: 2ª via
-//        atualizada do BB, no bucket crm-boletos — Caixa → Cobrança; o CRM acha o título e entrega à vendedora)
+//        atualizada do BB, no bucket crm-boletos — Caixa → Cobrança; o CRM acha o título e entrega ao(à) vendedor(a))
 // Só o administrador (o Caixa é só dele). A chave da Anthropic fica SÓ nos segredos do Supabase
 // (ANTHROPIC_API_KEY) — nunca no app, no repositório ou no chat. Deploy: verify_jwt ligado (o padrão).
 import { createClient } from 'npm:@supabase/supabase-js@2.116.0';

@@ -2094,7 +2094,7 @@ begin
   if not (public.crm_eh_admin() or public.crm_eh_comprador() or coalesce(auth.role(), '') = 'service_role') then raise exception 'só o administrador ou o comprador'; end if;
   select * into f from public.crm_estoque_fotos where id = p_foto;
   if f.id is null or not exists (select 1 from public.crm_estoque_saldo) then return null; end if;
-  delete from public.crm_estoque_difs where foto_id = f.id;
+  if f.conferida_em is not null then return f.resumo; end if; -- cada listagem é conferida uma vez (de novo = nova listagem)
   insert into public.crm_estoque_difs (foto_id, codigo, descricao, saldo_crm, saldo_fkn, diferenca, explicacao)
   with crm as (
     select s.codigo, s.descricao, s.inicio, coalesce((select sum(m.quantidade) from public.crm_estoque_mov m where m.codigo = s.codigo and m.quando <= f.gerado_em), 0) q

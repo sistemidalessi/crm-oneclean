@@ -65,7 +65,7 @@
   const { esc } = CRM;
   const E = () => CRM.estado;
 
-  // Administrador: o contas a receber inteiro. Gestora e vendedoras: só as duplicatas em atraso
+  // Administrador: o contas a receber inteiro. Gestora e vendedores(as): só as duplicatas em atraso
   // (E.atrasos, pela função crm_duplicatas_atraso — 06/10/2026, pedido do Anderson).
   const fonte = () => (CRM.ehAdmin() ? (E().D && E().D.titulos) || [] : E().atrasos || []);
   let cache = { ref: null, hoje: '', mapa: new Map() };
@@ -104,7 +104,7 @@
   CRM.fichaFinanceiro = id => {
     const f = CRM.financeiro(id);
     if (!f) return '';
-    // Gestora e vendedoras: só as duplicatas em atraso (é o que elas recebem do banco).
+    // Gestora e vendedores(as): só as duplicatas em atraso (é o que elas recebem do banco).
     if (!CRM.ehAdmin()) {
       return '<section class="financeiro"><h3>Duplicatas em atraso</h3><p class="resumo-compras devendo">' +
         (f.vencido > 0 ? CRM.selo('vencido ' + R.moeda(f.vencido), 'vermelho') + ' ' + f.qtdVencidos + ' duplicata(s), a mais antiga há ' + esc(atraso(f.maiorAtraso)) + '.<br>Combine o pagamento antes de oferecer pedido novo.' : '') +
@@ -154,7 +154,7 @@
           '<strong>' + esc(c.nome) + '</strong><small>' + CRM.selo(R.moeda(c.vencido), 'vermelho') + ' há ' + esc(atraso(c.maiorAtraso)) + ' · ' + c.qtdVencidos + ' título(s)' +
           (c.vendedor ? ' · ' + esc(c.vendedor) : '') + (c.empresa ? '' : ' · sem cadastro no CRM') + '</small>' + (c.empresa ? '</button>' : '</div>') + '</li>').join('') + '</ul>' +
           (p.vencidos.length > 15 ? '<p class="mais">e mais ' + (p.vencidos.length - 15) + '… (o arquivo exportado tem todos)</p>' : '') : '<p class="vazio">Nada vencido. 👍</p>') + '</section>' +
-        '<section><h3>Por vendedora</h3><div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Carteira</th><th class="num">Em aberto</th><th class="num">Vencido</th><th class="num">Clientes</th></tr></thead><tbody>' +
+        '<section><h3>Por vendedor(a)</h3><div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Carteira</th><th class="num">Em aberto</th><th class="num">Vencido</th><th class="num">Clientes</th></tr></thead><tbody>' +
           p.porVendedor.map(v => '<tr><td>' + esc(v.vendedor) + '</td><td class="num">' + esc(R.moeda(v.aberto)) + '</td><td class="num">' + (v.vencido > 0 ? CRM.selo(R.moeda(v.vencido), 'vermelho') : '—') + '</td>' +
             '<td class="num">' + v.clientes + (v.clientesVencidos ? ' <small>' + v.clientesVencidos + ' com vencido</small>' : '') + '</td></tr>').join('') + '</tbody></table></div>' +
           (p.semCliente.length ? '<p class="dica">' + p.semCliente.length + ' cliente(s) do FKN sem cadastro no CRM (CNPJ não encontrado): ' + esc(p.semCliente.slice(0, 5).map(c => c.nome).join(', ')) + (p.semCliente.length > 5 ? '…' : '') + '.</p>' : '') +

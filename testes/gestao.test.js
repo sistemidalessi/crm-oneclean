@@ -120,6 +120,8 @@ test('listagem de produtos do FKN: fornecedor, mínimo, pedido e a caixa fechada
   const det = l[0];
   assert.deepEqual([det.quantidade, det.estoque_min, det.estoque_max, det.pend_cliente, det.pend_fornecedor, det.custo_unit, det.preco_venda, det.fornecedor_cod, det.fornecedor, det.linha, det.familia, det.ult_entrada],
     [5, 2, 10, 2, 4, 25, 32.5, '00059', 'FORNECEDOR UM LTDA', 'DOMISSANITARIOS', '107 MULTI USO', '2026-09-05'], 'saldo (já sem o reservado para cliente), não o atual');
+  assert.equal(det.estoque_atual, 7, 'o atual (físico, com o reservado) também vem: é ele que o estoque do CRM compara');
+  assert.equal(require('../fkn.js').posicaoListagem(LISTAGEM), '2026-10-01T17:14:00.000Z', 'hora da listagem (Brasília)');
   assert.equal(l[3].fornecedor, null, 'fornecedor 00000 = sem fornecedor');
   assert.equal(det.custo_total, 125);
 
@@ -161,7 +163,7 @@ test('listagem de produtos: conferência do relatório puxado no FKN (o que falt
 test('equipe: comprador fora, "Direto" (venda do administrador) no fim, total = faturamento do mês', () => {
   const D = base();
   D.usuarios.push({ user_id: 'cmp', nome: 'Comprador Exemplo', papel: 'comprador', ativo: true });
-  // venda direta (admin) e uma venda de ex-vendedora (sem dono): entram no total
+  // venda direta (admin) e uma venda de ex-vendedor(a) (sem dono): entram no total
   D.notas.push({ id: 'nd', empresa_id: 'P', vendedor_id: 'adm', emitida_em: '2026-09-25T10:00:00-03:00', valor_total: 300, cancelada: false });
   D.nota_itens.push({ id: 'ndi', nota_id: 'nd', cfop: '5102', descricao: 'DETERGENTE 5L', unidade: 'GL', quantidade: 12, valor_total: 300 });
   D.notas.push({ id: 'nx', empresa_id: 'P', vendedor_nome: 'EX VENDEDORA', emitida_em: '2026-09-26T10:00:00-03:00', valor_total: 50, cancelada: false });
@@ -169,7 +171,7 @@ test('equipe: comprador fora, "Direto" (venda do administrador) no fim, total = 
   const p = G.painel(D, R.indexa(D), R.config({}), HOJE);
   assert.deepEqual(p.equipe.map(u => u.nome), ['Ana Exemplo', 'Direto'], 'comprador fora; Direto por último');
   assert.equal(p.equipe[1].valorMes, 300);
-  assert.equal(p.equipeTotal.valorMes, 550, '200 da Ana + 300 Direto + 50 de ex-vendedora');
+  assert.equal(p.equipeTotal.valorMes, 550, '200 da Ana + 300 Direto + 50 de ex-vendedor(a)');
   assert.equal(p.equipeTotal.outros.mes, 50);
   assert.equal(p.equipeTotal.valorMes, p.mes.atual.valor, 'o total bate com o faturamento do mês');
 });

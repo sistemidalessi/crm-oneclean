@@ -1,5 +1,5 @@
 /* CRM Sistemi Dalessi — orçamento do FKN → proposta no layout da empresa.
-   A vendedora gera o orçamento no FKN, salva em CSV (disquete → CSV) e importa aqui: o CRM lê
+   O(a) vendedor(a) gera o orçamento no FKN, salva em CSV (disquete → CSV) e importa aqui: o CRM lê
    cliente, itens e condições, acha o cliente pelo CNPJ (ou cadastra), cria ou atualiza o negócio
    na etapa de orçamento e monta a proposta, pronta para PDF, WhatsApp ou e-mail.
    Parte pura (CRMOrcamento.lerOrcamentoFKN, testada em testes/orcamento.test.js) e a tela. */
@@ -103,7 +103,7 @@
   // Quem é o cliente do orçamento. O FKN nem sempre traz CNPJ (escola, condomínio, pessoa): sem ele,
   // procura pelo código do cliente no FKN (contas a receber e orçamentos já importados), pelo e-mail
   // e pelo nome igual — antes de cadastrar de novo (em 05/10 três importações sem CNPJ criaram três
-  // "COLÉGIO XINGU"). Sem achar, devolve os de nome parecido para a vendedora escolher.
+  // "COLÉGIO XINGU"). Sem achar, devolve os de nome parecido para o(a) vendedor(a) escolher.
   //   D: { empresas, propostas, negocios, titulos }; negocioId: importação feita da ficha do negócio
   function clienteDoOrcamento(c, D, negocioId) {
     const emps = D.empresas || [], porId = id => emps.find(e => e.id === id) || null;
@@ -130,7 +130,7 @@
     if (iguais.length === 1) return { empresa: iguais[0], como: 'nome', parecidos: [] };
     // Parecido: um nome contém o outro ("CLUBE ATLETICO YPIRANGA" × "Alisson Clube Atlético Ypiranga") ou
     // têm duas palavras em comum ("NR EXPRESS ORÇ 3" × "NR Express - Matriz São Paulo | Amanda").
-    // Só sugere: a vendedora escolhe na lista; o padrão continua "cadastrar novo".
+    // Só sugere: o(a) vendedor(a) escolhe na lista; o padrão continua "cadastrar novo".
     const palavras = t => t.split(' ').filter(p => p.length >= 2 && !/^\d+$/.test(p));
     const pk = palavras(k);
     const nota = x => { const y = R.chaveNome(x.nome); if (!y) return 0;

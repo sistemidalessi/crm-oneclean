@@ -3,7 +3,7 @@
    O administrador monta a oferta em Compras (é quem lê o custo); a oferta guarda só o preço de oferta e o
    de tabela (crm_ofertas, a equipe toda lê). O público sai das notas: quem já comprou o item, quem compra
    a mesma família, ou (opcional) todo cliente que comprou nos últimos 12 meses. E-mail pela crm-email
-   (tipo 'oferta', em nome da vendedora, um por cliente e por oferta); WhatsApp pela vendedora, com o
+   (tipo 'oferta', em nome do(a) vendedor(a), um por cliente e por oferta); WhatsApp pelo(a) vendedor(a), com o
    texto pronto. Parte pura no começo (testes/ofertas.test.js); a tela vem depois. */
 (function (raiz) {
   'use strict';
@@ -346,13 +346,13 @@
         '<div><p><strong>E-mail:</strong> ' + esc(exemplo.assunto) + '</p><pre class="of-previa">' + esc(exemplo.corpo.replace('{itens}', '[tabela com os produtos e os preços]')) + '</pre></div>' +
         '<div><p><strong>WhatsApp:</strong></p><pre class="of-previa">' + esc(exemplo.whatsapp) + '</pre></div></div></details>' : '') +
       '<h2>Quem recebe</h2><div class="filtros-linha"><label class="check"><input type="checkbox" data-of-todos-clientes' + (todos ? ' checked' : '') + '> incluir todo cliente que comprou nos últimos 12 meses</label>' +
-        (CRM.ehGestor() ? '<label class="filtro-inline">Vendedora <select data-of-vend>' + CRM.opcoesHTML([['', 'Todas']].concat(vend.map(u => [u.user_id, u.nome])), filtroVend) + '</select></label>' : '') + '</div>' +
+        (CRM.ehGestor() ? '<label class="filtro-inline">Vendedor(a) <select data-of-vend>' + CRM.opcoesHTML([['', 'Todas']].concat(vend.map(u => [u.user_id, u.nome])), filtroVend) + '</select></label>' : '') + '</div>' +
       (no && prontos.length ? '<p class="cx-soma">' + '<strong>' + marcados.size + '</strong> marcado(s) de ' + prontos.length + ' com e-mail · ' +
         '<button type="button" class="mini" data-acao="of-marca-todos" data-id="' + esc(o.id) + '">Marcar todos</button>' +
         '<button type="button" class="mini" data-acao="of-marca-nenhum">Limpar</button>' +
         '<button type="button" class="btn" data-acao="of-enviar" data-id="' + esc(o.id) + '"' + (!marcados.size || enviando ? ' disabled' : '') + '>' + (enviando ? 'Enviando…' : 'Enviar e-mail para os ' + marcados.size) + '</button></p>'
         : !no ? '<p class="dica">Oferta ' + esc(s[0]) + ': o envio está fechado.</p>' : '') +
-      (pub.length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th></th><th>Cliente</th><th>Por quê</th>' + (CRM.carteira() ? '' : '<th>Vendedora</th>') + '<th>E-mail</th><th></th></tr></thead><tbody>' +
+      (pub.length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th></th><th>Cliente</th><th>Por quê</th>' + (CRM.carteira() ? '' : '<th>Vendedor(a)</th>') + '<th>E-mail</th><th></th></tr></thead><tbody>' +
         pub.map(p => '<tr><td class="cx-marca">' + (no && podeEmail(p) ? '<input type="checkbox" data-of-cli="' + esc(p.empresa_id) + '"' + (marcados.has(p.empresa_id) ? ' checked' : '') + '>' : '') + '</td>' +
           '<td><button type="button" class="linha" data-acao="abrir-empresa" data-id="' + esc(p.empresa_id) + '"><strong>' + esc(CRM.nomeEmpresa(p.empresa_id)) + '</strong></button> ' + CRM.selo(NIVEL[p.nivel][0], NIVEL[p.nivel][1]) + '</td>' +
           '<td><small>' + esc(p.motivo) + '</small></td>' + (CRM.carteira() ? '' : '<td><small>' + esc(R.primeiroNome(CRM.nomeUsuario(p.responsavel_id)) || '—') + '</small></td>') +
@@ -367,7 +367,7 @@
       const l = ofertas();
       if (!aberta || !l.some(o => o.id === aberta)) aberta = l.length ? l[0].id : null;
       const o = l.find(x => x.id === aberta);
-      return '<div class="cabecalho"><div><h1>Ofertas</h1><p class="sub">queima de estoque: preço especial por tempo limitado, por e-mail (em nome da vendedora) e WhatsApp</p></div>' +
+      return '<div class="cabecalho"><div><h1>Ofertas</h1><p class="sub">queima de estoque: preço especial por tempo limitado, por e-mail (em nome do(a) vendedor(a)) e WhatsApp</p></div>' +
         (CRM.ehAdmin() ? '<span class="flex"></span><button type="button" class="btn" data-acao="of-nova">🔥 Nova oferta com o estoque parado</button>' : '') + '</div>' +
         (l.length > 1 ? '<div class="abas-mini">' + l.map(x => '<button type="button" class="mini' + (x.id === aberta ? ' ativo' : '') + '" data-acao="of-abrir" data-id="' + esc(x.id) + '">' + esc(x.titulo) + ' · ' + esc(situacao(x)[0]) + '</button>').join('') + '</div>' : '') +
         (o ? cartaoOferta(o) : '<div class="cartao"><p class="vazio">Nenhuma oferta ainda. ' + (CRM.ehAdmin() ? 'Clique em "Nova oferta" (ou em Compras → Estoque parado) para montar a primeira.' : 'O administrador monta as ofertas com o estoque parado.') + '</p></div>');
@@ -397,7 +397,7 @@
     'of-enviar': async id => {
       const o = acha(id); if (!o || enviando) return;
       const l = publicoDe(o).filter(p => podeEmail(p) && marcados.has(p.empresa_id));
-      if (!l.length || !confirm('Enviar a oferta por e-mail para ' + l.length + ' cliente(s), cada um em nome da vendedora da carteira?')) return;
+      if (!l.length || !confirm('Enviar a oferta por e-mail para ' + l.length + ' cliente(s), cada um em nome do(a) vendedor(a) da carteira?')) return;
       enviando = true; CRM.render();
       let ok = 0; const falhas = [];
       for (const p of l) {
