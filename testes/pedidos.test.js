@@ -26,20 +26,21 @@ test('margem e desconto sobre a tabela, como na grade do FKN', () => {
 });
 
 test('linha e totais: comissão pelo plano de quem vendeu', () => {
-  const plano = P.PLANOS_PADRAO.find(p => p.id === 'comissionado');
+  const plano = P.PLANOS_PADRAO.find(p => p.id === 'externo');
   const it = { quantidade: 325, preco: 1.96, desconto: 0, preco_tab: 1.96, custo: 1.505 };
   const l = P.linha(it, { plano });
   assert.deepStrictEqual([l.total, l.faixa, l.margem, l.comissao, l.valorComissao], [637, 'A', 23.21, 5, 31.85]); // R$ 31,85 como no FKN
   const t = P.totais([it, { quantidade: 2, preco: 10, desconto: 10, preco_tab: null, custo: null }], 15, { plano });
   assert.deepStrictEqual(t, { produtos: 655, frete: 15, geral: 670, margem: 23.21, comissao: 31.85, comissaoPct: 5 });
   const esc = P.linha({ quantidade: 1, preco: 1.70, preco_tab: 1.96 }, { plano: P.PLANOS_PADRAO[0] });
-  assert.strictEqual(esc.faixa, 'ABAIXO'); assert.strictEqual(esc.comissao, 0);
+  assert.strictEqual(esc.faixa, 'ABAIXO'); assert.strictEqual(esc.comissao, 2);  // interno: abaixo da tabela A conta 2%
+  assert.strictEqual(P.linha({ quantidade: 1, preco: 1.70, preco_tab: 1.96 }, { plano: P.PLANOS_PADRAO[1] }).comissao, 0);
 });
 
 test('plano do usuário: configurado ou o primeiro', () => {
-  const cfg = { comissao_usuarios: { u2: 'comissionado' } };
-  assert.strictEqual(P.planoDoUsuario(cfg, 'u2').id, 'comissionado');
-  assert.strictEqual(P.planoDoUsuario(cfg, 'u1').id, 'escritorio');
+  const cfg = { comissao_usuarios: { u2: 'externo' } };
+  assert.strictEqual(P.planoDoUsuario(cfg, 'u2').id, 'externo');
+  assert.strictEqual(P.planoDoUsuario(cfg, 'u1').id, 'interno');
   assert.strictEqual(P.planoDoUsuario({ comissao_planos: [{ id: 'x', nome: 'X', faixas: {} }] }, 'u1').id, 'x');
 });
 
@@ -85,4 +86,14 @@ test('itens da proposta viram itens do pedido; endereço de entrega do cadastro'
     [{ codigo: '620000', descricao: 'ESCADA', unidade: 'UN', quantidade: 2, preco: 573.64, desconto: 0 }]);
   const d = P.entregaDoCliente({ logradouro: 'RUA CANADA', numero: '658', bairro: 'JARDIM AMERICA', cidade: 'SAO PAULO', uf: 'SP', cep: '01436-000' });
   assert.strictEqual(P.entregaTexto(d), 'RUA CANADA, 658 · JARDIM AMERICA · SAO PAULO/SP · CEP 01436-000');
+});
+
+test('margem mínima de 23%: abaixo dela o item avisa (e o pedido bloqueia no banco)', () => {
+  assert.strictEqual(P.linha({ quantidade: 1, preco: 1.96, preco_tab: 1.96, custo: 1.505 }).abaixoMinimo, false);  // 23,21%
+  assert.strictEqual(P.linha({ quantidade: 1, preco: 1.94, preco_tab: 1.96, custo: 1.505 }).abaixoMinimo, true);   // 22,42%
+  assert.strictEqual(P.linha({ quantidade: 1, preco: 1.94, preco_tab: 1.96, custo: 1.505 }, { margemMinima: 20 }).abaixoMinimo, false);
+  assert.strictEqual(P.linha({ quantidade: 1, preco: 0, preco_tab: 1.96, custo: 1.505 }).abaixoMinimo, true);      // brinde sem preço
+  assert.strictEqual(P.linha({ quantidade: 1, preco: 5, preco_tab: 1.96, custo: null }).abaixoMinimo, false);       // sem custo: não sabe
+  assert.strictEqual(P.margemMinima({ margem_minima: 25 }), 25);
+  assert.strictEqual(P.margemMinima({}), 23);
 });

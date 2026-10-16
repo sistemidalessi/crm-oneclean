@@ -944,7 +944,8 @@
     const falt = new Set((await this._faltas()).map(f => f.pedido_id));
     this._peds().filter(p => p.situacao === 'aberto').forEach(p => {
       p.bloqueios = [falt.has(p.id) && 'ESTOQUE', !p.entrada_ok && /(vista|antecipad|pix|transfer|dep[oó]sito)/i.test((p.dados || {}).pagamento || '') && 'SEM ENTRADA',
-        (p.itens || []).some(i => Number(i.preco_tab) > 0 && Number(i.preco) * (1 - Number(i.desconto || 0) / 100) < Number(i.preco_tab) * 0.9 - 0.00005) && 'PREÇO'].filter(Boolean);
+        (p.itens || []).some(i => { const pl = Number(i.preco) * (1 - Number(i.desconto || 0) / 100), c = Number(i.custo) || 0;
+          return c > 0 ? pl <= 0 || (pl - c) / pl * 100 < 23 - 0.005 : Number(i.preco_tab) > 0 && pl < Number(i.preco_tab) * 0.9 - 0.00005; }) && 'PREÇO'].filter(Boolean);
     });
     this._pedsGrava();
     return 0;

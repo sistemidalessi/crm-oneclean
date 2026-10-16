@@ -2287,7 +2287,7 @@ grant execute on function public.crm_compra_lancar(uuid, jsonb) to authenticated
 -- liberação). Orçamento aprovado (proposta) vira PEDIDO, que reserva o estoque: disponível = físico − reservado pelos
 -- pedidos em aberto, em separação ou separados. Bloqueios como no Sifn050 — ESTOQUE (falta, por ordem de chegada),
 -- ATRASO (duplicata vencida do cliente), SEM ENTRADA (pagamento à vista/antecipado ainda não recebido) e PREÇO (item
--- abaixo da faixa negativa da tabela) —; a gestora/o administrador libera. A logística junta os pedidos liberados numa
+-- com margem abaixo da mínima, 23%) —; a gestora/o administrador libera. A logística junta os pedidos liberados numa
 -- LISTA DE SEPARAÇÃO (o "bolão", o "SP" do FKN), separa e marca separado; a nota emitida para o cliente (ainda pelo FKN)
 -- chega pelo vigia e fatura o pedido sozinha (crm_pedidos_casar), soltando a reserva. Itens em jsonb de propósito:
 -- o pedido se grava inteiro numa função, sem apagar linha. Tudo grava por função (security definer).
@@ -2401,7 +2401,7 @@ returns table (codigo text, descricao text, unidade text, localizacao text, linh
   fisico numeric, reservado numeric, disponivel numeric, a_caminho numeric, preco_venda numeric, custo numeric, fator numeric, base text)
 -- plpgsql de propósito: como função SQL o mesmo corpo levava 500 ms (2.288 produtos); assim, 45 ms
 language plpgsql stable security definer set search_path = public as $$
-declare vc boolean := public.crm_eh_gestor() or public.crm_eh_comprador();
+declare vc boolean := public.crm_eh_membro() or public.crm_eh_comprador(); -- custo: equipe de vendas (como no FKN) e comprador; logística não
 begin
   if not public.crm_eh_ativo() then return; end if;
   return query
@@ -2468,20 +2468,25 @@ revoke all on function public.crm_pedido_itens_norm(jsonb) from public, anon, au
 
 -- Bloqueios de todos os pedidos em aberto (e o casamento com as notas que chegaram). Barato: roda ao abrir as telas.
 create or replace function public.crm_pedidos_atualizar() returns integer language plpgsql security definer set search_path = public as $$
-declare n integer; neg numeric; trava boolean; hoje date := (now() at time zone 'America/Sao_Paulo')::date;
+-- PREÇO (16/10, Anderson): item com margem abaixo da mínima (cfg.margem_minima, padrão 23% = tabela A) ou sem preço;
+-- sem custo conhecido, abaixo da faixa negativa da tabela. cfg.pedido_trava_preco = false desliga.
+declare n integer; neg numeric; mmin numeric; trava boolean; hoje date := (now() at time zone 'America/Sao_Paulo')::date;
 begin
   if not (public.crm_eh_ativo() or coalesce(auth.role(), '') = 'service_role') then raise exception 'sem acesso'; end if;
   perform public.crm_pedidos_casar_int();
-  select coalesce(nullif(dados->'tabela_precos'->>'NEG', '')::numeric, -10), coalesce((dados->>'pedido_trava_preco')::boolean, true)
-    into neg, trava from public.crm_config where id = 1;
+  select coalesce(nullif(dados->'tabela_precos'->>'NEG', '')::numeric, -10), coalesce(nullif(dados->>'margem_minima', '')::numeric, 23),
+         coalesce((dados->>'pedido_trava_preco')::boolean, true)
+    into neg, mmin, trava from public.crm_config where id = 1;
   with f as (select distinct pedido_id from public.crm_pedidos_faltas_todas()),
   b as (
     select p.id, array_remove(array[
       case when p.id in (select pedido_id from f) then 'ESTOQUE' end,
       case when exists (select 1 from public.crm_titulos t where t.empresa_id = p.empresa_id and t.vencimento < hoje and not t.abono) then 'ATRASO' end,
       case when not p.entrada_ok and coalesce(p.dados->>'pagamento', '') ~* '(vista|antecipad|pix|transfer|dep[oó]sito)' then 'SEM ENTRADA' end,
-      case when trava and exists (select 1 from jsonb_array_elements(p.itens) i where coalesce((i->>'preco_tab')::numeric, 0) > 0
-        and (i->>'preco')::numeric * (1 - coalesce((i->>'desconto')::numeric, 0) / 100) < round((i->>'preco_tab')::numeric * (1 + neg / 100), 4) - 0.00005) then 'PREÇO' end
+      case when trava and exists (select 1 from jsonb_array_elements(p.itens) i
+        cross join lateral (select (i->>'preco')::numeric * (1 - coalesce((i->>'desconto')::numeric, 0) / 100) pl, coalesce((i->>'custo')::numeric, 0) c, coalesce((i->>'preco_tab')::numeric, 0) tb) v
+        where case when v.c > 0 then v.pl <= 0 or (v.pl - v.c) / v.pl * 100 < mmin - 0.005
+                   else v.tb > 0 and v.pl < round(v.tb * (1 + neg / 100), 4) - 0.00005 end) then 'PREÇO' end
     ], null) bl from public.crm_pedidos p where p.situacao = 'aberto')
   update public.crm_pedidos p set bloqueios = b.bl from b where p.id = b.id and p.bloqueios is distinct from b.bl;
   get diagnostics n = row_count;

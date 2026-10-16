@@ -1155,10 +1155,11 @@ BLOQUEADO/liberado, bloqueios ESTOQUE / ATRASO DUPL / SEM ENTRADA, lista de sepa
   em qualquer proposta (do FKN importada ou do CRM) na ficha e na aba Orçamentos. Pedido do orçamento marca a proposta
   "aprovada" e pergunta se marca o negócio como ganho. Orçamento feito no CRM: `propostas.dados.orcamento = true`
   (o PDF diz "Orçamento", com os cartões de frete/pagamento como o do FKN).
-- **Grade de produtos** como a do FKN: item, código, nome, un, qtde, **Ñ atend.** (falta), preço, desc, margem (só
-  gestora/admin), total, **faixa** (A–F e negativa da tabela PADRAO sobre o "ven" da listagem: +0/5/10/15/20/25%, −10%;
-  `cfg.tabela_precos`), comissão % (planos `P.PLANOS_PADRAO`: escritório e comissionado; `cfg.comissao_planos` e
-  `cfg.comissao_usuarios` por user_id — **a tela de editar os planos e a apuração do mês são a Fase 3b**), desc s/tab e o
+- **Grade de produtos** como a do FKN: item, código, nome, un, qtde, **Ñ atend.** (falta), preço, desc, **margem e custo**
+  (equipe de vendas, como no FKN — decisão do Anderson em 16/10: saber se há espaço quando o cliente negocia), total, **faixa** (A–F e negativa da tabela PADRAO sobre o "ven" da listagem: +0/5/10/15/20/25%, −10%;
+  `cfg.tabela_precos`), comissão % (planos `P.PLANOS_PADRAO`: **interno** = papel do escritório, A 3,5 / B 5 /
+  C 5,5 / D 6, abaixo da A 2%; **externo** = tabela do FKN, A 5 … F 10, negativa 5 — hoje só a Silmara, em
+  `cfg.comissao_usuarios`; `cfg.comissao_planos` troca os números — **a tela de editar os planos e a apuração do mês são a Fase 3b**), desc s/tab e o
   **disponível**. Botões da tabela (A…F) põem o preço da faixa; "Últimas compras" e "Importar últimas compras" saem das notas.
 - **Banco:** `crm_pedidos` (itens em **jsonb** de propósito: grava inteiro por função, sem apagar linha; o banco completa
   base/fator/qtd_est/preco_tab/custo em `crm_pedido_itens_norm`), `crm_boloes`. Só leitura direta; tudo grava por função:
@@ -1171,11 +1172,12 @@ BLOQUEADO/liberado, bloqueios ESTOQUE / ATRASO DUPL / SEM ENTRADA, lista de sepa
   caixas. Custo só para gestora/admin/comprador. **Falta** (`crm_pedidos_faltas`): por ordem de chegada, o que está em
   separação primeiro. A reserva do FKN (pend. cliente) **não** entra: no paralelo todo pedido deve passar pelo CRM.
 - **Bloqueios:** ESTOQUE (falta), ATRASO (duplicata vencida do cliente), SEM ENTRADA (pagamento "à vista/antecipado/pix/
-  transferência/depósito" sem "Entrada recebida"), PREÇO (item abaixo da faixa negativa; `cfg.pedido_trava_preco = false` desliga).
+  transferência/depósito" sem "Entrada recebida"), PREÇO (**margem do item abaixo de 23%**, `cfg.margem_minima`, ou sem preço; sem custo, abaixo da faixa negativa;
+  `cfg.pedido_trava_preco = false` desliga). A vendedora vê a margem em vermelho ao digitar.
+- Localização no galpão: vazia no FKN (ainda não precisou); o bolão ordena por linha, família e nome até ser preenchida.
 - **Papel logística** (`crm_eh_logistica`): só a aba Pedidos (Pedidos, Consultar estoque, Separação, Faltas); não vê
   cliente nem financeiro (endereço e telefone vão no próprio pedido, `dados`). O comprador vê Consultar estoque e Faltas.
-  **Falta o Anderson rodar no SQL Editor** a troca da trava de papel e os `revoke` (o conector não roda `drop`/`revoke`;
-  SQL entregue no chat de 16/10) antes de cadastrar alguém como Logística.
+  Trava de papel e `revoke` rodados pelo Anderson no SQL Editor em 16/10 (conferido: anônimo sem acesso).
 - Testado em 16/10: banco real em transação desfeita (reserva, disponível, falta, 4 bloqueios, liberação só da gestora,
   bolão, separação, comentário, comprador sem gravar, anônimo sem nada) e navegador (pedido, orçamento → PDF → virar
   pedido, liberar, bolão, separado, faltas, menus por papel). Achado no teste: o Enter que insere o item também dispara o

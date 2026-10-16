@@ -17,12 +17,17 @@
   const TABELA_PADRAO = { NEG: -10, A: 0, B: 5, C: 10, D: 15, E: 20, F: 25 };
   const FAIXAS = ['F', 'E', 'D', 'C', 'B', 'A', 'NEG'];
   const tabelaDe = cfg => Object.assign({}, TABELA_PADRAO, (cfg && cfg.tabela_precos) || {});
-  // Planos de comissão (% por faixa). Comissionada pura = o que está no FKN para a Silmara; escritório = o papel
-  // (fixo + comissão; abaixo da tabela A conta 2%). A comissão é por item, pelo plano de quem vendeu.
+  // Planos de comissão (% por faixa), confirmados pelo Anderson em 16/10: INTERNO = vendedores(as) do escritório (o papel:
+  // fixo + comissão; abaixo da tabela A conta 2%); EXTERNO = vendedor(a) externo(a), hoje só a Silmara (a tabela do FKN).
+  // Quem é externo: cfg.comissao_usuarios = { user_id: 'externo' }. A comissão é por item, pelo plano de quem vendeu.
   const PLANOS_PADRAO = [
-    { id: 'escritorio', nome: 'Escritório (fixo + comissão)', faixas: { ABAIXO: 0, NEG: 2, A: 3.5, B: 5, C: 5.5, D: 6, E: 6, F: 6 } },
-    { id: 'comissionado', nome: 'Comissionado(a) puro(a)', faixas: { ABAIXO: 0, NEG: 5, A: 5, B: 6, C: 7, D: 8, E: 9, F: 10 } }
+    { id: 'interno', nome: 'Interno (escritório)', faixas: { ABAIXO: 2, NEG: 2, A: 3.5, B: 5, C: 5.5, D: 6, E: 6, F: 6 } },
+    { id: 'externo', nome: 'Externo', faixas: { ABAIXO: 0, NEG: 5, A: 5, B: 6, C: 7, D: 8, E: 9, F: 10 } }
   ];
+  // Margem mínima (a da tabela A: 23%). A vendedora vê a margem para saber se tem espaço quando o cliente negocia;
+  // abaixo dela o pedido fica bloqueado (PREÇO) até a gestora liberar.
+  const MARGEM_MINIMA = 23;
+  const margemMinima = cfg => (cfg && cfg.margem_minima != null && cfg.margem_minima !== '' ? Number(cfg.margem_minima) : MARGEM_MINIMA);
   const planosDe = cfg => ((cfg && Array.isArray(cfg.comissao_planos) && cfg.comissao_planos.length) ? cfg.comissao_planos : PLANOS_PADRAO);
   function planoDoUsuario(cfg, userId) {
     const ps = planosDe(cfg), id = cfg && cfg.comissao_usuarios && cfg.comissao_usuarios[userId];
@@ -53,7 +58,9 @@
     const plano = ctx.plano || PLANOS_PADRAO[0];
     const com = fx && plano.faixas[fx] != null ? num(plano.faixas[fx]) : null;
     const total = totalItem(it);
-    return { precoLiq: pl, total, faixa: fx, margem: margem(pl, it.custo), sobreTab: sobreTabela(pl, tab), comissao: com, valorComissao: com == null ? 0 : r2(total * com / 100) };
+    const mg = margem(pl, it.custo), min = ctx.margemMinima == null ? MARGEM_MINIMA : ctx.margemMinima;
+    return { precoLiq: pl, total, faixa: fx, margem: mg, abaixoMinimo: num(it.custo) > 0 && (pl <= 0 || (mg != null && mg < min - 0.005)), sobreTab: sobreTabela(pl, tab),
+      comissao: com, valorComissao: com == null ? 0 : r2(total * com / 100) };
   }
 
   // Totais do rodapé: produtos, frete, geral, margem ponderada (só itens com custo) e comissão.
@@ -72,7 +79,7 @@
 
   // Bloqueios que ainda seguram (os liberados à mão não contam; um novo volta a segurar).
   const bloqueiosAbertos = p => (p.bloqueios || []).filter(b => (p.liberado || []).indexOf(b) === -1);
-  const ROTULO_BLOQUEIO = { ESTOQUE: 'estoque', ATRASO: 'duplicata em atraso', 'SEM ENTRADA': 'sem entrada (pagamento antecipado)', 'PREÇO': 'preço abaixo da tabela' };
+  const ROTULO_BLOQUEIO = { ESTOQUE: 'estoque', ATRASO: 'duplicata em atraso', 'SEM ENTRADA': 'sem entrada (pagamento antecipado)', 'PREÇO': 'margem abaixo do mínimo' };
   // Situação como no Sifn050: BLOQUEADO / LIBERADO / EM SEPARAÇÃO (SP n) / A EMITIR NF / FATURADO / CANCELADO.
   function situacao(p, notaNumero) {
     if (p.situacao === 'cancelado') return { rotulo: 'CANCELADO', cor: 'cinza', chave: 'cancelado' };
@@ -136,7 +143,7 @@
 
   const FRETE_CONTA = [['0', '0-Remetente (CIF)'], ['1', '1-Destinatário (FOB)'], ['2', '2-Terceiros'], ['9', '9-Sem frete']];
 
-  const P = { TABELA_PADRAO, PLANOS_PADRAO, FAIXAS, FRETE_CONTA, ROTULO_BLOQUEIO, tabelaDe, planosDe, planoDoUsuario, precoLiq, totalItem, precoDaFaixa, faixaDoPreco, rotuloFaixa,
+  const P = { TABELA_PADRAO, PLANOS_PADRAO, MARGEM_MINIMA, margemMinima, FAIXAS, FRETE_CONTA, ROTULO_BLOQUEIO, tabelaDe, planosDe, planoDoUsuario, precoLiq, totalItem, precoDaFaixa, faixaDoPreco, rotuloFaixa,
     margem, sobreTabela, linha, totais, bloqueiosAbertos, situacao, bolao, ultimasCompras, procura, itensDaProposta, entregaDoCliente, entregaTexto };
   raiz.CRMPedidos = P;
   if (typeof module !== 'undefined') module.exports = P;
@@ -158,7 +165,9 @@
   const ehLog = () => CRM.papel() === 'logistica';
   const ehOp = () => ehLog() || CRM.ehGestor();                       // logística ou gestora/administrador
   const ehVenda = () => ['admin', 'gestor', 'vendedor'].indexOf(CRM.papel()) !== -1;
-  const veCusto = () => CRM.ehGestor() || CRM.ehComprador();
+  // custo e margem: equipe de vendas (como no FKN, para saber se há espaço na negociação) e comprador; a logística não vê
+  const veCusto = () => ehVenda() || CRM.ehComprador();
+  const veMargem = () => ehVenda();
 
   let peds = null, disp = [], faltas = [], boloes = [], carregando = false;
   let porCod = new Map();
@@ -184,7 +193,7 @@
   const nomeCliente = p => (CRM.empresa(p.empresa_id) || {}).nome || (p.dados || {}).cliente_nome || '—';
   const notaNumero = p => { if (!p.nota_id) return null; const n = (E().D.notas || []).find(x => x.id === p.nota_id); return n ? n.numero : null; };
   const faltasDe = id => faltas.filter(x => x.pedido_id === id);
-  const ctxDe = vendedorId => ({ tabela: P.tabelaDe(E().cfg), plano: P.planoDoUsuario(E().cfg, vendedorId) });
+  const ctxDe = vendedorId => ({ tabela: P.tabelaDe(E().cfg), plano: P.planoDoUsuario(E().cfg, vendedorId), margemMinima: P.margemMinima(E().cfg) });
   const podeEditar = p => p.situacao === 'aberto' && ehVenda() && (CRM.ehGestor() || p.vendedor_id === CRM.meuId() || !!CRM.empresa(p.empresa_id));
 
   function imprimir(html, titulo) {
@@ -234,17 +243,17 @@
     const soma = arr => arr.reduce((s, p) => s + num(p.valor_total), 0);
     const marg = arr => { const its = [].concat(...arr.map(p => p.itens || [])); return P.totais(its, 0).margem; };
     const bloq = l.filter(p => P.situacao(p).chave === 'bloqueado'), lib = l.filter(p => P.situacao(p).chave === 'liberado');
-    const tot = (rot, arr, cls) => '<div class="kpi ' + (cls || '') + '"><span>' + rot + '</span><strong>' + R.moeda(soma(arr)) + '</strong><small>' + arr.length + ' pedido(s)' + (CRM.ehGestor() ? ' · margem ' + pct(marg(arr)) : '') + '</small></div>';
+    const tot = (rot, arr, cls) => '<div class="kpi ' + (cls || '') + '"><span>' + rot + '</span><strong>' + R.moeda(soma(arr)) + '</strong><small>' + arr.length + ' pedido(s)' + (veMargem() ? ' · margem ' + pct(marg(arr)) : '') + '</small></div>';
     return '<section class="cartao"><div class="filtro-linha">' + SITS.map(s => '<button type="button" class="chip-filtro' + (f.sit === s[0] ? ' ativo' : '') + '" data-acao="pd-sit" data-id="' + s[0] + '">' + s[1] + '</button>').join('') + '</div>' +
       '<p class="acoes"><input type="search" placeholder="Pedido ou cliente" value="' + esc(f.busca) + '" data-pd-busca class="of-busca">' +
       (CRM.ehGestor() || ehLog() ? ' <label class="filtro-inline">Vendedor(a) <select data-pd-vend>' + CRM.opcoesHTML([['', 'Todos']].concat(CRM.usuariosAtivos().map(u => [u.user_id, u.nome])), f.vend) + '</select></label>' : '') + '</p>' +
       '<div class="kpis">' + tot('Geral', l) + tot('Bloqueado', bloq, bloq.length ? 'vermelho' : '') + tot('Liberado', lib, 'verde') + '</div>' +
-      (l.length ? '<div class="tabela-rolagem"><table class="tabela pd-lista"><thead><tr><th>Pedido</th><th>Data</th><th>Situação</th><th>Cliente</th><th class="num">Valor total</th>' + (CRM.ehGestor() ? '<th class="num">Margem</th>' : '') +
+      (l.length ? '<div class="tabela-rolagem"><table class="tabela pd-lista"><thead><tr><th>Pedido</th><th>Data</th><th>Situação</th><th>Cliente</th><th class="num">Valor total</th>' + (veMargem() ? '<th class="num">Margem</th>' : '') +
         '<th>Vendedor(a)</th><th>Entrega</th></tr></thead><tbody>' + l.map(p => {
           const s = P.situacao(p, notaNumero(p)), d = p.dados || {}, ent = d.entrega || {};
           return '<tr class="clicavel pd-' + s.chave + '" data-acao="pd-abrir" data-id="' + esc(p.id) + '" tabindex="0"><td><strong>' + esc(p.numero) + '</strong>' + (p.tipo === 'programado' ? '<small>programado</small>' : '') + '</td>' +
             '<td>' + esc(R.dataBR(R.diaLocal(p.criado_em))) + '</td><td>' + CRM.selo(s.rotulo, s.cor) + (s.bloqueios ? '<small>' + esc(s.bloqueios.map(b => P.ROTULO_BLOQUEIO[b] || b).join(' · ')) + '</small>' : '') + '</td>' +
-            '<td>' + esc(nomeCliente(p)) + '</td><td class="num">' + R.moeda(p.valor_total) + '</td>' + (CRM.ehGestor() ? '<td class="num">' + pct(P.totais(p.itens, 0).margem) + '</td>' : '') +
+            '<td>' + esc(nomeCliente(p)) + '</td><td class="num">' + R.moeda(p.valor_total) + '</td>' + (veMargem() ? '<td class="num">' + pct(P.totais(p.itens, 0).margem) + '</td>' : '') +
             '<td>' + esc(R.primeiroNome(CRM.nomeUsuario(p.vendedor_id))) + '</td><td>' + esc([p.entrega ? R.dataBR(p.entrega) : '', ent.cidade].filter(Boolean).join(' · ') || '—') + '</td></tr>';
         }).join('') + '</tbody></table></div>' : '<p class="vazio">Nenhum pedido aqui.' + (ehVenda() ? ' "+ Novo orçamento / pedido" começa um; um orçamento já feito vira pedido pela aba Orçamentos ou pela ficha do negócio.' : '') + '</p>') + '</section>';
   }
@@ -404,7 +413,7 @@
   }
 
   function gradeProdutos(itens, o) {
-    const gest = CRM.ehGestor();
+    const gest = veMargem();
     const falta = i => { const x = (o.faltas || []).find(y => y.idx === i); return x ? num(x.falta) : (o.estimaFalta ? o.estimaFalta(i) : 0); };
     return '<div class="tabela-rolagem"><table class="tabela pd-grade"><thead><tr><th>Item</th><th>Código</th><th>Nome do produto</th><th>Un</th><th class="num">Qtde</th><th class="num">Ñ atend.</th><th class="num">Preço un</th><th class="num">Desc</th>' +
       (gest ? '<th class="num">Margem</th>' : '') + '<th class="num">Preço total</th><th>Faixa</th><th class="num">Comis%</th><th class="num">Desc s/tab</th>' + (o.ler ? '' : '<th class="num">Disp.</th><th></th>') + '</tr></thead><tbody>' +
@@ -412,7 +421,7 @@
         const l = P.linha(it, o.ctx), fa = falta(i), d = porCod.get(it.codigo);
         return '<tr' + (o.sel === i ? ' class="sel"' : '') + '><td>' + String(i + 1).padStart(3, '0') + '</td><td>' + esc(it.codigo || '') + '</td><td>' + esc(it.descricao) + (it.obs ? '<small>' + esc(it.obs) + '</small>' : '') + '</td><td>' + esc(it.unidade || '') + '</td>' +
           '<td class="num">' + qtd(it.quantidade) + '</td><td class="num">' + (fa > 0 ? '<strong class="neg">' + qtd(fa) + '</strong>' : '0') + '</td><td class="num">' + preco(it.preco) + '</td><td class="num">' + preco(it.desconto) + '</td>' +
-          (gest ? '<td class="num">' + (l.margem == null ? '—' : pct(l.margem)) + '</td>' : '') + '<td class="num">' + preco(l.total) + '</td><td>' + esc(P.rotuloFaixa(l.faixa)) + '</td><td class="num">' + (l.comissao == null ? '—' : preco(l.comissao)) + '</td>' +
+          (gest ? '<td class="num">' + (l.margem == null ? '—' : l.abaixoMinimo ? '<strong class="neg" title="abaixo da margem mínima: precisa da liberação da gestora">' + pct(l.margem) + '</strong>' : pct(l.margem)) + '</td>' : '') + '<td class="num">' + preco(l.total) + '</td><td>' + esc(P.rotuloFaixa(l.faixa)) + '</td><td class="num">' + (l.comissao == null ? '—' : preco(l.comissao)) + '</td>' +
           '<td class="num">' + (l.sobreTab == null ? '—' : preco(l.sobreTab)) + '</td>' +
           (o.ler ? '' : '<td class="num">' + (d ? qtd(Math.floor(num(d.disponivel) * 1000) / 1000) : '—') + '</td><td class="num"><button type="button" class="mini" data-acao="pd-item-editar" data-id="' + i + '" title="Alterar o item">✎</button>' +
             '<button type="button" class="mini" data-acao="pd-item-excluir" data-id="' + i + '" title="Excluir o item">×</button></td>') + '</tr>';
@@ -420,7 +429,7 @@
   }
   function rodapeTotais(t) {
     return '<div class="pd-totais"><span>Total dos produtos <strong>' + R.moeda(t.produtos) + '</strong></span><span>Frete <strong>' + R.moeda(t.frete) + '</strong></span>' +
-      (CRM.ehGestor() ? '<span>Margem <strong>' + pct(t.margem) + '</strong></span>' : '') + '<span>Comissão <strong>' + R.moeda(t.comissao) + (t.comissaoPct != null ? ' (' + pct(t.comissaoPct) + ')' : '') + '</strong></span>' +
+      (veMargem() ? '<span>Margem <strong>' + pct(t.margem) + '</strong></span>' : '') + '<span>Comissão <strong>' + R.moeda(t.comissao) + (t.comissaoPct != null ? ' (' + pct(t.comissaoPct) + ')' : '') + '</strong></span>' +
       '<span class="geral">Total geral <strong>' + R.moeda(t.geral) + '</strong></span></div>';
   }
 
@@ -503,7 +512,8 @@
         '<label class="campo"><span>Desc %</span><input id="pdDesc" data-seq="' + x.seq + '" type="number" step="any" min="0" max="100" value="' + esc(l.desconto) + '" inputmode="decimal"></label>' +
         '<div class="pd-info" id="pdInfo">' + (dd ? 'Disponível <strong class="' + (num(dd.disponivel) < num(l.quantidade) ? 'neg' : '') + '">' + qtd(Math.floor(num(dd.disponivel) * 1000) / 1000) + ' ' + esc(dd.unidade || '') + '</strong>' +
           (dd.a_caminho ? ' · a caminho ' + qtd(dd.a_caminho) : '') + ' · preço tabela R$ ' + preco(dd.preco_venda) + ' · líquido R$ ' + preco(lin.precoLiq) + ' · total R$ ' + preco(lin.total) +
-          ' · faixa ' + esc(P.rotuloFaixa(lin.faixa)) + (lin.comissao != null ? ' · comissão ' + preco(lin.comissao) + '%' : '') + (CRM.ehGestor() && lin.margem != null ? ' · margem ' + pct(lin.margem) : '') : 'Escolha o produto: o CRM mostra o disponível e o preço da tabela.') + '</div>' +
+          ' · faixa ' + esc(P.rotuloFaixa(lin.faixa)) + (lin.comissao != null ? ' · comissão ' + preco(lin.comissao) + '%' : '') + (dd.custo != null ? ' · custo R$ ' + preco(dd.custo) : '') + (lin.margem != null ? ' · margem <strong class="' + (lin.abaixoMinimo ? 'neg' : '') + '">' + pct(lin.margem) + '</strong>' +
+            (lin.abaixoMinimo ? ' <strong class="neg">abaixo da margem mínima de ' + pct(P.margemMinima(E().cfg)) + ': o pedido fica bloqueado até a gestora liberar</strong>' : '') : '') : 'Escolha o produto: o CRM mostra o disponível e o preço da tabela.') + '</div>' +
         (dd && num(dd.preco_venda) > 0 ? '<div class="pd-faixas">Tabela: ' + P.FAIXAS.slice().reverse().map(fx => '<button type="button" class="mini" data-acao="pd-faixa" data-id="' + fx + '" title="' + (tab[fx] >= 0 ? '+' : '') + tab[fx] + '%">' + P.rotuloFaixa(fx) + ' ' + preco(P.precoDaFaixa(dd.preco_venda, fx, tab)) + '</button>').join('') + '</div>' : '') +
         '<p class="acoes"><button type="button" class="btn" data-acao="pd-item-salvar">' + (x.sel != null ? 'Salvar item' : 'Inserir item') + '</button> ' + (x.sel != null || l.codigo ? '<button type="button" class="btn sec" data-acao="pd-item-cancelar">Cancelar item</button> ' : '') +
         (x.empresa_id ? '<button type="button" class="btn sec" data-acao="pd-ultimas">Últimas compras</button> <button type="button" class="btn sec" data-acao="pd-importar-ultimas">Importar últimas compras</button> ' : '') +
