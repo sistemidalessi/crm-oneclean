@@ -60,8 +60,17 @@ function notaDoPedido(o) {
   const aPrazo = pg.forma === '15';   // boleto: sempre com parcela (à vista vence no dia)
   const duplicatas = aPrazo ? parcelas(total, pg.dias, emissao) : [];
   const vendedor = String(o.vendedorNome || '').trim().toUpperCase();
-  const entregaTxt = d.entrega && d.entrega.endereco && dig(d.entrega.cep) !== dig(e.cep) ? 'ENTREGA: ' + [d.entrega.endereco, d.entrega.numero, d.entrega.compl, d.entrega.bairro, d.entrega.cidade, d.entrega.uf].filter(Boolean).join(', ') : '';
-  const infCpl = [vendedor ? 'VENDEDOR: ' + vendedor : '', 'PEDIDO CRM ' + (p.numero || ''), d.seu_pedido ? 'SEU PEDIDO: ' + d.seu_pedido : '', d.texto_nota || '', entregaTxt].filter(Boolean).join(' | ');
+  const entregaTxt = d.entrega && d.entrega.endereco && dig(d.entrega.cep) !== dig(e.cep) ? 'LOCAL DE ENTREGA: ' + [d.entrega.endereco, d.entrega.numero, d.entrega.compl, d.entrega.bairro, d.entrega.cidade, d.entrega.uf].filter(Boolean).join(', ') : '';
+  // Do jeito do FKN (XML reais de 15/10/2026): "PORTADOR: BOLETO PRAZO: 28 DIAS;LOCAL DE ENTREGA: …;VENDEDOR: SILMARA;…",
+  // separado por ";" (o vigia e a comissão leem o "VENDEDOR:" daqui).
+  const PORTADOR = { '15': 'BOLETO', '17': 'PIX', '18': 'TRANSFERENCIA', '01': 'DINHEIRO', '03': 'CARTAO', '04': 'CARTAO' };
+  const prazo = pg.aVista ? 'A VISTA' : pg.dias.join('/') + ' DIAS';
+  const infCpl = [PORTADOR[pg.forma] ? 'PORTADOR: ' + PORTADOR[pg.forma] + ' PRAZO: ' + prazo : '', entregaTxt, vendedor ? 'VENDEDOR: ' + vendedor : '', 'PEDIDO CRM: ' + (p.numero || ''),
+    d.seu_pedido ? 'SEU PEDIDO: ' + d.seu_pedido : '', d.texto_nota || ''].filter(Boolean).map(x => String(x).replace(/;/g, ',')).join(';') + ';';
+  // LC 224/2025 (redução dos benefícios federais): item com PIS/COFINS de alíquota zero (06) ou isento (07) continua com o
+  // mesmo CST, e a nota leva este aviso nas informações de interesse do fisco (Receita, Perguntas e Respostas 34.1; o FKN põe)
+  const lc224 = itens.some(it => ['06', '07'].indexOf(it.pis.cst) !== -1 || ['06', '07'].indexOf(it.cofins.cst) !== -1);
+  const infAdFisco = lc224 ? 'Operacao sujeita ao disposto na Lei Complementar no 224/2025;' : null;
   const transp = String(d.transportadora || 'PROPRIO').trim();
   const nota = {
     ambiente: o.ambiente, emitente: o.emitente, serie: o.serie, numero: o.numero, emissao, natOp: cfg.natOp || 'VENDA NO ESTADO',
@@ -72,7 +81,7 @@ function notaDoPedido(o) {
       transportadora: /^PROPRI/i.test(transp) ? null : { nome: transp }, volumes: num(d.volumes) > 0 ? { qVol: num(d.volumes) } : null },
     cobranca: duplicatas.length ? { numero: String(o.numero), duplicatas } : null,
     pagamento: [{ tPag: aPrazo ? '15' : pg.forma, indPag: aPrazo ? 1 : 0, valor: total, descricao: pg.forma === '99' ? (d.pagamento || 'OUTROS') : null }],
-    infCpl, respTec: cfg.respTec || null, ibscbs: cfg.ibscbs == null ? undefined : cfg.ibscbs
+    infCpl, infAdFisco, respTec: cfg.respTec || null, ibscbs: cfg.ibscbs == null ? undefined : cfg.ibscbs
   };
   return { nota, avisos: { bloqueia: [...new Set(bloqueia)], conferir: [...new Set(conferir)] }, total };
 }

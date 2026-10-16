@@ -273,6 +273,7 @@
     const pg = (nota.pagamento || [])[0];
     const cob = dups.length ? '<p>Parcelas: ' + esc(dups.map(d => d.vencimento.split('-').reverse().join('/') + ' ' + moeda(d.valor)).join(' · ')) + '</p>' : pg ? '<p>Pagamento: ' + esc(({ '17': 'PIX', '18': 'transferência', '01': 'dinheiro', '03': 'cartão de crédito', '04': 'cartão de débito', '99': 'outros' })[pg.tPag] || pg.tPag) + ' à vista</p>' : '';
     return '<div class="nf-previa">' + lista('Isto impede a emissão:', av.bloqueia, 'alerta') + lista('Para conferir:', av.conferir, 'dica') + tot + cob + its +
+      (nota.infAdFisco ? '<p class="dica">Informações ao fisco: ' + esc(nota.infAdFisco) + '</p>' : '') +
       (nota.infCpl ? '<p class="dica">Informações complementares: ' + esc(nota.infCpl) + '</p>' : '') + '</div>';
   }
   async function emitir(pedidoId) {

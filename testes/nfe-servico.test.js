@@ -187,7 +187,10 @@ test('pedido → nota: caixa vira o código do produto, desconto em R$, parcelas
   assert.strictEqual(r.total, 220.35);
   assert.deepStrictEqual(n.cobranca.duplicatas, [{ vencimento: '2026-11-17', valor: 220.35 }]);
   assert.deepStrictEqual(n.pagamento, [{ tPag: '15', indPag: 1, valor: 220.35, descricao: null }]);
-  assert.strictEqual(n.infCpl, 'VENDEDOR: RENATA | PEDIDO CRM 7 | SEU PEDIDO: PC-55 | Recebimento das 7h às 12h');
+  assert.strictEqual(n.infCpl, 'PORTADOR: BOLETO PRAZO: 28 DIAS;VENDEDOR: RENATA;PEDIDO CRM: 7;SEU PEDIDO: PC-55;Recebimento das 7h às 12h;');   // como o FKN
+  assert.strictEqual(n.infAdFisco, 'Operacao sujeita ao disposto na Lei Complementar no 224/2025;');                                            // item com PIS/COFINS 06
+  const V = require('../nfe.js');   // o leitor do vigia acha o vendedor no texto novo
+  assert.strictEqual(V.lerXml(N.nfeCompleta(N.monta(n).infNFe, '')).vendedor, 'RENATA');
   assert.strictEqual(n.dest.email, 'a@cliente.teste');
   const m = N.monta(n);   // monta sem erro (parcelas fecham com o total)
   assert.strictEqual(m.totais.vNF, 220.35);
