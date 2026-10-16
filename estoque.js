@@ -58,8 +58,61 @@
     return { lote: [...lote.entries()].map(([codigo, contado]) => ({ codigo, contado })), erros };
   }
 
+  // ---------------------------------------------------------- entrada de compra pelo XML
+  const r2 = v => Math.round(num(v) * 100) / 100;
+  const tag = (x, t) => { const m = new RegExp('<' + t + '>([^<]*)</' + t + '>').exec(x || ''); return m ? m[1] : ''; };
+  // Frete, seguro e outras despesas de cada item (<det nItem="n"><prod>…<vFrete>…): o leitor de notas não traz.
+  function extrasDoXml(xml) {
+    const out = new Map(), re = /<det\b[^>]*nItem="(\d+)"[^>]*>([\s\S]*?)<\/det>/g;
+    let m;
+    while ((m = re.exec(String(xml || '')))) {
+      const prod = (/<prod>([\s\S]*?)<\/prod>/.exec(m[2]) || [])[1] || '';
+      out.set(+m[1], { frete: r2(tag(prod, 'vFrete')), outras: r2(num(tag(prod, 'vSeg')) + num(tag(prod, 'vOutro'))) });
+    }
+    return out;
+  }
+  // Nota do fornecedor (lerXml de nfe.js + o XML) → { compra, itens } para gravar em crm_compras/crm_compra_itens.
+  // nossoDoc: CNPJ da OneClean (a nota tem de ser PARA ela, e não emitida por ela).
+  function compraDoXml(d, xml, nossoDoc) {
+    if (!d || d.tipo !== 'nota') throw new Error('não é uma NF-e');
+    const dest = String((d.cliente || {}).doc || ''), emit = String((d.emitente || {}).doc || '');
+    if (nossoDoc && emit === nossoDoc) throw new Error('é nota de saída da própria empresa, não de compra (NF ' + d.numero + ')');
+    if (nossoDoc && dest && dest !== nossoDoc) throw new Error('a NF ' + d.numero + ' não é para a nossa empresa (destinatário ' + dest + ')');
+    const ex = extrasDoXml(xml);
+    return {
+      compra: { chave: d.chave, numero: d.numero, serie: d.serie, emitida_em: d.emitida_em, fornecedor_doc: emit || null, fornecedor_nome: (d.emitente || {}).nome || null,
+        valor_produtos: r2(d.valor_produtos), valor_total: r2(d.valor_total), parcelas: d.parcelas || [] },
+      itens: (d.itens || []).map(it => {
+        const f = it.fiscal || {}, e = ex.get(it.ordem) || {};
+        return { ordem: it.ordem, cod_fornecedor: it.codigo, descricao: it.descricao, ean: f.gtin || null, ncm: it.ncm, cfop: it.cfop, unidade: it.unidade,
+          quantidade: num(it.quantidade), valor_total: r2(it.valor_total), ipi: r2(f.v_ipi), st: r2(f.v_icms_st), frete: num(e.frete), outras: num(e.outras) };
+      })
+    };
+  }
+  // Custo de cada unidade do estoque: o que se pagou pelo item ÷ a quantidade já no fator (sem tirar créditos).
+  const custoItem = (it, fator) => { const q = num(it.quantidade) * num(fator); return q > 0 ? Math.round((num(it.valor_total) + num(it.ipi) + num(it.st) + num(it.frete) + num(it.outras)) / q * 10000) / 10000 : null; };
+  const palavras = t => [...new Set(String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').split(' ').filter(x => x.length >= 2))];
+  const un = t => String(t || '').trim().toUpperCase().replace(/Ç/g, 'C');
+  // Produto nosso para um item do fornecedor. ctx: { vinculos: Map('doc|cod' → {codigo, fator}), produtos: [crm_estoque sem as caixas],
+  // unidades: Map('codigo|UN' → fator) }. Ordem: ligação já feita antes; descrição parecida (sugestão para conferir).
+  // Fator: o da ligação; mesma unidade = 1; a unidade da caixa (crm_estoque_unidades); senão em branco (o comprador diz).
+  function sugere(it, fornecedorDoc, ctx) {
+    const v = ctx.vinculos && ctx.vinculos.get(fornecedorDoc + '|' + it.cod_fornecedor);
+    if (v) return { codigo: v.codigo, fator: num(v.fator), como: 'ligado antes' };
+    const pi = palavras(it.descricao);
+    let melhor = null, nota = 0;
+    (ctx.produtos || []).forEach(p => {
+      const pp = palavras(p.descricao), comuns = pp.filter(x => pi.indexOf(x) !== -1).length;
+      const s = comuns / Math.max(pi.length, pp.length, 1);
+      if (s > nota) { nota = s; melhor = p; }
+    });
+    if (!melhor || nota < 0.5) return { codigo: null, fator: null, como: '' };
+    const fator = un(melhor.unidade) && un(melhor.unidade) === un(it.unidade) ? 1 : (ctx.unidades && ctx.unidades.get(melhor.codigo + '|' + un(it.unidade))) || null;
+    return { codigo: melhor.codigo, fator, como: 'descrição parecida (confira)' };
+  }
+
   const TIPOS = { inicial: 'saldo inicial (FKN)', saida: 'saída (nota)', entrada: 'entrada (compra)', ajuste: 'ajuste', inventario: 'inventário', estorno: 'estorno' };
-  const api = { junta, valor, sequencia, lerContagem, atualFkn, ehCaixa, TIPOS };
+  const api = { junta, valor, sequencia, lerContagem, atualFkn, ehCaixa, TIPOS, extrasDoXml, compraDoXml, custoItem, sugere };
   raiz.CRMEstoque = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);
@@ -73,7 +126,7 @@
   const qtd = v => (v == null ? '—' : Number(v).toLocaleString('pt-BR', { maximumFractionDigits: 3 }));
   const quando = iso => (iso ? new Date(iso).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—');
 
-  let saldo = null, fkn = [], fotos = [], difs = [], fotoVista = null, carregando = false;
+  let saldo = null, fkn = [], fotos = [], difs = [], fotoVista = null, carregando = false, compras = [], lendoCompras = '';
   const filtro = { ver: 'saldo', busca: '', soDif: false };
 
   async function carrega() {
@@ -81,7 +134,7 @@
     carregando = true;
     try {
       const st = CRM.store();
-      [saldo, fkn, fotos] = await Promise.all([st.estoqueSaldo(), st.estoque(), st.estoqueFotos(60)]);
+      [saldo, fkn, fotos, compras] = await Promise.all([st.estoqueSaldo(), st.estoque(), st.estoqueFotos(60), st.compras ? st.compras(200).catch(() => []) : []]);
       const conferida = fotos.find(f => f.conferida_em);
       fotoVista = fotoVista || (conferida && conferida.id) || null;
       difs = fotoVista ? await st.estoqueDifs(fotoVista) : [];
@@ -116,6 +169,7 @@
       kpi('Última conferência com o FKN', ult ? (r.diferentes || 0) + ' diferença(s)' : '—', ult ? 'listagem de ' + quando(ult.gerado_em) + ' · ' + (r.sem_explicacao || 0) + ' sem explicação' : 'chega com a próxima listagem',
         ult && r.sem_explicacao ? 'vermelho' : ult ? 'verde' : '', 'conferencia') +
       kpi('Dias seguidos sem diferença sem explicação', seq.dias + ' de 15', seq.dias >= 15 ? 'pronto para a Fase 3 do plano' : 'a meta para confiar no estoque do CRM', seq.dias >= 15 ? 'verde' : '', 'conferencia') +
+      kpi('Notas de compra', compras.filter(c => c.situacao === 'pendente').length + ' pendente(s)', 'subir o XML e dar entrada no estoque', compras.some(c => c.situacao === 'pendente') ? 'ambar' : '', 'compras') +
       kpi('Contagem e ajuste', '✎', 'inventário por contagem ou acerto de um produto', '', 'contagem') + '</div>';
   }
 
@@ -155,6 +209,52 @@
             '</tbody></table></div></details>').join('')) + '</section>';
   }
 
+  // CNPJ da própria empresa: está na chave de qualquer nota de venda (posições 7 a 20)
+  const nossoDoc = () => { const n = (CRM.estado.D.notas || []).find(x => x.chave && x.chave.length === 44); return n ? n.chave.slice(6, 20) : null; };
+  function telaCompras() {
+    const pend = compras.filter(c => c.situacao === 'pendente'), feitas = compras.filter(c => c.situacao !== 'pendente').slice(0, 30);
+    const linhaC = c => '<tr><td><strong>' + esc(c.fornecedor_nome || '?') + '</strong><small>NF ' + esc(c.numero) + ' · ' + esc(quando(c.emitida_em)) + '</small></td>' +
+      '<td class="num">' + R.moeda(c.valor_total) + '</td><td>' + (c.situacao === 'pendente' ? CRM.selo('pendente', 'ambar') : c.situacao === 'lancada' ? CRM.selo('entrada ' + quando(c.lancada_em), 'verde') : CRM.selo('deixada de lado', 'cinza') + (c.obs ? ' <small>' + esc(c.obs) + '</small>' : '')) + '</td>' +
+      '<td class="num">' + (c.situacao === 'pendente' ? '<button type="button" class="btn" data-acao="es-compra" data-id="' + esc(c.id) + '">Conferir e dar entrada</button> <button type="button" class="mini" data-acao="es-compra-ignorar" data-id="' + esc(c.id) + '" title="Deixar de lado (não é mercadoria para o estoque)">✕</button>'
+        : '<button type="button" class="mini" data-acao="es-compra" data-id="' + esc(c.id) + '" title="Ver os itens">☰</button>') + '</td></tr>';
+    return '<section class="cartao"><h2>Notas de compra</h2>' +
+      '<p>Suba o <strong>XML</strong> das notas dos fornecedores (vários de uma vez, ou o .zip). Cada uma fica pendente até você conferir: ligue cada item a um produto nosso e diga o fator ' +
+      '(ex.: a caixa com 25 pacotes = 25). O CRM lembra a ligação para a próxima nota do mesmo fornecedor. A entrada soma no estoque com o custo do item (valor + IPI + ST + frete) e refaz o custo médio.</p>' +
+      '<p class="dica">Enquanto o FKN roda junto, a nota de compra continua entrando no FKN também, e as parcelas <strong>não</strong> vão para o contas a pagar do CRM (o FKN já manda; ia duplicar no Caixa).</p>' +
+      (lendoCompras ? '<p class="cob-lendo">' + esc(lendoCompras) + '</p>' : '<label class="btn sec arquivo">Escolher XML ou ZIP<input type="file" id="esCompraArq" multiple accept=".xml,.zip,text/xml,application/xml,application/zip"></label>') +
+      '<h3>Pendentes <small>' + pend.length + '</small></h3>' +
+      (pend.length ? '<div class="tabela-rolagem"><table class="tabela"><tbody>' + pend.map(linhaC).join('') + '</tbody></table></div>' : '<p class="vazio">Nenhuma nota esperando entrada.</p>') +
+      (feitas.length ? '<details data-chave="es-compras-feitas"><summary>Últimas lançadas ou deixadas de lado (' + feitas.length + ')</summary><div class="tabela-rolagem"><table class="tabela"><tbody>' + feitas.map(linhaC).join('') + '</tbody></table></div></details>' : '') +
+      '</section>';
+  }
+
+  async function lerCompras(files) {
+    const st = CRM.store(), N = raiz.CRMNfe, nosso = nossoDoc();
+    let novas = 0, ja = 0;
+    const erros = [];
+    lendoCompras = 'Lendo os XML…'; CRM.render();
+    try {
+      const textos = [];
+      for (const f of [].slice.call(files || [])) {
+        if (/\.zip$/i.test(f.name)) {
+          if (!raiz.CRMXlsx || typeof DecompressionStream === 'undefined') { erros.push(f.name + ': este navegador não abre .zip'); continue; }
+          (await raiz.CRMXlsx.lerZipTextos(f, /\.xml$/i)).forEach(x => textos.push({ nome: x.nome || f.name, texto: x.texto }));
+        } else textos.push({ nome: f.name, texto: await f.text() });
+      }
+      for (const t of textos) {
+        try {
+          const d = N.lerXml(t.texto);
+          if (!d || d.tipo !== 'nota') { erros.push(t.nome + ': não é NF-e'); continue; }
+          const c = S.compraDoXml(d, t.texto, nosso);
+          if (await st.compraGravar(c.compra, c.itens)) novas++; else ja++;
+          lendoCompras = 'Gravando: ' + (novas + ja) + ' de ' + textos.length + '…'; CRM.render();
+        } catch (e) { erros.push(t.nome + ': ' + (e.message || e)); }
+      }
+    } finally { lendoCompras = ''; }
+    CRM.toast(novas + ' nota(s) de compra nova(s)' + (ja ? ', ' + ja + ' já estavam' : '') + (erros.length ? ' · ' + erros.length + ' com problema: ' + erros.slice(0, 3).join(' | ') : '') + '.', !!erros.length);
+    compras = await st.compras(200).catch(() => compras); CRM.render();
+  }
+
   function telaContagem() {
     return '<section class="cartao"><h2>Inventário por contagem</h2>' +
       '<p>Contou o estoque (todo ou uma parte)? Cole aqui uma linha por produto: <code>código;quantidade contada</code> (da planilha, com Tab, também serve). ' +
@@ -170,13 +270,15 @@
       if (!saldo.length) return cabecalho() + naoComecado();
       const linhas = S.junta(saldo, fkn);
       return cabecalho() + quadros(linhas) +
-        (filtro.ver === 'conferencia' ? telaConferencia() : filtro.ver === 'contagem' ? telaContagem() : telaSaldo(linhas));
+        (filtro.ver === 'conferencia' ? telaConferencia() : filtro.ver === 'contagem' ? telaContagem() : filtro.ver === 'compras' ? telaCompras() : telaSaldo(linhas));
     },
     depois(c) {
       const b = c.querySelector('[data-es-busca]');
       if (b) b.addEventListener('input', () => { filtro.busca = b.value; CRM.render(); });
       const d = c.querySelector('[data-es-sodif]');
       if (d) d.addEventListener('change', () => { filtro.soDif = d.checked; CRM.render(); });
+      const arq = c.querySelector('#esCompraArq');
+      if (arq) arq.addEventListener('change', () => lerCompras(arq.files).catch(CRM.falhou));
       const f = c.querySelector('[data-es-foto]');
       if (f) f.addEventListener('change', async () => { fotoVista = Number(f.value); difs = await CRM.store().estoqueDifs(fotoVista).catch(() => []); CRM.render(); });
     }
@@ -223,6 +325,61 @@
           saldo = null; carrega();
         }
       });
+    },
+    'es-compra': async id => {
+      const c = compras.find(x => x.id === id); if (!c) return;
+      try {
+        const st = CRM.store();
+        const [itens, vinc, unis] = await Promise.all([st.compraItens(id), st.compraVinculos().catch(() => []), st.estoqueUnidades().catch(() => [])]);
+        const base = (fkn || []).filter(e => !S.ehCaixa(e.codigo));
+        const nomeDe = new Map(base.map(e => [e.codigo, e.descricao])), unDe = new Map(base.map(e => [e.codigo, e.unidade]));
+        (saldo || []).forEach(x => { if (!nomeDe.has(x.codigo)) { nomeDe.set(x.codigo, x.descricao); unDe.set(x.codigo, x.unidade); } });
+        const ctx = { vinculos: new Map(vinc.map(v => [v.fornecedor_doc + '|' + v.cod_fornecedor, v])), produtos: base, unidades: new Map(unis.map(u => [u.codigo + '|' + u.unidade, Number(u.fator)])) };
+        const pend = c.situacao === 'pendente';
+        const sug = new Map(itens.map(it => [it.id, pend ? S.sugere(it, c.fornecedor_doc, ctx) : { codigo: it.codigo, fator: it.fator, como: '' }]));
+        const linhaI = it => {
+          const g = sug.get(it.id) || {};
+          return '<tr><td><strong>' + esc(it.descricao) + '</strong><small>' + esc(it.cod_fornecedor || '') + ' · ' + qtd(it.quantidade) + ' ' + esc(it.unidade || '') + ' · ' + R.moeda(Number(it.valor_total) + Number(it.ipi) + Number(it.st) + Number(it.frete) + Number(it.outras)) +
+            (g.como ? ' · ' + esc(g.como) : '') + '</small></td>' +
+            '<td><input name="c_' + esc(it.id) + '" list="esProdutos" value="' + esc(g.codigo || '') + '" placeholder="código do produto"' + (pend ? '' : ' disabled') + ' class="es-cod"><small data-nome="' + esc(it.id) + '">' + esc(nomeDe.get(g.codigo) || '') + '</small></td>' +
+            '<td><input name="f_' + esc(it.id) + '" type="number" step="any" min="0" value="' + esc(g.fator == null ? '' : g.fator) + '"' + (pend ? '' : ' disabled') + ' class="es-fator"><small data-q="' + esc(it.id) + '"></small></td>' +
+            '<td>' + (pend ? '<label class="filtro-inline"><input type="checkbox" name="i_' + esc(it.id) + '"> não é estoque</label>' : '') + '</td></tr>';
+        };
+        CRM.abrirForm({
+          titulo: 'NF ' + c.numero + ' · ' + (c.fornecedor_nome || ''), largura: 'extra', campos: [], valores: {},
+          intro: (pend ? 'Ligue cada item a um produto nosso e diga o fator (quantas unidades do nosso estoque vêm em 1 unidade da nota). "Não é estoque": frete, brinde, material de uso.'
+            : 'Entrada dada em ' + quando(c.lancada_em) + '.') + (c.parcelas && c.parcelas.length ? ' Parcelas da nota: ' + c.parcelas.map(p => R.dataBR(p.vencimento) + ' ' + R.moeda(p.valor)).join(', ') + ' (não vão para o contas a pagar enquanto o FKN roda junto).' : ''),
+          htmlDepois: '<datalist id="esProdutos">' + [...nomeDe.entries()].map(([k, v]) => '<option value="' + esc(k) + '">' + esc(v || '') + '</option>').join('') + '</datalist>' +
+            '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Item da nota</th><th>Produto nosso</th><th>Fator</th><th></th></tr></thead><tbody>' + itens.map(linhaI).join('') + '</tbody></table></div>',
+          salvarTexto: pend ? 'Dar entrada no estoque' : 'Fechar',
+          extras: form => {
+            const atualiza = it => {
+              const cod = form.elements['c_' + it.id].value.trim(), fat = Number(form.elements['f_' + it.id].value) || 0;
+              const nome = form.querySelector('[data-nome="' + it.id + '"]'), q = form.querySelector('[data-q="' + it.id + '"]');
+              if (nome) nome.textContent = nomeDe.get(cod) || (cod ? 'código que o estoque não tem' : '');
+              if (q) q.textContent = fat ? '= ' + qtd(Number(it.quantidade) * fat) + ' ' + (unDe.get(cod) || '') + ' · ' + R.moeda(S.custoItem(it, fat)) + ' cada' : '';
+            };
+            itens.forEach(it => { atualiza(it); ['c_', 'f_'].forEach(p => form.elements[p + it.id].addEventListener('input', () => atualiza(it))); });
+          },
+          aoSalvar: async (v, form) => {
+            if (!pend) return;
+            const lista = itens.map(it => ({ id: it.id, codigo: form.elements['c_' + it.id].value.trim(), fator: form.elements['f_' + it.id].value, ignorar: form.elements['i_' + it.id].checked }));
+            const falta = lista.filter(x => !x.ignorar && (!x.codigo || !(Number(x.fator) > 0)));
+            if (falta.length) throw new Error(falta.length + ' item(ns) sem produto ou sem fator (ou marque "não é estoque")');
+            const fora = lista.filter(x => !x.ignorar && !nomeDe.has(x.codigo));
+            if (fora.length && !confirm(fora.length + ' código(s) que o estoque não tem (' + fora.map(x => x.codigo).join(', ') + '). Criar no estoque do CRM assim mesmo?')) return false;
+            const r = await st.compraLancar(id, lista);
+            CRM.toast('Entrada dada: ' + r.itens + ' item(ns) no estoque' + (r.ignorados ? ', ' + r.ignorados + ' fora do estoque' : '') + '.');
+            saldo = null; carrega();
+          }
+        });
+      } catch (e) { CRM.falhou(e); }
+    },
+    'es-compra-ignorar': async id => {
+      const c = compras.find(x => x.id === id); if (!c) return;
+      const obs = prompt('Deixar de lado a NF ' + c.numero + ' de ' + (c.fornecedor_nome || '') + '? Diga o motivo (ex.: material de uso, serviço, nota repetida):');
+      if (obs == null) return;
+      try { await CRM.store().compraIgnorar(id, obs); compras = await CRM.store().compras(200); CRM.render(); } catch (e) { CRM.falhou(e); }
     },
     'es-contagem': () => {
       CRM.abrirForm({

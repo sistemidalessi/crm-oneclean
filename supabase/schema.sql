@@ -2188,3 +2188,94 @@ end;
 $$;
 revoke all on function public.crm_estoque_contagem(jsonb, text, text) from public, anon;
 grant execute on function public.crm_estoque_contagem(jsonb, text, text) to authenticated;
+
+-- Entrada de compra pelo XML (Fase 2, 16/10/2026): o comprador sobe o XML da nota do fornecedor (pendente), liga cada
+-- item a um produto nosso com o fator de unidade (o CRM lembra a ligação por fornecedor + código do fornecedor) e dá
+-- a entrada: soma no estoque com o custo do item (vProd − vDesc + IPI + ST + frete + seguro/outras, ÷ quantidade na
+-- unidade do estoque; sem tirar créditos de ICMS/PIS/COFINS) e refaz o custo médio. Durante o paralelo com o FKN as
+-- parcelas NÃO viram contas a pagar (o FKN já lança e o Caixa duplicaria): ficam guardadas em parcelas.
+-- Sem "on delete cascade" de propósito: nota de compra não se apaga (deixar de lado = situacao 'ignorada').
+create table if not exists public.crm_compras (
+  id uuid primary key default gen_random_uuid(),
+  chave text not null unique,
+  numero bigint, serie text, emitida_em timestamptz,
+  fornecedor_doc text, fornecedor_nome text,
+  valor_produtos numeric(16,2), valor_total numeric(16,2),
+  parcelas jsonb not null default '[]'::jsonb,
+  situacao text not null default 'pendente' check (situacao in ('pendente', 'lancada', 'ignorada')),
+  lancada_em timestamptz, lancada_por uuid, obs text,
+  criado_por uuid default auth.uid(), criado_em timestamptz not null default now(), atualizado_em timestamptz not null default now()
+);
+create table if not exists public.crm_compra_itens (
+  id uuid primary key default gen_random_uuid(),
+  compra_id uuid not null references public.crm_compras(id),
+  ordem integer not null,
+  cod_fornecedor text, descricao text, ean text, ncm text, cfop text, unidade text,
+  quantidade numeric(14,4) not null default 0,
+  valor_total numeric(16,2) not null default 0,   -- vProd − vDesc
+  ipi numeric(16,2) not null default 0, st numeric(16,2) not null default 0,
+  frete numeric(16,2) not null default 0, outras numeric(16,2) not null default 0, -- outras = seguro + outras despesas
+  codigo text, fator numeric(14,4),
+  unique (compra_id, ordem)
+);
+create table if not exists public.crm_compra_vinculos (
+  fornecedor_doc text not null, cod_fornecedor text not null,
+  codigo text not null, fator numeric(14,4) not null default 1 check (fator > 0),
+  atualizado_em timestamptz not null default now(),
+  primary key (fornecedor_doc, cod_fornecedor)
+);
+alter table public.crm_compras enable row level security;
+alter table public.crm_compra_itens enable row level security;
+alter table public.crm_compra_vinculos enable row level security;
+revoke all on public.crm_compras, public.crm_compra_itens, public.crm_compra_vinculos from anon, public;
+drop policy if exists tudo on public.crm_compras;
+create policy tudo on public.crm_compras for select to authenticated using ((select public.crm_eh_admin()) or (select public.crm_eh_comprador()));
+drop policy if exists grava on public.crm_compras;
+create policy grava on public.crm_compras for insert to authenticated with check ((select public.crm_eh_admin()) or (select public.crm_eh_comprador()));
+drop policy if exists muda on public.crm_compras;
+create policy muda on public.crm_compras for update to authenticated using ((select public.crm_eh_admin()) or (select public.crm_eh_comprador())) with check ((select public.crm_eh_admin()) or (select public.crm_eh_comprador()));
+drop policy if exists tudo on public.crm_compra_itens;
+create policy tudo on public.crm_compra_itens for select to authenticated using ((select public.crm_eh_admin()) or (select public.crm_eh_comprador()));
+drop policy if exists grava on public.crm_compra_itens;
+create policy grava on public.crm_compra_itens for insert to authenticated with check ((select public.crm_eh_admin()) or (select public.crm_eh_comprador()));
+drop policy if exists tudo on public.crm_compra_vinculos;
+create policy tudo on public.crm_compra_vinculos for select to authenticated using ((select public.crm_eh_admin()) or (select public.crm_eh_comprador()));
+
+create or replace function public.crm_compra_lancar(p_compra uuid, p_itens jsonb) returns jsonb language plpgsql security definer set search_path = public as $$
+declare c record; it record; x jsonb; cod text; f numeric; q numeric; custo numeric; n integer := 0; ign integer := 0; agora timestamptz := now();
+begin
+  if not (public.crm_eh_admin() or public.crm_eh_comprador()) then raise exception 'só o administrador ou o comprador'; end if;
+  select * into c from public.crm_compras where id = p_compra for update;
+  if c.id is null then raise exception 'nota de compra não encontrada'; end if;
+  if c.situacao <> 'pendente' then raise exception 'esta nota já foi %', case c.situacao when 'lancada' then 'lançada' else 'deixada de lado' end; end if;
+  if not exists (select 1 from public.crm_estoque_saldo) then raise exception 'comece o estoque do CRM antes de dar entrada nas compras'; end if;
+  for it in select * from public.crm_compra_itens where compra_id = c.id order by ordem loop
+    x := null;
+    select e.value into x from jsonb_array_elements(coalesce(p_itens, '[]'::jsonb)) e where e.value->>'id' = it.id::text limit 1;
+    if x is null then raise exception 'falta dizer o produto do item % (%)', it.ordem, it.descricao; end if;
+    if coalesce((x->>'ignorar')::boolean, false) then ign := ign + 1; continue; end if;
+    cod := nullif(btrim(x->>'codigo'), ''); f := nullif(x->>'fator', '')::numeric;
+    if cod is null or f is null or f <= 0 then raise exception 'item % (%): diga o produto e o fator', it.ordem, it.descricao; end if;
+    q := round(it.quantidade * f, 3);
+    if q <= 0 then raise exception 'item % (%): quantidade zerada', it.ordem, it.descricao; end if;
+    custo := round((it.valor_total + it.ipi + it.st + it.frete + it.outras) / q, 4);
+    insert into public.crm_estoque_saldo (codigo, descricao, unidade, inicio)
+      select cod, coalesce(e.descricao, it.descricao), public.crm_un(coalesce(e.unidade, it.unidade)), agora - interval '1 second'
+      from (select 1) u left join public.crm_estoque e on e.codigo = cod
+      on conflict (codigo) do nothing;
+    insert into public.crm_estoque_mov (codigo, quando, tipo, quantidade, custo_unit, qtd_doc, unidade_doc, fator, compra_item_id, motivo)
+      values (cod, agora, 'entrada', q, custo, it.quantidade, public.crm_un(it.unidade), f, it.id,
+        left('NF ' || coalesce(c.numero::text, '?') || ' ' || coalesce(c.fornecedor_nome, ''), 200));
+    update public.crm_compra_itens set codigo = cod, fator = f where id = it.id;
+    if c.fornecedor_doc is not null and it.cod_fornecedor is not null then
+      insert into public.crm_compra_vinculos (fornecedor_doc, cod_fornecedor, codigo, fator) values (c.fornecedor_doc, it.cod_fornecedor, cod, f)
+        on conflict (fornecedor_doc, cod_fornecedor) do update set codigo = excluded.codigo, fator = excluded.fator, atualizado_em = now();
+    end if;
+    n := n + 1;
+  end loop;
+  update public.crm_compras set situacao = 'lancada', lancada_em = agora, lancada_por = auth.uid(), atualizado_em = agora where id = c.id;
+  return jsonb_build_object('itens', n, 'ignorados', ign);
+end;
+$$;
+revoke all on function public.crm_compra_lancar(uuid, jsonb) from public, anon;
+grant execute on function public.crm_compra_lancar(uuid, jsonb) to authenticated;

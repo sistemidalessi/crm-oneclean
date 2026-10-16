@@ -476,6 +476,33 @@
   Supa.prototype.estoqueUnidadeSalvar = async function (codigo, unidade, fator) {
     return unwrap(await this.sb.from('crm_estoque_unidades').upsert({ codigo, unidade, fator, origem: 'manual', atualizado_em: new Date().toISOString() }, { onConflict: 'codigo,unidade' }).select().single());
   };
+  // Notas de compra (entrada pelo XML): grava pendente (a mesma chave não entra duas vezes), lista, dá entrada, deixa de lado.
+  Supa.prototype.compras = async function (limite) { return unwrap(await this.sb.from('crm_compras').select('*').order('emitida_em', { ascending: false }).limit(limite || 200)); };
+  Supa.prototype.compraItens = async function (id) { return unwrap(await this.sb.from('crm_compra_itens').select('*').eq('compra_id', id).order('ordem')); };
+  Supa.prototype.compraVinculos = async function () { return unwrap(await this.sb.from('crm_compra_vinculos').select('*').limit(20000)); };
+  Supa.prototype.compraGravar = async function (compra, itens) {
+    const r = unwrap(await this.sb.from('crm_compras').upsert(compra, { onConflict: 'chave', ignoreDuplicates: true }).select());
+    if (!r || !r.length) return null; // já estava no CRM
+    unwrap(await this.sb.from('crm_compra_itens').insert(itens.map(i => Object.assign({}, i, { compra_id: r[0].id }))));
+    return r[0];
+  };
+  Supa.prototype.compraLancar = async function (id, itens) { return unwrap(await this.sb.rpc('crm_compra_lancar', { p_compra: id, p_itens: itens })); };
+  Supa.prototype.compraIgnorar = async function (id, obs) {
+    return unwrap(await this.sb.from('crm_compras').update({ situacao: 'ignorada', obs: obs || null, atualizado_em: new Date().toISOString() }).eq('id', id).eq('situacao', 'pendente').select().single());
+  };
+  Local.prototype.compras = async function () { return this._compras || []; };
+  Local.prototype.compraItens = async function (id) { return (this._compraItens || []).filter(i => i.compra_id === id); };
+  Local.prototype.compraVinculos = async function () { return []; };
+  Local.prototype.compraGravar = async function (compra, itens) {
+    this._compras = this._compras || []; this._compraItens = this._compraItens || [];
+    if (this._compras.some(c => c.chave === compra.chave)) return null;
+    const c = Object.assign({ id: uuid(), situacao: 'pendente', criado_em: new Date().toISOString() }, compra);
+    this._compras.push(c); itens.forEach(i => this._compraItens.push(Object.assign({ id: uuid(), compra_id: c.id }, i)));
+    return c;
+  };
+  Local.prototype.compraLancar = async function () { throw new Error('a entrada no estoque só funciona ligada ao banco'); };
+  Local.prototype.compraIgnorar = async function (id, obs) { const c = (this._compras || []).find(x => x.id === id); if (c) Object.assign(c, { situacao: 'ignorada', obs }); return c; };
+
   // modo local (teste/demonstração): o livro fica na memória
   Local.prototype.estoqueFoto = async function () { return { foto: null, conferencia: null }; };
   Local.prototype.estoqueIniciar = async function () { throw new Error('o estoque do CRM só funciona ligado ao banco'); };
