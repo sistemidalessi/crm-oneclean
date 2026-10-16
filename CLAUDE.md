@@ -1268,13 +1268,19 @@ o serviço na VPS da Agilité (não no servidor do escritório).
   do FKN" na aba Fiscal, só admin): `crm_fiscal_st_amostras()` dá a nota mais recente do FKN de cada produto com CST 60
   (120 dias); lê o XML guardado e grava por UNIDADE (UN/CX…) em `crm_fiscal_produtos.regra.st_ret` (vBCSTRet, pST,
   vICMSSubstituto, vICMSSTRet ÷ qCom). `pedido.js` multiplica pela quantidade; sem o valor, avisa e sai só com o CST 60.
-  "Atualizar as propostas" (fiscal.js) preserva o `st_ret`. **Falta:** Anderson clicar no botão (dá de casa) e, no escritório,
-  `git pull` + restart na VPS (o `pedido.js` roda lá); depois o teste 3 com produto 5405.
-  **Próximos, na ordem:** (1) teste 3 em homologação com produto 5405; (2) "de acordo" do
+  "Atualizar as propostas" (fiscal.js) preserva o `st_ret`. Anderson clicou (134 produtos aprendidos) e atualizou a VPS.
+  **Teste 3 autorizado** (NF 2-3, interfolha 290001, 5405/CST 60: vBCSTRet 8.22, pST 18, vICMSSubstituto 0.86, vICMSSTRet 0.61
+  = os da NF 2651 do FKN; tributos aproximados 7.42).
+  **Cadastros que ainda vêm do FKN (pergunta do Anderson, 16/10):** produto (o mestre de pedido/estoque/nota é a listagem
+  SIFN108, que o vigia substitui inteira; Configurações → Produtos é só a lista antiga dos negócios), formas de pagamento
+  (lista fixa `PAGAMENTOS` em pedidos.js + as dos orçamentos), transportadoras (texto livre) e fornecedores. Antes da virada:
+  cadastro de produto de verdade (código, descrição, unidade/caixa e fator, NCM e regra fiscal, preço, custo, fornecedor,
+  mínimo/máximo, ativo), formas de pagamento (prazo e tipo) e transportadoras (vão para a nota).
+  **Próximos, na ordem:** (2) "de acordo" do
   contador nas 1.190 regras (todas "proposta"); (3) boleto pelo BB (Fase 5; Anderson pede ao gerente a API de Cobrança e
   cadastra no portal de desenvolvedores do BB); (4) Fase 4b (devolução, bonificação, troca; 5117 e 6108 são raros);
   (5) IBPT atual e automático (cadastro gratuito no "De Olho no Imposto", chave nos Secrets); (6) notas de compra pela
-  Distribuição DF-e; (7) usuário da logística; (8) virada num dia combinado (sem paralelo longo emitindo nos dois).
+  Distribuição DF-e; (7) usuário da logística; (7b) cadastros (produto, formas de pagamento, transportadoras, fornecedores); (8) virada num dia combinado (sem paralelo longo emitindo nos dois).
   **SSH da VPS só no computador do escritório** (de casa: tudo do CRM funciona, mas `git pull` na VPS espera o escritório).
   Atualizar o serviço: `cd /opt/oneclean-fiscal && git pull -q && systemctl restart oneclean-fiscal`.
 - Depois (Fase 4b): devolução, bonificação, troca, entrega futura e outro estado (hoje bloqueados: saem pelo FKN).
