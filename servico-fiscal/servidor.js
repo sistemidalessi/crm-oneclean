@@ -19,6 +19,7 @@ const crypto = require('crypto');
 const N = require('./nfe');
 const A = require('./assinatura');
 const S = require('./sefaz');
+const PD = require('./pedido');
 
 const VERSAO = '2026-10-16';
 const env = process.env;
@@ -72,6 +73,19 @@ const ROTAS = {
   'POST /status': async b => S.status(cfgSefaz(b.ambiente)),
   'POST /previa': async b => { const m = N.monta(b.nota); return { chave: m.chave, calculo: m.calculo, totais: m.totais }; },
   'POST /emitir': async b => emitir(b.nota),
+  // Do pedido do CRM (a Edge Function crm-fiscal manda o pedido, o cliente, as regras fiscais e o emitente; o número
+  // vem reservado no banco). Com aviso que bloqueia, não monta nem envia: devolve os avisos.
+  'POST /previa-pedido': async b => {
+    const r = PD.notaDoPedido(Object.assign({}, b, { emissao: agoraSP(), numero: b.numero || 1 }));
+    if (r.avisos.bloqueia.length) return { avisos: r.avisos, bloqueado: true, total: r.total };
+    const m = N.monta(r.nota);
+    return { avisos: r.avisos, bloqueado: false, totais: m.totais, calculo: m.calculo, nota: r.nota };
+  },
+  'POST /emitir-pedido': async b => {
+    const r = PD.notaDoPedido(Object.assign({}, b, { emissao: agoraSP() }));
+    if (r.avisos.bloqueia.length) return { situacao: 'bloqueada', avisos: r.avisos };
+    return Object.assign(await emitir(r.nota), { avisos: r.avisos, nota: r.nota });
+  },
   'POST /consultar': async b => { const r = await S.consulta(cfgSefaz(b.ambiente), b.chave); return b.nfeXml ? finaliza(r, b.chave, b.nfeXml) : r; },
   'POST /reenviar': async b => finaliza(await S.autoriza(cfgSefaz(b.ambiente), b.nfeXml, b.chave), b.chave, b.nfeXml),
   'POST /cancelar': async b => {

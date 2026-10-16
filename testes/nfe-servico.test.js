@@ -159,3 +159,47 @@ test('servidor: recusa sem a chave, prévia calcula sem falar com a Sefaz, sem c
     assert.strictEqual((await chama('GET', '/saude', null, 'curta'))[0], 401);   // chave fraca: não atende ninguém
   } finally { srv.close(); fs.rmSync(process.env.FISCAL_PASTA, { recursive: true, force: true }); }
 });
+
+const PD = require('../servico-fiscal/pedido.js');
+test('pagamento do pedido: prazos e forma (boleto, pix, transferência, à vista sem forma)', () => {
+  assert.deepStrictEqual([PD.lePagamento('28 DIAS BOLETO').dias, PD.lePagamento('28 DIAS BOLETO').forma], [[28], '15']);
+  assert.deepStrictEqual(PD.lePagamento('30/60/90 DIAS BOLETO').dias, [30, 60, 90]);
+  assert.deepStrictEqual([PD.lePagamento('A VISTA PIX').forma, PD.lePagamento('A VISTA PIX').aVista], ['17', true]);
+  assert.strictEqual(PD.lePagamento('À vista transferência').forma, '18');
+  assert.strictEqual(PD.lePagamento('A VISTA').forma, '99');
+  assert.deepStrictEqual(PD.parcelas(100, [30, 60, 90], '2026-10-20'), [{ vencimento: '2026-11-19', valor: 33.33 }, { vencimento: '2026-12-19', valor: 33.33 }, { vencimento: '2027-01-18', valor: 33.34 }]);
+});
+
+const regraVenda = (cfop, cst, pis) => ({ ncm: '34022000', origem: '0', situacao: 'conferido', alertas: [],
+  regra: { venda: { cfop, cst_icms: cst, aliq_icms: cst === '00' ? 18 : null, cst_pis: pis, aliq_pis: pis === '01' ? 1.65 : null, cst_cofins: pis, aliq_cofins: pis === '01' ? 7.6 : null } } });
+const cliente = { cnpj: '22.333.444/0001-72', razao_social: 'CLIENTE DE TESTE LTDA', nome: 'Cliente', ie: '222333444555', ind_ie: '1', codigo_municipio: '3550308',
+  logradouro: 'AV. EXEMPLO', numero: '50', bairro: 'JARDIM', cidade: 'SAO PAULO', uf: 'SP', cep: '01436-000', email: 'a@cliente.teste; b@cliente.teste' };
+const pedido = { numero: 7, frete: 0, dados: { pagamento: '28 DIAS BOLETO', frete_conta: '0', volumes: 3, texto_nota: 'Recebimento das 7h às 12h', seu_pedido: 'PC-55' },
+  itens: [{ codigo: '010043', descricao: 'DETERGENTE NEUTRO 5L', unidade: 'GL', quantidade: 2, preco: 67.84, desconto: 0 },
+    { codigo: '250011.1', descricao: 'GUARDANAPO CX', unidade: 'CX', quantidade: 1, preco: 94.08, desconto: 10 }] };
+const regras = { '010043': regraVenda('5102', '00', '01'), '250011': regraVenda('5405', '60', '06') };
+
+test('pedido → nota: caixa vira o código do produto, desconto em R$, parcelas, vendedor no texto da nota', () => {
+  const r = PD.notaDoPedido({ pedido, empresa: cliente, regras, emitente, ambiente: 'homologacao', serie: 2, numero: 31, emissao: '2026-10-20T10:00:00-03:00', vendedorNome: 'Renata' });
+  assert.deepStrictEqual(r.avisos, { bloqueia: [], conferir: [] });
+  const n = r.nota;
+  assert.deepStrictEqual(n.itens.map(i => [i.codigo, i.unidade, i.cfop, i.desconto]), [['010043', 'GL', '5102', 0], ['250011', 'CX', '5405', 9.41]]);
+  assert.strictEqual(r.total, 220.35);
+  assert.deepStrictEqual(n.cobranca.duplicatas, [{ vencimento: '2026-11-17', valor: 220.35 }]);
+  assert.deepStrictEqual(n.pagamento, [{ tPag: '15', indPag: 1, valor: 220.35, descricao: null }]);
+  assert.strictEqual(n.infCpl, 'VENDEDOR: RENATA | PEDIDO CRM 7 | SEU PEDIDO: PC-55 | Recebimento das 7h às 12h');
+  assert.strictEqual(n.dest.email, 'a@cliente.teste');
+  const m = N.monta(n);   // monta sem erro (parcelas fecham com o total)
+  assert.strictEqual(m.totais.vNF, 220.35);
+});
+
+test('pedido → nota: o que bloqueia a emissão', () => {
+  const sem = PD.notaDoPedido({ pedido, empresa: Object.assign({}, cliente, { uf: 'RJ', codigo_municipio: '', ie: '' }), regras: { '010043': regras['010043'] }, emitente, ambiente: 'homologacao', serie: 2, numero: 1, emissao: '2026-10-20T10:00:00-03:00' });
+  assert.ok(sem.avisos.bloqueia.some(x => /outro estado/.test(x)));
+  assert.ok(sem.avisos.bloqueia.some(x => /código IBGE/.test(x)));
+  assert.ok(sem.avisos.bloqueia.some(x => /sem a inscrição estadual/.test(x)));
+  assert.ok(sem.avisos.bloqueia.some(x => /250011 .*sem regra fiscal/.test(x)));
+  const prop = PD.notaDoPedido({ pedido, empresa: cliente, regras: { '010043': Object.assign({}, regras['010043'], { situacao: 'proposta' }), '250011': regras['250011'] }, emitente, ambiente: 'homologacao', serie: 2, numero: 1, emissao: '2026-10-20T10:00:00-03:00' });
+  assert.deepStrictEqual(prop.avisos.bloqueia, []);
+  assert.ok(prop.avisos.conferir.some(x => /proposta/.test(x)));
+});

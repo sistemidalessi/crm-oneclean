@@ -1,0 +1,168 @@
+// Edge Function crm-fiscal — o CRM emite NF-e (Fase 4 da saída do FKN, 16/10/2026).
+// O navegador chama esta função (com o login de quem clicou); ela confere o papel, junta do banco o pedido, o cliente,
+// as regras fiscais e o emitente, reserva o número (crm_nfe_reservar) e manda ao SERVIÇO FISCAL na VPS
+// (servico-fiscal/, que assina com o A1 e fala com a Sefaz-SP). A nota autorizada entra no CRM pelo mesmo caminho do
+// vigia (crm-notas): estoque, títulos das parcelas, comissão, XML guardado.
+// Secrets: FISCAL_URL (https://fiscal.oneclean.com.br) e FISCAL_TOKEN (gerado na VPS; ver servico-fiscal/INSTALAR.md).
+// Deploy: verify_jwt LIGADO.
+import { createClient } from 'npm:@supabase/supabase-js@2.116.0';
+
+const CORS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS'
+};
+const resposta = (status: number, corpo: unknown) => new Response(JSON.stringify(corpo), { status, headers: { ...CORS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
+const EMITE = ['admin', 'gestor', 'logistica'], CANCELA = ['admin', 'gestor'];
+type Linha = Record<string, unknown>;
+
+async function sha256(t: string) {
+  const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t));
+  return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join('');
+}
+async function servico(rota: string, corpo: unknown, metodo = 'POST') {
+  const url = Deno.env.get('FISCAL_URL'), tok = Deno.env.get('FISCAL_TOKEN');
+  if (!url || !tok) throw new Error('o serviço fiscal ainda não está ligado (faltam FISCAL_URL e FISCAL_TOKEN nos Secrets)');
+  const r = await fetch(url.replace(/\/$/, '') + rota, { method: metodo, headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json' },
+    body: metodo === 'POST' ? JSON.stringify(corpo ?? {}) : undefined, signal: AbortSignal.timeout(90000) });
+  const j = await r.json().catch(() => ({ erro: 'resposta inválida do serviço fiscal (HTTP ' + r.status + ')' }));
+  if (!r.ok) throw new Error(j.erro || 'serviço fiscal: HTTP ' + r.status);
+  return j;
+}
+
+// A nota autorizada (ou o cancelamento) entra no CRM pela crm-notas, com uma chave de integração própria, derivada do
+// FISCAL_TOKEN (não é preciso gerar outra na tela). A integração é criada sozinha na primeira vez.
+async function entregaAoCrm(db: ReturnType<typeof createClient>, nome: string, xml: string) {
+  const chave = await sha256('crm-notas:' + Deno.env.get('FISCAL_TOKEN'));
+  const hash = await sha256(chave);
+  const { data: ja } = await db.from('crm_integracoes').select('id').eq('token_hash', hash).maybeSingle();
+  if (!ja) await db.from('crm_integracoes').insert({ nome: 'Serviço fiscal (NF-e do CRM)', token_hash: hash, filtro: 'todas', ativo: true, uso: 'notas', criado_por: null });
+  const r = await fetch(Deno.env.get('SUPABASE_URL') + '/functions/v1/crm-notas', { method: 'POST',
+    headers: { 'x-crm-chave': chave, 'Content-Type': 'application/json' }, body: JSON.stringify({ arquivos: [{ nome, xml }] }) });
+  return await r.json().catch(() => ({ erro: 'crm-notas: HTTP ' + r.status }));
+}
+
+async function dadosDoPedido(db: ReturnType<typeof createClient>, pedidoId: string) {
+  const { data: pedido } = await db.from('crm_pedidos').select('*').eq('id', pedidoId).maybeSingle();
+  if (!pedido) throw new Error('pedido não encontrado');
+  const p = pedido as Linha;
+  if (['faturado', 'cancelado'].includes(String(p.situacao))) throw new Error('o pedido já está ' + p.situacao);
+  const abertos = ((p.bloqueios as string[]) || []).filter(b => !((p.liberado as string[]) || []).includes(b));
+  if (abertos.length) throw new Error('o pedido está bloqueado (' + abertos.join(', ') + '): a gestora precisa liberar');
+  const { data: empresa } = await db.from('crm_empresas').select('*').eq('id', p.empresa_id).maybeSingle();
+  const bases = [...new Set(((p.itens as Linha[]) || []).map(i => String(i.codigo || '').replace(/\.\d+$/, '')).filter(Boolean))];
+  const { data: regs } = bases.length ? await db.from('crm_fiscal_produtos').select('*').in('codigo', bases) : { data: [] };
+  const regras: Record<string, Linha> = {}; (regs || []).forEach((r: Linha) => { regras[String(r.codigo)] = r; });
+  const { data: cfgRow } = await db.from('crm_config').select('dados').eq('id', 1).maybeSingle();
+  const fiscal = ((cfgRow as Linha | null)?.dados as Linha | undefined)?.fiscal as Linha | undefined || {};
+  if (!fiscal.emitente) throw new Error('falta configurar o emitente (aba Fiscal → Emissão)');
+  const { data: vend } = p.vendedor_id ? await db.from('crm_usuarios').select('nome, nomes_nota, papel').eq('user_id', p.vendedor_id).maybeSingle() : { data: null };
+  const v = vend as Linha | null;
+  const vendedorNome = v ? (((v.nomes_nota as string[]) || [])[0] || String(v.nome).split(' ')[0]) : '';
+  return { pedido: p, empresa: empresa as Linha, regras, fiscal, vendedorNome };
+}
+
+const ambienteDe = (fiscal: Linha) => (fiscal.ambiente === 'producao' ? 'producao' : 'homologacao');
+
+async function gravaResultado(db: ReturnType<typeof createClient>, nfeId: string, r: Linha, eu: string) {
+  const patch: Linha = { situacao: r.situacao === 'pendente' ? 'pendente' : r.situacao === 'bloqueada' ? 'bloqueada' : r.situacao, atualizado_em: new Date().toISOString() };
+  for (const [k, c] of [['chave', 'chave'], ['cStat', 'cstat'], ['motivo', 'motivo'], ['protocolo', 'protocolo'], ['nfeXml', 'nfe_xml'], ['procXml', 'proc_xml'], ['totais', 'totais'], ['avisos', 'avisos'], ['nota', 'nota']] as const)
+    if (r[k] !== undefined && r[k] !== null) patch[c] = r[k];
+  if (r.situacao === 'autorizada') { patch.autorizada_em = r.recebido || new Date().toISOString(); }
+  if (r.totais) patch.valor = (r.totais as Linha).vNF;
+  const { data } = await db.from('crm_nfe').update(patch).eq('id', nfeId).select().single();
+  const nfe = data as Linha;
+  // Homologação (teste, sem valor fiscal) NUNCA entra no CRM: nem estoque, nem título, nem comissão; o pedido não muda.
+  if (nfe && nfe.ambiente === 'producao' && nfe.situacao === 'autorizada' && nfe.proc_xml && !nfe.nota_id) {
+    const ent = await entregaAoCrm(db, 'NFe' + nfe.chave + '-procNFe.xml', String(nfe.proc_xml));
+    const { data: nota } = await db.from('crm_notas').select('id').eq('chave', nfe.chave).maybeSingle();
+    if (nota) {
+      await db.from('crm_nfe').update({ nota_id: (nota as Linha).id }).eq('id', nfeId);
+      if (nfe.pedido_id) await db.from('crm_pedidos').update({ situacao: 'faturado', nota_id: (nota as Linha).id, faturado_em: new Date().toISOString(), atualizado_por: eu, atualizado_em: new Date().toISOString() }).eq('id', nfe.pedido_id);
+    }
+    return Object.assign({}, nfe, { nota_id: nota ? (nota as Linha).id : null, entrega: ent });
+  }
+  return nfe;
+}
+const semXml = (n: Linha | null) => n && Object.assign({}, n, { nfe_xml: undefined, proc_xml: n.proc_xml ? true : false });
+
+Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
+  if (req.method !== 'POST') return resposta(405, { erro: 'use POST' });
+  const url = Deno.env.get('SUPABASE_URL')!;
+  const comoUsuario = createClient(url, Deno.env.get('SUPABASE_ANON_KEY')!, { global: { headers: { Authorization: req.headers.get('Authorization') ?? '' } }, auth: { persistSession: false } });
+  const { data: quem } = await comoUsuario.auth.getUser();
+  if (!quem?.user) return resposta(401, { erro: 'faça login' });
+  const db = createClient(url, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } });
+  const { data: euRow } = await db.from('crm_usuarios').select('papel, ativo, nome').eq('user_id', quem.user.id).maybeSingle();
+  const eu = euRow as Linha | null;
+  if (!eu || !eu.ativo || !EMITE.includes(String(eu.papel))) return resposta(403, { erro: 'só a logística, a gestora e o administrador emitem nota' });
+  let b: Linha;
+  try { b = await req.json(); } catch { return resposta(400, { erro: 'corpo inválido' }); }
+  try {
+    const acao = String(b.acao || '');
+    if (acao === 'saude') return resposta(200, await servico('/saude', null, 'GET'));
+    const { data: cfgRow } = await db.from('crm_config').select('dados').eq('id', 1).maybeSingle();
+    const fiscal = ((cfgRow as Linha | null)?.dados as Linha | undefined)?.fiscal as Linha | undefined || {};
+    const amb = ambienteDe(fiscal), serie = Number(fiscal.serie ?? 2);
+    if (acao === 'status') return resposta(200, await servico('/status', { ambiente: amb }));
+
+    if (acao === 'previa' || acao === 'emitir') {
+      const d = await dadosDoPedido(db, String(b.pedido_id));
+      const corpo = { pedido: d.pedido, empresa: d.empresa, regras: d.regras, emitente: d.fiscal.emitente, ambiente: amb, serie, vendedorNome: d.vendedorNome, cfg: d.fiscal };
+      if (acao === 'previa') return resposta(200, Object.assign(await servico('/previa-pedido', corpo), { ambiente: amb, serie }));
+      const { data: res, error } = await db.rpc('crm_nfe_reservar', { p_ambiente: amb, p_serie: serie, p_pedido: d.pedido.id, p_empresa: d.pedido.empresa_id });
+      if (error) throw new Error(error.message);
+      const nfe = res as Linha;
+      await db.from('crm_nfe').update({ criado_por: quem.user.id }).eq('id', nfe.id).is('criado_por', null);
+      let r: Linha;
+      try { r = await servico('/emitir-pedido', Object.assign(corpo, { numero: nfe.numero })); }
+      catch (e) { await db.from('crm_nfe').update({ situacao: 'pendente', motivo: 'sem resposta do serviço fiscal: ' + (e as Error).message }).eq('id', nfe.id); throw e; }
+      return resposta(200, { nfe: semXml(await gravaResultado(db, String(nfe.id), r, quem.user.id)) });
+    }
+
+    const { data: nfeRow } = b.nfe_id ? await db.from('crm_nfe').select('*').eq('id', b.nfe_id).maybeSingle() : { data: null };
+    const nfe = nfeRow as Linha | null;
+    const emitente = fiscal.emitente as Linha | undefined;
+    if (acao === 'consultar') {
+      if (!nfe || !nfe.chave) throw new Error('nota sem chave para consultar');
+      const r = await servico('/consultar', { ambiente: nfe.ambiente, chave: nfe.chave, nfeXml: nfe.nfe_xml });
+      if (r.situacao === 'rejeitada' && Number(r.cStat) === 217 && nfe.situacao === 'pendente' && nfe.nfe_xml) {   // a Sefaz não tem a nota: reenvia o MESMO XML
+        return resposta(200, { nfe: semXml(await gravaResultado(db, String(nfe.id), await servico('/reenviar', { ambiente: nfe.ambiente, chave: nfe.chave, nfeXml: nfe.nfe_xml }), quem.user.id)) });
+      }
+      return resposta(200, { nfe: semXml(await gravaResultado(db, String(nfe.id), Object.assign(r, { nfeXml: undefined }), quem.user.id)) });
+    }
+    if (acao === 'xml') {
+      if (!nfe) throw new Error('nota não encontrada');
+      return resposta(200, { proc_xml: nfe.proc_xml, nfe_xml: nfe.situacao === 'autorizada' ? null : nfe.nfe_xml });
+    }
+    if (acao === 'cancelar' || acao === 'cce') {
+      if (!nfe || nfe.situacao !== 'autorizada') throw new Error('só nota autorizada');
+      if (acao === 'cancelar' && !CANCELA.includes(String(eu.papel))) throw new Error('só a gestora ou o administrador cancela nota');
+      const evs = (nfe.eventos as Linha[]) || [];
+      const seq = acao === 'cce' ? evs.filter(e => e.tipo === 'cce').length + 1 : 1;
+      const r = acao === 'cancelar'
+        ? await servico('/cancelar', { ambiente: nfe.ambiente, cnpj: emitente?.cnpj, chave: nfe.chave, protocolo: nfe.protocolo, justificativa: b.texto })
+        : await servico('/cce', { ambiente: nfe.ambiente, cnpj: emitente?.cnpj, chave: nfe.chave, seq, correcao: b.texto });
+      const ok = [135, 136, 155].includes(Number(r.eventoStat));
+      const ev = { tipo: acao, seq, quando: new Date().toISOString(), cstat: r.eventoStat ?? r.cStat, motivo: r.eventoMotivo ?? r.xMotivo, protocolo: ok ? r.protocolo : null, texto: b.texto, por: quem.user.id };
+      const patch: Linha = { eventos: evs.concat([ev]), atualizado_em: new Date().toISOString() };
+      if (ok && acao === 'cancelar') patch.situacao = 'cancelada';
+      await db.from('crm_nfe').update(patch).eq('id', nfe.id);
+      if (ok && acao === 'cancelar' && nfe.ambiente === 'producao') {
+        await entregaAoCrm(db, 'NFe' + nfe.chave + '-canc.xml', '<?xml version="1.0" encoding="UTF-8"?><procEventoNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="1.00">' + r.eventoXml + r.retEvento + '</procEventoNFe>');
+        if (nfe.pedido_id) await db.from('crm_pedidos').update({ situacao: 'separado', nota_id: null, faturado_em: null, atualizado_em: new Date().toISOString() }).eq('id', nfe.pedido_id);
+      }
+      return resposta(200, { ok, evento: ev });
+    }
+    if (acao === 'inutilizar') {
+      if (eu.papel !== 'admin') throw new Error('só o administrador inutiliza numeração');
+      const r = await servico('/inutilizar', { ambiente: amb, cnpj: emitente?.cnpj, ano: new Date().getFullYear(), serie: Number(b.serie ?? serie), de: b.de, ate: b.ate, justificativa: b.texto });
+      await db.from('crm_nfe_inutilizacoes').insert({ ambiente: amb, serie: Number(b.serie ?? serie), de: b.de, ate: b.ate, justificativa: b.texto, cstat: r.cStat, motivo: r.xMotivo, protocolo: r.protocolo, criado_por: quem.user.id });
+      return resposta(200, { ok: Number(r.cStat) === 102, cStat: r.cStat, motivo: r.xMotivo });
+    }
+    return resposta(400, { erro: 'ação desconhecida' });
+  } catch (e) {
+    return resposta(422, { erro: e instanceof Error ? e.message : String(e) });
+  }
+});

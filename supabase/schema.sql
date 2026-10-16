@@ -2782,3 +2782,97 @@ end;
 $$;
 revoke all on function public.crm_comissao_reabrir(date) from public, anon;
 grant execute on function public.crm_comissao_reabrir(date) to authenticated;
+
+-- =================================================================== Fase 4: NF-e emitida pelo CRM
+-- (16/10/2026, plano docs/plano-sair-do-fkn.md). O serviço fiscal (servico-fiscal/, na VPS) monta, assina e envia à
+-- Sefaz-SP; a Edge Function crm-fiscal fala com ele e grava aqui. No paralelo com o FKN o CRM usa uma SÉRIE PRÓPRIA (2;
+-- o FKN emite na 1), para os números nunca se chocarem. Numeração por ambiente e série, reservada no banco (uma de cada
+-- vez). Regras: nota REJEITADA reaproveita o mesmo número (a Sefaz deixa); PENDENTE (sem resposta) obriga a consultar
+-- antes; pedido com nota autorizada não emite outra. Só leitura direta (administrador, gestora, logística); quem grava é
+-- a crm-fiscal (chave de serviço).
+create table if not exists public.crm_nfe_numeracao (
+  ambiente text not null check (ambiente in ('homologacao', 'producao')),
+  serie    integer not null check (serie between 0 and 999),
+  proximo  integer not null default 1 check (proximo > 0),
+  primary key (ambiente, serie)
+);
+create table if not exists public.crm_nfe (
+  id            uuid primary key default gen_random_uuid(),
+  ambiente      text not null check (ambiente in ('homologacao', 'producao')),
+  serie         integer not null,
+  numero        integer not null check (numero > 0),
+  pedido_id     uuid references public.crm_pedidos(id) on delete set null,
+  empresa_id    uuid references public.crm_empresas(id) on delete set null,
+  chave         text unique,
+  situacao      text not null default 'reservada' check (situacao in ('reservada', 'pendente', 'autorizada', 'rejeitada', 'denegada', 'cancelada', 'bloqueada')),
+  cstat         integer,
+  motivo        text,
+  protocolo     text,
+  autorizada_em timestamptz,
+  valor         numeric(14,2),
+  totais        jsonb,
+  avisos        jsonb,
+  nota          jsonb,                 -- o que foi mandado ao serviço fiscal (para conferir e reenviar)
+  nfe_xml       text,                  -- o XML assinado (reenviar o MESMO, nunca outro número)
+  proc_xml      text,                  -- nota + protocolo (o arquivo que vale)
+  nota_id       uuid references public.crm_notas(id) on delete set null,
+  eventos       jsonb not null default '[]'::jsonb,   -- [{tipo, seq, protocolo, quando, cstat, motivo, texto, por}]
+  tentativas    integer not null default 0,
+  criado_por    uuid default auth.uid(),
+  criado_em     timestamptz not null default now(),
+  atualizado_em timestamptz not null default now(),
+  unique (ambiente, serie, numero)
+);
+create index if not exists crm_nfe_pedido_idx on public.crm_nfe (pedido_id);
+create table if not exists public.crm_nfe_inutilizacoes (
+  id            bigint generated always as identity primary key,
+  ambiente      text not null,
+  serie         integer not null,
+  de            integer not null,
+  ate           integer not null,
+  justificativa text not null,
+  cstat         integer,
+  motivo        text,
+  protocolo     text,
+  criado_por    uuid,
+  criado_em     timestamptz not null default now()
+);
+alter table public.crm_nfe enable row level security;
+alter table public.crm_nfe_numeracao enable row level security;
+alter table public.crm_nfe_inutilizacoes enable row level security;
+revoke all on public.crm_nfe, public.crm_nfe_numeracao, public.crm_nfe_inutilizacoes from anon, public;
+grant select on public.crm_nfe, public.crm_nfe_numeracao, public.crm_nfe_inutilizacoes to authenticated;
+drop policy if exists ler on public.crm_nfe;
+create policy ler on public.crm_nfe for select to authenticated using ((select public.crm_eh_gestor()) or (select public.crm_eh_logistica()));
+drop policy if exists ler on public.crm_nfe_numeracao;
+create policy ler on public.crm_nfe_numeracao for select to authenticated using ((select public.crm_eh_gestor()) or (select public.crm_eh_logistica()));
+drop policy if exists ler on public.crm_nfe_inutilizacoes;
+create policy ler on public.crm_nfe_inutilizacoes for select to authenticated using ((select public.crm_eh_gestor()) or (select public.crm_eh_logistica()));
+
+-- Reserva o número da nota do pedido (chamada pela crm-fiscal com a chave de serviço, em nome de quem clicou).
+create or replace function public.crm_nfe_reservar(p_ambiente text, p_serie integer, p_pedido uuid, p_empresa uuid) returns public.crm_nfe
+language plpgsql security definer set search_path = public as $$
+declare r public.crm_nfe; n integer;
+begin
+  if coalesce(auth.role(), '') <> 'service_role' then raise exception 'só o serviço fiscal reserva número'; end if;
+  if p_ambiente not in ('homologacao', 'producao') then raise exception 'ambiente inválido'; end if;
+  perform pg_advisory_xact_lock(hashtext('crm_nfe:' || p_ambiente || ':' || p_serie));
+  -- em homologação o mesmo pedido pode ser testado de novo (a nota autorizada lá não conta)
+  select * into r from public.crm_nfe where pedido_id = p_pedido and ambiente = p_ambiente and situacao in ('autorizada', 'pendente', 'reservada', 'rejeitada', 'bloqueada')
+     and (p_ambiente = 'producao' or situacao <> 'autorizada')
+   order by criado_em desc limit 1;
+  if r.id is not null then
+    if r.situacao = 'autorizada' then raise exception 'o pedido já tem a NF % autorizada', r.numero; end if;
+    if r.situacao = 'pendente' then raise exception 'a NF % deste pedido ficou sem resposta da Sefaz: consulte antes de emitir de novo', r.numero; end if;
+    update public.crm_nfe set tentativas = tentativas + 1, atualizado_em = now() where id = r.id returning * into r;
+    return r;                                   -- rejeitada/bloqueada/reservada: o mesmo número
+  end if;
+  insert into public.crm_nfe_numeracao (ambiente, serie) values (p_ambiente, p_serie) on conflict do nothing;
+  update public.crm_nfe_numeracao set proximo = proximo + 1 where ambiente = p_ambiente and serie = p_serie returning proximo - 1 into n;
+  insert into public.crm_nfe (ambiente, serie, numero, pedido_id, empresa_id, situacao, tentativas)
+  values (p_ambiente, p_serie, n, p_pedido, p_empresa, 'reservada', 1) returning * into r;
+  return r;
+end;
+$$;
+revoke all on function public.crm_nfe_reservar(text, integer, uuid, uuid) from public, anon, authenticated;
+grant execute on function public.crm_nfe_reservar(text, integer, uuid, uuid) to service_role;
