@@ -1,4 +1,4 @@
-# Acrescentar ao /etc/caddy/Caddyfile da VPS (o bloco da Agilité continua como está)
+# Vai em /etc/caddy/conf.d/oneclean-fiscal.caddy na VPS (o Caddyfile da Agilité importa conf.d/*.caddy)
 fiscal.oneclean.com.br {
 	reverse_proxy 127.0.0.1:8787
 	request_body {

@@ -8,6 +8,7 @@
    reenvia com outro número — consulta pela chave; só reenvia o MESMO XML se a Sefaz disser que a chave não existe. */
 
 const https = require('https');
+const tls = require('tls');
 const { URL } = require('url');
 const { NS, txt } = require('./nfe');
 const A = require('./assinatura');
@@ -98,7 +99,7 @@ function chama(servico, xml, cfg) {
   const s = SERV[servico], url = new URL(BASE[cfg.ambiente === 'producao' ? 'producao' : 'homologacao'] + s[0]);
   const corpo = envelope(servico, xml);
   return new Promise((ok, falha) => {
-    const req = https.request({ hostname: url.hostname, path: url.pathname, method: 'POST', cert: cfg.certPem, key: cfg.keyPem, ca: cfg.ca || undefined,
+    const req = https.request({ hostname: url.hostname, path: url.pathname, method: 'POST', cert: cfg.certPem, key: cfg.keyPem, ca: cfg.ca ? tls.rootCertificates.concat([cfg.ca]) : undefined,   // a cadeia extra SOMA às autoridades de sempre
       rejectUnauthorized: true, timeout: cfg.tempo || 30000, minVersion: 'TLSv1.2',
       headers: { 'Content-Type': 'application/soap+xml; charset=utf-8; action="http://www.portalfiscal.inf.br/nfe/wsdl/' + s[1] + '/' + s[2] + '"', 'Content-Length': Buffer.byteLength(corpo) } }, res => {
       const partes = [];
