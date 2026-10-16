@@ -203,3 +203,9 @@ test('pedido → nota: o que bloqueia a emissão', () => {
   assert.deepStrictEqual(prop.avisos.bloqueia, []);
   assert.ok(prop.avisos.conferir.some(x => /proposta/.test(x)));
 });
+
+test('intermediador: obrigatório na venda não presencial (9), ausente na presencial (1)', () => {
+  const x9 = N.monta(nota()).infNFe, x1 = N.monta(nota({ indPres: 1 })).infNFe;
+  assert.match(x9, /<indPres>9<\/indPres><indIntermed>0<\/indIntermed><procEmi>/);   // rejeição 434 sem ele (homologação, 16/10/2026)
+  assert.doesNotMatch(x1, /indIntermed/);
+});

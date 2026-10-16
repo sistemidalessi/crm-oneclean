@@ -148,10 +148,14 @@ function monta(nota, opc) {
   const chave = chaveAcesso({ cUF, emissao: nota.emissao, cnpj: em.cnpj, mod: 55, serie: nota.serie, numero: nota.numero, tpEmis: 1, cNF });
   const ufDest = String((de.endereco || {}).uf || '').toUpperCase();
   const idDest = ufDest && ufDest !== String(e.uf || 'SP').toUpperCase() ? '2' : '1';
+  const indPres = nota.indPres == null ? 9 : nota.indPres;
   const ide = '<ide>' + tag('cUF', cUF) + tag('cNF', cNF) + tag('natOp', txt(nota.natOp || 'VENDA NO ESTADO')) + '<mod>55</mod>' + tag('serie', String(Number(nota.serie))) +
     tag('nNF', String(Number(nota.numero))) + tag('dhEmi', nota.emissao) + (nota.saida ? tag('dhSaiEnt', nota.saida) : '') + '<tpNF>1</tpNF>' + tag('idDest', idDest) +
     tag('cMunFG', dig(e.cMun)) + '<tpImp>1</tpImp><tpEmis>1</tpEmis>' + tag('cDV', chave.slice(-1)) + tag('tpAmb', homolog ? '2' : '1') + '<finNFe>1</finNFe>' +
-    tag('indFinal', String(nota.indFinal == null ? 1 : nota.indFinal)) + tag('indPres', String(nota.indPres == null ? 9 : nota.indPres)) +
+    tag('indFinal', String(nota.indFinal == null ? 1 : nota.indFinal)) + tag('indPres', String(indPres)) +
+    // intermediador (NT 2020.006): obrigatório quando a venda não é presencial (2, 3, 4 e 9; rejeição 434) e proibido
+    // nos outros (435). 0 = sem intermediador (venda direta, sem marketplace)
+    ([2, 3, 4, 9].indexOf(Number(indPres)) !== -1 ? tag('indIntermed', String(nota.indIntermed == null ? 0 : nota.indIntermed)) : '') +
     '<procEmi>0</procEmi>' + tag('verProc', txt(nota.verProc || 'CRM Sistemi 1.0')) + '</ide>';
   const emit = '<emit>' + docXml(em.cnpj) + tag('xNome', txt(em.razao)) + tag('xFant', txt(em.fantasia)) +
     enderecoXml('enderEmit', { logradouro: e.logradouro, numero: e.numero, complemento: e.complemento, bairro: e.bairro, cMun: e.cMun, municipio: e.municipio, uf: e.uf, cep: e.cep, fone: e.fone }, true) +
