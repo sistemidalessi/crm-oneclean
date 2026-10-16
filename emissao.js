@@ -330,7 +330,7 @@
     const fc = Object.assign({}, fiscalCfg(), base || {}), em = fc.emitente || {}, e = em.endereco || {}, rt = fc.respTec || {};
     CRM.abrirForm({
       titulo: 'Emitente da NF-e', largura: 'largo',
-      intro: base ? 'Lido do XML da nota ' + (base._nota || '') + ' do FKN. Confira e salve.' : 'Os dados da OneClean que vão em toda nota. O CNPJ e a IE precisam ser os do certificado A1.',
+      intro: base ? 'Lido do XML da nota ' + (base._nota || '') + ' do FKN. Confira e salve.' : 'Os dados da empresa que vão em toda nota. O CNPJ e a IE precisam ser os do certificado A1.',
       campos: [{ tipo: 'secao', rotulo: 'Empresa' }, { nome: 'razao', rotulo: 'Razão social', obrigatorio: true, largo: true }, { nome: 'fantasia', rotulo: 'Nome fantasia' },
         { nome: 'cnpj', rotulo: 'CNPJ', obrigatorio: true }, { nome: 'ie', rotulo: 'Inscrição estadual', obrigatorio: true },
         { nome: 'crt', rotulo: 'Regime tributário (CRT)', tipo: 'select', opcoes: [['3', '3 — Regime normal (Lucro Real/Presumido)'], ['1', '1 — Simples Nacional'], ['2', '2 — Simples, excesso de sublimite']] },
