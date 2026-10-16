@@ -1245,10 +1245,32 @@ o serviço na VPS da Agilité (não no servidor do escritório).
   sem CNPJ, prévia, emissão, CC-e, cancelamento, inutilização recusada/aceita, passagem para produção. Banco real:
   vendedora não lê nem grava `crm_nfe` e não reserva número. `revoke` da Fase 4 rodados pelo Anderson no SQL Editor em 16/10
   (conferido: só leitura para `authenticated`; a reserva, só `service_role`).
-- **Falta (Anderson):** instalar o serviço na VPS (`servico-fiscal/INSTALAR.md`: DNS `fiscal`, .pfx e senha só lá,
-  `FISCAL_URL`/`FISCAL_TOKEN` nos Secrets, `diagnostico.js status homologacao` dando 107); **renovar o A1 até 29/10**;
-  configurar o emitente pelo XML; confirmar o responsável técnico; o
-  contador dá o "de acordo" na tabela fiscal e no cClassTrib; testes em homologação; depois produção.
+- **ONDE PARAMOS (16/10/2026, noite) — retomar daqui.** Serviço fiscal **instalado e no ar** na VPS (Anderson, passo a
+  passo pelo chat): `oneclean-fiscal` ativo, Caddy com `/etc/caddy/conf.d/oneclean-fiscal.caddy` (o `deploy/Caddyfile` da
+  Agilité importa `conf.d/*.caddy` desde o commit `03bdfbd` dela), `fiscal.oneclean.com.br` responde 401 sem a chave,
+  `FISCAL_URL`/`FISCAL_TOKEN` nos Secrets, diagnóstico 107 em homologação. **A1 desta instalação vale até 23/12/2026**
+  (titular ONECLEAN DO BRASIL MATERIAIS DE LIMPEZA HIGIENE; o "29/10" era outro certificado — conferir qual o FKN usa).
+  **Cadeia da Sefaz-SP:** servidor ← AC SOLUTI SSL EV G4 ← **Raiz Brasileira v10** (o Node não tem): `/etc/oneclean-fiscal/cadeia.pem`
+  baixada pelo endereço do intermediário (`http://acraiz.icpbrasil.gov.br/ICP-Brasilv10.crt`, SHA-256 `3b3ef396…0f33e0`,
+  conferido pela VPS e pelo Windows do escritório); o zip do ITI não serve (site com HTTPS vencido). Emitente salvo pelo XML do
+  FKN (série 2, indFinal 1, indPres 9, respTec = OneClean/Anderson). **Homologação:** NF 2-1 rejeitada 434 (faltava
+  `indIntermed`, corrigido) e depois **autorizada** (16:30, protocolo 135260009369016) e **cancelada** (16:41) pelo CRM;
+  NF 2-2 autorizada (17:33) com LC 224 e tributos aproximados certos. Comparado com XML reais do FKN (2703/2705/2708):
+  o FKN escreve `infAdFisco` "Operacao sujeita ao disposto na Lei Complementar no 224/2025;" (itens PIS/COFINS 06/07 — feito)
+  e "Trib aprox R$: … Federal, … Estadual e … Municipal.; Fonte: IBPT…" (feito: tabela `crm_ibpt`, carregada pelo Anderson
+  pela aba Fiscal: 11.104 NCMs, versão 26.2.A **vencida em 30/09** — o FKN usa outra mais nova, chave Xe67eQ); `infCpl` no
+  formato `PORTADOR: BOLETO PRAZO: 28 DIAS;LOCAL DE ENTREGA: …;VENDEDOR: X;…` (feito); **ICMS60 com vBCSTRet/pST/
+  vICMSSubstituto/vICMSSTRet** (NÃO feito — 130 das 150 notas de outubro têm item 5405; 134 produtos com regra 5405). FKN
+  não manda `infRespTec`. Também feito em 16/10: DANFE com as cores da empresa (`op.cores`), **NF-e em lote** em Pedidos →
+  Separação (marca os separados, pula pendências, para se a Sefaz não responder, DANFEs num PDF só), lista de clientes do
+  pedido em ordem alfabética. Função temporária `crm-amostra-xml` (leitura de amostras) **desligada** (410).
+  **Próximos, na ordem:** (1) ICMS-ST retido nos itens 5405 e teste 3 em homologação com produto 5405; (2) "de acordo" do
+  contador nas 1.190 regras (todas "proposta"); (3) boleto pelo BB (Fase 5; Anderson pede ao gerente a API de Cobrança e
+  cadastra no portal de desenvolvedores do BB); (4) Fase 4b (devolução, bonificação, troca; 5117 e 6108 são raros);
+  (5) IBPT atual e automático (cadastro gratuito no "De Olho no Imposto", chave nos Secrets); (6) notas de compra pela
+  Distribuição DF-e; (7) usuário da logística; (8) virada num dia combinado (sem paralelo longo emitindo nos dois).
+  **SSH da VPS só no computador do escritório** (de casa: tudo do CRM funciona, mas `git pull` na VPS espera o escritório).
+  Atualizar o serviço: `cd /opt/oneclean-fiscal && git pull -q && systemctl restart oneclean-fiscal`.
 - Depois (Fase 4b): devolução, bonificação, troca, entrega futura e outro estado (hoje bloqueados: saem pelo FKN).
 
 ## Fiscal — Fase 1 da saída do FKN (15/10/2026, pedido do Anderson)
