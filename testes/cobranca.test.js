@@ -56,6 +56,10 @@ test('boleto acha o título: CNPJ e valor, nota, único do CNPJ; cartório e já
   // duas parcelas iguais: sem mais nada, não escolhe sozinho
   const dois = C.casaBoleto({ documento: '11222333000181', valor_documento: 917.88 }, tits, empresas);
   assert.equal(dois.titulo, null); assert.equal(dois.candidatos.length, 3);
+  // desempate (16/10/2026): o vencimento original do boleto ou a parcela no "Nº do documento"
+  assert.equal(C.casaBoleto({ documento: '11222333000181', valor_documento: 917.88, vencimento: '2026-10-08' }, tits, empresas).titulo.duplicata, '002205/02');
+  assert.equal(C.casaBoleto({ documento: '11222333000181', valor_documento: 917.88, numero_documento: '002205/01' }, tits, empresas).titulo.duplicata, '002205/01');
+  assert.equal(C.casaBoleto({ documento: '11222333000181', valor_documento: 917.88, numero_documento: '2205-2' }, tits, empresas).titulo.duplicata, '002205/02');
   // a primeira já foi casada neste lote: a outra parcela é a que sobra
   assert.equal(C.casaBoleto({ documento: '11222333000181', valor_documento: 917.88 }, tits, empresas, new Set(['002205/01'])).titulo.duplicata, '002205/02');
   // título em cartório não recebe boleto

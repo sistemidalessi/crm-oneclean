@@ -91,8 +91,15 @@
     const ndoc = digitos(b.numero_documento);
     const temNota = t => t.nota_numero && ndoc && ndoc.replace(/^0+/, '').indexOf(String(t.nota_numero)) === 0;
     const igualValor = t => b.valor_documento > 0 && Math.abs(Number(t.valor) - b.valor_documento) < 0.01;
+    // desempate de parcelas iguais (16/10/2026): o vencimento original (a 2ª via do BB mantém o da linha
+    // digitável) e a parcela escrita no "Nº do documento" ("002205/02", "2205-2")
+    const mesmoVenc = t => !!b.vencimento && t.vencimento === b.vencimento;
+    const parcB = (/[\/-]\s*0*(\d{1,3})\s*$/.exec(String(b.numero_documento || '')) || [])[1];
+    const mesmaParcela = t => !!parcB && +String(t.duplicata).split('/')[1] === +parcB;
     const pega = (l, como) => (l.length === 1 ? { titulo: l[0], como } : null);
     return pega(mesmoDoc.filter(igualValor), 'CNPJ e valor') ||
+      pega(mesmoDoc.filter(igualValor).filter(mesmoVenc), 'CNPJ, valor e vencimento') ||
+      pega(mesmoDoc.filter(igualValor).filter(temNota).filter(mesmaParcela), 'CNPJ, valor e parcela') ||
       pega(mesmoDoc.filter(igualValor).filter(temNota), 'CNPJ, valor e nota') ||
       pega(mesmoDoc.filter(temNota), 'CNPJ e nota') ||
       pega(mesmoDoc, 'único vencido do CNPJ') ||
@@ -447,14 +454,17 @@
     const venc = vencidosACobrar(), empresas = E().D.empresas || [], usados = new Set();
     const itens = lidos.map(x => {
       const conf = confereBoleto(x.b, hoje());
-      const casa = casaBoleto(x.b, venc, empresas, usados);
+      // boleto já mandado (mesma linha digitável): reenviar o lote não duplica
+      const ja = conf.linha && (E().boletos || []).find(y => y.linha_digitavel === conf.linha);
+      // o vencimento que vale para achar o título é o original (o da linha digitável)
+      const casa = ja ? { titulo: null, como: '', candidatos: [] } : casaBoleto(Object.assign({}, x.b, { vencimento: conf.vencimento || x.b.vencimento }), venc, empresas, usados);
       if (casa.titulo) usados.add(casa.titulo.duplicata);
-      return Object.assign({}, x, { conf, casa });
+      return Object.assign({}, x, { conf, casa, ja });
     });
     const valores = {};
     const campos = itens.map((x, i) => {
-      // vencido não vai marcado: só se o administrador escolher o título de propósito
-      valores['b' + i] = x.casa.titulo ? x.casa.titulo.duplicata : '';
+      // sem título achado fica "escolha o título" (não deixa mandar sem escolher); já mandado vem "não mandar"
+      valores['b' + i] = x.ja ? 'nao' : x.casa.titulo ? x.casa.titulo.duplicata : '';
       const docB = doc(x.b.documento);
       const ordem = venc.slice().sort((a, b) => {
         const pa = (x.casa.candidatos || []).indexOf(a) !== -1 || doc((CRM.empresa(a.empresa_id) || {}).cnpj) === docB ? 0 : 1;
@@ -464,12 +474,14 @@
       return { nome: 'b' + i, tipo: 'select', largo: true,
         rotulo: (x.b.pagador || 'Pagador não lido') + ' — ' + R.moeda(x.conf.valor) + (x.conf.juros > 0 ? ' (original ' + R.moeda(x.conf.valorOriginal) + ' + ' + R.moeda(x.conf.juros) + ' de juros e multa)' : '') +
           (x.conf.vencimento ? (x.conf.vencido ? ', venceu ' : ', vence ') + R.dataBR(x.conf.vencimento) : '') + (x.varios ? ' (pág. ' + x.b.pagina + ' de ' + x.arquivo.name + ')' : ''),
-        opcoes: [['', '— não mandar este boleto —']].concat(ordem.map(t => [t.duplicata, rotuloTitulo(t)])),
-        ajuda: [x.casa.titulo ? 'achado por ' + x.casa.como : 'escolha o título deste boleto', x.conf.linhaOk ? 'linha digitável conferida ✓' : ''].concat(x.conf.avisos).filter(Boolean).join(' · ') };
+        opcoes: [['', '— escolha o título deste boleto —'], ['nao', '— não mandar este boleto —']].concat(ordem.map(t => [t.duplicata, rotuloTitulo(t)])),
+        ajuda: [x.ja ? 'já mandado em ' + dm(R.diaLocal(x.ja.criado_em)) + ' (' + CRM.nomeEmpresa(x.ja.empresa_id) + ')' : x.casa.titulo ? 'achado por ' + x.casa.como : '⚠ não achei o título sozinho: escolha na lista',
+          x.conf.linhaOk ? 'linha digitável conferida ✓' : ''].concat(x.conf.avisos).filter(Boolean).join(' · ') };
     });
     CRM.abrirForm({
       titulo: 'Conferir os boletos', largura: 'largo',
-      intro: itens.length + ' boleto(s) lido(s). Cada um já vem com o título achado; confira e clique em "Mandar às vendedoras": cada boleto vai para a vendedora da carteira do cliente ' +
+      intro: itens.length + ' boleto(s) lido(s)' + (itens.some(x => !x.ja && !x.casa.titulo) ? ' — os marcados com ⚠ eu não achei sozinho: escolha o título na lista' : '') +
+        (itens.some(x => x.ja) ? ' — os já mandados vêm em "não mandar"' : '') + '. Confira e clique em "Mandar às vendedoras": cada boleto vai para a vendedora da carteira do cliente ' +
         '(Fila do dia, sino e ficha), com a mensagem pronta para ela mandar ao cliente. "Não mandar" só se o título estiver errado.' +
         (avisos.length ? '\nAtenção: ' + avisos.join(' · ') : ''),
       campos, valores, salvarTexto: 'Mandar às vendedoras',
@@ -477,15 +489,17 @@
         const st = CRM.store(), escolhidos = new Set();
         let n = 0, semPdf = 0;
         const gravados = [];
+        const falta = itens.filter((x, i) => !v['b' + i]).map(x => x.b.pagador || 'pagador não lido');
+        if (falta.length) throw new Error('Escolha o título ' + (falta.length > 1 ? 'destes boletos' : 'deste boleto') + ' (ou marque "não mandar"): ' + falta.join('; ') + '.');
         for (let i = 0; i < itens.length; i++) {
           const dup = v['b' + i];
-          if (!dup) continue;
+          if (!dup || dup === 'nao') continue;
           if (escolhidos.has(dup)) throw new Error('Dois boletos para o mesmo título (' + dup + '): deixe um em "não mandar".');
           escolhidos.add(dup);
         }
         for (let i = 0; i < itens.length; i++) {
           const x = itens[i], dup = v['b' + i];
-          if (!dup) continue;
+          if (!dup || dup === 'nao') continue;
           const t = venc.find(y => y.duplicata === dup);
           if (!x.conf.vencimento || !(x.conf.valor > 0)) throw new Error('O boleto de ' + (x.b.pagador || '?') + ' veio sem valor ou vencimento: não dá para mandar.');
           // PDF com vários boletos: cada um vai em arquivo próprio (a vendedora não pode receber o de outro cliente)
@@ -515,7 +529,8 @@
         await criaTarefas(gravados);
         const pc = await comporPdfs(gravados);
         CRM.render();
-        CRM.toast(n + ' boleto(s) gravado(s), com a tarefa de cobrar para cada vendedora' + (semPdf ? ' · ' + semPdf + ' sem o PDF (não consegui separar a página): vão só com a linha digitável' : '') +
+        const naoMandados = itens.length - n;
+        CRM.toast(n + ' boleto(s) gravado(s), com a tarefa de cobrar para cada vendedora' + (naoMandados ? ' · ' + naoMandados + ' não mandado(s), como marcado' : '') + (semPdf ? ' · ' + semPdf + ' sem o PDF (não consegui separar a página): vão só com a linha digitável' : '') +
           (pc.clientes ? ' · PDF completo (resumo, nota fiscal e boleto) de ' + (pc.clientes - pc.falhas) + ' cliente(s)' : '') +
           (pc.falhas ? ', ' + pc.falhas + ' ficaram só com o boleto do banco' : '') + (pc.semNota ? ' · ' + pc.semNota + ' nota(s) sem o XML guardado: vão sem a DANFE' : '') + '.', !!pc.falhas);
         setTimeout(formAvisar, 0); // agora: mandar no WhatsApp de cada vendedora
@@ -561,7 +576,7 @@
     const qt = ' (' + l.length + ' boleto' + (l.length > 1 ? 's' : '') + ')';
     // 15/10/2026 (Anderson: o Compartilhar ainda pedia escolher o WhatsApp e a vendedora): o principal abre direto a conversa
     // dela, com a mensagem e o link do PDF completo; mandar o arquivo em si (compartilhar do Windows) fica como segunda opção.
-    return '<span class="cob-vend"><button type="button" class="btn ouro" data-acao="cob-avisar" data-id="' + esc(u) + '">📲 WhatsApp da ' + esc(nome) + qt + '</button>' +
+    return '<span class="cob-vend"><button type="button" class="btn ouro" data-acao="cob-avisar" data-id="' + esc(u) + '">📲 WhatsApp de ' + esc(nome) + qt + '</button>' +
       (podeCompartilhar() && l.some(b => b.arquivo) ? '<button type="button" class="link" data-acao="cob-avisar-pdf" data-id="' + esc(u) + '">ou compartilhar o arquivo</button>' : '') + '</span>';
   };
   const preCarrega = lista => { arquivosDe(lista).catch(() => {}); };
@@ -702,7 +717,7 @@
         }
         if (el) { el.disabled = true; el.textContent = '✓ ' + el.textContent.replace(/^📲\s*/, ''); }
         CRM.render();
-        CRM.toast('WhatsApp da ' + R.primeiroNome(usr.nome) + ' aberto com ' + lista.length + ' boleto(s): é só apertar enviar.');
+        CRM.toast('WhatsApp de ' + R.primeiroNome(usr.nome) + ' aberto com ' + lista.length + ' boleto(s): é só apertar enviar.');
       })().catch(e => { if (w) w.close(); CRM.falhou(e); });
     },
     // administrador → vendedora: os PDFs de verdade pela janela de compartilhar (WhatsApp do Windows ou do celular)
