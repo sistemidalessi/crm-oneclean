@@ -477,11 +477,15 @@ returns boolean language sql stable security definer set search_path = public as
 $$;
 
 -- =================================================================== cadastro sem duplicado
--- Chaves de comparação (as mesmas do app, R.chaveTelefone etc.): documento só com dígitos
--- (CPF 11 ou CNPJ 14), telefone pelos 8 últimos dígitos (pega com e sem DDD, com e sem o 9
--- do celular), e-mail em minúsculas.
+-- Chaves de comparação (as mesmas do app, R.chaveDoc, R.chaveTelefone etc.): documento sem pontuação,
+-- em maiúsculas (CPF com 11 números; CNPJ com 14, letras permitidas nas 12 primeiras posições desde 07/2026,
+-- IN RFB 2.229/2024; texto com prefixo cai nos números, como antes), telefone pelos 8 últimos dígitos (pega
+-- com e sem DDD, com e sem o 9 do celular), e-mail em minúsculas.
 create or replace function public.crm_doc(t text) returns text language sql immutable set search_path = public as $$
-  select case when length(regexp_replace(coalesce(t, ''), '\D', '', 'g')) in (11, 14) then regexp_replace(t, '\D', '', 'g') end;
+  select case
+    when upper(regexp_replace(coalesce(t, ''), '[^0-9A-Za-z]', '', 'g')) ~ '^([0-9]{11}|[0-9A-Z]{12}[0-9]{2})$'
+      then upper(regexp_replace(t, '[^0-9A-Za-z]', '', 'g'))
+    when length(regexp_replace(coalesce(t, ''), '\D', '', 'g')) in (11, 14) then regexp_replace(t, '\D', '', 'g') end;
 $$;
 create or replace function public.crm_tel(t text) returns text language sql immutable set search_path = public as $$
   select case when length(regexp_replace(coalesce(t, ''), '\D', '', 'g')) >= 8 then right(regexp_replace(t, '\D', '', 'g'), 8) end;

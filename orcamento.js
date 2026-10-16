@@ -7,6 +7,7 @@
   'use strict';
   const R = raiz.CRMRegras || (typeof require !== 'undefined' ? require('./regras.js') : null);
   const digitos = v => String(v == null ? '' : v).replace(/\D/g, '');
+  const doc = v => String(v == null ? '' : v).toUpperCase().replace(/[^0-9A-Z]/g, ''); // CPF/CNPJ (o CNPJ pode ter letras desde 07/2026)
   const dataBR = v => { const m = /(\d\d)\/(\d\d)\/(\d{4})/.exec(String(v || '')); return m ? m[3] + '-' + m[2] + '-' + m[1] : null; };
   // Número do FKN: "1.234,5678" (até 4 casas no preço unitário).
   const n = v => { const x = Number(String(v == null ? '' : v).trim().replace(/\./g, '').replace(',', '.')); return isFinite(x) ? x : 0; };
@@ -35,7 +36,7 @@
       if ((v = pega(/COD\.CLI:\s*(\d+)/i, l))) o.cliente.codigo = v;
       if ((v = pega(/\bTEL:\s*([^;]+?)\s*;/i, l))) o.cliente.telefone = v;
       if ((v = pega(/SEU PEDIDO:\s*([^;]*)/i, l))) o.seu_pedido = v || null;
-      if ((v = pega(/CNPJ:\s*([\d./-]+)/i, l)) || (v = pega(/CPF:\s*([\d.-]+)/i, l))) o.cliente.doc = digitos(v);
+      if ((v = pega(/CNPJ:\s*([\dA-Za-z./-]+)/i, l)) || (v = pega(/CPF:\s*([\d.-]+)/i, l))) o.cliente.doc = doc(v);
       if ((v = pega(/I\.E\.:\s*(\S+)/i, l))) o.cliente.ie = v;
       if (/^A\/C SR\(A\):/i.test(l)) o.ac = esquerda(l.replace(/^A\/C SR\(A\):/i, '')) || null;
       if (/^REF:/i.test(l)) o.ref = esquerda(l.replace(/^REF:/i, '')) || null;
@@ -106,8 +107,8 @@
   //   D: { empresas, propostas, negocios, titulos }; negocioId: importação feita da ficha do negócio
   function clienteDoOrcamento(c, D, negocioId) {
     const emps = D.empresas || [], porId = id => emps.find(e => e.id === id) || null;
-    const doc = digitos(c.doc);
-    let e = doc && emps.find(x => digitos(x.cnpj) === doc);
+    const d = doc(c.doc);
+    let e = d && emps.find(x => doc(x.cnpj) === d);
     if (e) return { empresa: e, como: 'cnpj', parecidos: [] };
     if (negocioId) { const n = (D.negocios || []).find(x => x.id === negocioId); if (n && porId(n.empresa_id)) return { empresa: porId(n.empresa_id), como: 'negócio', parecidos: [] }; }
     const cod = String(c.codigo || '').replace(/^0+/, '');
@@ -236,7 +237,7 @@
       emp = await CRM.inserir('empresas', { nome: c.nome || 'Cliente do orçamento ' + o.numero, razao_social: c.nome || null, cnpj: c.doc ? R.formataCNPJ(c.doc) : null, email: c.email || null,
         telefone: c.telefone || null, logradouro: c.endereco || null, cep: c.cep || null, bairro: c.bairro || null, cidade: c.cidade || null, uf: c.uf || null,
         situacao: 'lead', responsavel_id: v.responsavel_id || CRM.meuId(), origem: 'Orçamento FKN' });
-    } else if (o.cliente.doc && !digitos(emp.cnpj) && CRM.podeEditarEmpresa(emp)) {
+    } else if (o.cliente.doc && !doc(emp.cnpj) && CRM.podeEditarEmpresa(emp)) {
       // achado sem CNPJ (código, e-mail ou nome) e o orçamento traz: completa a ficha
       await CRM.atualizar('empresas', emp.id, { cnpj: R.formataCNPJ(o.cliente.doc) }).catch(() => {});
     }

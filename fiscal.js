@@ -134,7 +134,7 @@
     const out = { total: 0, completos: 0, faltando: [] };
     (empresas || []).filter(e => comNota.has(e.id)).forEach(e => {
       out.total++;
-      const doc = String(e.cnpj || '').replace(/\D/g, ''), ind = String(e.ind_ie || ''), ie = String(e.ie || '').replace(/\D/g, '');
+      const doc = String(e.cnpj || '').toUpperCase().replace(/[^0-9A-Z]/g, ''), ind = String(e.ind_ie || ''), ie = String(e.ie || '').replace(/\D/g, '');
       const falta = [];
       if (doc.length !== 14 && doc.length !== 11) falta.push('CNPJ/CPF');
       if (!ind) falta.push('indicador da IE');

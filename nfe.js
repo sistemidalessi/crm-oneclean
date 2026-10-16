@@ -76,7 +76,7 @@
       const st = ret ? valor(bloco(ret, 'infEvento') || ret, 'cStat') : '';
       if (st && ['135', '136', '155'].indexOf(st) === -1) return null; // evento recusado pela SEFAZ
       const chave = valor(bloco(x, 'infEvento'), 'chNFe');
-      return /^\d{44}$/.test(chave) ? { tipo: 'cancelamento', chave } : null;
+      return /^[0-9A-Z]{44}$/.test(chave) ? { tipo: 'cancelamento', chave } : null;
     }
     const inf = blocos(x, 'infNFe')[0];
     if (!inf) return null;
@@ -110,9 +110,9 @@
       emitida_em: valor(ide, 'dhEmi') || (dia ? dia + 'T12:00:00-03:00' : null),
       natureza: valor(ide, 'natOp') || null, saida: valor(ide, 'tpNF') !== '0', finalidade: valor(ide, 'finNFe') || '1',
       autorizada: !prot || st === '100' || st === '150', situacao_sefaz: st,
-      emitente: { doc: R.digitos(valor(emit, 'CNPJ') || valor(emit, 'CPF')), nome: valor(emit, 'xNome') },
+      emitente: { doc: R.doc(valor(emit, 'CNPJ') || valor(emit, 'CPF')), nome: valor(emit, 'xNome') },
       cliente: {
-        doc: R.digitos(valor(dest, 'CNPJ') || valor(dest, 'CPF')), nome: valor(dest, 'xNome'), email: valor(dest, 'email'),
+        doc: R.doc(valor(dest, 'CNPJ') || valor(dest, 'CPF')), nome: valor(dest, 'xNome'), email: valor(dest, 'email'),
         telefone: valor(end, 'fone'), cep: valor(end, 'CEP'), logradouro: valor(end, 'xLgr'), numero: valor(end, 'nro'),
         complemento: valor(end, 'xCpl'), bairro: valor(end, 'xBairro'), cidade: valor(end, 'xMun'), uf: valor(end, 'UF'),
         ie: valor(dest, 'IE'), ind_ie: valor(dest, 'indIEDest'), cmun: valor(end, 'cMun')
@@ -206,7 +206,7 @@
     (docs || []).forEach(d => {
       if (!d) return;
       if (d.tipo === 'cancelamento') { cancelar.add(d.chave); return; }
-      if (d.tipo !== 'nota' || !/^\d{44}$/.test(d.chave || '') || vistas.has(d.chave)) return;
+      if (d.tipo !== 'nota' || !/^[0-9A-Z]{44}$/.test(d.chave || '') || vistas.has(d.chave)) return;
       vistas.add(d.chave); notas.push(d);
     });
     resumo.lidas = notas.length;
@@ -214,7 +214,7 @@
     // Emitente = a própria empresa (o CNPJ que mais aparece como emitente nas notas de saída).
     const freq = new Map();
     notas.filter(d => d.saida && d.emitente.doc).forEach(d => freq.set(d.emitente.doc, (freq.get(d.emitente.doc) || 0) + 1));
-    const principal = R.digitos(op.cnpjEmpresa) || [...freq.entries()].sort((a, b) => b[1] - a[1]).map(x => x[0])[0] || null;
+    const principal = R.doc(op.cnpjEmpresa) || [...freq.entries()].sort((a, b) => b[1] - a[1]).map(x => x[0])[0] || null;
     if (principal) { const d = notas.find(n => n.emitente.doc === principal); resumo.emitente = { doc: R.formataCNPJ(principal), nome: d ? d.emitente.nome : '' }; }
 
     // Notas já no banco: não duplica; cancelamento novo só marca.
@@ -260,8 +260,8 @@
     const guarda = (m, k, e) => { if (k && !m.has(k)) m.set(k, e); };
     const indexaEmpresa = e => {
       porId.set(e.id, e);
-      const d = R.digitos(e.cnpj); if (d.length === 11 || d.length === 14) guarda(porDoc, d, e);
-      if (d.length === 14) guarda(porRaiz, d.slice(0, 8), e);
+      const d = R.chaveDoc(e.cnpj); if (d) guarda(porDoc, d, e);
+      if (R.ehCNPJ(d)) guarda(porRaiz, d.slice(0, 8), e);
       [e.razao_social, e.nome, e.nome && e.nome.indexOf('|') > 0 ? e.nome.split('|')[0] : null].forEach(n => guarda(porNome, R.chaveNome(n), e));
     };
     (D.empresas || []).forEach(indexaEmpresa);
@@ -290,8 +290,8 @@
       const e = porNome.get(R.chaveNome(d.cliente.nome)) || null;
       // Mesmo nome com outro CNPJ: é outra unidade (filial) ou outra empresa, nunca a mesma.
       if (e && doc.length === 14) {
-        const dele = R.digitos(e.cnpj || (patches.get(e.id) || {}).cnpj);
-        if (dele.length === 14 && dele !== doc) return null;
+        const dele = R.chaveDoc(e.cnpj || (patches.get(e.id) || {}).cnpj);
+        if (R.ehCNPJ(dele) && dele !== doc) return null;
       }
       return e;
     };

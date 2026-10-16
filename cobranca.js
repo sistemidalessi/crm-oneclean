@@ -7,6 +7,7 @@
   'use strict';
   const R = raiz.CRMRegras || (typeof require !== 'undefined' ? require('./regras.js') : null);
   const digitos = v => String(v == null ? '' : v).replace(/\D/g, '');
+  const doc = v => String(v == null ? '' : v).toUpperCase().replace(/[^0-9A-Z]/g, ''); // CPF/CNPJ (o CNPJ pode ter letras desde 07/2026)
   const r2 = v => Math.round((Number(v) || 0) * 100) / 100;
 
   // ---- linha digitável do boleto bancário (47 dígitos; FEBRABAN)
@@ -83,10 +84,10 @@
   // título vencido daquele CNPJ; sem CNPJ, o número da nota/duplicata no documento e o valor original.
   function casaBoleto(b, titulos, empresas, usados) {
     usados = usados || new Set();
-    const docDe = new Map((empresas || []).map(e => [e.id, digitos(e.cnpj)]));
+    const docDe = new Map((empresas || []).map(e => [e.id, doc(e.cnpj)]));
     const livres = (titulos || []).filter(t => !usados.has(t.duplicata) && !t.cartorio_em);
-    const doc = digitos(b.documento);
-    const mesmoDoc = doc ? livres.filter(t => docDe.get(t.empresa_id) === doc || digitos(t.cliente_doc) === doc) : [];
+    const docB = doc(b.documento);
+    const mesmoDoc = docB ? livres.filter(t => docDe.get(t.empresa_id) === docB || doc(t.cliente_doc) === docB) : [];
     const ndoc = digitos(b.numero_documento);
     const temNota = t => t.nota_numero && ndoc && ndoc.replace(/^0+/, '').indexOf(String(t.nota_numero)) === 0;
     const igualValor = t => b.valor_documento > 0 && Math.abs(Number(t.valor) - b.valor_documento) < 0.01;
@@ -221,7 +222,7 @@
   function resumoHtml(e, l, danfes, pagBoleto) {
     const cfg = E().cfg || {}, b0 = l[0], um = l.length === 1, h = diaB(b0);
     const venceu = l.some(b => b.vencimento < h);
-    const doc = e && e.cnpj ? (R.digitos(e.cnpj).length === 11 ? 'CPF ' : 'CNPJ ') + e.cnpj : '';
+    const doc = e && e.cnpj ? (R.ehCPF(R.chaveDoc(e.cnpj)) ? 'CPF ' : 'CNPJ ') + e.cnpj : '';
     const total = l.reduce((s, b) => s + Number(b.valor || 0), 0);
     const notas = [...new Set(l.map(b => b.nota_numero).filter(Boolean))];
     const sub = venceu ? 'pagando depois de ' + dm(h) + ', o banco soma os encargos do dia' : 'vence em ' + R.dataBR(b0.vencimento);
@@ -450,7 +451,6 @@
       if (casa.titulo) usados.add(casa.titulo.duplicata);
       return Object.assign({}, x, { conf, casa });
     });
-    const doc = d => String(d || '').replace(/\D/g, '');
     const valores = {};
     const campos = itens.map((x, i) => {
       // vencido não vai marcado: só se o administrador escolher o título de propósito

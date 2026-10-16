@@ -124,7 +124,7 @@
       // ---- coluna 1: dados + contatos
       '<div class="ficha-col">' +
         '<section><dl class="dados">' +
-          dado('Grupo', grupo) + dado('Razão social', esc(e.razao_social)) + dado('CNPJ/CPF', esc(e.cnpj) + (e.cnpj && R.digitos(e.cnpj).length === 14 && !R.cnpjValido(e.cnpj) ? ' ' + CRM.selo('inválido?', 'ambar') : '')) +
+          dado('Grupo', grupo) + dado('Razão social', esc(e.razao_social)) + dado('CNPJ/CPF', esc(e.cnpj) + (e.cnpj && R.ehCNPJ(R.chaveDoc(e.cnpj)) && !R.cnpjValido(e.cnpj) ? ' ' + CRM.selo('inválido?', 'ambar') : '')) +
           dado('Telefone', esc(e.telefone)) + dado('WhatsApp', esc(e.whatsapp)) +
           dado('E-mail', e.email ? (separaEmails(e.email).length ? separaEmails(e.email).map(m => '<a href="mailto:' + esc(m) + '">' + esc(m) + '</a>').join('<br>') : esc(e.email)) : '') +
           dado('Site', e.site ? '<a href="' + esc(/^https?:/i.test(e.site) ? e.site : 'https://' + e.site) + '" target="_blank" rel="noopener noreferrer">' + esc(e.site) + '</a>' : '') +
@@ -395,9 +395,9 @@
       extras: form => {
         ['nome', 'cnpj', 'telefone', 'whatsapp', 'email'].forEach(n => form.elements[n] && form.elements[n].addEventListener('input', () => checaDuplicado(form, e && e.id)));
         form.elements.cnpj.addEventListener('blur', () => {
-          const d = R.digitos(form.elements.cnpj.value);
-          if (d.length === 14 || d.length === 11) form.elements.cnpj.value = R.formataCNPJ(d);
-          CRM.avisoCampo(form, 'cnpj', d.length === 14 && !R.cnpjValido(d) ? 'CNPJ parece inválido (confira os dígitos).' : '');
+          const d = R.chaveDoc(form.elements.cnpj.value);
+          if (d) form.elements.cnpj.value = R.formataCNPJ(d);
+          CRM.avisoCampo(form, 'cnpj', R.ehCNPJ(d) && !R.cnpjValido(d) ? 'CNPJ parece inválido (confira os dígitos).' : '');
         });
         form.elements.cep.addEventListener('blur', () => { const d = R.digitos(form.elements.cep.value); if (d.length === 8) form.elements.cep.value = d.replace(/(\d{5})(\d{3})/, '$1-$2'); });
       },
@@ -452,9 +452,9 @@
       extras: form => {
         ['nome', 'telefone', 'email', 'cnpj', 'contato_telefone', 'contato_email'].forEach(n => form.elements[n] && form.elements[n].addEventListener('input', () => checaDuplicado(form)));
         form.elements.cnpj.addEventListener('blur', () => {
-          const d = R.digitos(form.elements.cnpj.value);
-          if (d.length === 14 || d.length === 11) form.elements.cnpj.value = R.formataCNPJ(d);
-          CRM.avisoCampo(form, 'cnpj', d.length === 14 && !R.cnpjValido(d) ? 'CNPJ parece inválido (confira os dígitos).' : '');
+          const d = R.chaveDoc(form.elements.cnpj.value);
+          if (d) form.elements.cnpj.value = R.formataCNPJ(d);
+          CRM.avisoCampo(form, 'cnpj', R.ehCNPJ(d) && !R.cnpjValido(d) ? 'CNPJ parece inválido (confira os dígitos).' : '');
         });
       },
       aoSalvar: async v => {
@@ -560,11 +560,11 @@
 
   // Outra venda ganha do mesmo cliente (mesmo cadastro ou mesmo CNPJ) com valor até 5% diferente e fechada até 3 dias antes ou depois.
   function vendaParecida(n, valor, fechado) {
-    const emp = CRM.empresa(n.empresa_id), doc = emp ? R.digitos(emp.cnpj || '') : '';
+    const emp = CRM.empresa(n.empresa_id), doc = emp ? R.chaveDoc(emp.cnpj) : '';
     const v = Number(valor) || 0;
     if (!v || !fechado) return null;
     return E().D.negocios.find(x => x.id !== n.id && x.status === 'ganho' && x.fechado_em &&
-      (x.empresa_id === n.empresa_id || (doc.length >= 11 && R.digitos((CRM.empresa(x.empresa_id) || {}).cnpj || '') === doc)) &&
+      (x.empresa_id === n.empresa_id || (doc && R.chaveDoc((CRM.empresa(x.empresa_id) || {}).cnpj) === doc)) &&
       Math.abs(R.diasEntre(x.fechado_em, fechado)) <= 3 && Math.abs((Number(x.valor) || 0) - v) <= v * 0.05) || null;
   }
   fichas.vendaParecida = vendaParecida;
@@ -736,7 +736,7 @@
     const numero = p.numero_fkn ? Number(p.numero_fkn).toLocaleString('pt-BR') : String(p.numero);
     const endereco = e ? [iniciais([e.logradouro, e.numero].filter(Boolean).join(', ')), iniciais(e.bairro), [iniciais(e.cidade), e.uf].filter(Boolean).join('/'), e.cep ? 'CEP ' + e.cep : ''].filter(Boolean).join(' · ') : '';
     const ac = (c && c.nome) || d.ac;
-    const linhaCliente = [ac ? 'A/C ' + iniciais(ac) + (c && c.cargo ? ' — ' + c.cargo : '') : '', e && e.cnpj ? (R.digitos(e.cnpj).length === 11 ? 'CPF ' : 'CNPJ ') + e.cnpj : ''].filter(Boolean);
+    const linhaCliente = [ac ? 'A/C ' + iniciais(ac) + (c && c.cargo ? ' — ' + c.cargo : '') : '', e && e.cnpj ? (R.ehCPF(R.chaveDoc(e.cnpj)) ? 'CPF ' : 'CNPJ ') + e.cnpj : ''].filter(Boolean);
     // Cartões: frete, entrega e pagamento (do orçamento do FKN).
     const cartoes = [];
     if (d.fkn || R.num(d.frete)) cartoes.push([R.num(d.frete) ? 'Frete ' + R.moeda(d.frete) : 'Frete grátis', 'Neste orçamento']);
