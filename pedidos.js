@@ -375,8 +375,11 @@
           '<span class="acoes-rapidas"><button type="button" class="btn" data-acao="pd-bolao" data-id="' + esc(b) + '">Abrir</button></span></li>'; }).join('') + '</ul>' : '<p class="vazio">Nenhuma lista aberta.</p>') + '</section>' +
       '<section class="cartao"><h2>Separados — a emitir NF <small>' + sep.length + '</small></h2>' +
       '<p class="dica">A nota emitida no FKN chega ao CRM pelo vigia e fatura o pedido sozinha (mesmo cliente, os mesmos produtos). Se não casar, use "Faturar…".</p>' +
-      (sep.length ? '<div class="tabela-rolagem"><table class="tabela"><tbody>' + sep.map(p => linhaP(p, false) + '<td class="num">' + (CRM.nfe && CRM.nfe.podeEmitir(p) ? '<button type="button" class="mini" data-acao="nf-emitir" data-id="' + esc(p.id) + '">Emitir NF-e</button> ' : '') +
-        '<button type="button" class="mini" data-acao="pd-faturar" data-id="' + esc(p.id) + '" title="ligar a nota que o FKN emitiu">Faturar (FKN)…</button></td></tr>').join('') + '</tbody></table></div>'
+      (sep.length ? '<div class="tabela-rolagem"><table class="tabela"><tbody>' + sep.map(p => '<tr><td>' + (CRM.nfe && CRM.nfe.podeEmitir(p) ? '<input type="checkbox" data-nf-marca="' + esc(p.id) + '"' + (CRM.nfe.marcado(p.id) ? ' checked' : '') + '>' : '') + '</td>' +
+        linhaP(p, false).slice(4) + '<td class="num">' + (CRM.nfe && CRM.nfe.podeEmitir(p) ? '<button type="button" class="mini" data-acao="nf-emitir" data-id="' + esc(p.id) + '">Emitir NF-e</button> ' : '') +
+        '<button type="button" class="mini" data-acao="pd-faturar" data-id="' + esc(p.id) + '" title="ligar a nota que o FKN emitiu">Faturar (FKN)…</button></td></tr>').join('') + '</tbody></table></div>' +
+        (CRM.nfe && sep.some(p => CRM.nfe.podeEmitir(p)) ? '<p class="acoes"><button type="button" class="btn verde" data-acao="nf-lote">Emitir NF-e dos marcados (' + sep.filter(p => CRM.nfe.marcado(p.id)).length + ')</button> ' +
+          '<button type="button" class="mini" data-acao="nf-marcar-todos">marcar todos</button></p>' : '')
         : '<p class="vazio">Nada esperando nota.</p>') + '</section>';
   }
 
@@ -791,6 +794,7 @@
     // para a emissão de NF-e (emissao.js)
     pedido: id => ped(id),
     recarregar: () => recarrega(),
+    separados: () => (peds || []).filter(p => p.situacao === 'separado'),
     verNfe: async () => { fechaFichas(); E().aba = 'pedidos'; ed = null; aberto = null; f.ver = 'nfe'; if (peds === null) await carrega(true); CRM.render(); }
   };
 

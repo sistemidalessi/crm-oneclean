@@ -344,6 +344,50 @@
     });
   }
 
+  // Emissão em lote (a logística marca os separados e emite de uma vez): um de cada vez, na ordem; o que tem aviso que
+  // bloqueia fica de fora; se a Sefaz parar de responder, para tudo (não adianta seguir e nunca se emite de novo sem consultar).
+  const marcados = new Set();
+  async function lote() {
+    const ids = [...marcados].filter(id => { const p = CRM.pedidos.pedido(id); return p && podeEmitir(p); });
+    if (!ids.length) { CRM.toast('Marque os pedidos.', true); return; }
+    const amb = ambiente();
+    if (!confirm('Emitir ' + ids.length + ' NF-e' + (amb === 'producao' ? ' em PRODUÇÃO (valem de verdade)' : ' em HOMOLOGAÇÃO (teste)') + '?\nOs que tiverem pendência (cadastro, regra fiscal) ficam de fora e aparecem no fim.')) return;
+    const res = [];
+    for (let i = 0; i < ids.length; i++) {
+      const p = CRM.pedidos.pedido(ids[i]), rot = 'pedido ' + (p ? p.numero : '') + ' · ' + (p ? CRM.nomeEmpresa(p.empresa_id) : '');
+      CRM.toast('Emitindo ' + (i + 1) + ' de ' + ids.length + ': ' + rot + '…');
+      try {
+        const pv = await chama({ acao: 'previa', pedido_id: ids[i] });
+        if (pv.bloqueado) { res.push({ rot, sit: 'bloqueada', txt: (pv.avisos.bloqueia || []).join('; ') }); continue; }
+        const n = (await chama({ acao: 'emitir', pedido_id: ids[i] })).nfe || {};
+        res.push({ rot, sit: n.situacao, nfe: n, txt: n.situacao === 'autorizada' ? 'NF ' + n.serie + '-' + n.numero : (n.cstat || '') + ' — ' + (n.motivo || '') });
+        marcados.delete(ids[i]);
+        if (n.situacao === 'pendente') { res.push({ rot: '', sit: 'parado', txt: 'a Sefaz não respondeu: parei aqui. Consulte a nota pendente antes de seguir.' }); break; }
+      } catch (e) { res.push({ rot, sit: 'erro', txt: e.message }); }
+    }
+    await recarrega();
+    if (CRM.pedidos.recarregar) await CRM.pedidos.recarregar();
+    const aut = res.filter(r => r.sit === 'autorizada');
+    const cor = { autorizada: 'verde', bloqueada: 'ambar', rejeitada: 'vermelho', denegada: 'vermelho', pendente: 'ambar', parado: 'vermelho', erro: 'vermelho' };
+    CRM.abrirForm({ titulo: 'Emissão em lote: ' + aut.length + ' de ' + ids.length + ' autorizada(s)', largura: 'largo', campos: [],
+      intro: aut.length ? 'Baixe as DANFEs das autorizadas num PDF só, para imprimir e mandar com a entrega.' : 'Nenhuma nota autorizada.',
+      htmlDepois: '<ul class="lista">' + res.map(r => '<li>' + CRM.selo((M.SITUACAO[r.sit] || [r.sit])[0], cor[r.sit] || 'cinza') + ' <strong>' + esc(r.rot) + '</strong> ' + esc(r.txt) + '</li>').join('') + '</ul>',
+      salvarTexto: aut.length ? 'Baixar as ' + aut.length + ' DANFE(s)' : 'Fechar',
+      aoSalvar: async () => { if (aut.length) await danfes(aut.map(r => r.nfe.id)); } });
+  }
+  async function danfes(ids) {
+    await carregaJs('vendor/jspdf.umd.min.js');
+    const Dn = raiz.CRMDanfe, pdf = new raiz.jspdf.jsPDF({ unit: 'mm', format: 'a4', compress: true }), lg = await pegaLogo();
+    let n = 0;
+    for (const id of ids) {
+      const x = await CRM.store().nfeXml(id), xml = x && (x.proc_xml || x.nfe_xml), d = xml && Dn.ler(xml);
+      if (!d) continue;
+      if (n++) pdf.addPage('a4', 'portrait');
+      Dn.desenha(pdf, d, { logo: lg, cores: (raiz.CRM_CONFIG || {}).cores });
+    }
+    if (n) pdf.save('DANFEs-' + new Date().toISOString().slice(0, 10) + '.pdf');
+  }
+
   async function xmlDe(id) {
     const x = await CRM.store().nfeXml(id);
     const xml = x && (x.proc_xml || x.nfe_xml);
@@ -439,6 +483,8 @@
       try { await salvaFiscal({ ambiente: 'homologacao' }); CRM.render(); } catch (e) { CRM.falhou(e); }
     },
     'nf-emitir': id => emitir(id),
+    'nf-lote': () => lote(),
+    'nf-marcar-todos': () => { (CRM.pedidos.separados ? CRM.pedidos.separados() : []).filter(podeEmitir).forEach(p => marcados.add(p.id)); CRM.render(); },
     'nf-danfe': id => danfe(id),
     'nf-xml': async id => {
       try { const n = nfe(id), xml = await xmlDe(id); CRM.baixar('NFe' + (n ? n.chave : id) + '-procNFe.xml', xml, 'application/xml'); } catch (e) { CRM.falhou(e); }
@@ -511,9 +557,10 @@
     }
   });
 
-  CRM.nfe = { tela, secaoFiscal, doPedido, podeEmitir, emitir, carrega: recarrega,
+  CRM.nfe = { tela, secaoFiscal, doPedido, podeEmitir, emitir, carrega: recarrega, marcado: id => marcados.has(id),
     depois(c) {
       const m = c.querySelector('[data-nf-mes]'); if (m) m.addEventListener('change', () => { f.mes = m.value; });
+      c.querySelectorAll('[data-nf-marca]').forEach(el => el.addEventListener('change', () => { if (el.checked) marcados.add(el.dataset.nfMarca); else marcados.delete(el.dataset.nfMarca); CRM.render(); }));
       const ib = c.querySelector('[data-nf-ibpt]'); if (ib) ib.addEventListener('change', () => { if (ib.files[0]) carregaIbpt(ib.files[0]); });
     } };
 })(typeof window !== 'undefined' ? window : globalThis);
