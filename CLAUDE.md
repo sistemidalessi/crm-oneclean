@@ -382,6 +382,10 @@ recusas mais novas que a última entrega boa) faz o aviso de Compras dizer o que
   senão é `digitos()`, então documento só com números dá o mesmo de antes. `crm_doc()` + `crm_cnpj_dv()` no banco fazem
   igual (mudar um, mudar o outro). Chave da nota `^[0-9A-Z]{44}$` (`CHAVE` em `nfe.js`, `crm_notas_chave_check`); DANFE
   com CODE-128 B nos trechos com letra (`danfe.js code128`). Telefone, CEP, CPF e números continuam com `digitos()`.
+  Em produção (16/10): `crm_cnpj_dv` + `crm_doc` novos (migration `crm_cnpj_alfanumerico_doc`; antes conferido que os 299
+  CNPJs do banco não têm letra, 0 diferenças), `crm-notas` v27 (motor no commit fdc3a7b) e `crm-caixa-ler` v11. **Falta o
+  Anderson rodar no SQL Editor** (o MCP trava em DROP) a troca do `crm_notas_chave_check` — as 2 linhas do `schema.sql`
+  logo antes de `crm_notas.vendedor_nome`; até lá nota com letra na chave é recusada pelo banco (aparece como erro do vigia).
 - Só confere o que **mudou**: os repetidos que vieram do Agendor (55 grupos por e-mail e
   82 por telefone em 30/09) continuam editáveis; juntar em Configurações → Duplicados (que
   agora agrupa também por telefone e e-mail, mostra o motivo e a carteira de cada um,
