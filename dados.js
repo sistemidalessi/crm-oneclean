@@ -1031,6 +1031,20 @@
     return n;
   };
 
+  // Comissão do mês fechado (Fase 3b): o administrador lê todas; cada um, a própria (RLS). Fechar e reabrir: funções do banco.
+  Supa.prototype.comissoes = async function (mes) { return unwrap(await this.sb.from('crm_comissoes').select('*').eq('mes', mes)); };
+  Supa.prototype.comissaoFechar = async function (mes, linhas) { return unwrap(await this.sb.rpc('crm_comissao_fechar', { p_mes: mes, p_linhas: linhas })); };
+  Supa.prototype.comissaoReabrir = async function (mes) { return unwrap(await this.sb.rpc('crm_comissao_reabrir', { p_mes: mes })); };
+  Local.prototype.comissoes = async function (mes) { return (this._comissoes || []).filter(c => c.mes === mes); };
+  Local.prototype.comissaoFechar = async function (mes, linhas) {
+    this._comissoes = this._comissoes || [];
+    if (this._comissoes.some(c => c.mes === mes && c.fechado_em)) throw new Error('o mês já está fechado: reabra antes');
+    this._comissoes = this._comissoes.filter(c => c.mes !== mes).concat(linhas.map(l => Object.assign({ mes, fechado_em: new Date().toISOString(), fechado_por: LOCAL_ADMIN }, l,
+      { total: Math.round((Number(l.comissao) + (l.ajustes || []).reduce((t, a) => t + Number(a.valor), 0)) * 100) / 100 })));
+    return linhas.length;
+  };
+  Local.prototype.comissaoReabrir = async function (mes) { let n = 0; (this._comissoes || []).forEach(c => { if (c.mes === mes && c.fechado_em) { c.fechado_em = null; c.reaberto_em = new Date().toISOString(); n++; } }); return n; };
+
   raiz.CRMDados = { TABELAS, INTEIRAS, PARCIAIS, aplicaMudancas, marcaRecarga, chave, Local, Supa, uuid, vazio, LOCAL_ADMIN, cascataMemoria, situacaoVigia, PARADO_MIN, lembreteFkn };
   if (typeof module !== 'undefined' && module.exports) module.exports = raiz.CRMDados;
 })(typeof window !== 'undefined' ? window : globalThis);

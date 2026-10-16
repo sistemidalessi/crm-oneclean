@@ -29,8 +29,11 @@
   const MARGEM_MINIMA = 23;
   const margemMinima = cfg => (cfg && cfg.margem_minima != null && cfg.margem_minima !== '' ? Number(cfg.margem_minima) : MARGEM_MINIMA);
   const planosDe = cfg => ((cfg && Array.isArray(cfg.comissao_planos) && cfg.comissao_planos.length) ? cfg.comissao_planos : PLANOS_PADRAO);
-  function planoDoUsuario(cfg, userId) {
+  // Plano de quem vendeu: o configurado; 'nenhum' = sem comissão; o administrador sem plano configurado não ganha
+  // comissão (o "DIRETO" das notas é dele); os demais, o primeiro plano (interno).
+  function planoDoUsuario(cfg, userId, papel) {
     const ps = planosDe(cfg), id = cfg && cfg.comissao_usuarios && cfg.comissao_usuarios[userId];
+    if (id === 'nenhum' || (!id && papel === 'admin')) return null;
     return ps.find(p => p.id === id) || ps[0];
   }
 
@@ -141,9 +144,51 @@
   const entregaDoCliente = e => (e ? { endereco: e.logradouro || '', numero: e.numero || '', compl: e.complemento || '', bairro: e.bairro || '', cidade: e.cidade || '', uf: e.uf || '', cep: e.cep || '' } : {});
   const entregaTexto = d => (d ? [[d.endereco, d.numero].filter(Boolean).join(', '), d.compl, d.bairro, [d.cidade, d.uf].filter(Boolean).join('/'), d.cep ? 'CEP ' + d.cep : ''].filter(Boolean).join(' · ') : '');
 
+  // Apuração da comissão do mês (Fase 3b): nasce na nota emitida, item a item, pela faixa do preço praticado na tabela e
+  // pelo plano de quem vendeu (o vendedor escrito na nota). Só itens de venda (CFOP x1xx e x4xx: 5102, 5405, 5117…; fora
+  // remessa, bonificação, simples faturamento). Preço de tabela: o do pedido do CRM que virou a nota (foto do dia) ou o de
+  // hoje da listagem; caixa vendida como "CX" usa o preço da caixa. Sem preço de tabela, conta como faixa A e avisa.
+  //   o: { notas, itensPorNota (Map), mes 'AAAA-MM', dia(nota) → 'AAAA-MM-DD', precos (Map código → preço "ven"),
+  //        precoCaixa (Map código → preço da caixa), pedidoDaNota (Map nota_id → pedido), cfg, usuarios [{user_id, nome, papel}] }
+  const ehVendaCfop = c => !c || /^[56][14]/.test(String(c));
+  function apuraComissao(o) {
+    const tabela = tabelaDe(o.cfg), dia = o.dia || (n => String(n.emitida_em).slice(0, 10));
+    const us = new Map((o.usuarios || []).map(u => [u.user_id, u])), por = new Map();
+    (o.notas || []).forEach(n => {
+      if (n.cancelada || !n.vendedor_id || dia(n).slice(0, 7) !== o.mes) return;
+      const u = us.get(n.vendedor_id) || { user_id: n.vendedor_id, nome: n.vendedor_nome || '?' };
+      const plano = planoDoUsuario(o.cfg, u.user_id, u.papel);
+      if (!plano) return;
+      if (!por.has(u.user_id)) por.set(u.user_id, { user_id: u.user_id, nome: u.nome, plano: plano.id, planoNome: plano.nome, base: 0, comissao: 0, porFaixa: {}, notas: [], semTabela: 0, itens: 0 });
+      const g = por.get(u.user_id), ped = o.pedidoDaNota && o.pedidoDaNota.get(n.id);
+      const doPedido = new Map(((ped && ped.itens) || []).filter(i => i.codigo && i.preco_tab != null).map(i => [String(i.codigo).replace(/\.\d+$/, '') + '|' + (i.unidade || ''), num(i.preco_tab)]));
+      let bn = 0, cn = 0;
+      (o.itensPorNota.get(n.id) || []).forEach(it => {
+        if (!ehVendaCfop(it.cfop)) return;
+        const cod = String(it.codigo || ''), un = String(it.unidade || '').toUpperCase();
+        let tab = doPedido.get(cod.replace(/\.\d+$/, '') + '|' + un);
+        if (tab == null) tab = un === 'CX' && o.precoCaixa && o.precoCaixa.has(cod) ? o.precoCaixa.get(cod) : o.precos && o.precos.get(cod);
+        let fx = faixaDoPreco(num(it.valor_unitario), tab, tabela);
+        if (!fx) { fx = 'A'; g.semTabela++; }
+        const pctc = num(plano.faixas[fx]), v = num(it.valor_total), c = r2(v * pctc / 100);
+        const pf = g.porFaixa[fx] = g.porFaixa[fx] || { base: 0, comissao: 0, pct: pctc };
+        pf.base = r2(pf.base + v); pf.comissao = r2(pf.comissao + c);
+        bn += v; cn += c; g.itens++;
+      });
+      g.base = r2(g.base + bn); g.comissao = r2(g.comissao + cn);
+      g.notas.push({ id: n.id, numero: n.numero, data: dia(n), cliente: n.cliente_nome || '', base: r2(bn), comissao: r2(cn) });
+    });
+    return [...por.values()].sort((a, b) => b.base - a.base);
+  }
+  const totalComAjustes = (comissao, ajustes) => r2(num(comissao) + (ajustes || []).reduce((s, a) => s + num(a.valor), 0));
+
+  // "Repetir pedido" (restaurar): os itens de um pedido do CRM ou de uma nota do cliente, com os preços dela.
+  const itensParaRepetir = (pedido, itensNota) => (pedido ? (pedido.itens || []).map(i => ({ codigo: i.codigo || null, descricao: i.descricao, unidade: i.unidade || null, quantidade: num(i.quantidade), preco: num(i.preco), desconto: num(i.desconto) }))
+    : (itensNota || []).filter(i => ehVendaCfop(i.cfop)).map(i => ({ codigo: i.codigo || null, descricao: i.descricao, unidade: i.unidade || null, quantidade: num(i.quantidade), preco: num(i.valor_unitario), desconto: 0 })));
+
   const FRETE_CONTA = [['0', '0-Remetente (CIF)'], ['1', '1-Destinatário (FOB)'], ['2', '2-Terceiros'], ['9', '9-Sem frete']];
 
-  const P = { TABELA_PADRAO, PLANOS_PADRAO, MARGEM_MINIMA, margemMinima, FAIXAS, FRETE_CONTA, ROTULO_BLOQUEIO, tabelaDe, planosDe, planoDoUsuario, precoLiq, totalItem, precoDaFaixa, faixaDoPreco, rotuloFaixa,
+  const P = { TABELA_PADRAO, PLANOS_PADRAO, MARGEM_MINIMA, margemMinima, apuraComissao, totalComAjustes, itensParaRepetir, ehVendaCfop, FAIXAS, FRETE_CONTA, ROTULO_BLOQUEIO, tabelaDe, planosDe, planoDoUsuario, precoLiq, totalItem, precoDaFaixa, faixaDoPreco, rotuloFaixa,
     margem, sobreTabela, linha, totais, bloqueiosAbertos, situacao, bolao, ultimasCompras, procura, itensDaProposta, entregaDoCliente, entregaTexto };
   raiz.CRMPedidos = P;
   if (typeof module !== 'undefined') module.exports = P;
@@ -214,6 +259,7 @@
     l.push(['estoque', 'Consultar estoque']);
     if (ehOp()) l.push(['separacao', 'Separação']);
     l.push(['faltas', 'Faltas']);
+    if (ehVenda()) l.push(['comissoes', CRM.ehAdmin() ? 'Comissões' : 'Minha comissão']);
     return l;
   }
   function cabecalho() {
@@ -456,9 +502,15 @@
     return x;
   }
   // Item com o que o disponível sabe do produto (preço de tabela, custo para quem vê, unidade).
+  // A caixa vendida com o código da unidade e "CX" (como sai na nota) vira o código da caixa (".1"): preço, custo e fator dela.
   function completa(it) {
-    const d = it.codigo ? porCod.get(String(it.codigo).replace(/\.0+$/, '')) : null;
-    return Object.assign({}, it, { codigo: it.codigo ? String(it.codigo).replace(/\.0+$/, '') : null, unidade: it.unidade || (d && d.unidade) || '', preco_tab: d ? d.preco_venda : it.preco_tab, custo: d && d.custo != null ? d.custo : it.custo });
+    let cod = it.codigo ? String(it.codigo).replace(/\.0+$/, '') : null;
+    if (cod && String(it.unidade || '').toUpperCase() === 'CX' && !/\.\d+$/.test(cod)) {
+      const b = porCod.get(cod), v = b && String(b.unidade || '').toUpperCase() !== 'CX' && disp.find(x => x.base === cod && /\.\d+$/.test(x.codigo));
+      if (v) cod = v.codigo;
+    }
+    const d = cod ? porCod.get(cod) : null;
+    return Object.assign({}, it, { codigo: cod, unidade: it.unidade || (d && d.unidade) || '', preco_tab: d ? d.preco_venda : it.preco_tab, custo: d && d.custo != null ? d.custo : it.custo });
   }
   // Ñ atend. estimado no editor: o disponível de agora (com a reserva deste pedido devolvida, se já gravado).
   function estimador() {
@@ -516,7 +568,7 @@
             (lin.abaixoMinimo ? ' <strong class="neg">abaixo da margem mínima de ' + pct(P.margemMinima(E().cfg)) + ': o pedido fica bloqueado até a gestora liberar</strong>' : '') : '') : 'Escolha o produto: o CRM mostra o disponível e o preço da tabela.') + '</div>' +
         (dd && num(dd.preco_venda) > 0 ? '<div class="pd-faixas">Tabela: ' + P.FAIXAS.slice().reverse().map(fx => '<button type="button" class="mini" data-acao="pd-faixa" data-id="' + fx + '" title="' + (tab[fx] >= 0 ? '+' : '') + tab[fx] + '%">' + P.rotuloFaixa(fx) + ' ' + preco(P.precoDaFaixa(dd.preco_venda, fx, tab)) + '</button>').join('') + '</div>' : '') +
         '<p class="acoes"><button type="button" class="btn" data-acao="pd-item-salvar">' + (x.sel != null ? 'Salvar item' : 'Inserir item') + '</button> ' + (x.sel != null || l.codigo ? '<button type="button" class="btn sec" data-acao="pd-item-cancelar">Cancelar item</button> ' : '') +
-        (x.empresa_id ? '<button type="button" class="btn sec" data-acao="pd-ultimas">Últimas compras</button> <button type="button" class="btn sec" data-acao="pd-importar-ultimas">Importar últimas compras</button> ' : '') +
+        (x.empresa_id ? '<button type="button" class="btn sec" data-acao="pd-ultimas">Últimas compras</button> <button type="button" class="btn sec" data-acao="pd-importar-ultimas">Importar últimas compras</button> <button type="button" class="btn sec" data-acao="pd-repetir" title="Repetir um pedido ou uma nota anterior do cliente, com os preços dela">Repetir pedido</button> ' : '') +
         (x.itens.length > 1 ? '<button type="button" class="mini" data-acao="pd-organizar">Organizar por nome</button>' : '') + '</p></div>' +
         gradeProdutos(x.itens, { ctx, sel: x.sel, estimaFalta: estimador() }) + rodapeTotais(t);
     }
@@ -619,6 +671,106 @@
   }
 
   // Abrir o editor de fora (ficha do negócio, aba Orçamentos)
+
+  // ------------------------------------------------ comissões (Fase 3b)
+  const com = { mes: null, fechadas: null, mesCarregado: null, carregando: false, abertos: new Set() };
+  const mesAtual = () => CRM.hoje().slice(0, 7);
+  const mesAnterior = m => { const [a, b] = m.split('-').map(Number); return b === 1 ? (a - 1) + '-12' : a + '-' + String(b - 1).padStart(2, '0'); };
+  const nomeMes = m => { const [a, b] = m.split('-').map(Number); return ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'][b - 1] + ' de ' + a; };
+  // Ajustes do mês (devolução, venda fora das condições) ficam no navegador do administrador até fechar o mês.
+  const chaveAj = m => 'crm_comissao_ajustes_' + m;
+  const ajustesDe = (m, uid) => { try { return (JSON.parse(localStorage.getItem(chaveAj(m)) || '{}')[uid]) || []; } catch (e) { return []; } };
+  const poeAjustes = (m, uid, l) => { try { const o = JSON.parse(localStorage.getItem(chaveAj(m)) || '{}'); o[uid] = l; localStorage.setItem(chaveAj(m), JSON.stringify(o)); } catch (e) { /* sem navegador */ } };
+  async function carregaComissoes() {
+    if (com.carregando) return;
+    com.carregando = true;
+    try { com.fechadas = await CRM.store().comissoes(com.mes + '-01'); } catch (e) { com.fechadas = []; CRM.falhou(e); }
+    com.mesCarregado = com.mes; com.carregando = false; CRM.render();
+  }
+  function previa(m) {
+    const precos = new Map(), caixa = new Map();
+    disp.forEach(d => { if (/\.\d+$/.test(d.codigo)) { if (!caixa.has(d.base) && d.preco_venda) caixa.set(d.base, num(d.preco_venda)); } else if (d.preco_venda) precos.set(d.codigo, num(d.preco_venda)); });
+    const pedidoDaNota = new Map((peds || []).filter(p => p.nota_id).map(p => [p.nota_id, p]));
+    const r = P.apuraComissao({ notas: E().D.notas || [], itensPorNota: E().ix.porNota, mes: m, dia: n => R.diaLocal(n.emitida_em), precos, precoCaixa: caixa, pedidoDaNota, cfg: E().cfg, usuarios: E().D.usuarios || [] });
+    return CRM.ehAdmin() ? r : r.filter(g => g.user_id === CRM.meuId());
+  }
+  const linhaFx = pf => Object.keys(pf || {}).sort((a, b) => P.FAIXAS.concat(['ABAIXO']).indexOf(a) - P.FAIXAS.concat(['ABAIXO']).indexOf(b))
+    .map(k => P.rotuloFaixa(k) + ' ' + R.moeda(pf[k].base) + ' × ' + preco(pf[k].pct) + '%').join(' · ');
+  function telaComissoes() {
+    const adm = CRM.ehAdmin();
+    if (!com.mes) com.mes = adm ? mesAnterior(mesAtual()) : mesAtual();
+    if (com.mesCarregado !== com.mes) { setTimeout(carregaComissoes, 0); return '<section class="cartao"><p class="vazio">Carregando…</p></section>'; }
+    const meses = []; let m = mesAtual(); for (let i = 0; i < 13; i++) { meses.push([m, nomeMes(m)]); m = mesAnterior(m); }
+    const fech = (com.fechadas || []).filter(c => c.fechado_em), fechado = fech.length > 0, reaberto = (com.fechadas || []).some(c => c.reaberto_em && !c.fechado_em);
+    let corpo;
+    if (fechado) {
+      const rows = adm ? fech : fech.filter(c => c.user_id === CRM.meuId());
+      corpo = '<p class="dica">Mês <strong>fechado</strong> em ' + esc(quando(fech[0].fechado_em)) + ' por ' + esc(CRM.nomeUsuario(fech[0].fechado_por)) + '. Estes valores não mudam mais' + (adm ? ' (para mexer, reabra).' : '.') + '</p>' +
+        (rows.length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Vendedor(a)</th><th>Plano</th><th class="num">Faturado</th><th class="num">Comissão</th><th>Ajustes</th><th class="num">A pagar</th></tr></thead><tbody>' +
+          rows.map(c => '<tr><td><strong>' + esc(CRM.nomeUsuario(c.user_id)) + '</strong><small>' + esc(linhaFx((c.detalhe || {}).porFaixa)) + '</small></td><td>' + esc(c.plano || '') + '</td><td class="num">' + R.moeda(c.base) + '</td><td class="num">' + R.moeda(c.comissao) + '</td>' +
+            '<td><small>' + esc((c.ajustes || []).map(a => R.moeda(a.valor) + ' ' + a.motivo).join(' · ') || '—') + '</small></td><td class="num"><strong>' + R.moeda(c.total) + '</strong></td></tr>').join('') + '</tbody></table></div>'
+          : '<p class="vazio">Nenhuma comissão sua neste mês.</p>') +
+        (adm ? '<p class="acoes"><button type="button" class="btn sec" data-acao="pd-com-reabrir">Reabrir o mês</button></p>' : '');
+    } else {
+      const l = previa(com.mes);
+      const tot = l.reduce((s2, g) => s2 + P.totalComAjustes(g.comissao, ajustesDe(com.mes, g.user_id)), 0);
+      corpo = '<p class="dica">' + (com.mes === mesAtual() ? 'Mês em andamento: é uma <strong>prévia</strong>, muda a cada nota que chega.' : 'Prévia do mês' + (reaberto ? ' (reaberto)' : '') + (adm ? ': confira, lance os ajustes (devolução, venda fora das condições) e feche.' : '; o administrador fecha o mês.')) +
+        ' A comissão nasce na nota emitida, item a item, pela faixa do preço na tabela PADRAO e pelo plano de quem vendeu (o vendedor escrito na nota).</p>' +
+        (l.length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Vendedor(a)</th><th>Plano</th><th class="num">Notas</th><th class="num">Faturado</th><th class="num">Comissão</th>' + (adm ? '<th>Ajustes</th><th class="num">A pagar</th>' : '') + '</tr></thead><tbody>' +
+          l.map(g => { const aj = ajustesDe(com.mes, g.user_id), ab = com.abertos.has(g.user_id);
+            return '<tr><td><button type="button" class="link" data-acao="pd-com-abrir" data-id="' + esc(g.user_id) + '"><strong>' + (ab ? '▾ ' : '▸ ') + esc(g.nome) + '</strong></button><small>' + esc(linhaFx(g.porFaixa)) +
+              (g.semTabela ? ' · ' + g.semTabela + ' item(ns) sem preço de tabela (contados como A)' : '') + '</small></td>' +
+              '<td>' + esc(g.planoNome) + '</td><td class="num">' + g.notas.length + '</td><td class="num">' + R.moeda(g.base) + '</td><td class="num">' + R.moeda(g.comissao) + '</td>' +
+              (adm ? '<td><small>' + esc(aj.map(a => R.moeda(a.valor) + ' ' + a.motivo).join(' · ')) + '</small> <button type="button" class="mini" data-acao="pd-com-ajuste" data-id="' + esc(g.user_id) + '">+ ajuste</button>' +
+                (aj.length ? '<button type="button" class="mini" data-acao="pd-com-ajuste-limpa" data-id="' + esc(g.user_id) + '" title="Tirar os ajustes">×</button>' : '') + '</td><td class="num"><strong>' + R.moeda(P.totalComAjustes(g.comissao, aj)) + '</strong></td>' : '') + '</tr>' +
+              (ab ? '<tr><td colspan="' + (adm ? 7 : 5) + '"><table class="tabela"><thead><tr><th>NF</th><th>Data</th><th>Cliente</th><th class="num">Faturado</th><th class="num">Comissão</th></tr></thead><tbody>' +
+                g.notas.map(n => '<tr><td>' + esc(n.numero) + '</td><td>' + esc(R.dataBR(n.data)) + '</td><td>' + esc(n.cliente) + '</td><td class="num">' + R.moeda(n.base) + '</td><td class="num">' + R.moeda(n.comissao) + '</td></tr>').join('') + '</tbody></table></td></tr>' : '');
+          }).join('') + '</tbody>' + (adm ? '<tfoot><tr><td colspan="6">Total</td><td class="num"><strong>' + R.moeda(tot) + '</strong></td></tr></tfoot>' : '') + '</table></div>'
+          : '<p class="vazio">Nenhuma nota com vendedor(a) neste mês.</p>') +
+        (adm && com.mes < mesAtual() && l.length ? '<p class="acoes"><button type="button" class="btn verde" data-acao="pd-com-fechar">Fechar ' + esc(nomeMes(com.mes)) + '</button></p>' : '');
+    }
+    return '<section class="cartao"><h2>' + (adm ? 'Comissões' : 'Minha comissão') + '</h2>' +
+      '<p class="acoes"><label class="filtro-inline">Mês <select data-pd-com-mes>' + CRM.opcoesHTML(meses, com.mes) + '</select></label>' +
+      (adm ? ' <button type="button" class="btn sec" data-acao="pd-com-config">Tabela de preços e planos de comissão</button>' : '') + '</p>' + corpo + '</section>';
+  }
+  function formConfigComissao() {
+    const cfg = E().cfg, tab = P.tabelaDe(cfg), planos = P.planosDe(cfg).map(p => ({ id: p.id, nome: p.nome, faixas: Object.assign({}, p.faixas) }));
+    const FX = ['ABAIXO', 'NEG', 'A', 'B', 'C', 'D', 'E', 'F'], TB = ['NEG', 'A', 'B', 'C', 'D', 'E', 'F'];
+    const users = (E().D.usuarios || []).filter(u => u.ativo !== false && ['admin', 'gestor', 'vendedor'].indexOf(u.papel) !== -1);
+    const atual = u => (cfg.comissao_usuarios || {})[u.user_id] || (u.papel === 'admin' ? 'nenhum' : planos[0].id);
+    const inp = (nome, v) => '<input name="' + nome + '" type="number" step="any" value="' + esc(v == null ? '' : v) + '" class="pd-num">';
+    CRM.abrirForm({
+      titulo: 'Tabela de preços e planos de comissão', largura: 'extra', campos: [], valores: {},
+      intro: 'A tabela PADRAO soma um percentual sobre o preço de venda do produto (o "ven" da listagem do FKN). A margem mínima trava o pedido (a gestora libera). Cada plano diz a comissão (%) de cada faixa; quem está "sem comissão" não entra na apuração.',
+      htmlDepois: '<h3>Tabela de preços (%)</h3><div class="tabela-rolagem"><table class="tabela"><thead><tr>' + TB.map(k => '<th>' + P.rotuloFaixa(k) + '</th>').join('') + '</tr></thead><tbody><tr>' +
+        TB.map(k => '<td>' + inp('tab_' + k, tab[k]) + '</td>').join('') + '</tr></tbody></table></div>' +
+        '<p class="acoes"><label class="filtro-inline">Margem mínima (%) ' + inp('margem_minima', P.margemMinima(cfg)) + '</label> <label class="filtro-inline"><input type="checkbox" name="trava"' + (cfg.pedido_trava_preco === false ? '' : ' checked') + '> bloquear o pedido abaixo dela</label></p>' +
+        '<h3>Planos de comissão (% por faixa)</h3><div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Plano</th>' + FX.map(k => '<th>' + (k === 'ABAIXO' ? 'abaixo neg.' : P.rotuloFaixa(k)) + '</th>').join('') + '</tr></thead><tbody>' +
+        planos.concat([{ id: '', nome: '', faixas: {} }]).map((p, i) => '<tr><td><input name="pln_' + i + '" value="' + esc(p.nome) + '"' + (p.id ? '' : ' placeholder="novo plano (opcional)"') + '><input type="hidden" name="pli_' + i + '" value="' + esc(p.id) + '"></td>' +
+          FX.map(k => '<td>' + inp('pl_' + i + '_' + k, p.faixas[k]) + '</td>').join('') + '</tr>').join('') + '</tbody></table></div>' +
+        '<h3>Quem está em cada plano</h3><div class="campos">' + users.map(u => '<label class="campo"><span>' + esc(u.nome) + '</span><select name="us_' + esc(u.user_id) + '">' +
+          CRM.opcoesHTML(planos.map(p => [p.id, p.nome]).concat([['nenhum', 'sem comissão']]), atual(u)) + '</select></label>').join('') + '</div>',
+      salvarTexto: 'Salvar',
+      aoSalvar: async (v, form) => {
+        const g = n => (form.elements[n] ? form.elements[n].value : ''), nr = n => (String(g(n)).trim() === '' ? null : Number(String(g(n)).replace(',', '.')));
+        const tabela = {};
+        TB.forEach(k => { const x = nr('tab_' + k); if (x == null || !isFinite(x)) throw new Error('preencha a faixa ' + P.rotuloFaixa(k) + ' da tabela'); tabela[k] = x; });
+        const novos = [];
+        planos.concat([{ id: '' }]).forEach((p, i) => {
+          const nome = String(g('pln_' + i)).trim(); if (!nome) return;
+          const faixas = {}; FX.forEach(k => { const x = nr('pl_' + i + '_' + k); faixas[k] = x == null || !isFinite(x) ? 0 : x; });
+          novos.push({ id: g('pli_' + i) || R.normaliza(nome).replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'plano' + i, nome, faixas });
+        });
+        if (!novos.length) throw new Error('é preciso pelo menos um plano');
+        const usuarios = {}; users.forEach(u => { usuarios[u.user_id] = g('us_' + u.user_id); });
+        const mm = nr('margem_minima');
+        await CRM.salvarConfig({ tabela_precos: tabela, comissao_planos: novos, comissao_usuarios: usuarios, margem_minima: mm == null ? 23 : mm, pedido_trava_preco: form.elements.trava.checked });
+        CRM.toast('Tabela e planos salvos.');
+        recarrega();
+      }
+    });
+  }
+
   const fechaFichas = () => ['#dlgNegocio', '#dlgEmpresa', '#dlgLista'].forEach(s => { const d = document.querySelector(s); if (d && d.open) d.close(); });
   CRM.pedidos = {
     deProposta: async pid => {
@@ -641,13 +793,14 @@
       if (ed) return cabecalho() + telaEditor();
       const p = aberto && ped(aberto);
       if (p) return cabecalho() + telaPedido(p);
-      return cabecalho() + (f.ver === 'orcamentos' ? telaOrcamentos() : f.ver === 'estoque' ? telaEstoque() : f.ver === 'separacao' ? telaSeparacao() : f.ver === 'faltas' ? telaFaltas() : telaLista());
+      return cabecalho() + (f.ver === 'orcamentos' ? telaOrcamentos() : f.ver === 'estoque' ? telaEstoque() : f.ver === 'separacao' ? telaSeparacao() : f.ver === 'faltas' ? telaFaltas() : f.ver === 'comissoes' ? telaComissoes() : telaLista());
     },
     depois(c) {
       const on = (sel, ev, fn) => c.querySelectorAll(sel).forEach(el => el.addEventListener(ev, () => fn(el)));
       on('[data-pd-busca]', 'input', el => { f.busca = el.value; CRM.render(); });
       on('[data-pd-vend]', 'change', el => { f.vend = el.value; CRM.render(); });
       on('[data-pd-est]', 'input', el => { f.est = el.value; CRM.render(); });
+      on('[data-pd-com-mes]', 'change', el => { com.mes = el.value; com.mesCarregado = null; CRM.render(); });
       on('[data-pd-marca]', 'change', el => { if (el.checked) f.marcados.add(el.dataset.pdMarca); else f.marcados.delete(el.dataset.pdMarca); CRM.render(); });
       on('[data-pd-sep]', 'change', async el => {
         const [id, i] = el.dataset.pdSep.split(':');
@@ -744,6 +897,45 @@
     'pd-bolao-um': vivo(async id => { const b = await CRM.store().bolaoMontar([id], null); aberto = null; f.ver = 'separacao'; f.bolao = b; await recarrega(); }),
     'pd-bolao': id => { f.bolao = Number(id); CRM.render(); },
     'pd-bolao-voltar': () => { f.bolao = null; CRM.render(); },
+    'pd-com-abrir': id => { if (com.abertos.has(id)) com.abertos.delete(id); else com.abertos.add(id); CRM.render(); },
+    'pd-com-config': () => formConfigComissao(),
+    'pd-com-ajuste': uid => CRM.abrirForm({ titulo: 'Ajuste na comissão · ' + CRM.nomeUsuario(uid) + ' · ' + nomeMes(com.mes),
+      intro: 'Negativo desconta (ex.: −35,20 da devolução da NF 2701); positivo soma. Vai junto do fechamento do mês.',
+      campos: [{ nome: 'valor', rotulo: 'Valor (R$)', tipo: 'numero', min: -1e9, obrigatorio: true }, { nome: 'motivo', rotulo: 'Motivo', obrigatorio: true, largo: true }], valores: {},
+      aoSalvar: async v => { poeAjustes(com.mes, uid, ajustesDe(com.mes, uid).concat([{ valor: v.valor, motivo: v.motivo }])); CRM.render(); } }),
+    'pd-com-ajuste-limpa': uid => { if (confirm('Tirar os ajustes de ' + CRM.nomeUsuario(uid) + '?')) { poeAjustes(com.mes, uid, []); CRM.render(); } },
+    'pd-com-fechar': vivo(async () => {
+      const l = previa(com.mes);
+      const tot = l.reduce((s2, g) => s2 + P.totalComAjustes(g.comissao, ajustesDe(com.mes, g.user_id)), 0);
+      if (!confirm('Fechar as comissões de ' + nomeMes(com.mes) + '? ' + l.length + ' vendedor(es)(as), total a pagar ' + R.moeda(tot) + '.\nDepois de fechado, os valores não mudam (só reabrindo).')) return;
+      const n = await CRM.store().comissaoFechar(com.mes + '-01', l.map(g => ({ user_id: g.user_id, plano: g.plano, base: g.base, comissao: g.comissao, ajustes: ajustesDe(com.mes, g.user_id),
+        detalhe: { porFaixa: g.porFaixa, semTabela: g.semTabela, itens: g.itens, notas: g.notas.map(x => ({ numero: x.numero, data: x.data, cliente: x.cliente, base: x.base, comissao: x.comissao })) } })));
+      CRM.toast(nomeMes(com.mes) + ' fechado: ' + n + ' vendedor(es)(as).'); com.mesCarregado = null; CRM.render();
+    }),
+    'pd-com-reabrir': vivo(async () => {
+      if (!confirm('Reabrir as comissões de ' + nomeMes(com.mes) + '? Fica registrado quem reabriu e quando.')) return;
+      await CRM.store().comissaoReabrir(com.mes + '-01'); com.mesCarregado = null; CRM.render();
+    }),
+    'pd-repetir': () => {
+      const ps = (peds || []).filter(p => p.empresa_id === ed.empresa_id && p.id !== ed.id && p.situacao !== 'cancelado').slice(0, 10);
+      const ns = CRM.doEmpresa('notas', ed.empresa_id).filter(n => !n.cancelada).slice().sort((a, b) => String(b.emitida_em).localeCompare(String(a.emitida_em))).slice(0, 10);
+      const linha = (id, rot, data, valor, n) => '<tr><td><strong>' + esc(rot) + '</strong></td><td>' + esc(data) + '</td><td class="num">' + n + '</td><td class="num">' + R.moeda(valor) + '</td><td><button type="button" class="mini" data-acao="pd-repetir-usar" data-id="' + esc(id) + '">usar</button></td></tr>';
+      CRM.abrirForm({ titulo: 'Repetir pedido · ' + CRM.nomeEmpresa(ed.empresa_id), largura: 'largo', campos: [], salvarTexto: 'Fechar', aoSalvar: async () => {},
+        intro: 'Escolha um pedido do CRM ou uma nota do cliente: os itens entram com as quantidades e os preços dela (confira com a tabela de hoje).',
+        htmlDepois: (ps.length || ns.length) ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Pedido / nota</th><th>Data</th><th class="num">Itens</th><th class="num">Valor</th><th></th></tr></thead><tbody>' +
+          ps.map(p => linha('p:' + p.id, 'Pedido ' + p.numero, R.dataBR(R.diaLocal(p.criado_em)), p.valor_total, (p.itens || []).length)).join('') +
+          ns.map(n => linha('n:' + n.id, 'NF ' + n.numero, R.dataBR(R.diaLocal(n.emitida_em)), n.valor_total, (E().ix.porNota.get(n.id) || []).length)).join('') + '</tbody></table></div>'
+          : '<p class="vazio">Nenhum pedido nem nota deste cliente no CRM.</p>' });
+    },
+    'pd-repetir-usar': id => {
+      const [t, x] = id.split(':');
+      const its = t === 'p' ? P.itensParaRepetir(ped(x)) : P.itensParaRepetir(null, E().ix.porNota.get(x) || []);
+      if (!its.length) { CRM.toast('Nada para repetir.', true); return; }
+      if (ed.itens.length && confirm('O pedido já tem ' + ed.itens.length + ' item(ns). OK = trocar pelos do escolhido; Cancelar = juntar.')) ed.itens = [];
+      its.forEach(i => ed.itens.push(completa(i)));
+      const d = document.getElementById('dlgForm'); if (d && d.open) d.close();
+      CRM.toast(its.length + ' item(ns) no pedido, com os preços de antes.'); CRM.render();
+    },
     'pd-bolao-imprimir': id => imprimir(htmlBolaoImpresso(Number(id)), 'Lista de separacao SP ' + id)
   });
 })(typeof window !== 'undefined' ? window : globalThis);

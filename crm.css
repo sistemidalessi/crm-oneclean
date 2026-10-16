@@ -849,3 +849,4 @@ pre.of-previa { white-space: pre-wrap; font-family: inherit; font-size: .88rem; 
 .sp-doc td.n { text-align: right; font-weight: 700; } .sp-doc td.cx { width: 7mm; }
 .sp-doc .ass { margin-top: 4mm; }
 @media print { .sp-doc .quebra { break-before: page; } }
+.pd-num { width: 80px; }

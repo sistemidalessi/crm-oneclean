@@ -97,3 +97,48 @@ test('margem mínima de 23%: abaixo dela o item avisa (e o pedido bloqueia no ba
   assert.strictEqual(P.margemMinima({ margem_minima: 25 }), 25);
   assert.strictEqual(P.margemMinima({}), 23);
 });
+
+test('plano: administrador sem plano e "nenhum" não ganham comissão', () => {
+  assert.strictEqual(P.planoDoUsuario({}, 'adm', 'admin'), null);
+  assert.strictEqual(P.planoDoUsuario({ comissao_usuarios: { adm: 'interno' } }, 'adm', 'admin').id, 'interno');
+  assert.strictEqual(P.planoDoUsuario({ comissao_usuarios: { v: 'nenhum' } }, 'v', 'vendedor'), null);
+});
+
+test('apuração do mês: faixa do item pela tabela, plano de quem vendeu, só itens de venda, canceladas fora', () => {
+  const notas = [
+    { id: 'n1', numero: 10, emitida_em: '2026-09-05T13:00:00Z', vendedor_id: 'int', cliente_nome: 'A' },
+    { id: 'n2', numero: 11, emitida_em: '2026-09-06T13:00:00Z', vendedor_id: 'ext', cliente_nome: 'B' },
+    { id: 'n3', numero: 12, emitida_em: '2026-09-07T13:00:00Z', vendedor_id: 'int', cancelada: true },
+    { id: 'n4', numero: 13, emitida_em: '2026-10-01T13:00:00Z', vendedor_id: 'int' },
+    { id: 'n5', numero: 14, emitida_em: '2026-09-08T13:00:00Z', vendedor_id: 'adm' }];
+  const itens = new Map([
+    ['n1', [{ codigo: 'P1', unidade: 'PT', valor_unitario: 1.96, valor_total: 196, cfop: '5102' },      // A
+            { codigo: 'P1', unidade: 'CX', valor_unitario: 100, valor_total: 100, cfop: '5405' },        // caixa a 100 sobre 94,08 → B
+            { codigo: 'XX', unidade: 'UN', valor_unitario: 10, valor_total: 10, cfop: '5102' },          // sem tabela → A
+            { codigo: 'P1', unidade: 'PT', valor_unitario: 1.96, valor_total: 50, cfop: '5910' }]],      // bonificação: fora
+    ['n2', [{ codigo: 'P1', unidade: 'PT', valor_unitario: 2.45, valor_total: 245, cfop: '5102' }]],      // F
+    ['n3', [{ codigo: 'P1', unidade: 'PT', valor_unitario: 1.96, valor_total: 999, cfop: '5102' }]],
+    ['n4', [{ codigo: 'P1', unidade: 'PT', valor_unitario: 1.96, valor_total: 999, cfop: '5102' }]],
+    ['n5', [{ codigo: 'P1', unidade: 'PT', valor_unitario: 1.96, valor_total: 999, cfop: '5102' }]]]);
+  const r = P.apuraComissao({ notas, itensPorNota: itens, mes: '2026-09', precos: new Map([['P1', 1.96]]), precoCaixa: new Map([['P1', 94.08]]),
+    cfg: { comissao_usuarios: { ext: 'externo' } }, usuarios: [{ user_id: 'int', nome: 'Interna', papel: 'vendedor' }, { user_id: 'ext', nome: 'Externa', papel: 'vendedor' }, { user_id: 'adm', nome: 'Adm', papel: 'admin' }] });
+  assert.deepStrictEqual(r.map(x => [x.nome, x.plano, x.base, x.comissao, x.semTabela, x.notas.length]), [['Interna', 'interno', 306, 12.21, 1, 1], ['Externa', 'externo', 245, 24.5, 0, 1]]);
+  // interno: 196 × 3,5% + 100 × 5% + 10 × 3,5% = 6,86 + 5 + 0,35
+  assert.deepStrictEqual(r[0].porFaixa, { A: { base: 206, comissao: 7.21, pct: 3.5 }, B: { base: 100, comissao: 5, pct: 5 } });
+  assert.strictEqual(P.totalComAjustes(12.21, [{ valor: -2.21, motivo: 'devolução' }]), 10);
+});
+
+test('apuração: o preço de tabela do pedido do CRM (foto do dia) vale sobre o de hoje', () => {
+  const r = P.apuraComissao({ notas: [{ id: 'n1', numero: 1, emitida_em: '2026-09-05T13:00:00Z', vendedor_id: 'v' }], mes: '2026-09',
+    itensPorNota: new Map([['n1', [{ codigo: 'P1', unidade: 'PT', valor_unitario: 2, valor_total: 200, cfop: '5102' }]]]),
+    precos: new Map([['P1', 2.2]]), pedidoDaNota: new Map([['n1', { itens: [{ codigo: 'P1', unidade: 'PT', preco_tab: 1.60 }] }]]),
+    cfg: {}, usuarios: [{ user_id: 'v', nome: 'V', papel: 'vendedor' }] });
+  assert.deepStrictEqual(Object.keys(r[0].porFaixa), ['F']); // 2,00 sobre 1,60 = +25% → F (com o preço de hoje seria abaixo)
+});
+
+test('repetir pedido: do pedido do CRM ou da nota (com os preços dela, sem bonificação)', () => {
+  assert.deepStrictEqual(P.itensParaRepetir({ itens: [{ codigo: 'A', descricao: 'X', unidade: 'GL', quantidade: 2, preco: 5, desconto: 1, base: 'A' }] }),
+    [{ codigo: 'A', descricao: 'X', unidade: 'GL', quantidade: 2, preco: 5, desconto: 1 }]);
+  assert.deepStrictEqual(P.itensParaRepetir(null, [{ codigo: 'B', descricao: 'Y', unidade: 'UN', quantidade: 3, valor_unitario: 4.5, cfop: '5102' }, { codigo: 'C', descricao: 'Z', quantidade: 1, valor_unitario: 0, cfop: '5910' }]),
+    [{ codigo: 'B', descricao: 'Y', unidade: 'UN', quantidade: 3, preco: 4.5, desconto: 0 }]);
+});

@@ -1185,8 +1185,21 @@ BLOQUEADO/liberado, bloqueios ESTOQUE / ATRASO DUPL / SEM ENTRADA, lista de sepa
 - **Paralelo com o FKN:** até a Fase 4 a nota sai do FKN, então o pedido precisa existir lá também. O caminho sem digitar
   duas vezes: orçamento no FKN → importar no CRM → "Virar pedido" no CRM; ou o pedido no CRM e a logística lança no FKN.
   Pronto quando: uma semana de pedidos reais feitos no CRM conferidos com o que saiu no FKN.
-- Depois (3b e além): tela dos planos de comissão e apuração no mês fechado, faltas entrando na sugestão de compra de
-  Compras, restaurar pedido (já há "Importar últimas compras"), localização no galpão (o FKN tem o campo, vazio hoje).
+- **Fase 3b (16/10/2026) — comissões e restaurar pedido:** aba Pedidos → **Comissões** (administrador: equipe;
+  vendedor(a) e gestora: "Minha comissão", só a própria). A comissão nasce na **nota emitida** (o vendedor do `infCpl`),
+  item a item (só CFOP de venda x1xx/x4xx), pela faixa do preço praticado e pelo plano de quem vendeu
+  (`P.apuraComissao`). Preço de tabela: o do pedido do CRM que virou a nota (foto do dia) ou o de hoje da listagem;
+  caixa "CX" com o código da unidade usa o preço da caixa; sem preço de tabela conta como A e avisa. O administrador
+  lança **ajustes** (devolução, venda fora das condições; ficam no navegador dele até fechar) e **fecha o mês**
+  (`crm_comissoes` + `crm_comissao_fechar`/`crm_comissao_reabrir`, só admin grava; RLS: cada um lê a própria linha).
+  Fechado não muda; reabrir fica registrado. Botão **"Tabela de preços e planos de comissão"**: percentuais da tabela,
+  margem mínima, trava, planos (editáveis, dá para criar outro) e quem está em cada plano ("sem comissão" fica fora;
+  o administrador, "DIRETO" das notas, fica sem comissão). Devolução automática: quando as notas de devolução
+  chegarem ao CRM (Fase 4b) — hoje nenhuma chega, por isso o ajuste à mão.
+  **"Repetir pedido"** no editor: um pedido do CRM ou uma nota do cliente volta com as quantidades e os preços dela
+  (`P.itensParaRepetir`; sem bonificação). Achado no teste: a caixa vem na nota com o código da unidade e "CX" — agora o
+  item vira o código da caixa (".1") na tela (`completa`) e no banco (`crm_pedido_itens_norm`), com preço, custo e fator dela.
+- Depois: faltas entrando na sugestão de compra de Compras; localização no galpão (o FKN tem o campo, vazio hoje).
 
 ## Fiscal — Fase 1 da saída do FKN (15/10/2026, pedido do Anderson)
 

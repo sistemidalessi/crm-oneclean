@@ -2442,6 +2442,11 @@ begin
     if pr < 0 or d < 0 or d > 100 then raise exception 'item %: preço ou desconto inválido', k; end if;
     if coalesce(btrim(x->>'descricao'), '') = '' and cod is null then raise exception 'item %: diga o produto', k; end if;
     base := null; f := 1;
+    -- caixa com o código da unidade e "CX" (como sai na nota): vale o código da caixa (".1"), com o preço e o custo dela
+    if cod is not null and cod !~ '\.\d+$' and public.crm_un(x->>'unidade') = 'CX'
+       and coalesce(public.crm_un((select unidade from public.crm_estoque where codigo = cod)), 'CX') <> 'CX' then
+      cod := coalesce((select v.codigo from public.crm_estoque v where v.codigo ~ ('^' || cod || '\.\d+$') order by v.codigo limit 1), cod);
+    end if;
     select codigo, descricao, unidade, preco_venda, custo_unit into e from public.crm_estoque where codigo = cod;
     if cod is not null then
       base := regexp_replace(cod, '\.\d+$', '');
@@ -2710,3 +2715,70 @@ end;
 $$;
 revoke all on function public.crm_pedidos_troca_empresa(uuid[], uuid) from public, anon;
 grant execute on function public.crm_pedidos_troca_empresa(uuid[], uuid) to authenticated;
+
+-- =================================================================== Fase 3b: comissão do mês fechado
+-- (16/10/2026, plano docs/plano-sair-do-fkn.md). A comissão nasce na nota emitida (o vendedor escrito na nota), item a
+-- item, pela faixa do preço praticado na tabela PADRAO e pelo plano de quem vendeu (interno = papel do escritório;
+-- externo = tabela do FKN, hoje só a Silmara). A tela calcula a prévia (pedidos.js apuraComissao); o administrador
+-- confere, lança os ajustes (devolução, venda fora das condições) e FECHA o mês: a foto fica aqui e não muda mais (para
+-- mexer, "reabrir", que fica registrado). Cada vendedor(a) lê só a própria linha; só o administrador grava.
+create table if not exists public.crm_comissoes (
+  mes          date not null check (extract(day from mes) = 1),   -- 1º dia do mês
+  user_id      uuid not null references public.crm_usuarios(user_id),
+  plano        text,
+  base         numeric(14,2) not null default 0,                   -- soma dos itens das notas (sem frete)
+  comissao     numeric(14,2) not null default 0,                   -- dos itens, antes dos ajustes
+  ajustes      jsonb not null default '[]'::jsonb,                 -- [{valor (− desconta), motivo}]
+  total        numeric(14,2) not null default 0,                   -- comissão + ajustes
+  detalhe      jsonb not null default '{}'::jsonb,                 -- notas, por faixa, itens sem preço de tabela
+  fechado_em   timestamptz,
+  fechado_por  uuid,
+  reaberto_em  timestamptz,
+  reaberto_por uuid,
+  atualizado_em timestamptz not null default now(),
+  primary key (mes, user_id)
+);
+alter table public.crm_comissoes enable row level security;
+revoke all on public.crm_comissoes from anon, public;
+grant select on public.crm_comissoes to authenticated;
+drop policy if exists ler on public.crm_comissoes;
+create policy ler on public.crm_comissoes for select to authenticated using ((select public.crm_eh_admin()) or user_id = (select auth.uid()));
+
+-- Fecha o mês: grava a foto de cada vendedor(a) (linhas: [{user_id, plano, base, comissao, ajustes, detalhe}]). Mês já
+-- fechado não se regrava: reabrir antes.
+create or replace function public.crm_comissao_fechar(p_mes date, p_linhas jsonb) returns integer language plpgsql security definer set search_path = public as $$
+declare x jsonb; n integer := 0; aj jsonb; t numeric;
+begin
+  if not public.crm_eh_admin() then raise exception 'só o administrador fecha as comissões'; end if;
+  if p_mes is null or extract(day from p_mes) <> 1 then raise exception 'mês inválido'; end if;
+  if p_mes >= date_trunc('month', now() at time zone 'America/Sao_Paulo')::date then raise exception 'o mês ainda não acabou'; end if;
+  if exists (select 1 from public.crm_comissoes where mes = p_mes and fechado_em is not null) then raise exception 'o mês já está fechado: reabra antes'; end if;
+  for x in select value from jsonb_array_elements(coalesce(p_linhas, '[]'::jsonb)) loop
+    aj := coalesce(x->'ajustes', '[]'::jsonb);
+    if exists (select 1 from jsonb_array_elements(aj) a where coalesce(btrim(a->>'motivo'), '') = '' or (a->>'valor') is null) then raise exception 'ajuste sem valor ou sem motivo'; end if;
+    t := coalesce((x->>'comissao')::numeric, 0) + coalesce((select sum((a->>'valor')::numeric) from jsonb_array_elements(aj) a), 0);
+    insert into public.crm_comissoes (mes, user_id, plano, base, comissao, ajustes, total, detalhe, fechado_em, fechado_por, atualizado_em)
+    values (p_mes, (x->>'user_id')::uuid, x->>'plano', coalesce((x->>'base')::numeric, 0), coalesce((x->>'comissao')::numeric, 0), aj, round(t, 2),
+      coalesce(x->'detalhe', '{}'::jsonb), now(), auth.uid(), now())
+    on conflict (mes, user_id) do update set plano = excluded.plano, base = excluded.base, comissao = excluded.comissao, ajustes = excluded.ajustes,
+      total = excluded.total, detalhe = excluded.detalhe, fechado_em = now(), fechado_por = auth.uid(), atualizado_em = now();
+    n := n + 1;
+  end loop;
+  return n;
+end;
+$$;
+revoke all on function public.crm_comissao_fechar(date, jsonb) from public, anon;
+grant execute on function public.crm_comissao_fechar(date, jsonb) to authenticated;
+
+create or replace function public.crm_comissao_reabrir(p_mes date) returns integer language plpgsql security definer set search_path = public as $$
+declare n integer;
+begin
+  if not public.crm_eh_admin() then raise exception 'só o administrador'; end if;
+  update public.crm_comissoes set fechado_em = null, fechado_por = null, reaberto_em = now(), reaberto_por = auth.uid(), atualizado_em = now()
+   where mes = p_mes and fechado_em is not null;
+  get diagnostics n = row_count;
+  return n;
+end;
+$$;
+revoke all on function public.crm_comissao_reabrir(date) from public, anon;
+grant execute on function public.crm_comissao_reabrir(date) to authenticated;
