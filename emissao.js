@@ -179,7 +179,7 @@
     const c = saude.certificado;
     if (!c) return '<p class="alerta">O serviço respondeu (versão ' + esc(saude.versao) + '), mas <strong>sem o certificado A1</strong>: falta pôr o .pfx e a senha na VPS (passo 3 do INSTALAR.md).</p>';
     const dias = Math.floor((new Date(c.validoAte).getTime() - Date.now()) / 864e5);
-    return '<p class="' + (dias < 30 ? 'alerta' : 'dica') + '">Serviço fiscal ' + esc(saude.versao) + ' no ar · certificado de <strong>' + esc(c.titular || c.cnpj || '') + '</strong> válido até <strong>' +
+    return '<p class="' + (dias < 30 ? 'alerta' : 'dica') + '">Serviço fiscal ' + esc(saude.versao) + ' no ar · certificado de <strong>' + esc((/CN=([^,\n]+?)(?:\s+E:|,|\n|$)/.exec(c.titular || '') || [])[1] || c.titular || c.cnpj || '') + '</strong> válido até <strong>' +
       esc(new Date(c.validoAte).toLocaleDateString('pt-BR')) + '</strong> (' + (dias < 0 ? 'VENCIDO' : dias + ' dia(s)') + ')' + (dias < 30 ? ' — <strong>renovar o A1</strong> e trocar o arquivo na VPS.' : '.') + '</p>';
   }
   function secaoFiscal() {
