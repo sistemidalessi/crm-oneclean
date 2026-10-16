@@ -149,6 +149,11 @@
 
   function desenha(pdf, d, op) {
     op = op || {};
+    // Cores da empresa (op.cores = { principal, destaque }, as do config.js): barra dos títulos, rótulos e linhas, como a
+    // DANFSE da Agilité. Só cor: os quadros, a ordem e os campos são os do Manual da DANFE; o código de barras fica preto
+    // no branco (leitura). Sem cores, sai em preto, como antes.
+    const cor = op.cores || {}, C = { borda: cor.principal || 0, rotulo: cor.principal || 0, barra: cor.principal || null, destaque: cor.destaque || null,
+      fundo: cor.principal ? (cor.fundo || '#eef4f6') : null };
     const fonte = (tam, negrito) => { pdf.setFont('helvetica', negrito ? 'bold' : 'normal'); pdf.setFontSize(tam); };
     const largura = (t, tam) => pdf.getStringUnitWidth(t) * tam / pdf.internal.scaleFactor;
     // texto numa linha, encolhendo até 5 pt e depois cortando, para caber em w
@@ -160,13 +165,15 @@
       return { t, s };
     }
     const linha = (x1, y1, x2, y2) => pdf.line(x1, y1, x2, y2);
-    function caixa(x, y, w, h) { pdf.setDrawColor(0); pdf.setLineWidth(0.2); pdf.rect(x, y, w, h); }
+    function caixa(x, y, w, h) { pdf.setDrawColor(C.borda); pdf.setLineWidth(0.2); pdf.rect(x, y, w, h); }
     // célula com rótulo pequeno em cima e o valor embaixo
     function cel(x, y, w, h, rotulo, v, o) {
       o = o || {};
       caixa(x, y, w, h);
       fonte(4.6, false);
+      pdf.setTextColor(C.rotulo);
       pdf.text(cabe(rotulo, w - 1.2, 4.6, 3.8).t, x + 0.7, y + 0.6, { baseline: 'top' });
+      pdf.setTextColor(0);
       if (v == null || v === '') return;
       const f = cabe(String(v), w - 1.6, o.tam || 7.6);
       fonte(f.s, o.negrito);
@@ -180,7 +187,14 @@
       cels.forEach(c => { cel(x, y, c[0], h || H_CEL, c[1], c[2], c[3]); x += c[0]; });
       return y + (h || H_CEL);
     }
-    function titulo(y, t) { fonte(5.6, true); pdf.text(limpa(t), X, y + H_TIT - 0.6, { baseline: 'bottom' }); return y + H_TIT; }
+    function titulo(y, t) {
+      fonte(5.6, true);
+      if (!C.barra) { pdf.text(limpa(t), X, y + H_TIT - 0.6, { baseline: 'bottom' }); return y + H_TIT; }
+      pdf.setFillColor(C.barra); pdf.rect(X, y + 0.3, W, H_TIT - 0.5, 'F');
+      if (C.destaque) { pdf.setFillColor(C.destaque); pdf.rect(X, y + 0.3, 1.2, H_TIT - 0.5, 'F'); }
+      pdf.setTextColor(255); pdf.text(limpa(t), X + (C.destaque ? 2.2 : 1), y + H_TIT - 0.75, { baseline: 'bottom' }); pdf.setTextColor(0);
+      return y + H_TIT;
+    }
     function quebra(t, w, tam) { fonte(tam, false); return pdf.splitTextToSize(limpa(t), w); }
     const e = d.emitente, de = d.destinatario, end = de.endereco || {}, t = d.totais || {}, tr = d.transporte || {};
 
@@ -219,7 +233,7 @@
       const h = 33;
       // emitente
       caixa(X, y, 82, h);
-      fonte(4.6, false); pdf.text('IDENTIFICAÇÃO DO EMITENTE', X + 0.7, y + 0.6, { baseline: 'top' });
+      fonte(4.6, false); pdf.setTextColor(C.rotulo); pdf.text('IDENTIFICAÇÃO DO EMITENTE', X + 0.7, y + 0.6, { baseline: 'top' }); pdf.setTextColor(0);
       let yy = y + 3.2;
       if (op.logo && op.logo.data) {
         const lh = 10, lw = Math.min(50, lh * (op.logo.proporcao || 2));
@@ -241,7 +255,7 @@
       // quadro DANFE
       const xd = X + 82, wd = 34;
       caixa(xd, y, wd, h);
-      fonte(12, true); pdf.text('DANFE', xd + wd / 2, y + 5, { align: 'center' });
+      fonte(12, true); pdf.setTextColor(C.rotulo); pdf.text('DANFE', xd + wd / 2, y + 5, { align: 'center' }); pdf.setTextColor(0);
       fonte(5.6, false);
       pdf.text(['DOCUMENTO AUXILIAR DA', 'NOTA FISCAL ELETRÔNICA'], xd + wd / 2, y + 8, { align: 'center' });
       fonte(6.4, false);
@@ -273,10 +287,12 @@
       const hc = 5.6;
       let x = X;
       COLS.forEach(c => {
+        if (C.fundo) { pdf.setFillColor(C.fundo); pdf.rect(x, y, c[0], hc, 'F'); }
         caixa(x, y, c[0], hc);
-        fonte(4.4, false);
+        fonte(4.4, false); pdf.setTextColor(C.rotulo);
         const l = pdf.splitTextToSize(c[1], c[0] - 0.8);
         pdf.text(l.slice(0, 2), x + c[0] / 2, y + (l.length > 1 ? 1.4 : 2.6), { align: 'center', baseline: 'top' });
+        pdf.setTextColor(0);
         x += c[0];
       });
       y += hc;
@@ -285,7 +301,7 @@
       COLS.slice(0, -1).forEach(c => { x += c[0]; linha(x, y, x, ate); });
       let yy = y + 0.4;
       lista.forEach((r, k) => {
-        if (k) { pdf.setDrawColor(215); linha(X, yy - 0.2, X + W, yy - 0.2); pdf.setDrawColor(0); }
+        if (k) { pdf.setDrawColor(215); linha(X, yy - 0.2, X + W, yy - 0.2); pdf.setDrawColor(C.borda); }
         const it = r.it, base = yy + LH;
         fonte(TAM_IT, false);
         let xc = X;
@@ -318,14 +334,15 @@
         caixa(X, y, W - wn, 9.4);
         const l = quebra(txt, W - wn - 1.6, 5.6);
         fonte(5.6, false); pdf.text(l.slice(0, 3), X + 0.8, y + 2.6);
-        caixa(X, y + 9.4, 40, 8); fonte(4.6, false); pdf.text('DATA DE RECEBIMENTO', X + 0.7, y + 10, { baseline: 'top' });
-        caixa(X + 40, y + 9.4, W - wn - 40, 8); pdf.text('IDENTIFICAÇÃO E ASSINATURA DO RECEBEDOR', X + 40.7, y + 10, { baseline: 'top' });
+        caixa(X, y + 9.4, 40, 8); fonte(4.6, false); pdf.setTextColor(C.rotulo); pdf.text('DATA DE RECEBIMENTO', X + 0.7, y + 10, { baseline: 'top' });
+        caixa(X + 40, y + 9.4, W - wn - 40, 8); pdf.text('IDENTIFICAÇÃO E ASSINATURA DO RECEBEDOR', X + 40.7, y + 10, { baseline: 'top' }); pdf.setTextColor(0);
         caixa(X + W - wn, y, wn, 17.4);
-        fonte(10, true); pdf.text('NF-e', X + W - wn / 2, y + 5.4, { align: 'center' });
+        fonte(10, true); pdf.setTextColor(C.rotulo); pdf.text('NF-e', X + W - wn / 2, y + 5.4, { align: 'center' }); pdf.setTextColor(0);
         fonte(8, true); pdf.text('Nº ' + numeroNF(d.numero), X + W - wn / 2, y + 10.4, { align: 'center' });
         pdf.text('SÉRIE ' + String(d.serie || '').padStart(3, '0'), X + W - wn / 2, y + 14.4, { align: 'center' });
         y += 17.4 + 1.6;
-        pdf.setLineDashPattern([1, 1], 0); linha(X, y, X + W, y); pdf.setLineDashPattern([], 0);
+        if (C.destaque) pdf.setDrawColor(C.destaque);
+        pdf.setLineDashPattern([1, 1], 0); linha(X, y, X + W, y); pdf.setLineDashPattern([], 0); pdf.setDrawColor(C.borda);
         y += 1.6;
       }
       y = cabecalho(y, i + 1);

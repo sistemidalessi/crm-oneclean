@@ -320,7 +320,7 @@
       if (!d) throw new Error('não consegui ler o XML da nota');
       if (n && n.situacao === 'cancelada') Object.assign(d, { autorizada: false, marca: 'NF-e CANCELADA' });
       const pdf = new raiz.jspdf.jsPDF({ unit: 'mm', format: 'a4', compress: true });
-      Dn.desenha(pdf, d, { logo: await pegaLogo() });
+      Dn.desenha(pdf, d, { logo: await pegaLogo(), cores: (raiz.CRM_CONFIG || {}).cores });
       pdf.save('DANFE-NF' + (n ? n.serie + '-' + n.numero : d.numero) + '.pdf');
     } catch (e) { CRM.falhou(e); }
   }
