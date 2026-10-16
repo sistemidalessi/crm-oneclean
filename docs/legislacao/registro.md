@@ -6,6 +6,42 @@ urgência. O vigia só escreve aqui; quem muda o sistema é a sessão de desenvo
 
 <!-- novas entradas abaixo desta linha -->
 
+## 16/10/2026 — CNPJ alfanumérico já vale na NF-e (desde 01/07/2026)
+- **O que mudou:** a Receita passou a atribuir CNPJ com letras e números (12 primeiras posições alfanuméricas, 2
+  dígitos verificadores numéricos). A **NT 2026.004** (v1.00 de abril, v1.01 de 08/06/2026) mudou o esquema da NF-e/NFC-e:
+  campos de CNPJ (emitente, destinatário, transportador, autorizados) e a **chave de acesso de 44 posições** passam a
+  aceitar letras; a inutilização (NFeInutilizacao) também.
+- **Norma e link:** IN RFB nº 2.229/2024; NT 2026.004 v1.01 — https://www.nfe.fazenda.gov.br/portal/ (Documentos →
+  Notas Técnicas). Resumo: https://documentacao.senior.com.br/exigenciaslegais/noticias/federal/2026/2026-06-08-nf-e-nfc-e-nota-tecnica-no-2026-004-v-1-01-cnpj-alfanumerico-atualizacoes/
+- **Desde quando:** homologação 15/06/2026, **produção 01/07/2026** (os CNPJs antigos, só números, continuam válidos).
+- **O que muda no sistema:** o CRM trata CNPJ como **só dígitos** em vários lugares — `regras.js` `chaveDoc`/`digitos`
+  (a chave do "mesmo cadastro"), a trava do banco `crm_doc` (`schema.sql`), `nfe.js` (acha o cliente pelo CNPJ,
+  `R.digitos(e.cnpj)`, emitente, raiz de 8 dígitos da filial), `financeiro.js`/`fkn.js` (contas a receber e a pagar),
+  `orcamento.js`, `cobranca.js` (CNPJ do boleto) e a chave de 44 dígitos das notas. Um cliente novo com CNPJ
+  alfanumérico **perderia as letras**: não seria achado, a trava de duplicado não o pegaria e a validação de 14 dígitos o
+  descartaria. O serviço fiscal (Fase 4) precisa do esquema novo e do cálculo do DV alfanumérico (valor ASCII − 48).
+- **Urgência:** **média-alta** — a emissão já aceita esses CNPJs desde julho e os primeiros clientes com CNPJ novo podem
+  aparecer a qualquer momento; hoje o sistema só lê notas (não quebra a emissão), mas erra o cadastro.
+
+## 16/10/2026 — Manifestação do destinatário: prazo caiu para 90 dias (desde 01/06/2026)
+- **O que mudou:** a manifestação conclusiva (confirmação da operação, desconhecimento, operação não realizada) passou de
+  180 para **90 dias** contados da autorização da NF-e; a ciência da emissão segue com prazo próprio (curto — conferir).
+- **Norma e link:** Ajuste SINIEF 14/2026; NT 2020.001 v1.60 (publicada em 23/04/2026) — https://www.nfe.fazenda.gov.br/portal/
+- **Desde quando:** homologação 15/05/2026, produção 01/06/2026.
+- **O que muda no sistema:** o serviço fiscal (a fazer) que lê as notas de compra pelo DF-e deve dar ciência logo e
+  avisar a confirmação **antes de 90 dias** (lembrete com folga, por exemplo em 60 dias). Atualizar `monitoramento.md`
+  (linha "Notas de compra").
+- **Urgência:** **baixa** — nada no sistema faz manifestação ainda; vale para o desenho da Fase de notas de compra.
+
+## 16/10/2026 — Tabelas de IBS/CBS (cClassTrib, CST, crédito presumido) v1.70: prazo 16/10/2026
+- **O que mudou:** Informe Técnico 2025.002 v1.70 (publicado em 01/10/2026) atualiza as tabelas de classificação
+  tributária, CST e crédito presumido do IBS/CBS (9 códigos novos de cClassTrib, indicadores de uso por documento em 10
+  códigos, colunas novas na de crédito presumido). Os autorizadores têm até **16/10/2026** para aplicar.
+- **Link oficial:** https://www.nfe.fazenda.gov.br/portal/ e https://dfe-portal.svrs.rs.gov.br/NFe/Documentos
+- **O que muda no sistema:** o serviço fiscal (a fazer) deve usar a tabela vigente na data da operação (guardar a versão);
+  conferir o cClassTrib da venda normal de limpeza/descartáveis/EPI com o contador antes de emitir.
+- **Urgência:** **baixa** agora; vira obrigatória quando a emissão direta começar.
+
 ## 15/10/2026 — Perfumaria e higiene pessoal fora da ST em SP desde 01/04/2026 (A CONFIRMAR para papel)
 - **O que mudou:** notícias de contabilidades citam a **Portaria SRE 94/2025** (DOE 23/12/2025), que revogou o
   **Anexo XI da Portaria CAT 68/2019** (perfumaria e higiene pessoal) e a SRE 48/2025 (MVA), com efeito em
