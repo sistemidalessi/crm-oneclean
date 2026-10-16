@@ -84,23 +84,39 @@ sudo -u oneclean-fiscal env $(xargs < /etc/oneclean-fiscal.env) node diagnostico
 Tem de mostrar o titular (OneClean e o CNPJ), a validade do certificado e `107 — Servico em Operacao`.
 
 - `Falhou: ... mac verify failure` ou `invalid password`: a senha ficou errada; repita o 4b.
-- `Falhou: ... unable to get local issuer certificate` (ou `unable to verify the first certificate`): o Node não
-  conhece a autoridade da ICP-Brasil que assina o servidor da Sefaz. Instalar a cadeia (o serviço **soma** essa
-  cadeia às autoridades normais; nunca desligar a conferência):
+- `Falhou: ... unable to get local issuer certificate`: o Node não conhece a raiz da ICP-Brasil que assina o
+  servidor da Sefaz (em 16/10/2026: servidor ← **AC SOLUTI SSL EV G4** ← **Autoridade Certificadora Raiz Brasileira
+  v10**, que o servidor não manda). Foi o que aconteceu na instalação de 16/10. O pacote zip do site do ITI **não
+  serve**: o site do ITI usa a mesma ICP-Brasil (a VPS não confia) e estava com o certificado HTTPS vencido (o Windows
+  recusa). O caminho que funcionou: baixar a raiz pelo endereço que o próprio intermediário da Sefaz informa e
+  conferir por dois caminhos.
 
   ```bash
-  apt install -y unzip
-  cd /tmp && rm -rf icp && mkdir icp && cd icp
-  curl -fsSLO https://acraiz.icpbrasil.gov.br/credenciadas/CertificadosAC-ICP-Brasil/ACcompactado.zip
-  unzip -q ACcompactado.zip
-  for f in $(find . -type f \( -iname '*.crt' -o -iname '*.cer' -o -iname '*.pem' \)); do
-    openssl x509 -in "$f" -inform DER -outform PEM 2>/dev/null || openssl x509 -in "$f" -outform PEM 2>/dev/null
-  done > /etc/oneclean-fiscal/cadeia.pem
-  grep -c "BEGIN CERTIFICATE" /etc/oneclean-fiscal/cadeia.pem     # dezenas de certificados
-  echo "FISCAL_CA=/etc/oneclean-fiscal/cadeia.pem" >> /etc/oneclean-fiscal.env
+  mkdir -p /tmp/icp && cd /tmp/icp && rm -f c*.pem raiz*
+  echo | openssl s_client -showcerts -connect homologacao.nfe.fazenda.sp.gov.br:443 -servername homologacao.nfe.fazenda.sp.gov.br 2>/dev/null | awk '/BEGIN CERTIFICATE/{n++} n{print > ("c" n ".pem")}'
+  URL=$(openssl x509 -in c2.pem -noout -ext authorityInfoAccess | grep -o 'CA Issuers - URI:[^ ]*' | head -1 | sed 's/.*URI://')
+  echo "ENDERECO: $URL"           # em 16/10/2026: http://acraiz.icpbrasil.gov.br/ICP-Brasilv10.crt
+  curl -fsSL "$URL" -o raiz.bin
+  openssl x509 -in raiz.bin -inform DER -out raiz-v10.pem 2>/dev/null || openssl x509 -in raiz.bin -out raiz-v10.pem
+  openssl x509 -in raiz-v10.pem -noout -subject -enddate
+  sha256sum raiz.bin              # em 16/10/2026: 3b3ef39649ba13e10a99bc042cfc112723d8e0503326174f15ab89941a0f33e0
+  openssl verify -CAfile raiz-v10.pem -untrusted c2.pem c1.pem    # tem de dar "c1.pem: OK"
+  ```
+
+  Conferir o mesmo arquivo baixado **pelo computador do escritório** (outra rede), no PowerShell:
+  `curl.exe -fsSLo $HOME\Downloads\raiz-v10.crt <ENDERECO>` e `certutil -hashfile $HOME\Downloads\raiz-v10.crt SHA256`.
+  Só se os dois códigos forem iguais:
+
+  ```bash
+  cp /tmp/icp/raiz-v10.pem /etc/oneclean-fiscal/cadeia.pem && chmod 644 /etc/oneclean-fiscal/cadeia.pem
+  grep -q FISCAL_CA /etc/oneclean-fiscal.env || echo "FISCAL_CA=/etc/oneclean-fiscal/cadeia.pem" >> /etc/oneclean-fiscal.env
   cd /opt/oneclean-fiscal/servico-fiscal
   sudo -u oneclean-fiscal env $(xargs < /etc/oneclean-fiscal.env) node diagnostico.js status homologacao
   ```
+
+  Em **produção** o servidor é `nfe.fazenda.sp.gov.br`: antes de passar o CRM para produção, rodar o
+  `diagnostico.js status producao`; se a raiz for outra, repetir o bloco acima com esse endereço e **somar** a raiz
+  nova ao `cadeia.pem` (`cat raiz-nova.pem >> /etc/oneclean-fiscal/cadeia.pem`).
 
 ## 6. Ligar o serviço e o endereço (na VPS)
 
