@@ -1090,6 +1090,7 @@
     const amb = fc.ambiente === 'producao' ? 'producao' : 'homologacao', serie = Number(fc.serie == null ? 2 : fc.serie), r2 = v => Math.round(v * 100) / 100;
     if (b.acao === 'saude') return { ok: true, versao: 'modo local (simulação)', certificado: { titular: 'ONECLEAN (simulação)', validoAte: new Date(Date.now() + 13 * 864e5).toISOString() } };
     if (b.acao === 'status') return { cStat: 107, xMotivo: 'Servico em Operacao (simulação do modo local)' };
+    if (b.acao === 'aprender_st') return { notas: 0, lidas: 0, semXml: 0, produtos: 0 };
     if (b.acao === 'previa' || b.acao === 'emitir') {
       if (!fc.emitente) throw new Error('falta configurar o emitente (aba Fiscal → Emissão)');
       const p = this._ped(b.pedido_id), e = (this.ler().empresas || []).find(x => x.id === p.empresa_id) || {};

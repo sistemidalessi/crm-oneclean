@@ -224,7 +224,10 @@
           : '<button type="button" class="btn sec" data-acao="nf-homologacao">Voltar para homologação</button>') + '</p>' +
       (amb === 'homologacao' ? '<p class="dica">Para passar para produção: serviço fiscal e certificado conferidos, Sefaz 107, e pelo menos uma nota de teste autorizada em homologação' +
         (nfes ? ' (até agora: ' + homAut + ')' : '') + '. O contador confere a tabela fiscal antes.</p>' : '') +
-      '<h3>Tabela do IBPT (tributos aproximados na nota, Lei 12.741)</h3>' + ibptHtml() + '</section>';
+      '<h3>Tabela do IBPT (tributos aproximados na nota, Lei 12.741)</h3>' + ibptHtml() +
+      '<h3>ICMS-ST já recolhido (produtos com CST 60)</h3><p class="dica">A nota do CRM informa, nos produtos com substituição tributária, o mesmo ICMS-ST que o FKN informa: ' +
+        'o CRM lê a nota mais recente do FKN de cada produto e guarda o valor por unidade. Rodar de novo de vez em quando (ou depois de uma compra com preço novo).</p>' +
+      '<p class="acoes"><button type="button" class="btn sec" data-acao="nf-aprender-st"' + (testando ? ' disabled' : '') + '>Aprender o ICMS-ST das notas do FKN</button></p></section>';
   }
 
   let ibpt = null, ibptCarregando = false;
@@ -458,6 +461,14 @@
     'nf-sefaz': async () => {
       testando = 'Perguntando à Sefaz…'; CRM.render();
       try { sefaz = Object.assign(await chama({ acao: 'status' }), { ambiente: ambiente() }); } catch (e) { sefaz = null; CRM.falhou(e); }
+      testando = ''; CRM.render();
+    },
+    'nf-aprender-st': async () => {
+      testando = 'Lendo as notas do FKN com ICMS-ST (pode levar um minuto)…'; CRM.render();
+      try {
+        const r = await chama({ acao: 'aprender_st' });
+        CRM.toast('ICMS-ST aprendido de ' + r.lidas + ' nota(s) do FKN: ' + r.produtos + ' produto(s).' + (r.semXml ? ' ' + r.semXml + ' nota(s) sem XML guardado.' : ''));
+      } catch (e) { CRM.falhou(e); }
       testando = ''; CRM.render();
     },
     'nf-do-xml': async () => {

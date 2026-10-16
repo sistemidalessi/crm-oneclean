@@ -2926,3 +2926,18 @@ end;
 $$;
 revoke all on function public.crm_ibpt_carregar(jsonb) from public, anon;
 grant execute on function public.crm_ibpt_carregar(jsonb) to authenticated;
+
+-- ICMS-ST retido (CST 60) como o FKN informa: a nota mais recente de cada produto com CST 60 (série do FKN, últimos 120
+-- dias). A crm-fiscal ("Aprender o ICMS-ST", aba Fiscal) lê esses XML e guarda o valor por unidade em
+-- crm_fiscal_produtos.regra.st_ret[unidade]. Só a chave de serviço.
+create or replace function public.crm_fiscal_st_amostras() returns table (codigo text, chave text, emitida_em timestamptz)
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if coalesce(auth.role(), '') <> 'service_role' then raise exception 'só o serviço'; end if;
+  return query
+  select distinct on (i.codigo) i.codigo, n.chave, n.emitida_em
+    from public.crm_fiscal_itens i join public.crm_notas n on n.id = i.nota_id
+   where i.cst_icms in ('60', '500') and not n.cancelada and n.chave is not null and n.emitida_em > now() - interval '120 days'
+   order by i.codigo, n.emitida_em desc;
+end;
+$$;

@@ -46,10 +46,18 @@ function notaDoPedido(o) {
     if (!r.ncm) { bloqueia.push('produto ' + cod + ' sem NCM'); return null; }
     if (r.situacao !== 'conferido') conferir.push('produto ' + cod + ': regra fiscal ainda é proposta (não conferida)');
     (r.alertas || []).forEach(a => conferir.push('produto ' + cod + ': ' + (a.texto || a)));
-    const q = num(it.quantidade), pu = num(it.preco);
+    const q = num(it.quantidade), pu = num(it.preco), unid = String(it.unidade || r.unidade || 'UN').toUpperCase();
+    // ICMS-ST já recolhido (CST 60): o mesmo que o FKN informa, por unidade vendida, aprendido das notas dele
+    // (crm_fiscal_produtos.regra.st_ret[unidade], botão na aba Fiscal) e multiplicado pela quantidade
+    let stRet = null;
+    if (['60', '500'].indexOf(String(v.cst_icms)) !== -1) {
+      const u = ((r.regra && r.regra.st_ret) || {})[unid];
+      if (u) stRet = { vBCSTRet: r2(num(u.vBCSTRet) * q), pST: num(u.pST), vICMSSubstituto: u.vICMSSubstituto == null ? null : r2(num(u.vICMSSubstituto) * q), vICMSSTRet: r2(num(u.vICMSSTRet) * q) };
+      else conferir.push('produto ' + cod + ': sem o ICMS-ST retido (' + unid + ') das notas do FKN; sai só com o CST 60 (aba Fiscal → "Aprender o ICMS-ST")');
+    }
     return { codigo: cod, descricao: it.descricao, ncm: r.ncm, cest: r.cest || null, gtin: r.gtin || null, origem: r.origem == null ? 0 : r.origem,
-      cfop: v.cfop, unidade: String(it.unidade || r.unidade || 'UN').toUpperCase(), quantidade: q, valorUnitario: pu, desconto: r2(q * pu * num(it.desconto) / 100),
-      icms: { cst: String(v.cst_icms), aliquota: num(v.aliq_icms) }, pis: { cst: String(v.cst_pis || '01'), aliquota: num(v.aliq_pis) },
+      cfop: v.cfop, unidade: unid, quantidade: q, valorUnitario: pu, desconto: r2(q * pu * num(it.desconto) / 100),
+      icms: { cst: String(v.cst_icms), aliquota: num(v.aliq_icms), stRet }, pis: { cst: String(v.cst_pis || '01'), aliquota: num(v.aliq_pis) },
       cofins: { cst: String(v.cst_cofins || '01'), aliquota: num(v.aliq_cofins) }, pedidoCliente: d.seu_pedido || null };
   }).filter(Boolean);
   if (!itens.length && !bloqueia.length) bloqueia.push('o pedido não tem itens');

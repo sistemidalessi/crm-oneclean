@@ -66,6 +66,48 @@ async function dadosDoPedido(db: ReturnType<typeof createClient>, pedidoId: stri
   return { pedido: p, empresa: empresa as Linha, regras, fiscal, vendedorNome, ibpt };
 }
 
+// ICMS-ST retido (CST 60) como o FKN informa: da nota mais recente de cada produto com CST 60, o valor POR UNIDADE
+// vendida (vBCSTRet, pST, vICMSSubstituto, vICMSSTRet ÷ qCom), separado pela unidade (UN, CX…), em
+// crm_fiscal_produtos.regra.st_ret. A nota do CRM multiplica pela quantidade (servico-fiscal/pedido.js).
+async function aprenderSt(db: ReturnType<typeof createClient>) {
+  const { data: am, error } = await db.rpc('crm_fiscal_st_amostras');
+  if (error) throw new Error(error.message);
+  const chaves = [...new Set(((am || []) as Linha[]).map(a => String(a.chave)))];
+  const pega = (x: string, t: string) => ((new RegExp('<' + t + '>([^<]*)</' + t + '>').exec(x) || [])[1] ?? null);
+  const achado: Record<string, Record<string, Linha & { quando: string }>> = {};
+  let lidas = 0, semXml = 0;
+  for (let i = 0; i < chaves.length; i += 6) {
+    await Promise.all(chaves.slice(i, i + 6).map(async ch => {
+      const r = await db.storage.from('crm-notas-xml').download('nfe/' + ch + '.xml');
+      if (r.error) { semXml++; return; }
+      const x = await r.data.text(); lidas++;
+      const quando = pega(x, 'dhEmi') || '', numero = pega(x, 'nNF');
+      for (const m of x.matchAll(/<det nItem="\d+">([\s\S]*?)<\/det>/g)) {
+        const d = m[1], g = (/<ICMS60>([\s\S]*?)<\/ICMS60>/.exec(d) || /<ICMSSN500>([\s\S]*?)<\/ICMSSN500>/.exec(d) || [])[1];
+        if (!g) continue;
+        const cod = String(pega(d, 'cProd') || '').replace(/\.\d+$/, ''), un = String(pega(d, 'uCom') || 'UN').toUpperCase(), q = Number(pega(d, 'qCom')) || 0;
+        if (!cod || !(q > 0) || pega(g, 'vBCSTRet') == null) continue;
+        const ja = achado[cod]?.[un];
+        if (ja && ja.quando >= quando) continue;
+        const por = (t: string) => { const v = pega(g, t); return v == null ? null : Math.round(Number(v) / q * 1e6) / 1e6; };
+        (achado[cod] = achado[cod] || {})[un] = { vBCSTRet: por('vBCSTRet'), pST: Number(pega(g, 'pST')) || 0, vICMSSubstituto: por('vICMSSubstituto'), vICMSSTRet: por('vICMSSTRet'),
+          nota: numero, quando };
+      }
+    }));
+  }
+  const cods = Object.keys(achado);
+  let gravados = 0;
+  for (let i = 0; i < cods.length; i += 100) {
+    const { data: ps } = await db.from('crm_fiscal_produtos').select('codigo, regra').in('codigo', cods.slice(i, i + 100));
+    for (const p of (ps || []) as Linha[]) {
+      const regra = Object.assign({}, (p.regra as Linha) || {}, { st_ret: Object.assign({}, ((p.regra as Linha) || {}).st_ret as Linha || {}, achado[String(p.codigo)]) });
+      const { error: e2 } = await db.from('crm_fiscal_produtos').update({ regra }).eq('codigo', p.codigo);
+      if (!e2) gravados++;
+    }
+  }
+  return { notas: chaves.length, lidas, semXml, produtos: gravados };
+}
+
 const ambienteDe = (fiscal: Linha) => (fiscal.ambiente === 'producao' ? 'producao' : 'homologacao');
 
 async function gravaResultado(db: ReturnType<typeof createClient>, nfeId: string, r: Linha, eu: string) {
@@ -110,6 +152,10 @@ Deno.serve(async (req) => {
     const fiscal = ((cfgRow as Linha | null)?.dados as Linha | undefined)?.fiscal as Linha | undefined || {};
     const amb = ambienteDe(fiscal), serie = Number(fiscal.serie ?? 2);
     if (acao === 'status') return resposta(200, await servico('/status', { ambiente: amb }));
+    if (acao === 'aprender_st') {
+      if (eu.papel !== 'admin') throw new Error('só o administrador');
+      return resposta(200, await aprenderSt(db));
+    }
 
     if (acao === 'previa' || acao === 'emitir') {
       const d = await dadosDoPedido(db, String(b.pedido_id));

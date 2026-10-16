@@ -86,7 +86,8 @@ test('XML assinado passa no esquema oficial da NF-e (PL_010 v1.30, com IBS/CBS) 
     for (const amb of ['homologacao', 'producao']) {
       const comTrib = amb === 'producao';   // produção também com os tributos aproximados (IBPT) e o aviso ao fisco
       const m = N.monta(nota({ ambiente: amb, frete: { modFrete: 0, valor: 12.5, volumes: { qVol: 5, esp: 'CAIXAS' } },
-        itens: nota().itens.map(it => Object.assign({}, it, comTrib ? { vTotTrib: 4.27 } : {})), infAdFisco: comTrib ? 'Operacao sujeita ao disposto na Lei Complementar no 224/2025;' : undefined,
+        itens: nota().itens.map(it => Object.assign({}, it, comTrib ? { vTotTrib: 4.27 } : {},
+          comTrib && it.icms.cst === '60' ? { icms: { cst: '60', stRet: { vBCSTRet: 13.95, pST: 18, vICMSSubstituto: 1.71, vICMSSTRet: 0.8 } } } : {})), infAdFisco: comTrib ? 'Operacao sujeita ao disposto na Lei Complementar no 224/2025;' : undefined,
         cobranca: { duplicatas: [{ vencimento: '2026-11-19', valor: 78.89 }, { vencimento: '2026-12-19', valor: 78.89 }] } }));
       const sig = A.assinaElemento(m.infNFe, m.id, certPem, keyPem);
       const nfe = N.nfeCompleta(m.infNFe, sig);
@@ -183,7 +184,8 @@ const regras = { '010043': regraVenda('5102', '00', '01'), '250011': regraVenda(
 
 test('pedido → nota: caixa vira o código do produto, desconto em R$, parcelas, vendedor no texto da nota', () => {
   const r = PD.notaDoPedido({ pedido, empresa: cliente, regras, emitente, ambiente: 'homologacao', serie: 2, numero: 31, emissao: '2026-10-20T10:00:00-03:00', vendedorNome: 'Renata' });
-  assert.deepStrictEqual(r.avisos, { bloqueia: [], conferir: ['tabela do IBPT não carregada (aba Fiscal): a nota sai sem os tributos aproximados'] });
+  assert.deepStrictEqual(r.avisos, { bloqueia: [], conferir: ['produto 250011: sem o ICMS-ST retido (CX) das notas do FKN; sai só com o CST 60 (aba Fiscal → "Aprender o ICMS-ST")',
+    'tabela do IBPT não carregada (aba Fiscal): a nota sai sem os tributos aproximados'] });
   const n = r.nota;
   assert.deepStrictEqual(n.itens.map(i => [i.codigo, i.unidade, i.cfop, i.desconto]), [['010043', 'GL', '5102', 0], ['250011', 'CX', '5405', 9.41]]);
   assert.strictEqual(r.total, 220.35);
@@ -227,4 +229,16 @@ test('tributos aproximados (Lei 12.741) pela tabela do IBPT: por item, no total 
   assert.match(x, /<vNF>220.35<\/vNF><vTotTrib>69.30<\/vTotTrib><\/ICMSTot>/);
   const fora = PD.notaDoPedido({ pedido, empresa: cliente, regras, emitente, ambiente: 'homologacao', serie: 2, numero: 31, emissao: '2026-10-20T10:00:00-03:00', ibpt: { '48181000': ibpt['34022000'] } });
   assert.ok(fora.avisos.conferir.some(x => /010043.*fora da tabela do IBPT/.test(x)));
+});
+
+test('ICMS-ST retido (CST 60): o valor por unidade aprendido do FKN vezes a quantidade; sem ele, avisa', () => {
+  const r60 = Object.assign({}, regras['250011'], { regra: Object.assign({}, regras['250011'].regra,
+    { st_ret: { CX: { vBCSTRet: 46.48, pST: 18, vICMSSubstituto: 5.69, vICMSSTRet: 2.67 } } }) });
+  const p2 = Object.assign({}, pedido, { itens: [pedido.itens[0], Object.assign({}, pedido.itens[1], { quantidade: 2 })] });
+  const r = PD.notaDoPedido({ pedido: p2, empresa: cliente, regras: { '010043': regras['010043'], '250011': r60 }, emitente, ambiente: 'homologacao', serie: 2, numero: 31, emissao: '2026-10-20T10:00:00-03:00' });
+  assert.deepStrictEqual(r.nota.itens[1].icms.stRet, { vBCSTRet: 92.96, pST: 18, vICMSSubstituto: 11.38, vICMSSTRet: 5.34 });
+  assert.match(N.monta(r.nota).infNFe, /<ICMS60><orig>0<\/orig><CST>60<\/CST><vBCSTRet>92.96<\/vBCSTRet><pST>18.00<\/pST><vICMSSubstituto>11.38<\/vICMSSubstituto><vICMSSTRet>5.34<\/vICMSSTRet><\/ICMS60>/);
+  const sem = PD.notaDoPedido({ pedido, empresa: cliente, regras, emitente, ambiente: 'homologacao', serie: 2, numero: 31, emissao: '2026-10-20T10:00:00-03:00' });
+  assert.ok(sem.avisos.conferir.some(x => /250011: sem o ICMS-ST retido \(CX\)/.test(x)));
+  assert.strictEqual(sem.nota.itens[1].icms.stRet, null);
 });

@@ -206,7 +206,9 @@
     const linhas = resumo.map(F.analisa).map(a => {
       const ja = atuais.get(a.codigo);
       const base = { codigo: a.codigo, descricao: a.descricao, unidade: a.unidade, alertas: a.alertas };
-      return ja && ja.situacao === 'conferido' ? base : Object.assign(base, { ncm: a.ncm, cest: a.cest, gtin: a.gtin, origem: a.origem, regra: a.regra, situacao: 'proposta' });
+      // o ICMS-ST aprendido das notas (regra.st_ret, emissao.js) não se perde ao refazer a proposta
+      const regra = ja && ja.regra && ja.regra.st_ret ? Object.assign({}, a.regra, { st_ret: ja.regra.st_ret }) : a.regra;
+      return ja && ja.situacao === 'conferido' ? base : Object.assign(base, { ncm: a.ncm, cest: a.cest, gtin: a.gtin, origem: a.origem, regra, situacao: 'proposta' });
     });
     await CRM.store().fiscalProdutosSalvar(linhas);
     produtos = await CRM.store().fiscalProdutos();

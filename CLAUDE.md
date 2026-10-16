@@ -1264,7 +1264,13 @@ o serviço na VPS da Agilité (não no servidor do escritório).
   não manda `infRespTec`. Também feito em 16/10: DANFE com as cores da empresa (`op.cores`), **NF-e em lote** em Pedidos →
   Separação (marca os separados, pula pendências, para se a Sefaz não responder, DANFEs num PDF só), lista de clientes do
   pedido em ordem alfabética. Função temporária `crm-amostra-xml` (leitura de amostras) **desligada** (410).
-  **Próximos, na ordem:** (1) ICMS-ST retido nos itens 5405 e teste 3 em homologação com produto 5405; (2) "de acordo" do
+  **ICMS-ST retido (16/10, noite) — código pronto:** `crm-fiscal` v6 ação `aprender_st` (botão "Aprender o ICMS-ST das notas
+  do FKN" na aba Fiscal, só admin): `crm_fiscal_st_amostras()` dá a nota mais recente do FKN de cada produto com CST 60
+  (120 dias); lê o XML guardado e grava por UNIDADE (UN/CX…) em `crm_fiscal_produtos.regra.st_ret` (vBCSTRet, pST,
+  vICMSSubstituto, vICMSSTRet ÷ qCom). `pedido.js` multiplica pela quantidade; sem o valor, avisa e sai só com o CST 60.
+  "Atualizar as propostas" (fiscal.js) preserva o `st_ret`. **Falta:** Anderson clicar no botão (dá de casa) e, no escritório,
+  `git pull` + restart na VPS (o `pedido.js` roda lá); depois o teste 3 com produto 5405.
+  **Próximos, na ordem:** (1) teste 3 em homologação com produto 5405; (2) "de acordo" do
   contador nas 1.190 regras (todas "proposta"); (3) boleto pelo BB (Fase 5; Anderson pede ao gerente a API de Cobrança e
   cadastra no portal de desenvolvedores do BB); (4) Fase 4b (devolução, bonificação, troca; 5117 e 6108 são raros);
   (5) IBPT atual e automático (cadastro gratuito no "De Olho no Imposto", chave nos Secrets); (6) notas de compra pela
