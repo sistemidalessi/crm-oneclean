@@ -1119,7 +1119,7 @@ O CRM tem o próprio estoque, **em paralelo com o FKN** (o FKN continua o dono a
 - **Começar** (`crm_estoque_iniciar`, só admin, uma vez): saldo inicial = **"atual" da última listagem do FKN** (o físico,
   com o reservado para cliente; "saldo" do FKN = atual − reservado), na hora em que ela foi gerada (cabeçalho DATA +
   hora, `fkn.js posicaoListagem`); as notas emitidas depois disso que já estão no CRM viram saída na hora.
-  **Ainda não foi começado**: falta o Anderson clicar em "Começar" (depois de chegar uma listagem com a hora).
+  **Começado pelo Anderson em 16/10** com a listagem das 11:56 (1.713 produtos; 1ª conferência: 0 diferença).
 - **Saídas**: gatilho em `crm_nota_itens` (vigia e importação) → `crm_estoque_saida_item` (uma vez por item; não move CFOP
   de entrada, 5922/6922, serviço; nota cancelada estorna; item apagado estorna). **Unidade**: venda "CX" de produto
   controlado em PT/UN multiplica pelo fator da caixa fechada (`crm_estoque_unidades`, refeito a cada listagem por
@@ -1140,6 +1140,51 @@ O CRM tem o próprio estoque, **em paralelo com o FKN** (o FKN continua o dono a
 - **Lição (16/10):** pelo conector do Supabase, comandos com `delete`, `drop` ou `revoke` (até dentro do corpo de uma
   função) pedem confirmação e caem por tempo. Desenhar sem eles (ex.: conferência que não apaga) e, quando forem
   inevitáveis, passar o SQL para o Anderson rodar no SQL Editor (como em 16/10: limpeza dos boletos e as travas).
+
+## Pedido de venda, liberação e separação — Fase 3 da saída do FKN (16/10/2026, pedido do Anderson)
+
+Aba **Pedidos** (`pedidos.js`: regra pura `CRMPedidos`, testes em `testes/pedidos.test.js`; banco no fim do `schema.sql`).
+Copia o jeito das telas do FKN que o Anderson mandou em 16/10: **SIFN138** (orçamento: Dados cadastrais + Produtos),
+**SIFN006** (pedido: Dados cadastrais, Comentários, Produtos, "Texto da nota") e **Sifn050** (pendência/liberação: situação
+BLOQUEADO/liberado, bloqueios ESTOQUE / ATRASO DUPL / SEM ENTRADA, lista de separação "SP" que junta pedidos = o **bolão**).
+- **Fluxo:** orçamento (proposta no negócio, PDF da OneClean) → **pedido** (reserva o estoque) → bloqueado ou liberado →
+  **lista de separação** (bolão: somado por produto na ordem do galpão, depois pedido a pedido com caixinha) → separado
+  ("A EMITIR NF") → a nota que chega pelo vigia **fatura o pedido sozinha** (`crm_pedidos_casar_int`: mesmo cliente, emitida
+  depois do pedido, até 20 dias, ≥ 60% dos produtos) e solta a reserva; "Faturar…" escolhe a nota à mão.
+- **Entradas:** "+ Novo orçamento / pedido" (aba Pedidos ou "+ orçamento / pedido" na ficha do negócio); **"Virar pedido"**
+  em qualquer proposta (do FKN importada ou do CRM) na ficha e na aba Orçamentos. Pedido do orçamento marca a proposta
+  "aprovada" e pergunta se marca o negócio como ganho. Orçamento feito no CRM: `propostas.dados.orcamento = true`
+  (o PDF diz "Orçamento", com os cartões de frete/pagamento como o do FKN).
+- **Grade de produtos** como a do FKN: item, código, nome, un, qtde, **Ñ atend.** (falta), preço, desc, margem (só
+  gestora/admin), total, **faixa** (A–F e negativa da tabela PADRAO sobre o "ven" da listagem: +0/5/10/15/20/25%, −10%;
+  `cfg.tabela_precos`), comissão % (planos `P.PLANOS_PADRAO`: escritório e comissionado; `cfg.comissao_planos` e
+  `cfg.comissao_usuarios` por user_id — **a tela de editar os planos e a apuração do mês são a Fase 3b**), desc s/tab e o
+  **disponível**. Botões da tabela (A…F) põem o preço da faixa; "Últimas compras" e "Importar últimas compras" saem das notas.
+- **Banco:** `crm_pedidos` (itens em **jsonb** de propósito: grava inteiro por função, sem apagar linha; o banco completa
+  base/fator/qtd_est/preco_tab/custo em `crm_pedido_itens_norm`), `crm_boloes`. Só leitura direta; tudo grava por função:
+  `crm_pedido_gravar`, `crm_pedido_situacao` (separado, aberto, cancelado com motivo, desfaturar), `crm_pedido_liberar`
+  (gestora/admin; bloqueio novo volta a segurar), `crm_pedido_comentar`, `crm_bolao_montar`, `crm_pedido_separar_item`,
+  `crm_pedido_notas_candidatas`/`crm_pedido_faturar`, `crm_pedidos_troca_empresa` (juntar cadastros: `ajustes.js`).
+  `crm_pedidos_atualizar` (casa notas e refaz os bloqueios) roda ao abrir a aba.
+- **Disponível** (`crm_estoque_disponivel`, plpgsql de propósito: 45 ms × 500 ms como função SQL) = físico (saldo do livro
+  do CRM; antes de começado, o "atual" do FKN) − reservado pelos pedidos em aberto/separação/separados. Caixa ".1" sai em
+  caixas. Custo só para gestora/admin/comprador. **Falta** (`crm_pedidos_faltas`): por ordem de chegada, o que está em
+  separação primeiro. A reserva do FKN (pend. cliente) **não** entra: no paralelo todo pedido deve passar pelo CRM.
+- **Bloqueios:** ESTOQUE (falta), ATRASO (duplicata vencida do cliente), SEM ENTRADA (pagamento "à vista/antecipado/pix/
+  transferência/depósito" sem "Entrada recebida"), PREÇO (item abaixo da faixa negativa; `cfg.pedido_trava_preco = false` desliga).
+- **Papel logística** (`crm_eh_logistica`): só a aba Pedidos (Pedidos, Consultar estoque, Separação, Faltas); não vê
+  cliente nem financeiro (endereço e telefone vão no próprio pedido, `dados`). O comprador vê Consultar estoque e Faltas.
+  **Falta o Anderson rodar no SQL Editor** a troca da trava de papel e os `revoke` (o conector não roda `drop`/`revoke`;
+  SQL entregue no chat de 16/10) antes de cadastrar alguém como Logística.
+- Testado em 16/10: banco real em transação desfeita (reserva, disponível, falta, 4 bloqueios, liberação só da gestora,
+  bolão, separação, comentário, comprador sem gravar, anônimo sem nada) e navegador (pedido, orçamento → PDF → virar
+  pedido, liberar, bolão, separado, faltas, menus por papel). Achado no teste: o Enter que insere o item também dispara o
+  "change" do campo antigo — cada linha de digitação tem um número (`ed.seq`) para isso não sujar a linha nova.
+- **Paralelo com o FKN:** até a Fase 4 a nota sai do FKN, então o pedido precisa existir lá também. O caminho sem digitar
+  duas vezes: orçamento no FKN → importar no CRM → "Virar pedido" no CRM; ou o pedido no CRM e a logística lança no FKN.
+  Pronto quando: uma semana de pedidos reais feitos no CRM conferidos com o que saiu no FKN.
+- Depois (3b e além): tela dos planos de comissão e apuração no mês fechado, faltas entrando na sugestão de compra de
+  Compras, restaurar pedido (já há "Importar últimas compras"), localização no galpão (o FKN tem o campo, vazio hoje).
 
 ## Fiscal — Fase 1 da saída do FKN (15/10/2026, pedido do Anderson)
 

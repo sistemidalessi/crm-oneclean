@@ -786,6 +786,7 @@
     if (ext.length !== (alvo.externos_mesclados || []).length) patch.externos_mesclados = ext;
     for (const t of ['contatos', 'negocios', 'atividades', 'notas']) await CRM.atualizarVarios(t, (E().D[t] || []).filter(x => s.has(x.empresa_id)).map(x => x.id), { empresa_id: marcado });
     await CRM.store().trocaEmpresaTitulos(outros, marcado); // pela função do banco: a gestora não lê os títulos
+    if (CRM.store().pedidosTrocaEmpresa) await CRM.store().pedidosTrocaEmpresa(outros, marcado); // pedidos (sem cascata: senão a exclusão abaixo recusa)
     // Unidades do grupo que apontavam para um cadastro que some passam a apontar para o que fica.
     await CRM.atualizarVarios('empresas', E().D.empresas.filter(x => s.has(x.grupo_id) && x.id !== marcado).map(x => x.id), { grupo_id: marcado });
     // Apaga os repetidos antes de completar o que fica: senão a trava de duplicado recusaria

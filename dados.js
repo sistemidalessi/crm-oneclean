@@ -870,6 +870,166 @@
     return { estoque: max(est), receber: max(tit), pagar: max((this.ler().fin_lancamentos || []).filter(x => x.chave_fkn)), recusas: [] };
   };
 
+  // Pedido de venda (Fase 3, 16/10/2026): carregado à parte (a tela Pedidos e a ficha). Os em aberto, em separação
+  // ou separados, e os faturados/cancelados dos últimos 60 dias. Tudo que grava é função do banco.
+  Supa.prototype.pedidos = async function () {
+    const desde = new Date(Date.now() - 60 * 864e5).toISOString(), out = [];
+    for (let de = 0; ; de += PAGINA) {
+      const l = unwrap(await comTentativas(() => this.sb.from('crm_pedidos').select('*').or('situacao.in.(aberto,separacao,separado),criado_em.gte.' + desde)
+        .order('criado_em', { ascending: false }).range(de, de + PAGINA - 1)));
+      out.push(...l);
+      if (l.length < PAGINA) return out;
+    }
+  };
+  Supa.prototype.estoqueDisponivel = async function () {
+    const out = [];
+    for (let de = 0; ; de += PAGINA) {
+      const l = unwrap(await comTentativas(() => this.sb.rpc('crm_estoque_disponivel').range(de, de + PAGINA - 1)));
+      out.push(...l);
+      if (l.length < PAGINA) return out;
+    }
+  };
+  Supa.prototype.pedidosAtualizar = async function () { return unwrap(await this.sb.rpc('crm_pedidos_atualizar')); };
+  Supa.prototype.pedidosFaltas = async function () { return unwrap(await this.sb.rpc('crm_pedidos_faltas')); };
+  Supa.prototype.boloes = async function () { return unwrap(await this.sb.from('crm_boloes').select('*').order('id', { ascending: false }).limit(60)); };
+  Supa.prototype.pedidoGravar = async function (p) { return unwrap(await this.sb.rpc('crm_pedido_gravar', { p })); };
+  Supa.prototype.pedidoSituacao = async function (id, para, motivo) { return unwrap(await this.sb.rpc('crm_pedido_situacao', { p_id: id, p_para: para, p_motivo: motivo || null })); };
+  Supa.prototype.pedidoLiberar = async function (id, liberar, entrada) {
+    return unwrap(await this.sb.rpc('crm_pedido_liberar', { p_id: id, p_liberar: liberar == null ? null : !!liberar, p_entrada: entrada == null ? null : !!entrada }));
+  };
+  Supa.prototype.pedidoComentar = async function (id, texto) { return unwrap(await this.sb.rpc('crm_pedido_comentar', { p_id: id, p_texto: texto })); };
+  Supa.prototype.bolaoMontar = async function (ids, obs) { return unwrap(await this.sb.rpc('crm_bolao_montar', { p_pedidos: ids, p_obs: obs || null })); };
+  Supa.prototype.pedidoSepararItem = async function (id, idx, ok) { return unwrap(await this.sb.rpc('crm_pedido_separar_item', { p_id: id, p_idx: idx, p_ok: !!ok })); };
+  Supa.prototype.pedidoNotasCandidatas = async function (id) { return unwrap(await this.sb.rpc('crm_pedido_notas_candidatas', { p_id: id })); };
+  Supa.prototype.pedidoFaturar = async function (id, nota) { return unwrap(await this.sb.rpc('crm_pedido_faturar', { p_id: id, p_nota: nota })); };
+  Supa.prototype.pedidosTrocaEmpresa = async function (de, para) { return de.length ? unwrap(await this.sb.rpc('crm_pedidos_troca_empresa', { p_de: de, p_para: para })) : 0; };
+
+  // Modo local (teste/demonstração): os pedidos ficam na memória e no navegador; o disponível vem do estoque local
+  // (o CSV do FKN), com a mesma conta do banco (falta por ordem de chegada, bloqueios ESTOQUE / SEM ENTRADA / PREÇO).
+  Local.prototype._peds = function () {
+    if (!this._pedidos) { try { this._pedidos = JSON.parse(raiz.localStorage.getItem('crm_pedidos') || '[]'); } catch (e) { this._pedidos = []; } }
+    return this._pedidos;
+  };
+  Local.prototype._pedsGrava = function () { try { raiz.localStorage.setItem('crm_pedidos', JSON.stringify(this._pedidos)); } catch (e) { /* só na memória */ } };
+  const ABERTOS = ['aberto', 'separacao', 'separado'];
+  const FATOR_LOCAL = 12; // caixa fechada no modo local (no banco vem de crm_estoque_unidades)
+  Local.prototype._fisico = async function () {
+    const m = new Map();
+    (await this.estoque()).forEach(e => { if (!/\.\d+$/.test(e.codigo)) m.set(e.codigo, e.estoque_atual != null ? Number(e.estoque_atual) : Number(e.quantidade || 0) + Number(e.pend_cliente || 0)); });
+    return m;
+  };
+  Local.prototype._faltas = async function () {
+    const fis = await this._fisico(), usado = new Map(), out = [];
+    this._peds().filter(p => ABERTOS.indexOf(p.situacao) !== -1).sort((a, b) => (a.situacao === 'aberto') - (b.situacao === 'aberto') || String(a.criado_em).localeCompare(String(b.criado_em)))
+      .forEach(p => (p.itens || []).forEach((it, idx) => {
+        if (!it.base || !fis.has(it.base)) return;
+        const depois = (usado.get(it.base) || 0) + Number(it.qtd_est);
+        usado.set(it.base, depois);
+        const f = Math.min(Number(it.qtd_est), depois - fis.get(it.base));
+        if (f > 0.0005) out.push({ pedido_id: p.id, idx, base: it.base, falta: Math.round(f / Number(it.fator || 1) * 1000) / 1000 });
+      }));
+    return out;
+  };
+  Local.prototype.pedidos = async function () { return this._peds().slice(); };
+  Local.prototype.estoqueDisponivel = async function () {
+    const est = await this.estoque(), fis = await this._fisico(), res = new Map();
+    this._peds().filter(p => ABERTOS.indexOf(p.situacao) !== -1).forEach(p => (p.itens || []).forEach(it => { if (it.base) res.set(it.base, (res.get(it.base) || 0) + Number(it.qtd_est)); }));
+    return est.map(e => {
+      const base = e.codigo.replace(/\.\d+$/, ''), f = /\.\d+$/.test(e.codigo) ? FATOR_LOCAL : 1, fi = fis.get(base) || 0, r = res.get(base) || 0;
+      return { codigo: e.codigo, descricao: e.descricao, unidade: e.unidade || (f > 1 ? 'CX' : null), localizacao: e.localizacao, linha: e.linha, familia: e.familia, situacao: e.situacao,
+        fisico: fi / f, reservado: r / f, disponivel: (fi - r) / f, a_caminho: f > 1 ? null : e.pend_fornecedor, preco_venda: e.preco_venda, custo: e.custo_unit, fator: f, base };
+    });
+  };
+  Local.prototype.pedidosAtualizar = async function () {
+    const falt = new Set((await this._faltas()).map(f => f.pedido_id));
+    this._peds().filter(p => p.situacao === 'aberto').forEach(p => {
+      p.bloqueios = [falt.has(p.id) && 'ESTOQUE', !p.entrada_ok && /(vista|antecipad|pix|transfer|dep[oó]sito)/i.test((p.dados || {}).pagamento || '') && 'SEM ENTRADA',
+        (p.itens || []).some(i => Number(i.preco_tab) > 0 && Number(i.preco) * (1 - Number(i.desconto || 0) / 100) < Number(i.preco_tab) * 0.9 - 0.00005) && 'PREÇO'].filter(Boolean);
+    });
+    this._pedsGrava();
+    return 0;
+  };
+  Local.prototype.pedidosFaltas = async function () { return this._faltas(); };
+  Local.prototype.boloes = async function () { return (this._boloes || []).slice().reverse(); };
+  Local.prototype.pedidoGravar = async function (p) {
+    const est = new Map((await this.estoque()).map(e => [e.codigo, e]));
+    const itens = (p.itens || []).map(x => {
+      const cod = x.codigo ? String(x.codigo).toUpperCase().trim().replace(/\.0+$/, '') : null, e = (cod && est.get(cod)) || {};
+      const base = cod && est.has(cod.replace(/\.\d+$/, '')) ? cod.replace(/\.\d+$/, '') : null, f = cod && /\.\d+$/.test(cod) ? FATOR_LOCAL : 1;
+      if (!(Number(x.quantidade) > 0)) throw new Error('quantidade precisa ser maior que zero');
+      return { codigo: cod, descricao: x.descricao || e.descricao || cod, unidade: x.unidade || e.unidade || null, quantidade: Number(x.quantidade), preco: Number(x.preco) || 0, desconto: Number(x.desconto) || 0,
+        total: Math.round(Number(x.quantidade) * Number(x.preco || 0) * (1 - Number(x.desconto || 0) / 100) * 100) / 100, obs: x.obs || null,
+        base, fator: f, qtd_est: Number(x.quantidade) * f, preco_tab: e.preco_venda == null ? null : e.preco_venda, custo: e.custo_unit == null ? null : e.custo_unit, separado: false };
+    });
+    if (!itens.length) throw new Error('o pedido não tem itens');
+    const vp = Math.round(itens.reduce((s, i) => s + i.total, 0) * 100) / 100, fr = Number(p.frete) || 0, agora = new Date().toISOString();
+    let r = p.id && this._peds().find(x => x.id === p.id);
+    if (r && r.situacao !== 'aberto') throw new Error('o pedido ' + r.numero + ' já está ' + r.situacao);
+    if (!r) {
+      r = { id: uuid(), numero: this._peds().reduce((m, x) => Math.max(m, x.numero), 0) + 1, situacao: 'aberto', comentarios: [], bloqueios: [], liberado: [], entrada_ok: false, criado_em: agora, criado_por: LOCAL_ADMIN };
+      this._peds().push(r);
+    }
+    Object.assign(r, { empresa_id: p.empresa_id, negocio_id: p.negocio_id || r.negocio_id || null, proposta_id: r.proposta_id || p.proposta_id || null, vendedor_id: p.vendedor_id || r.vendedor_id || LOCAL_ADMIN,
+      tipo: p.tipo || 'normal', entrega: p.entrega || null, itens, valor_produtos: vp, frete: fr, valor_total: vp + fr, dados: p.dados || {}, liberado: [], atualizado_em: agora });
+    await this.pedidosAtualizar();
+    return Object.assign({}, r);
+  };
+  Local.prototype._ped = function (id) { const r = this._peds().find(x => x.id === id); if (!r) throw new Error('pedido não encontrado'); return r; };
+  Local.prototype.pedidoSituacao = async function (id, para, motivo) {
+    const r = this._ped(id);
+    if (para === 'cancelado') { if (!motivo) throw new Error('diga o motivo do cancelamento'); Object.assign(r, { situacao: 'cancelado', cancelado_motivo: motivo }); }
+    else if (para === 'separado') { if (r.situacao !== 'separacao') throw new Error('o pedido não está em separação'); r.situacao = 'separado'; }
+    else if (para === 'aberto') { r.situacao = 'aberto'; r.bolao_id = null; r.itens.forEach(i => { i.separado = false; }); }
+    else if (para === 'desfaturar') Object.assign(r, { situacao: 'separado', nota_id: null, faturado_em: null });
+    await this.pedidosAtualizar();
+    return Object.assign({}, r);
+  };
+  Local.prototype.pedidoLiberar = async function (id, liberar, entrada) {
+    const r = this._ped(id);
+    if (entrada != null) r.entrada_ok = !!entrada;
+    await this.pedidosAtualizar();
+    if (liberar != null) Object.assign(r, { liberado: liberar ? r.bloqueios.slice() : [], liberado_em: liberar ? new Date().toISOString() : null, liberado_por: liberar ? LOCAL_ADMIN : null });
+    this._pedsGrava();
+    return Object.assign({}, r);
+  };
+  Local.prototype.pedidoComentar = async function (id, texto) {
+    const r = this._ped(id);
+    r.comentarios = (r.comentarios || []).concat([{ quando: new Date().toISOString(), por: LOCAL_ADMIN, nome: 'Administrador (modo local)', texto }]);
+    this._pedsGrava();
+    return Object.assign({}, r);
+  };
+  Local.prototype.bolaoMontar = async function (ids) {
+    await this.pedidosAtualizar();
+    ids.forEach(id => {
+      const r = this._ped(id);
+      if (r.situacao !== 'aberto') throw new Error('o pedido ' + r.numero + ' não está em aberto');
+      if (r.bloqueios.some(b => r.liberado.indexOf(b) === -1)) throw new Error('o pedido ' + r.numero + ' está bloqueado: a gestora precisa liberar');
+    });
+    this._boloes = this._boloes || [];
+    const b = { id: this._boloes.length + 1, dia: new Date().toISOString().slice(0, 10), criado_em: new Date().toISOString() };
+    this._boloes.push(b);
+    ids.forEach(id => Object.assign(this._ped(id), { situacao: 'separacao', bolao_id: b.id }));
+    this._pedsGrava();
+    return b.id;
+  };
+  Local.prototype.pedidoSepararItem = async function (id, idx, ok) { const r = this._ped(id); r.itens[idx].separado = !!ok; this._pedsGrava(); return Object.assign({}, r); };
+  Local.prototype.pedidoNotasCandidatas = async function (id) {
+    const r = this._ped(id), usadas = new Set(this._peds().map(p => p.nota_id).filter(Boolean));
+    return (this.ler().notas || []).filter(n => n.empresa_id === r.empresa_id && !n.cancelada && !usadas.has(n.id)).slice(0, 20);
+  };
+  Local.prototype.pedidoFaturar = async function (id, nota) {
+    const r = this._ped(id), n = (this.ler().notas || []).find(x => x.id === nota);
+    Object.assign(r, { situacao: 'faturado', nota_id: nota, faturado_em: n ? n.emitida_em : new Date().toISOString() });
+    this._pedsGrava();
+    return Object.assign({}, r);
+  };
+  Local.prototype.pedidosTrocaEmpresa = async function (de, para) {
+    const s = new Set(de); let n = 0;
+    this._peds().forEach(p => { if (s.has(p.empresa_id)) { p.empresa_id = para; n++; } });
+    this._pedsGrava();
+    return n;
+  };
+
   raiz.CRMDados = { TABELAS, INTEIRAS, PARCIAIS, aplicaMudancas, marcaRecarga, chave, Local, Supa, uuid, vazio, LOCAL_ADMIN, cascataMemoria, situacaoVigia, PARADO_MIN, lembreteFkn };
   if (typeof module !== 'undefined' && module.exports) module.exports = raiz.CRMDados;
 })(typeof window !== 'undefined' ? window : globalThis);

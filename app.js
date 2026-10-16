@@ -35,6 +35,9 @@
   CRM.papel = () => (E.eu ? E.eu.papel : null);
   CRM.ehGestor = () => ['admin', 'gestor'].indexOf(CRM.papel()) !== -1;
   CRM.ehComprador = () => CRM.papel() === 'comprador';
+  CRM.ehLogistica = () => CRM.papel() === 'logistica';
+  // comprador e logística: fora da equipe de vendas (sem busca, sino, "+ novo", leads)
+  CRM.foraDeVendas = () => CRM.ehComprador() || CRM.ehLogistica();
   CRM.ehAdmin = () => CRM.papel() === 'admin';
   CRM.meuId = () => (E.eu ? E.eu.user_id : null);
   CRM.podeEditarEmpresa = e => !!e && (CRM.ehGestor() || e.responsavel_id === CRM.meuId());
@@ -63,7 +66,7 @@
     return nomes.sort((a, b) => qtd.get(b) - qtd.get(a) || a.localeCompare(b, 'pt-BR'));
   };
   CRM.etapas = funil => E.D.etapas.filter(e => !funil || (e.funil || 'Vendas') === funil).sort((a, b) => a.ordem - b.ordem);
-  CRM.usuariosAtivos = () => E.D.usuarios.filter(u => u.ativo !== false && u.papel !== 'comprador').sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+  CRM.usuariosAtivos = () => E.D.usuarios.filter(u => u.ativo !== false && u.papel !== 'comprador' && u.papel !== 'logistica').sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
   CRM.opcoesUsuarios = vazio => (vazio ? [['', vazio]] : []).concat(CRM.usuariosAtivos().map(u => [u.user_id, u.nome]));
   CRM.todasTags = () => [...new Set([].concat(...E.D.empresas.map(e => e.tags || []), ...E.D.contatos.map(c => c.tags || [])))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
   CRM.lista = (lista, vazio) => (vazio !== undefined ? [['', vazio]] : []).concat(lista.map(x => [x, x]));
@@ -106,9 +109,9 @@
       if (CRM.ehAdmin() && store.vigias) E.vigias = await store.vigias().catch(() => E.vigias || []);
       // Só o administrador lê o contas a receber (RLS): gestora e vendedores(as) recebem as duplicatas em
       // atraso (com detalhe) para o selo da Recompra, da Fila do dia e da ficha.
-      if (!CRM.ehAdmin() && !CRM.ehComprador() && store.duplicatasAtraso) E.atrasos = await store.duplicatasAtraso().catch(() => E.atrasos || []);
+      if (!CRM.ehAdmin() && !CRM.foraDeVendas() && store.duplicatasAtraso) E.atrasos = await store.duplicatasAtraso().catch(() => E.atrasos || []);
       // Boletos atualizados (cobrança, 14/10/2026): o administrador manda, o(a) vendedor(a) da carteira envia ao cliente.
-      if (!CRM.ehComprador() && store.boletos) E.boletos = await store.boletos().catch(() => E.boletos || []);
+      if (!CRM.foraDeVendas() && store.boletos) E.boletos = await store.boletos().catch(() => E.boletos || []);
       // Administrador e comprador: quando chegaram os relatórios do FKN (lembrete em Compras).
       if ((CRM.ehAdmin() || CRM.ehComprador()) && store.fknAtualizado) E.fkn = await store.fknAtualizado().catch(() => E.fkn || null);
       E.D = D;
@@ -319,7 +322,7 @@
   // ------------------------------------------------------------ render
   const ABAS = [
     ['inicio', 'Início', '⌂'], ['fila', 'Fila do dia', '▶'], ['funil', 'Funil', '▥'], ['empresas', 'Empresas', '▦'], ['pessoas', 'Pessoas', '☺'],
-    ['negocios', 'Negócios', '$'], ['agenda', 'Atividades', '▣'], ['relatorios', 'Relatórios', '▲'], ['ajustes', 'Configurações', '⚙'], ['compras', 'Compras', '▤'], ['estoque', 'Estoque', '▦'], ['gestao', 'Gestão', '◆'], ['caixa', 'Caixa', '◈'], ['emails', 'E-mails', '✉'], ['ofertas', 'Ofertas', '✦'], ['fiscal', 'Fiscal', '§']
+    ['negocios', 'Negócios', '$'], ['pedidos', 'Pedidos', '☰'], ['agenda', 'Atividades', '▣'], ['relatorios', 'Relatórios', '▲'], ['ajustes', 'Configurações', '⚙'], ['compras', 'Compras', '▤'], ['estoque', 'Estoque', '▦'], ['gestao', 'Gestão', '◆'], ['caixa', 'Caixa', '◈'], ['emails', 'E-mails', '✉'], ['ofertas', 'Ofertas', '✦'], ['fiscal', 'Fiscal', '§']
   ];
   CRM.ABAS = ABAS;
   // Relatórios do FKN que estão pendentes neste turno (manhã/tarde): [{ arquivo, ultimo, turno }].
@@ -385,10 +388,11 @@
   function renderAgora() {
     if (!E.eu) return;
     // Comprador: só Compras e Estoque. Compras, Estoque e Gestão: administrador. Configurações: gestor.
-    const abas = CRM.ehComprador() ? ABAS.filter(a => a[0] === 'compras' || a[0] === 'estoque')
+    // Logística (Fase 3): só Pedidos (a separação). O comprador vê também as faltas e a consulta de estoque em Pedidos.
+    const abas = CRM.ehLogistica() ? ABAS.filter(a => a[0] === 'pedidos') : CRM.ehComprador() ? ABAS.filter(a => a[0] === 'compras' || a[0] === 'estoque' || a[0] === 'pedidos')
       : ABAS.filter(a => (a[0] !== 'ajustes' || CRM.ehGestor()) && ((a[0] !== 'gestao' && a[0] !== 'compras' && a[0] !== 'estoque' && a[0] !== 'caixa' && a[0] !== 'fiscal') || CRM.ehAdmin()));
     if (!abas.some(a => a[0] === E.aba)) E.aba = abas[0][0];
-    ['#buscaGlobal', '[data-acao="novo-menu"]', '#sino'].forEach(s => { const el = $(s); if (el) el.hidden = CRM.ehComprador(); });
+    ['#buscaGlobal', '[data-acao="novo-menu"]', '#sino'].forEach(s => { const el = $(s); if (el) el.hidden = CRM.foraDeVendas(); });
     const al = R.alertas(E.D, E.ix, E.cfg, CRM.hoje(), CRM.carteira());
     const nTarefas = al.atrasadas.length + al.deHoje.length;
     $('#menuLateral').innerHTML = abas.map(a => '<button type="button" class="nav' + (E.aba === a[0] ? ' ativa' : '') + '" data-acao="aba" data-id="' + a[0] + '"' +
@@ -404,7 +408,7 @@
     $('#nomeTopo').textContent = nomeInstalacao() === 'CRM' ? 'Sistemi Dalessi' : nomeInstalacao();
     $('#usuarioTopo').innerHTML = CRM.avatar(E.eu) + '<span class="usu-nome">' + esc(E.eu.nome) + '<small>' + esc(R.rotulo(R.PAPEIS, E.eu.papel)) + '</small></span>';
     // boletos atualizados que o financeiro mandou e o(a) vendedor(a) ainda não enviou ao cliente (cobranca.js)
-    const nBoletos = CRM.cobranca && !CRM.ehComprador() ? CRM.cobranca.paraFila().length : 0;
+    const nBoletos = CRM.cobranca && !CRM.foraDeVendas() ? CRM.cobranca.paraFila().length : 0;
     const nAlertas = nBoletos + al.atrasadas.length + al.leadsSemAtendimento.length + al.negociosParados.length + al.clientesSemContato.length + al.recompra.length;
     $('#sino').innerHTML = '<span aria-hidden="true">🔔</span>' + (nAlertas ? '<span class="bolinha vermelha">' + nAlertas + '</span>' : '');
     $('#sino').dataset.boletos = nBoletos;

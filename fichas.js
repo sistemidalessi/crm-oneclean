@@ -295,7 +295,8 @@
               '</td><td class="num">' + esc(R.moeda(it.preco)) + '</td><td class="num">' + (R.num(it.desconto) ? esc(R.numero(it.desconto)) + '%' : '—') + '</td><td class="num">' + esc(R.moeda(R.totalItem(it))) + '</td></tr>').join('') +
             '</tbody><tfoot><tr><td colspan="4">Total</td><td class="num"><strong>' + esc(R.moeda(R.totalItens(itens))) + '</strong></td></tr></tfoot></table>'
             : '<p class="vazio">Sem itens. O valor do negócio é o informado à mão.</p>') + '</section>' +
-        '<section><h3>Propostas ' + (pode ? '<button type="button" class="mini" data-acao="nova-proposta">+ gerar proposta</button>' +
+        '<section><h3>Propostas ' + (pode ? (CRM.pedidos ? '<button type="button" class="mini" data-acao="pd-novo-negocio" data-id="' + esc(n.id) + '" title="Orçamento ou pedido com o disponível do estoque, como no FKN">+ orçamento / pedido</button>' : '') +
+          '<button type="button" class="mini" data-acao="nova-proposta">+ gerar proposta</button>' +
           (CRM.importarOrcamento ? '<button type="button" class="mini" data-acao="importar-orcamento" data-id="' + esc(n.id) + '" title="Arquivo CSV do orçamento salvo no FKN">importar do FKN</button>' : '') : '') + '</h3>' +
           (props.length ? '<ul class="lista">' + props.map(p => '<li class="proposta"><div><strong>#' + esc(p.numero) + ' · ' + esc(R.moeda(p.valor_total)) + '</strong> ' + CRM.seloProposta(p.status) +
             '<small>' + esc([p.enviada_em ? 'enviada ' + R.dataBR(p.enviada_em) : '', p.validade ? 'válida até ' + R.dataBR(p.validade) : '', p.respondida_em ? 'resposta ' + R.dataBR(p.respondida_em) : ''].filter(Boolean).join(' · ')) + '</small></div>' +
@@ -304,6 +305,7 @@
               '<button type="button" class="mini" data-acao="enviar-proposta" data-id="' + esc(p.id) + ':email" title="Abre o e-mail para todos os endereços do cliente; anexe o PDF">E-mail</button>' : '') +
             (pode && p.status === 'rascunho' ? '<button type="button" class="mini" data-acao="proposta-status" data-id="' + esc(p.id) + ':enviada">Marcar enviada</button>' : '') +
             (pode && p.status === 'enviada' ? '<button type="button" class="mini verde" data-acao="proposta-status" data-id="' + esc(p.id) + ':aprovada">Aprovada</button><button type="button" class="mini" data-acao="proposta-status" data-id="' + esc(p.id) + ':recusada">Recusada</button>' : '') +
+            (pode && CRM.pedidos && p.status !== 'recusada' ? '<button type="button" class="mini verde" data-acao="pd-de-proposta" data-id="' + esc(p.id) + '" title="O cliente aprovou: vira pedido e reserva o estoque">Virar pedido</button>' : '') +
             (pode ? '<button type="button" class="mini" data-acao="editar-proposta" data-id="' + esc(p.id) + '">editar</button>' : '') + '</span></li>').join('') + '</ul>'
             : '<p class="vazio">Nenhuma proposta. "Gerar proposta" usa os itens acima e fica numerada; "importar do FKN" traz o orçamento feito lá.</p>') + '</section>' +
       '</div>' +
@@ -739,7 +741,7 @@
     const linhaCliente = [ac ? 'A/C ' + iniciais(ac) + (c && c.cargo ? ' — ' + c.cargo : '') : '', e && e.cnpj ? (R.ehCPF(R.chaveDoc(e.cnpj)) ? 'CPF ' : 'CNPJ ') + e.cnpj : ''].filter(Boolean);
     // Cartões: frete, entrega e pagamento (do orçamento do FKN).
     const cartoes = [];
-    if (d.fkn || R.num(d.frete)) cartoes.push([R.num(d.frete) ? 'Frete ' + R.moeda(d.frete) : 'Frete grátis', 'Neste orçamento']);
+    if (d.fkn || d.orcamento || R.num(d.frete)) cartoes.push([R.num(d.frete) ? 'Frete ' + R.moeda(d.frete) : 'Frete grátis', 'Neste orçamento']);
     if (d.prazo_entrega) cartoes.push(['Entrega em ' + acentua(d.prazo_entrega.toLowerCase()), d.transportadora === 'PROPRIO' ? 'Frota própria' : d.transportadora ? 'Transporte: ' + iniciais(d.transportadora) : 'Prazo de entrega']);
     else if (d.transportadora) cartoes.push([d.transportadora === 'PROPRIO' ? 'Entrega com frota própria' : 'Transporte: ' + iniciais(d.transportadora), 'Entrega']);
     if (d.pagamento) cartoes.push([[d.cobranca, d.pagamento].filter(Boolean).join(' '), 'Condições de pagamento']);
@@ -749,13 +751,13 @@
       d.ref ? 'Referência: ' + frase(d.ref).toLowerCase() + '.' : '', d.seu_pedido ? 'Seu pedido: ' + d.seu_pedido + '.' : ''].filter(Boolean);
     const tel = vend && R.linkWhatsApp(vend.telefone) ? vend.telefone : '';
     const msgWa = 'Olá' + (vend ? ', ' + R.primeiroNome(vend.nome) : '') + '! Recebi o orçamento nº ' + numero + ' (' + R.moeda(p.valor_total) + ') e quero programar a entrega.';
-    const freteTxt = R.num(d.frete) ? 'Frete ' + R.moeda(d.frete) + ' incluído' : (d.fkn ? 'Frete grátis' : '');
-    const nome = ((p.numero_fkn ? 'Orcamento ' + p.numero_fkn : 'Proposta ' + p.numero) + ' - ' + (e ? e.nome : '')).replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim();
+    const freteTxt = R.num(d.frete) ? 'Frete ' + R.moeda(d.frete) + ' incluído' : (d.fkn || d.orcamento ? 'Frete grátis' : '');
+    const nome = ((p.numero_fkn ? 'Orcamento ' + p.numero_fkn : (d.orcamento ? 'Orcamento ' : 'Proposta ') + p.numero) + ' - ' + (e ? e.nome : '')).replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim();
     // Orçamento comprido: letras e espaços menores para caber na primeira folha (com o total e o botão).
     const html = '<div class="proposta-doc' + (itens.length > 12 ? ' denso' : '') + '">' +
       '<div class="faixa-doc"></div>' +
       '<header><img src="' + esc(CRM.logo()) + '" alt="' + esc(CRM.nomeInstalacao()) + '">' +
-        '<div class="doc-id"><strong>' + (p.numero_fkn ? 'Orçamento ' : 'Proposta ') + esc(numero) + '</strong>' +
+        '<div class="doc-id"><strong>' + (p.numero_fkn || d.orcamento ? 'Orçamento ' : 'Proposta ') + esc(numero) + '</strong>' +
         '<span>Emitido em ' + esc(R.dataBR(emitida)) + '</span>' + (p.validade ? '<span>Válido até ' + esc(R.dataBR(p.validade)) + '</span>' : '') + '</div></header>' +
       (cfg.proposta_chamada ? '<section class="chamada"><h1>' + esc(cfg.proposta_chamada) + '</h1>' + (cfg.proposta_subchamada ? '<p>' + esc(cfg.proposta_subchamada) + '</p>' : '') + '</section>' : '') +
       '<section class="preparado"><h2>Preparado para</h2><p class="nome">' + esc(maiusculas(e ? e.razao_social || e.nome : '')) + '</p>' +
@@ -768,7 +770,7 @@
         (comDesc ? '<td class="num">' + (R.num(it.desconto) ? esc(R.numero(it.desconto)) + '%' : '—') + '</td>' : '') +
         '<td class="num tot">' + esc(R.moeda(totalDe(it))) + '</td></tr>').join('') + '</tbody></table>' +
       '<section class="fecho"><div class="atende"><h2>Entrega e atendimento</h2>' + entrega.map(x => '<p>' + esc(x) + '</p>').join('') +
-        (!d.fkn && p.condicoes ? '<p class="pre">' + esc(p.condicoes) + '</p>' : '') + (p.observacoes ? '<p class="pre">' + esc(p.observacoes) + '</p>' : '') +
+        (!d.fkn && !d.orcamento && p.condicoes ? '<p class="pre">' + esc(p.condicoes) + '</p>' : '') + (p.observacoes ? '<p class="pre">' + esc(p.observacoes) + '</p>' : '') +
         (vend ? '<p class="contato">Seu contato: ' + esc(R.primeiroNome(vend.nome)) + '</p>' + [tel ? 'WhatsApp ' + telBonito(tel) : '', vend.email || ''].filter(Boolean).map(x => '<p>' + esc(x) + '</p>').join('') : '') + '</div>' +
         '<div class="total"><span class="rot">Total do pedido</span><strong>' + esc(R.moeda(p.valor_total)) + '</strong><span class="sub">' + esc([itens.length + (itens.length === 1 ? ' item' : ' itens'), freteTxt].filter(Boolean).join(' · ')) + '</span></div></section>' +
       (tel ? '<a class="cta" href="' + esc(R.linkWhatsApp(tel, msgWa)) + '"><span>' + esc(cfg.proposta_cta || 'Vamos programar sua entrega?') + '</span><span class="vai">Confirmar pelo WhatsApp &nbsp;›</span></a>' : '') +

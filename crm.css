@@ -816,3 +816,36 @@ pre.of-previa { white-space: pre-wrap; font-family: inherit; font-size: .88rem; 
 .fi-alertas { margin: 6px 0 0; padding-left: 0; list-style: none; font-size: .82rem; }
 .fi-alertas li { margin: 3px 0; }
 .kpi.ativo { outline: 2px solid var(--ouro); }
+
+/* ---------- pedidos (Fase 3): janela como a do FKN, grade de produtos e lista de separação ---------- */
+.pd-vistas { margin: 0 0 12px; }
+.pd-janela .pd-topo { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.pd-janela .pd-topo h2 { margin: 0; flex: 1; }
+.pd-janela p.alerta { background: var(--vermelho-fundo); color: var(--vermelho); padding: 8px 12px; border-radius: 8px; }
+.pd-campos { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px 12px; margin: 10px 0; }
+.pd-campos .campo, .pd-entrada .campo { grid-column: auto; }
+.pd-campos .campo.largo, .pd-campos .largo, .pd-entrada .campo.largo { grid-column: 1 / -1; }
+.pd-janela .chips { margin: 4px 0 10px; }
+.pd-campos h3 { margin: 8px 0 0; font-size: 1rem; }
+.pd-entrada { display: grid; grid-template-columns: 150px 160px 110px 1fr; gap: 8px 12px; align-items: end; padding: 10px; margin: 10px 0; border: 1px solid var(--borda); border-radius: 10px; background: var(--realce); }
+.pd-entrada .pd-info, .pd-entrada .pd-faixas, .pd-entrada .acoes { grid-column: 1 / -1; margin: 0; }
+.pd-faixas .mini { margin-right: 4px; }
+.pd-grade td, .pd-grade th { white-space: nowrap; }
+.pd-grade td:nth-child(3) { white-space: normal; min-width: 220px; }
+.pd-grade tr.sel td { background: var(--realce); }
+.neg { color: var(--vermelho); }
+.pd-totais { display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: flex-end; padding: 10px 4px; border-top: 1px solid var(--borda); }
+.pd-totais .geral strong { font-size: 1.15rem; }
+.pd-gravar { justify-content: flex-end; }
+.pd-sep { border: 1px solid var(--borda); border-radius: 10px; padding: 8px 12px; margin: 10px 0; }
+.pd-sep h4 { margin: 4px 0 8px; }
+.pd-lista tr.pd-bloqueado td:first-child { box-shadow: inset 3px 0 0 var(--vermelho); }
+.pd-lista tr.pd-liberado td:first-child { box-shadow: inset 3px 0 0 var(--verde); }
+@media (max-width: 700px) { .pd-entrada { grid-template-columns: 1fr 1fr; } }
+.sp-doc { font: 10pt/1.4 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; color: #000; padding: 0 8mm; }
+.sp-doc h1 { font-size: 15pt; margin: 0 0 2mm; } .sp-doc h2 { font-size: 12pt; margin: 6mm 0 1mm; }
+.sp-doc table { width: 100%; border-collapse: collapse; margin: 2mm 0; }
+.sp-doc th, .sp-doc td { border: 1px solid #999; padding: 1.2mm 2mm; text-align: left; vertical-align: top; }
+.sp-doc td.n { text-align: right; font-weight: 700; } .sp-doc td.cx { width: 7mm; }
+.sp-doc .ass { margin-top: 4mm; }
+@media print { .sp-doc .quebra { break-before: page; } }
