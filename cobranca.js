@@ -574,10 +574,14 @@
     const nome = u ? R.primeiroNome(CRM.nomeUsuario(u)) : 'Sem vendedora';
     if (!u || !tel) return '<span class="cob-sem-tel">' + esc(nome) + ': ' + l.length + ' boleto(s) — ' + (u ? 'sem celular no cadastro (Configurações → Equipe)' : 'cliente sem vendedora na carteira') + '</span>';
     const qt = ' (' + l.length + ' boleto' + (l.length > 1 ? 's' : '') + ')';
-    // 15/10/2026 (Anderson: o Compartilhar ainda pedia escolher o WhatsApp e a vendedora): o principal abre direto a conversa
-    // dela, com a mensagem e o link do PDF completo; mandar o arquivo em si (compartilhar do Windows) fica como segunda opção.
-    return '<span class="cob-vend"><button type="button" class="btn ouro" data-acao="cob-avisar" data-id="' + esc(u) + '">📲 WhatsApp de ' + esc(nome) + qt + '</button>' +
-      (podeCompartilhar() && l.some(b => b.arquivo) ? '<button type="button" class="link" data-acao="cob-avisar-pdf" data-id="' + esc(u) + '">ou compartilhar o arquivo</button>' : '') + '</span>';
+    // 16/10/2026 (Anderson: quer o ARQUIVO PDF na conversa, como sai pelo Compartilhar): o principal volta a mandar o PDF
+    // de verdade (janela de compartilhar do Windows/celular: escolhe o WhatsApp e a vendedora); abrir a conversa direto com
+    // a mensagem e o LINK do PDF (o wa.me não anexa arquivo) fica como segunda opção.
+    const comPdf = podeCompartilhar() && l.some(b => b.arquivo);
+    return '<span class="cob-vend">' + (comPdf
+      ? '<button type="button" class="btn ouro" data-acao="cob-avisar-pdf" data-id="' + esc(u) + '">📎 Mandar o PDF a ' + esc(nome) + qt + '</button>' +
+        '<button type="button" class="link" data-acao="cob-avisar" data-id="' + esc(u) + '">ou abrir o WhatsApp de ' + esc(nome) + ' com o link</button>'
+      : '<button type="button" class="btn ouro" data-acao="cob-avisar" data-id="' + esc(u) + '">📲 WhatsApp de ' + esc(nome) + qt + '</button>') + '</span>';
   };
   const preCarrega = lista => { arquivosDe(lista).catch(() => {}); };
   // WhatsApp oficial da Meta (15/10/2026): pronto quando o número está conectado e o modelo aprovado
@@ -597,8 +601,10 @@
     preCarrega(paraAvisar());
     CRM.abrirForm({
       titulo: 'Mandar no WhatsApp das vendedoras',
-      intro: 'Um clique por vendedora: abre o seu WhatsApp direto na conversa com ela, com cada cliente, o valor atualizado, o link do PDF completo (resumo, nota fiscal e boleto; vale 7 dias) e a mensagem pronta para ela mandar ao cliente. É só apertar enviar.\n' +
-        (podeCompartilhar() ? 'Prefere mandar o arquivo em si? "ou compartilhar o arquivo" abre a janela de compartilhar (aí você escolhe o WhatsApp e a vendedora).\n' : '') +
+      intro: (podeCompartilhar()
+        ? '"Mandar o PDF" abre a janela de compartilhar: escolha o WhatsApp e a vendedora, e o PDF completo (resumo, nota fiscal e boleto) chega como arquivo, um por cliente; a mensagem pronta fica copiada (Ctrl+V se não aparecer junto).\n' +
+          'Prefere sem escolher nada? "ou abrir o WhatsApp … com o link" abre direto a conversa com ela, com a mensagem e o link do PDF (vale 7 dias).\n'
+        : 'Um clique por vendedora: abre o seu WhatsApp direto na conversa com ela, com cada cliente, o valor atualizado, o link do PDF completo (resumo, nota fiscal e boleto; vale 7 dias) e a mensagem pronta para ela mandar ao cliente. É só apertar enviar.\n') +
         'A tarefa "Cobrar boleto atualizado" já está na agenda de cada uma.',
       campos: [], salvarTexto: 'Fechar', aoSalvar: async () => {},
       rodape: botaoMeta(paraAvisar().length) + '<div class="cob-avisar">' + g.map(([u, l]) => botaoAvisar(u, l)).join('') + '</div>'
@@ -655,7 +661,8 @@
         'O CRM lê cada um (valor, vencimento, linha digitável), acha o título e você confere antes de mandar às vendedoras.</p>' +
         '<label class="btn sec arquivo">Escolher arquivos<input type="file" id="cobArq" multiple accept="application/pdf,image/png,image/jpeg,image/webp"></label>') + '</section>' +
       (avisar.length ? '<section class="cartao cob-aviso"><h2>Mandar no WhatsApp das vendedoras <small>' + avisar.reduce((t, x) => t + x[1].length, 0) + ' boleto(s) ainda não foram</small></h2>' +
-        '<p>Um clique por vendedora: abre o seu WhatsApp na conversa com ela, com tudo pronto (valor, PDF, telefone do cliente e a mensagem para ela copiar).</p>' +
+        '<p>' + (podeCompartilhar() ? 'Um clique por vendedora: o PDF completo de cada cliente vai como arquivo (escolha o WhatsApp e a vendedora na janela de compartilhar), com a mensagem pronta copiada.'
+          : 'Um clique por vendedora: abre o seu WhatsApp na conversa com ela, com tudo pronto (valor, PDF, telefone do cliente e a mensagem para ela copiar).') + '</p>' +
         botaoMeta(avisar.reduce((t, x) => t + x[1].length, 0)) + '<div class="cob-avisar">' + avisar.map(([u, l]) => botaoAvisar(u, l)).join('') + '</div></section>' : '') +
       '<section class="cartao"><h2>Vencidos para cobrar <small>' + venc.length + ' título(s) · ' + esc(R.moeda(tot(venc))) + '</small></h2>' +
       (venc.length ? [...porVend.entries()].sort((a, b) => CRM.nomeUsuario(a[0]).localeCompare(CRM.nomeUsuario(b[0]))).map(([u, l]) =>
@@ -734,7 +741,7 @@
         }
         if (el) { el.disabled = true; el.textContent = '✓ ' + el.textContent.replace(/^📎\s*/, ''); }
         CRM.render();
-        CRM.toast(files.length + ' PDF(s) compartilhado(s) com a ' + R.primeiroNome(usr.nome) + '. A mensagem também ficou copiada: se não apareceu junto, cole na conversa (Ctrl+V).');
+        CRM.toast(files.length + ' PDF(s) compartilhado(s) com ' + R.primeiroNome(usr.nome) + '. A mensagem também ficou copiada: se não apareceu junto, cole na conversa (Ctrl+V).');
       })().catch(CRM.falhou);
     },
     // vendedora → cliente: o PDF completo de verdade, com a mensagem pronta

@@ -1895,3 +1895,296 @@ end;
 $$;
 revoke all on function public.crm_fiscal_resumo() from public, anon;
 grant execute on function public.crm_fiscal_resumo() to authenticated;
+
+-- =================================================================== estoque do CRM: Fase 2 da saída do FKN (16/10/2026)
+-- O CRM passa a ter o próprio estoque, em paralelo com o FKN: um LIVRO DE MOVIMENTOS (crm_estoque_mov) e o saldo
+-- de cada produto (crm_estoque_saldo, mantido pelo gatilho do livro). O livro não se edita nem se apaga: erro se
+-- corrige com estorno ou ajuste. Saldo inicial = a listagem do FKN ("atual": o físico, com o reservado para
+-- cliente) na hora em que ela foi gerada; depois disso cada item de nota de venda que chega vira saída (gatilho),
+-- nota cancelada estorna. A cada listagem do FKN o banco compara os dois saldos na mesma hora
+-- (crm_estoque_conferir) e guarda as diferenças com a explicação provável. Unidade: a venda "CX" de um produto
+-- controlado em PT/UN multiplica pelo fator da caixa fechada (crm_estoque_unidades).
+alter table public.crm_estoque add column if not exists estoque_atual numeric(14,3); -- "atual" da listagem (físico)
+
+create or replace function public.crm_un(t text) returns text language sql immutable set search_path = public as $$
+  select nullif(upper(translate(btrim(coalesce(t, '')), 'çÇ', 'cC')), '');
+$$;
+
+create table if not exists public.crm_estoque_saldo (
+  codigo        text primary key check (length(btrim(codigo)) > 0),
+  descricao     text,
+  unidade       text,
+  saldo         numeric(14,3) not null default 0,
+  custo_medio   numeric(16,4),
+  inicio        timestamptz not null,           -- o CRM conta este produto a partir daqui (saldo inicial)
+  ult_mov       timestamptz,
+  atualizado_em timestamptz not null default now()
+);
+create table if not exists public.crm_estoque_unidades (
+  codigo        text not null,
+  unidade       text not null,                  -- unidade da nota (crm_un)
+  fator         numeric(14,4) not null check (fator > 0),
+  origem        text not null default 'auto' check (origem in ('auto', 'manual')),
+  atualizado_em timestamptz not null default now(),
+  primary key (codigo, unidade)
+);
+create table if not exists public.crm_estoque_mov (
+  id             uuid primary key default gen_random_uuid(),
+  codigo         text not null references public.crm_estoque_saldo(codigo),
+  quando         timestamptz not null,
+  tipo           text not null check (tipo in ('inicial', 'saida', 'entrada', 'ajuste', 'inventario', 'estorno')),
+  quantidade     numeric(14,3) not null,          -- na unidade do estoque; + entra, − sai
+  custo_unit     numeric(16,4),
+  qtd_doc        numeric(14,4),                   -- como estava no documento (nota)
+  unidade_doc    text,
+  fator          numeric(14,4),
+  conferir       boolean not null default false,  -- unidade da nota sem fator conhecido (contou 1:1)
+  nota_item_id   uuid unique,                     -- saída da nota de venda (uma vez só)
+  compra_item_id uuid unique,                     -- entrada da nota de compra
+  estorno_de     uuid unique references public.crm_estoque_mov(id),
+  motivo         text,
+  criado_por     uuid default auth.uid(),
+  criado_em      timestamptz not null default now()
+);
+create index if not exists crm_estoque_mov_cod on public.crm_estoque_mov (codigo, quando);
+create table if not exists public.crm_estoque_fotos (
+  id           bigint generated always as identity primary key,
+  gerado_em    timestamptz not null,             -- hora em que a listagem foi gerada no FKN
+  recebido_em  timestamptz not null default now(),
+  linhas       integer,
+  conferida_em timestamptz,
+  resumo       jsonb
+);
+create table if not exists public.crm_estoque_difs (
+  foto_id    bigint not null references public.crm_estoque_fotos(id) on delete cascade,
+  codigo     text not null,
+  descricao  text,
+  saldo_crm  numeric(14,3),
+  saldo_fkn  numeric(14,3),
+  diferenca  numeric(14,3),
+  explicacao text,
+  primary key (foto_id, codigo)
+);
+do $$ declare t text; begin
+  foreach t in array array['crm_estoque_saldo', 'crm_estoque_unidades', 'crm_estoque_mov', 'crm_estoque_fotos', 'crm_estoque_difs'] loop
+    execute format('alter table public.%I enable row level security', t);
+    execute format('revoke all on public.%I from anon, public', t);
+    execute format('grant select on public.%I to authenticated', t);
+    execute format('drop policy if exists ler on public.%I', t);
+    execute format('create policy ler on public.%I for select to authenticated using ((select public.crm_eh_admin()) or (select public.crm_eh_comprador()))', t);
+  end loop;
+end $$;
+-- o comprador e o administrador acertam o fator de uma unidade (o resto só pelas funções abaixo)
+grant insert, update on public.crm_estoque_unidades to authenticated;
+drop policy if exists acerta on public.crm_estoque_unidades;
+create policy acerta on public.crm_estoque_unidades for insert to authenticated with check ((select public.crm_eh_admin()) or (select public.crm_eh_comprador()));
+drop policy if exists acerta2 on public.crm_estoque_unidades;
+create policy acerta2 on public.crm_estoque_unidades for update to authenticated using ((select public.crm_eh_admin()) or (select public.crm_eh_comprador()))
+  with check ((select public.crm_eh_admin()) or (select public.crm_eh_comprador()));
+
+-- saldo e custo médio a cada movimento (custo médio ponderado só nas entradas com custo)
+create or replace function public.crm_estoque_mov_saldo() returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  update public.crm_estoque_saldo s set
+    custo_medio = case
+      when new.tipo = 'inicial' then coalesce(new.custo_unit, s.custo_medio)
+      when new.tipo = 'entrada' and new.quantidade > 0 and coalesce(new.custo_unit, 0) > 0 then
+        case when s.saldo <= 0 or s.custo_medio is null then new.custo_unit
+             else round((s.saldo * s.custo_medio + new.quantidade * new.custo_unit) / (s.saldo + new.quantidade), 4) end
+      else s.custo_medio end,
+    saldo = s.saldo + new.quantidade,
+    ult_mov = greatest(coalesce(s.ult_mov, new.quando), new.quando),
+    atualizado_em = now()
+  where s.codigo = new.codigo;
+  return null;
+end;
+$$;
+drop trigger if exists crm_estoque_mov_saldo on public.crm_estoque_mov;
+create trigger crm_estoque_mov_saldo after insert on public.crm_estoque_mov for each row execute function public.crm_estoque_mov_saldo();
+create or replace function public.crm_estoque_mov_trava() returns trigger language plpgsql set search_path = public as $$
+begin raise exception 'o livro de estoque não se edita nem se apaga: corrija com estorno ou ajuste'; end;
+$$;
+drop trigger if exists crm_estoque_mov_trava on public.crm_estoque_mov;
+create trigger crm_estoque_mov_trava before update or delete on public.crm_estoque_mov for each row execute function public.crm_estoque_mov_trava();
+
+-- Saída de um item de nota de venda (uma vez por item). Não move: nota cancelada, CFOP de entrada, simples
+-- faturamento da entrega futura (5922/6922: a mercadoria sai na remessa 5117/6117) e serviço; nota emitida antes
+-- do saldo inicial do produto (já estava no saldo do FKN). Produto que o livro ainda não tem entra com saldo zero.
+create or replace function public.crm_estoque_saida_item(p_item uuid) returns void language plpgsql security definer set search_path = public as $$
+declare i record; n record; s record; f numeric; conf boolean := false; un text;
+begin
+  select id, nota_id, codigo, descricao, unidade, quantidade, cfop into i from public.crm_nota_itens where id = p_item;
+  if i.id is null or coalesce(btrim(i.codigo), '') = '' or coalesce(i.quantidade, 0) = 0 then return; end if;
+  if i.cfop is not null and (i.cfop !~ '^[56]' or i.cfop in ('5922', '6922', '5933', '6933')) then return; end if;
+  select numero, emitida_em, cancelada into n from public.crm_notas where id = i.nota_id;
+  if n.emitida_em is null or n.cancelada then return; end if;
+  if exists (select 1 from public.crm_estoque_mov where nota_item_id = p_item) then return; end if;
+  if not exists (select 1 from public.crm_estoque_saldo) then return; end if; -- o livro ainda não começou
+  un := public.crm_un(i.unidade);
+  select codigo, unidade, inicio into s from public.crm_estoque_saldo where codigo = i.codigo;
+  if s.codigo is null then
+    insert into public.crm_estoque_saldo (codigo, descricao, unidade, inicio) values (i.codigo, i.descricao, un, n.emitida_em - interval '1 second')
+      on conflict (codigo) do nothing;
+    select codigo, unidade, inicio into s from public.crm_estoque_saldo where codigo = i.codigo;
+  end if;
+  if n.emitida_em <= s.inicio then return; end if;
+  select u.fator into f from public.crm_estoque_unidades u where u.codigo = i.codigo and u.unidade = un;
+  if f is null then f := 1; conf := un is not null and s.unidade is not null and un <> s.unidade; end if;
+  insert into public.crm_estoque_mov (codigo, quando, tipo, quantidade, qtd_doc, unidade_doc, fator, conferir, nota_item_id, motivo, criado_por)
+  values (i.codigo, n.emitida_em, 'saida', -round(i.quantidade * f, 3), i.quantidade, un, f, conf, p_item, 'NF ' || n.numero, null);
+end;
+$$;
+revoke all on function public.crm_estoque_saida_item(uuid) from public, anon, authenticated;
+
+create or replace function public.crm_estoque_nota_item() returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if tg_op = 'INSERT' then perform public.crm_estoque_saida_item(new.id); return null; end if;
+  -- item apagado (nota apagada ou mesclada): devolve o que ele tirou
+  insert into public.crm_estoque_mov (codigo, quando, tipo, quantidade, qtd_doc, unidade_doc, fator, estorno_de, motivo, criado_por)
+  select m.codigo, now(), 'estorno', -m.quantidade, m.qtd_doc, m.unidade_doc, m.fator, m.id, 'item de nota apagado (' || coalesce(m.motivo, '') || ')', auth.uid()
+  from public.crm_estoque_mov m where m.nota_item_id = old.id and m.tipo = 'saida' and not exists (select 1 from public.crm_estoque_mov e where e.estorno_de = m.id);
+  return old;
+end;
+$$;
+drop trigger if exists crm_estoque_nota_item on public.crm_nota_itens;
+create trigger crm_estoque_nota_item after insert on public.crm_nota_itens for each row execute function public.crm_estoque_nota_item();
+drop trigger if exists crm_estoque_nota_item_del on public.crm_nota_itens;
+create trigger crm_estoque_nota_item_del before delete on public.crm_nota_itens for each row execute function public.crm_estoque_nota_item();
+
+create or replace function public.crm_estoque_nota_cancelada() returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  insert into public.crm_estoque_mov (codigo, quando, tipo, quantidade, qtd_doc, unidade_doc, fator, estorno_de, motivo, criado_por)
+  select m.codigo, now(), 'estorno', -m.quantidade, m.qtd_doc, m.unidade_doc, m.fator, m.id, coalesce(m.motivo, 'NF') || ' cancelada', auth.uid()
+  from public.crm_estoque_mov m join public.crm_nota_itens i on i.id = m.nota_item_id
+  where i.nota_id = new.id and m.tipo = 'saida' and not exists (select 1 from public.crm_estoque_mov e where e.estorno_de = m.id);
+  return null;
+end;
+$$;
+drop trigger if exists crm_estoque_nota_cancelada on public.crm_notas;
+create trigger crm_estoque_nota_cancelada after update of cancelada on public.crm_notas for each row
+  when (new.cancelada and not coalesce(old.cancelada, false)) execute function public.crm_estoque_nota_cancelada();
+
+-- Fator da caixa fechada (variante ".1", ".2"… da listagem do FKN, vendida como "CX" com o código da unidade):
+-- custo da caixa ÷ custo da unidade, quando dá inteiro (±5%); senão o "C/ N" da descrição. Com mais de uma caixa
+-- (".1", ".2"), vale a primeira; o comprador acerta à mão (origem 'manual' não é sobrescrita).
+create or replace function public.crm_estoque_fatores() returns integer language plpgsql security definer set search_path = public as $$
+declare n integer;
+begin
+  insert into public.crm_estoque_unidades (codigo, unidade, fator, origem)
+  select distinct on (u.codigo) u.codigo, 'CX', x.f, 'auto'
+  from public.crm_estoque v join public.crm_estoque u on u.codigo = regexp_replace(v.codigo, '\.\d+$', '')
+  cross join lateral (select coalesce(nullif(v.custo_compra, 0), v.custo_unit) / nullif(coalesce(nullif(u.custo_compra, 0), u.custo_unit), 0) r) c
+  cross join lateral (select case when c.r >= 1.5 and abs(c.r - round(c.r)) / c.r < 0.05 then round(c.r)
+    else nullif(coalesce(substring(v.descricao from '(?i)C/\s*(\d+)'), substring(v.descricao from '(?i)CX\.?\s*(\d+)\s*X')), '')::numeric end f) x
+  where v.codigo ~ '\.\d+$' and x.f > 1 and coalesce(public.crm_un(u.unidade), '') <> 'CX'
+  order by u.codigo, v.codigo
+  on conflict (codigo, unidade) do update set fator = excluded.fator, atualizado_em = now() where crm_estoque_unidades.origem = 'auto';
+  get diagnostics n = row_count;
+  return n;
+end;
+$$;
+revoke all on function public.crm_estoque_fatores() from public, anon, authenticated;
+
+-- Conferência CRM × FKN na hora da listagem: saldo do livro até gerado_em × "atual" do FKN. Explicação provável
+-- de cada diferença (a ordem importa): unidade da venda a conferir; nota emitida perto da hora da listagem;
+-- entrada no FKN depois do início (compra sem entrada no CRM); saída no FKN sem nota no CRM; produto só no CRM.
+create or replace function public.crm_estoque_conferir(p_foto bigint) returns jsonb language plpgsql security definer set search_path = public as $$
+declare f record; r jsonb;
+begin
+  if not (public.crm_eh_admin() or public.crm_eh_comprador() or coalesce(auth.role(), '') = 'service_role') then raise exception 'só o administrador ou o comprador'; end if;
+  select * into f from public.crm_estoque_fotos where id = p_foto;
+  if f.id is null or not exists (select 1 from public.crm_estoque_saldo) then return null; end if;
+  delete from public.crm_estoque_difs where foto_id = f.id;
+  insert into public.crm_estoque_difs (foto_id, codigo, descricao, saldo_crm, saldo_fkn, diferenca, explicacao)
+  with crm as (
+    select s.codigo, s.descricao, s.inicio, coalesce((select sum(m.quantidade) from public.crm_estoque_mov m where m.codigo = s.codigo and m.quando <= f.gerado_em), 0) q
+    from public.crm_estoque_saldo s where s.inicio <= f.gerado_em
+  ), fkn as (
+    select e.codigo, e.descricao, coalesce(e.estoque_atual, e.quantidade + coalesce(e.pend_cliente, 0)) q, e.ult_entrada, e.ult_saida
+    from public.crm_estoque e where e.codigo !~ '\.\d+$'
+  ), j as (
+    select coalesce(c.codigo, k.codigo) codigo, coalesce(k.descricao, c.descricao) descricao, coalesce(c.q, 0) qc, coalesce(k.q, 0) qk, c.inicio, k.ult_entrada, k.ult_saida, c.codigo is null so_fkn, k.codigo is null so_crm
+    from crm c full join fkn k on k.codigo = c.codigo
+  )
+  select f.id, j.codigo, j.descricao, j.qc, j.qk, j.qk - j.qc,
+    case
+      when j.so_fkn then 'produto novo no FKN (o CRM ainda não tem)'
+      when exists (select 1 from public.crm_estoque_mov m where m.codigo = j.codigo and m.conferir and m.quando <= f.gerado_em) then 'venda em unidade sem fator (confira a unidade)'
+      when exists (select 1 from public.crm_estoque_mov m where m.codigo = j.codigo and m.tipo = 'saida' and m.quando between f.gerado_em - interval '30 minutes' and f.gerado_em) then 'nota emitida perto da hora da listagem'
+      when j.qk > j.qc and j.ult_entrada >= j.inicio::date then 'entrada no FKN em ' || to_char(j.ult_entrada, 'DD/MM') || ' sem entrada no CRM (nota de compra)'
+      when j.qk < j.qc and j.ult_saida >= j.inicio::date then 'saída no FKN (' || to_char(j.ult_saida, 'DD/MM') || ') sem nota no CRM'
+      when j.so_crm then 'produto só no CRM (vendido sem cadastro no FKN)'
+      else 'sem explicação' end
+  from j where abs(j.qk - j.qc) >= 0.0005;
+  select jsonb_build_object('produtos', (select count(*) from public.crm_estoque_saldo where inicio <= f.gerado_em),
+    'diferentes', count(*), 'sem_explicacao', count(*) filter (where explicacao = 'sem explicação')) into r
+  from public.crm_estoque_difs where foto_id = f.id;
+  update public.crm_estoque_fotos set conferida_em = now(), resumo = r where id = f.id;
+  return r;
+end;
+$$;
+revoke all on function public.crm_estoque_conferir(bigint) from public, anon;
+grant execute on function public.crm_estoque_conferir(bigint) to authenticated, service_role;
+
+-- Chegou uma listagem do FKN (vigia ou tela): guarda a hora em que foi gerada, refaz os fatores das caixas e,
+-- com o livro já começado, confere.
+create or replace function public.crm_estoque_foto(p_gerado timestamptz, p_linhas integer) returns jsonb language plpgsql security definer set search_path = public as $$
+declare fid bigint; r jsonb;
+begin
+  if not (public.crm_eh_admin() or public.crm_eh_comprador() or coalesce(auth.role(), '') = 'service_role') then raise exception 'só o administrador ou o comprador'; end if;
+  insert into public.crm_estoque_fotos (gerado_em, linhas) values (coalesce(p_gerado, now()), p_linhas) returning id into fid;
+  perform public.crm_estoque_fatores();
+  r := public.crm_estoque_conferir(fid);
+  return jsonb_build_object('foto', fid, 'conferencia', r);
+end;
+$$;
+revoke all on function public.crm_estoque_foto(timestamptz, integer) from public, anon;
+grant execute on function public.crm_estoque_foto(timestamptz, integer) to authenticated, service_role;
+
+-- Começa o estoque do CRM (uma vez, só o administrador): saldo inicial = a última listagem do FKN, na hora em que
+-- ela foi gerada; as notas emitidas depois disso que já estão no CRM viram saída na hora.
+create or replace function public.crm_estoque_iniciar() returns jsonb language plpgsql security definer set search_path = public as $$
+declare f record; it record; n integer; ns integer := 0;
+begin
+  if not public.crm_eh_admin() then raise exception 'só o administrador'; end if;
+  if exists (select 1 from public.crm_estoque_saldo) then raise exception 'o estoque do CRM já foi começado'; end if;
+  select * into f from public.crm_estoque_fotos order by gerado_em desc limit 1;
+  if f.id is null then raise exception 'falta uma listagem de produtos do FKN com a hora: puxe a listagem e tente de novo'; end if;
+  insert into public.crm_estoque_saldo (codigo, descricao, unidade, inicio)
+    select e.codigo, e.descricao, public.crm_un(e.unidade), f.gerado_em from public.crm_estoque e where e.codigo !~ '\.\d+$';
+  get diagnostics n = row_count;
+  perform public.crm_estoque_fatores();
+  insert into public.crm_estoque_mov (codigo, quando, tipo, quantidade, custo_unit, motivo)
+    select e.codigo, f.gerado_em, 'inicial', coalesce(e.estoque_atual, e.quantidade + coalesce(e.pend_cliente, 0)), nullif(e.custo_unit, 0),
+      'saldo do FKN (listagem de ' || to_char(f.gerado_em at time zone 'America/Sao_Paulo', 'DD/MM HH24:MI') || ')'
+    from public.crm_estoque e where e.codigo !~ '\.\d+$';
+  for it in select i.id from public.crm_nota_itens i join public.crm_notas nt on nt.id = i.nota_id where nt.emitida_em > f.gerado_em and not nt.cancelada loop
+    perform public.crm_estoque_saida_item(it.id); ns := ns + 1;
+  end loop;
+  return jsonb_build_object('produtos', n, 'itens_depois', ns, 'desde', f.gerado_em, 'conferencia', public.crm_estoque_conferir(f.id));
+end;
+$$;
+revoke all on function public.crm_estoque_iniciar() from public, anon;
+grant execute on function public.crm_estoque_iniciar() to authenticated;
+
+-- Ajuste avulso e inventário por contagem (administrador ou comprador): leva o saldo ao contado.
+-- lote: [{codigo, contado}]; tipo 'ajuste' (um produto, com motivo) ou 'inventario' (a contagem).
+create or replace function public.crm_estoque_contagem(lote jsonb, p_tipo text, p_motivo text) returns integer language plpgsql security definer set search_path = public as $$
+declare x jsonb; s record; n integer := 0; d numeric;
+begin
+  if not (public.crm_eh_admin() or public.crm_eh_comprador()) then raise exception 'só o administrador ou o comprador'; end if;
+  if p_tipo not in ('ajuste', 'inventario') then raise exception 'tipo inválido'; end if;
+  if coalesce(btrim(p_motivo), '') = '' then raise exception 'diga o motivo'; end if;
+  for x in select * from jsonb_array_elements(coalesce(lote, '[]'::jsonb)) loop
+    select codigo, saldo into s from public.crm_estoque_saldo where codigo = x->>'codigo' for update;
+    if s.codigo is null then raise exception 'produto % não está no estoque do CRM', x->>'codigo'; end if;
+    d := round((x->>'contado')::numeric - s.saldo, 3);
+    if d = 0 then continue; end if;
+    insert into public.crm_estoque_mov (codigo, quando, tipo, quantidade, motivo) values (s.codigo, now(), p_tipo, d, left(btrim(p_motivo), 300));
+    n := n + 1;
+  end loop;
+  return n;
+end;
+$$;
+revoke all on function public.crm_estoque_contagem(jsonb, text, text) from public, anon;
+grant execute on function public.crm_estoque_contagem(jsonb, text, text) to authenticated;
