@@ -1243,10 +1243,11 @@ o serviço na VPS da Agilité (não no servidor do escritório).
 - Testes: `testes/nfe-servico.test.js` (XSD, assinatura, mensagens, servidor, pedido → nota) e `testes/emissao.test.js`
   (emitente do XML, conferências, fechamento, ZIP aberto pelo Python). Navegador (16/10, modo local): bloqueio por cliente
   sem CNPJ, prévia, emissão, CC-e, cancelamento, inutilização recusada/aceita, passagem para produção. Banco real:
-  vendedora não lê nem grava `crm_nfe` e não reserva número.
+  vendedora não lê nem grava `crm_nfe` e não reserva número. `revoke` da Fase 4 rodados pelo Anderson no SQL Editor em 16/10
+  (conferido: só leitura para `authenticated`; a reserva, só `service_role`).
 - **Falta (Anderson):** instalar o serviço na VPS (`servico-fiscal/INSTALAR.md`: DNS `fiscal`, .pfx e senha só lá,
   `FISCAL_URL`/`FISCAL_TOKEN` nos Secrets, `diagnostico.js status homologacao` dando 107); **renovar o A1 até 29/10**;
-  rodar o SQL dos `revoke` da Fase 4 no SQL Editor; configurar o emitente pelo XML; confirmar o responsável técnico; o
+  configurar o emitente pelo XML; confirmar o responsável técnico; o
   contador dá o "de acordo" na tabela fiscal e no cClassTrib; testes em homologação; depois produção.
 - Depois (Fase 4b): devolução, bonificação, troca, entrega futura e outro estado (hoje bloqueados: saem pelo FKN).
 
