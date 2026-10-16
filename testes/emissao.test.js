@@ -83,3 +83,15 @@ test('ZIP: abre com outro programa, com o conteúdo e os nomes certos (UTF-8)', 
   assert.strictEqual(py.status, 0, py.stderr);
   assert.deepStrictEqual(JSON.parse(py.stdout), [['NFe1-procNFe.xml', '<a>ação</a>', [2026, 10, 16, 10, 30]], ['relação.csv', '﻿Tipo;Série\r\n', [2026, 10, 16, 10, 30]]]);
 });
+
+test('tabela do IBPT: só NCM (tipo 0), datas e chave', () => {
+  const csv = 'codigo;ex;tipo;descricao;nacionalfederal;importadosfederal;estadual;municipal;vigenciainicio;vigenciafim;chave;versao;fonte\r\n' +
+    '48181000;;0;"Papel higienico";13.45;28.04;18.00;0.00;20/08/2026;30/09/2026;A906AF;26.2.A;IBPT/empresometro.com.br\r\n' +
+    '40151900;01;0;"De seguranca; e protecao";13.45;16.98;18.00;0.00;20/08/2026;30/09/2026;A906AF;26.2.A;IBPT/empresometro.com.br\r\n' +
+    '3901;;2;"Servicos";13.45;15.45;0.00;4.19;20/08/2026;30/09/2026;A906AF;26.2.A;IBPT/empresometro.com.br\r\n';
+  const t = M.lerIbpt(csv);
+  assert.deepStrictEqual([t.linhas.length, t.versao, t.chave, t.vig_ini, t.vig_fim], [2, '26.2.A', 'A906AF', '2026-08-20', '2026-09-30']);
+  assert.deepStrictEqual(t.linhas[1], { codigo: '40151900', ex: '01', descricao: 'De seguranca; e protecao', nac_fed: 13.45, imp_fed: 16.98, estadual: 18, municipal: 0,
+    vig_ini: '2026-08-20', vig_fim: '2026-09-30', chave: 'A906AF', versao: '26.2.A', fonte: 'IBPT/empresometro.com.br' });
+  assert.throws(() => M.lerIbpt('outra coisa;x'), /não parece a tabela do IBPT/);
+});

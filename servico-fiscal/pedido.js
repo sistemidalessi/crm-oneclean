@@ -69,8 +69,26 @@ function notaDoPedido(o) {
     d.seu_pedido ? 'SEU PEDIDO: ' + d.seu_pedido : '', d.texto_nota || ''].filter(Boolean).map(x => String(x).replace(/;/g, ',')).join(';') + ';';
   // LC 224/2025 (redução dos benefícios federais): item com PIS/COFINS de alíquota zero (06) ou isento (07) continua com o
   // mesmo CST, e a nota leva este aviso nas informações de interesse do fisco (Receita, Perguntas e Respostas 34.1; o FKN põe)
+  // Tributos aproximados (Lei 12.741/2012), pela tabela do IBPT que o CRM guarda (aba Fiscal), como o FKN faz:
+  // por item = valor × (federal + estadual + municipal) %, federal nacional ou importado pela origem; o total vai ao fisco.
+  const ib = o.ibpt || {}, soma = { fed: 0, est: 0, mun: 0 };
+  let tabIbpt = null;
+  const semTabela = !Object.keys(ib).length;
+  if (semTabela && itens.length) conferir.push('tabela do IBPT não carregada (aba Fiscal): a nota sai sem os tributos aproximados');
+  itens.forEach(it => {
+    const t = ib[dig(it.ncm)];
+    if (!t) { if (!semTabela) conferir.push('produto ' + it.codigo + ': NCM ' + it.ncm + ' fora da tabela do IBPT (sai sem os tributos aproximados)'); return; }
+    tabIbpt = tabIbpt || t;
+    const v = r2(it.quantidade * it.valorUnitario - it.desconto), importado = [1, 2, 6, 7].indexOf(Number(it.origem)) !== -1;   // estrangeira (direta ou no mercado interno)
+    const f = r2(v * num(importado ? t.imp_fed : t.nac_fed) / 100), e2 = r2(v * num(t.estadual) / 100), m = r2(v * num(t.municipal) / 100);
+    it.vTotTrib = r2(f + e2 + m); soma.fed += f; soma.est += e2; soma.mun += m;
+  });
+  if (tabIbpt && tabIbpt.vig_fim && String(emissao || '').slice(0, 10) > String(tabIbpt.vig_fim).slice(0, 10))
+    conferir.push('a tabela do IBPT venceu em ' + String(tabIbpt.vig_fim).slice(0, 10).split('-').reverse().join('/') + ': carregue a nova na aba Fiscal');
+  const tribTxt = tabIbpt ? 'Trib aprox R$: ' + r2(soma.fed).toFixed(2) + ' Federal, ' + r2(soma.est).toFixed(2) + ' Estadual e ' + r2(soma.mun).toFixed(2) + ' Municipal.; Fonte: ' +
+    (tabIbpt.fonte || 'IBPT') + ' ' + (tabIbpt.chave || '') + ';' : '';
   const lc224 = itens.some(it => ['06', '07'].indexOf(it.pis.cst) !== -1 || ['06', '07'].indexOf(it.cofins.cst) !== -1);
-  const infAdFisco = lc224 ? 'Operacao sujeita ao disposto na Lei Complementar no 224/2025;' : null;
+  const infAdFisco = ((lc224 ? 'Operacao sujeita ao disposto na Lei Complementar no 224/2025;' : '') + tribTxt) || null;
   const transp = String(d.transportadora || 'PROPRIO').trim();
   const nota = {
     ambiente: o.ambiente, emitente: o.emitente, serie: o.serie, numero: o.numero, emissao, natOp: cfg.natOp || 'VENDA NO ESTADO',

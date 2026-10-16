@@ -121,7 +121,22 @@
     return out;
   }
 
-  const api = { SITUACAO, situacaoDe, emitenteDoXml, faltasEmitente, confereTexto, horasDesde, mesSP, fechamento, zip, crc32 };
+  // Tabela do IBPT (CSV "codigo;ex;tipo;descricao;nacionalfederal;importadosfederal;estadual;municipal;vigenciainicio;
+  // vigenciafim;chave;versao;fonte"), só o tipo 0 (NCM). → { linhas, versao, chave, vig_ini, vig_fim, fonte }
+  function lerIbpt(texto) {
+    const campos = l => { const out = []; let cur = '', q = false; for (const ch of l) { if (ch === '"') q = !q; else if (ch === ';' && !q) { out.push(cur); cur = ''; } else cur += ch; } out.push(cur); return out; };
+    const dataISO = v => { const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(String(v || '').trim()); return m ? m[3] + '-' + m[2] + '-' + m[1] : null; };
+    const ls = String(texto || '').replace(/^\ufeff/, '').split(/\r?\n|\r|\u0085/).filter(l => l.trim());
+    if (!ls.length || !/^codigo;ex;tipo;/i.test(ls[0])) throw new Error('não parece a tabela do IBPT (a 1ª linha tem de começar com "codigo;ex;tipo;")');
+    const n = v => (v === '' || v == null ? null : Number(String(v).replace(',', '.')));
+    const linhas = ls.slice(1).map(campos).filter(c => c[2] === '0' && /^\d{8}$/.test(c[0])).map(c => ({ codigo: c[0], ex: c[1] || '', descricao: (c[3] || '').slice(0, 120),
+      nac_fed: n(c[4]), imp_fed: n(c[5]), estadual: n(c[6]), municipal: n(c[7]), vig_ini: dataISO(c[8]), vig_fim: dataISO(c[9]), chave: c[10] || null, versao: c[11] || null, fonte: c[12] || null }));
+    if (!linhas.length) throw new Error('nenhum NCM na tabela');
+    const a = linhas[0];
+    return { linhas, versao: a.versao, chave: a.chave, vig_ini: a.vig_ini, vig_fim: a.vig_fim, fonte: a.fonte };
+  }
+
+  const api = { lerIbpt, SITUACAO, situacaoDe, emitenteDoXml, faltasEmitente, confereTexto, horasDesde, mesSP, fechamento, zip, crc32 };
   raiz.CRMEmissao = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);
@@ -208,7 +223,29 @@
         (amb === 'homologacao' ? '<button type="button" class="btn" data-acao="nf-producao"' + (falta.length ? ' disabled title="complete o emitente antes"' : '') + '>Passar para produção…</button>'
           : '<button type="button" class="btn sec" data-acao="nf-homologacao">Voltar para homologação</button>') + '</p>' +
       (amb === 'homologacao' ? '<p class="dica">Para passar para produção: serviço fiscal e certificado conferidos, Sefaz 107, e pelo menos uma nota de teste autorizada em homologação' +
-        (nfes ? ' (até agora: ' + homAut + ')' : '') + '. O contador confere a tabela fiscal antes.</p>' : '') + '</section>';
+        (nfes ? ' (até agora: ' + homAut + ')' : '') + '. O contador confere a tabela fiscal antes.</p>' : '') +
+      '<h3>Tabela do IBPT (tributos aproximados na nota, Lei 12.741)</h3>' + ibptHtml() + '</section>';
+  }
+
+  let ibpt = null, ibptCarregando = false;
+  function ibptHtml() {
+    if (ibpt === null && !ibptCarregando) { ibptCarregando = true; CRM.store().ibptInfo().then(r => { ibpt = r || {}; ibptCarregando = false; CRM.render(); }).catch(() => { ibpt = {}; ibptCarregando = false; }); }
+    const i = ibpt || {}, br = d => (d ? String(d).slice(0, 10).split('-').reverse().join('/') : '');
+    const vencida = i.vig_fim && String(i.vig_fim).slice(0, 10) < new Date().toISOString().slice(0, 10);
+    return (i.n ? '<p class="' + (vencida ? 'alerta' : 'dica') + '">' + i.n + ' NCMs · versão ' + esc(i.versao || '') + ' (chave ' + esc(i.chave || '') + ') · vale de ' + br(i.vig_ini) + ' a ' + br(i.vig_fim) +
+        (vencida ? ' — <strong>vencida</strong>: baixe a nova (o FKN guarda em \\\\servidor\\sistema\\SIFN\\dados\\TIBPT-SP.csv, ou o site do IBPT) e carregue aqui.' : '.') + '</p>'
+      : '<p class="alerta">Ainda não carregada: sem ela a nota sai sem os tributos aproximados.</p>') +
+      '<p class="acoes"><label class="btn sec">Carregar a tabela (TIBPT-SP.csv)<input type="file" accept=".csv,text/csv" data-nf-ibpt hidden></label></p>';
+  }
+  async function carregaIbpt(arquivo) {
+    try {
+      const texto = new TextDecoder('windows-1252').decode(await arquivo.arrayBuffer());
+      const t = M.lerIbpt(texto);
+      CRM.toast('Carregando ' + t.linhas.length + ' NCMs da tabela do IBPT…');
+      for (let i = 0; i < t.linhas.length; i += 2000) await CRM.store().ibptCarregar(t.linhas.slice(i, i + 2000));
+      ibpt = await CRM.store().ibptInfo();
+      CRM.toast('Tabela do IBPT ' + (t.versao || '') + ' carregada: ' + t.linhas.length + ' NCMs.'); CRM.render();
+    } catch (e) { CRM.falhou(e); }
   }
 
   // ------------------------------------------------ Pedidos → NF-e
@@ -475,5 +512,8 @@
   });
 
   CRM.nfe = { tela, secaoFiscal, doPedido, podeEmitir, emitir, carrega: recarrega,
-    depois(c) { const m = c.querySelector('[data-nf-mes]'); if (m) m.addEventListener('change', () => { f.mes = m.value; }); } };
+    depois(c) {
+      const m = c.querySelector('[data-nf-mes]'); if (m) m.addEventListener('change', () => { f.mes = m.value; });
+      const ib = c.querySelector('[data-nf-ibpt]'); if (ib) ib.addEventListener('change', () => { if (ib.files[0]) carregaIbpt(ib.files[0]); });
+    } };
 })(typeof window !== 'undefined' ? window : globalThis);

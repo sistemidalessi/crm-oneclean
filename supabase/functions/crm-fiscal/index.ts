@@ -53,13 +53,17 @@ async function dadosDoPedido(db: ReturnType<typeof createClient>, pedidoId: stri
   const bases = [...new Set(((p.itens as Linha[]) || []).map(i => String(i.codigo || '').replace(/\.\d+$/, '')).filter(Boolean))];
   const { data: regs } = bases.length ? await db.from('crm_fiscal_produtos').select('*').in('codigo', bases) : { data: [] };
   const regras: Record<string, Linha> = {}; (regs || []).forEach((r: Linha) => { regras[String(r.codigo)] = r; });
+  // tabela do IBPT (tributos aproximados, Lei 12.741) pelo NCM de cada produto
+  const ncms = [...new Set((regs || []).map((r: Linha) => String(r.ncm || '').replace(/\D/g, '')).filter(Boolean))];
+  const { data: tib } = ncms.length ? await db.from('crm_ibpt').select('codigo, nac_fed, imp_fed, estadual, municipal, vig_fim, chave, versao, fonte').eq('ex', '').in('codigo', ncms) : { data: [] };
+  const ibpt: Record<string, Linha> = {}; (tib || []).forEach((t: Linha) => { ibpt[String(t.codigo)] = t; });
   const { data: cfgRow } = await db.from('crm_config').select('dados').eq('id', 1).maybeSingle();
   const fiscal = ((cfgRow as Linha | null)?.dados as Linha | undefined)?.fiscal as Linha | undefined || {};
   if (!fiscal.emitente) throw new Error('falta configurar o emitente (aba Fiscal → Emissão)');
   const { data: vend } = p.vendedor_id ? await db.from('crm_usuarios').select('nome, nomes_nota, papel').eq('user_id', p.vendedor_id).maybeSingle() : { data: null };
   const v = vend as Linha | null;
   const vendedorNome = v ? (((v.nomes_nota as string[]) || [])[0] || String(v.nome).split(' ')[0]) : '';
-  return { pedido: p, empresa: empresa as Linha, regras, fiscal, vendedorNome };
+  return { pedido: p, empresa: empresa as Linha, regras, fiscal, vendedorNome, ibpt };
 }
 
 const ambienteDe = (fiscal: Linha) => (fiscal.ambiente === 'producao' ? 'producao' : 'homologacao');
@@ -109,7 +113,7 @@ Deno.serve(async (req) => {
 
     if (acao === 'previa' || acao === 'emitir') {
       const d = await dadosDoPedido(db, String(b.pedido_id));
-      const corpo = { pedido: d.pedido, empresa: d.empresa, regras: d.regras, emitente: d.fiscal.emitente, ambiente: amb, serie, vendedorNome: d.vendedorNome, cfg: d.fiscal };
+      const corpo = { pedido: d.pedido, empresa: d.empresa, regras: d.regras, emitente: d.fiscal.emitente, ambiente: amb, serie, vendedorNome: d.vendedorNome, cfg: d.fiscal, ibpt: d.ibpt };
       if (acao === 'previa') return resposta(200, Object.assign(await servico('/previa-pedido', corpo), { ambiente: amb, serie }));
       const { data: res, error } = await db.rpc('crm_nfe_reservar', { p_ambiente: amb, p_serie: serie, p_pedido: d.pedido.id, p_empresa: d.pedido.empresa_id });
       if (error) throw new Error(error.message);

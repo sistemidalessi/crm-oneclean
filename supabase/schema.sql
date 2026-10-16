@@ -2880,3 +2880,49 @@ end;
 $$;
 revoke all on function public.crm_nfe_reservar(text, integer, uuid, uuid) from public, anon, authenticated;
 grant execute on function public.crm_nfe_reservar(text, integer, uuid, uuid) to service_role;
+
+-- =================================================================== Tabela do IBPT (Lei 12.741/2012), 16/10/2026
+-- Os tributos aproximados que a NF-e do CRM escreve ("Trib aprox R$: … Federal, … Estadual e … Municipal"), como o FKN.
+-- O administrador carrega o CSV do IBPT de SP (TIBPT-SP.csv; só o tipo 0, NCM) na aba Fiscal; a crm-fiscal lê pelo NCM.
+-- Carga nova sobrescreve linha a linha (sem apagar): NCM que saiu da tabela fica com a versão antiga (raro).
+create table if not exists public.crm_ibpt (
+  codigo       text not null,
+  ex           text not null default '',
+  descricao    text,
+  nac_fed      numeric(7,2),
+  imp_fed      numeric(7,2),
+  estadual     numeric(7,2),
+  municipal    numeric(7,2),
+  vig_ini      date,
+  vig_fim      date,
+  chave        text,
+  versao       text,
+  fonte        text,
+  carregado_em timestamptz not null default now(),
+  primary key (codigo, ex)
+);
+alter table public.crm_ibpt enable row level security;
+revoke all on public.crm_ibpt from anon, authenticated, public;
+grant select on public.crm_ibpt to authenticated;
+drop policy if exists ler on public.crm_ibpt;
+create policy ler on public.crm_ibpt for select to authenticated using ((select public.crm_eh_gestor()) or (select public.crm_eh_logistica()));
+
+create or replace function public.crm_ibpt_carregar(p_linhas jsonb) returns integer
+language plpgsql security definer set search_path = public as $$
+declare n integer;
+begin
+  if not public.crm_eh_admin() then raise exception 'só o administrador carrega a tabela do IBPT'; end if;
+  insert into public.crm_ibpt (codigo, ex, descricao, nac_fed, imp_fed, estadual, municipal, vig_ini, vig_fim, chave, versao, fonte, carregado_em)
+  select x->>'codigo', coalesce(x->>'ex', ''), x->>'descricao', (x->>'nac_fed')::numeric, (x->>'imp_fed')::numeric, (x->>'estadual')::numeric, (x->>'municipal')::numeric,
+         (x->>'vig_ini')::date, (x->>'vig_fim')::date, x->>'chave', x->>'versao', x->>'fonte', now()
+    from jsonb_array_elements(p_linhas) x
+   where x->>'codigo' ~ '^[0-9]{8}$'
+  on conflict (codigo, ex) do update set descricao = excluded.descricao, nac_fed = excluded.nac_fed, imp_fed = excluded.imp_fed, estadual = excluded.estadual,
+    municipal = excluded.municipal, vig_ini = excluded.vig_ini, vig_fim = excluded.vig_fim, chave = excluded.chave, versao = excluded.versao, fonte = excluded.fonte,
+    carregado_em = now();
+  get diagnostics n = row_count;
+  return n;
+end;
+$$;
+revoke all on function public.crm_ibpt_carregar(jsonb) from public, anon;
+grant execute on function public.crm_ibpt_carregar(jsonb) to authenticated;

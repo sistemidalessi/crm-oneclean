@@ -84,7 +84,9 @@ test('XML assinado passa no esquema oficial da NF-e (PL_010 v1.30, com IBS/CBS) 
     execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', path.join(dir, 'k.pem'), '-out', path.join(dir, 'c.pem'), '-days', '2', '-subj', '/CN=TESTE'], { stdio: 'pipe' });
     const keyPem = fs.readFileSync(path.join(dir, 'k.pem'), 'utf8'), certPem = fs.readFileSync(path.join(dir, 'c.pem'), 'utf8');
     for (const amb of ['homologacao', 'producao']) {
+      const comTrib = amb === 'producao';   // produção também com os tributos aproximados (IBPT) e o aviso ao fisco
       const m = N.monta(nota({ ambiente: amb, frete: { modFrete: 0, valor: 12.5, volumes: { qVol: 5, esp: 'CAIXAS' } },
+        itens: nota().itens.map(it => Object.assign({}, it, comTrib ? { vTotTrib: 4.27 } : {})), infAdFisco: comTrib ? 'Operacao sujeita ao disposto na Lei Complementar no 224/2025;' : undefined,
         cobranca: { duplicatas: [{ vencimento: '2026-11-19', valor: 78.89 }, { vencimento: '2026-12-19', valor: 78.89 }] } }));
       const sig = A.assinaElemento(m.infNFe, m.id, certPem, keyPem);
       const nfe = N.nfeCompleta(m.infNFe, sig);
@@ -181,7 +183,7 @@ const regras = { '010043': regraVenda('5102', '00', '01'), '250011': regraVenda(
 
 test('pedido → nota: caixa vira o código do produto, desconto em R$, parcelas, vendedor no texto da nota', () => {
   const r = PD.notaDoPedido({ pedido, empresa: cliente, regras, emitente, ambiente: 'homologacao', serie: 2, numero: 31, emissao: '2026-10-20T10:00:00-03:00', vendedorNome: 'Renata' });
-  assert.deepStrictEqual(r.avisos, { bloqueia: [], conferir: [] });
+  assert.deepStrictEqual(r.avisos, { bloqueia: [], conferir: ['tabela do IBPT não carregada (aba Fiscal): a nota sai sem os tributos aproximados'] });
   const n = r.nota;
   assert.deepStrictEqual(n.itens.map(i => [i.codigo, i.unidade, i.cfop, i.desconto]), [['010043', 'GL', '5102', 0], ['250011', 'CX', '5405', 9.41]]);
   assert.strictEqual(r.total, 220.35);
@@ -211,4 +213,18 @@ test('intermediador: obrigatório na venda não presencial (9), ausente na prese
   const x9 = N.monta(nota()).infNFe, x1 = N.monta(nota({ indPres: 1 })).infNFe;
   assert.match(x9, /<indPres>9<\/indPres><indIntermed>0<\/indIntermed><procEmi>/);   // rejeição 434 sem ele (homologação, 16/10/2026)
   assert.doesNotMatch(x1, /indIntermed/);
+});
+
+test('tributos aproximados (Lei 12.741) pela tabela do IBPT: por item, no total e no texto ao fisco, como o FKN', () => {
+  const ibpt = { '34022000': { nac_fed: 13.45, imp_fed: 15.45, estadual: 18, municipal: 0, vig_fim: '2026-09-30', chave: 'A906AF', fonte: 'IBPT/empresometro.com.br' } };
+  const r = PD.notaDoPedido({ pedido, empresa: cliente, regras, emitente, ambiente: 'homologacao', serie: 2, numero: 31, emissao: '2026-10-20T10:00:00-03:00', vendedorNome: 'Renata', ibpt });
+  // detergente: 2 × 67,84 = 135,68 × 31,45% = 42,67 (a mesma conta da NF 2708 do FKN); guardanapo: 84,67 × 31,45% = 26,63
+  assert.deepStrictEqual(r.nota.itens.map(i => i.vTotTrib), [42.67, 26.63]);
+  assert.strictEqual(r.nota.infAdFisco, 'Operacao sujeita ao disposto na Lei Complementar no 224/2025;Trib aprox R$: 29.64 Federal, 39.66 Estadual e 0.00 Municipal.; Fonte: IBPT/empresometro.com.br A906AF;');
+  assert.ok(r.avisos.conferir.some(x => /venceu em 30\/09\/2026/.test(x)));
+  const x = N.monta(r.nota).infNFe;
+  assert.match(x, /<imposto><vTotTrib>42.67<\/vTotTrib><ICMS>/);
+  assert.match(x, /<vNF>220.35<\/vNF><vTotTrib>69.30<\/vTotTrib><\/ICMSTot>/);
+  const fora = PD.notaDoPedido({ pedido, empresa: cliente, regras, emitente, ambiente: 'homologacao', serie: 2, numero: 31, emissao: '2026-10-20T10:00:00-03:00', ibpt: { '48181000': ibpt['34022000'] } });
+  assert.ok(fora.avisos.conferir.some(x => /010043.*fora da tabela do IBPT/.test(x)));
 });

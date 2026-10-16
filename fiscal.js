@@ -272,6 +272,7 @@
           '</ul></details>' : '<p class="vazio">Todos completos. 👍</p>') + '</section>' + (CRM.nfe ? CRM.nfe.secaoFiscal() : '');
     },
     depois(c) {
+      if (CRM.nfe) CRM.nfe.depois(c);
       const b = c.querySelector('[data-fi-busca]');
       if (b) b.addEventListener('input', () => { filtro.busca = b.value; CRM.render(); });
     }

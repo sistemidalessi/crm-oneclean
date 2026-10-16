@@ -1069,6 +1069,16 @@
   };
   Supa.prototype.nfeInutilizacoes = async function () { return unwrap(await this.sb.from('crm_nfe_inutilizacoes').select('*').order('criado_em', { ascending: false }).limit(200)); };
 
+  // Tabela do IBPT (tributos aproximados): o administrador carrega o CSV; a crm-fiscal lê pelo NCM.
+  Supa.prototype.ibptInfo = async function () {
+    const um = unwrap(await this.sb.from('crm_ibpt').select('versao, chave, vig_ini, vig_fim, fonte').order('vig_fim', { ascending: false }).limit(1));
+    const r = await this.sb.from('crm_ibpt').select('codigo', { count: 'exact', head: true });
+    return Object.assign({}, um[0] || {}, { n: r.count || 0 });
+  };
+  Supa.prototype.ibptCarregar = async function (linhas) { return unwrap(await this.sb.rpc('crm_ibpt_carregar', { p_linhas: linhas })); };
+  Local.prototype.ibptInfo = async function () { const l = this._ibpt || []; return Object.assign({}, l[0] || {}, { n: l.length }); };
+  Local.prototype.ibptCarregar = async function (linhas) { const m = new Map((this._ibpt || []).map(x => [x.codigo + '|' + x.ex, x])); linhas.forEach(x => m.set(x.codigo + '|' + x.ex, x)); this._ibpt = [...m.values()]; return linhas.length; };
+
   // Modo local: SIMULAÇÃO (nada vai à Sefaz; serve para treinar e testar a tela).
   Local.prototype._nfeL = function () {
     if (!this._nfes) { try { this._nfes = JSON.parse(raiz.localStorage.getItem('crm_nfe_local') || '[]'); } catch (e) { this._nfes = []; } }

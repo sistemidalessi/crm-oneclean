@@ -172,13 +172,17 @@ function monta(nota, opc) {
       tag('vUnCom', d4(it.valorUnitario)) + tag('vProd', d2(ci.vProd)) + tag('cEANTrib', ean) + tag('uTrib', txt(it.unidade || 'UN')) + tag('qTrib', d4(it.quantidade)) +
       tag('vUnTrib', d4(it.valorUnitario)) + (ci.vFrete ? tag('vFrete', d2(ci.vFrete)) : '') + (ci.vDesc ? tag('vDesc', d2(ci.vDesc)) : '') + '<indTot>1</indTot>' +
       (it.pedidoCliente ? tag('xPed', txt(it.pedidoCliente)) : '') + '</prod>';
-    const imp = '<imposto>' + grupoIcms(ci, it) + grupoFed('PIS', ci.pis) + grupoFed('COFINS', ci.cofins) + grupoIbsCbs(ci.ibscbs) + '</imposto>';
+    const imp = '<imposto>' + (it.vTotTrib != null ? tag('vTotTrib', d2(it.vTotTrib)) : '') + grupoIcms(ci, it) + grupoFed('PIS', ci.pis) + grupoFed('COFINS', ci.cofins) + grupoIbsCbs(ci.ibscbs) + '</imposto>';
     return '<det nItem="' + (i + 1) + '">' + prod + imp + (it.infAdProd ? tag('infAdProd', txt(it.infAdProd)) : '') + '</det>';
   }).join('');
   const t = c.totais;
+  // tributos aproximados (Lei 12.741/2012, tabela do IBPT): por item e o total
+  const comTrib = (nota.itens || []).filter(it => it.vTotTrib != null);
+  const totTrib = comTrib.length ? r2(comTrib.reduce((s, it) => s + num(it.vTotTrib), 0)) : null;
   const icmsTot = '<ICMSTot>' + tag('vBC', d2(t.vBC)) + tag('vICMS', d2(t.vICMS)) + '<vICMSDeson>0.00</vICMSDeson><vFCP>0.00</vFCP><vBCST>0.00</vBCST><vST>0.00</vST><vFCPST>0.00</vFCPST><vFCPSTRet>0.00</vFCPSTRet>' +
     tag('vProd', d2(t.vProd)) + tag('vFrete', d2(t.vFrete)) + '<vSeg>0.00</vSeg>' + tag('vDesc', d2(t.vDesc)) + '<vII>0.00</vII><vIPI>0.00</vIPI><vIPIDevol>0.00</vIPIDevol>' +
-    tag('vPIS', d2(t.vPIS)) + tag('vCOFINS', d2(t.vCOFINS)) + '<vOutro>0.00</vOutro>' + tag('vNF', d2(t.vNF)) + '</ICMSTot>';
+    tag('vPIS', d2(t.vPIS)) + tag('vCOFINS', d2(t.vCOFINS)) + '<vOutro>0.00</vOutro>' + tag('vNF', d2(t.vNF)) +
+    (totTrib != null ? tag('vTotTrib', d2(totTrib)) : '') + '</ICMSTot>';
   const ib = t.ibscbs;
   const ibsTot = ib ? '<IBSCBSTot>' + tag('vBCIBSCBS', d2(ib.vBC)) + '<gIBS><gIBSUF><vDif>0.00</vDif><vDevTrib>0.00</vDevTrib>' + tag('vIBSUF', d2(ib.vIBSUF)) + '</gIBSUF>' +
     '<gIBSMun><vDif>0.00</vDif><vDevTrib>0.00</vDevTrib>' + tag('vIBSMun', d2(ib.vIBSMun)) + '</gIBSMun>' + tag('vIBS', d2(ib.vIBS)) + '<vCredPres>0.00</vCredPres><vCredPresCondSus>0.00</vCredPresCondSus></gIBS>' +
