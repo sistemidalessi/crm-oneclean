@@ -29,6 +29,7 @@ Lido todo dia útil pelo **Vigia da legislação (fiscal OneClean)** (tarefa age
 | Notas de compra | distribuição de DF-e (Ambiente Nacional) e manifestação do destinatário (ciência da operação) | serviço fiscal (a fazer) |
 | Boleto | API de cobrança do Banco do Brasil (registro e aviso de pagamento); CNAB como plano B | a fazer (Fase 5) |
 | Contabilidade | XML de saída + relação de canceladas e inutilizadas do mês; inventário de 31/12 no encerramento de dezembro | Fechar o mês (a fazer) |
+| CNPJ alfanumérico | IN RFB 2.229/2024 e NT 2026.004 (NF-e desde 01/07/2026): letras nas 12 primeiras posições, DV numérico (ASCII − 48); a chave de 44 posições também aceita letras. **O CRM aceita desde 16/10/2026** (`regras.js` `doc`/`chaveDoc`/`cnpjValido`, `crm_doc` do banco) | `regras.js`, `schema.sql`, `nfe.js` e leitores |
 | Certificado A1 | e-CNPJ da OneClean (Safeweb) — **vence em 29/10/2026** (renovação pedida em 15/10) | serviço fiscal |
 | E-mail e WhatsApp | descadastro em todo e-mail de marketing (LGPD); WhatsApp pela API oficial da Meta (preço por mensagem) | `crm-email`, `crm-whatsapp` |
 

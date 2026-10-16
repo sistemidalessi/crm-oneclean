@@ -89,7 +89,7 @@ const ESQUEMA_BOLETO = {
 };
 const SISTEMA_BOLETO = 'Você lê boletos bancários (2ª via atualizada, com juros e multa) que a OneClean emite pelo Banco do Brasil contra os clientes dela. ' +
   'Devolva cada boleto do documento, um item por boleto, com a página em que ele está. Valor em reais com ponto decimal (950.12). Datas AAAA-MM-DD. ' +
-  'A linha digitável tem 47 dígitos: copie todos, só os números, conferindo dígito a dígito. CNPJ/CPF do pagador só com dígitos. ' +
+  'A linha digitável tem 47 dígitos: copie todos, só os números, conferindo dígito a dígito. CNPJ/CPF do pagador sem pontuação (o CNPJ novo pode ter letras). ' +
   'Na 2ª via do Banco do Brasil é NORMAL a linha digitável e o código de barras manterem o valor e o vencimento originais, com o valor atualizado (juros, multa) só em "(=) Valor cobrado": ' +
   'nesse caso valor_documento = o original, valor_cobrado = o atualizado, vencimento = o que está no boleto, e não avise nada sobre isso. ' +
   'Não invente: campo ilegível fica vazio (ou 0) e você diz em "aviso" (curto, só o que ficou ilegível). Recibo do pagador e ficha de compensação do mesmo boleto são um boleto só.';

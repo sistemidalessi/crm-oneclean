@@ -1157,6 +1157,14 @@ Sefaz por um serviço fiscal na VPS da Agilité; notas de compra pelo DF-e; bole
   no `registro.md`); levar ao contador PIS/COFINS do papel, limpeza com ST desde 01/08 e a dúvida da perfumaria/higiene
   (papel e toalha) fora da ST desde 01/04; depois do "de acordo", corrigir no FKN o 300005 e a ST da limpeza; seguir a
   Fase 2 do `plano-sair-do-fkn.md` (estoque no CRM em paralelo).
+- **CNPJ alfanumérico (16/10, achado do vigia, pedido do Anderson):** desde 01/07/2026 a Receita dá CNPJ com letras nas
+  12 primeiras posições (IN RFB 2.229/2024; NT 2026.004). Um normalizador só em `regras.js`: **`R.doc`** (números e
+  letras em maiúsculas), **`R.chaveDoc`** (CPF 11 números ou CNPJ 14 com letras; texto com prefixo cai nos números),
+  `R.ehCNPJ`/`R.ehCPF`, `R.cnpjValido` (DV com ASCII − 48; o exemplo da Receita `12.ABC.345/01DE-35` passa) e
+  `R.formataCNPJ`. **Para os CNPJs antigos o resultado é o mesmo de antes** (conferido nos 2.011 cadastros do banco).
+  Usam o normalizador: ficha, duplicados, busca, notas (`nfe.js`, chave de 44 posições com letras), FKN (`fkn.js`),
+  orçamento, cobrança, caixa, planilha, fiscal e o `crm_doc` do banco; a IA do Caixa (`crm-caixa-ler` v12) devolve o
+  documento com letras. Nunca mais tratar CNPJ com `digitos()`/`\D`. Testes em `testes/cnpj.test.js`.
 - **Vigia da legislação fiscal** (tarefa agendada da conta do Anderson, como o "Vigia da legislação (DP
   Agilité)"): lê `docs/legislacao/monitoramento.md` (o que o sistema usa) e `docs/legislacao/registro.md` (o que
   já foi avisado), pesquisa as fontes oficiais e grava achado novo **só** no `registro.md` (commit no main).

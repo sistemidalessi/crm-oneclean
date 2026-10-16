@@ -22,6 +22,9 @@ urgência. O vigia só escreve aqui; quem muda o sistema é a sessão de desenvo
   descartaria. O serviço fiscal (Fase 4) precisa do esquema novo e do cálculo do DV alfanumérico (valor ASCII − 48).
 - **Urgência:** **média-alta** — a emissão já aceita esses CNPJs desde julho e os primeiros clientes com CNPJ novo podem
   aparecer a qualquer momento; hoje o sistema só lê notas (não quebra a emissão), mas erra o cadastro.
+- **Atendido em 16/10/2026** (sessão de desenvolvimento, pedido do Anderson): o CRM guarda, valida, formata, busca e acha
+  duplicado com letras; `crm_doc` do banco igual; `crm-notas` v28 e `crm-caixa-ler` v12. Falta só no serviço fiscal (Fase 4):
+  esquema novo e DANFE com código de barras para chave com letras (a chave das notas da OneClean segue numérica).
 
 ## 16/10/2026 — Manifestação do destinatário: prazo caiu para 90 dias (desde 01/06/2026)
 - **O que mudou:** a manifestação conclusiva (confirmação da operação, desconhecimento, operação não realizada) passou de
