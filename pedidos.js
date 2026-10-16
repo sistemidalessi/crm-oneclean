@@ -260,6 +260,7 @@
     if (ehOp()) l.push(['separacao', 'Separação']);
     l.push(['faltas', 'Faltas']);
     if (ehVenda()) l.push(['comissoes', CRM.ehAdmin() ? 'Comissões' : 'Minha comissão']);
+    if (ehOp() && CRM.nfe) l.push(['nfe', 'NF-e']);
     return l;
   }
   function cabecalho() {
@@ -374,7 +375,8 @@
           '<span class="acoes-rapidas"><button type="button" class="btn" data-acao="pd-bolao" data-id="' + esc(b) + '">Abrir</button></span></li>'; }).join('') + '</ul>' : '<p class="vazio">Nenhuma lista aberta.</p>') + '</section>' +
       '<section class="cartao"><h2>Separados — a emitir NF <small>' + sep.length + '</small></h2>' +
       '<p class="dica">A nota emitida no FKN chega ao CRM pelo vigia e fatura o pedido sozinha (mesmo cliente, os mesmos produtos). Se não casar, use "Faturar…".</p>' +
-      (sep.length ? '<div class="tabela-rolagem"><table class="tabela"><tbody>' + sep.map(p => linhaP(p, false) + '<td class="num"><button type="button" class="mini" data-acao="pd-faturar" data-id="' + esc(p.id) + '">Faturar…</button></td></tr>').join('') + '</tbody></table></div>'
+      (sep.length ? '<div class="tabela-rolagem"><table class="tabela"><tbody>' + sep.map(p => linhaP(p, false) + '<td class="num">' + (CRM.nfe && CRM.nfe.podeEmitir(p) ? '<button type="button" class="mini" data-acao="nf-emitir" data-id="' + esc(p.id) + '">Emitir NF-e</button> ' : '') +
+        '<button type="button" class="mini" data-acao="pd-faturar" data-id="' + esc(p.id) + '" title="ligar a nota que o FKN emitiu">Faturar (FKN)…</button></td></tr>').join('') + '</tbody></table></div>'
         : '<p class="vazio">Nada esperando nota.</p>') + '</section>';
   }
 
@@ -429,7 +431,8 @@
     if (ehOp() && p.situacao === 'aberto' && !bAbertos.length) botoes.push('<button type="button" class="btn" data-acao="pd-bolao-um" data-id="' + esc(p.id) + '">Mandar para separação</button>');
     if (ehOp() && p.situacao === 'separacao') botoes.push('<button type="button" class="btn verde" data-acao="pd-separado" data-id="' + esc(p.id) + '">Separado ✓</button>');
     if (ehOp() && (p.situacao === 'separacao' || p.situacao === 'separado')) botoes.push('<button type="button" class="btn sec" data-acao="pd-voltar-aberto" data-id="' + esc(p.id) + '">Voltar ao aberto</button>');
-    if (ehOp() && ['aberto', 'separacao', 'separado'].indexOf(p.situacao) !== -1) botoes.push('<button type="button" class="btn sec" data-acao="pd-faturar" data-id="' + esc(p.id) + '">Faturar…</button>');
+    if (CRM.nfe && CRM.nfe.podeEmitir(p)) botoes.push('<button type="button" class="btn' + (p.situacao === 'separado' ? ' verde' : '') + '" data-acao="nf-emitir" data-id="' + esc(p.id) + '">Emitir NF-e</button>');
+    if (ehOp() && ['aberto', 'separacao', 'separado'].indexOf(p.situacao) !== -1) botoes.push('<button type="button" class="btn sec" data-acao="pd-faturar" data-id="' + esc(p.id) + '" title="ligar a nota que o FKN emitiu">Faturar (nota do FKN)…</button>');
     if (gest && p.situacao === 'faturado') botoes.push('<button type="button" class="btn sec" data-acao="pd-desfaturar" data-id="' + esc(p.id) + '">Desfazer faturado</button>');
     if ((p.situacao === 'aberto' && ehVenda()) || (ehOp() && ['separacao', 'separado'].indexOf(p.situacao) !== -1)) botoes.push('<button type="button" class="btn perigo" data-acao="pd-cancelar" data-id="' + esc(p.id) + '">Cancelar pedido</button>');
     botoes.push('<button type="button" class="btn sec" data-acao="pd-imprimir" data-id="' + esc(p.id) + '">Imprimir</button>');
@@ -454,7 +457,7 @@
     }
     return '<section class="cartao pd-janela"><header class="pd-topo"><button type="button" class="btn sec" data-acao="pd-fechar">← Voltar</button><h2>Pedido ' + esc(p.numero) + ' · ' + esc(nomeCliente(p)) + '</h2>' + CRM.selo(s.rotulo, s.cor) + '</header>' +
       (bAbertos.length ? '<p class="alerta">Bloqueado por: <strong>' + esc(bAbertos.map(b => P.ROTULO_BLOQUEIO[b] || b).join(', ')) + '</strong>.' + (gest ? ' Confira e clique em "Liberar".' : ' Quem libera é a gestora.') + '</p>' : '') +
-      '<p class="acoes">' + botoes.join(' ') + '</p>' +
+      '<p class="acoes">' + botoes.join(' ') + '</p>' + (CRM.nfe ? CRM.nfe.doPedido(p) : '') +
       '<div class="chips">' + abas.map(a => '<button type="button" class="chip-filtro' + (abaPed === a[0] ? ' ativo' : '') + '" data-acao="pd-aba-ped" data-id="' + a[0] + '">' + esc(a[1]) + '</button>').join('') + '</div>' + corpo + '</section>';
   }
 
@@ -784,7 +787,11 @@
     novo: async o => { fechaFichas(); E().aba = 'pedidos'; aberto = null; if (peds === null) await carrega(true); ed = novoEd(o || {}); CRM.render(); },
     abrir: async id => { fechaFichas(); E().aba = 'pedidos'; if (peds === null) await carrega(true); ed = null; aberto = id; CRM.render(); },
     doNegocio: id => (peds || []).filter(p => p.negocio_id === id),
-    carregados: () => peds !== null
+    carregados: () => peds !== null,
+    // para a emissão de NF-e (emissao.js)
+    pedido: id => ped(id),
+    recarregar: () => recarrega(),
+    verNfe: async () => { fechaFichas(); E().aba = 'pedidos'; ed = null; aberto = null; f.ver = 'nfe'; if (peds === null) await carrega(true); CRM.render(); }
   };
 
   CRM.telas.pedidos = {
@@ -793,10 +800,11 @@
       if (ed) return cabecalho() + telaEditor();
       const p = aberto && ped(aberto);
       if (p) return cabecalho() + telaPedido(p);
-      return cabecalho() + (f.ver === 'orcamentos' ? telaOrcamentos() : f.ver === 'estoque' ? telaEstoque() : f.ver === 'separacao' ? telaSeparacao() : f.ver === 'faltas' ? telaFaltas() : f.ver === 'comissoes' ? telaComissoes() : telaLista());
+      return cabecalho() + (f.ver === 'orcamentos' ? telaOrcamentos() : f.ver === 'estoque' ? telaEstoque() : f.ver === 'separacao' ? telaSeparacao() : f.ver === 'faltas' ? telaFaltas() : f.ver === 'comissoes' ? telaComissoes() : f.ver === 'nfe' && CRM.nfe ? CRM.nfe.tela() : telaLista());
     },
     depois(c) {
       const on = (sel, ev, fn) => c.querySelectorAll(sel).forEach(el => el.addEventListener(ev, () => fn(el)));
+      if (CRM.nfe) CRM.nfe.depois(c);
       on('[data-pd-busca]', 'input', el => { f.busca = el.value; CRM.render(); });
       on('[data-pd-vend]', 'change', el => { f.vend = el.value; CRM.render(); });
       on('[data-pd-est]', 'input', el => { f.est = el.value; CRM.render(); });

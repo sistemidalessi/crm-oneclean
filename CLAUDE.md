@@ -1182,7 +1182,7 @@ BLOQUEADO/liberado, bloqueios ESTOQUE / ATRASO DUPL / SEM ENTRADA, lista de sepa
   bolão, separação, comentário, comprador sem gravar, anônimo sem nada) e navegador (pedido, orçamento → PDF → virar
   pedido, liberar, bolão, separado, faltas, menus por papel). Achado no teste: o Enter que insere o item também dispara o
   "change" do campo antigo — cada linha de digitação tem um número (`ed.seq`) para isso não sujar a linha nova.
-- **Paralelo com o FKN:** até a Fase 4 a nota sai do FKN, então o pedido precisa existir lá também. O caminho sem digitar
+- **Paralelo com o FKN:** até a Fase 4 entrar em produção a nota sai do FKN, então o pedido precisa existir lá também. O caminho sem digitar
   duas vezes: orçamento no FKN → importar no CRM → "Virar pedido" no CRM; ou o pedido no CRM e a logística lança no FKN.
   Pronto quando: uma semana de pedidos reais feitos no CRM conferidos com o que saiu no FKN.
 - **Fase 3b (16/10/2026) — comissões e restaurar pedido:** aba Pedidos → **Comissões** (administrador: equipe;
@@ -1200,6 +1200,55 @@ BLOQUEADO/liberado, bloqueios ESTOQUE / ATRASO DUPL / SEM ENTRADA, lista de sepa
   (`P.itensParaRepetir`; sem bonificação). Achado no teste: a caixa vem na nota com o código da unidade e "CX" — agora o
   item vira o código da caixa (".1") na tela (`completa`) e no banco (`crm_pedido_itens_norm`), com preço, custo e fator dela.
 - Depois: faltas entrando na sugestão de compra de Compras; localização no galpão (o FKN tem o campo, vazio hoje).
+
+## NF-e emitida pelo CRM — Fase 4 da saída do FKN (16/10/2026, pedido do Anderson)
+
+**Caminho:** navegador → Edge Function `crm-fiscal` (login de quem clicou; emite: admin, gestora e logística; cancela:
+admin e gestora; inutiliza, configura e fecha o mês: admin) → **serviço fiscal** na VPS da Agilité (`servico-fiscal/`,
+Node puro, usuário `oneclean-fiscal`, porta 8787 atrás do Caddy em `fiscal.oneclean.com.br`; instalação em
+`servico-fiscal/INSTALAR.md`) → Sefaz-SP. Decisão do Anderson (15/10): emitir direto na Sefaz, como a NFS-e da Agilité, e
+o serviço na VPS da Agilité (não no servidor do escritório).
+- **Regras que não se quebram:** o certificado A1 (.pfx e senha) **só existe na VPS** — nunca no repositório, no CRM, no
+  chat; o `FISCAL_TOKEN` é gerado na VPS e vai só aos Secrets do Supabase (com `FISCAL_URL`); o serviço só escuta em
+  127.0.0.1; a conferência TLS da Sefaz nunca é desligada (cadeia extra em `FISCAL_CA`). **Nota de homologação nunca
+  entra no CRM** (nem estoque, nem título, nem comissão; o pedido não muda) — `gravaResultado` só entrega em produção.
+- **Núcleo** (`servico-fiscal/nfe.js`, testado contra o XSD oficial PL_010 v1.30 em `servico-fiscal/esquemas/`): NF-e 4.00
+  modelo 55 com IBS/CBS; cálculo copiado do FKN e conferido nos XML reais (ICMS 18% sobre produto + frete − desconto; CST 60
+  sem destaque; PIS/COFINS 1,65/7,6% com o ICMS fora da base; CST 06 sem alíquota; IBS/CBS 2026 informativo, CBS 0,9% e
+  IBS UF 0,1%, CST `000`, cClassTrib `000001` — **o contador confirma**). Assinatura XMLDSig RSA-SHA1 com C14N do
+  `xmllint` (`assinatura.js`); SOAP 1.2 com TLS mútuo, autorização síncrona, sem resposta → consulta pela chave
+  (`sefaz.js`). `pedido.js`: pedido → nota (avisos que bloqueiam: cliente sem CNPJ/endereço/IBGE/IE, outro estado, produto
+  sem regra fiscal ou sem NCM; para conferir: regra só proposta, alertas da aba Fiscal, forma de pagamento não reconhecida).
+  `infCpl` como o FKN ("VENDEDOR: NOME | PEDIDO CRM n | …"), assim a comissão e o vigia continuam iguais.
+- **Banco:** `crm_nfe` (uma linha por número: reservada/pendente/autorizada/rejeitada/denegada/cancelada/bloqueada;
+  `inutilizada_em`; `nfe_xml` assinado, `proc_xml`, `eventos` com o XML de cada evento), `crm_nfe_numeracao` (por
+  ambiente e série) e `crm_nfe_inutilizacoes` (com o ProcInutNFe). `crm_nfe_reservar` (só service_role, trava por
+  advisory lock): rejeitada/bloqueada/reservada **reaproveita o número**; pendente obriga a consultar; autorizada em
+  produção não emite outra (em homologação dá para repetir). Leitura: admin, gestora, logística; grava só a `crm-fiscal`.
+- **Série 2 no paralelo** (o FKN emite na 1; notas 1–2.708 em 16/10): os números nunca se chocam. Sair do FKN de vez =
+  decidir com o contador se continua na 2 ou volta à 1 a partir do último número do FKN.
+- **Telas (`emissao.js`):** aba **Fiscal → 4. Emissão** (só admin): ambiente (selo HOMOLOGAÇÃO/PRODUÇÃO), "Conferir o
+  serviço fiscal" (versão e validade do A1, alerta abaixo de 30 dias), "Status da Sefaz", emitente e opções (natureza,
+  consumidor final, presença, série, responsável técnico) com **"Preencher pelo XML de uma nota do FKN"** (copia o que o
+  FKN usa); "Passar para produção" só depois de 1 nota de teste autorizada em homologação e escrevendo PRODUÇÃO.
+  No pedido (aberto liberado, em separação ou separado): **"Emitir NF-e"** → prévia (totais, impostos, itens com NCM/CFOP/CST,
+  parcelas, o que bloqueia e o que conferir) → emitir → autorizada (oferece a DANFE) / rejeitada (corrigir e emitir de
+  novo, mesmo número) / sem resposta ("Consultar"; se a Sefaz não recebeu, reenvia o MESMO XML). "Faturar (nota do FKN)"
+  continua para o paralelo. **Pedidos → NF-e** (admin, gestora, logística): lista com DANFE (do `proc_xml`, `danfe.js`;
+  cancelada sai com a marca "NF-e CANCELADA"), XML, Consultar, Carta de correção (15–1000 letras; cada carta substitui a
+  anterior, o CRM traz a última para completar), Cancelar (15–255 letras; aviso depois de 24 h) e, para o admin, o
+  **fechamento do mês** (ZIP com os XML de produção do mês, os eventos e as inutilizações + `relacao-canceladas-inutilizadas-AAAA-MM.csv`;
+  ZIP "stored" feito no navegador, `M.zip`) e **inutilizar** (recusa faixa com nota usada; o número inutilizado não volta
+  a ser reaproveitado e a numeração pula a faixa). Modo local = **simulação** (nada vai à Sefaz; serve para treinar).
+- Testes: `testes/nfe-servico.test.js` (XSD, assinatura, mensagens, servidor, pedido → nota) e `testes/emissao.test.js`
+  (emitente do XML, conferências, fechamento, ZIP aberto pelo Python). Navegador (16/10, modo local): bloqueio por cliente
+  sem CNPJ, prévia, emissão, CC-e, cancelamento, inutilização recusada/aceita, passagem para produção. Banco real:
+  vendedora não lê nem grava `crm_nfe` e não reserva número.
+- **Falta (Anderson):** instalar o serviço na VPS (`servico-fiscal/INSTALAR.md`: DNS `fiscal`, .pfx e senha só lá,
+  `FISCAL_URL`/`FISCAL_TOKEN` nos Secrets, `diagnostico.js status homologacao` dando 107); **renovar o A1 até 29/10**;
+  rodar o SQL dos `revoke` da Fase 4 no SQL Editor; configurar o emitente pelo XML; confirmar o responsável técnico; o
+  contador dá o "de acordo" na tabela fiscal e no cClassTrib; testes em homologação; depois produção.
+- Depois (Fase 4b): devolução, bonificação, troca, entrega futura e outro estado (hoje bloqueados: saem pelo FKN).
 
 ## Fiscal — Fase 1 da saída do FKN (15/10/2026, pedido do Anderson)
 

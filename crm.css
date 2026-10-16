@@ -850,3 +850,7 @@ pre.of-previa { white-space: pre-wrap; font-family: inherit; font-size: .88rem; 
 .sp-doc .ass { margin-top: 4mm; }
 @media print { .sp-doc .quebra { break-before: page; } }
 .pd-num { width: 80px; }
+
+/* Emissão de NF-e (emissao.js) */
+.nf-previa { padding: 0 1.25rem; }
+.nf-previa .dados { margin: .6rem 0; }

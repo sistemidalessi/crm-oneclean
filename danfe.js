@@ -210,7 +210,7 @@
     function marcaDagua() {
       if (!d.homologacao && d.autorizada !== false) return;
       fonte(30, true); pdf.setTextColor(200);
-      pdf.text(d.homologacao ? 'SEM VALOR FISCAL' : 'NOTA SEM AUTORIZAÇÃO', 105, 200, { align: 'center', angle: 30 });
+      pdf.text(d.marca || (d.homologacao ? 'SEM VALOR FISCAL' : 'NOTA SEM AUTORIZAÇÃO'), 105, 200, { align: 'center', angle: 30 });
       pdf.setTextColor(0);
     }
 

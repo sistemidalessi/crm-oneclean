@@ -1045,6 +1045,92 @@
   };
   Local.prototype.comissaoReabrir = async function (mes) { let n = 0; (this._comissoes || []).forEach(c => { if (c.mes === mes && c.fechado_em) { c.fechado_em = null; c.reaberto_em = new Date().toISOString(); n++; } }); return n; };
 
+  // NF-e emitida pelo CRM (Fase 4): a Edge Function crm-fiscal faz tudo que fala com a Sefaz (pelo serviço fiscal da VPS);
+  // a leitura é direta (administrador, gestora e logística, pela RLS). Os XML vêm só quando pedidos (DANFE, fechamento).
+  const NFE_COLUNAS = 'id,ambiente,serie,numero,pedido_id,empresa_id,chave,situacao,cstat,motivo,protocolo,autorizada_em,valor,totais,avisos,nota_id,eventos,tentativas,inutilizada_em,criado_por,criado_em,atualizado_em';
+  Supa.prototype.fiscal = async function (corpo) {
+    const r = await this.sb.functions.invoke('crm-fiscal', { body: corpo });
+    if (r.error) throw await erroDaFuncao(r);
+    return r.data;
+  };
+  Supa.prototype.nfes = async function () {
+    const desde = new Date(Date.now() - 90 * 864e5).toISOString();
+    return unwrap(await comTentativas(() => this.sb.from('crm_nfe').select(NFE_COLUNAS).or('criado_em.gte.' + desde + ',situacao.eq.pendente').order('criado_em', { ascending: false }).limit(1000)));
+  };
+  Supa.prototype.nfeXml = async function (id) { return unwrap(await this.sb.from('crm_nfe').select('chave, proc_xml, nfe_xml').eq('id', id).single()); };
+  Supa.prototype.nfesDoMes = async function (mes) {
+    const [a, m] = mes.split('-').map(Number), fim = (m === 12 ? (a + 1) + '-01' : a + '-' + String(m + 1).padStart(2, '0')) + '-01T00:00:00-03:00', out = [];
+    for (let de = 0; ; de += 200) {
+      const l = unwrap(await comTentativas(() => this.sb.from('crm_nfe').select(NFE_COLUNAS + ',proc_xml').eq('ambiente', 'producao').gte('autorizada_em', mes + '-01T00:00:00-03:00')
+        .lt('autorizada_em', fim).order('numero').range(de, de + 199)));
+      out.push(...l);
+      if (l.length < 200) return out;
+    }
+  };
+  Supa.prototype.nfeInutilizacoes = async function () { return unwrap(await this.sb.from('crm_nfe_inutilizacoes').select('*').order('criado_em', { ascending: false }).limit(200)); };
+
+  // Modo local: SIMULAÇÃO (nada vai à Sefaz; serve para treinar e testar a tela).
+  Local.prototype._nfeL = function () {
+    if (!this._nfes) { try { this._nfes = JSON.parse(raiz.localStorage.getItem('crm_nfe_local') || '[]'); } catch (e) { this._nfes = []; } }
+    return this._nfes;
+  };
+  Local.prototype._nfeGrava = function () { try { raiz.localStorage.setItem('crm_nfe_local', JSON.stringify(this._nfes)); } catch (e) { /* só na memória */ } };
+  Local.prototype.fiscal = async function (b) {
+    const l = this._nfeL(), fc = ((((this.ler().config || [])[0]) || {}).dados || {}).fiscal || {}, agora = new Date().toISOString();
+    const amb = fc.ambiente === 'producao' ? 'producao' : 'homologacao', serie = Number(fc.serie == null ? 2 : fc.serie), r2 = v => Math.round(v * 100) / 100;
+    if (b.acao === 'saude') return { ok: true, versao: 'modo local (simulação)', certificado: { titular: 'ONECLEAN (simulação)', validoAte: new Date(Date.now() + 13 * 864e5).toISOString() } };
+    if (b.acao === 'status') return { cStat: 107, xMotivo: 'Servico em Operacao (simulação do modo local)' };
+    if (b.acao === 'previa' || b.acao === 'emitir') {
+      if (!fc.emitente) throw new Error('falta configurar o emitente (aba Fiscal → Emissão)');
+      const p = this._ped(b.pedido_id), e = (this.ler().empresas || []).find(x => x.id === p.empresa_id) || {};
+      if (['faturado', 'cancelado'].indexOf(p.situacao) !== -1) throw new Error('o pedido já está ' + p.situacao);
+      const bloqueia = e.cnpj ? [] : ['cliente sem CNPJ/CPF no cadastro'], vt = Number(p.valor_total) || 0;
+      const totais = { vProd: Number(p.valor_produtos) || 0, vFrete: Number(p.frete) || 0, vDesc: 0, vBC: vt, vICMS: r2(vt * 0.18), vPIS: r2(vt * 0.82 * 0.0165), vCOFINS: r2(vt * 0.82 * 0.076), vNF: vt };
+      const nota = { itens: (p.itens || []).map(i => ({ codigo: i.codigo, descricao: i.descricao, ncm: '—', cfop: '5102', icms: { cst: '00' }, pis: { cst: '01' }, unidade: i.unidade || 'UN',
+        quantidade: i.quantidade, valorUnitario: i.preco, desconto: i.quantidade * i.preco * (i.desconto || 0) / 100 })), infCpl: 'PEDIDO CRM ' + p.numero };
+      if (b.acao === 'previa') return { ambiente: amb, serie, bloqueado: bloqueia.length > 0, avisos: { bloqueia, conferir: ['modo local: é uma simulação, nada vai à Sefaz'] }, totais, nota };
+      if (bloqueia.length) throw new Error(bloqueia.join('; '));
+      let n = l.find(x => x.pedido_id === p.id && x.ambiente === amb && ['reservada', 'rejeitada', 'bloqueada'].indexOf(x.situacao) !== -1 && !x.inutilizada_em);
+      if (!n) {
+        const numero = l.filter(x => x.ambiente === amb && x.serie === serie).reduce((m, x) => Math.max(m, x.numero), 0) + 1;
+        n = { id: uuid(), ambiente: amb, serie, numero, pedido_id: p.id, empresa_id: p.empresa_id, eventos: [], tentativas: 0, criado_em: agora };
+        l.push(n);
+      }
+      Object.assign(n, { chave: '3526' + String(Date.now()).padStart(40, '0').slice(-40), situacao: 'autorizada', cstat: 100, motivo: 'Autorizado o uso da NF-e (simulação)', protocolo: '1352' + String(Date.now()).slice(-11),
+        autorizada_em: agora, atualizado_em: agora, valor: vt, totais, tentativas: (n.tentativas || 0) + 1 });
+      if (amb === 'producao') Object.assign(p, { situacao: 'faturado', faturado_em: agora });
+      this._nfeGrava(); this._pedsGrava();
+      return { nfe: Object.assign({}, n) };
+    }
+    const n = l.find(x => x.id === b.nfe_id);
+    if (b.acao === 'consultar') { if (!n) throw new Error('nota não encontrada'); return { nfe: Object.assign({}, n) }; }
+    if (b.acao === 'cancelar' || b.acao === 'cce') {
+      if (!n || n.situacao !== 'autorizada') throw new Error('só nota autorizada');
+      const ev = { tipo: b.acao, seq: b.acao === 'cce' ? n.eventos.filter(x => x.tipo === 'cce').length + 1 : 1, quando: agora, cstat: 135, motivo: 'Evento registrado (simulação)', protocolo: '1352' + String(Date.now()).slice(-11), texto: b.texto };
+      n.eventos.push(ev);
+      if (b.acao === 'cancelar') {
+        n.situacao = 'cancelada';
+        const p = n.pedido_id && this._peds().find(x => x.id === n.pedido_id);
+        if (p && n.ambiente === 'producao') Object.assign(p, { situacao: 'separado', faturado_em: null, nota_id: null });
+        this._pedsGrava();
+      }
+      this._nfeGrava();
+      return { ok: true, evento: ev };
+    }
+    if (b.acao === 'inutilizar') {
+      this._inuts = this._inuts || [];
+      this._inuts.unshift({ id: this._inuts.length + 1, ambiente: amb, serie: Number(b.serie), de: Number(b.de), ate: Number(b.ate), justificativa: b.texto, cstat: 102, motivo: 'Inutilizacao de numero homologado (simulação)', criado_em: agora });
+      l.filter(x => x.ambiente === amb && x.serie === Number(b.serie) && x.numero >= b.de && x.numero <= b.ate).forEach(x => { x.inutilizada_em = agora; });
+      this._nfeGrava();
+      return { ok: true, cStat: 102, motivo: 'Inutilizacao de numero homologado (simulação)' };
+    }
+    throw new Error('ação desconhecida');
+  };
+  Local.prototype.nfes = async function () { return this._nfeL().slice().sort((a, b) => String(b.criado_em).localeCompare(String(a.criado_em))).map(n => Object.assign({}, n)); };
+  Local.prototype.nfeXml = async function (id) { const n = this._nfeL().find(x => x.id === id); return { chave: n && n.chave, proc_xml: null, nfe_xml: null }; };
+  Local.prototype.nfesDoMes = async function () { return []; };
+  Local.prototype.nfeInutilizacoes = async function () { return (this._inuts || []).slice(); };
+
   raiz.CRMDados = { TABELAS, INTEIRAS, PARCIAIS, aplicaMudancas, marcaRecarga, chave, Local, Supa, uuid, vazio, LOCAL_ADMIN, cascataMemoria, situacaoVigia, PARADO_MIN, lembreteFkn };
   if (typeof module !== 'undefined' && module.exports) module.exports = raiz.CRMDados;
 })(typeof window !== 'undefined' ? window : globalThis);

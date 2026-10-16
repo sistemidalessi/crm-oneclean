@@ -87,6 +87,6 @@ systemctl reload caddy
 
 - **Atualizar o código:** `cd /opt/oneclean-fiscal && git pull && systemctl restart oneclean-fiscal`
 - **Certificado renovado:** trocar o `oneclean.pfx` (e a `senha.txt`, se mudou) e `systemctl reload oneclean-fiscal`
-  — o CRM avisa no sino 30 dias antes de vencer.
+  — o CRM avisa (aba Fiscal → "Conferir o serviço fiscal") quando faltam menos de 30 dias.
 - **Cópia dos XML:** ficam em `/var/lib/oneclean-fiscal/AAAA-MM/` (além do CRM). Entram no backup da VPS.
 - **Ver o que aconteceu:** `journalctl -u oneclean-fiscal -n 100 --no-pager`

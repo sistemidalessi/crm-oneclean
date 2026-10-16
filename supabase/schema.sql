@@ -2824,6 +2824,8 @@ create table if not exists public.crm_nfe (
   unique (ambiente, serie, numero)
 );
 create index if not exists crm_nfe_pedido_idx on public.crm_nfe (pedido_id);
+-- número que não vai ser usado (rejeitada/reservada de pedido que não sai) e foi inutilizado na Sefaz: não volta a ser reaproveitado
+alter table public.crm_nfe add column if not exists inutilizada_em timestamptz;
 create table if not exists public.crm_nfe_inutilizacoes (
   id            bigint generated always as identity primary key,
   ambiente      text not null,
@@ -2834,13 +2836,15 @@ create table if not exists public.crm_nfe_inutilizacoes (
   cstat         integer,
   motivo        text,
   protocolo     text,
+  xml           text,                  -- ProcInutNFe (vai ao contador no fechamento do mês)
   criado_por    uuid,
   criado_em     timestamptz not null default now()
 );
+alter table public.crm_nfe_inutilizacoes add column if not exists xml text;
 alter table public.crm_nfe enable row level security;
 alter table public.crm_nfe_numeracao enable row level security;
 alter table public.crm_nfe_inutilizacoes enable row level security;
-revoke all on public.crm_nfe, public.crm_nfe_numeracao, public.crm_nfe_inutilizacoes from anon, public;
+revoke all on public.crm_nfe, public.crm_nfe_numeracao, public.crm_nfe_inutilizacoes from anon, authenticated, public;
 grant select on public.crm_nfe, public.crm_nfe_numeracao, public.crm_nfe_inutilizacoes to authenticated;
 drop policy if exists ler on public.crm_nfe;
 create policy ler on public.crm_nfe for select to authenticated using ((select public.crm_eh_gestor()) or (select public.crm_eh_logistica()));
@@ -2859,7 +2863,7 @@ begin
   perform pg_advisory_xact_lock(hashtext('crm_nfe:' || p_ambiente || ':' || p_serie));
   -- em homologação o mesmo pedido pode ser testado de novo (a nota autorizada lá não conta)
   select * into r from public.crm_nfe where pedido_id = p_pedido and ambiente = p_ambiente and situacao in ('autorizada', 'pendente', 'reservada', 'rejeitada', 'bloqueada')
-     and (p_ambiente = 'producao' or situacao <> 'autorizada')
+     and inutilizada_em is null and (p_ambiente = 'producao' or situacao <> 'autorizada')
    order by criado_em desc limit 1;
   if r.id is not null then
     if r.situacao = 'autorizada' then raise exception 'o pedido já tem a NF % autorizada', r.numero; end if;

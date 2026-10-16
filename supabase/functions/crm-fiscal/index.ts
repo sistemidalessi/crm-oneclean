@@ -145,21 +145,39 @@ Deno.serve(async (req) => {
         ? await servico('/cancelar', { ambiente: nfe.ambiente, cnpj: emitente?.cnpj, chave: nfe.chave, protocolo: nfe.protocolo, justificativa: b.texto })
         : await servico('/cce', { ambiente: nfe.ambiente, cnpj: emitente?.cnpj, chave: nfe.chave, seq, correcao: b.texto });
       const ok = [135, 136, 155].includes(Number(r.eventoStat));
-      const ev = { tipo: acao, seq, quando: new Date().toISOString(), cstat: r.eventoStat ?? r.cStat, motivo: r.eventoMotivo ?? r.xMotivo, protocolo: ok ? r.protocolo : null, texto: b.texto, por: quem.user.id };
+      // o XML do evento (procEventoNFe) fica guardado: vai ao contador no fechamento do mês
+      const procEv = ok && r.eventoXml && r.retEvento ? '<?xml version="1.0" encoding="UTF-8"?><procEventoNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="1.00">' + r.eventoXml + r.retEvento + '</procEventoNFe>' : null;
+      const ev = { tipo: acao, seq, quando: new Date().toISOString(), cstat: r.eventoStat ?? r.cStat, motivo: r.eventoMotivo ?? r.xMotivo, protocolo: ok ? r.protocolo : null, texto: b.texto, por: quem.user.id, xml: procEv };
       const patch: Linha = { eventos: evs.concat([ev]), atualizado_em: new Date().toISOString() };
       if (ok && acao === 'cancelar') patch.situacao = 'cancelada';
       await db.from('crm_nfe').update(patch).eq('id', nfe.id);
       if (ok && acao === 'cancelar' && nfe.ambiente === 'producao') {
-        await entregaAoCrm(db, 'NFe' + nfe.chave + '-canc.xml', '<?xml version="1.0" encoding="UTF-8"?><procEventoNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="1.00">' + r.eventoXml + r.retEvento + '</procEventoNFe>');
+        await entregaAoCrm(db, 'NFe' + nfe.chave + '-canc.xml', String(procEv));
         if (nfe.pedido_id) await db.from('crm_pedidos').update({ situacao: 'separado', nota_id: null, faturado_em: null, atualizado_em: new Date().toISOString() }).eq('id', nfe.pedido_id);
       }
-      return resposta(200, { ok, evento: ev });
+      return resposta(200, { ok, evento: Object.assign({}, ev, { xml: undefined }) });
     }
     if (acao === 'inutilizar') {
       if (eu.papel !== 'admin') throw new Error('só o administrador inutiliza numeração');
-      const r = await servico('/inutilizar', { ambiente: amb, cnpj: emitente?.cnpj, ano: new Date().getFullYear(), serie: Number(b.serie ?? serie), de: b.de, ate: b.ate, justificativa: b.texto });
-      await db.from('crm_nfe_inutilizacoes').insert({ ambiente: amb, serie: Number(b.serie ?? serie), de: b.de, ate: b.ate, justificativa: b.texto, cstat: r.cStat, motivo: r.xMotivo, protocolo: r.protocolo, criado_por: quem.user.id });
-      return resposta(200, { ok: Number(r.cStat) === 102, cStat: r.cStat, motivo: r.xMotivo });
+      const s = Number(b.serie ?? serie), de = Number(b.de), ate = Number(b.ate);
+      if (!(de > 0) || !(ate >= de) || ate - de > 9999) throw new Error('faixa de números inválida');
+      if (String(b.texto || '').trim().length < 15) throw new Error('a justificativa precisa de pelo menos 15 letras');
+      // número usado de verdade (autorizada, cancelada, denegada ou sem resposta) não se inutiliza
+      const { data: usados } = await db.from('crm_nfe').select('numero, situacao').eq('ambiente', amb).eq('serie', s).gte('numero', de).lte('numero', ate)
+        .in('situacao', ['autorizada', 'cancelada', 'denegada', 'pendente']).is('inutilizada_em', null);
+      if ((usados || []).length) throw new Error('a faixa tem nota usada: ' + (usados as Linha[]).map(u => 'NF ' + u.numero + ' (' + u.situacao + ')').join(', '));
+      const r = await servico('/inutilizar', { ambiente: amb, cnpj: emitente?.cnpj, ano: new Date().getFullYear(), serie: s, de, ate, justificativa: b.texto });
+      const ok = Number(r.cStat) === 102;
+      await db.from('crm_nfe_inutilizacoes').insert({ ambiente: amb, serie: s, de, ate, justificativa: b.texto, cstat: r.cStat, motivo: r.xMotivo, protocolo: r.protocolo, xml: r.procInut || null, criado_por: quem.user.id });
+      if (ok) {
+        const agora = new Date().toISOString();
+        await db.from('crm_nfe').update({ inutilizada_em: agora, atualizado_em: agora }).eq('ambiente', amb).eq('serie', s).gte('numero', de).lte('numero', ate).is('inutilizada_em', null);
+        // a numeração pula a faixa (inutilizar números à frente do próximo)
+        const { data: nr } = await db.from('crm_nfe_numeracao').select('proximo').eq('ambiente', amb).eq('serie', s).maybeSingle();
+        if (!nr) await db.from('crm_nfe_numeracao').insert({ ambiente: amb, serie: s, proximo: ate + 1 });
+        else if (Number((nr as Linha).proximo) <= ate) await db.from('crm_nfe_numeracao').update({ proximo: ate + 1 }).eq('ambiente', amb).eq('serie', s);
+      }
+      return resposta(200, { ok, cStat: r.cStat, motivo: r.xMotivo });
     }
     return resposta(400, { erro: 'ação desconhecida' });
   } catch (e) {

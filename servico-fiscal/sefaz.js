@@ -144,7 +144,11 @@ async function evento_(cfg, inf, idLote) {
 async function inutiliza(cfg, dados) {
   const inf = infInut(Object.assign({ ambiente: cfg.ambiente }, dados));
   const sig = A.assinaElemento(inf.infInut, inf.id, cfg.certPem, cfg.keyPem);
-  return leRetorno(await chama('inutilizacao', inutNFe(inf.infInut, sig), cfg));
+  const xml = inutNFe(inf.infInut, sig), r = leRetorno(await chama('inutilizacao', xml, cfg));
+  // o arquivo que vale (pedido + resposta) vai ao contador no fechamento do mês
+  const ret = bloco(r.bruto, 'retInutNFe');
+  return Object.assign(r, { procInut: ret && Number(r.cStat) === 102 ? '<?xml version="1.0" encoding="UTF-8"?><ProcInutNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">' +
+    xml.replace(/^<\?xml[^>]*>/, '') + ret.replace(/<(\/?)\w+:/g, '<$1') + '</ProcInutNFe>' : null });
 }
 
 module.exports = { BASE, SERV, msgStatus, msgConsulta, infEvento, cancelamento, cartaCorrecao, envEvento, montaEvento: evento, infInut, inutNFe, envelope, leRetorno, situacao,
