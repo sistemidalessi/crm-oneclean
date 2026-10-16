@@ -1,0 +1,7 @@
+# Acrescentar ao /etc/caddy/Caddyfile da VPS (o bloco da Agilité continua como está)
+fiscal.oneclean.com.br {
+	reverse_proxy 127.0.0.1:8787
+	request_body {
+		max_size 5MB
+	}
+}

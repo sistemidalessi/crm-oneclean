@@ -1,0 +1,23 @@
+# Serviço fiscal da OneClean (NF-e) — /etc/systemd/system/oneclean-fiscal.service
+[Unit]
+Description=Servico fiscal da OneClean (NF-e direto na Sefaz-SP)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=oneclean-fiscal
+Group=oneclean-fiscal
+WorkingDirectory=/opt/oneclean-fiscal/servico-fiscal
+EnvironmentFile=/etc/oneclean-fiscal.env
+ExecStart=/usr/bin/node servidor.js
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/oneclean-fiscal
+
+[Install]
+WantedBy=multi-user.target

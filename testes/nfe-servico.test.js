@@ -98,3 +98,64 @@ test('XML assinado passa no esquema oficial da NF-e (PL_010 v1.30, com IBS/CBS) 
     }
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('mensagens da Sefaz (status, consulta, cancelamento, CC-e, inutilização) passam nos esquemas oficiais', { skip: !temFerramentas && 'sem xmllint/openssl' }, () => {
+  const A = require('../servico-fiscal/assinatura.js'), S = require('../servico-fiscal/sefaz.js');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nfe-teste-'));
+  try {
+    execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', path.join(dir, 'k.pem'), '-out', path.join(dir, 'c.pem'), '-days', '2', '-subj', '/CN=TESTE'], { stdio: 'pipe' });
+    const keyPem = fs.readFileSync(path.join(dir, 'k.pem'), 'utf8'), certPem = fs.readFileSync(path.join(dir, 'c.pem'), 'utf8');
+    const chave = N.monta(nota()).chave, quando = '2026-10-20T11:00:00-03:00';
+    const canc = S.cancelamento({ ambiente: 'homologacao', cnpj: '11222333000181', chave, protocolo: '135260000000001', justificativa: 'Cliente desistiu da compra', quando });
+    const cce = S.cartaCorrecao({ ambiente: 'homologacao', cnpj: '11222333000181', chave, seq: 2, correcao: 'Endereço de entrega: Rua das Flores, 10', quando });
+    const inut = S.infInut({ ambiente: 'homologacao', cnpj: '11222333000181', ano: 2026, serie: 2, de: 7, ate: 9, justificativa: 'Numeração pulada por falha do sistema' });
+    const ev = i => S.envEvento(1, S.montaEvento(i.infEvento, A.assinaElemento(i.infEvento, i.id, certPem, keyPem)));
+    const casos = [[S.msgStatus('homologacao'), 'consStatServ_v4.00.xsd'], [S.msgConsulta('producao', chave), 'consSitNFe_v4.00.xsd'],
+      [ev(canc), 'envEventoCancNFe_v1.00.xsd'], [ev(cce), 'envCCe_v1.00.xsd'], [S.inutNFe(inut.infInut, A.assinaElemento(inut.infInut, inut.id, certPem, keyPem)), 'inutNFe_v4.00.xsd']];
+    for (const [xml, xsd] of casos) {
+      const f = path.join(dir, 'm.xml'); fs.writeFileSync(f, xml);
+      const r = spawnSync('xmllint', ['--noout', '--schema', path.join(ESQ, xsd), f]);
+      assert.strictEqual(r.status, 0, xsd + ': ' + String(r.stderr));
+    }
+    assert.strictEqual(canc.id, 'ID110111' + chave + '01');
+    assert.strictEqual(inut.id.length, 43);
+    assert.throws(() => S.cancelamento({ chave, protocolo: '1', justificativa: 'curto', quando }), /15 letras/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('leitura das respostas da Sefaz: autorizada, rejeitada, denegada, evento', () => {
+  const S = require('../servico-fiscal/sefaz.js');
+  const env = x => '<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope"><soap:Body><nfeResultMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4">' + x + '</nfeResultMsg></soap:Body></soap:Envelope>';
+  const prot = (c, m) => '<protNFe versao="4.00"><infProt><tpAmb>2</tpAmb><chNFe>3526' + '1'.repeat(40) + '</chNFe><dhRecbto>2026-10-20T11:00:01-03:00</dhRecbto><nProt>135260000012345</nProt><cStat>' + c + '</cStat><xMotivo>' + m + '</xMotivo></infProt></protNFe>';
+  const a = S.leRetorno(env('<retEnviNFe versao="4.00"><cStat>104</cStat><xMotivo>Lote processado</xMotivo>' + prot(100, 'Autorizado o uso da NF-e') + '</retEnviNFe>'));
+  assert.deepStrictEqual([a.situacao, a.cStat, a.protocolo, a.cStatLote], ['autorizada', 100, '135260000012345', 104]);
+  assert.ok(a.protNFe.indexOf('<protNFe') === 0);
+  const r = S.leRetorno(env('<retEnviNFe versao="4.00"><cStat>104</cStat><xMotivo>Lote processado</xMotivo>' + prot(778, 'Rejeicao: Informado NCM inexistente') + '</retEnviNFe>'));
+  assert.deepStrictEqual([r.situacao, r.cStat, r.xMotivo], ['rejeitada', 778, 'Rejeicao: Informado NCM inexistente']);
+  assert.strictEqual(S.leRetorno(env('<retEnviNFe><cStat>225</cStat><xMotivo>Rejeicao: Falha no Schema XML</xMotivo></retEnviNFe>')).situacao, 'rejeitada');
+  assert.strictEqual(S.situacao(302), 'denegada');
+  const e = S.leRetorno(env('<retEnvEvento><cStat>128</cStat><retEvento versao="1.00"><infEvento><cStat>135</cStat><xMotivo>Evento registrado e vinculado a NF-e</xMotivo><nProt>135260000099999</nProt></infEvento></retEvento></retEnvEvento>'));
+  assert.deepStrictEqual([e.eventoStat, e.protocolo], [135, '135260000099999']);
+});
+
+test('servidor: recusa sem a chave, prévia calcula sem falar com a Sefaz, sem certificado não emite', async () => {
+  const V = require('../servico-fiscal/servidor.js');
+  process.env.FISCAL_TOKEN = 'x'.repeat(40); process.env.FISCAL_PASTA = fs.mkdtempSync(path.join(os.tmpdir(), 'fisc-'));
+  V._cert(null);
+  const srv = V.cria(); await new Promise(ok => srv.listen(0, '127.0.0.1', ok));
+  const porta = srv.address().port;
+  const chama = async (met, rota, corpo, tok) => { const r = await fetch('http://127.0.0.1:' + porta + rota, { method: met, headers: tok ? { Authorization: 'Bearer ' + tok } : {}, body: corpo ? JSON.stringify(corpo) : undefined }); return [r.status, await r.json()]; };
+  try {
+    assert.strictEqual((await chama('GET', '/saude'))[0], 401);
+    assert.strictEqual((await chama('GET', '/saude', null, 'y'.repeat(40)))[0], 401);
+    const [s, saude] = await chama('GET', '/saude', null, 'x'.repeat(40));
+    assert.deepStrictEqual([s, saude.ok, saude.certificado], [200, true, null]);
+    const [sp, pv] = await chama('POST', '/previa', { nota: nota() }, 'x'.repeat(40));
+    assert.deepStrictEqual([sp, pv.totais.vNF, pv.chave.length], [200, 145.28, 44]);
+    const [se, em] = await chama('POST', '/emitir', { nota: nota() }, 'x'.repeat(40));
+    assert.deepStrictEqual([se, /certificado/.test(em.erro)], [503, true]);
+    assert.strictEqual((await chama('POST', '/nada', {}, 'x'.repeat(40)))[0], 404);
+    process.env.FISCAL_TOKEN = 'curta';
+    assert.strictEqual((await chama('GET', '/saude', null, 'curta'))[0], 401);   // chave fraca: não atende ninguém
+  } finally { srv.close(); fs.rmSync(process.env.FISCAL_PASTA, { recursive: true, force: true }); }
+});
