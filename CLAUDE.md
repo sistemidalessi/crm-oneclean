@@ -1109,6 +1109,38 @@ ligado ao domínio; **começa com fila de aprovação** (nada sai sozinho); reme
 - **Depois (fase 2):** envio automático por cliente (o servidor monta a fila todo dia: precisa de pg_cron e da
   regra rodando na função) e a volta do e-mail (resposta do cliente vira atividade).
 
+## Estoque do CRM — Fase 2 da saída do FKN (16/10/2026, pedido do Anderson)
+
+O CRM tem o próprio estoque, **em paralelo com o FKN** (o FKN continua o dono até a virada). Aba **Estoque**
+(administrador e comprador; `estoque.js`, testes em `testes/estoque.test.js`; banco no fim do `schema.sql`).
+- **Livro de movimentos** `crm_estoque_mov` (não se edita nem se apaga: gatilho `crm_estoque_mov_trava`; erro se corrige
+  com estorno ou ajuste) e **saldo** `crm_estoque_saldo` (gatilho do livro; custo médio ponderado nas entradas).
+  Tipos: inicial, saida, entrada, ajuste, inventario, estorno. Tudo que grava é função do banco.
+- **Começar** (`crm_estoque_iniciar`, só admin, uma vez): saldo inicial = **"atual" da última listagem do FKN** (o físico,
+  com o reservado para cliente; "saldo" do FKN = atual − reservado), na hora em que ela foi gerada (cabeçalho DATA +
+  hora, `fkn.js posicaoListagem`); as notas emitidas depois disso que já estão no CRM viram saída na hora.
+  **Ainda não foi começado**: falta o Anderson clicar em "Começar" (depois de chegar uma listagem com a hora).
+- **Saídas**: gatilho em `crm_nota_itens` (vigia e importação) → `crm_estoque_saida_item` (uma vez por item; não move CFOP
+  de entrada, 5922/6922, serviço; nota cancelada estorna; item apagado estorna). **Unidade**: venda "CX" de produto
+  controlado em PT/UN multiplica pelo fator da caixa fechada (`crm_estoque_unidades`, refeito a cada listagem por
+  `crm_estoque_fatores`: custo da caixa ÷ custo da unidade; 487 fatores na listagem de 16/10). Sem fator: conta 1:1 e
+  marca "unidade a conferir".
+- **Conferência CRM × FKN**: cada listagem que chega (vigia `crm-notas` v29 ou tela) chama `crm_estoque_foto` →
+  `crm_estoque_conferir`: livro até a hora da listagem × "atual" do FKN, com a explicação provável de cada diferença
+  (`crm_estoque_difs`); cada listagem é conferida uma vez. **Meta do plano: 15 dias seguidos sem "sem explicação"**.
+- **Contagem e ajuste** (`crm_estoque_contagem`): colar `código;quantidade` (vírgula decimal; "3.000" = três mil) ou ✎.
+- **Entrada da nota de compra pelo XML** (`crm_compras`, `crm_compra_itens`, `crm_compra_vinculos`, `crm_compra_lancar`):
+  o comprador sobe o XML/ZIP, liga cada item a um produto com o fator (lembra por fornecedor + código do fornecedor;
+  sugere pela descrição), e a entrada soma no estoque com o custo do item (vProd − vDesc + IPI + ST + frete + seguro/
+  outras ÷ quantidade; **sem tirar créditos**). **Parcelas não vão ao contas a pagar durante o paralelo** (o FKN já manda;
+  duplicaria no Caixa). As notas de compra chegando sozinhas (DF-e) ficam para o serviço fiscal.
+- Testado em 16/10: navegador (saldo, conferência, movimentos, contagem, compra), banco real em transação desfeita
+  (1.712 produtos, 139 saídas depois da listagem, conferência 0 diferença no início, estorno, ajuste) e ataque de RLS
+  (vendedor não lê nem grava; comprador lê e grava compra).
+- **Lição (16/10):** pelo conector do Supabase, comandos com `delete`, `drop` ou `revoke` (até dentro do corpo de uma
+  função) pedem confirmação e caem por tempo. Desenhar sem eles (ex.: conferência que não apaga) e, quando forem
+  inevitáveis, passar o SQL para o Anderson rodar no SQL Editor (como em 16/10: limpeza dos boletos e as travas).
+
 ## Fiscal — Fase 1 da saída do FKN (15/10/2026, pedido do Anderson)
 
 Plano completo em `docs/plano-sair-do-fkn.md` do repositório **sistemi-dalessi** (decisões: NF-e direto na
