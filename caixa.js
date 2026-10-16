@@ -367,8 +367,8 @@
   // movimento lido do documento → a frase que o leitor entende. O CNPJ/CPF acha o nome do cliente no CRM
   // (o banco corta o nome: "SLIP QUIMIC"); números saem do nome e da descrição para o leitor não tomar por valor.
   function fraseDoMovimento(m) {
-    const doc = String(m.documento || '').replace(/\D/g, '');
-    const emp = doc.length >= 11 && (E().D.empresas || []).find(e => String(e.cnpj || '').replace(/\D/g, '') === doc);
+    const doc = R.documento(m.documento); // CNPJ pode ter letras (alfanumérico)
+    const emp = doc.length >= 11 && (E().D.empresas || []).find(e => R.documento(e.cnpj) === doc);
     const limpa = t => String(t || '').replace(/\d+/g, ' ').replace(/[^\p{L}\s&.'-]/gu, ' ').replace(/\s+/g, ' ').trim();
     const quem = limpa(emp ? emp.nome : m.quem);
     // "Pix recebido": "pix" é palavra de saída para o leitor; numa entrada não ajuda em nada

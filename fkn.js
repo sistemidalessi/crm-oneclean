@@ -8,7 +8,6 @@
 (function (raiz) {
   'use strict';
   const R = raiz.CRMRegras || (typeof require !== 'undefined' ? require('./regras.js') : null);
-  const digitos = v => String(v == null ? '' : v).replace(/\D/g, '');
 
   // ------------------------------------------------------------ estoque (CSV do FKN)
   // Cabeçalho reconhecido pelo nome (CODIGO; NOME DO PRODUTO; UNIDADE; LOCALIZAÇÃO; CUSTO; ESTOQUE).
@@ -91,7 +90,7 @@
         cli = { codigo: m[1], nome: m[2].trim(), vendedor: (m[4] || '').trim(), doc: '' };
         return;
       }
-      if (cli && (m = /^(?:CNPJ|CPF)\.*:\s*([\d./-]+)/.exec(l))) { cli.doc = digitos(m[1]); return; }
+      if (cli && (m = /^(?:CNPJ|CPF)\.*:\s*([0-9A-Za-z]{2}\.?[0-9A-Za-z]{3}\.?[0-9A-Za-z]{3}\/?[0-9A-Za-z]{4}-?\d{2}|[\d./-]+)/.exec(l))) { cli.doc = R.documento(m[1]); return; } // CNPJ pode ter letras (alfanumérico)
       if ((m = /^\s*(\d+)\/(\d+)([^;]*);\s*(\d\d\/\d\d\/\d\d(?:\d\d)?);\s*([-\d.,]+);\s*(\d\d\/\d\d\/\d\d(?:\d\d)?);\s*(\d*);([^;]*)/.exec(l))) {
         if (!cli) return;
         let dup = m[1] + '/' + m[2];
@@ -117,12 +116,12 @@
     const notasNum = new Map();
     (D.notas || []).forEach(n => { if (n.numero != null && n.empresa_id) { const k = String(+n.numero); if (!notasNum.has(k)) notasNum.set(k, []); notasNum.get(k).push(n); } });
     const porDoc = new Map();
-    (D.empresas || []).forEach(e => { const d = digitos(e.cnpj); if (d.length >= 11) { if (!porDoc.has(d)) porDoc.set(d, []); porDoc.get(d).push(e); } });
+    (D.empresas || []).forEach(e => { const d = R.documento(e.cnpj); if (d.length >= 11) { if (!porDoc.has(d)) porDoc.set(d, []); porDoc.get(d).push(e); } });
     const nNotas = e => ((ix && ix.porEmpresa && ix.porEmpresa.notas.get(e.id)) || []).length;
     let pelaNota = 0, peloDoc = 0, sem = 0;
     const out = titulos.map(t => {
-      const doc = digitos(t.cliente_doc);
-      const n = (notasNum.get(String(t.nota_numero)) || []).find(x => !doc || digitos(x.cliente_doc) === doc);
+      const doc = R.documento(t.cliente_doc);
+      const n = (notasNum.get(String(t.nota_numero)) || []).find(x => !doc || R.documento(x.cliente_doc) === doc);
       let empresa_id = n ? n.empresa_id : null;
       if (empresa_id) pelaNota++;
       else {

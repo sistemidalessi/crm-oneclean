@@ -370,3 +370,42 @@ test('vendasIguaisNotas: venda do cadastro sem CNPJ = nota de outro cadastro (me
   const r = N.vendasIguaisNotas(empresas, negocios, notas);
   assert.deepEqual(r.map(x => [x.a, x.b, x.negocio.id, x.nota.numero]), [['a', 'b', 'g1', 2069]]);
 });
+
+test('CNPJ alfanumérico (NT 2026.004): emitente e destinatário com letras, chave de 44 posições com letras', () => {
+  const EMIT_A = 'AB1CD2EF000170', DEST_A = '12ABC34501DE35'; // fictícios, com os verificadores certos
+  const chaveA = n => ('352609' + EMIT_A + '55001' + String(n).padStart(9, '0') + '1').padEnd(44, '0');
+  const com = (n, o) => xml(Object.assign({ n, emit: EMIT_A, itens: [{ cod: 'A', desc: 'A', q: 1, p: 100 }] }, o)).split(chave(n)).join(chaveA(n));
+  const d = N.lerXml(com(901, { dest: 'CLIENTE ALFA LTDA', cnpjDest: '12.abc.345/01de-35' }));
+  assert.equal(d.chave, chaveA(901));
+  assert.equal(d.emitente.doc, EMIT_A, 'o CNPJ do emitente não perde as letras');
+  assert.equal(d.cliente.doc, DEST_A);
+  assert.deepEqual(N.lerXml(cancelamento(901).split(chave(901)).join(chaveA(901))), { tipo: 'cancelamento', chave: chaveA(901) });
+
+  const D = base();
+  D.usuarios = [{ user_id: 'u1', nome: 'Vendedora Um' }];
+  D.empresas = [{ id: 'e1', nome: 'Cliente Alfa', cnpj: '12.ABC.345/01DE-35', situacao: 'cliente', responsavel_id: 'u1' }];
+  const docs = [d,
+    N.lerXml(com(902, { dest: 'CLIENTE ALFA LTDA - FILIAL', cnpjDest: '12ABC34502DE' + '00' })), // filial com verificador errado: não é alfanumérico
+    N.lerXml(com(903, { dest: 'NOVO CLIENTE BETA', cnpjDest: 'ZX9Y8W7V000122' }))];
+  const pl = N.planeja(D, docs, { responsavelPadrao: 'u1', filtro: 'todas' });
+  assert.equal(pl.resumoNotas.emitente.doc, 'AB.1CD.2EF/0001-70');
+  assert.equal(pl.criar.notas.find(n => n.numero === 901).empresa_id, 'e1', 'achou o cliente pelo CNPJ alfanumérico');
+  const beta = pl.criar.empresas.find(e => e.nome === 'NOVO CLIENTE BETA');
+  assert.equal(beta.cnpj, 'ZX.9Y8.W7V/0001-22', 'cliente novo com o CNPJ alfanumérico formatado');
+  assert.equal(pl.criar.notas.find(n => n.numero === 903).cliente_doc, 'ZX.9Y8.W7V/0001-22');
+  // reimportar não duplica
+  D.notas = pl.criar.notas.map(n => ({ id: n.id, chave: n.chave, cancelada: n.cancelada }));
+  assert.equal(N.planeja(D, docs, { responsavelPadrao: 'u1', filtro: 'todas' }).criar.notas.length, 0);
+});
+
+test('CNPJ alfanumérico: filial pela raiz de 8 posições com letra', () => {
+  const MATRIZ = '12ABC34501DE35';
+  const filial = (() => { for (let a = 0; a < 10; a++) for (let b = 0; b < 10; b++) if (R.cnpjValido('12ABC3450002' + a + b)) return '12ABC3450002' + a + b; })();
+  const D = base();
+  D.usuarios = [{ user_id: 'u1', nome: 'Vendedora Um' }];
+  D.empresas = [{ id: 'm', nome: 'Rede Alfa', cnpj: R.formataCNPJ(MATRIZ), situacao: 'cliente', responsavel_id: 'u1' }];
+  const pl = N.planeja(D, [N.lerXml(xml({ n: 950, dest: 'REDE ALFA UNIDADE 2', cnpjDest: filial, itens: [{ cod: 'A', desc: 'A', q: 1, p: 10 }] }))], { responsavelPadrao: 'u1', filtro: 'todas' });
+  const nova = pl.criar.empresas[0];
+  assert.equal(nova.grupo_id, 'm', 'mesma raiz 12ABC345: filial no grupo da matriz');
+  assert.equal(nova.responsavel_id, 'u1');
+});

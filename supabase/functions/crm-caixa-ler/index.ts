@@ -40,7 +40,7 @@ const ESQUEMA = {
           data: { type: 'string', description: 'AAAA-MM-DD' },
           situacao: { type: 'string', enum: ['realizado', 'previsto'] },
           quem: { type: 'string', description: 'quem pagou (entrada) ou a quem foi pago (saída), como está no documento; vazio se não aparece' },
-          documento: { type: 'string', description: 'CNPJ ou CPF só com dígitos; vazio se não aparece' },
+          documento: { type: 'string', description: 'CNPJ ou CPF sem pontuação (o CNPJ novo pode ter letras: 12ABC34501DE35); vazio se não aparece' },
           descricao: { type: 'string', description: 'do que se trata, curto (ex.: Pix recebido, boleto de energia, tarifa)' }
         }
       }
@@ -49,12 +49,14 @@ const ESQUEMA = {
   }
 };
 
+// CNPJ ou CPF sem pontuação; o CNPJ alfanumérico (IN RFB 2.229/2024) fica com as letras, em maiúsculas.
+const doc = (v: unknown) => String(v ?? '').toUpperCase().replace(/[^0-9A-Z]/g, '').slice(0, 14);
 const SISTEMA = 'Você lê documentos financeiros da OneClean (distribuidora de produtos de limpeza em São Bernardo do Campo) para o caixa da empresa: ' +
   'prints do extrato do Banco do Brasil, comprovantes de Pix e TED, boletos, notas e recibos. Devolva cada movimento de dinheiro que o documento mostra. ' +
   'Regras: crédito, "C", "Pix - Recebido", depósito = entrada; débito, "D", pagamento, Pix enviado, tarifa = saída. ' +
   'Valor em reais, número com ponto decimal (134.84). Data no formato AAAA-MM-DD; sem ano no documento, use o ano de hoje. ' +
   'Situação "realizado" para o que já aconteceu (extrato, comprovante); "previsto" para boleto ou conta ainda por pagar (use o vencimento). ' +
-  'Em "quem", copie o nome como aparece (o banco às vezes corta o nome, não complete). Em "documento", o CNPJ ou CPF da outra parte, só dígitos. ' +
+  'Em "quem", copie o nome como aparece (o banco às vezes corta o nome, não complete). Em "documento", o CNPJ ou CPF da outra parte, sem pontuação (o CNPJ alfanumérico tem letras nas 12 primeiras posições: mantenha as letras). ' +
   'Não invente: se um valor ou data não estiver legível, deixe o movimento de fora e diga em "aviso". ' +
   'A anotação de quem colou vale como contexto (ex.: "entrou hoje" confirma que é entrada realizada), mas o documento manda nos números. ' +
   'Saldos, limites e totais do extrato não são movimentos.';
@@ -74,7 +76,7 @@ const ESQUEMA_BOLETO = {
         properties: {
           pagina: { type: 'integer', description: 'página do PDF onde está o boleto (1 = primeira); imagem: 1' },
           pagador: { type: 'string', description: 'nome do pagador (sacado), como está' },
-          documento: { type: 'string', description: 'CNPJ ou CPF do pagador, só dígitos; vazio se não aparece' },
+          documento: { type: 'string', description: 'CNPJ ou CPF do pagador, sem pontuação (o CNPJ novo pode ter letras); vazio se não aparece' },
           numero_documento: { type: 'string', description: 'campo "Nº do documento" (costuma ser o número da nota ou da duplicata), como está' },
           nosso_numero: { type: 'string', description: 'campo "Nosso número", como está' },
           valor_documento: { type: 'number', description: 'valor original do título ("Valor do documento"); 0 se não aparece' },
@@ -89,7 +91,7 @@ const ESQUEMA_BOLETO = {
 };
 const SISTEMA_BOLETO = 'Você lê boletos bancários (2ª via atualizada, com juros e multa) que a OneClean emite pelo Banco do Brasil contra os clientes dela. ' +
   'Devolva cada boleto do documento, um item por boleto, com a página em que ele está. Valor em reais com ponto decimal (950.12). Datas AAAA-MM-DD. ' +
-  'A linha digitável tem 47 dígitos: copie todos, só os números, conferindo dígito a dígito. CNPJ/CPF do pagador só com dígitos. ' +
+  'A linha digitável tem 47 dígitos: copie todos, só os números, conferindo dígito a dígito. CNPJ/CPF do pagador sem pontuação (o CNPJ alfanumérico tem letras: mantenha). ' +
   'Na 2ª via do Banco do Brasil é NORMAL a linha digitável e o código de barras manterem o valor e o vencimento originais, com o valor atualizado (juros, multa) só em "(=) Valor cobrado": ' +
   'nesse caso valor_documento = o original, valor_cobrado = o atualizado, vencimento = o que está no boleto, e não avise nada sobre isso. ' +
   'Não invente: campo ilegível fica vazio (ou 0) e você diz em "aviso" (curto, só o que ficou ilegível). Recibo do pagador e ficha de compensação do mesmo boleto são um boleto só.';
@@ -155,7 +157,7 @@ Deno.serve(async (req) => {
       // deno-lint-ignore no-explicit-any
       const boletos = (Array.isArray(lido.boletos) ? lido.boletos : []).filter((b: any) => /^\d{4}-\d{2}-\d{2}$/.test(String(b.vencimento)) && (Number(b.valor_cobrado) > 0 || Number(b.valor_documento) > 0)).slice(0, 60)
         // deno-lint-ignore no-explicit-any
-        .map((b: any) => ({ pagina: Math.max(1, Math.min(500, Math.round(Number(b.pagina) || 1))), pagador: String(b.pagador ?? '').slice(0, 120), documento: String(b.documento ?? '').replace(/\D/g, '').slice(0, 14),
+        .map((b: any) => ({ pagina: Math.max(1, Math.min(500, Math.round(Number(b.pagina) || 1))), pagador: String(b.pagador ?? '').slice(0, 120), documento: doc(b.documento),
           numero_documento: String(b.numero_documento ?? '').slice(0, 40), nosso_numero: String(b.nosso_numero ?? '').slice(0, 40), valor_documento: d2(b.valor_documento), valor_cobrado: d2(b.valor_cobrado),
           vencimento: b.vencimento, linha_digitavel: String(b.linha_digitavel ?? '').replace(/\D/g, '').slice(0, 48) }));
       return resposta(200, { boletos, aviso: String(lido.aviso ?? '').slice(0, 500) });
@@ -165,7 +167,7 @@ Deno.serve(async (req) => {
       (m.tipo === 'entrada' || m.tipo === 'saida') && Number(m.valor) > 0 && /^\d{4}-\d{2}-\d{2}$/.test(String(m.data))).slice(0, 40)
       // deno-lint-ignore no-explicit-any
       .map((m: any) => ({ tipo: m.tipo, valor: Math.round(Number(m.valor) * 100) / 100, data: m.data, situacao: m.situacao === 'previsto' ? 'previsto' : 'realizado',
-        quem: String(m.quem ?? '').slice(0, 120), documento: String(m.documento ?? '').replace(/\D/g, '').slice(0, 14), descricao: String(m.descricao ?? '').slice(0, 120) }));
+        quem: String(m.quem ?? '').slice(0, 120), documento: doc(m.documento), descricao: String(m.descricao ?? '').slice(0, 120) }));
     return resposta(200, { movimentos, aviso: String(lido.aviso ?? '').slice(0, 500) });
   } catch (e) {
     if (e instanceof Anthropic.AuthenticationError) return resposta(503, { erro: 'a chave da Anthropic (ANTHROPIC_API_KEY) foi recusada: confira nos segredos do Supabase' });

@@ -311,3 +311,28 @@ test('recompra inteligente: ritmo, itens habituais e mensagem', () => {
   assert.ok(msg.startsWith('Olá, Maria! Aqui é Ana, da Empresa Exemplo.'));
   assert.ok(msg.includes('• Detergente neutro 5L — 4 GL'));
 });
+
+test('CNPJ alfanumérico (IN RFB 2.229/2024): verificador com ASCII − 48, máscara e chave do duplicado', () => {
+  // exemplo do material da Receita
+  assert.ok(R.cnpjValido('12ABC34501DE35'));
+  assert.ok(R.cnpjValido('12.abc.345/01de-35'), 'minúscula e com pontuação');
+  assert.ok(!R.cnpjValido('12ABC34501DE36'), 'verificador errado');
+  assert.ok(!R.cnpjValido('12ABC34501DEA5'), 'verificador com letra não existe');
+  assert.ok(R.cnpjValido('AB1CD2EF000170'));
+  assert.equal(R.formataCNPJ('12abc34501de35'), '12.ABC.345/01DE-35');
+  assert.equal(R.documento('12.ABC.345/01DE-35'), '12ABC34501DE35');
+  assert.equal(R.chaveDoc(' 12.abc.345/01de-35 '), '12ABC34501DE35');
+  assert.equal(R.chaveDoc('12ABC34501DE36'), '', 'alfanumérico com verificador errado não vira chave');
+  // só números: igual ao de antes (CNPJ antigo, CPF, texto em volta)
+  assert.equal(R.documento('11.222.333/0001-81'), '11222333000181');
+  assert.equal(R.documento('CNPJ 11.222.333/0001-81'), '11222333000181');
+  assert.equal(R.chaveDoc('CPF 123.456.789-09'), '12345678909');
+  assert.equal(R.formataCNPJ('12345678909'), '123.456.789-09');
+  assert.ok(R.cnpjValido('CNPJ 11.222.333/0001-81'));
+  assert.ok(!R.cnpjValido('11111111111111'));
+  // trava do app: o mesmo CNPJ escrito de outro jeito
+  const D = { empresas: [{ id: 'a', nome: 'Alfa', cnpj: '12.ABC.345/01DE-35' }], contatos: [] };
+  assert.deepEqual(R.achaDuplicados(D, { cnpj: '12abc34501de35' }).map(x => x.empresa_id), ['a']);
+  // busca pelo pedaço do CNPJ sem pontuação
+  assert.ok(R.casaBusca('12abc345', ['12.ABC.345/01DE-35']));
+});

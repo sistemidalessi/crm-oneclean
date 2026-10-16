@@ -283,7 +283,7 @@ create table if not exists public.crm_atividades (
 -- Só gestor importa; o vendedor vê as notas das empresas que ele vê.
 create table if not exists public.crm_notas (
   id             uuid primary key default gen_random_uuid(),
-  chave          text not null check (chave ~ '^[0-9]{44}$'),
+  chave          text not null check (chave ~ '^[0-9A-Z]{44}$'),
   numero         bigint,
   serie          text,
   emitida_em     timestamptz not null,
@@ -336,6 +336,10 @@ create table if not exists public.crm_integracoes (
 -- Vendedor da nota (o escrito no infCpl, "VENDEDOR: NOME"): os relatórios de faturamento e a
 -- Gestão contam a venda para ele (DIRETO, vendedora externa…); sem ele, a carteira do cliente.
 -- nomes_nota: como o usuário aparece nas notas quando não é pelo nome (ex.: DIRETO = o dono).
+-- Chave de acesso com letra (CNPJ alfanumérico do emitente, NT 2026.004, produção desde 01/07/2026).
+-- Para ver a regra que está no banco: select pg_get_constraintdef(oid) from pg_constraint where conname = 'crm_notas_chave_check';
+alter table public.crm_notas drop constraint if exists crm_notas_chave_check;
+alter table public.crm_notas add constraint crm_notas_chave_check check (chave ~ '^[0-9A-Z]{44}$');
 alter table public.crm_notas add column if not exists vendedor_nome text;
 alter table public.crm_notas add column if not exists vendedor_id uuid references public.crm_usuarios(user_id) on delete set null;
 create index if not exists crm_notas_vendedor_idx on public.crm_notas (vendedor_id);
@@ -477,11 +481,32 @@ returns boolean language sql stable security definer set search_path = public as
 $$;
 
 -- =================================================================== cadastro sem duplicado
--- Chaves de comparação (as mesmas do app, R.chaveTelefone etc.): documento só com dígitos
--- (CPF 11 ou CNPJ 14), telefone pelos 8 últimos dígitos (pega com e sem DDD, com e sem o 9
--- do celular), e-mail em minúsculas.
+-- Chaves de comparação (as mesmas do app, R.chaveDoc/R.documento, R.chaveTelefone etc.): documento
+-- só com dígitos (CPF 11 ou CNPJ 14) ou, se for CNPJ alfanumérico (IN RFB 2.229/2024: 12 primeiras
+-- posições com letras, 2 dígitos verificadores; NF-e desde 01/07/2026) com os verificadores certos,
+-- as 14 posições em maiúsculas; telefone pelos 8 últimos dígitos (pega com e sem DDD, com e sem o 9
+-- do celular), e-mail em minúsculas. Documento só com números dá o mesmo resultado de antes.
+-- Verificadores do CNPJ: módulo 11, cada posição vale ASCII − 48 (A = 17), pesos 2 a 9 da direita.
+create or replace function public.crm_cnpj_dv(c text) returns boolean language plpgsql immutable set search_path = public as $$
+declare n int; k int; s int; r int;
+begin
+  if c is null or c !~ '^[0-9A-Z]{12}[0-9]{2}$' then return false; end if;
+  for n in 12..13 loop
+    s := 0;
+    for k in 1..n loop
+      s := s + (ascii(substr(c, k, 1)) - 48) * (2 + ((n - k) % 8));
+    end loop;
+    r := s % 11;
+    if (case when r < 2 then 0 else 11 - r end) <> ascii(substr(c, n + 1, 1)) - 48 then return false; end if;
+  end loop;
+  return true;
+end $$;
 create or replace function public.crm_doc(t text) returns text language sql immutable set search_path = public as $$
-  select case when length(regexp_replace(coalesce(t, ''), '\D', '', 'g')) in (11, 14) then regexp_replace(t, '\D', '', 'g') end;
+  select case
+    when upper(regexp_replace(coalesce(t, ''), '[^0-9A-Za-z]', '', 'g')) ~ '[A-Z]'
+     and public.crm_cnpj_dv(upper(regexp_replace(coalesce(t, ''), '[^0-9A-Za-z]', '', 'g')))
+      then upper(regexp_replace(t, '[^0-9A-Za-z]', '', 'g'))
+    when length(regexp_replace(coalesce(t, ''), '\D', '', 'g')) in (11, 14) then regexp_replace(t, '\D', '', 'g') end;
 $$;
 create or replace function public.crm_tel(t text) returns text language sql immutable set search_path = public as $$
   select case when length(regexp_replace(coalesce(t, ''), '\D', '', 'g')) >= 8 then right(regexp_replace(t, '\D', '', 'g'), 8) end;

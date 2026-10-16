@@ -13,6 +13,7 @@
      18% (alíquota interna geral). Estoque de 31/07/2026: Portaria CAT 28/2020 (com o contador). */
 (function (raiz) {
   'use strict';
+  const RG = raiz.CRMRegras || (typeof require !== 'undefined' ? require('./regras.js') : null);
 
   const NCM_PAPEL_HIGIENICO = '48181000';
   const PIS_LUCRO_REAL = 1.65, COFINS_LUCRO_REAL = 7.6;
@@ -134,7 +135,7 @@
     const out = { total: 0, completos: 0, faltando: [] };
     (empresas || []).filter(e => comNota.has(e.id)).forEach(e => {
       out.total++;
-      const doc = String(e.cnpj || '').replace(/\D/g, ''), ind = String(e.ind_ie || ''), ie = String(e.ie || '').replace(/\D/g, '');
+      const doc = RG.documento(e.cnpj), ind = String(e.ind_ie || ''), ie = String(e.ie || '').replace(/\D/g, '');
       const falta = [];
       if (doc.length !== 14 && doc.length !== 11) falta.push('CNPJ/CPF');
       if (!ind) falta.push('indicador da IE');

@@ -62,6 +62,9 @@ insert into crm_empresas (nome, responsavel_id, telefone) values ('Ana copiando 
 insert into crm_empresas (nome, responsavel_id, email) values ('Ana copiando e-mail','c0000000-0000-0000-0000-000000000003',' Compras@Bruno.com.br'); -- FALHA (duplicado)
 insert into crm_empresas (nome, responsavel_id, cnpj) values ('Ana copiando CNPJ','c0000000-0000-0000-0000-000000000003','11222333000181'); -- FALHA (duplicado)
 update crm_empresas set whatsapp='11 9 8888 7777' where nome='Da Ana'; -- FALHA (duplicado)
+-- CNPJ alfanumérico (IN RFB 2.229/2024): a trava pega com e sem pontuação, maiúscula ou minúscula
+reset role; update crm_empresas set cnpj='12.ABC.345/01DE-35' where nome='Do Bruno'; set role authenticated; select pg_temp.como('c0000000-0000-0000-0000-000000000003');
+insert into crm_empresas (nome, responsavel_id, cnpj) values ('Ana copiando CNPJ alfanumérico','c0000000-0000-0000-0000-000000000003','12abc34501de35') returning 'Ana copiou CNPJ alfanumérico (NÃO devia)'; -- FALHA (duplicado)
 select 'Ana vê o aviso (só nome e carteira)' t, nome, responsavel, campo from crm_duplicado_empresa(null, array['988887777'], null);
 update crm_empresas set cidade='Santo André', telefone=telefone where nome='Da Ana' returning 'Ana editou a própria empresa sem mexer nos dados' as ok;
 select * from crm_acha_duplicado('11222333000181', null, null, null); -- FALHA (interna)
@@ -357,3 +360,12 @@ select case when crm_espelho_pacote(par) ->> 'apagar' = 'true' then 'desfeito no
 select crm_espelho_aplicar('{"versao":1,"origem":"agilite","par":"agilite:1;drop","movimentos":[]}'); -- FALHA
 select crm_espelho_aplicar('{"versao":1,"origem":"oneclean","par":"agilite:1","apagar":true}'); -- FALHA
 select crm_espelho_aplicar('{"versao":1,"origem":"agilite","par":"agilite:2","movimentos":[{"ref":"agilite:2","tipo":"saida","valor":-5,"data":"2026-10-08","situacao":"realizado"}]}'); -- FALHA
+-- crm_doc: igual ao R.chaveDoc do app (regras.js). Só números: o mesmo de antes; CNPJ alfanumérico com
+-- verificador certo fica com as letras; com verificador errado ou "CPF ..." não vira CNPJ.
+reset role;
+select case when crm_doc('11.222.333/0001-81') = '11222333000181' and crm_doc('123.456.789-09') = '12345678909'
+  and crm_doc('12.ABC.345/01DE-35') = '12ABC34501DE35' and crm_doc('12abc34501de35') = '12ABC34501DE35'
+  and crm_doc('12ABC34501DE36') is null and crm_doc('CPF 123.456.789-09') = '12345678909' and crm_doc(null) is null and crm_doc('123') is null
+  then 'crm_doc: CNPJ alfanumérico ok' else 'crm_doc errado (NÃO devia)' end;
+select case when exists (select 1 from pg_constraint where conname = 'crm_notas_chave_check' and pg_get_constraintdef(oid) like '%0-9A-Z%')
+  then 'chave da nota aceita letras' else 'chave da nota só com números (NÃO devia)' end;

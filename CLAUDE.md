@@ -376,6 +376,12 @@ recusas mais novas que a última entrega boa) faz o aviso de Compras dizer o que
   ser no servidor). Chaves: documento só dígitos (11/14), telefone pelos **8 últimos
   dígitos** (pega com/sem DDD, com/sem o 9, com +55), e-mail minúsculo. Iguais em
   `R.chaveDoc/chaveTelefone/chaveEmail` e `crm_doc/crm_tel/crm_mail`; mudar um, mudar o outro.
+- **CNPJ alfanumérico (16/10/2026, achado do vigia da legislação):** desde 01/07/2026 a NF-e aceita CNPJ com letras nas
+  12 primeiras posições (IN RFB 2.229/2024, NT 2026.004; verificador = módulo 11 com ASCII − 48). CNPJ se normaliza com
+  **`R.documento()`** (nunca `digitos()`): maiúsculas, sem pontuação, e só fica com letras se os verificadores conferem —
+  senão é `digitos()`, então documento só com números dá o mesmo de antes. `crm_doc()` + `crm_cnpj_dv()` no banco fazem
+  igual (mudar um, mudar o outro). Chave da nota `^[0-9A-Z]{44}$` (`CHAVE` em `nfe.js`, `crm_notas_chave_check`); DANFE
+  com CODE-128 B nos trechos com letra (`danfe.js code128`). Telefone, CEP, CPF e números continuam com `digitos()`.
 - Só confere o que **mudou**: os repetidos que vieram do Agendor (55 grupos por e-mail e
   82 por telefone em 30/09) continuam editáveis; juntar em Configurações → Duplicados (que
   agora agrupa também por telefone e e-mail, mostra o motivo e a carteira de cada um,

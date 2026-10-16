@@ -86,3 +86,9 @@ test('pendentes da vendedora e a mensagem pronta', () => {
   assert.doesNotMatch(venc, /copiar a linha digitável/, 'sem linha: só o PDF');
   assert.equal(C.boletosPendentes([Object.assign({}, boletos[1], { cobrado_em: 'x' })], atrasos).length, 0);
 });
+
+test('boleto com CNPJ alfanumérico do pagador acha o título', () => {
+  const empresas = [{ id: 'a', cnpj: '12.ABC.345/01DE-35' }];
+  const tits = [{ duplicata: '002600/01', nota_numero: 2600, empresa_id: 'a', valor: 250, vencimento: '2026-10-01' }];
+  assert.equal(C.casaBoleto({ documento: '12abc34501de35', valor_documento: 250 }, tits, empresas).titulo.duplicata, '002600/01');
+});

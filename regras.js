@@ -189,32 +189,57 @@
 
   function linkTelefone(tel) { const d = digitos(tel); return d.length >= 8 ? 'tel:' + d : ''; }
 
+  // CNPJ alfanumérico (IN RFB 2.229/2024; na NF-e desde 01/07/2026, NT 2026.004): as 12 primeiras
+  // posições podem ter letras (A–Z), os 2 dígitos verificadores continuam números. O CPF segue só
+  // com números. Dígitos verificadores: módulo 11 de sempre, cada posição vale o código ASCII − 48
+  // (0–9 = 0–9, A = 17, B = 18…), pesos 2 a 9 da direita para a esquerda.
+  const alfanum = s => String(s == null ? '' : s).replace(/[^0-9A-Za-z]/g, '').toUpperCase();
+  function dvCNPJ(c) {
+    if (!/^[0-9A-Z]{12}[0-9]{2}$/.test(c)) return false;
+    const calc = n => {
+      let soma = 0;
+      for (let k = 0; k < n; k++) soma += (c.charCodeAt(k) - 48) * (2 + ((n - 1 - k) % 8));
+      const r = soma % 11;
+      return r < 2 ? 0 : 11 - r;
+    };
+    return calc(12) === +c[12] && calc(13) === +c[13];
+  }
+  // O que pode ser um CNPJ: com letra e na forma de CNPJ, as 14 posições; senão só os dígitos.
+  function cnpjCandidato(v) {
+    const t = alfanum(v);
+    return /[A-Z]/.test(t) && /^[0-9A-Z]{12}[0-9]{2}$/.test(t) ? t : digitos(v);
+  }
+  // Documento para comparar (chaveDoc, notas, títulos, boletos): sem pontuação e em maiúsculas. Só
+  // fica com letras quando é um CNPJ alfanumérico com os dígitos verificadores certos — senão é
+  // digitos(), como sempre foi ("CPF 123.456.789-09" continua 12345678909). Para documento só com
+  // números o resultado é o mesmo de antes. Igual ao crm_doc() / crm_cnpj_dv() do schema.sql.
+  function documento(v) {
+    const t = alfanum(v);
+    return /[A-Z]/.test(t) && dvCNPJ(t) ? t : digitos(v);
+  }
+
   function formataCNPJ(v) {
-    const d = digitos(v);
-    if (d.length === 14) return d.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
+    const d = documento(v);
+    if (d.length === 14) return d.replace(/^(.{2})(.{3})(.{3})(.{4})(.{2})$/, '$1.$2.$3/$4-$5');
     if (d.length === 11) return d.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, '$1.$2.$3-$4');
     return v || '';
   }
 
   function cnpjValido(v) {
-    const d = digitos(v);
-    if (d.length !== 14 || /^(\d)\1+$/.test(d)) return false;
-    const calc = (base) => {
-      let pos = base.length - 7, soma = 0;
-      for (let i = base.length; i >= 1; i--) { soma += +base[base.length - i] * pos--; if (pos < 2) pos = 9; }
-      const r = soma % 11;
-      return r < 2 ? 0 : 11 - r;
-    };
-    return calc(d.slice(0, 12)) === +d[12] && calc(d.slice(0, 13)) === +d[13];
+    const d = cnpjCandidato(v);
+    return d.length === 14 && !/^(.)\1+$/.test(d) && dvCNPJ(d);
   }
 
   function casaBusca(termo, campos) {
     const t = normaliza(termo);
     if (!t) return true;
     const td = digitos(termo);
+    // pedaço de CNPJ alfanumérico digitado sem a pontuação ("12ABC345")
+    const ta = /[a-z]/i.test(termo) && /\d/.test(termo) ? String(termo).replace(/[^0-9A-Za-z]/g, '').toUpperCase() : '';
     return campos.some(c => {
       if (c == null) return false;
       if (normaliza(c).indexOf(t) !== -1) return true;
+      if (ta.length >= 4 && String(c).replace(/[^0-9A-Za-z]/g, '').toUpperCase().indexOf(ta) !== -1) return true;
       return td.length >= 4 && digitos(c).indexOf(td) !== -1;
     });
   }
@@ -498,7 +523,7 @@
     // Nota com vendedor escrito mas sem usuário = ex-vendedor: conta no total, não vai para ninguém.
     const dono = n => { if (n.vendedor_id) return n.vendedor_id; if (n.vendedor_nome) return null; const e = empresa(n.empresa_id); return e ? e.responsavel_id || null : null; };
     const nomeVendedor = n => { const u = dono(n), us = u && ix.porId.usuarios.get(u); return us ? us.nome : !n.vendedor_id && n.vendedor_nome ? n.vendedor_nome + ' (ex-vendedor)' : '(sem responsável)'; };
-    const chaveCliente = n => n.empresa_id || (n.cliente_doc ? 'doc:' + digitos(n.cliente_doc) : 'nome:' + normaliza(n.cliente_nome));
+    const chaveCliente = n => n.empresa_id || (n.cliente_doc ? 'doc:' + documento(n.cliente_doc) : 'nome:' + normaliza(n.cliente_nome));
     const nomeCliente = n => { const e = empresa(n.empresa_id); return e ? e.nome : n.cliente_nome || '(sem nome)'; };
     const todas = (D.notas || []).filter(n => notaDeVenda(n, itensDe(n)) && (!resp || dono(n) === resp));
     const doPeriodo = todas.filter(n => noPeriodo(diaLocal(n.emitida_em), p));
@@ -703,9 +728,9 @@
 
   // ------------------------------------------------------------ duplicados
   // Chaves do "mesmo cadastro" — as mesmas da trava do banco (crm_doc / crm_tel / crm_mail no
-  // schema.sql): documento só com dígitos (CPF ou CNPJ), telefone pelos 8 últimos dígitos (com
-  // ou sem DDD, com ou sem o 9 do celular), e-mail em minúsculas.
-  function chaveDoc(v) { const d = digitos(v); return d.length === 11 || d.length === 14 ? d : ''; }
+  // schema.sql): documento() com 11 (CPF) ou 14 posições (CNPJ, também o alfanumérico), telefone
+  // pelos 8 últimos dígitos (com ou sem DDD, com ou sem o 9 do celular), e-mail em minúsculas.
+  function chaveDoc(v) { const d = documento(v); return d.length === 11 || d.length === 14 ? d : ''; }
   function chaveTelefone(v) { const d = digitos(v); return d.length >= 8 ? d.slice(-8) : ''; }
   function chaveEmail(v) { const s = String(v == null ? '' : v).trim().toLowerCase(); return /.@./.test(s) ? s : ''; }
 
@@ -951,7 +976,7 @@
     ETAPAS_PADRAO, OPCOES_PADRAO, CONFIG_PADRAO, config, rotulo, num, moeda, numero, pct,
     hojeISO, diaLocal, horaLocal, momento, somaDias, somaMeses, diasEntre, dataBR, dataHoraBR, mesCurto,
     inicioSemana, periodo, noPeriodo, proximaRecorrencia,
-    normaliza, digitos, chaveNome, linkWhatsApp, linkTelefone, formataCNPJ, cnpjValido, casaBusca, iniciais,
+    normaliza, digitos, documento, cnpjCandidato, chaveNome, linkWhatsApp, linkTelefone, formataCNPJ, cnpjValido, casaBusca, iniciais,
     primeiroNome, aplicaModelo, linkGoogleAgenda, totalItem, totalItens, indexa, probabilidade,
     situacaoEfetiva, situacaoTarefa, alertas, ultimoMovimento, ritmoCompra, cicloRecompra, itensHabituais, nomeDeItem, textoItens, dashboard, duplicadosEmpresas, duplicadosContatos, mesclaCampos,
     buscaGlobal, csvParse, csvGera, numeroBR, dataPlanilha,

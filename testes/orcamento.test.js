@@ -147,3 +147,13 @@ test('e-mail vazio no FKN não pega a palavra da coluna da direita ("SEU PEDIDO"
   assert.equal(o.cliente.email, undefined);
   assert.equal(o.seu_pedido, '77');
 });
+
+test('orçamento com CNPJ alfanumérico: lê com as letras e acha o cliente', () => {
+  const txt = CSV.replace('CNPJ: 11.222.333/0001-81', 'CNPJ: 12.ABC.345/01DE-35');
+  const o = O.lerOrcamentoFKN(txt);
+  assert.equal(o.cliente.doc, '12ABC34501DE35');
+  const a = O.clienteDoOrcamento(o.cliente, { empresas: [{ id: 'k', nome: 'Escola Alfa', cnpj: '12.ABC.345/01DE-35' }] });
+  assert.deepEqual([a.empresa && a.empresa.id, a.como], ['k', 'cnpj']);
+  // CNPJ vazio não pega o "I.E." do lado
+  assert.equal(O.lerOrcamentoFKN(CSV.replace('CNPJ: 11.222.333/0001-81', 'CNPJ:                 ')).cliente.doc, undefined);
+});

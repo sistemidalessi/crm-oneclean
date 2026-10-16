@@ -264,13 +264,13 @@
       if (e.externo_id) emp.ext.set(e.externo_id, e);
       // Códigos de origem dos cadastros que foram mesclados neste: reimportar não os recria.
       (e.externos_mesclados || []).forEach(x => { if (!emp.ext.has(x)) emp.ext.set(x, e); });
-      const d = R.digitos(e.cnpj); if (d.length >= 11) emp.doc.set(d, e);
+      const d = R.documento(e.cnpj); if (d.length >= 11) emp.doc.set(d, e);
       const n = R.chaveNome(e.nome); if (n && !emp.nome.has(n)) emp.nome.set(n, e);
       [R.chaveTelefone(e.telefone), R.chaveTelefone(e.whatsapp), R.chaveEmail(e.email)].forEach(k => { if (k && !emp.contato.has(k)) emp.contato.set(k, e); });
     };
     D.empresas.forEach(indexaEmpresa);
     const achaEmpresa = (ext, doc, nome) =>
-      (ext && emp.ext.get(ext)) || (R.digitos(doc).length >= 11 && emp.doc.get(R.digitos(doc))) || (nome && emp.nome.get(R.chaveNome(nome))) || null;
+      (ext && emp.ext.get(ext)) || (R.documento(doc).length >= 11 && emp.doc.get(R.documento(doc))) || (nome && emp.nome.get(R.chaveNome(nome))) || null;
     // Empresa nova com telefone ou e-mail de uma que já existe: o banco recusaria o cadastro
     // (trava de duplicado), e os negócios e tarefas dela se perderiam. Vai para a existente.
     const achaPorContato = d => [R.chaveEmail(d.email), R.chaveTelefone(d.telefone), R.chaveTelefone(d.whatsapp)].filter(Boolean).map(k => emp.contato.get(k)).find(Boolean) || null;
