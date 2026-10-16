@@ -538,7 +538,7 @@
     const pags = [...new Set(PAGAMENTOS.concat((E().D.propostas || []).map(p => p.dados && p.dados.pagamento).filter(Boolean)))].slice(0, 60);
     let corpo;
     if (x.aba === 'dados') {
-      const emps = (E().D.empresas || []);
+      const emps = (E().D.empresas || []).slice().sort((a, b) => String(a.nome).localeCompare(String(b.nome), 'pt-BR'));   // em ordem alfabética (pedido do Anderson)
       corpo = '<div class="campos pd-campos">' +
         '<label class="campo largo"><span>Cliente *</span><input data-ed-cliente list="pdClientes" value="' + esc(e ? e.nome + (e.cnpj ? ' · ' + e.cnpj : '') : '') + '" placeholder="Nome, CNPJ ou cidade" autocomplete="off"></label>' +
         '<datalist id="pdClientes">' + emps.slice(0, 5000).map(c => '<option value="' + esc(c.nome + (c.cnpj ? ' · ' + c.cnpj : '')) + '">' + esc([c.cidade, CRM.nomeUsuario(c.responsavel_id)].filter(Boolean).join(' · ')) + '</option>').join('') + '</datalist>' +
