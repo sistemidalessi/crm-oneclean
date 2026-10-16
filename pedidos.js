@@ -515,7 +515,7 @@
       '<div class="chips">' + abas.map(a => '<button type="button" class="chip-filtro' + (x.aba === a[0] ? ' ativo' : '') + '" data-acao="pd-aba-ed" data-id="' + a[0] + '">' + esc(a[1]) + '</button>').join('') + '</div>' +
       corpo + '<p class="acoes pd-gravar">' + (!x.id ? '<button type="button" class="btn sec" data-acao="pd-salvar-orcamento">Salvar orçamento e gerar o PDF</button> ' : '') +
       '<button type="button" class="btn verde" data-acao="pd-gravar">' + (x.id ? 'Gravar as alterações do pedido' : 'Gravar pedido (reserva o estoque)') + '</button></p>' +
-      '<p class="dica">Orçamento: vai para o negócio do cliente e sai no PDF da OneClean (WhatsApp/e-mail na ficha). Pedido: reserva o estoque; se faltar produto, o cliente tiver duplicata em atraso, o pagamento for antecipado ou o preço ficar abaixo da tabela, ele fica <strong>bloqueado</strong> até a gestora liberar.</p></section>';
+      '<p class="dica">Orçamento: vai para o negócio do cliente e sai no PDF da empresa (WhatsApp/e-mail na ficha). Pedido: reserva o estoque; se faltar produto, o cliente tiver duplicata em atraso, o pagamento for antecipado ou o preço ficar abaixo da tabela, ele fica <strong>bloqueado</strong> até a gestora liberar.</p></section>';
   }
 
   // valor do campo "data-ed" (ex.: dados.entrega.cidade) para o editor
