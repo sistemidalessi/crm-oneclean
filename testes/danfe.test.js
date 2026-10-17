@@ -41,6 +41,13 @@ test('lê os campos da DANFE do XML', () => {
   assert.equal(D.numeroNF('2286'), '000.002.286');
 });
 
+test('CNPJ / CPF na DANFE: numérico, alfanumérico e CPF', () => {
+  assert.equal(D.doc('98765432000155'), '98.765.432/0001-55');
+  assert.equal(D.doc('12ABC34501DE35'), '12.ABC.345/01DE-35');
+  assert.equal(D.doc('12345678901'), '123.456.789-01');
+  assert.equal(D.doc('EX123'), 'EX123');
+});
+
 test('código de barras CODE-128C da chave', () => {
   const b = D.code128c(CHAVE);
   // início + 22 pares + verificador = 24 símbolos de 11 módulos, mais a parada (13)

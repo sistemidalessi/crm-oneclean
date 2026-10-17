@@ -16,6 +16,8 @@
   };
   const situacaoDe = n => (n && n.inutilizada_em ? 'inutilizada' : (n && n.situacao) || 'reservada');
   const dig = v => String(v == null ? '' : v).replace(/\D/g, '');
+  const doc = v => String(v == null ? '' : v).toUpperCase().replace(/[^0-9A-Z]/g, ''); // CNPJ pode ter letras (07/2026)
+  const ehCNPJ = d => /^[0-9A-Z]{12}\d{2}$/.test(d);
   // primeiro conteúdo da tag (com ou sem prefixo), dentro de um trecho
   function pega(xml, tag) {
     const m = new RegExp('<(?:\\w+:)?' + tag + '(?:\\s[^>]*)?>([\\s\\S]*?)</(?:\\w+:)?' + tag + '>').exec(xml || '');
@@ -30,7 +32,7 @@
     if (!emit) return null;
     const n = v => (v === '' ? null : Number(v));
     return {
-      emitente: { cnpj: dig(pega(emit, 'CNPJ')), ie: dig(pega(emit, 'IE')), razao: pega(emit, 'xNome'), fantasia: pega(emit, 'xFant') || null, crt: n(pega(emit, 'CRT')) || 3,
+      emitente: { cnpj: doc(pega(emit, 'CNPJ')), ie: dig(pega(emit, 'IE')), razao: pega(emit, 'xNome'), fantasia: pega(emit, 'xFant') || null, crt: n(pega(emit, 'CRT')) || 3,
         endereco: { logradouro: pega(en, 'xLgr'), numero: pega(en, 'nro'), complemento: pega(en, 'xCpl') || null, bairro: pega(en, 'xBairro'), cMun: dig(pega(en, 'cMun')),
           municipio: pega(en, 'xMun'), uf: pega(en, 'UF'), cep: dig(pega(en, 'CEP')), fone: dig(pega(en, 'fone')) || null } },
       natOp: pega(ide, 'natOp') || null, indFinal: n(pega(ide, 'indFinal')), indPres: n(pega(ide, 'indPres')), serie: n(pega(ide, 'serie')), numero: n(pega(ide, 'nNF')),
@@ -41,7 +43,7 @@
   // O que falta no emitente para a nota sair (o serviço fiscal recusa sem isso).
   function faltasEmitente(f) {
     const em = (f && f.emitente) || {}, e = em.endereco || {}, out = [];
-    if (dig(em.cnpj).length !== 14) out.push('CNPJ');
+    if (!ehCNPJ(doc(em.cnpj))) out.push('CNPJ');
     if (!dig(em.ie)) out.push('inscrição estadual');
     if (!String(em.razao || '').trim()) out.push('razão social');
     if (!e.logradouro || !e.numero || !e.bairro) out.push('endereço (rua, número e bairro)');
@@ -136,7 +138,7 @@
     return { linhas, versao: a.versao, chave: a.chave, vig_ini: a.vig_ini, vig_fim: a.vig_fim, fonte: a.fonte };
   }
 
-  const api = { lerIbpt, SITUACAO, situacaoDe, emitenteDoXml, faltasEmitente, confereTexto, horasDesde, mesSP, fechamento, zip, crc32 };
+  const api = { lerIbpt, SITUACAO, situacaoDe, doc, emitenteDoXml, faltasEmitente, confereTexto, horasDesde, mesSP, fechamento, zip, crc32 };
   raiz.CRMEmissao = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);
@@ -435,11 +437,11 @@
       salvarTexto: 'Salvar',
       aoSalvar: async v => {
         const d = x => String(x || '').replace(/\D/g, '');
-        const novo = { emitente: { cnpj: d(v.cnpj), ie: d(v.ie), razao: String(v.razao).trim().toUpperCase(), fantasia: String(v.fantasia || '').trim().toUpperCase() || null, crt: Number(v.crt) || 3,
+        const novo = { emitente: { cnpj: M.doc(v.cnpj), ie: d(v.ie), razao: String(v.razao).trim().toUpperCase(), fantasia: String(v.fantasia || '').trim().toUpperCase() || null, crt: Number(v.crt) || 3,
           endereco: { logradouro: String(v.logradouro).trim().toUpperCase(), numero: String(v.numero).trim(), complemento: String(v.complemento || '').trim().toUpperCase() || null, bairro: String(v.bairro).trim().toUpperCase(),
             cMun: d(v.cMun), municipio: String(v.municipio).trim().toUpperCase(), uf: String(v.uf).trim().toUpperCase(), cep: d(v.cep), fone: d(v.fone) || null } },
           natOp: String(v.natOp || '').trim().toUpperCase() || 'VENDA NO ESTADO', indFinal: Number(v.indFinal), indPres: Number(v.indPres), serie: v.serie == null ? 2 : Number(v.serie),
-          respTec: d(v.rt_cnpj) ? { cnpj: d(v.rt_cnpj), contato: String(v.rt_contato || '').trim(), email: String(v.rt_email || '').trim(), fone: d(v.rt_fone) } : null };
+          respTec: M.doc(v.rt_cnpj) ? { cnpj: M.doc(v.rt_cnpj), contato: String(v.rt_contato || '').trim(), email: String(v.rt_email || '').trim(), fone: d(v.rt_fone) } : null };
         const falta = M.faltasEmitente(novo);
         if (falta.length) throw new Error('falta ' + falta.join(', '));
         if (novo.serie === 1 && !confirm('A série 1 é a do FKN. Usar a mesma série no paralelo faz os números se chocarem. Usar assim mesmo?')) return false;

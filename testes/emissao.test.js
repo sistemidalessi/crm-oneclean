@@ -35,6 +35,16 @@ test('o que falta no emitente', () => {
   assert.deepStrictEqual(M.faltasEmitente({ emitente: e }), ['código IBGE do município (7 números)']);
 });
 
+test('emitente com CNPJ alfanumérico (IN RFB 2.229/2024): as letras não somem', () => {
+  const e = Object.assign({}, emitente, { cnpj: '12.ABC.345/01DE-35' });
+  const xml = '<?xml version="1.0"?><nfeProc><NFe><infNFe Id="NFe1" versao="4.00">' + N.monta(Object.assign({}, nota, { emitente: e })).infNFe.replace(/^<infNFe[^>]*>/, '') + '</NFe></nfeProc>';
+  const d = M.emitenteDoXml(xml);
+  assert.strictEqual(d.emitente.cnpj, '12ABC34501DE35');
+  assert.deepStrictEqual(M.faltasEmitente(d), []);
+  assert.strictEqual(M.doc('12.abc.345/01de-35'), '12ABC34501DE35');
+  assert.deepStrictEqual(M.faltasEmitente({ emitente: Object.assign({}, emitente, { cnpj: '12ABC34501DEXX' }) }).slice(0, 1), ['CNPJ']);
+});
+
 test('justificativa e correção: de 15 a 255 / 1000 letras', () => {
   assert.match(M.confereTexto('curto', 'cancelar'), /15 letras/);
   assert.strictEqual(M.confereTexto('pedido cancelado pelo cliente', 'cancelar'), null);

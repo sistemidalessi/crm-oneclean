@@ -118,10 +118,11 @@
   }
   const n2 = v => milhar(Number(v) || 0, 2);
   const n4 = v => milhar(Number(v) || 0, 4);
+  // CNPJ (pode ter letras nas 12 primeiras posições desde 07/2026) ou CPF, com a pontuação de sempre.
   function doc(v) {
-    const d = so(v);
-    if (d.length === 14) return d.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
-    if (d.length === 11) return d.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, '$1.$2.$3-$4');
+    const d = String(v == null ? '' : v).toUpperCase().replace(/[^0-9A-Z]/g, '');
+    if (/^[0-9A-Z]{12}\d{2}$/.test(d)) return d.replace(/^(.{2})(.{3})(.{3})(.{4})(.{2})$/, '$1.$2.$3/$4-$5');
+    if (/^\d{11}$/.test(d)) return d.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, '$1.$2.$3-$4');
     return String(v || '');
   }
   const cep = v => { const d = so(v); return d.length === 8 ? d.slice(0, 5) + '-' + d.slice(5) : String(v || ''); };
@@ -406,7 +407,7 @@
     return total;
   }
 
-  const D = { ler, code128c, desenha, chaveFmt, numeroNF };
+  const D = { ler, code128c, desenha, chaveFmt, numeroNF, doc };
   raiz.CRMDanfe = D;
   if (typeof module !== 'undefined') module.exports = D;
 })(typeof window !== 'undefined' ? window : globalThis);
