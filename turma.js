@@ -155,7 +155,7 @@
       document.addEventListener('click', ev => {
         if (!painelAberto) return;
         // o caminho do clique na hora (o botão pode ter sido redesenhado no meio do clique)
-        if (ev.composedPath().some(el => el.id === 'turmaPainel' || el.id === 'turmaBtn')) return;
+        if (ev.composedPath().some(el => el.id === 'turmaPainel' || el.id === 'turmaBtn' || el.id === 'turmaCanto')) return;
         fechaPainel();
       });
       document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && painelAberto) fechaPainel(); });
@@ -168,6 +168,82 @@
     return '<button type="button" class="turma-item ' + x.nivel + '" data-acao="turma-ir" data-id="' + esc(x.aba + (x.sub ? ':' + x.sub : '')) + '">' +
       '<img src="' + esc(img(m, true)) + '" alt="">' + '<span>' + esc(x.texto) + '</span><b aria-hidden="true">›</b></button>';
   }
+  // ---- a conversa com a IA (crm-assistente): fica montada uma vez (o que se digita não some quando a tela redesenha)
+  const chat = { conversa: null, msgs: [], enviando: false, situacao: null, montado: false };
+  const SUGESTOES = {
+    inicio: ['O que tenho para fazer hoje?', 'Quanto vendi este mês?'],
+    fila: ['Quem eu devo ligar hoje?', 'Quais clientes estão no ritmo de recompra?'],
+    funil: ['Quais negócios estão parados?'], negocios: ['Quais negócios estão parados?'],
+    empresas: ['O que o cliente … mais compra?'], pessoas: ['O que tenho para fazer hoje?'],
+    pedidos: ['Quais pedidos estão bloqueados?', 'O que falta separar hoje?'],
+    agenda: ['Quais tarefas estão atrasadas?'],
+    relatorios: ['Quanto a equipe vendeu este mês, por vendedor(a)?', 'Quais produtos mais venderam no mês?'],
+    compras: ['O que preciso comprar esta semana?', 'Quais produtos estão abaixo do mínimo e vendem bem?'],
+    estoque: ['Qual a cobertura em dias dos produtos mais vendidos?', 'O que está abaixo do mínimo?'],
+    caixa: ['Como fica o caixa nos próximos 7 dias?', 'Quais as maiores contas da semana?'],
+    gestao: ['Como estão as vendas do mês comparadas ao mês passado?'],
+    ofertas: ['Quais produtos parados valem uma oferta?']
+  };
+  const fmt = t => esc(String(t || '')).replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>').split('\n')
+    .map(l => (/^\s*[-•]\s+/.test(l) ? '<li>' + l.replace(/^\s*[-•]\s+/, '') + '</li>' : l)).join('\n')
+    .replace(/(<li>.*<\/li>\n?)+/g, m => '<ul>' + m.replace(/\n/g, '') + '</ul>').replace(/\n/g, '<br>');
+  function quemResponde() { const aba = E().aba, id = especialista(cfgT, aba, subDe(aba)); return Object.assign({ id }, dados(id)); }
+  function desenhaChat() {
+    const el = $('#turmaChat');
+    if (!el) return;
+    const st = CRM.store(), q = quemResponde();
+    if (!st || !st.assistente) { el.innerHTML = '<p class="dica">A conversa com a IA funciona com o sistema ligado ao banco.</p>'; return; }
+    if (!chat.montado) {
+      el.innerHTML = '<h4>Pergunte para a turma</h4><div class="turma-msgs"></div>' +
+        '<form class="turma-pergunta"><textarea rows="2" maxlength="2000" aria-label="Sua pergunta"></textarea><button type="submit" class="btn">Perguntar</button></form>' +
+        '<p class="turma-chat-rodape"><span data-turma-sit></span> <button type="button" class="link" data-acao="turma-nova">nova conversa</button></p>';
+      const f = el.querySelector('form'), ta = el.querySelector('textarea');
+      f.addEventListener('submit', ev => { ev.preventDefault(); perguntar(ta.value); });
+      ta.addEventListener('keydown', ev => { if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); perguntar(ta.value); } });
+      chat.montado = true;
+    }
+    const ta = el.querySelector('textarea');
+    ta.placeholder = 'Pergunte ao ' + q.nome + '… (Enter envia)';
+    ta.disabled = chat.enviando || (chat.situacao && !chat.situacao.ligado);
+    el.querySelector('button[type=submit]').disabled = ta.disabled;
+    const sug = (SUGESTOES[E().aba] || SUGESTOES.inicio);
+    el.querySelector('.turma-msgs').innerHTML = (chat.msgs.length ? chat.msgs.map(m => m.eu
+      ? '<div class="turma-msg eu">' + esc(m.texto) + '</div>'
+      : '<div class="turma-msg ia' + (m.erro ? ' erro' : '') + '"><img src="' + esc(img(m.mascote, true)) + '" alt=""><div><b>' + esc(dados(m.mascote).nome) + '</b>' + (m.pensando ? '<span class="turma-pensando">consultando o sistema…</span>' : fmt(m.texto)) + '</div></div>').join('')
+      : '<div class="turma-sugestoes">' + sug.map(x => '<button type="button" class="turma-chip" data-acao="turma-sugestao" data-id="' + esc(x) + '">' + esc(x) + '</button>').join('') + '</div>');
+    const s = chat.situacao;
+    el.querySelector('[data-turma-sit]').textContent = !s ? '' : !s.ligado ? 'A IA ainda não está ligada (falta a chave nos segredos do Supabase).'
+      : s.hoje + ' de ' + s.limite + ' perguntas hoje' + (s.custo_mes != null ? ' · uso do mês ≈ US$ ' + Number(s.custo_mes).toFixed(2) : '');
+    const ms = el.querySelector('.turma-msgs'); ms.scrollTop = ms.scrollHeight;
+  }
+  async function situacaoChat() {
+    const st = CRM.store();
+    if (!st || !st.assistente || chat.situacao) return;
+    try { chat.situacao = await st.assistente({ acao: 'situacao' }); } catch (e) { chat.situacao = null; }
+    desenhaChat();
+  }
+  async function perguntar(texto) {
+    const t = String(texto || '').trim(), st = CRM.store();
+    if (!t || chat.enviando || !st || !st.assistente) return;
+    const q = quemResponde();
+    chat.msgs.push({ eu: true, texto: t });
+    const resp = { mascote: q.id, pensando: true };
+    chat.msgs.push(resp);
+    chat.enviando = true; chat.verGuia = false;
+    desenhaPainel();
+    const ta = $('#turmaChat textarea'); if (ta) ta.value = '';
+    desenhaChat();
+    try {
+      const r = await st.assistente({ pergunta: t, conversa_id: chat.conversa, tela: (CRM.ABAS.find(a => a[0] === E().aba) || [])[1] || E().aba, mascote: { id: q.id, nome: q.nome, papel: q.papel } });
+      chat.conversa = r.conversa_id || chat.conversa;
+      resp.texto = r.resposta;
+      if (chat.situacao) chat.situacao.hoje = (chat.situacao.hoje || 0) + 1;
+    } catch (e) { resp.texto = (e && e.message) || 'não consegui responder agora'; resp.erro = true; }
+    resp.pensando = false; chat.enviando = false;
+    desenhaChat();
+    const t2 = $('#turmaChat textarea'); if (t2 && painelAberto) t2.focus();
+  }
+
   function desenhaPainel() {
     const p = $('#turmaPainel'), b = $('#turmaBtn');
     if (!p || !b) return;
@@ -175,11 +251,22 @@
     const aba = E().aba;
     const aqui = itens.filter(x => x.aba === aba), resto = itens.filter(x => x.aba !== aba);
     const primeiro = String(eu.nome || '').split(' ')[0];
-    p.innerHTML = '<div class="turma-cab"><img src="' + esc(img(cfgT.principal)) + '" alt=""><div><strong>' + esc(saudacao(new Date().getHours()) + (primeiro ? ', ' + primeiro : '') + '!') + '</strong>' +
+    if (!p.querySelector('#turmaGuia')) {
+      p.innerHTML = '<div id="turmaGuia"></div><div id="turmaChat" class="turma-chat"></div>' +
+        '<div class="turma-rodape"><label><input type="checkbox" data-turma-esconder> mostrar o ajudante de cada tela</label></div>';
+      const chk = p.querySelector('[data-turma-esconder]');
+      chk.onchange = () => { CRM.gravaPref('turma-esconder', chk.checked ? '' : 'sim'); canto.chave = ''; canto.id = ''; CRM.render(); };
+    }
+    p.querySelector('[data-turma-esconder]').checked = !escondidos();
+    const gh = '<div class="turma-cab"><img src="' + esc(img(cfgT.principal)) + '" alt=""><div><strong>' + esc(saudacao(new Date().getHours()) + (primeiro ? ', ' + primeiro : '') + '!') + '</strong>' +
       '<p>' + esc(itens.length ? 'Eu sou o ' + d.nome + '. Separei o que está esperando você:' : 'Eu sou o ' + d.nome + '. Por aqui está tudo em dia.') + '</p></div></div>' +
-      (aqui.length ? '<h4>Nesta tela</h4>' + aqui.map(itemHtml).join('') : '') +
-      (resto.length ? '<h4>' + (aqui.length ? 'No resto do sistema' : 'No sistema') + '</h4>' + resto.map(itemHtml).join('') : '') +
-      '<div class="turma-rodape"><label><input type="checkbox" data-turma-esconder' + (escondidos() ? '' : ' checked') + '> mostrar o ajudante de cada tela</label></div>';
+      // com conversa aberta, a lista de avisos recolhe numa linha (clicar abre de novo)
+      (chat.msgs.length && !chat.verGuia ? (itens.length ? '<p class="turma-recolhido"><button type="button" class="link" data-acao="turma-ver-guia">ver os ' + itens.length + ' aviso(s) do dia</button></p>' : '')
+        : (aqui.length ? '<h4>Nesta tela</h4>' + aqui.map(itemHtml).join('') : '') +
+          (resto.length ? '<h4>' + (aqui.length ? 'No resto do sistema' : 'No sistema') + '</h4>' + resto.map(itemHtml).join('') : ''));
+    const g = p.querySelector('#turmaGuia');
+    if (g.dataset.html !== gh) { g.innerHTML = gh; g.dataset.html = gh; }
+    desenhaChat();
     const n = contagem(itens);
     const bh = '<img src="' + esc(img(cfgT.principal, true)) + '" alt=""><span class="turma-nome">' + esc(d.nome) + '</span>' + (n ? '<span class="bolinha vermelha">' + n + '</span>' : '');
     if (b.dataset.html !== bh) { b.innerHTML = bh; b.dataset.html = bh; }
@@ -188,8 +275,6 @@
     const r = b.getBoundingClientRect();
     p.style.setProperty('--turma-topo', Math.round(r.bottom + 8) + 'px');
     p.style.setProperty('--turma-dir', Math.max(8, Math.round(window.innerWidth - r.right - 60)) + 'px');
-    const chk = p.querySelector('[data-turma-esconder]');
-    if (chk) chk.onchange = () => { CRM.gravaPref('turma-esconder', chk.checked ? '' : 'sim'); canto.chave = ''; canto.id = ''; CRM.render(); };
   }
 
   // ---- o especialista no canto
@@ -219,7 +304,8 @@
       '<button type="button" class="turma-fecha" data-acao="turma-mini" aria-label="Encolher">×</button>' +
       '<strong>' + esc(d.nome) + (d.papel ? '<small>' + esc(d.papel) + '</small>' : '') + '</strong>' +
       (falas.length ? '<ul>' + falas.map(x => '<li class="' + x.nivel + '"><button type="button" class="link" data-acao="turma-ir" data-id="' + esc(x.aba + (x.sub ? ':' + x.sub : '')) + '">' + esc(x.texto) + '</button></li>').join('') + '</ul>'
-        : '<p>' + esc(padrao) + '</p>') + '</div>' +
+        : '<p>' + esc(padrao) + '</p>') +
+      (CRM.store() && CRM.store().assistente ? '<p class="turma-perguntar"><button type="button" class="link" data-acao="turma-perguntar">💬 Perguntar ao ' + esc(d.nome) + '</button></p>' : '') + '</div>' +
       '<button type="button" class="turma-boneco" data-acao="turma-balao" aria-label="' + esc(d.nome) + '">' +
       '<img src="' + esc(img(id, canto.mini)) + '" alt="">' + (canto.mini && falas.some(x => x.nivel !== 'info') ? '<span class="bolinha vermelha">' + falas.filter(x => x.nivel !== 'info').length + '</span>' : '') + '</button>';
     if (trocou && canto.balao) {
@@ -243,7 +329,18 @@
       painelAberto = !painelAberto;
       const p = $('#turmaPainel');
       if (p) { desenhaPainel(); p.hidden = !painelAberto; }
-      if (painelAberto) atualizar(false);
+      if (painelAberto) { atualizar(false); situacaoChat(); }
+    },
+    'turma-sugestao': t => perguntar(t),
+    'turma-ver-guia': () => { chat.verGuia = !chat.verGuia; desenhaPainel(); },
+    'turma-nova': () => { chat.conversa = null; chat.msgs = []; desenhaChat(); const ta = $('#turmaChat textarea'); if (ta) ta.focus(); },
+    // "Perguntar ao …" no balão do canto: abre o painel com o especialista da tela respondendo
+    'turma-perguntar': () => {
+      painelAberto = true;
+      const p = $('#turmaPainel');
+      if (p) { desenhaPainel(); p.hidden = false; }
+      situacaoChat();
+      setTimeout(() => { const ta = $('#turmaChat textarea'); if (ta) ta.focus(); }, 30);
     },
     'turma-ir': id => {
       const [aba, sub] = String(id).split(':');

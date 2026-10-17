@@ -2994,3 +2994,41 @@ end;
 $$;
 revoke all on function public.crm_turma_resumo() from public, anon;
 grant execute on function public.crm_turma_resumo() to authenticated;
+
+-- Assistente com IA da turma (crm-assistente, 17/10/2026). A conversa fica guardada inteira (os blocos da resposta
+-- voltam à IA sem mexer, como a API pede) e cada pergunta deixa uma linha de uso (tokens e custo estimado). Quem
+-- grava é só a Edge Function (chave de serviço); cada um lê só as próprias conversas; o uso, cada um o seu e o
+-- administrador todos. As CONSULTAS da IA rodam com o login de quem pergunta (RLS de sempre).
+create table if not exists public.crm_assistente_conversas (
+  id            uuid primary key default gen_random_uuid(),
+  user_id       uuid not null references public.crm_usuarios(user_id) on delete cascade,
+  titulo        text,
+  mensagens     jsonb not null default '[]'::jsonb,
+  criado_em     timestamptz not null default now(),
+  atualizado_em timestamptz not null default now()
+);
+create index if not exists crm_assistente_conversas_user on public.crm_assistente_conversas (user_id, atualizado_em desc);
+create table if not exists public.crm_assistente_uso (
+  id             bigint generated always as identity primary key,
+  user_id        uuid not null references public.crm_usuarios(user_id) on delete cascade,
+  conversa_id    uuid references public.crm_assistente_conversas(id) on delete set null,
+  criado_em      timestamptz not null default now(),
+  tela           text,
+  mascote        text,
+  ferramentas    text[] not null default '{}',
+  tokens_entrada integer not null default 0,
+  tokens_saida   integer not null default 0,
+  cache_lido     integer not null default 0,
+  cache_escrito  integer not null default 0,
+  custo_usd      numeric(10,5) not null default 0,
+  erro           text
+);
+create index if not exists crm_assistente_uso_user on public.crm_assistente_uso (user_id, criado_em desc);
+alter table public.crm_assistente_conversas enable row level security;
+alter table public.crm_assistente_uso enable row level security;
+revoke all on public.crm_assistente_conversas, public.crm_assistente_uso from anon, public;
+grant select on public.crm_assistente_conversas, public.crm_assistente_uso to authenticated;
+drop policy if exists le on public.crm_assistente_conversas;
+create policy le on public.crm_assistente_conversas for select to authenticated using (user_id = (select auth.uid()));
+drop policy if exists le on public.crm_assistente_uso;
+create policy le on public.crm_assistente_uso for select to authenticated using (user_id = (select auth.uid()) or (select public.crm_eh_admin()));

@@ -926,3 +926,23 @@ pre.of-previa { white-space: pre-wrap; font-family: inherit; font-size: .88rem; 
 @keyframes turma-entra { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 @keyframes turma-pula { 0% { transform: translateY(30px) scale(.9); opacity: 0; } 60% { transform: translateY(-6px) scale(1.02); opacity: 1; } 100% { transform: none; } }
 @media (prefers-reduced-motion: reduce) { .turma-painel, .turma-balao, .turma-canto.entra .turma-boneco img, .entrada-anfitriao img { animation: none; } }
+/* conversa com a IA no painel do principal */
+.turma-chat { margin-top: 10px; padding-top: 6px; border-top: 1px solid var(--borda); }
+.turma-msgs { max-height: 46vh; overflow: auto; display: grid; gap: 8px; margin: 6px 0; }
+.turma-msg { font-size: .88rem; line-height: 1.45; }
+.turma-msg.eu { justify-self: end; background: var(--marinho); color: #fff; padding: 6px 10px; border-radius: 12px 12px 2px 12px; max-width: 85%; white-space: pre-wrap; }
+.turma-msg.ia { display: grid; grid-template-columns: 28px 1fr; gap: 6px; align-items: start; }
+.turma-msg.ia img { width: 28px; height: 28px; border-radius: 50%; }
+.turma-msg.ia > div { background: var(--realce); padding: 6px 10px; border-radius: 2px 12px 12px 12px; }
+.turma-msg.ia b { display: block; font-size: .78rem; color: var(--suave); }
+.turma-msg.ia ul { margin: 4px 0; padding-left: 18px; }
+.turma-msg.erro > div { background: var(--vermelho-fundo); color: var(--vermelho); }
+.turma-pensando { color: var(--suave); font-style: italic; animation: turma-pisca 1.2s ease-in-out infinite; }
+@keyframes turma-pisca { 50% { opacity: .4; } }
+.turma-pergunta { display: grid; grid-template-columns: 1fr auto; gap: 6px; align-items: end; }
+.turma-pergunta textarea { width: 100%; resize: vertical; min-height: 40px; font: inherit; padding: 6px 8px; border-radius: 10px; border: 1px solid var(--borda); background: var(--papel); color: var(--texto); }
+.turma-chat-rodape { margin: 4px 0 0; font-size: .75rem; color: var(--suave); display: flex; justify-content: space-between; gap: 6px; }
+.turma-chat-rodape .link { font-size: .75rem; }
+.turma-sugestoes { display: flex; flex-wrap: wrap; gap: 6px; }
+.turma-sugestoes .turma-chip { padding: 4px 10px; text-align: left; }
+.turma-perguntar { margin: 6px 0 0 !important; }

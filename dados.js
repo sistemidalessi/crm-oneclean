@@ -1078,6 +1078,17 @@
   Supa.prototype.ibptCarregar = async function (linhas) { return unwrap(await this.sb.rpc('crm_ibpt_carregar', { p_linhas: linhas })); };
   // Turma (turma.js): números do guia do dia, contados pela RLS de quem pergunta.
   Supa.prototype.turmaResumo = async function () { return unwrap(await this.sb.rpc('crm_turma_resumo')); };
+  // Conversa com a IA da turma (crm-assistente): só consulta, com o login de quem pergunta.
+  Supa.prototype.assistente = async function (corpo) {
+    const r = await this.sb.functions.invoke('crm-assistente', { body: corpo });
+    if (r.error) throw await erroDaFuncao(r);
+    return r.data;
+  };
+  // modo local: sem IA (serve para ver a tela); responde só com o eco da pergunta
+  Local.prototype.assistente = async function (corpo) {
+    if (corpo.acao === 'situacao') return { ligado: true, hoje: 0, limite: 40, custo_mes: null };
+    return { conversa_id: corpo.conversa_id || 'local', resposta: '(modo local: sem IA) Você perguntou: **' + corpo.pergunta + '**\n- No sistema ligado ao banco eu consulto os dados e respondo aqui.', ferramentas: [] };
+  };
   Local.prototype.turmaResumo = async function () {
     const peds = (() => { try { return JSON.parse(raiz.localStorage.getItem('crm_pedidos') || '[]'); } catch (e) { return []; } })();
     const conta = f => peds.filter(f).length, aberto = p => p.situacao === 'aberto', bloq = p => (p.bloqueios || []).some(b => (p.liberado || []).indexOf(b) === -1);
