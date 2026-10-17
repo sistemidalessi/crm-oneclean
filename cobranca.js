@@ -228,6 +228,8 @@
   const nomeArquivo = (e, l) => ('Boleto atualizado - ' + l.map(nomeNF).join(', ') + ' - ' + (e ? e.nome : '')).replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120) + '.pdf';
   function resumoHtml(e, l, danfes, pagBoleto) {
     const cfg = E().cfg || {}, b0 = l[0], um = l.length === 1, h = diaB(b0);
+    // mascote da cobrança da instalação (turma.js), no canto da chamada
+    const mascote = CRM.turma && (raiz.CRM_CONFIG.turma.telas || {})['caixa:cobranca'] ? CRM.turma.img(raiz.CRM_CONFIG.turma.telas['caixa:cobranca']) : null;
     const venceu = l.some(b => b.vencimento < h);
     const doc = e && e.cnpj ? (R.ehCPF(R.chaveDoc(e.cnpj)) ? 'CPF ' : 'CNPJ ') + e.cnpj : '';
     const total = l.reduce((s, b) => s + Number(b.valor || 0), 0);
@@ -247,8 +249,8 @@
       '<div class="faixa-doc"></div>' +
       '<header><img src="' + esc(CRM.logo()) + '" alt="' + esc(CRM.nomeInstalacao()) + '"><div class="doc-id"><strong>' + (um ? 'Boleto atualizado' : 'Boletos atualizados') + '</strong>' +
         '<span>' + esc(um ? nomeNF(b0) + ' · duplicata ' + b0.duplicata : notas.length ? 'NF ' + notas.join(', ') : l.length + ' duplicatas') + '</span><span>Atualizado em ' + esc(R.dataBR(h)) + '</span></div></header>' +
-      '<section class="chamada"><h1>' + (um ? 'Seu boleto, já com tudo calculado' : 'Seus boletos, já com tudo calculado') + '</h1><p>Atualizamos ' + (um ? 'o boleto em aberto' : 'os boletos em aberto') + ' para facilitar o pagamento. ' +
-        (danfes.length ? 'Junto vão a cópia da nota fiscal e o boleto do banco.' : 'Junto vai o boleto do banco.') + '</p></section>' +
+      '<section class="chamada' + (mascote ? ' com-mascote' : '') + '"><div><h1>' + (um ? 'Seu boleto, já com tudo calculado' : 'Seus boletos, já com tudo calculado') + '</h1><p>Atualizamos ' + (um ? 'o boleto em aberto' : 'os boletos em aberto') + ' para facilitar o pagamento. ' +
+        (danfes.length ? 'Junto vão a cópia da nota fiscal e o boleto do banco.' : 'Junto vai o boleto do banco.') + '</p></div>' + (mascote ? '<img class="mascote" src="' + esc(mascote) + '" alt="">' : '') + '</section>' +
       '<section class="preparado"><h2>Preparado para</h2><p class="nome">' + esc(String((e && (e.razao_social || e.nome)) || '').toUpperCase()) + '</p>' +
         '<p>' + [doc, notas.length ? (notas.length === 1 ? 'Nota fiscal ' : 'Notas fiscais ') + notas.join(', ') : '', um ? (venceu ? 'venceu em ' : 'vence em ') + R.dataBR(b0.vencimento) : ''].filter(Boolean).map(esc).join('&nbsp; | &nbsp;') + '</p></section>' +
       valores +

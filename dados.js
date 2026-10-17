@@ -1076,6 +1076,13 @@
     return Object.assign({}, um[0] || {}, { n: r.count || 0 });
   };
   Supa.prototype.ibptCarregar = async function (linhas) { return unwrap(await this.sb.rpc('crm_ibpt_carregar', { p_linhas: linhas })); };
+  // Turma (turma.js): números do guia do dia, contados pela RLS de quem pergunta.
+  Supa.prototype.turmaResumo = async function () { return unwrap(await this.sb.rpc('crm_turma_resumo')); };
+  Local.prototype.turmaResumo = async function () {
+    const peds = (() => { try { return JSON.parse(raiz.localStorage.getItem('crm_pedidos') || '[]'); } catch (e) { return []; } })();
+    const conta = f => peds.filter(f).length, aberto = p => p.situacao === 'aberto', bloq = p => (p.bloqueios || []).some(b => (p.liberado || []).indexOf(b) === -1);
+    return { pedidos: { bloqueados: conta(p => aberto(p) && bloq(p)), liberados: conta(p => aberto(p) && !bloq(p)), separacao: conta(p => p.situacao === 'separacao'), separado: conta(p => p.situacao === 'separado') } };
+  };
   Local.prototype.ibptInfo = async function () { const l = this._ibpt || []; return Object.assign({}, l[0] || {}, { n: l.length }); };
   Local.prototype.ibptCarregar = async function (linhas) { const m = new Map((this._ibpt || []).map(x => [x.codigo + '|' + x.ex, x])); linhas.forEach(x => m.set(x.codigo + '|' + x.ex, x)); this._ibpt = [...m.values()]; return linhas.length; };
 

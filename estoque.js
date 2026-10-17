@@ -20,7 +20,7 @@
       ultMov: s.ult_mov || null, fkn: null, minimo: null, fornecedor: null }));
     (fkn || []).filter(e => !ehCaixa(e.codigo)).forEach(e => {
       const l = porCod.get(e.codigo) || { codigo: e.codigo, descricao: e.descricao, unidade: e.unidade, saldo: null, custo: null, ultMov: null };
-      Object.assign(l, { fkn: atualFkn(e), minimo: e.estoque_min == null ? null : num(e.estoque_min), fornecedor: e.fornecedor || null, descricao: l.descricao || e.descricao });
+      Object.assign(l, { fkn: atualFkn(e), minimo: e.estoque_min == null ? null : num(e.estoque_min), fornecedor: e.fornecedor || null, descricao: l.descricao || e.descricao, linha: e.linha || null });
       porCod.set(e.codigo, l);
     });
     return [...porCod.values()].map(l => Object.assign(l, { dif: l.saldo == null || l.fkn == null ? null : Math.round((l.fkn - l.saldo) * 1000) / 1000 }));
@@ -127,7 +127,7 @@
   const quando = iso => (iso ? new Date(iso).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—');
 
   let saldo = null, fkn = [], fotos = [], difs = [], fotoVista = null, carregando = false, compras = [], lendoCompras = '';
-  const filtro = { ver: 'saldo', busca: '', soDif: false };
+  const filtro = { ver: 'saldo', busca: '', soDif: false, linhaM: null };
 
   async function carrega() {
     if (carregando) return;
@@ -173,16 +173,30 @@
       kpi('Contagem e ajuste', '✎', 'inventário por contagem ou acerto de um produto', '', 'contagem') + '</div>';
   }
 
+  // Mascotes das linhas de produto (turma.js, quando a instalação tem): um botão por mascote, que filtra a lista.
+  function chipsLinhas(linhas) {
+    const T = CRM.turma;
+    if (!T || !T.daLinha) return '';
+    const qt = new Map();
+    linhas.forEach(x => { const m = T.daLinha(x.linha, x.descricao); if (m) qt.set(m, (qt.get(m) || 0) + 1); });
+    if (!qt.size) return '';
+    return '<div class="turma-chips">' + [...qt.entries()].sort((a, b) => b[1] - a[1]).map(([m, n]) => {
+      const d = T.dados(m);
+      return '<button type="button" class="turma-chip' + (filtro.linhaM === m ? ' ativa' : '') + '" data-acao="es-linha" data-id="' + esc(m) + '" title="' + esc(d.papel) + '"><img src="' + esc(T.img(m, true)) + '" alt="">' + esc(d.nome) + ' <small>' + n + '</small></button>';
+    }).join('') + '</div>';
+  }
+
   function telaSaldo(linhas) {
-    const q = R.normaliza(filtro.busca);
-    const l = linhas.filter(x => (!q || R.normaliza(x.descricao + ' ' + x.codigo + ' ' + (x.fornecedor || '')).indexOf(q) !== -1) && (!filtro.soDif || (x.dif != null && Math.abs(x.dif) >= 0.0005)))
+    const q = R.normaliza(filtro.busca), T = CRM.turma;
+    const l = linhas.filter(x => (!q || R.normaliza(x.descricao + ' ' + x.codigo + ' ' + (x.fornecedor || '')).indexOf(q) !== -1) && (!filtro.soDif || (x.dif != null && Math.abs(x.dif) >= 0.0005)) &&
+      (!filtro.linhaM || !T || T.daLinha(x.linha, x.descricao) === filtro.linhaM))
       .sort((a, b) => String(a.descricao).localeCompare(String(b.descricao), 'pt-BR'));
-    return '<section class="cartao"><h2>Saldo por produto <small>' + l.length + ' produto(s)</small></h2>' +
+    return '<section class="cartao"><h2>Saldo por produto <small>' + l.length + ' produto(s)</small></h2>' + chipsLinhas(linhas) +
       '<p class="dica">"FKN agora" é o "atual" da última listagem; a diferença daqui pode ser só uma nota emitida depois dela. A conferência de verdade, na mesma hora, está em "Última conferência".</p>' +
       '<p class="acoes"><input type="search" placeholder="Procurar produto, código ou fornecedor" value="' + esc(filtro.busca) + '" data-es-busca class="of-busca"> ' +
       '<label class="filtro-inline"><input type="checkbox" data-es-sodif' + (filtro.soDif ? ' checked' : '') + '> só com diferença</label></p>' +
       (l.length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Produto</th><th class="num">Saldo CRM</th><th class="num">FKN agora</th><th class="num">Diferença</th><th class="num">Custo médio</th><th>Último movimento</th><th></th></tr></thead><tbody>' +
-        l.slice(0, 300).map(x => '<tr><td><strong>' + esc(R.nomeDeItem(x.descricao || x.codigo)) + '</strong><small>' + esc(x.codigo) + (x.unidade ? ' · ' + esc(x.unidade) : '') + (x.fornecedor ? ' · ' + esc(x.fornecedor) : '') + '</small></td>' +
+        l.slice(0, 300).map(x => '<tr><td>' + (T ? T.iconeLinha(x.linha, x.descricao) : '') + '<strong>' + esc(R.nomeDeItem(x.descricao || x.codigo)) + '</strong><small>' + esc(x.codigo) + (x.unidade ? ' · ' + esc(x.unidade) : '') + (x.fornecedor ? ' · ' + esc(x.fornecedor) : '') + '</small></td>' +
           '<td class="num">' + qtd(x.saldo) + '</td><td class="num">' + qtd(x.fkn) + '</td>' +
           '<td class="num">' + (x.dif == null ? '—' : Math.abs(x.dif) < 0.0005 ? '✓' : '<strong>' + qtd(x.dif) + '</strong>') + '</td>' +
           '<td class="num">' + (x.custo == null ? '—' : R.moeda(x.custo)) + '</td><td>' + esc(quando(x.ultMov)) + '</td>' +
@@ -264,6 +278,7 @@
   }
 
   CRM.telas.estoque = {
+    turmaSub: () => filtro.ver,
     render() {
       if (!(CRM.ehAdmin() || CRM.ehComprador())) return '<div class="cartao"><p class="vazio">Esta tela é do administrador e do comprador.</p></div>';
       if (saldo === null) { setTimeout(carrega, 0); return cabecalho() + '<div class="cartao"><p class="vazio">Carregando…</p></div>'; }
@@ -296,6 +311,7 @@
         saldo = null; fotoVista = null; carrega();
       } catch (e) { CRM.falhou(e); }
     },
+    'es-linha': m => { filtro.linhaM = filtro.linhaM === m ? null : m; CRM.render(); },
     'es-movs': async cod => {
       try {
         const l = await CRM.store().estoqueMovs(cod, 200);

@@ -761,6 +761,7 @@
   }
 
   CRM.telas.caixa = {
+    turmaSub: () => vista,
     render() {
       if (!CRM.ehAdmin()) return '<div class="cartao"><p class="vazio">Esta tela é só do administrador.</p></div>';
       if (!F) { setTimeout(carrega, 0); return '<div class="cabecalho"><div><h1>Caixa</h1></div></div><div class="cartao"><p class="vazio">Carregando o caixa…</p></div>'; }

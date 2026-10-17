@@ -799,6 +799,7 @@
   };
 
   CRM.telas.pedidos = {
+    turmaSub: () => (ed ? 'editor' : aberto ? 'pedido' : f.ver),
     render() {
       if (peds === null) { setTimeout(() => carrega(), 0); return cabecalho() + '<div class="cartao"><p class="vazio">Carregando…</p></div>'; }
       if (ed) return cabecalho() + telaEditor();

@@ -2941,3 +2941,56 @@ begin
    order by i.codigo, n.emitida_em desc;
 end;
 $$;
+
+-- Turma (mascotes, 17/10/2026): números do "guia do dia" do assistente, num pedido só. SECURITY INVOKER: cada bloco
+-- conta só o que a RLS deixa a pessoa ver (a vendedora, os pedidos dela; o Caixa, só o administrador). Bloco que a
+-- pessoa não pode ler volta vazio (o erro de permissão é engolido ali, sem derrubar os outros).
+create or replace function public.crm_turma_resumo() returns jsonb
+language plpgsql stable security invoker set search_path = public as $$
+declare
+  hoje date := (now() at time zone 'America/Sao_Paulo')::date;
+  r jsonb := '{}'::jsonb;
+  x jsonb;
+begin
+  begin
+    select jsonb_build_object(
+      'bloqueados', count(*) filter (where situacao = 'aberto' and exists (select 1 from unnest(bloqueios) b where b <> all (liberado))),
+      'liberados',  count(*) filter (where situacao = 'aberto' and not exists (select 1 from unnest(bloqueios) b where b <> all (liberado))),
+      'separacao',  count(*) filter (where situacao = 'separacao'),
+      'separado',   count(*) filter (where situacao = 'separado'))
+      into x from public.crm_pedidos where situacao in ('aberto', 'separacao', 'separado');
+    r := r || jsonb_build_object('pedidos', x);
+  exception when others then null; end;
+  begin
+    select jsonb_build_object(
+      'pendentes',  count(*) filter (where situacao = 'pendente'),
+      'rejeitadas', count(*) filter (where situacao = 'rejeitada' and criado_em > now() - interval '3 days'))
+      into x from public.crm_nfe where ambiente = 'producao' and situacao in ('pendente', 'rejeitada');
+    r := r || jsonb_build_object('nfe', x);
+  exception when others then null; end;
+  begin
+    select jsonb_build_object('abaixo_minimo', count(*)) into x from public.crm_estoque
+     where codigo !~ '\.\d+$' and coalesce(situacao, '') <> 'INATIVO' and coalesce(estoque_min, 0) > 0
+       and coalesce(estoque_atual, quantidade, 0) < estoque_min;
+    r := r || jsonb_build_object('estoque', x);
+    select jsonb_build_object('sem_explicacao', coalesce((resumo->>'sem_explicacao')::int, 0), 'gerado_em', gerado_em) into x
+      from public.crm_estoque_fotos where resumo is not null order by gerado_em desc limit 1;
+    if x is not null then r := jsonb_set(r, '{estoque}', (r->'estoque') || x); end if;
+  exception when others then null; end;
+  begin
+    select jsonb_build_object(
+      'vencidas', count(*) filter (where vencimento < hoje), 'vencidas_valor', coalesce(sum(valor) filter (where vencimento < hoje), 0),
+      'hoje', count(*) filter (where vencimento = hoje), 'hoje_valor', coalesce(sum(valor) filter (where vencimento = hoje), 0))
+      into x from public.crm_fin_lancamentos where tipo = 'saida' and situacao = 'aberto' and vencimento <= hoje;
+    r := r || jsonb_build_object('caixa', x);
+  exception when others then null; end;
+  begin
+    select jsonb_build_object('vencidos', count(*), 'valor', coalesce(sum(valor), 0)) into x
+      from public.crm_titulos where vencimento < hoje and not abono and cartorio_em is null;
+    r := r || jsonb_build_object('receber', x);
+  exception when others then null; end;
+  return r;
+end;
+$$;
+revoke all on function public.crm_turma_resumo() from public, anon;
+grant execute on function public.crm_turma_resumo() to authenticated;

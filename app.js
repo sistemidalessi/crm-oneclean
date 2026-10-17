@@ -440,6 +440,7 @@
       if (el.setSelectionRange && /^(text|textarea|search|tel|url|email|password|)$/.test(el.type || '') && typeof el.value === 'string') { try { el.setSelectionRange(el.value.length, el.value.length); } catch (e) { /* sem cursor */ } }
     }
     if (CRM.fichas) CRM.fichas.renderAbertas();
+    if (CRM.turma) CRM.turma.depoisRender(E.aba, al); // mascotes (turma.js): guia do dia no topo e o especialista da tela
   }
 
   CRM.irPara = (aba, filtros) => {
@@ -658,11 +659,18 @@
         '<path d="M0 40 C 140 22, 320 20, 470 36 S 690 56, 800 34 V60 H0 Z" fill="#fff" opacity=".14"/></svg>'
     };
   }
-  function telaEntrada(html) {
+  // anfitrião da turma (config.js → turma.anfitriao) ao lado do cartão do login, com a fala de boas-vindas
+  function anfitriao() {
+    const t = window.CRM_CONFIG && window.CRM_CONFIG.turma;
+    if (!t || !t.anfitriao) return '';
+    return '<div class="entrada-anfitriao" aria-hidden="true"><p class="turma-balao fixo">' + esc(t.boasVindas || 'Olá! Entre com o seu e-mail e a sua senha.') + '</p>' +
+      '<img src="' + esc((t.pasta || 'assets/turma/') + t.anfitriao + '.webp' + (t.versao ? '?v=' + encodeURIComponent(t.versao) : '')) + '" alt=""></div>';
+  }
+  function telaEntrada(html, comAnfitriao) {
     $('#app').hidden = true;
     const o = ondasEntrada();
-    $('#tela').innerHTML = '<div class="entrada">' + o.fundo + '<div class="entrada-cartao">' + o.cartao +
-      '<img src="' + esc(logo()) + '" alt="" class="logo-grande"><h1>' + esc(nomeInstalacao()) + '</h1>' + html + '</div>' +
+    $('#tela').innerHTML = '<div class="entrada">' + o.fundo + (comAnfitriao ? '<div class="entrada-par">' + anfitriao() : '') + '<div class="entrada-cartao">' + o.cartao +
+      '<img src="' + esc(logo()) + '" alt="" class="logo-grande"><h1>' + esc(nomeInstalacao()) + '</h1>' + html + '</div>' + (comAnfitriao ? '</div>' : '') +
       '<p class="rodape-entrada">CRM · Sistemi Dalessi — sistemas sob medida · <a href="mailto:' + CRM.ASSINATURA_EMAIL + '">' + CRM.ASSINATURA_EMAIL + '</a></p></div>';
   }
 
@@ -674,7 +682,7 @@
       '<label class="campo"><span>Senha</span><input type="password" id="loginSenha" autocomplete="current-password" required></label>' +
       (erro ? '<p class="erro-form">' + esc(erro) + '</p>' : '') + (info ? '<p class="ok-form">' + esc(info) + '</p>' : '') +
       '<button type="submit" class="btn largo">Entrar</button>' +
-      '<button type="button" class="link" id="esqueci">Esqueci minha senha</button></form>');
+      '<button type="button" class="link" id="esqueci">Esqueci minha senha</button></form>', true);
     $('#formLogin').addEventListener('submit', async ev => {
       ev.preventDefault();
       const b = $('#formLogin button[type=submit]');
