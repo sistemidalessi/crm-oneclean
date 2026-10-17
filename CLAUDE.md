@@ -1201,6 +1201,46 @@ BLOQUEADO/liberado, bloqueios ESTOQUE / ATRASO DUPL / SEM ENTRADA, lista de sepa
   item vira o código da caixa (".1") na tela (`completa`) e no banco (`crm_pedido_itens_norm`), com preço, custo e fator dela.
 - Depois: faltas entrando na sugestão de compra de Compras; localização no galpão (o FKN tem o campo, vazio hoje).
 
+## Turma OneClean: mascotes e conversa com IA (17/10/2026, pedido do Anderson)
+
+Pedido: "na Agilité a gente criou um mascote, o Agilitinho… queria trazer para a OneClean… e um principal, um
+robozinho… precisava que eles interagissem com inteligência artificial"; "vamos colocar bastante IA no sistema"; liberdade
+para mexer no layout e nos botões. Os desenhos são dele (zip `OneClean-Todos-os-Mascotes.zip`, pranchas 1254×1254 com título
+e círculo); recortados sem fundo com o rembg (isnet) em `assets/turma/<id>.webp` (corpo, até 400 px) e `<id>-rosto.webp`
+(círculo de 192 px tirado da prancha). Código genérico em `turma.js`; quem é quem, em que tela e as linhas de produto ficam no
+`config.js` → `turma` (sem `turma` no config, nada aparece; o `crm/` do sistemi-dalessi não leva os desenhos).
+
+- **Etapa 1 (sem IA):** o **Clean** (principal) no topo, ao lado do sino, com o nome e o contador (urgente + atenção);
+  clicar abre o **guia do dia** por papel ("Nesta tela" primeiro). Números de `crm_turma_resumo()` (SECURITY INVOKER: cada
+  bloco conta só o que a RLS deixa ver; conferido como vendedora = zeros no Caixa, e como admin) + o que já está na memória
+  (tarefas, leads, recompra, boletos, relatórios do FKN, vigia parado). O **especialista da tela** no canto de baixo
+  (`telas` no config; sub-aba pelo `turmaSub()` da tela: Caixa → cobrança, Pedidos → separação/NF-e, Estoque → a vista) diz
+  o estado da área; o balão some em 9 s, "×" encolhe para o rosto, e a opção "mostrar o ajudante de cada tela" no painel
+  desliga. **Linhas de produto**: rosto do mascote na lista do Estoque e botões que filtram por mascote (descrição primeiro,
+  depois a linha do FKN; regras em `turma.linhas`). **Andi** no login (`anfitriao` + `boasVindas`). **Cobrança** no resumo
+  do boleto (canto da chamada).
+- **Etapa 2 (IA):** Edge Function **`crm-assistente`** (v1, verify_jwt): pergunta pelo painel do Clean ou por
+  "💬 Perguntar ao …" no balão do especialista, que responde como o personagem da tela. **Só consulta**, sempre com o
+  login de quem pergunta (cliente com o token dele → RLS de sempre) e ferramentas por papel (`FERRAMENTAS[*].papeis`):
+  guia_do_dia, buscar_clientes, cliente, vendas, produtos (`crm_estoque_disponivel`), giro, reposicao (admin/comprador:
+  abaixo do mínimo + venda de 90 dias; o system manda pensar como **comprador sênior**: cobertura em dias, ponto de pedido),
+  pedidos, tarefas, caixa (só admin). Campos escolhidos um a um (sem telefone, e-mail, endereço, CPF). Modelo
+  `claude-opus-5-5`, effort low, fallbacks default, cache automático; até 6 voltas. Conversa inteira em
+  `crm_assistente_conversas` (blocos voltam sem mexer), uso e custo por pergunta em `crm_assistente_uso`, limite por dia
+  (admin 150, gestor 60, vendedor/comprador 40, logística 30). Mesma chave `ANTHROPIC_API_KEY` dos Secrets (limite de
+  US$ 10/mês no console da Anthropic: com o uso da equipe, rever). Custo do mês aparece para o admin no rodapé da conversa.
+- **Não testado ainda com a API de verdade** (daqui não há login de usuário): a 1ª pergunta real é do Anderson. Se uma
+  ferramenta falhar, a IA diz "a consulta falhou" e o motivo fica no log da função (`get_logs` → edge-function).
+- **Faltam os arquivos** (vieram só como imagem na conversa): **Andi novo** (proporção melhor; substituir `andi`),
+  **Auditoria** (novo: conferência CRM × FKN, Duplicados, Fiscal → `telas['estoque:conferencia']`, `fiscal`) e o
+  **Saquinho** (o do zip veio cortado embaixo). Mandar como arquivo; recortar com `scratchpad/mascotes/scripts/final.py`
+  (ou refazer: rembg isnet + maior componente + círculo da prancha) e subir a `versao` do config.
+- **Próximo pedido do Anderson (17/10):** "uma skill de um comprador sênior… administrando a parte de compras, dando
+  palpite, sugerindo compras inteligentes, relação com os principais concorrentes, fornecedor…". O começo já está na
+  persona de Compras + `reposicao`/`giro`; falta: prazo e mínimo por fornecedor, histórico de preço de compra
+  (`crm_compra_itens`), curva ABC, sugestão de pedido pronta para aprovar, e concorrentes pela busca na web (ferramenta de
+  servidor `web_search`, só admin/comprador, com custo à parte) — combinar com ele.
+
 ## NF-e emitida pelo CRM — Fase 4 da saída do FKN (16/10/2026, pedido do Anderson)
 
 **Caminho:** navegador → Edge Function `crm-fiscal` (login de quem clicou; emite: admin, gestora e logística; cancela:
