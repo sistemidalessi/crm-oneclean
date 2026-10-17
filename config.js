@@ -17,7 +17,7 @@ window.CRM_CONFIG = {
   // (topo, guia do dia); cada tela tem o seu especialista; os de linha de produto saem pela linha do FKN; o Andi
   // recebe no login. turma.js explica. Trocar um desenho: mesmo nome de arquivo e subir a `versao`.
   turma: {
-    pasta: 'assets/turma/', versao: '1',
+    pasta: 'assets/turma/', versao: '2',
     principal: 'clean', anfitriao: 'andi',
     boasVindas: 'Olá! Eu sou o Andi, assistente virtual da OneClean. Entre com o seu e-mail e a sua senha para começar.',
     mascotes: {

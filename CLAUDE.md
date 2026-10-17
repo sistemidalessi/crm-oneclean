@@ -1231,10 +1231,11 @@ e círculo); recortados sem fundo com o rembg (isnet) em `assets/turma/<id>.webp
   US$ 10/mês no console da Anthropic: com o uso da equipe, rever). Custo do mês aparece para o admin no rodapé da conversa.
 - **Não testado ainda com a API de verdade** (daqui não há login de usuário): a 1ª pergunta real é do Anderson. Se uma
   ferramenta falhar, a IA diz "a consulta falhou" e o motivo fica no log da função (`get_logs` → edge-function).
-- **Faltam os arquivos** (vieram só como imagem na conversa): **Andi novo** (proporção melhor; substituir `andi`),
-  **Auditoria** (novo: conferência CRM × FKN, Duplicados, Fiscal → `telas['estoque:conferencia']`, `fiscal`) e o
-  **Saquinho** (o do zip veio cortado embaixo). Mandar como arquivo; recortar com `scratchpad/mascotes/scripts/final.py`
-  (ou refazer: rembg isnet + maior componente + círculo da prancha) e subir a `versao` do config.
+- **Desenhos:** Andi novo (proporção melhor) trocado em 17/10 à noite (`versao` 2). O **Saquinho** do arquivo original vem
+  cortado embaixo (PNG truncado na linha 1088 de 1254; o 2º zip trouxe o mesmo arquivo, mesmo tamanho): por ora o pé
+  tem um degradê; precisa o PNG inteiro (gerar/baixar de novo). Falta o **Auditoria** como arquivo (veio só como imagem):
+  vai em `telas['estoque:conferencia']` e `fiscal`. Recortar com `scratchpad/mascotes/scripts/final.py` (rembg isnet +
+  maior componente + círculo da prancha; o nome sai do arquivo "NN-Nome.png") e subir a `versao` do config.
 - **Próximo pedido do Anderson (17/10):** "uma skill de um comprador sênior… administrando a parte de compras, dando
   palpite, sugerindo compras inteligentes, relação com os principais concorrentes, fornecedor…". O começo já está na
   persona de Compras + `reposicao`/`giro`; falta: prazo e mínimo por fornecedor, histórico de preço de compra
