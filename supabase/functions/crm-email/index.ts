@@ -110,7 +110,8 @@ Deno.serve(async (req) => {
   try { sair = new URL(String(c.sair_url ?? '')); } catch { return resposta(400, { erro: 'endereço de descadastro inválido' }); }
   const origem = req.headers.get('origin');
   if (sair.protocol !== 'https:' && sair.hostname !== 'localhost') return resposta(400, { erro: 'endereço de descadastro inválido' });
-  if (origem && sair.origin !== origem) return resposta(400, { erro: 'endereço de descadastro de outro site' });
+  const origemEsperada = Deno.env.get('CRM_ORIGEM') ?? origem; // sem cabeçalho Origin (chamada direta), só o site do CRM
+  if (sair.origin !== origemEsperada) return resposta(400, { erro: 'endereço de descadastro de outro site' });
 
   // a empresa, com o login de quem chama: se a RLS não deixa ver, não envia
   const { data: emp } = await comoUsuario.from('crm_empresas').select('id, nome, email, responsavel_id, email_sair_em').eq('id', String(c.empresa_id ?? '')).maybeSingle();
