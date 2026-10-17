@@ -10,3 +10,6 @@ node_modules/
 ferramentas/vigia-notas.json
 ferramentas/vigia-notas-estado.json
 ferramentas/vigia-notas.log
+
+# grafo do graphify (gerado no computador, não versionar)
+graphify-out/
