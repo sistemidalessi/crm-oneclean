@@ -64,7 +64,7 @@
       (c.recusas || []).forEach((x, i) => poe('fkn-recusa-' + i, 'urgente', 'Relatório do FKN recusado: puxe de novo com as opções certas', 'compras'));
       (c.fkn || []).forEach((x, i) => poe('fkn-' + i, 'atencao', 'Puxar do FKN: ' + x.arquivo, 'compras'));
       const es = r.estoque || {};
-      if (es.sem_explicacao) poe('estoque-dif', 'atencao', plural(es.sem_explicacao, 'diferença de estoque sem explicação', 'diferenças de estoque sem explicação'), 'estoque');
+      if (es.sem_explicacao) poe('estoque-dif', 'atencao', plural(es.sem_explicacao, 'diferença de estoque sem explicação', 'diferenças de estoque sem explicação'), 'estoque', 'conferencia');
       if (es.abaixo_minimo) poe('estoque-min', 'info', plural(es.abaixo_minimo, 'produto abaixo do mínimo', 'produtos abaixo do mínimo'), 'compras');
     }
     if (c.admin) {
@@ -348,6 +348,7 @@
       CRM.irPara(aba);
       if (sub && aba === 'caixa' && CRM.acoes['cx-vista']) CRM.acoes['cx-vista'](sub);
       if (sub && aba === 'pedidos' && CRM.acoes['pd-ver']) CRM.acoes['pd-ver'](sub);
+      if (sub && aba === 'estoque' && CRM.acoes['es-ver']) CRM.acoes['es-ver'](sub);
     },
     'turma-balao': () => {
       if (canto.mini) { canto.mini = false; CRM.gravaPref('turma-canto', ''); canto.balao = true; } else canto.balao = !canto.balao;

@@ -17,7 +17,7 @@ window.CRM_CONFIG = {
   // (topo, guia do dia); cada tela tem o seu especialista; os de linha de produto saem pela linha do FKN; o Andi
   // recebe no login. turma.js explica. Trocar um desenho: mesmo nome de arquivo e subir a `versao`.
   turma: {
-    pasta: 'assets/turma/', versao: '2',
+    pasta: 'assets/turma/', versao: '3',
     principal: 'clean', anfitriao: 'andi',
     boasVindas: 'Olá! Eu sou o Andi, assistente virtual da OneClean. Entre com o seu e-mail e a sua senha para começar.',
     mascotes: {
@@ -40,14 +40,15 @@ window.CRM_CONFIG = {
       estoque: { nome: 'Estoque', papel: 'Saldo, conferência e inventário' },
       financeiro: { nome: 'Financeiro', papel: 'Contas a pagar e a receber' },
       'proposta-comercial': { nome: 'Proposta', papel: 'Negócios e propostas' },
-      cobranca: { nome: 'Cobrança', papel: 'Boletos e lembretes' }
+      cobranca: { nome: 'Cobrança', papel: 'Boletos e lembretes' },
+      auditoria: { nome: 'Auditoria', papel: 'Conferência, divergências e correções' }
     },
     telas: {
       inicio: 'clean', fila: 'capiclean', funil: 'proposta-comercial', empresas: 'capiclean', pessoas: 'capiclean',
       negocios: 'proposta-comercial', pedidos: 'compras-cliente-sacola', 'pedidos:separacao': 'logistica', 'pedidos:nfe': 'logistica',
       'pedidos:estoque': 'estoque', 'pedidos:faltas': 'compras-setor-interno', agenda: 'baldinho', relatorios: 'clean', ajustes: 'clean',
       compras: 'compras-setor-interno', estoque: 'estoque', gestao: 'financeiro', caixa: 'financeiro', 'caixa:cobranca': 'cobranca',
-      emails: 'capiclean', ofertas: 'gotti', fiscal: 'clean'
+      emails: 'capiclean', ofertas: 'gotti', fiscal: 'auditoria', 'estoque:conferencia': 'auditoria'
     },
     // fala de "tudo em dia" de cada tela (quando não há nada esperando ali)
     falas: {
@@ -60,6 +61,8 @@ window.CRM_CONFIG = {
       agenda: 'Nenhuma atividade atrasada. Rotina em dia!',
       compras: 'Relatórios do FKN em dia.',
       estoque: 'Estoque conferido com o FKN, sem diferença sem explicação.',
+      'estoque:conferencia': 'Conferi a última listagem do FKN: nenhuma diferença sem explicação.',
+      fiscal: 'Estou de olho nas regras fiscais e nas notas. Pergunte se algo parecer estranho.',
       caixa: 'Nenhuma conta vencida sem baixa.',
       'caixa:cobranca': 'Nenhum boleto esperando por aqui.',
       emails: 'A cadência de e-mails está rodando.',
