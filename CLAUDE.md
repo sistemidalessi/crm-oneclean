@@ -1248,6 +1248,10 @@ e círculo); recortados sem fundo com o rembg (isnet) em `assets/turma/<id>.webp
   Depois, a pedido dele ("pode colocar o especialista no alto de cada tela"): o especialista da tela aparece **ao lado do
   título** (`especialistaNaTela` em `turma.js`, 64 px, nome e "N coisas pra fazer aqui" ou o papel; clicar abre o painel);
   nas telas do principal (Início, Relatórios, Configurações) não aparece. Agenda passou do Baldinho para o CapiClean.
+  **Recorte consertado (18/10, `versao` 5):** na Cobrança o papel branco com o rosto tinha sumido (o rembg tomou o branco
+  por fundo; o Anderson viu no PDF do boleto), e Compras, Proposta e Rolinho tinham o papel meio transparente. Refeitos com
+  `scratchpad/mascotes/scripts/conserta.py`: o que fica dentro do contorno do boneco volta opaco, com as cores da prancha.
+  Desenho novo com papel ou parte branca por dentro: conferir sobre fundo colorido antes de publicar.
 - **Próximo pedido do Anderson (17/10):** "uma skill de um comprador sênior… administrando a parte de compras, dando
   palpite, sugerindo compras inteligentes, relação com os principais concorrentes, fornecedor…". O começo já está na
   persona de Compras + `reposicao`/`giro`; falta: prazo e mínimo por fornecedor, histórico de preço de compra
