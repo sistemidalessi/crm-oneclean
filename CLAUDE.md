@@ -1304,6 +1304,26 @@ Respostas dele: histórico das notas de compra **buscado na Sefaz**; concorrente
   `docs/oneclean/concorrentes.md` (este repositório é público: estratégia da OneClean não vem para cá). Esperando o
   Anderson escolher quais acompanhar; 8 publicam preço na internet (base para uma cesta de itens comparada por mês).
 
+## Layout em grupos e comparação com concorrentes (18/10/2026, pedidos do Anderson)
+
+- **Menu no topo em grupos** ("igual ao sistema da Agilité… sem a coluna da esquerda a gente ganha largura"; proposta
+  aprovada no artifact https://claude.ai/artifact/Q5CY7Pc5Q9AEV9shZJXGt1): a coluna lateral saiu. Barra escura de cima
+  (`.barra-topo`) com o logo, os **grupos** (`GRUPOS` em `app.js`: Início · Vendas · Pedidos · Compras e estoque ·
+  Financeiro · Marketing · Relatórios · Configurações; cada tela num grupo só) e o usuário; passar o mouse abre as telas do
+  grupo; clicar no grupo leva à última tela usada dele. Na barra branca de baixo (`.topo`), as **telas do grupo aberto**
+  (`#menuArea`) e, à direita, busca, carteira, + Novo, o Clean e o sino. As permissões continuam as de `abas` (o grupo só
+  aparece com alguma tela visível). Tela nova = entra em `ABAS` e num grupo de `GRUPOS`. Até 1000 px a barra quebra e os
+  grupos rolam de lado (no toque não há o menu suspenso: a barra de baixo mostra as outras telas).
+- **Telas mais suaves:** tabelas com linhas mais altas, listras leves e a linha sob o mouse destacada; em Compras a tabela
+  de produtos abre **enxuta** (sem Mín. FKN, Clientes previstos, Precisa, Vendido 12 meses e Tendência; botão
+  "Todas as colunas", a escolha fica no navegador).
+- **Concorrentes** (`concorrentes.js`, grupo Compras e estoque, admin e comprador): comparação **mensal** de preço por
+  unidade de comparação. Tabelas `crm_concorrentes` (a lista fica no banco, não no código: este repositório é público),
+  `crm_cesta` (produto, unidade de comparação, fator = quantas há na nossa unidade) e `crm_precos_concorrente` (mês,
+  concorrente, produto, preço da embalagem dele e quanto vem nela, link). Selo verde = concorrente mais caro que a nossa
+  tabela; vermelho = mais barato. "Sugerir a cesta" = 20 mais vendidos da curva A. A IA tem a ferramenta `concorrentes`.
+  Levantamento e os escolhidos pelo Anderson: `sistemi-dalessi` (privado), `docs/oneclean/concorrentes.md`.
+
 ## NF-e emitida pelo CRM — Fase 4 da saída do FKN (16/10/2026, pedido do Anderson)
 
 **Caminho:** navegador → Edge Function `crm-fiscal` (login de quem clicou; emite: admin, gestora e logística; cancela:

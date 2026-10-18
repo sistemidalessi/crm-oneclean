@@ -325,6 +325,18 @@
     ['negocios', 'Negócios', '$'], ['pedidos', 'Pedidos', '☰'], ['agenda', 'Atividades', '▣'], ['relatorios', 'Relatórios', '▲'], ['ajustes', 'Configurações', '⚙'], ['compras', 'Compras', '▤'], ['estoque', 'Estoque', '▦'], ['gestao', 'Gestão', '◆'], ['caixa', 'Caixa', '◈'], ['emails', 'E-mails', '✉'], ['ofertas', 'Ofertas', '✦'], ['fiscal', 'Fiscal', '§'], ['concorrentes', 'Concorrentes', '⚖']
   ];
   CRM.ABAS = ABAS;
+  // Os grupos do menu de cima (cada tela num grupo só; a ordem é a do menu).
+  const GRUPOS = [
+    { id: 'inicio', nome: 'Início', telas: ['inicio'] },
+    { id: 'vendas', nome: 'Vendas', telas: ['fila', 'funil', 'negocios', 'empresas', 'pessoas', 'agenda'] },
+    { id: 'pedidos', nome: 'Pedidos', telas: ['pedidos'] },
+    { id: 'compras', nome: 'Compras e estoque', telas: ['compras', 'estoque', 'concorrentes'] },
+    { id: 'financeiro', nome: 'Financeiro', telas: ['caixa', 'gestao', 'fiscal'] },
+    { id: 'marketing', nome: 'Marketing', telas: ['emails', 'ofertas'] },
+    { id: 'relatorios', nome: 'Relatórios', telas: ['relatorios'] },
+    { id: 'ajustes', nome: 'Configurações', telas: ['ajustes'] }
+  ];
+  CRM.GRUPOS = GRUPOS;
   // Relatórios do FKN que estão pendentes neste turno (manhã/tarde): [{ arquivo, ultimo, turno }].
   CRM.lembreteFkn = () => {
     if (!E.fkn || !(CRM.ehAdmin() || CRM.ehComprador())) return [];
@@ -395,10 +407,25 @@
     ['#buscaGlobal', '[data-acao="novo-menu"]', '#sino'].forEach(s => { const el = $(s); if (el) el.hidden = CRM.foraDeVendas(); });
     const al = R.alertas(E.D, E.ix, E.cfg, CRM.hoje(), CRM.carteira());
     const nTarefas = al.atrasadas.length + al.deHoje.length;
-    $('#menuLateral').innerHTML = abas.map(a => '<button type="button" class="nav' + (E.aba === a[0] ? ' ativa' : '') + '" data-acao="aba" data-id="' + a[0] + '"' +
-      (E.aba === a[0] ? ' aria-current="page"' : '') + ' title="' + esc(a[1]) + ' (tecla ' + (ABAS.indexOf(a) + 1) + ')"><span class="nav-ico">' + a[2] + '</span><span class="nav-txt">' + esc(a[1]) + '</span>' +
-      (a[0] === 'inicio' && nTarefas ? '<span class="bolinha' + (al.atrasadas.length ? ' vermelha' : '') + '">' + nTarefas + '</span>' : '') +
-      (a[0] === 'compras' && (CRM.lembreteFkn().length || CRM.recusasFkn().length) ? '<span class="bolinha vermelha" title="Puxar os relatórios do FKN">!</span>' : '') + '</button>').join('');
+    // Menu no topo em grupos (18/10/2026, pedido do Anderson: "igual ao sistema da Agilité", mais largura na tela):
+    // o grupo fica na barra de cima (passando o mouse abre as telas dele) e as telas do grupo aberto, na barra de baixo.
+    const bolinhaDe = id => (id === 'inicio' && nTarefas ? '<span class="bolinha' + (al.atrasadas.length ? ' vermelha' : '') + '">' + nTarefas + '</span>' : '') +
+      (id === 'compras' && (CRM.lembreteFkn().length || CRM.recusasFkn().length) ? '<span class="bolinha vermelha" title="Puxar os relatórios do FKN">!</span>' : '');
+    const visivel = new Map(abas.map(a => [a[0], a]));
+    const grupos = GRUPOS.map(g => Object.assign({}, g, { telas: g.telas.filter(t => visivel.has(t)) })).filter(g => g.telas.length);
+    const aberto = grupos.find(g => g.telas.includes(E.aba)) || grupos[0];
+    const botaoTela = (t, cls) => { const a = visivel.get(t);
+      return '<button type="button" class="' + cls + (E.aba === t ? ' ativa' : '') + '" data-acao="aba" data-id="' + t + '"' + (E.aba === t ? ' aria-current="page"' : '') +
+        ' title="' + esc(a[1]) + ' (tecla ' + (ABAS.indexOf(a) + 1) + ')">' + esc(a[1]) + bolinhaDe(t) + '</button>'; };
+    $('#menuLateral').innerHTML = grupos.map(g => {
+      const so = g.telas.length === 1, alvo = so ? g.telas[0] : (E.ultimaDoGrupo && g.telas.includes(E.ultimaDoGrupo[g.id]) ? E.ultimaDoGrupo[g.id] : g.telas[0]);
+      const bol = g.telas.map(bolinhaDe).join('');
+      return '<div class="grupo' + (g === aberto ? ' ativo' : '') + '"><button type="button" class="grupo-btn" data-acao="aba" data-id="' + alvo + '"' + (g === aberto ? ' aria-current="true"' : '') +
+        (so ? '' : ' aria-haspopup="true"') + '>' + esc(g.nome) + (so ? '' : ' <span class="seta" aria-hidden="true">▾</span>') + bol + '</button>' +
+        (so ? '' : '<div class="grupo-menu">' + g.telas.map(t => botaoTela(t, 'grupo-item')).join('') + '</div>') + '</div>';
+    }).join('');
+    E.ultimaDoGrupo = Object.assign(E.ultimaDoGrupo || {}, aberto ? { [aberto.id]: E.aba } : {});
+    $('#menuArea').innerHTML = aberto && aberto.telas.length > 1 ? aberto.telas.map(t => botaoTela(t, 'area-item')).join('') : '<strong class="area-nome">' + esc(aberto ? aberto.nome : '') + '</strong>';
 
     const sel = $('#visao');
     if (CRM.ehGestor()) {

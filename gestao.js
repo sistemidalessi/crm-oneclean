@@ -345,6 +345,9 @@
   let diasCompras = 30;
   let estoque = null;      // retrato do FKN (carregado sob demanda: só o administrador lê)
   let lendoEstoque = false;
+  // Tabela de Compras enxuta por padrão (18/10/2026, "telas com muita coisa mais suaves"): a escolha fica no navegador.
+  let todasColunas = false;
+  try { todasColunas = localStorage.getItem('crm_compras_colunas') === 'todas'; } catch (e) { /* sem armazenamento */ }
   let extra = {};          // { fornecedores, produtoForn, custoHist } (carregaEstoque)
   async function carregaEstoque() {
     if (lendoEstoque) return;
@@ -557,12 +560,13 @@
           (c.listas.linhas.length ? '<select id="cLinha" aria-label="Linha">' + CRM.opcoesHTML([['', 'Todas as linhas']].concat(c.listas.linhas.map(f => [f, f])), fc.linha) + '</select>' : '') +
           '<select id="gDias" aria-label="Prazo">' + CRM.opcoesHTML([['15', 'Para 15 dias'], ['30', 'Para 30 dias'], ['45', 'Para 45 dias'], ['60', 'Para 60 dias'], ['90', 'Para 90 dias']], String(c.dias)) + '</select>' +
           '<select id="cOrdem" aria-label="Ordenar">' + CRM.opcoesHTML(ORDEM, fc.ordem) + '</select>' +
+          '<button type="button" class="btn sec" data-acao="compras-colunas" title="Mostrar ou esconder Mín. FKN, Clientes previstos, Precisa, Vendido 12 meses e Tendência">' + (todasColunas ? 'Só as colunas principais' : 'Todas as colunas') + '</button>' +
           '<button type="button" class="btn sec" data-acao="compras-exportar" title="Baixa uma planilha (abre no Excel) com os produtos que estão na tabela, com estes filtros">Baixar planilha (' + l.length + ' produtos)</button>' +
         '</div>' +
         '<p class="dica">Precisa = o maior entre o que os clientes devem pedir (pelo ritmo e pelos itens de sempre) e o consumo médio dos últimos 90 dias no prazo. ' +
           'Comprar = precisa + o que sai até o pedido chegar (prazo do fornecedor; 7 dias sem cadastro) − estoque − o que já foi pedido (no mínimo o estoque mínimo do FKN). O estoque do FKN já desconta o reservado para cliente, e a caixa fechada entra em unidades. ✱ = fornecedor trocado no CRM.' +
           (e && !e.completo ? ' <strong>Para ter fornecedor, mínimo e pedidos em aberto, use a Listagem cadastral de produtos do FKN (SIFN108) em CSV.</strong>' : '') + '</p>' +
-        (l.length ? '<div class="tabela-rolagem tabela-fixa"><table class="tabela compras"><thead><tr>' + cabecalhoCompras() + '</tr></thead><tbody>' +
+        (l.length ? '<div class="tabela-rolagem tabela-fixa"><table class="tabela compras' + (todasColunas ? '' : ' enxuta') + '"><thead><tr>' + cabecalhoCompras() + '</tr></thead><tbody>' +
           l.slice(0, LIMITE_COMPRAS).map(g => '<tr><td>' + esc(R.nomeDeItem(g.descricao)) + ' <small>' + esc(g.codigo || '') + '</small>' + (g.inativo ? ' ' + CRM.selo('inativo no FKN', 'etiqueta') : '') + '</td>' +
             '<td class="forn" title="' + esc(g.fornecedor || '') + '"><small>' + esc(g.fornecedor || '—') + (g.fornecedorTrocado ? ' ✱' : '') + '</small>' +
               (g.codigo && g.saldo != null ? ' <button type="button" class="mini" data-acao="compras-troca-forn" data-id="' + esc(g.codigo) + '" title="' + (g.fornecedor ? 'Trocar o fornecedor deste produto' : 'Dizer de qual fornecedor se compra') + '">✎</button>' : '') + '</td><td>' + curva(g) + '</td>' +
@@ -791,6 +795,7 @@
       CRM.render();
       const t = document.querySelector('.filtros-compras'); if (t && t.scrollIntoView) t.scrollIntoView({ block: 'start' });
     },
+    'compras-colunas': () => { todasColunas = !todasColunas; try { localStorage.setItem('crm_compras_colunas', todasColunas ? 'todas' : ''); } catch (e) { /* sem armazenamento */ } CRM.render(); },
     'compras-forn-editar': cod => formFornecedor(cod),
     'compras-troca-forn': cod => formTrocaForn(cod),
     'compras-sem-forn': () => {

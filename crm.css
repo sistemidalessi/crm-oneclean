@@ -111,7 +111,47 @@ input.curto { width: 120px; }
 .bolinha.vermelha { background: #d64541; color: #fff; }
 
 /* ---------- estrutura ---------- */
-.app { display: flex; height: 100vh; }
+.app { display: flex; flex-direction: column; height: 100vh; }
+/* ---------- menu no topo em grupos (18/10/2026, como o sistema da Agilité) ---------- */
+.barra-topo { flex: none; display: flex; align-items: center; gap: 14px; padding: 8px 18px; background: var(--marinho); color: #fff; border-bottom: 4px solid var(--ouro); position: relative; z-index: 20; }
+.barra-topo .marca { padding: 0; flex: none; }
+.barra-topo .marca.completa { margin: 0; padding: 6px 12px; border-radius: 12px; }
+.barra-topo .marca .logo-menu { width: auto; height: 40px; }
+.barra-topo .marca strong { max-width: 180px; }
+.menu-topo { display: flex; flex-wrap: wrap; gap: 0; min-width: 0; }
+.grupo { position: relative; }
+.grupo-btn { appearance: none; border: 0; background: none; color: #fff; font: inherit; font-size: .97rem; font-weight: 600; padding: 9px 12px; border-radius: 10px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.grupo-btn:hover, .grupo:focus-within > .grupo-btn { background: rgba(255, 255, 255, .12); }
+.grupo.ativo > .grupo-btn { background: #fff; color: var(--marinho); font-weight: 700; }
+.grupo-btn .seta { font-size: .7em; opacity: .8; }
+.grupo-menu { display: none; position: absolute; top: calc(100% + 4px); left: 0; min-width: 220px; background: var(--papel); color: var(--texto); border: 1px solid var(--borda); border-radius: 12px; box-shadow: 0 14px 34px rgba(0, 0, 0, .18); padding: 6px; z-index: 40; }
+.grupo-menu::before { content: ''; position: absolute; top: -8px; left: 0; right: 0; height: 8px; }  /* ponte: o mouse passa do botão ao menu sem fechar */
+.grupo:hover > .grupo-menu, .grupo:focus-within > .grupo-menu { display: grid; gap: 2px; }
+.grupo-item { appearance: none; border: 0; background: none; font: inherit; color: inherit; text-align: left; padding: 10px 12px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; gap: 8px; }
+.grupo-item:hover { background: var(--realce); }
+.grupo-item.ativa { background: var(--realce); font-weight: 700; color: var(--marinho); }
+.barra-topo .assinatura { margin: 0; padding: 0; font-size: .68rem; color: rgba(255, 255, 255, .45); white-space: nowrap; }
+.barra-topo .usuario-topo { color: #fff; }
+.barra-topo .usuario-topo:hover { background: rgba(255, 255, 255, .12); }
+.barra-topo .usu-nome small { color: rgba(255, 255, 255, .7); }
+.menu-area { flex: 0 1 auto; display: flex; flex-wrap: nowrap; overflow-x: auto; gap: 2px; background: var(--fundo); border: 1px solid var(--borda); border-radius: 12px; padding: 4px; min-width: 0; }
+.area-item { appearance: none; border: 0; background: none; font: inherit; font-weight: 600; color: var(--suave); padding: 8px 12px; border-radius: 9px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.area-item:hover { background: var(--papel); color: var(--texto); }
+.area-item.ativa { background: var(--marinho); color: #fff; }
+.menu-area:has(.area-nome) { background: none; border: 0; padding: 0 4px; }
+.area-nome { font-size: 1.05rem; color: var(--marinho); white-space: nowrap; }
+#visao { max-width: 170px; }
+@media (max-width: 1600px) { .barra-topo .assinatura { display: none; } }
+@media (max-width: 1500px) { .barra-topo .usu-nome { display: none; } }
+@media (max-width: 1180px) { .grupo-btn { font-size: .9rem; padding: 8px 9px; } .barra-topo .marca .logo-menu { height: 34px; } }
+@media (max-width: 1000px) {
+  .barra-topo { flex-wrap: wrap; padding: 6px 10px; gap: 8px; }
+  .menu-topo { order: 3; flex: 1 1 100%; flex-wrap: nowrap; overflow-x: auto; }
+  .grupo-btn { font-size: .92rem; padding: 8px 10px; }
+  .grupo-menu { display: none !important; }   /* no toque, o grupo leva à tela e a barra de baixo mostra as outras */
+  .topo { flex-wrap: wrap; }
+  .menu-area { flex: 1 1 100%; flex-wrap: nowrap; overflow-x: auto; }
+}
 .lateral { width: 200px; flex: none; background: linear-gradient(180deg, var(--marinho) 30%, var(--grad-esc) 100%); color: #fff; display: flex; flex-direction: column; border-right: 3px solid; border-image: linear-gradient(180deg, var(--grad-a), var(--grad-b)) 1; }
 .marca { display: flex; align-items: center; gap: 10px; padding: 14px; }
 .marca .logo { width: 38px; height: 38px; border-radius: 50%; object-fit: cover; background: #fff; }
@@ -129,7 +169,7 @@ input.curto { width: 120px; }
 .assinatura { margin: auto 0 0; padding: 12px 14px; font-size: .7rem; color: rgba(255, 255, 255, .4); letter-spacing: 1px; }
 .principal { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .topo { display: flex; align-items: center; gap: 10px; padding: 8px 16px; background: var(--papel); border-bottom: 1px solid var(--borda); }
-.busca { position: relative; flex: 1; max-width: 640px; }
+.busca { position: relative; flex: 1 1 200px; max-width: 420px; margin-left: auto; }
 .busca input { width: 100%; padding: 8px 12px; border-radius: 999px; background: var(--fundo); }
 .resultados-busca { position: absolute; top: calc(100% + 6px); left: 0; right: 0; background: var(--papel); border: 1px solid var(--borda); border-radius: 12px; box-shadow: 0 12px 32px rgba(0, 0, 0, .18); padding: 6px; z-index: 30; max-height: 70vh; overflow: auto; }
 .resultados-busca .res { appearance: none; border: 0; background: none; font: inherit; color: inherit; width: 100%; text-align: left; display: grid; grid-template-columns: 76px 1fr; column-gap: 8px; padding: 7px 10px; border-radius: 8px; cursor: pointer; }
@@ -218,6 +258,14 @@ td .barra { width: 110px; }
 .tabela th, .tabela td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--borda); vertical-align: middle; }
 .tabela th { font-size: .72rem; color: var(--suave); font-weight: 600; text-transform: uppercase; letter-spacing: .4px; white-space: nowrap; background: var(--papel); }
 .tabela th.num, .tabela td.num { text-align: right; }
+/* telas mais suaves (18/10/2026): linhas mais altas, listras leves e a linha sob o mouse destacada */
+.tabela th, .tabela td { padding: 10px 12px; }
+.tabela tbody tr:nth-child(even) > td { background: rgba(15, 35, 64, .022); }
+.tabela tbody tr:hover > td { background: var(--realce); }
+/* Compras enxuta: some Mín. FKN (5), Clientes previstos (9), Precisa (10), Vendido 12 meses (13) e Tendência (14) */
+.tabela.compras.enxuta th:nth-child(5), .tabela.compras.enxuta td:nth-child(5), .tabela.compras.enxuta th:nth-child(9), .tabela.compras.enxuta td:nth-child(9),
+.tabela.compras.enxuta th:nth-child(10), .tabela.compras.enxuta td:nth-child(10), .tabela.compras.enxuta th:nth-child(13), .tabela.compras.enxuta td:nth-child(13),
+.tabela.compras.enxuta th:nth-child(14), .tabela.compras.enxuta td:nth-child(14) { display: none; }
 .tabela tbody tr:last-child td { border-bottom: 0; }
 .tabela td small { display: block; color: var(--suave); font-size: .76rem; }
 .tabela.clicavel tbody tr, tr.clicavel { cursor: pointer; }
@@ -407,7 +455,7 @@ body.arrastando-card .zonas-fim { display: grid; grid-template-columns: 1fr 1fr;
 .impressao { display: none; }
 @media print {
   body { background: #fff; color: #000; }
-  .lateral, .topo, .faixa, .toast, dialog, .cabecalho button, .cabecalho select, .filtros, .barra-selecao, .mini { display: none !important; }
+  .lateral, .barra-topo, .topo, .faixa, .toast, dialog, .cabecalho button, .cabecalho select, .filtros, .barra-selecao, .mini { display: none !important; }
   .app, .principal, .conteudo { display: block; height: auto; overflow: visible; }
   .cartao, .kpi { box-shadow: none; break-inside: avoid; }
   body.imprimindo > *:not(.impressao) { display: none !important; }
@@ -535,12 +583,6 @@ body.arrastando-card .zonas-fim { display: grid; grid-template-columns: 1fr 1fr;
   .colunas-inicio { grid-template-columns: 1fr; }
 }
 @media (max-width: 1000px) {
-  .lateral { width: 64px; }
-  .nav-txt, .marca div, .assinatura { display: none; }
-  /* Menu encolhido: volta o ícone quadrado no lugar do logo completo. */
-  .marca.completa { background: none; margin: 0; padding: 14px; }
-  .marca.completa .logo { display: block; }
-  .marca.completa .logo-menu { display: none; }
   .zonas-fim { left: 80px; }
   .ajustes { grid-template-columns: 1fr; }
   .ajustes-menu { position: static; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
@@ -937,3 +979,6 @@ pre.of-previa { white-space: pre-wrap; font-family: inherit; font-size: .88rem; 
 .turma-sugestoes { display: flex; flex-wrap: wrap; gap: 6px; }
 .turma-sugestoes .turma-chip { appearance: none; border: 1px solid var(--borda); background: var(--papel); color: inherit; font: inherit; font-size: .82rem; border-radius: 999px; padding: 4px 12px; text-align: left; cursor: pointer; }
 .turma-sugestoes .turma-chip:hover { background: var(--realce); }
+/* Concorrentes: a célula do concorrente mais barato que a nossa tabela */
+.tabela.concorrentes tbody tr > td.cc-menor { background: var(--vermelho-fundo); }
+.tabela.concorrentes td small { display: inline; }

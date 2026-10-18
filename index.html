@@ -9,21 +9,24 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self'; img-src 'self' data:; connect-src 'self' https://*.supabase.co wss://*.supabase.co; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <title>CRM</title>
-<meta name="crm-versao" content="7770a4a00684">
+<meta name="crm-versao" content="5612957d1f6e">
 <link rel="icon" href="assets/logo.jpg?v=c886df2fc5">
-<link rel="stylesheet" href="crm.css?v=1157b8d155">
+<link rel="stylesheet" href="crm.css?v=6cde39902c">
 </head>
 <body>
 <div id="tela"></div>
 
 <div id="app" class="app" hidden>
-  <aside class="lateral">
+  <header class="barra-topo">
     <div class="marca"><img id="logoTopo" src="assets/logo.jpg?v=c886df2fc5" alt="" class="logo"><img id="logoMenu" alt="" class="logo-menu" hidden><div><strong id="nomeTopo">CRM</strong><span>CRM</span></div></div>
-    <nav id="menuLateral" class="menu-lateral" aria-label="Seções"></nav>
+    <nav id="menuLateral" class="menu-topo" aria-label="Seções"></nav>
+    <span class="flex"></span>
     <p class="assinatura">Sistemi Dalessi</p>
-  </aside>
+    <button type="button" id="usuarioTopo" class="usuario-topo" data-acao="menu-usuario"></button>
+  </header>
   <div class="principal">
     <header class="topo">
+      <nav id="menuArea" class="menu-area" aria-label="Telas desta área"></nav>
       <div class="busca">
         <input type="search" id="buscaGlobal" placeholder="Buscar empresa, pessoa, telefone, e-mail, negócio, nº da proposta…  (Ctrl+K)" autocomplete="off" aria-label="Busca">
         <div id="resultadosBusca" class="resultados-busca" hidden></div>
@@ -31,7 +34,6 @@
       <select id="visao" aria-label="Carteira" title="Ver a equipe toda ou a carteira de um vendedor" hidden></select>
       <button type="button" class="btn ouro" data-acao="novo-menu">+ Novo</button>
       <button type="button" id="sino" class="sino" data-acao="sino" aria-label="Alertas"></button>
-      <button type="button" id="usuarioTopo" class="usuario-topo" data-acao="menu-usuario"></button>
     </header>
     <div id="faixaModo" class="faixa" hidden>Modo local: os dados ficam só neste navegador. Para a equipe usar de qualquer computador, ligue o Supabase (crm/README.md).</div>
     <div id="faixaCarga" class="faixa" role="status" hidden></div>
@@ -56,11 +58,11 @@
 <script src="nfe.js?v=3b25a30eb9"></script>
 <script src="xlsx-leitor.js?v=f6da9a0815"></script>
 <script src="ui.js?v=4b3b6b1604"></script>
-<script src="app.js?v=6bfe836adf"></script>
+<script src="app.js?v=7f7cbc9f89"></script>
 <script src="perfil.js?v=e602731ca7"></script>
 <script src="telas.js?v=d7f0acecce"></script>
 <script src="fkn.js?v=b6d0d85d5d"></script>
-<script src="gestao.js?v=d8f705b677"></script>
+<script src="gestao.js?v=e21b995ba7"></script>
 <script src="frases.js?v=adc91fb830"></script>
 <script src="caixa-calculo.js?v=9a8446d31f"></script>
 <script src="caixa.js?v=b809338a5a"></script>
