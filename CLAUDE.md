@@ -65,6 +65,9 @@ carrega ~4× o volume da OneClean e falha se alguma leitura passar de 1 s (com o
 `dados.js`); sem carga nenhuma, a tela diz "seus dados estão guardados" e tenta sozinha; com dados
 antigos, só aparece a faixa `#faixaCarga`. Ao criar política nova: copiar o formato das que existem.
 
+**No computador do escritório: ler e começar por `PENDENCIAS-ESCRITORIO.md`** (o que só dá para fazer de lá, como o SSH
+da VPS, e as perguntas que esperam o Anderson). Item resolvido: apagar a linha e commitar.
+
 ## ONDE PARAMOS (01/10/2026, manhã) — retomar daqui
 
 **Estado:** 1º dia da equipe só no CRM. De manhã o CRM abriu vazio (políticas lentas; ver
@@ -1242,6 +1245,9 @@ e círculo); recortados sem fundo com o rembg (isnet) em `assets/turma/<id>.webp
   especialista da tela **dentro do painel** (rosto, nome, o que há naquela tela ou a fala de "tudo em dia"), depois "No resto
   do sistema" e a conversa. Não voltar a espalhar mascote pela tela sem ele pedir; os desenhos das linhas continuam em
   `assets/turma` (sem uso).
+  Depois, a pedido dele ("pode colocar o especialista no alto de cada tela"): o especialista da tela aparece **ao lado do
+  título** (`especialistaNaTela` em `turma.js`, 64 px, nome e "N coisas pra fazer aqui" ou o papel; clicar abre o painel);
+  nas telas do principal (Início, Relatórios, Configurações) não aparece. Agenda passou do Baldinho para o CapiClean.
 - **Próximo pedido do Anderson (17/10):** "uma skill de um comprador sênior… administrando a parte de compras, dando
   palpite, sugerindo compras inteligentes, relação com os principais concorrentes, fornecedor…". O começo já está na
   persona de Compras + `reposicao`/`giro`; falta: prazo e mínimo por fornecedor, histórico de preço de compra

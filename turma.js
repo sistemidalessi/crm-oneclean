@@ -132,7 +132,7 @@
       document.addEventListener('click', ev => {
         if (!painelAberto) return;
         // o caminho do clique na hora (o botão pode ter sido redesenhado no meio do clique)
-        if (ev.composedPath().some(el => el.id === 'turmaPainel' || el.id === 'turmaBtn')) return;
+        if (ev.composedPath().some(el => el.id === 'turmaPainel' || el.id === 'turmaBtn' || (el.classList && el.classList.contains('turma-tela')))) return;
         fechaPainel();
       });
       document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && painelAberto) fechaPainel(); });
@@ -255,11 +255,34 @@
     p.style.setProperty('--turma-dir', Math.max(8, Math.round(window.innerWidth - r.right - 60)) + 'px');
   }
 
+  // ---- o especialista no alto da tela (pedido do Anderson, 18/10): um só, ao lado do título, do tamanho do Clean;
+  // clicar abre o painel (onde ele mesmo aparece e responde). Nas telas do principal (Início, Relatórios…) não repete.
+  function especialistaNaTela(aba) {
+    const c = $('#conteudo');
+    if (!c || c.querySelector('.turma-tela')) return;
+    const h1 = c.querySelector('.cabecalho h1') || c.querySelector('h1');
+    if (!h1) return;
+    const sub = subDe(aba), esp = especialista(cfgT, aba, sub);
+    if (!esp || esp === cfgT.principal) return;
+    const de = dados(esp), n = contagem(falasDaTela(itens, aba, sub, 20)), fala = FALA_TELA[aba + ':' + sub] || FALA_TELA[aba] || '';
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'turma-btn turma-tela'; b.dataset.acao = 'turma-painel';
+    b.title = de.nome + (de.papel ? ' · ' + de.papel : '') + (!n && fala ? ': ' + fala : '') + ' (clique para ver e conversar)';
+    b.innerHTML = '<span class="turma-corpo"><img src="' + esc(img(esp)) + '" alt=""></span>' +
+      '<span class="turma-txt"><strong>' + esc(de.nome) + '</strong><small class="' + (n ? 'tem' : '') + '">' + esc(n ? n + (n === 1 ? ' coisa pra fazer aqui' : ' coisas pra fazer aqui') : de.papel) + '</small></span>';
+    // título solto no cabeçalho (<h1> direto): entra antes dele. Bloco do título (<div><h1>…<p class="sub">): entra no
+    // bloco, à esquerda do título e da linha de baixo (grade, em crm.css).
+    const par = h1.parentElement;
+    if (!par.classList.contains('cabecalho') && par !== c) par.classList.add('com-turma');
+    par.insertBefore(b, h1);
+  }
+
   function depoisRender(aba, al) {
     if (!E().eu) return;
     itens = calcula(al);
     botaoPrincipal();
     desenhaPainel();
+    especialistaNaTela(aba);
     if (!resumoEm) atualizar(true);
   }
 

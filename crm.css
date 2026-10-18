@@ -871,6 +871,12 @@ pre.of-previa { white-space: pre-wrap; font-family: inherit; font-size: .88rem; 
 .turma-txt small { color: var(--suave); font-size: .82rem; white-space: nowrap; }
 .turma-txt small.tem { color: var(--vermelho); font-weight: 600; }
 @media (max-width: 1200px) { .turma-txt { display: none; } }
+/* o especialista no alto de cada tela, ao lado do título (o nome fica visível mesmo em tela menor) */
+.turma-tela { margin: -6px 4px -6px -6px; padding: 2px 8px 2px 4px; }
+.turma-tela .turma-txt { display: grid; }
+.com-turma { display: grid; grid-template-columns: auto 1fr; column-gap: 6px; align-items: center; flex: 1 1 360px; min-width: 0; }
+.com-turma > .turma-tela { grid-row: 1 / span 6; }
+@media (max-width: 640px) { .turma-tela .turma-corpo, .turma-tela .turma-corpo img { height: 48px; } .turma-tela .turma-txt { display: none; } .com-turma > .turma-tela { align-self: start; } }
 .turma-painel { position: fixed; top: var(--turma-topo, 60px); right: var(--turma-dir, 16px); width: min(380px, calc(100vw - 24px)); max-height: calc(100vh - var(--turma-topo, 60px) - 16px); overflow: auto;
   background: var(--papel); border: 1px solid var(--borda); border-radius: 16px; box-shadow: 0 18px 40px rgba(0, 0, 0, .22); padding: 14px; z-index: 60; animation: turma-entra .18s ease-out; }
 .turma-cab { display: grid; grid-template-columns: 74px 1fr; gap: 10px; align-items: center; margin-bottom: 6px; }

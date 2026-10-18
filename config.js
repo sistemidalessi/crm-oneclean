@@ -46,7 +46,7 @@ window.CRM_CONFIG = {
     telas: {
       inicio: 'clean', fila: 'capiclean', funil: 'proposta-comercial', empresas: 'capiclean', pessoas: 'capiclean',
       negocios: 'proposta-comercial', pedidos: 'compras-cliente-sacola', 'pedidos:separacao': 'logistica', 'pedidos:nfe': 'logistica',
-      'pedidos:estoque': 'estoque', 'pedidos:faltas': 'compras-setor-interno', agenda: 'baldinho', relatorios: 'clean', ajustes: 'clean',
+      'pedidos:estoque': 'estoque', 'pedidos:faltas': 'compras-setor-interno', agenda: 'capiclean', relatorios: 'clean', ajustes: 'clean',
       compras: 'compras-setor-interno', estoque: 'estoque', gestao: 'financeiro', caixa: 'financeiro', 'caixa:cobranca': 'cobranca',
       emails: 'capiclean', ofertas: 'gotti', fiscal: 'auditoria', 'estoque:conferencia': 'auditoria'
     },
