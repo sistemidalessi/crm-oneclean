@@ -128,13 +128,16 @@
 
   let saldo = null, fkn = [], fotos = [], difs = [], fotoVista = null, carregando = false, compras = [], lendoCompras = '';
   const filtro = { ver: 'saldo', busca: '', soDif: false };
+  let dfe = [], dfeEst = null, buscouDfe = false, buscandoDfe = '';
 
   async function carrega() {
     if (carregando) return;
     carregando = true;
     try {
       const st = CRM.store();
-      [saldo, fkn, fotos, compras] = await Promise.all([st.estoqueSaldo(), st.estoque(), st.estoqueFotos(60), st.compras ? st.compras(200).catch(() => []) : []]);
+      [saldo, fkn, fotos, compras, dfe, dfeEst] = await Promise.all([st.estoqueSaldo(), st.estoque(), st.estoqueFotos(60), st.compras ? st.compras(200).catch(() => []) : [],
+        st.dfe ? st.dfe().catch(() => []) : [], st.dfeEstado ? st.dfeEstado().catch(() => null) : null]);
+      if (st.modo === 'supabase' && podeSefaz() && !buscouDfe && (!dfeEst || !dfeEst.proxima_em || Date.parse(dfeEst.proxima_em) < Date.now())) { buscouDfe = true; setTimeout(() => buscaSefaz(true), 50); }
       const conferida = fotos.find(f => f.conferida_em);
       fotoVista = fotoVista || (conferida && conferida.id) || null;
       difs = fotoVista ? await st.estoqueDifs(fotoVista) : [];
@@ -217,7 +220,7 @@
       '<td class="num">' + R.moeda(c.valor_total) + '</td><td>' + (c.situacao === 'pendente' ? CRM.selo('pendente', 'ambar') : c.situacao === 'lancada' ? CRM.selo('entrada ' + quando(c.lancada_em), 'verde') : CRM.selo('deixada de lado', 'cinza') + (c.obs ? ' <small>' + esc(c.obs) + '</small>' : '')) + '</td>' +
       '<td class="num">' + (c.situacao === 'pendente' ? '<button type="button" class="btn" data-acao="es-compra" data-id="' + esc(c.id) + '">Conferir e dar entrada</button> <button type="button" class="mini" data-acao="es-compra-ignorar" data-id="' + esc(c.id) + '" title="Deixar de lado (não é mercadoria para o estoque)">✕</button>'
         : '<button type="button" class="mini" data-acao="es-compra" data-id="' + esc(c.id) + '" title="Ver os itens">☰</button>') + '</td></tr>';
-    return '<section class="cartao"><h2>Notas de compra</h2>' +
+    return blocoSefaz() + '<section class="cartao"><h2>Notas de compra</h2>' +
       '<p>Suba o <strong>XML</strong> das notas dos fornecedores (vários de uma vez, ou o .zip). Cada uma fica pendente até você conferir: ligue cada item a um produto nosso e diga o fator ' +
       '(ex.: a caixa com 25 pacotes = 25). O CRM lembra a ligação para a próxima nota do mesmo fornecedor. A entrada soma no estoque com o custo do item (valor + IPI + ST + frete) e refaz o custo médio.</p>' +
       '<p class="dica">Enquanto o FKN roda junto, a nota de compra continua entrando no FKN também, e as parcelas <strong>não</strong> vão para o contas a pagar do CRM (o FKN já manda; ia duplicar no Caixa).</p>' +
@@ -226,6 +229,80 @@
       (pend.length ? '<div class="tabela-rolagem"><table class="tabela"><tbody>' + pend.map(linhaC).join('') + '</tbody></table></div>' : '<p class="vazio">Nenhuma nota esperando entrada.</p>') +
       (feitas.length ? '<details data-chave="es-compras-feitas"><summary>Últimas lançadas ou deixadas de lado (' + feitas.length + ')</summary><div class="tabela-rolagem"><table class="tabela"><tbody>' + feitas.map(linhaC).join('') + '</tbody></table></div></details>' : '') +
       '</section>';
+  }
+
+  // Grava cada XML de compra em crm_compras (pendente, para o comprador conferir). Nota de ANTES do início do estoque do
+  // CRM já entrou no estoque pelo FKN: fica como "deixada de lado", só para o histórico de preço (comprador sênior).
+  async function gravaTextos(textos, nosso) {
+    const st = CRM.store(), N = raiz.CRMNfe;
+    const inicio = (saldo || []).reduce((m, x) => (x.inicio && (!m || x.inicio < m) ? x.inicio : m), null);
+    let novas = 0, ja = 0, historico = 0;
+    const erros = [];
+    for (const t of textos) {
+      try {
+        const d = N.lerXml(t.texto);
+        if (!d || d.tipo !== 'nota') { erros.push(t.nome + ': não é NF-e'); continue; }
+        const c = S.compraDoXml(d, t.texto, nosso);
+        const g = await st.compraGravar(c.compra, c.itens);
+        if (!g) { ja++; continue; }
+        novas++;
+        if (inicio && c.compra.emitida_em && c.compra.emitida_em < inicio) { await st.compraIgnorar(g.id, 'antes do início do estoque do CRM: já entrou pelo FKN; fica como histórico de preço'); historico++; }
+        lendoCompras = 'Gravando: ' + (novas + ja) + ' de ' + textos.length + '…'; CRM.render();
+      } catch (e) { erros.push(t.nome + ': ' + (e.message || e)); }
+    }
+    return { novas, ja, historico, erros };
+  }
+
+  // ---- notas de compra pela Sefaz
+  const podeSefaz = () => CRM.ehAdmin() || CRM.ehComprador();   // os mesmos da crm-fiscal (DFE) e da RLS de crm_dfe
+  async function buscaSefaz(sozinho) {
+    const st = CRM.store();
+    if (!st.dfeBuscar || buscandoDfe) return;
+    buscandoDfe = 'Consultando a Sefaz…'; CRM.render();
+    try {
+      const r = await st.dfeBuscar();
+      if (!sozinho || r.resumos || r.notas) CRM.toast(r.espera ? 'A Sefaz pede 1 hora entre as consultas: a próxima fica liberada às ' + quando(r.espera) + '.'
+        : (r.resumos || 0) + ' nota(s) nova(s) da Sefaz' + (r.notas ? ', ' + r.notas + ' com o XML completo' : '') + (r.motivo ? ' · ' + r.motivo : '') + '.');
+    } catch (e) { if (!sozinho) CRM.falhou(e); }
+    buscandoDfe = '';
+    [dfe, dfeEst] = await Promise.all([st.dfe().catch(() => dfe), st.dfeEstado().catch(() => dfeEst)]);
+    await trazDfe(true);
+    CRM.render();
+  }
+  // As notas da Sefaz que já têm o XML completo e ainda não estão no CRM viram compra (pendente ou histórico).
+  async function trazDfe(sozinho) {
+    const st = CRM.store(), tem = new Set(compras.map(c => c.chave));
+    const faltam = dfe.filter(d => d.xml_em && d.situacao === 'autorizada' && !tem.has(d.chave));
+    if (!faltam.length) { if (!sozinho) CRM.toast('Nenhuma nota completa da Sefaz fora do CRM.'); return; }
+    lendoCompras = 'Trazendo ' + faltam.length + ' nota(s) da Sefaz…'; CRM.render();
+    const textos = [];
+    for (const d of faltam) { const x = await st.dfeXml(d.chave).catch(() => null); if (x) textos.push({ nome: 'NF de ' + (d.emitente_nome || d.chave), texto: x }); }
+    const r = await gravaTextos(textos, nossoDoc() || String((CRM.estado.cfg.fiscal && CRM.estado.cfg.fiscal.emitente && CRM.estado.cfg.fiscal.emitente.cnpj) || '').replace(/\D/g, '') || null);
+    lendoCompras = '';
+    if (r.novas || !sozinho) CRM.toast(r.novas + ' nota(s) da Sefaz no CRM' + (r.historico ? ' (' + r.historico + ' de antes do estoque do CRM, só como histórico de preço)' : '') + (r.erros.length ? ' · ' + r.erros.length + ' com problema: ' + r.erros.slice(0, 2).join(' | ') : '') + '.', !!r.erros.length);
+    compras = await st.compras(200).catch(() => compras);
+  }
+  function blocoSefaz() {
+    const st = CRM.store();
+    if (!st || !st.dfe || st.modo !== 'supabase' || !podeSefaz()) return '';
+    const tem = new Set(compras.map(c => c.chave));
+    const aut = dfe.filter(d => d.situacao === 'autorizada');
+    const completas = aut.filter(d => d.xml_em && !tem.has(d.chave)), resumo = aut.filter(d => !d.xml_em);
+    const semCiencia = resumo.filter(d => !d.manifestada_em), aguardando = resumo.filter(d => d.manifestada_em);
+    const e = dfeEst || {}, espera = e.proxima_em && Date.parse(e.proxima_em) > Date.now();
+    return '<section class="cartao"><h2>Notas da Sefaz <small>emitidas contra o nosso CNPJ nos últimos 3 meses</small></h2>' +
+      '<p>' + (e.ultima_em ? 'Última consulta: <strong>' + esc(quando(e.ultima_em)) + '</strong>' + (e.ultimo_motivo ? ' (' + esc(e.ultimo_motivo) + ')' : '') + '. ' : 'Ainda não consultou. ') +
+        (espera ? 'A Sefaz pede 1 hora entre as consultas: a próxima fica liberada às ' + esc(quando(e.proxima_em)) + '.' : '') + '</p>' +
+      '<p class="acoes"><button type="button" class="btn sec" data-acao="es-sefaz"' + (espera || buscandoDfe ? ' disabled' : '') + '>' + esc(buscandoDfe || 'Buscar na Sefaz agora') + '</button> ' +
+        (completas.length ? '<button type="button" class="btn" data-acao="es-sefaz-trazer">Trazer ' + completas.length + ' nota(s) para a conferência</button> ' : '') + '</p>' +
+      '<p>' + aut.length + ' nota(s) vista(s) · ' + (aut.length - resumo.length) + ' com o XML completo · ' + resumo.length + ' só com o resumo' + (aguardando.length ? ' (' + aguardando.length + ' esperando a Sefaz liberar o XML)' : '') + '.</p>' +
+      (semCiencia.length ? '<p class="dica">O XML completo (itens e preços) só vem depois da <strong>Ciência da Operação</strong>: o aviso à Sefaz de que a empresa sabe da nota. ' +
+          'Não confirma nem recusa a compra. ' + (CRM.ehAdmin() ? '' : 'Quem dá a ciência é o administrador.') + '</p>' +
+        (CRM.ehAdmin() ? '<p class="acoes"><button type="button" class="btn sec" data-acao="es-sefaz-ciencia">Dar ciência e pedir o XML de ' + Math.min(20, semCiencia.length) + ' nota(s)' + (semCiencia.length > 20 ? ' (de ' + semCiencia.length + '; 20 por vez)' : '') + '</button></p>' : '') : '') +
+      (resumo.length ? '<details data-chave="es-sefaz-resumos"><summary>Só com o resumo (' + resumo.length + ')</summary><div class="tabela-rolagem"><table class="tabela"><tbody>' +
+        resumo.slice(0, 100).map(d => '<tr><td><strong>' + esc(d.emitente_nome || '?') + '</strong><small>' + esc(quando(d.emitida_em)) + '</small></td><td class="num">' + R.moeda(d.valor) + '</td><td>' +
+          (d.manifestada_em ? CRM.selo('ciência dada', 'azul') : d.manifesto_motivo ? CRM.selo(d.manifesto_motivo.slice(0, 60), 'vermelho') : CRM.selo('falta ciência', 'ambar')) + '</td></tr>').join('') +
+        '</tbody></table></div></details>' : '') + '</section>';
   }
 
   async function lerCompras(files) {
@@ -241,15 +318,8 @@
           (await raiz.CRMXlsx.lerZipTextos(f, /\.xml$/i)).forEach(x => textos.push({ nome: x.nome || f.name, texto: x.texto }));
         } else textos.push({ nome: f.name, texto: await f.text() });
       }
-      for (const t of textos) {
-        try {
-          const d = N.lerXml(t.texto);
-          if (!d || d.tipo !== 'nota') { erros.push(t.nome + ': não é NF-e'); continue; }
-          const c = S.compraDoXml(d, t.texto, nosso);
-          if (await st.compraGravar(c.compra, c.itens)) novas++; else ja++;
-          lendoCompras = 'Gravando: ' + (novas + ja) + ' de ' + textos.length + '…'; CRM.render();
-        } catch (e) { erros.push(t.nome + ': ' + (e.message || e)); }
-      }
+      const r = await gravaTextos(textos, nosso);
+      novas = r.novas; ja = r.ja; erros.push(...r.erros);
     } finally { lendoCompras = ''; }
     CRM.toast(novas + ' nota(s) de compra nova(s)' + (ja ? ', ' + ja + ' já estavam' : '') + (erros.length ? ' · ' + erros.length + ' com problema: ' + erros.slice(0, 3).join(' | ') : '') + '.', !!erros.length);
     compras = await st.compras(200).catch(() => compras); CRM.render();
@@ -326,6 +396,14 @@
           saldo = null; carrega();
         }
       });
+    },
+    'es-sefaz': () => buscaSefaz(false),
+    'es-sefaz-trazer': async () => { await trazDfe(false); CRM.render(); },
+    'es-sefaz-ciencia': async () => {
+      if (!confirm('Dar a Ciência da Operação das notas que ainda não têm o XML completo (até 20)?\nÉ só o aviso à Sefaz de que a empresa sabe da nota: não confirma nem recusa a compra.')) return;
+      try { const r = await CRM.store().dfeCiencia(); CRM.toast('Ciência dada em ' + r.ok + ' nota(s)' + (r.falha ? ', ' + r.falha + ' com problema (veja na lista)' : '') + '. O XML completo chega na próxima consulta (até 1 hora).', !!r.falha); }
+      catch (e) { CRM.falhou(e); }
+      const st = CRM.store(); dfe = await st.dfe().catch(() => dfe); CRM.render();
     },
     'es-compra': async id => {
       const c = compras.find(x => x.id === id); if (!c) return;

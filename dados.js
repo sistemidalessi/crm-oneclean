@@ -486,6 +486,16 @@
     unwrap(await this.sb.from('crm_compra_itens').insert(itens.map(i => Object.assign({}, i, { compra_id: r[0].id }))));
     return r[0];
   };
+  // Notas de compra pela Sefaz (crm-fiscal → serviço fiscal → Distribuição de DF-e): resumo, NSU e o XML completo.
+  Supa.prototype.dfe = async function () { return unwrap(await this.sb.from('crm_dfe').select('*').order('emitida_em', { ascending: false }).limit(1000)); };
+  Supa.prototype.dfeEstado = async function () { return unwrap(await this.sb.from('crm_dfe_estado').select('*').eq('id', 1).maybeSingle()); };
+  Supa.prototype.dfeBuscar = async function () { return this.fiscal({ acao: 'dfe_buscar' }); };
+  Supa.prototype.dfeCiencia = async function (chave) { return this.fiscal({ acao: 'dfe_ciencia', chave: chave || null }); };
+  Supa.prototype.dfeXml = async function (chave) {
+    const r = await this.sb.storage.from('crm-compras-xml').download(chave + '.xml');
+    if (r.error) return null;
+    return await r.data.text();
+  };
   Supa.prototype.compraLancar = async function (id, itens) { return unwrap(await this.sb.rpc('crm_compra_lancar', { p_compra: id, p_itens: itens })); };
   Supa.prototype.compraIgnorar = async function (id, obs) {
     return unwrap(await this.sb.from('crm_compras').update({ situacao: 'ignorada', obs: obs || null, atualizado_em: new Date().toISOString() }).eq('id', id).eq('situacao', 'pendente').select().single());
@@ -500,6 +510,11 @@
     this._compras.push(c); itens.forEach(i => this._compraItens.push(Object.assign({ id: uuid(), compra_id: c.id }, i)));
     return c;
   };
+  Local.prototype.dfe = async function () { return []; };
+  Local.prototype.dfeEstado = async function () { return null; };
+  Local.prototype.dfeBuscar = async function () { throw new Error('a busca na Sefaz só funciona ligada ao banco'); };
+  Local.prototype.dfeCiencia = Local.prototype.dfeBuscar;
+  Local.prototype.dfeXml = async function () { return null; };
   Local.prototype.compraLancar = async function () { throw new Error('a entrada no estoque só funciona ligada ao banco'); };
   Local.prototype.compraIgnorar = async function (id, obs) { const c = (this._compras || []).find(x => x.id === id); if (c) Object.assign(c, { situacao: 'ignorada', obs }); return c; };
 

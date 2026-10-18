@@ -1235,11 +1235,44 @@ e círculo); recortados sem fundo com o rembg (isnet) em `assets/turma/<id>.webp
   `fiscal` e `estoque:conferencia`; o aviso de diferença de estoque leva à Conferência) — os dois últimos vieram soltos (sem
   título nem círculo): `scratchpad/mascotes/scripts/solto.py` (rosto = parte de cima do corpo) + borda suavizada. Pranchas com
   título e círculo: `final.py` (o nome sai do arquivo "NN-Nome.png"). Trocar desenho: mesmo nome de arquivo e subir a `versao`.
+- **Redesenho (18/10, `versao` 4), pedido do Anderson:** "poluiu muito, principalmente o estoque… baldinho, uns produtos
+  que não faz sentido… muito pequeno… mais ou menos igual ao Agilitinho no sistema da Agilité". Saíram o **canto** (balão
+  flutuante do especialista) e os **mascotes das linhas de produto** (rostos na lista e filtros do Estoque; `turma.linhas`
+  apagado do config). Ficou: o **Clean de corpo inteiro (64 px) no topo**, com o nome e "N coisas pra fazer", e o
+  especialista da tela **dentro do painel** (rosto, nome, o que há naquela tela ou a fala de "tudo em dia"), depois "No resto
+  do sistema" e a conversa. Não voltar a espalhar mascote pela tela sem ele pedir; os desenhos das linhas continuam em
+  `assets/turma` (sem uso).
 - **Próximo pedido do Anderson (17/10):** "uma skill de um comprador sênior… administrando a parte de compras, dando
   palpite, sugerindo compras inteligentes, relação com os principais concorrentes, fornecedor…". O começo já está na
   persona de Compras + `reposicao`/`giro`; falta: prazo e mínimo por fornecedor, histórico de preço de compra
   (`crm_compra_itens`), curva ABC, sugestão de pedido pronta para aprovar, e concorrentes pela busca na web (ferramenta de
   servidor `web_search`, só admin/comprador, com custo à parte) — combinar com ele.
+
+## Comprador sênior (17–18/10/2026, pedido do Anderson: "vamos começar o comprador sênior")
+
+Respostas dele: histórico das notas de compra **buscado na Sefaz**; concorrentes **eu pesquiso e sugiro**; fornecedores
+(prazo, mínimo, frete) **o comprador preenche no CRM**.
+
+- **1 e 2 — notas de compra pela Sefaz (feito):** `servico-fiscal/dfe.js` (Distribuição de DF-e do Ambiente Nacional,
+  NT 2014.002; mensagens validadas no XSD em `testes/dfe.test.js`) e rotas `/dfe` e `/ciencia` do serviço fiscal
+  (`VERSAO 2026-10-17`). A `crm-fiscal` (v7, ações `dfe_buscar` para admin/comprador e `dfe_ciencia` só admin) guarda o
+  resumo em `crm_dfe`, o NSU e a espera em `crm_dfe_estado` e o XML completo no bucket privado `crm-compras-xml`
+  (`<chave>.xml`); RLS: admin e comprador leem. **Sempre produção** (consultar não emite nada). Regras da Sefaz respeitadas
+  pela função: continuar do `ultNSU`, 1 hora de espera depois de 137 ou de `ultNSU = maxNSU`, até 5 consultas por vez
+  (656 = bloqueio de 1 hora). Tela: **Estoque → Notas de compra**, bloco "Notas da Sefaz" (só admin/comprador): busca sozinha
+  ao abrir quando a espera passou, botão "Buscar na Sefaz agora", "Trazer N nota(s) para a conferência" (vira `crm_compras`
+  pendente; nota de **antes do início do estoque do CRM** fica "deixada de lado" como **histórico de preço**, porque já
+  entrou pelo FKN) e, para o admin, "Dar ciência e pedir o XML" (até 20 por vez, com confirmação). A **Ciência da
+  Operação** (210210) é ato em nome da OneClean perante a Sefaz (só "fiquei sabendo"; não confirma nem recusa a compra):
+  fica no botão do admin; a ciência automática (`fiscal.dfe_ciencia = true` no config do banco) **só se o Anderson
+  concordar**. A Sefaz só devolve os **últimos 3 meses**.
+  **Falta o Anderson:** atualizar o serviço fiscal na VPS
+  (`cd /opt/oneclean-fiscal && git pull -q && systemctl restart oneclean-fiscal && systemctl is-active oneclean-fiscal`) e
+  apertar "Buscar na Sefaz agora". Se der erro de certificado do servidor da Sefaz nacional (cadeia diferente da de SP),
+  acrescentar a raiz em `cadeia.pem` (nunca desligar a verificação).
+- **3 — falta:** `crm_fornecedores` (prazo de entrega, pedido mínimo, frete, dia de pedido, contato; padrão 7 dias),
+  painel do comprador (comprar hoje por fornecedor, preço de compra que subiu, produtos sem fornecedor, parado → oferta),
+  ferramentas novas da IA (fornecedores, preços de compra) e a lista de concorrentes para o Anderson aprovar.
 
 ## NF-e emitida pelo CRM — Fase 4 da saída do FKN (16/10/2026, pedido do Anderson)
 
