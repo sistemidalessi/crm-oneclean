@@ -1254,6 +1254,8 @@ e círculo); recortados sem fundo com o rembg (isnet) em `assets/turma/<id>.webp
   Desenho novo com papel ou parte branca por dentro: conferir sobre fundo colorido antes de publicar.
   **Cobrança nova (18/10, `versao` 6):** o Anderson mandou outro desenho (calendário com celular, já sem fundo); corpo = o
   arquivo dele reduzido, rosto = recorte do alto (olhos e gravata) sobre fundo claro.
+  **Proposta nova (18/10, `versao` 7):** desenho do Anderson (folha com gravata-borboleta e caneta, já sem fundo), no
+  orçamento em PDF e nas telas de Funil e Negócios.
   **Orçamento com a Proposta (18/10, aprovado pelo Anderson pelo PDF de exemplo):** o mascote de `turma.telas.negocios` ao
   lado da frase de destaque (`proposta_chamada`), como a Cobrança no boleto (`fichas.js` → `montaProposta`; 24 mm no modo
   denso). Sem frase de destaque ou sem `turma` no config, sai sem mascote. Continua cabendo numa folha.
