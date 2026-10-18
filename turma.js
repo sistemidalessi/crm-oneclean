@@ -2,12 +2,13 @@
    Agilitinho… queria trazer isso; tem os de linha de estoque, o do boleto de cobrança, o de compras… e um
    principal, um robozinho"). Só liga quando o config.js da instalação traz `turma` (nomes, imagens e em que tela
    cada um aparece são da instalação; o código é o mesmo para qualquer cliente).
-   - O PRINCIPAL fica no topo, ao lado do sino, com o contador: clicar abre o guia do dia (o que está esperando a
-     pessoa, primeiro o da tela aberta). Os números vêm da RLS de cada um (crm_turma_resumo: SECURITY INVOKER),
-     então a vendedora nunca vê número do Caixa.
-   - O ESPECIALISTA da tela aparece no canto de baixo e diz o estado daquela área (Estoque, Compras, Cobrança…).
-   - Os de LINHA DE PRODUTO aparecem ao lado do produto (pela linha do FKN) e filtram o Estoque.
-   - O ANFITRIÃO recebe na tela de entrada.
+   - O PRINCIPAL fica no topo, de corpo inteiro, com o nome e "N coisas pra fazer" (o formato do Agilitinho da Agilité;
+     18/10, pedido do Anderson: os mascotes espalhados pela tela poluíam). Clicar abre o guia do dia (primeiro o da tela
+     aberta) e a conversa com a IA. Os números vêm da RLS de cada um (crm_turma_resumo: SECURITY INVOKER), então a
+     vendedora nunca vê número do Caixa.
+   - O ESPECIALISTA da tela aberta (Estoque, Compras, Cobrança…) aparece só DENTRO do painel: o rosto e o que ele tem a
+     dizer daquela área, e é quem responde a conversa.
+   - O ANFITRIÃO recebe na tela de entrada; o da cobrança vai no resumo do boleto.
    A imagem não sabe nada sozinha: cada fala sai de um número do sistema. Nada de estoque, preço ou pagamento
    inventado. Aqui: a parte pura (testes/turma.test.js) e a tela. */
 (function (raiz) {
@@ -22,17 +23,6 @@
     if (!t) return null;
     const tl = t.telas || {};
     return (sub && tl[aba + ':' + sub]) || tl[aba] || t.principal;
-  }
-  // Mascote do produto: a 1ª regra que bate com a descrição (mais precisa: "VASSOURA" na linha SUPER MERCADO); senão, com a linha do FKN.
-  function daLinha(t, linha, descricao) {
-    const regras = (t && t.linhas) || [];
-    for (const txt of [descricao, linha]) {
-      const s = normaliza(txt);
-      if (!s) continue;
-      const r = regras.find(x => new RegExp(x[1]).test(s));
-      if (r) return r[0];
-    }
-    return null;
   }
   const saudacao = hora => (hora < 5 ? 'Boa noite' : hora < 12 ? 'Bom dia' : hora < 18 ? 'Boa tarde' : 'Boa noite');
 
@@ -85,7 +75,7 @@
     return daTela.slice(0, max || 3);
   }
 
-  const T = { especialista, daLinha, saudacao, guia, contagem, falasDaTela, NIVEL };
+  const T = { especialista, saudacao, guia, contagem, falasDaTela, NIVEL };
   if (typeof module !== 'undefined' && module.exports) { module.exports = T; return; }
   raiz.CRMTurma = T;
 
@@ -98,22 +88,9 @@
   const dados = id => Object.assign({ nome: id, papel: '' }, (cfgT.mascotes || {})[id] || {});
   const img = (id, rosto) => pasta + id + (rosto ? '-rosto' : '') + '.webp' + v;
   const FALA_TELA = cfgT.falas || {};
-  let resumo = {}, resumoEm = 0, itens = [], painelAberto = false, canto = { chave: '', id: '', mini: CRM.pref('turma-canto', '') === 'mini', balao: false, timer: null };
-  const escondidos = () => CRM.pref('turma-esconder', '') === 'sim';
+  let resumo = {}, resumoEm = 0, itens = [], painelAberto = false;
 
-  CRM.turma = {
-    img, dados, ativo: true,
-    // rosto pequeno da linha do produto (Estoque, Compras, pedido): '' quando nenhuma regra bate
-    iconeLinha(linha, descricao) {
-      const id = daLinha(cfgT, linha, descricao);
-      if (!id) return '';
-      const d = dados(id);
-      return '<img class="turma-linha" src="' + esc(img(id, true)) + '" alt="" title="' + esc(d.nome + (d.papel ? ' · ' + d.papel : '')) + '" loading="lazy">';
-    },
-    daLinha: (linha, descricao) => daLinha(cfgT, linha, descricao),
-    atualizar,
-    depoisRender
-  };
+  CRM.turma = { img, dados, ativo: true, atualizar, depoisRender };
 
   async function atualizar(forca) {
     const st = CRM.store();
@@ -155,7 +132,7 @@
       document.addEventListener('click', ev => {
         if (!painelAberto) return;
         // o caminho do clique na hora (o botão pode ter sido redesenhado no meio do clique)
-        if (ev.composedPath().some(el => el.id === 'turmaPainel' || el.id === 'turmaBtn' || el.id === 'turmaCanto')) return;
+        if (ev.composedPath().some(el => el.id === 'turmaPainel' || el.id === 'turmaBtn')) return;
         fechaPainel();
       });
       document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && painelAberto) fechaPainel(); });
@@ -248,71 +225,34 @@
     const p = $('#turmaPainel'), b = $('#turmaBtn');
     if (!p || !b) return;
     const eu = E().eu || {}, d = dados(cfgT.principal);
-    const aba = E().aba;
-    const aqui = itens.filter(x => x.aba === aba), resto = itens.filter(x => x.aba !== aba);
+    const aba = E().aba, sub = subDe(aba);
+    const aqui = falasDaTela(itens, aba, sub, 20), resto = itens.filter(x => x.aba !== aba);
     const primeiro = String(eu.nome || '').split(' ')[0];
-    if (!p.querySelector('#turmaGuia')) {
-      p.innerHTML = '<div id="turmaGuia"></div><div id="turmaChat" class="turma-chat"></div>' +
-        '<div class="turma-rodape"><label><input type="checkbox" data-turma-esconder> mostrar o ajudante de cada tela</label></div>';
-      const chk = p.querySelector('[data-turma-esconder]');
-      chk.onchange = () => { CRM.gravaPref('turma-esconder', chk.checked ? '' : 'sim'); canto.chave = ''; canto.id = ''; CRM.render(); };
-    }
-    p.querySelector('[data-turma-esconder]').checked = !escondidos();
-    const gh = '<div class="turma-cab"><img src="' + esc(img(cfgT.principal)) + '" alt=""><div><strong>' + esc(saudacao(new Date().getHours()) + (primeiro ? ', ' + primeiro : '') + '!') + '</strong>' +
+    if (!p.querySelector('#turmaGuia')) p.innerHTML = '<div id="turmaGuia"></div><div id="turmaChat" class="turma-chat"></div>';
+    // o especialista da tela aberta aparece aqui dentro (não espalhado pela tela): rosto, nome e o que ele tem a dizer
+    const esp = especialista(cfgT, aba, sub), de = dados(esp);
+    const nestaTela = esp && esp !== cfgT.principal
+      ? '<div class="turma-esp"><img src="' + esc(img(esp, true)) + '" alt=""><div><strong>' + esc(de.nome) + '</strong><small>' + esc(de.papel) + '</small></div></div>' +
+        (aqui.length ? aqui.map(itemHtml).join('') : '<p class="turma-fala">' + esc(FALA_TELA[aba + ':' + sub] || FALA_TELA[aba] || 'Por aqui está tudo em dia.') + '</p>')
+      : (aqui.length ? '<h4>Nesta tela</h4>' + aqui.map(itemHtml).join('') : '');
+    const gh = '<div class="turma-cab"><img src="' + esc(img(cfgT.principal)) + '" alt=""><div><strong>' + esc(saudacao(Number(new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo', hour: 'numeric', hour12: false })) % 24) + (primeiro ? ', ' + primeiro : '') + '!') + '</strong>' +
       '<p>' + esc(itens.length ? 'Eu sou o ' + d.nome + '. Separei o que está esperando você:' : 'Eu sou o ' + d.nome + '. Por aqui está tudo em dia.') + '</p></div></div>' +
       // com conversa aberta, a lista de avisos recolhe numa linha (clicar abre de novo)
       (chat.msgs.length && !chat.verGuia ? (itens.length ? '<p class="turma-recolhido"><button type="button" class="link" data-acao="turma-ver-guia">ver os ' + itens.length + ' aviso(s) do dia</button></p>' : '')
-        : (aqui.length ? '<h4>Nesta tela</h4>' + aqui.map(itemHtml).join('') : '') +
-          (resto.length ? '<h4>' + (aqui.length ? 'No resto do sistema' : 'No sistema') + '</h4>' + resto.map(itemHtml).join('') : ''));
+        : nestaTela + (resto.length ? '<h4>' + (aqui.length || nestaTela ? 'No resto do sistema' : 'No sistema') + '</h4>' + resto.map(itemHtml).join('') : ''));
     const g = p.querySelector('#turmaGuia');
     if (g.dataset.html !== gh) { g.innerHTML = gh; g.dataset.html = gh; }
     desenhaChat();
+    // o principal no topo, de corpo inteiro, com o nome e quantas coisas há para fazer (como o Agilitinho da Agilité)
     const n = contagem(itens);
-    const bh = '<img src="' + esc(img(cfgT.principal, true)) + '" alt=""><span class="turma-nome">' + esc(d.nome) + '</span>' + (n ? '<span class="bolinha vermelha">' + n + '</span>' : '');
+    const bh = '<span class="turma-corpo"><img src="' + esc(img(cfgT.principal)) + '" alt="">' + (n ? '<span class="bolinha vermelha">' + n + '</span>' : '') + '</span>' +
+      '<span class="turma-txt"><strong>' + esc(d.nome) + '</strong><small class="' + (n ? 'tem' : '') + '">' + esc(n ? n + (n === 1 ? ' coisa pra fazer' : ' coisas pra fazer') : 'tudo em dia') + '</small></span>';
     if (b.dataset.html !== bh) { b.innerHTML = bh; b.dataset.html = bh; }
-    b.title = d.nome + (d.papel ? ' · ' + d.papel : '') + ': ' + (n ? n + ' coisa(s) para fazer' : 'tudo em dia');
-    b.setAttribute('aria-label', b.title);
+    b.title = d.nome + (d.papel ? ' · ' + d.papel : '') + ': clique para ver o dia e conversar';
+    b.setAttribute('aria-label', d.nome + ': ' + (n ? n + ' coisa(s) para fazer' : 'tudo em dia'));
     const r = b.getBoundingClientRect();
     p.style.setProperty('--turma-topo', Math.round(r.bottom + 8) + 'px');
     p.style.setProperty('--turma-dir', Math.max(8, Math.round(window.innerWidth - r.right - 60)) + 'px');
-  }
-
-  // ---- o especialista no canto
-  function elCanto() {
-    let c = $('#turmaCanto');
-    if (!c) {
-      c = document.createElement('div');
-      c.id = 'turmaCanto'; c.className = 'turma-canto';
-      document.body.appendChild(c);
-    }
-    return c;
-  }
-  function desenhaCanto(aba, sub) {
-    const c = elCanto();
-    if (escondidos()) { c.hidden = true; return; }
-    const id = especialista(cfgT, aba, sub), d = dados(id);
-    const falas = falasDaTela(itens, aba, sub, 3);
-    const padrao = FALA_TELA[aba + ':' + sub] || FALA_TELA[aba] || 'Estou por aqui se precisar.';
-    const chave = id + '|' + (canto.mini ? 1 : 0) + (canto.balao ? 1 : 0) + '|' + falas.map(x => x.id + x.texto).join('|');
-    if (chave === canto.chave) return;
-    const trocou = canto.id !== id;
-    canto.chave = chave; canto.id = id;
-    if (trocou && !canto.mini) canto.balao = true;
-    c.hidden = false;
-    c.className = 'turma-canto' + (canto.mini ? ' mini' : '') + (trocou ? ' entra' : '');
-    c.innerHTML = '<div class="turma-balao"' + (canto.balao ? '' : ' hidden') + '>' +
-      '<button type="button" class="turma-fecha" data-acao="turma-mini" aria-label="Encolher">×</button>' +
-      '<strong>' + esc(d.nome) + (d.papel ? '<small>' + esc(d.papel) + '</small>' : '') + '</strong>' +
-      (falas.length ? '<ul>' + falas.map(x => '<li class="' + x.nivel + '"><button type="button" class="link" data-acao="turma-ir" data-id="' + esc(x.aba + (x.sub ? ':' + x.sub : '')) + '">' + esc(x.texto) + '</button></li>').join('') + '</ul>'
-        : '<p>' + esc(padrao) + '</p>') +
-      (CRM.store() && CRM.store().assistente ? '<p class="turma-perguntar"><button type="button" class="link" data-acao="turma-perguntar">💬 Perguntar ao ' + esc(d.nome) + '</button></p>' : '') + '</div>' +
-      '<button type="button" class="turma-boneco" data-acao="turma-balao" aria-label="' + esc(d.nome) + '">' +
-      '<img src="' + esc(img(id, canto.mini)) + '" alt="">' + (canto.mini && falas.some(x => x.nivel !== 'info') ? '<span class="bolinha vermelha">' + falas.filter(x => x.nivel !== 'info').length + '</span>' : '') + '</button>';
-    if (trocou && canto.balao) {
-      clearTimeout(canto.timer);
-      canto.timer = setTimeout(() => { canto.balao = false; canto.chave = ''; desenhaCanto(E().aba, subDe(E().aba)); }, 9000);
-    }
-    if (trocou) setTimeout(() => c.classList.remove('entra'), 700);
   }
 
   function depoisRender(aba, al) {
@@ -320,7 +260,6 @@
     itens = calcula(al);
     botaoPrincipal();
     desenhaPainel();
-    desenhaCanto(aba, subDe(aba));
     if (!resumoEm) atualizar(true);
   }
 
@@ -334,14 +273,6 @@
     'turma-sugestao': t => perguntar(t),
     'turma-ver-guia': () => { chat.verGuia = !chat.verGuia; desenhaPainel(); },
     'turma-nova': () => { chat.conversa = null; chat.msgs = []; desenhaChat(); const ta = $('#turmaChat textarea'); if (ta) ta.focus(); },
-    // "Perguntar ao …" no balão do canto: abre o painel com o especialista da tela respondendo
-    'turma-perguntar': () => {
-      painelAberto = true;
-      const p = $('#turmaPainel');
-      if (p) { desenhaPainel(); p.hidden = false; }
-      situacaoChat();
-      setTimeout(() => { const ta = $('#turmaChat textarea'); if (ta) ta.focus(); }, 30);
-    },
     'turma-ir': id => {
       const [aba, sub] = String(id).split(':');
       fechaPainel();
@@ -349,12 +280,6 @@
       if (sub && aba === 'caixa' && CRM.acoes['cx-vista']) CRM.acoes['cx-vista'](sub);
       if (sub && aba === 'pedidos' && CRM.acoes['pd-ver']) CRM.acoes['pd-ver'](sub);
       if (sub && aba === 'estoque' && CRM.acoes['es-ver']) CRM.acoes['es-ver'](sub);
-    },
-    'turma-balao': () => {
-      if (canto.mini) { canto.mini = false; CRM.gravaPref('turma-canto', ''); canto.balao = true; } else canto.balao = !canto.balao;
-      clearTimeout(canto.timer);
-      desenhaCanto(E().aba, subDe(E().aba));
-    },
-    'turma-mini': () => { canto.mini = true; canto.balao = false; CRM.gravaPref('turma-canto', 'mini'); canto.chave = ''; desenhaCanto(E().aba, subDe(E().aba)); }
+    }
   });
 })(typeof window !== 'undefined' ? window : globalThis);

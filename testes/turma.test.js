@@ -1,13 +1,12 @@
 'use strict';
-// Turma (mascotes): quem fala em cada tela, mascote da linha do produto e o guia do dia por papel. Dados fictícios.
+// Turma (mascotes): quem fala em cada tela e o guia do dia por papel. Dados fictícios.
 const test = require('node:test');
 const assert = require('node:assert');
 const T = require('../turma.js');
 
 const cfg = {
   principal: 'robo',
-  telas: { estoque: 'caixa-papelao', caixa: 'calculadora', 'caixa:cobranca': 'envelope' },
-  linhas: [['saco', 'SACO'], ['rolo', 'PAPEL(?!ARIA)|COPO'], ['frasco', 'DOMISSANIT|DETERGENTE'], ['balde', 'LUVA|\\bEPI\\b']]
+  telas: { estoque: 'caixa-papelao', caixa: 'calculadora', 'caixa:cobranca': 'envelope' }
 };
 
 test('especialista da tela: sub-aba, tela e o principal', () => {
@@ -15,15 +14,6 @@ test('especialista da tela: sub-aba, tela e o principal', () => {
   assert.strictEqual(T.especialista(cfg, 'caixa', 'dia'), 'calculadora');
   assert.strictEqual(T.especialista(cfg, 'fila', null), 'robo');
   assert.strictEqual(T.especialista(null, 'fila'), null);
-});
-
-test('mascote do produto: a descrição primeiro, depois a linha; sem acento e sem falso EPI', () => {
-  assert.strictEqual(T.daLinha(cfg, 'SUPER MERCADO', 'Detergente Ypê 500 ml'), 'frasco');
-  assert.strictEqual(T.daLinha(cfg, 'DOMISSANITÁRIOS', 'Sabonete perolado 5 L'), 'frasco');
-  assert.strictEqual(T.daLinha(cfg, 'PAPELARIA', 'Caneta azul'), null);
-  assert.strictEqual(T.daLinha(cfg, 'EPI', 'Sapato EVA'), 'balde');
-  assert.strictEqual(T.daLinha(cfg, '', 'RECEPIENTE 2L'), null);
-  assert.strictEqual(T.daLinha({}, 'SACOS', 'SACO 100 L'), null);
 });
 
 test('saudação pelo horário', () => {

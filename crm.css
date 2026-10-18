@@ -859,12 +859,18 @@ pre.of-previa { white-space: pre-wrap; font-family: inherit; font-size: .88rem; 
 .nf-previa .dados { margin: .6rem 0; }
 
 /* ---- Turma (mascotes da instalação, turma.js) */
-.turma-btn { appearance: none; border: 1px solid var(--borda); background: var(--papel); color: var(--texto); font: inherit; font-weight: 600; border-radius: 999px; padding: 2px 12px 2px 2px; cursor: pointer; position: relative; height: 40px; display: inline-flex; align-items: center; gap: 6px; }
+.turma-btn { appearance: none; border: 0; background: none; color: var(--texto); font: inherit; padding: 0 6px; cursor: pointer; position: relative; display: inline-flex; align-items: center; gap: 8px; border-radius: 12px; }
 .turma-btn:hover { background: var(--realce); }
-@media (max-width: 1200px) { .turma-btn { padding-right: 2px; } .turma-btn .turma-nome { display: none; } }
-.turma-btn img { width: 34px; height: 34px; border-radius: 50%; display: block; transition: transform .2s; }
-.turma-btn:hover img { transform: rotate(-8deg) scale(1.06); }
-.turma-btn .bolinha { position: absolute; top: -5px; right: -7px; }
+.turma-btn .turma-corpo { position: relative; display: block; height: 64px; }
+.turma-btn .turma-corpo img { height: 64px; width: auto; display: block; filter: drop-shadow(0 3px 4px rgba(0, 0, 0, .18)); transition: transform .2s; transform-origin: bottom center; }
+.turma-btn:hover .turma-corpo img { transform: rotate(-5deg) translateY(-2px); }
+.turma-btn .bolinha { position: absolute; top: 0; right: -4px; }
+.topo:has(.turma-btn) { padding-top: 4px; padding-bottom: 4px; }
+.turma-txt { display: grid; text-align: left; line-height: 1.15; }
+.turma-txt strong { color: var(--marinho); font-size: 1.02rem; }
+.turma-txt small { color: var(--suave); font-size: .82rem; white-space: nowrap; }
+.turma-txt small.tem { color: var(--vermelho); font-weight: 600; }
+@media (max-width: 1200px) { .turma-txt { display: none; } }
 .turma-painel { position: fixed; top: var(--turma-topo, 60px); right: var(--turma-dir, 16px); width: min(380px, calc(100vw - 24px)); max-height: calc(100vh - var(--turma-topo, 60px) - 16px); overflow: auto;
   background: var(--papel); border: 1px solid var(--borda); border-radius: 16px; box-shadow: 0 18px 40px rgba(0, 0, 0, .22); padding: 14px; z-index: 60; animation: turma-entra .18s ease-out; }
 .turma-cab { display: grid; grid-template-columns: 74px 1fr; gap: 10px; align-items: center; margin-bottom: 6px; }
@@ -880,52 +886,26 @@ pre.of-previa { white-space: pre-wrap; font-family: inherit; font-size: .88rem; 
 .turma-item.atencao { border-left-color: var(--ambar); }
 .turma-item.info { border-left-color: var(--azul); }
 .turma-item b { color: var(--suave); }
-.turma-rodape { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--borda); font-size: .82rem; color: var(--suave); }
-.turma-rodape label { display: flex; gap: 6px; align-items: center; cursor: pointer; }
-
-.turma-canto { position: fixed; right: 14px; bottom: 10px; z-index: 40; display: flex; align-items: flex-end; gap: 6px; pointer-events: none; }
-.turma-canto > * { pointer-events: auto; }
-.turma-canto.entra .turma-boneco img { animation: turma-pula .6s ease-out; }
-.turma-boneco { appearance: none; border: 0; background: none; padding: 0; cursor: pointer; position: relative; }
-.turma-boneco img { height: 104px; width: auto; max-width: 110px; object-fit: contain; display: block; filter: drop-shadow(0 4px 6px rgba(0, 0, 0, .18)); transition: transform .2s; transform-origin: bottom center; }
-.turma-boneco:hover img { transform: rotate(-4deg) translateY(-2px); }
-.turma-canto.mini .turma-boneco img { height: 46px; width: 46px; border-radius: 50%; border: 2px solid var(--papel); box-shadow: 0 4px 12px rgba(0, 0, 0, .2); filter: none; }
-.turma-boneco .bolinha { position: absolute; top: -4px; right: -4px; }
-.turma-balao { position: relative; background: var(--papel); color: var(--texto); border: 1px solid var(--borda); border-radius: 14px; padding: 10px 28px 10px 12px; box-shadow: 0 10px 28px rgba(0, 0, 0, .18);
-  width: min(290px, calc(100vw - 150px)); margin-bottom: 46px; animation: turma-entra .2s ease-out; font-size: .88rem; }
-.turma-balao::after { content: ''; position: absolute; right: -8px; bottom: 18px; border: 8px solid transparent; border-left-color: var(--papel); border-right: 0; }
-.turma-balao strong { display: block; font-size: .9rem; }
-.turma-balao strong small { display: block; font-weight: 400; color: var(--suave); font-size: .75rem; }
-.turma-balao p { margin: 4px 0 0; }
-.turma-balao ul { margin: 6px 0 0; padding: 0; list-style: none; display: grid; gap: 3px; }
-.turma-balao li { padding-left: 12px; position: relative; }
-.turma-balao li::before { content: ''; position: absolute; left: 0; top: .5em; width: 6px; height: 6px; border-radius: 50%; background: var(--azul); }
-.turma-balao li.urgente::before { background: var(--vermelho); }
-.turma-balao li.atencao::before { background: var(--ambar); }
-.turma-balao li .link { text-align: left; padding: 0; font-size: inherit; }
-.turma-fecha { position: absolute; top: 4px; right: 6px; appearance: none; border: 0; background: none; color: var(--suave); font-size: 1.1rem; line-height: 1; cursor: pointer; padding: 2px 4px; }
-.turma-linha { width: 22px; height: 22px; border-radius: 50%; vertical-align: middle; margin-right: 6px; float: left; }
-.turma-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
-.turma-chip { appearance: none; border: 1px solid var(--borda); background: var(--papel); color: inherit; font: inherit; font-size: .82rem; border-radius: 999px; padding: 2px 10px 2px 2px; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
-.turma-chip img { width: 26px; height: 26px; border-radius: 50%; }
-.turma-chip.ativa { border-color: var(--marinho); background: var(--realce); font-weight: 600; }
-.turma-chip small { color: var(--suave); }
+.turma-esp { display: grid; grid-template-columns: 36px 1fr; gap: 8px; align-items: center; margin: 12px 0 4px; }
+.turma-esp img { width: 36px; height: 36px; border-radius: 50%; }
+.turma-esp strong { display: block; font-size: .9rem; }
+.turma-esp small { color: var(--suave); font-size: .78rem; }
+.turma-fala { margin: 2px 0 6px; color: var(--suave); font-size: .88rem; }
 
 /* login: o anfitrião ao lado do cartão */
 .entrada-par { display: flex; align-items: flex-end; gap: 6px; }
 .entrada-anfitriao { display: flex; flex-direction: column; align-items: center; width: 200px; }
 .entrada-anfitriao img { height: 300px; width: auto; filter: drop-shadow(0 10px 18px rgba(0, 0, 0, .3)); animation: turma-pula .8s ease-out; }
-.turma-balao.fixo { width: 200px; margin: 0 0 8px; padding: 10px 12px; color: var(--texto); }
-.turma-balao.fixo::after { right: auto; left: 50%; bottom: -8px; transform: translateX(-50%); border: 8px solid transparent; border-top-color: var(--papel); border-bottom: 0; }
+.turma-balao.fixo { position: relative; background: var(--papel); color: var(--texto); border-radius: 14px; box-shadow: 0 10px 28px rgba(0, 0, 0, .18); width: 200px; margin: 0 0 8px; padding: 10px 12px;
+  font-size: .88rem; animation: turma-entra .2s ease-out; }
+.turma-balao.fixo::after { content: ''; position: absolute; left: 50%; bottom: -8px; transform: translateX(-50%); border: 8px solid transparent; border-top-color: var(--papel); border-bottom: 0; }
 @media (max-width: 760px) {
   .entrada-anfitriao { display: none; }
-  .turma-canto:not(.mini) .turma-boneco img { height: 70px; }
-  .turma-balao { width: min(240px, calc(100vw - 110px)); margin-bottom: 30px; }
 }
-@media print { .turma-canto, .turma-painel, .turma-btn { display: none !important; } }
+@media print { .turma-painel, .turma-btn { display: none !important; } }
 @keyframes turma-entra { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 @keyframes turma-pula { 0% { transform: translateY(30px) scale(.9); opacity: 0; } 60% { transform: translateY(-6px) scale(1.02); opacity: 1; } 100% { transform: none; } }
-@media (prefers-reduced-motion: reduce) { .turma-painel, .turma-balao, .turma-canto.entra .turma-boneco img, .entrada-anfitriao img { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .turma-painel, .turma-balao, .entrada-anfitriao img { animation: none; } }
 /* conversa com a IA no painel do principal */
 .turma-chat { margin-top: 10px; padding-top: 6px; border-top: 1px solid var(--borda); }
 .turma-msgs { max-height: 46vh; overflow: auto; display: grid; gap: 8px; margin: 6px 0; }
@@ -944,5 +924,5 @@ pre.of-previa { white-space: pre-wrap; font-family: inherit; font-size: .88rem; 
 .turma-chat-rodape { margin: 4px 0 0; font-size: .75rem; color: var(--suave); display: flex; justify-content: space-between; gap: 6px; }
 .turma-chat-rodape .link { font-size: .75rem; }
 .turma-sugestoes { display: flex; flex-wrap: wrap; gap: 6px; }
-.turma-sugestoes .turma-chip { padding: 4px 10px; text-align: left; }
-.turma-perguntar { margin: 6px 0 0 !important; }
+.turma-sugestoes .turma-chip { appearance: none; border: 1px solid var(--borda); background: var(--papel); color: inherit; font: inherit; font-size: .82rem; border-radius: 999px; padding: 4px 12px; text-align: left; cursor: pointer; }
+.turma-sugestoes .turma-chip:hover { background: var(--realce); }

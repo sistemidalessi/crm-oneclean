@@ -14,10 +14,10 @@ window.CRM_CONFIG = {
   // Documento da proposta: turquesa e azul-petróleo do modelo aprovado em 02/10, mais o verde da borboleta.
   cores: { principal: '#175b6d', destaque: '#a9c451', gradiente: ['#03baca', '#0198cf'], documento: { destaque: '#009cb3', escuro: '#163e50', verde: '#a9c451' } },
   // A turma OneClean (mascotes, 17/10/2026; desenhos do Anderson, recortados em assets/turma): o Clean é o principal
-  // (topo, guia do dia); cada tela tem o seu especialista; os de linha de produto saem pela linha do FKN; o Andi
+  // (topo, de corpo inteiro, guia do dia e conversa); o especialista de cada tela aparece dentro do painel; o Andi
   // recebe no login. turma.js explica. Trocar um desenho: mesmo nome de arquivo e subir a `versao`.
   turma: {
-    pasta: 'assets/turma/', versao: '3',
+    pasta: 'assets/turma/', versao: '4',
     principal: 'clean', anfitriao: 'andi',
     boasVindas: 'Olá! Eu sou o Andi, assistente virtual da OneClean. Entre com o seu e-mail e a sua senha para começar.',
     mascotes: {
@@ -67,19 +67,7 @@ window.CRM_CONFIG = {
       'caixa:cobranca': 'Nenhum boleto esperando por aqui.',
       emails: 'A cadência de e-mails está rodando.',
       ofertas: 'Monte uma oferta com o estoque parado para girar o galpão.'
-    },
-    // linha do FKN (ou descrição) → mascote; a 1ª que bater vale (texto sem acento, maiúsculo)
-    linhas: [
-      ['saquinho', 'SACO|SACARIA|SACOLA'],
-      ['dispenser', 'DISPENSER|DISPENSADOR|SABONETEIRA|TOALHEIRO'],
-      ['rolinho', 'PAPEL(?!ARIA)|GUARDANAPO|LENCO|COPO|DESCARTAVE|ISOPOR|BOBINA|POTES|LENCOL'],
-      ['vassourinha', 'VASSOURA|RODO|MOP|CABOS|DESENTUP|LIMPA TETO'],
-      ['esponjinha', 'ESPONJA|FIBRA|DISCO|PANO|FLANELA'],
-      ['baldinho', 'BALDE|BACIA|LIXEIRA|LUVA|\\bEPI\\b|AVENTAL|OCULOS|CAPACETE|UTILIDADES|ACESSORIOS|COZINHA|PLACAS'],
-      ['carrinho-de-limpeza', 'EQUIPAMENTO|CARRINHO'],
-      ['borrifador', 'AROMATIZ|DESODORIZ|INSETICIDA|AEROSOL|BORRIF|PULVERIZ|ESSENCIA'],
-      ['frasquinho', 'DOMISSANIT|SUPER MERCADO|LIMPADOR|ALCOOL|PISCINA|PEDRA SANIT|SABAO|REMOVEDOR|DETERGENTE|DESINFET|CLORO|SANITARIA']
-    ]
+    }
   },
   supabaseUrl: 'https://udhigavckigciqnicgyy.supabase.co',
   supabaseAnonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkaGlnYXZja2lnY2lxbmljZ3l5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA3MDQzNjcsImV4cCI6MjEwNjI4MDM2N30.vQQcV9RIWI5ZBDUreKWoWPNEE9JcSM33XHUWUHYJqlY'
