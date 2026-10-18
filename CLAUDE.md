@@ -1252,6 +1252,8 @@ e círculo); recortados sem fundo com o rembg (isnet) em `assets/turma/<id>.webp
   por fundo; o Anderson viu no PDF do boleto), e Compras, Proposta e Rolinho tinham o papel meio transparente. Refeitos com
   `scratchpad/mascotes/scripts/conserta.py`: o que fica dentro do contorno do boneco volta opaco, com as cores da prancha.
   Desenho novo com papel ou parte branca por dentro: conferir sobre fundo colorido antes de publicar.
+  **Cobrança nova (18/10, `versao` 6):** o Anderson mandou outro desenho (calendário com celular, já sem fundo); corpo = o
+  arquivo dele reduzido, rosto = recorte do alto (olhos e gravata) sobre fundo claro.
 - **Próximo pedido do Anderson (17/10):** "uma skill de um comprador sênior… administrando a parte de compras, dando
   palpite, sugerindo compras inteligentes, relação com os principais concorrentes, fornecedor…". O começo já está na
   persona de Compras + `reposicao`/`giro`; falta: prazo e mínimo por fornecedor, histórico de preço de compra
