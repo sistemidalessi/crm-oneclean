@@ -3032,3 +3032,55 @@ drop policy if exists le on public.crm_assistente_conversas;
 create policy le on public.crm_assistente_conversas for select to authenticated using (user_id = (select auth.uid()));
 drop policy if exists le on public.crm_assistente_uso;
 create policy le on public.crm_assistente_uso for select to authenticated using (user_id = (select auth.uid()) or (select public.crm_eh_admin()));
+
+-- Notas de COMPRA pela Sefaz (17/10/2026, comprador sênior; servico-fiscal/dfe.js). A crm-fiscal consulta a
+-- Distribuição de DF-e do Ambiente Nacional continuando do último NSU e guarda aqui o RESUMO de cada nota emitida
+-- contra o CNPJ da empresa (fornecedor, valor, data, situação). O XML completo (com os itens e os preços) vem depois
+-- da Ciência da Operação e fica no bucket privado crm-compras-xml (<chave>.xml); o navegador do comprador lê o XML com
+-- o mesmo leitor da entrada de compra (estoque.js → compraDoXml) e grava em crm_compras. Só a chave de serviço grava;
+-- lê o administrador e o comprador. crm_dfe_estado: o NSU e a hora da próxima consulta (regra da Sefaz: 1 hora de espera
+-- quando não há mais nada; senão cStat 656 e o CNPJ fica bloqueado).
+create table if not exists public.crm_dfe (
+  chave            text primary key check (chave ~ '^\d{44}$'),
+  nsu              bigint,
+  emitente_doc     text,
+  emitente_nome    text,
+  emitida_em       timestamptz,
+  valor            numeric(14,2),
+  tp_nf            smallint,
+  situacao         text not null default 'autorizada' check (situacao in ('autorizada', 'cancelada', 'denegada')),
+  protocolo        text,
+  manifestada_em   timestamptz,
+  manifesto_cstat  integer,
+  manifesto_motivo text,
+  xml_em           timestamptz,
+  criado_em        timestamptz not null default now(),
+  atualizado_em    timestamptz not null default now()
+);
+create index if not exists crm_dfe_emitida on public.crm_dfe (emitida_em desc);
+create table if not exists public.crm_dfe_estado (
+  id            smallint primary key default 1 check (id = 1),
+  ult_nsu       bigint not null default 0,
+  max_nsu       bigint not null default 0,
+  proxima_em    timestamptz,
+  ultimo_cstat  integer,
+  ultimo_motivo text,
+  ultima_em     timestamptz
+);
+alter table public.crm_dfe enable row level security;
+alter table public.crm_dfe_estado enable row level security;
+grant select on public.crm_dfe, public.crm_dfe_estado to authenticated;
+do $$ begin
+  if not exists (select 1 from pg_policies where tablename = 'crm_dfe' and policyname = 'le') then
+    create policy le on public.crm_dfe for select to authenticated using ((select public.crm_eh_admin()) or (select public.crm_eh_comprador()));
+  end if;
+  if not exists (select 1 from pg_policies where tablename = 'crm_dfe_estado' and policyname = 'le') then
+    create policy le on public.crm_dfe_estado for select to authenticated using ((select public.crm_eh_admin()) or (select public.crm_eh_comprador()));
+  end if;
+  insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+  values ('crm-compras-xml', 'crm-compras-xml', false, 2097152, array['text/xml','application/xml'])
+  on conflict (id) do update set public = false, file_size_limit = 2097152, allowed_mime_types = excluded.allowed_mime_types;
+  if not exists (select 1 from pg_policies where schemaname = 'storage' and tablename = 'objects' and policyname = 'crm_compras_xml_le') then
+    create policy crm_compras_xml_le on storage.objects for select to authenticated using (bucket_id = 'crm-compras-xml' and ((select public.crm_eh_admin()) or (select public.crm_eh_comprador())));
+  end if;
+end $$;

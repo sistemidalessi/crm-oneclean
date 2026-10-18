@@ -4,6 +4,7 @@
 // (servico-fiscal/, que assina com o A1 e fala com a Sefaz-SP). A nota autorizada entra no CRM pelo mesmo caminho do
 // vigia (crm-notas): estoque, títulos das parcelas, comissão, XML guardado.
 // Secrets: FISCAL_URL (https://fiscal.oneclean.com.br) e FISCAL_TOKEN (gerado na VPS; ver servico-fiscal/INSTALAR.md).
+// Notas de COMPRA (dfe_buscar, dfe_ciencia): administrador e comprador; a ciência, só o administrador.
 // Deploy: verify_jwt LIGADO.
 import { createClient } from 'npm:@supabase/supabase-js@2.116.0';
 
@@ -13,7 +14,7 @@ const CORS = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS'
 };
 const resposta = (status: number, corpo: unknown) => new Response(JSON.stringify(corpo), { status, headers: { ...CORS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
-const EMITE = ['admin', 'gestor', 'logistica'], CANCELA = ['admin', 'gestor'];
+const EMITE = ['admin', 'gestor', 'logistica'], CANCELA = ['admin', 'gestor'], DFE = ['admin', 'comprador'];
 type Linha = Record<string, unknown>;
 
 async function sha256(t: string) {
@@ -110,6 +111,74 @@ async function aprenderSt(db: ReturnType<typeof createClient>) {
 
 const ambienteDe = (fiscal: Linha) => (fiscal.ambiente === 'producao' ? 'producao' : 'homologacao');
 
+// ------------------------------------------------------------------ notas de COMPRA pela Sefaz (servico-fiscal/dfe.js)
+// Sempre no ambiente de PRODUÇÃO (são as notas de verdade dos fornecedores; consultar não emite nada). Continua do
+// último NSU guardado e respeita a espera de 1 hora da Sefaz (crm_dfe_estado.proxima_em): até 5 consultas por vez,
+// e quando acabou (137 ou ultNSU = maxNSU) só volta a consultar depois de 1 hora. O resumo vai para crm_dfe; o XML
+// completo (depois da Ciência da Operação) para o bucket crm-compras-xml.
+const HORA = 61 * 60000;
+async function dfeBuscar(db: ReturnType<typeof createClient>, fiscal: Linha) {
+  const cnpj = String(((fiscal.emitente as Linha) || {}).cnpj || '').replace(/\D/g, '');
+  if (cnpj.length !== 14) throw new Error('falta configurar o emitente (aba Fiscal → Emissão): o CNPJ da empresa é o destinatário das notas de compra');
+  const { data: est0 } = await db.from('crm_dfe_estado').select('*').eq('id', 1).maybeSingle();
+  const est = (est0 as Linha | null) || { id: 1, ult_nsu: 0, max_nsu: 0 };
+  if (est.proxima_em && Date.parse(String(est.proxima_em)) > Date.now()) return { espera: est.proxima_em, ult_nsu: est.ult_nsu, max_nsu: est.max_nsu, ultimo_motivo: est.ultimo_motivo };
+  let ult = Number(est.ult_nsu || 0), max = Number(est.max_nsu || 0), cstat: number | null = null, motivo: string | null = null, proxima = new Date(Date.now() + 3 * 60000).toISOString();
+  const cont = { resumos: 0, notas: 0, eventos: 0 };
+  for (let i = 0; i < 5; i++) {
+    const r = await servico('/dfe', { ambiente: 'producao', cnpj, ultNSU: ult });
+    cstat = Number(r.cStat); motivo = r.xMotivo || null;
+    if (cstat === 138) {
+      for (const d of (r.docs || []) as Linha[]) await guardaDoc(db, d, cont);
+      ult = Number(r.ultNSU || ult); max = Number(r.maxNSU || max);
+      if (ult >= max) { proxima = new Date(Date.now() + HORA).toISOString(); break; }
+      continue;
+    }
+    if (cstat === 137) { ult = Number(r.ultNSU || ult); max = Number(r.maxNSU || max); }
+    proxima = new Date(Date.now() + HORA).toISOString();   // 137 (nada novo), 656 (consumo indevido) ou outro: 1 hora
+    break;
+  }
+  await db.from('crm_dfe_estado').upsert({ id: 1, ult_nsu: ult, max_nsu: max, proxima_em: proxima, ultimo_cstat: cstat, ultimo_motivo: motivo, ultima_em: new Date().toISOString() });
+  const ciencias = fiscal.dfe_ciencia === true ? await dfeCiencias(db, fiscal, null) : null;
+  return Object.assign({ ult_nsu: ult, max_nsu: max, proxima_em: proxima, cstat, motivo, ciencias }, cont);
+}
+async function guardaDoc(db: ReturnType<typeof createClient>, d: Linha, cont: Record<string, number>) {
+  const ch = String(d.chave || '');
+  if (!/^\d{44}$/.test(ch)) return;
+  const agora = new Date().toISOString();
+  if (d.tipo === 'evento') {
+    cont.eventos++;
+    if (d.cancelada) await db.from('crm_dfe').update({ situacao: 'cancelada', atualizado_em: agora }).eq('chave', ch);
+    return;
+  }
+  if (d.tipo !== 'resumo' && d.tipo !== 'nota') return;
+  const linha: Linha = { chave: ch, nsu: d.nsu, emitente_doc: d.emitente_doc || null, emitente_nome: d.emitente_nome || null, emitida_em: d.emitida_em || null,
+    valor: d.valor ?? null, tp_nf: d.tp_nf ?? null, protocolo: d.protocolo || null, atualizado_em: agora };
+  if (d.tipo === 'resumo') { cont.resumos++; linha.situacao = d.situacao || 'autorizada'; }
+  if (d.tipo === 'nota' && d.xml) {
+    const up = await db.storage.from('crm-compras-xml').upload(ch + '.xml', new Blob([String(d.xml)], { type: 'text/xml' }), { upsert: true, contentType: 'text/xml' });
+    if (!up.error) { linha.xml_em = agora; cont.notas++; }
+  }
+  await db.from('crm_dfe').upsert(linha, { onConflict: 'chave' });
+}
+// Ciência da Operação (o "fiquei sabendo" da nota; libera o XML completo na próxima consulta). Só das autorizadas, de
+// entrada (tpNF 1 = saída do fornecedor), ainda sem XML e sem ciência; até 20 por vez (limite da Sefaz por hora).
+async function dfeCiencias(db: ReturnType<typeof createClient>, fiscal: Linha, chaves: string[] | null) {
+  const cnpj = String(((fiscal.emitente as Linha) || {}).cnpj || '').replace(/\D/g, '');
+  let q = db.from('crm_dfe').select('chave').eq('situacao', 'autorizada').is('xml_em', null).is('manifestada_em', null).order('emitida_em', { ascending: false }).limit(20);
+  if (chaves) q = q.in('chave', chaves);
+  const { data } = await q;
+  let ok = 0, falha = 0;
+  for (const r of (data || []) as Linha[]) {
+    try {
+      const ev = await servico('/ciencia', { ambiente: 'producao', cnpj, chave: r.chave });
+      await db.from('crm_dfe').update({ manifestada_em: ev.ok ? new Date().toISOString() : null, manifesto_cstat: ev.cStat, manifesto_motivo: ev.xMotivo, atualizado_em: new Date().toISOString() }).eq('chave', r.chave);
+      if (ev.ok) ok++; else falha++;
+    } catch (e) { falha++; await db.from('crm_dfe').update({ manifesto_motivo: e instanceof Error ? e.message : String(e) }).eq('chave', r.chave); }
+  }
+  return { ok, falha };
+}
+
 async function gravaResultado(db: ReturnType<typeof createClient>, nfeId: string, r: Linha, eu: string) {
   const patch: Linha = { situacao: r.situacao === 'pendente' ? 'pendente' : r.situacao === 'bloqueada' ? 'bloqueada' : r.situacao, atualizado_em: new Date().toISOString() };
   for (const [k, c] of [['chave', 'chave'], ['cStat', 'cstat'], ['motivo', 'motivo'], ['protocolo', 'protocolo'], ['nfeXml', 'nfe_xml'], ['procXml', 'proc_xml'], ['totais', 'totais'], ['avisos', 'avisos'], ['nota', 'nota']] as const)
@@ -142,9 +211,11 @@ Deno.serve(async (req) => {
   const db = createClient(url, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } });
   const { data: euRow } = await db.from('crm_usuarios').select('papel, ativo, nome').eq('user_id', quem.user.id).maybeSingle();
   const eu = euRow as Linha | null;
-  if (!eu || !eu.ativo || !EMITE.includes(String(eu.papel))) return resposta(403, { erro: 'só a logística, a gestora e o administrador emitem nota' });
   let b: Linha;
   try { b = await req.json(); } catch { return resposta(400, { erro: 'corpo inválido' }); }
+  const ehDfe = /^dfe_/.test(String(b.acao || ''));
+  if (!eu || !eu.ativo) return resposta(403, { erro: 'usuário inativo' });
+  if (ehDfe ? !DFE.includes(String(eu.papel)) : !EMITE.includes(String(eu.papel))) return resposta(403, { erro: ehDfe ? 'as notas de compra são do administrador e do comprador' : 'só a logística, a gestora e o administrador emitem nota' });
   try {
     const acao = String(b.acao || '');
     if (acao === 'saude') return resposta(200, await servico('/saude', null, 'GET'));
@@ -152,6 +223,11 @@ Deno.serve(async (req) => {
     const fiscal = ((cfgRow as Linha | null)?.dados as Linha | undefined)?.fiscal as Linha | undefined || {};
     const amb = ambienteDe(fiscal), serie = Number(fiscal.serie ?? 2);
     if (acao === 'status') return resposta(200, await servico('/status', { ambiente: amb }));
+    if (acao === 'dfe_buscar') return resposta(200, await dfeBuscar(db, fiscal));
+    if (acao === 'dfe_ciencia') {
+      if (eu.papel !== 'admin') throw new Error('só o administrador dá a ciência das notas de compra');
+      return resposta(200, await dfeCiencias(db, fiscal, b.chave ? [String(b.chave)] : null));
+    }
     if (acao === 'aprender_st') {
       if (eu.papel !== 'admin') throw new Error('só o administrador');
       return resposta(200, await aprenderSt(db));

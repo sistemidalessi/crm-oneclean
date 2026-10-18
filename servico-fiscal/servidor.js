@@ -9,7 +9,8 @@
      FISCAL_CA                  (opcional) cadeia extra de certificados do servidor da Sefaz, se o Node não reconhecer
      FISCAL_PASTA               pasta onde guarda uma cópia de cada XML enviado/autorizado (padrão /var/lib/oneclean-fiscal)
      FISCAL_PORTA               porta local (padrão 8787; o Caddy encaminha para 127.0.0.1)
-   Rotas (POST com JSON): /status, /previa, /emitir, /consultar, /reenviar, /cancelar, /cce, /inutilizar; GET /saude.
+   Rotas (POST com JSON): /status, /previa, /emitir, /consultar, /reenviar, /cancelar, /cce, /inutilizar, /dfe (notas de
+   compra: distribuição pelo NSU ou pela chave), /ciencia (Ciência da Operação de uma nota de compra); GET /saude.
    Certificado novo (renovação do A1): trocar o arquivo e mandar "systemctl reload oneclean-fiscal" (SIGHUP relê). */
 
 const http = require('http');
@@ -20,8 +21,9 @@ const N = require('./nfe');
 const A = require('./assinatura');
 const S = require('./sefaz');
 const PD = require('./pedido');
+const D = require('./dfe');
 
-const VERSAO = '2026-10-16';
+const VERSAO = '2026-10-17';
 const env = process.env;
 let cert = null;   // { certPem, keyPem, dados }
 
@@ -100,7 +102,14 @@ const ROTAS = {
     if (r.retEvento) guarda(b.chave + '-cce' + (b.seq || 1) + '.xml', '<procEventoNFe xmlns="' + N.NS + '" versao="1.00">' + r.eventoXml + r.retEvento + '</procEventoNFe>');
     return r;
   },
-  'POST /inutilizar': async b => S.inutiliza(cfgSefaz(b.ambiente), b)
+  'POST /inutilizar': async b => S.inutiliza(cfgSefaz(b.ambiente), b),
+  // Notas de compra (dfe.js). Quem controla o NSU e a espera de 1 hora é a crm-fiscal; aqui só consulta e devolve.
+  'POST /dfe': async b => {
+    const r = await D.busca(cfgSefaz(b.ambiente), { cnpj: b.cnpj, ultNSU: b.ultNSU, chave: b.chave });
+    r.docs.forEach(d => { if (d.tipo === 'nota' && d.chave && d.xml) guarda(d.chave + '-compra.xml', d.xml); });
+    return r;
+  },
+  'POST /ciencia': async b => D.daCiencia(cfgSefaz(b.ambiente), { cnpj: b.cnpj, chave: b.chave, quando: agoraSP() })
 };
 
 function autorizado(req) {

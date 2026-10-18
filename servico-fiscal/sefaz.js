@@ -30,10 +30,10 @@ const msgStatus = amb => '<consStatServ xmlns="' + NS + '" versao="4.00"><tpAmb>
 const msgConsulta = (amb, chave) => '<consSitNFe xmlns="' + NS + '" versao="4.00"><tpAmb>' + tpAmb(amb) + '</tpAmb><xServ>CONSULTAR</xServ><chNFe>' + chave + '</chNFe></consSitNFe>';
 
 // Evento (sem a assinatura): devolve { infEvento, id } para assinar e o envelope envEvento.
-function infEvento({ ambiente, cnpj, chave, tpEvento, seq, quando, detalhe }) {
+function infEvento({ ambiente, cnpj, chave, tpEvento, seq, quando, detalhe, cOrgao }) {
   const n = Number(seq || 1);
   const id = 'ID' + tpEvento + chave + String(n).padStart(2, '0');
-  const inf = '<infEvento Id="' + id + '"><cOrgao>' + CUF_SP + '</cOrgao><tpAmb>' + tpAmb(ambiente) + '</tpAmb><CNPJ>' + String(cnpj).replace(/[^0-9A-Z]/gi, '').toUpperCase() + '</CNPJ>' +
+  const inf = '<infEvento Id="' + id + '"><cOrgao>' + (cOrgao || CUF_SP) + '</cOrgao><tpAmb>' + tpAmb(ambiente) + '</tpAmb><CNPJ>' + String(cnpj).replace(/[^0-9A-Z]/gi, '').toUpperCase() + '</CNPJ>' +
     '<chNFe>' + chave + '</chNFe><dhEvento>' + quando + '</dhEvento><tpEvento>' + tpEvento + '</tpEvento><nSeqEvento>' + n + '</nSeqEvento><verEvento>1.00</verEvento>' +
     '<detEvento versao="1.00">' + detalhe + '</detEvento></infEvento>';
   return { id, infEvento: inf };
@@ -94,19 +94,18 @@ function envelope(servico, xml) {
   return '<?xml version="1.0" encoding="utf-8"?><soap12:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" ' +
     'xmlns:soap12="http://www.w3.org/2003/05/soap-envelope"><soap12:Body><nfeDadosMsg xmlns="' + ns + '">' + xml + '</nfeDadosMsg></soap12:Body></soap12:Envelope>';
 }
-// cfg: { ambiente, certPem, keyPem, ca (cadeia extra, opcional), tempo (ms) }
-function chama(servico, xml, cfg) {
-  const s = SERV[servico], url = new URL(BASE[cfg.ambiente === 'producao' ? 'producao' : 'homologacao'] + s[0]);
-  const corpo = envelope(servico, xml);
+// POST SOAP 1.2 com TLS mútuo. cfg: { ambiente, certPem, keyPem, ca (cadeia extra, opcional), tempo (ms) }
+function posta(endereco, acao, corpo, cfg, sinal) {
+  const url = new URL(endereco);
   return new Promise((ok, falha) => {
     const req = https.request({ hostname: url.hostname, path: url.pathname, method: 'POST', cert: cfg.certPem, key: cfg.keyPem, ca: cfg.ca ? tls.rootCertificates.concat([cfg.ca]) : undefined,   // a cadeia extra SOMA às autoridades de sempre
       rejectUnauthorized: true, timeout: cfg.tempo || 30000, minVersion: 'TLSv1.2',
-      headers: { 'Content-Type': 'application/soap+xml; charset=utf-8; action="http://www.portalfiscal.inf.br/nfe/wsdl/' + s[1] + '/' + s[2] + '"', 'Content-Length': Buffer.byteLength(corpo) } }, res => {
+      headers: { 'Content-Type': 'application/soap+xml; charset=utf-8; action="' + acao + '"', 'Content-Length': Buffer.byteLength(corpo) } }, res => {
       const partes = [];
       res.on('data', d => partes.push(d));
       res.on('end', () => {
         const t = Buffer.concat(partes).toString('utf8');
-        if (res.statusCode >= 500 && !/nfeResultMsg/.test(t)) return falha(Object.assign(new Error('Sefaz respondeu HTTP ' + res.statusCode), { semResposta: true }));
+        if (res.statusCode >= 500 && !(sinal || /nfeResultMsg/).test(t)) return falha(Object.assign(new Error('Sefaz respondeu HTTP ' + res.statusCode), { semResposta: true }));
         ok(t);
       });
     });
@@ -114,6 +113,10 @@ function chama(servico, xml, cfg) {
     req.on('error', e => falha(Object.assign(e, { semResposta: true })));
     req.end(corpo);
   });
+}
+function chama(servico, xml, cfg) {
+  const s = SERV[servico];
+  return posta(BASE[cfg.ambiente === 'producao' ? 'producao' : 'homologacao'] + s[0], 'http://www.portalfiscal.inf.br/nfe/wsdl/' + s[1] + '/' + s[2], envelope(servico, xml), cfg);
 }
 
 // ---------------------------------------------------------------- operações
@@ -152,5 +155,5 @@ async function inutiliza(cfg, dados) {
     xml.replace(/^<\?xml[^>]*>/, '') + ret.replace(/<(\/?)\w+:/g, '<$1') + '</ProcInutNFe>' : null });
 }
 
-module.exports = { BASE, SERV, msgStatus, msgConsulta, infEvento, cancelamento, cartaCorrecao, envEvento, montaEvento: evento, infInut, inutNFe, envelope, leRetorno, situacao,
+module.exports = { BASE, SERV, CUF_SP, tpAmb, pega, bloco, posta, msgStatus, msgConsulta, infEvento, cancelamento, cartaCorrecao, envEvento, montaEvento: evento, infInut, inutNFe, envelope, leRetorno, situacao,
   status, consulta, autoriza, enviaEvento: evento_, inutiliza, COND_USO_CCE };
