@@ -474,6 +474,7 @@ body.arrastando-card .zonas-fim { display: grid; grid-template-columns: 1fr 1fr;
 .proposta-doc.denso .chamada { padding-top: 3mm; }
 .proposta-doc.denso .chamada h1 { font-size: 16pt; }
 .proposta-doc.denso .chamada p { font-size: 9.5pt; }
+.proposta-doc.denso .chamada .mascote { height: 24mm; }
 .proposta-doc.denso .chamada::after { margin-top: 2mm; }
 .proposta-doc.denso .preparado { margin-top: 3mm; padding: 2.5mm 5mm; gap: 1px; }
 .proposta-doc.denso .preparado .nome { font-size: 10.5pt; }

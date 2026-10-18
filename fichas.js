@@ -753,13 +753,17 @@
     const msgWa = 'Olá' + (vend ? ', ' + R.primeiroNome(vend.nome) : '') + '! Recebi o orçamento nº ' + numero + ' (' + R.moeda(p.valor_total) + ') e quero programar a entrega.';
     const freteTxt = R.num(d.frete) ? 'Frete ' + R.moeda(d.frete) + ' incluído' : (d.fkn || d.orcamento ? 'Frete grátis' : '');
     const nome = ((p.numero_fkn ? 'Orcamento ' + p.numero_fkn : (d.orcamento ? 'Orcamento ' : 'Proposta ') + p.numero) + ' - ' + (e ? e.nome : '')).replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim();
+    // mascote das propostas da instalação (turma.js; o da tela Negócios), ao lado da frase de destaque, como no boleto
+    const tt = (window.CRM_CONFIG && window.CRM_CONFIG.turma) || {};
+    const mascote = CRM.turma && (tt.telas || {}).negocios ? CRM.turma.img(tt.telas.negocios) : null;
     // Orçamento comprido: letras e espaços menores para caber na primeira folha (com o total e o botão).
     const html = '<div class="proposta-doc' + (itens.length > 12 ? ' denso' : '') + '">' +
       '<div class="faixa-doc"></div>' +
       '<header><img src="' + esc(CRM.logo()) + '" alt="' + esc(CRM.nomeInstalacao()) + '">' +
         '<div class="doc-id"><strong>' + (p.numero_fkn || d.orcamento ? 'Orçamento ' : 'Proposta ') + esc(numero) + '</strong>' +
         '<span>Emitido em ' + esc(R.dataBR(emitida)) + '</span>' + (p.validade ? '<span>Válido até ' + esc(R.dataBR(p.validade)) + '</span>' : '') + '</div></header>' +
-      (cfg.proposta_chamada ? '<section class="chamada"><h1>' + esc(cfg.proposta_chamada) + '</h1>' + (cfg.proposta_subchamada ? '<p>' + esc(cfg.proposta_subchamada) + '</p>' : '') + '</section>' : '') +
+      (cfg.proposta_chamada ? '<section class="chamada' + (mascote ? ' com-mascote' : '') + '"><div><h1>' + esc(cfg.proposta_chamada) + '</h1>' + (cfg.proposta_subchamada ? '<p>' + esc(cfg.proposta_subchamada) + '</p>' : '') + '</div>' +
+        (mascote ? '<img class="mascote" src="' + esc(mascote) + '" alt="">' : '') + '</section>' : '') +
       '<section class="preparado"><h2>Preparado para</h2><p class="nome">' + esc(maiusculas(e ? e.razao_social || e.nome : '')) + '</p>' +
         (linhaCliente.length ? '<p>' + linhaCliente.map(esc).join('&nbsp; | &nbsp;') + '</p>' : '') + (endereco ? '<p>' + esc(endereco) + '</p>' : '') + '</section>' +
       (cartoes.length ? '<section class="cartoes c' + cartoes.length + '">' + cartoes.map(x => '<div><strong>' + esc(x[0]) + '</strong><span>' + esc(x[1]) + '</span></div>').join('') + '</section>' : '') +
