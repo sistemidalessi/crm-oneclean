@@ -1285,9 +1285,24 @@ Respostas dele: histórico das notas de compra **buscado na Sefaz**; concorrente
   (`cd /opt/oneclean-fiscal && git pull -q && systemctl restart oneclean-fiscal && systemctl is-active oneclean-fiscal`) e
   apertar "Buscar na Sefaz agora". Se der erro de certificado do servidor da Sefaz nacional (cadeia diferente da de SP),
   acrescentar a raiz em `cadeia.pem` (nunca desligar a verificação).
-- **3 — falta:** `crm_fornecedores` (prazo de entrega, pedido mínimo, frete, dia de pedido, contato; padrão 7 dias),
-  painel do comprador (comprar hoje por fornecedor, preço de compra que subiu, produtos sem fornecedor, parado → oferta),
-  ferramentas novas da IA (fornecedores, preços de compra) e a lista de concorrentes para o Anderson aprovar.
+- **3 — fornecedores e painel do comprador (18/10, feito):** tabelas `crm_fornecedores` (código do FKN; prazo de entrega,
+  pedido mínimo, frete CIF/FOB/CIF acima de X, dias de pedido 1=seg…6=sáb, pagamento, contato), `crm_produto_fornecedor`
+  (produto sem fornecedor ou com o errado no FKN; fornecedor nulo = volta ao do FKN, sem apagar linha) e
+  `crm_custo_historico` (gatilho `crm_estoque_custo`: cada mudança do `custo_compra` nas listagens do FKN, a partir de
+  18/10); RPC `crm_fornecedores_resumo()` (SECURITY INVOKER). RLS: admin e comprador. **Regra nova da sugestão**
+  (`gestao.js` → `compras(…, extra)`): Comprar = precisa + **o que sai até o pedido chegar** (consumo/dia × prazo do
+  fornecedor; 7 dias sem cadastro, `PRAZO_PADRAO`) − estoque − já pedido, com piso no mínimo do FKN; `urgente` = acaba
+  antes da entrega (ou está abaixo do mínimo). A sugestão subiu um pouco em relação à de antes (era só o período).
+  Tela Compras: **Painel do comprador** (Pedir hoje por fornecedor, Preço de compra subiu 3%+ em 60 dias, Vende e não tem
+  fornecedor com "definir", botão "💬 Pedir a análise de compras de hoje" → `CRM.turma.perguntar`), Pedido por fornecedor
+  com pedido mínimo (faltam R$ X), prazo, frete e selos "pedir hoje"/"dia de pedido", e **Cadastro dos fornecedores**
+  (lista de todos com ✎; "+ Fornecedor que não está no FKN"); ✎ na coluna Fornecedor troca o fornecedor do produto
+  (✱ = trocado no CRM). IA (`crm-assistente` v2): ferramentas `fornecedores` e `precos_compra` (histórico do FKN +
+  itens das notas de compra), `reposicao` com o prazo do fornecedor; o system manda juntar o pedido por fornecedor,
+  avisar do mínimo e não inventar preço de concorrente.
+- **Concorrentes:** levantamento de 20 (pesquisa na web, 18/10) no repositório **privado** `sistemi-dalessi`,
+  `docs/oneclean/concorrentes.md` (este repositório é público: estratégia da OneClean não vem para cá). Esperando o
+  Anderson escolher quais acompanhar; 8 publicam preço na internet (base para uma cesta de itens comparada por mês).
 
 ## NF-e emitida pelo CRM — Fase 4 da saída do FKN (16/10/2026, pedido do Anderson)
 

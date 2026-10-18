@@ -90,7 +90,8 @@
   const FALA_TELA = cfgT.falas || {};
   let resumo = {}, resumoEm = 0, itens = [], painelAberto = false;
 
-  CRM.turma = { img, dados, ativo: true, atualizar, depoisRender };
+  // perguntar: abre o painel e manda a pergunta (botões prontos das telas, ex.: "Pedir a análise de compras de hoje")
+  CRM.turma = { img, dados, ativo: true, atualizar, depoisRender, perguntar: t => setTimeout(() => { abrePainel(); perguntar(t); }, 0) };   // depois do clique (senão o "clique fora" fecha o painel)
 
   async function atualizar(forca) {
     const st = CRM.store();
@@ -138,6 +139,13 @@
       document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && painelAberto) fechaPainel(); });
     }
     return b;
+  }
+  function abrePainel() {
+    botaoPrincipal();
+    const p = $('#turmaPainel');
+    if (!p) return;
+    painelAberto = true; desenhaPainel(); p.hidden = false;
+    situacaoChat();
   }
   function fechaPainel() { painelAberto = false; const p = $('#turmaPainel'); if (p) p.hidden = true; }
   function itemHtml(x) {

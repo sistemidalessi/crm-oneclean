@@ -73,14 +73,34 @@ test('estoque do FKN: leitura do CSV e sugestão de pedido', () => {
   const ix = R.indexa(D), cfg = R.config({});
   const c = G.compras(D, ix, cfg, HOJE, 30, est.map(x => Object.assign({ atualizado_em: '2026-09-30T18:00:00Z' }, x)));
   // Detergente: previsão 4 (padaria); consumo 90 dias = 4 notas × 4 = 16 → 5,3 em 30 dias (vale o maior);
-  // tem 1 → comprar 5.
+  // + o que sai até o pedido chegar (7 dias sem cadastro do fornecedor: 1,2); tem 1 → comprar 6.
   const det = c.sugestao.find(g => g.codigo === '010001');
-  assert.equal(det.saldo, 1); assert.equal(det.comprar, 5); assert.equal(det.custoUnit, 25);
+  assert.equal(det.saldo, 1); assert.equal(det.comprar, 6); assert.equal(det.custoUnit, 25);
+  assert.equal(det.prazo, 7); assert.equal(det.prazoEstimado, true);
   // Papel: tem 100, precisa ~10 → não entra na sugestão.
   assert.ok(!c.sugestao.some(g => g.codigo === '010002'));
   assert.deepEqual(c.parado.map(x => x.codigo), ['010003'], 'cera tem saldo e não vendeu em 90 dias');
   assert.equal(c.estoque.produtos, 4); assert.equal(c.estoque.negativos, 1); assert.equal(c.estoque.valor, 1325);
-  assert.equal(c.estoque.valorSugestao, 125);
+  assert.equal(c.estoque.valorSugestao, 150);
+
+  // Comprador sênior: prazo e pedido mínimo do cadastro, dia de pedido, fornecedor trocado e preço de compra que subiu.
+  const est2 = est.map(x => Object.assign({ atualizado_em: '2026-09-30T18:00:00Z', fornecedor_cod: '00059', fornecedor: 'FORNECEDOR UM LTDA' }, x));
+  est2[1].fornecedor_cod = null; est2[1].fornecedor = null;   // papel toalha sem fornecedor no FKN
+  const dia = new Date(HOJE + 'T12:00:00Z').getUTCDay();
+  const c2 = G.compras(D, ix, cfg, HOJE, 30, est2, {
+    fornecedores: [{ codigo: '00059', nome: 'Fornecedor Um', prazo_dias: 15, pedido_minimo: 500, frete: 'cif_acima', frete_cif_acima: 1000, dias_pedido: [dia] }, { codigo: '00077', nome: 'Fornecedor Dois', prazo_dias: 3 }],
+    produtoForn: [{ codigo: '010002', fornecedor: '00077' }],
+    custoHist: [{ codigo: '010001', descricao: 'DETERGENTE 5L', fornecedor_cod: '00059', custo_de: 25, custo_para: 27.5, em: HOJE + 'T10:00:00Z' },
+      { codigo: '010003', custo_de: 300, custo_para: 301, em: HOJE + 'T10:00:00Z' }] });
+  const d2 = c2.sugestao.find(g => g.codigo === '010001');
+  // 15 dias de prazo: 5,3 + 0,178 × 15 = 8 − 1 = 7; e acaba antes de chegar → pedir hoje
+  assert.equal(d2.prazo, 15); assert.equal(d2.comprar, 7); assert.equal(d2.urgente, true);
+  const f = c2.pedidoPorFornecedor.find(x => x.cod === '00059');
+  assert.equal(f.custo, 175); assert.equal(f.faltaMinimo, 325); assert.equal(f.diaDePedido, true); assert.equal(f.freteCif, false); assert.equal(f.urgentes, 1);
+  assert.deepEqual(c2.pedirHoje.map(x => x.cod), ['00059']);
+  assert.equal(c2.produtos.find(g => g.codigo === '010002').fornecedor, 'Fornecedor Dois', 'troca de fornecedor feita no CRM');
+  assert.deepEqual(c2.custoSubiu.map(x => [x.codigo, Math.round(x.pct)]), [['010001', 10]], 'só a alta de 3% ou mais');
+  assert.deepEqual(c2.todosFornecedores.map(x => x.cod).sort(), ['00059', '00077']);
 });
 
 test('gestão: negócios abertos e conversão só do funil de vendas (pós-venda fora)', () => {

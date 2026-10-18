@@ -446,6 +446,31 @@
     unwrap(await this.sb.from('crm_estoque').delete().lt('atualizado_em', agora));
     return linhas.length;
   };
+  // Comprador sênior (18/10/2026): cadastro dos fornecedores, troca de fornecedor de um produto e histórico do custo.
+  Supa.prototype.fornecedores = async function () { return unwrap(await this.sb.from('crm_fornecedores').select('*').order('nome')); };
+  Supa.prototype.produtoForn = async function () { return unwrap(await this.sb.from('crm_produto_fornecedor').select('codigo, fornecedor').not('fornecedor', 'is', null)); };
+  Supa.prototype.custoHist = async function (dias) {
+    return unwrap(await this.sb.from('crm_custo_historico').select('*').gte('em', new Date(Date.now() - (dias || 90) * 864e5).toISOString()).order('em', { ascending: false }).limit(2000));
+  };
+  Supa.prototype.salvarFornecedor = async function (f) {
+    return unwrap(await this.sb.from('crm_fornecedores').upsert(Object.assign({}, f, { atualizado_em: new Date().toISOString() }), { onConflict: 'codigo' }).select().single());
+  };
+  // fornecedor null = volta ao do FKN
+  Supa.prototype.trocarFornecedor = async function (codigo, fornecedor) {
+    return unwrap(await this.sb.from('crm_produto_fornecedor').upsert({ codigo, fornecedor: fornecedor || null, atualizado_em: new Date().toISOString() }, { onConflict: 'codigo' }));
+  };
+  const lsLe = (k, pad) => { try { return JSON.parse(localStorage.getItem(k) || 'null') || pad; } catch (e) { return pad; } };
+  const lsGrava = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* só na memória */ } };
+  Local.prototype.fornecedores = async function () { return lsLe('crm_fornecedores', []); };
+  Local.prototype.produtoForn = async function () { return lsLe('crm_produto_fornecedor', []).filter(x => x.fornecedor); };
+  Local.prototype.custoHist = async function () { return []; };
+  Local.prototype.salvarFornecedor = async function (f) {
+    const l = lsLe('crm_fornecedores', []).filter(x => x.codigo !== f.codigo).concat(Object.assign({ prazo_dias: 7, dias_pedido: [] }, f));
+    lsGrava('crm_fornecedores', l); return f;
+  };
+  Local.prototype.trocarFornecedor = async function (codigo, fornecedor) {
+    lsGrava('crm_produto_fornecedor', lsLe('crm_produto_fornecedor', []).filter(x => x.codigo !== codigo).concat({ codigo, fornecedor: fornecedor || null }));
+  };
   Local.prototype.estoque = async function () { try { return JSON.parse(localStorage.getItem('crm_estoque') || '[]'); } catch (e) { return this._estoque || []; } };
   Local.prototype.salvarEstoque = async function (lista) {
     const l = lista.map(x => Object.assign({}, x, { atualizado_em: new Date().toISOString() }));

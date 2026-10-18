@@ -3084,3 +3084,88 @@ do $$ begin
     create policy crm_compras_xml_le on storage.objects for select to authenticated using (bucket_id = 'crm-compras-xml' and ((select public.crm_eh_admin()) or (select public.crm_eh_comprador())));
   end if;
 end $$;
+
+-- ============================================================ comprador sênior: fornecedores (18/10/2026)
+-- Cadastro dos fornecedores que o comprador preenche (pedido do Anderson): prazo de entrega, pedido mínimo, frete,
+-- dias de fazer pedido e contato. O código é o do fornecedor no FKN (fornecedor_cod da listagem SIFN108); sem cadastro,
+-- o CRM usa o nome da listagem e 7 dias de prazo. crm_produto_fornecedor: o produto sem fornecedor no FKN (ou com o
+-- errado) ganha um aqui; fornecedor nulo = volta ao do FKN (sem apagar linha). crm_custo_historico: cada mudança do
+-- último custo de compra na listagem do FKN (gatilho), para o aviso "preço de compra subiu".
+create table if not exists public.crm_fornecedores (
+  codigo          text primary key check (length(btrim(codigo)) > 0),
+  nome            text not null check (length(btrim(nome)) > 0),
+  cnpj            text,
+  contato         text,
+  telefone        text,
+  email           text,
+  prazo_dias      integer not null default 7 check (prazo_dias between 0 and 180),
+  pedido_minimo   numeric(14,2) check (pedido_minimo is null or pedido_minimo >= 0),
+  frete           text check (frete is null or frete in ('cif', 'fob', 'cif_acima')),
+  frete_cif_acima numeric(14,2) check (frete_cif_acima is null or frete_cif_acima >= 0),
+  dias_pedido     smallint[] not null default '{}',
+  pagamento       text,
+  obs             text,
+  ativo           boolean not null default true,
+  atualizado_em   timestamptz not null default now(),
+  atualizado_por  uuid default auth.uid()
+);
+create table if not exists public.crm_produto_fornecedor (
+  codigo         text primary key,
+  fornecedor     text references public.crm_fornecedores(codigo),
+  atualizado_em  timestamptz not null default now(),
+  atualizado_por uuid default auth.uid()
+);
+create table if not exists public.crm_custo_historico (
+  id             bigint generated always as identity primary key,
+  codigo         text not null,
+  descricao      text,
+  fornecedor_cod text,
+  custo_de       numeric(16,4),
+  custo_para     numeric(16,4),
+  em             timestamptz not null default now()
+);
+create index if not exists crm_custo_historico_em on public.crm_custo_historico (em desc);
+alter table public.crm_fornecedores enable row level security;
+alter table public.crm_produto_fornecedor enable row level security;
+alter table public.crm_custo_historico enable row level security;
+grant select, insert, update on public.crm_fornecedores, public.crm_produto_fornecedor to authenticated;
+grant select on public.crm_custo_historico to authenticated;
+do $$ begin
+  if not exists (select 1 from pg_policies where tablename = 'crm_fornecedores' and policyname = 'tudo') then
+    create policy tudo on public.crm_fornecedores for all to authenticated using ((select public.crm_eh_admin()) or (select public.crm_eh_comprador())) with check ((select public.crm_eh_admin()) or (select public.crm_eh_comprador()));
+  end if;
+  if not exists (select 1 from pg_policies where tablename = 'crm_produto_fornecedor' and policyname = 'tudo') then
+    create policy tudo on public.crm_produto_fornecedor for all to authenticated using ((select public.crm_eh_admin()) or (select public.crm_eh_comprador())) with check ((select public.crm_eh_admin()) or (select public.crm_eh_comprador()));
+  end if;
+  if not exists (select 1 from pg_policies where tablename = 'crm_custo_historico' and policyname = 'le') then
+    create policy le on public.crm_custo_historico for select to authenticated using ((select public.crm_eh_admin()) or (select public.crm_eh_comprador()));
+  end if;
+end $$;
+create or replace function public.crm_custo_mudou() returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if coalesce(old.custo_compra, 0) > 0 and coalesce(new.custo_compra, 0) > 0 and new.custo_compra <> old.custo_compra then
+    insert into public.crm_custo_historico (codigo, descricao, fornecedor_cod, custo_de, custo_para)
+    values (new.codigo, new.descricao, new.fornecedor_cod, old.custo_compra, new.custo_compra);
+  end if;
+  return new;
+end $$;
+create or replace trigger crm_estoque_custo after update of custo_compra on public.crm_estoque for each row execute function public.crm_custo_mudou();
+-- Resumo por fornecedor (a IA e a tela): produtos ativos, abaixo do mínimo, com pedido em aberto e o cadastro.
+create or replace function public.crm_fornecedores_resumo()
+returns table (codigo text, nome text, produtos integer, abaixo_minimo integer, com_pedido integer, prazo_dias integer, prazo_estimado boolean,
+  pedido_minimo numeric, frete text, frete_cif_acima numeric, dias_pedido smallint[], pagamento text, contato text, telefone text, email text, obs text)
+language sql stable security invoker set search_path = public as $$
+  with p as (
+    select coalesce(pf.fornecedor, e.fornecedor_cod) as cod, e.quantidade, e.estoque_min, e.pend_fornecedor
+    from crm_estoque e left join crm_produto_fornecedor pf on pf.codigo = e.codigo
+    where e.codigo !~ '\.\d+$' and coalesce(e.situacao, '') <> 'INATIVO'
+  ), g as (
+    select cod, count(*)::int as produtos,
+      count(*) filter (where estoque_min > 0 and quantidade < estoque_min)::int as abaixo,
+      count(*) filter (where pend_fornecedor > 0)::int as pedido
+    from p where cod is not null group by cod
+  ), nomes as (select fornecedor_cod as cod, max(fornecedor) as nome from crm_estoque where fornecedor_cod is not null group by 1)
+  select coalesce(f.codigo, g.cod), coalesce(f.nome, n.nome, g.cod), coalesce(g.produtos, 0), coalesce(g.abaixo, 0), coalesce(g.pedido, 0),
+    coalesce(f.prazo_dias, 7), f.codigo is null, f.pedido_minimo, f.frete, f.frete_cif_acima, coalesce(f.dias_pedido, '{}'), f.pagamento, f.contato, f.telefone, f.email, f.obs
+  from g full join crm_fornecedores f on f.codigo = g.cod left join nomes n on n.cod = coalesce(f.codigo, g.cod)
+$$;

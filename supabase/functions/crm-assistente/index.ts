@@ -54,7 +54,10 @@ Quando quem responde é Compras (ou a pergunta é de compra/reposição), pense 
 distribuidora: cobertura em dias (estoque ÷ venda média diária dos últimos 90 dias), ponto de pedido (venda média
 × prazo do fornecedor + segurança), o que já está a caminho, giro e estoque parado, concentração num fornecedor e
 o último custo de compra. Sugira o que comprar e quanto, com os números das ferramentas, e diga o porquê em uma
-linha por item. Se faltar o prazo do fornecedor, use 7 dias e avise que é estimativa.`;
+linha por item. Use "fornecedores" para prazo, pedido mínimo, frete e dia de pedido (junte o pedido de cada fornecedor e
+avise se não chega ao mínimo) e "precos_compra" para o custo que subiu (proponha revisar o preço de venda dos itens da
+curva A). Se faltar o prazo do fornecedor, use 7 dias e avise que é estimativa. Concorrentes: não há preço deles no
+sistema; não invente, sugira conferir manualmente.`;
 
 // ------------------------------------------------------------------ ferramentas (todas de leitura)
 type Ctx = { u: SupabaseClient; papel: string; meuId: string; hoje: string; usuarios: Map<string, string> };
@@ -192,7 +195,10 @@ const FERRAMENTAS: Record<string, Ferr> = {
     def: { name: 'reposicao', description: 'Produtos abaixo do estoque mínimo do FKN (ou de uma linha/fornecedor), com atual, mínimo, máximo, já pedido ao fornecedor, último custo, última entrada e a venda dos últimos 90 dias. Até 40, os mais vendidos primeiro.', strict: true,
       input_schema: obj({ filtro: { type: 'string', description: 'parte da linha, do fornecedor ou da descrição; vazio = todos' } }, ['filtro']) },
     async roda(c, i) {
-      const est = await tudo((a, b) => c.u.from('crm_estoque').select('codigo, descricao, unidade, linha, fornecedor, estoque_atual, quantidade, estoque_min, estoque_max, pend_fornecedor, custo_compra, custo_unit, ult_entrada, situacao').range(a, b), 6000);
+      const est = await tudo((a, b) => c.u.from('crm_estoque').select('codigo, descricao, unidade, linha, fornecedor, fornecedor_cod, estoque_atual, quantidade, estoque_min, estoque_max, pend_fornecedor, custo_compra, custo_unit, ult_entrada, situacao').range(a, b), 6000);
+      // prazo de entrega do cadastro de fornecedores (sem cadastro: 7 dias, estimado) e a troca de fornecedor feita no CRM
+      const [{ data: forn }, { data: trocas }] = await Promise.all([c.u.from('crm_fornecedores').select('codigo, nome, prazo_dias'), c.u.from('crm_produto_fornecedor').select('codigo, fornecedor').not('fornecedor', 'is', null)]);
+      const fMap = new Map((forn || []).map(f => [f.codigo, f])), tMap = new Map((trocas || []).map(t => [t.codigo, t.fornecedor]));
       const f = normaliza(i.filtro);
       // deno-lint-ignore no-explicit-any
       const baixo = (est as any[]).filter(e => !/\.\d+$/.test(e.codigo) && e.situacao !== 'INATIVO' && Number(e.estoque_min) > 0 && Number(e.estoque_atual ?? e.quantidade ?? 0) < Number(e.estoque_min) &&
@@ -201,9 +207,51 @@ const FERRAMENTAS: Record<string, Ferr> = {
       const cods = baixo.map(e => e.codigo).slice(0, 300);
       const it = await tudo((a, b) => c.u.from('crm_nota_itens').select('codigo, quantidade, crm_notas!inner(emitida_em, cancelada)').in('codigo', cods).eq('crm_notas.cancelada', false).gte('crm_notas.emitida_em', somaDias(c.hoje, -90)).range(a, b), 20000);
       const v = new Map<string, number>(); it.forEach((x: { codigo: string; quantidade: number }) => v.set(x.codigo, (v.get(x.codigo) || 0) + Number(x.quantidade || 0)));
-      return { abaixo_do_minimo: baixo.length, itens: baixo.map(e => ({ codigo: e.codigo, descricao: e.descricao, unidade: e.unidade, linha: e.linha, fornecedor: e.fornecedor,
-        atual: n2(e.estoque_atual ?? e.quantidade), minimo: n2(e.estoque_min), maximo: n2(e.estoque_max), ja_pedido: n2(e.pend_fornecedor), ultimo_custo: n2(e.custo_compra || e.custo_unit), ultima_entrada: e.ult_entrada, venda_90d: n2(v.get(e.codigo) || 0) }))
+      return { abaixo_do_minimo: baixo.length, itens: baixo.map(e => {
+        const cod = tMap.get(e.codigo) || e.fornecedor_cod, f = cod ? fMap.get(cod) : null;
+        return { codigo: e.codigo, descricao: e.descricao, unidade: e.unidade, linha: e.linha, fornecedor: f ? f.nome : e.fornecedor, fornecedor_codigo: cod || null,
+          prazo_entrega_dias: f ? f.prazo_dias : 7, prazo_estimado: !f,
+          atual: n2(e.estoque_atual ?? e.quantidade), minimo: n2(e.estoque_min), maximo: n2(e.estoque_max), ja_pedido: n2(e.pend_fornecedor), ultimo_custo: n2(e.custo_compra || e.custo_unit), ultima_entrada: e.ult_entrada, venda_90d: n2(v.get(e.codigo) || 0) }; })
         .sort((a, b) => b.venda_90d - a.venda_90d).slice(0, 40) };
+    }
+  },
+  fornecedores: {
+    papeis: ['admin', 'comprador'],
+    def: { name: 'fornecedores', description: 'Fornecedores com o cadastro do comprador (prazo de entrega em dias, pedido mínimo, frete CIF/FOB, dias em que se faz o pedido, condição de pagamento) e quantos produtos ativos cada um tem, quantos estão abaixo do mínimo e quantos têm pedido em aberto. Sem cadastro: prazo 7 dias estimado. Até 40, os com mais produtos abaixo do mínimo primeiro.', strict: true,
+      input_schema: obj({ filtro: { type: 'string', description: 'parte do nome ou do código; vazio = todos' } }, ['filtro']) },
+    async roda(c, i) {
+      const { data, error } = await c.u.rpc('crm_fornecedores_resumo');
+      if (error) throw error;
+      const f = normaliza(i.filtro);
+      const DIAS = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
+      // deno-lint-ignore no-explicit-any
+      const l = ((data || []) as any[]).filter(x => !f || normaliza(x.codigo + ' ' + x.nome).includes(f))
+        .sort((a, b) => b.abaixo_minimo - a.abaixo_minimo || b.produtos - a.produtos);
+      return { fornecedores: l.length, com_cadastro: l.filter(x => !x.prazo_estimado).length, lista: l.slice(0, 40).map(x => ({ codigo: x.codigo, nome: x.nome, produtos: x.produtos, abaixo_do_minimo: x.abaixo_minimo,
+        com_pedido_em_aberto: x.com_pedido, prazo_entrega_dias: x.prazo_dias, prazo_estimado: x.prazo_estimado, pedido_minimo: x.pedido_minimo == null ? null : n2(x.pedido_minimo),
+        frete: x.frete === 'cif_acima' ? 'CIF acima de R$ ' + n2(x.frete_cif_acima) : x.frete, dias_de_pedido: (x.dias_pedido || []).map((d: number) => DIAS[d]), pagamento: x.pagamento, obs: x.obs })) };
+    }
+  },
+  precos_compra: {
+    papeis: ['admin', 'comprador'],
+    def: { name: 'precos_compra', description: 'Histórico do preço de compra: as mudanças do último custo de compra nas listagens do FKN (desde 18/10/2026) e os itens das notas de compra recebidas (fornecedor, data, quantidade e custo unitário com IPI, ST e frete). Pelo código do produto, por parte do nome, ou vazio para as maiores altas dos últimos 60 dias.', strict: true,
+      input_schema: obj({ termo: { type: 'string', description: 'código ou parte da descrição; vazio = maiores altas' } }, ['termo']) },
+    async roda(c, i) {
+      const t = String(i.termo || '').trim(), desde = somaDias(c.hoje, -180);
+      let qh = c.u.from('crm_custo_historico').select('codigo, descricao, custo_de, custo_para, em').gte('em', desde).order('em', { ascending: false }).limit(200);
+      if (t) qh = /^[\d.]+$/.test(t) ? qh.eq('codigo', t) : qh.ilike('descricao', '%' + t.replace(/[%_]/g, '') + '%');
+      let qi = c.u.from('crm_compra_itens').select('codigo, descricao, unidade, quantidade, valor_total, ipi, st, frete, outras, fator, crm_compras!inner(fornecedor_nome, emitida_em)').gte('crm_compras.emitida_em', desde).limit(200);
+      if (t) qi = /^[\d.]+$/.test(t) ? qi.eq('codigo', t) : qi.ilike('descricao', '%' + t.replace(/[%_]/g, '') + '%');
+      const [{ data: h, error: e1 }, { data: it, error: e2 }] = await Promise.all([qh, qi]);
+      if (e1) throw e1;
+      if (e2) throw e2;
+      const mud = (h || []).map(x => ({ codigo: x.codigo, descricao: x.descricao, de: n2(x.custo_de), para: n2(x.custo_para), variacao_pct: x.custo_de ? n2((x.custo_para / x.custo_de - 1) * 100) : null, quando: String(x.em).slice(0, 10) }));
+      // deno-lint-ignore no-explicit-any
+      const notas = ((it || []) as any[]).map(x => { const tot = Number(x.valor_total) + Number(x.ipi) + Number(x.st) + Number(x.frete) + Number(x.outras); const q = Number(x.quantidade) * Number(x.fator || 1);
+        return { codigo: x.codigo, descricao: x.descricao, fornecedor: x.crm_compras.fornecedor_nome, dia: String(x.crm_compras.emitida_em).slice(0, 10), quantidade: n2(q), custo_unitario: q ? n2(tot / q) : null }; })
+        .sort((a, b) => (a.dia < b.dia ? 1 : -1)).slice(0, 40);
+      return { mudancas_de_custo_fkn: t ? mud.slice(0, 40) : mud.filter(x => (x.variacao_pct || 0) > 0).sort((a, b) => (b.variacao_pct || 0) - (a.variacao_pct || 0)).slice(0, 25),
+        itens_de_notas_de_compra: notas, observacao: 'o histórico de custo do FKN começou em 18/10/2026; as notas de compra entram pela Sefaz (Estoque → Notas de compra)' };
     }
   },
   pedidos: {

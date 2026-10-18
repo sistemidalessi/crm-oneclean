@@ -591,6 +591,10 @@ body.arrastando-card .zonas-fim { display: grid; grid-template-columns: 1fr 1fr;
 /* Gestão (administrador) */
 .g-duas { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .g-duas > .cartao { min-width: 0; }
+.g-tres { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.g-tres > div { min-width: 0; }
+.painel-comprador h3 { margin: 4px 0 6px; font-size: .95rem; }
+.painel-comprador .g-tend li .mini { justify-self: end; }
 .g-base { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 0; }
 .g-base div { display: grid; gap: 2px; }
 .g-base dt { color: var(--suave); font-size: .85rem; }
@@ -608,7 +612,7 @@ body.arrastando-card .zonas-fim { display: grid; grid-template-columns: 1fr 1fr;
 .g-sobe { color: var(--verde); font-weight: 600; white-space: nowrap; }
 .g-desce { color: var(--vermelho); font-weight: 600; white-space: nowrap; }
 .cartao h2 select { font-size: .85rem; }
-@media (max-width: 860px) { .g-duas, .g-base { grid-template-columns: 1fr; } }
+@media (max-width: 860px) { .g-duas, .g-base, .g-tres { grid-template-columns: 1fr; } }
 .g-top .link { justify-self: start; text-align: left; padding: 0; }
 .seq-passo { border: 1px solid var(--borda); border-radius: 10px; padding: 8px 12px 4px; margin: 0 0 12px; }
 .seq-passo legend { font-weight: 700; padding: 0 6px; }
