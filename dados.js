@@ -459,8 +459,31 @@
   Supa.prototype.trocarFornecedor = async function (codigo, fornecedor) {
     return unwrap(await this.sb.from('crm_produto_fornecedor').upsert({ codigo, fornecedor: fornecedor || null, atualizado_em: new Date().toISOString() }, { onConflict: 'codigo' }));
   };
+  // Comparação mensal com os concorrentes (18/10/2026): lista, cesta e preços lançados pelo comprador.
+  Supa.prototype.concorrentes = async function () { return unwrap(await this.sb.from('crm_concorrentes').select('*').order('ordem')); };
+  Supa.prototype.cesta = async function () { return unwrap(await this.sb.from('crm_cesta').select('*').order('ordem')); };
+  Supa.prototype.precosConcorrente = async function (desde) { return unwrap(await this.sb.from('crm_precos_concorrente').select('*').gte('mes', desde).limit(5000)); };
+  Supa.prototype.salvarConcorrente = async function (k) {
+    if (k.id) return unwrap(await this.sb.from('crm_concorrentes').update({ nome: k.nome, site: k.site, obs: k.obs, ativo: k.ativo, ordem: k.ordem }).eq('id', k.id).select().single());
+    return unwrap(await this.sb.from('crm_concorrentes').insert({ nome: k.nome, site: k.site || null, ordem: k.ordem || 0 }).select().single());
+  };
+  Supa.prototype.salvarCesta = async function (it) { return unwrap(await this.sb.from('crm_cesta').upsert(Object.assign({}, it, { atualizado_em: new Date().toISOString() }), { onConflict: 'codigo' })); };
+  Supa.prototype.salvarPrecoConcorrente = async function (p) {
+    return unwrap(await this.sb.from('crm_precos_concorrente').upsert(Object.assign({}, p, { em: new Date().toISOString() }), { onConflict: 'mes,concorrente_id,codigo' }));
+  };
   const lsLe = (k, pad) => { try { return JSON.parse(localStorage.getItem(k) || 'null') || pad; } catch (e) { return pad; } };
   const lsGrava = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* só na memória */ } };
+  Local.prototype.concorrentes = async function () { return lsLe('crm_concorrentes', []); };
+  Local.prototype.cesta = async function () { return lsLe('crm_cesta', []); };
+  Local.prototype.precosConcorrente = async function (desde) { return lsLe('crm_precos_concorrente', []).filter(p => p.mes >= desde); };
+  Local.prototype.salvarConcorrente = async function (k) {
+    const l = lsLe('crm_concorrentes', []), id = k.id || (l.reduce((m, x) => Math.max(m, x.id), 0) + 1);
+    lsGrava('crm_concorrentes', l.filter(x => x.id !== id).concat(Object.assign({ ativo: true }, l.find(x => x.id === id) || {}, k, { id }))); return k;
+  };
+  Local.prototype.salvarCesta = async function (it) { lsGrava('crm_cesta', lsLe('crm_cesta', []).filter(x => x.codigo !== it.codigo).concat(it)); };
+  Local.prototype.salvarPrecoConcorrente = async function (p) {
+    lsGrava('crm_precos_concorrente', lsLe('crm_precos_concorrente', []).filter(x => !(x.mes === p.mes && x.concorrente_id === p.concorrente_id && x.codigo === p.codigo)).concat(p));
+  };
   Local.prototype.fornecedores = async function () { return lsLe('crm_fornecedores', []); };
   Local.prototype.produtoForn = async function () { return lsLe('crm_produto_fornecedor', []).filter(x => x.fornecedor); };
   Local.prototype.custoHist = async function () { return []; };

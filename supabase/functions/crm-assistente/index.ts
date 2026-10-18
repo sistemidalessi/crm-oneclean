@@ -56,8 +56,8 @@ distribuidora: cobertura em dias (estoque ÷ venda média diária dos últimos 9
 o último custo de compra. Sugira o que comprar e quanto, com os números das ferramentas, e diga o porquê em uma
 linha por item. Use "fornecedores" para prazo, pedido mínimo, frete e dia de pedido (junte o pedido de cada fornecedor e
 avise se não chega ao mínimo) e "precos_compra" para o custo que subiu (proponha revisar o preço de venda dos itens da
-curva A). Se faltar o prazo do fornecedor, use 7 dias e avise que é estimativa. Concorrentes: não há preço deles no
-sistema; não invente, sugira conferir manualmente.`;
+curva A). Se faltar o prazo do fornecedor, use 7 dias e avise que é estimativa. Concorrentes: use "concorrentes" (preços
+que o comprador lançou no mês, por unidade de comparação, contra a nossa tabela); o que não estiver lá, não invente.`;
 
 // ------------------------------------------------------------------ ferramentas (todas de leitura)
 type Ctx = { u: SupabaseClient; papel: string; meuId: string; hoje: string; usuarios: Map<string, string> };
@@ -252,6 +252,31 @@ const FERRAMENTAS: Record<string, Ferr> = {
         .sort((a, b) => (a.dia < b.dia ? 1 : -1)).slice(0, 40);
       return { mudancas_de_custo_fkn: t ? mud.slice(0, 40) : mud.filter(x => (x.variacao_pct || 0) > 0).sort((a, b) => (b.variacao_pct || 0) - (a.variacao_pct || 0)).slice(0, 25),
         itens_de_notas_de_compra: notas, observacao: 'o histórico de custo do FKN começou em 18/10/2026; as notas de compra entram pela Sefaz (Estoque → Notas de compra)' };
+    }
+  },
+  concorrentes: {
+    papeis: ['admin', 'comprador'],
+    def: { name: 'concorrentes', description: 'Comparação de preço com os concorrentes num mês (lançada pelo comprador na tela Concorrentes): para cada produto da cesta, o nosso preço de tabela e o custo por unidade de comparação (metro, folha, litro…) e o preço de cada concorrente na mesma unidade, com a diferença em % (positivo = o concorrente está mais caro). Também o mês anterior.', strict: true,
+      input_schema: obj({ mes: { type: 'string', description: 'AAAA-MM; vazio = o mês atual' } }, ['mes']) },
+    async roda(c, i) {
+      const mes = (/^\d{4}-\d{2}$/.test(String(i.mes || '')) ? String(i.mes) : c.hoje.slice(0, 7)) + '-01';
+      const [a, m] = mes.split('-').map(Number), ant = (m === 1 ? (a - 1) + '-12' : a + '-' + String(m - 1).padStart(2, '0')) + '-01';
+      const [{ data: conc }, { data: cesta }, { data: precos, error }] = await Promise.all([
+        c.u.from('crm_concorrentes').select('id, nome, site, obs').eq('ativo', true).order('ordem'),
+        c.u.from('crm_cesta').select('codigo, unidade_comp, fator').eq('ativo', true).order('ordem'),
+        c.u.from('crm_precos_concorrente').select('mes, concorrente_id, codigo, preco, quantidade, obs').in('mes', [mes, ant])]);
+      if (error) throw error;
+      if (!(cesta || []).length) return { erro: 'a cesta de comparação ainda não foi montada (tela Concorrentes)' };
+      const { data: est } = await c.u.from('crm_estoque').select('codigo, descricao, preco_venda, custo_compra, custo_unit').in('codigo', (cesta || []).map(x => x.codigo));
+      // deno-lint-ignore no-explicit-any
+      const e = new Map<string, any>((est || []).map(x => [String(x.codigo).replace(/\.0+$/, ''), x]));
+      const nome = new Map((conc || []).map(k => [k.id, k.nome]));
+      return { mes: mes.slice(0, 7), concorrentes: (conc || []).map(k => ({ nome: k.nome, obs: k.obs })), produtos: (cesta || []).map(x => {
+        const p = e.get(x.codigo) || {}, f = Number(x.fator) || 1, nosso = Number(p.preco_venda) > 0 ? Number(p.preco_venda) / f : null;
+        const deles = (precos || []).filter(q => q.codigo === x.codigo).map(q => { const pu = Number(q.preco) / (Number(q.quantidade) || 1);
+          return { concorrente: nome.get(q.concorrente_id) || '?', mes: String(q.mes).slice(0, 7), por_unidade: Math.round(pu * 10000) / 10000, diferenca_pct: nosso ? n2((pu / nosso - 1) * 100) : null, obs: q.obs }; });
+        return { codigo: x.codigo, descricao: p.descricao || null, unidade_comparacao: x.unidade_comp, nosso_por_unidade: nosso == null ? null : Math.round(nosso * 10000) / 10000,
+          custo_por_unidade: Number(p.custo_compra || p.custo_unit) > 0 ? Math.round(Number(p.custo_compra || p.custo_unit) / f * 10000) / 10000 : null, concorrentes: deles }; }) };
     }
   },
   pedidos: {

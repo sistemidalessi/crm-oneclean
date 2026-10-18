@@ -48,7 +48,7 @@ window.CRM_CONFIG = {
       negocios: 'proposta-comercial', pedidos: 'compras-cliente-sacola', 'pedidos:separacao': 'logistica', 'pedidos:nfe': 'logistica',
       'pedidos:estoque': 'estoque', 'pedidos:faltas': 'compras-setor-interno', agenda: 'capiclean', relatorios: 'clean', ajustes: 'clean',
       compras: 'compras-setor-interno', estoque: 'estoque', gestao: 'financeiro', caixa: 'financeiro', 'caixa:cobranca': 'cobranca',
-      emails: 'capiclean', ofertas: 'gotti', fiscal: 'auditoria', 'estoque:conferencia': 'auditoria'
+      emails: 'capiclean', ofertas: 'gotti', fiscal: 'auditoria', 'estoque:conferencia': 'auditoria', concorrentes: 'compras-setor-interno'
     },
     // fala de "tudo em dia" de cada tela (quando não há nada esperando ali)
     falas: {
@@ -66,7 +66,8 @@ window.CRM_CONFIG = {
       caixa: 'Nenhuma conta vencida sem baixa.',
       'caixa:cobranca': 'Nenhum boleto esperando por aqui.',
       emails: 'A cadência de e-mails está rodando.',
-      ofertas: 'Monte uma oferta com o estoque parado para girar o galpão.'
+      ofertas: 'Monte uma oferta com o estoque parado para girar o galpão.',
+      concorrentes: 'Uma vez por mês, lance os preços dos concorrentes e eu comparo por unidade com a nossa tabela.'
     }
   },
   supabaseUrl: 'https://udhigavckigciqnicgyy.supabase.co',

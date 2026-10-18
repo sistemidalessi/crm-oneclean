@@ -3169,3 +3169,56 @@ language sql stable security invoker set search_path = public as $$
     coalesce(f.prazo_dias, 7), f.codigo is null, f.pedido_minimo, f.frete, f.frete_cif_acima, coalesce(f.dias_pedido, '{}'), f.pagamento, f.contato, f.telefone, f.email, f.obs
   from g full join crm_fornecedores f on f.codigo = g.cod left join nomes n on n.cod = coalesce(f.codigo, g.cod)
 $$;
+
+-- ============================================================ comparação mensal com os concorrentes (18/10/2026)
+-- Pedido do Anderson: acompanhar de perto os maiores concorrentes (a lista fica no banco). A cesta são os produtos que se
+-- comparam todo mês, cada um com a UNIDADE DE COMPARAÇÃO (ex.: "metro", "folha", "litro") e quantas dessas há na nossa
+-- unidade (fator: o fardo de 8 rolos de 300 m = 2400 metros). O comprador lança o preço que viu no site/cotação de cada
+-- concorrente, com quanto vem na embalagem dele (na mesma unidade de comparação); o CRM compara por unidade. Os nomes
+-- dos concorrentes são dados da instalação (ficam no banco, não no código).
+create table if not exists public.crm_concorrentes (
+  id         bigint generated always as identity primary key,
+  nome       text not null check (length(btrim(nome)) > 0),
+  site       text,
+  obs        text,
+  ativo      boolean not null default true,
+  ordem      integer not null default 0,
+  criado_em  timestamptz not null default now()
+);
+create table if not exists public.crm_cesta (
+  codigo        text primary key,
+  unidade_comp  text not null default 'unidade',
+  fator         numeric(14,4) not null default 1 check (fator > 0),
+  ordem         integer not null default 0,
+  ativo         boolean not null default true,
+  atualizado_em timestamptz not null default now()
+);
+create table if not exists public.crm_precos_concorrente (
+  id             bigint generated always as identity primary key,
+  mes            date not null check (extract(day from mes) = 1),
+  concorrente_id bigint not null references public.crm_concorrentes(id),
+  codigo         text not null,
+  preco          numeric(14,2) not null check (preco > 0),
+  quantidade     numeric(14,4) not null default 1 check (quantidade > 0),   -- quanto vem na embalagem dele, na unidade de comparação
+  descricao      text,                                                    -- como o concorrente chama o produto
+  link           text,
+  obs            text,
+  registrado_por uuid default auth.uid(),
+  em             timestamptz not null default now(),
+  unique (mes, concorrente_id, codigo)
+);
+alter table public.crm_concorrentes enable row level security;
+alter table public.crm_cesta enable row level security;
+alter table public.crm_precos_concorrente enable row level security;
+grant select, insert, update on public.crm_concorrentes, public.crm_cesta, public.crm_precos_concorrente to authenticated;
+do $$ begin
+  if not exists (select 1 from pg_policies where tablename = 'crm_concorrentes' and policyname = 'tudo') then
+    create policy tudo on public.crm_concorrentes for all to authenticated using ((select public.crm_eh_admin()) or (select public.crm_eh_comprador())) with check ((select public.crm_eh_admin()) or (select public.crm_eh_comprador()));
+  end if;
+  if not exists (select 1 from pg_policies where tablename = 'crm_cesta' and policyname = 'tudo') then
+    create policy tudo on public.crm_cesta for all to authenticated using ((select public.crm_eh_admin()) or (select public.crm_eh_comprador())) with check ((select public.crm_eh_admin()) or (select public.crm_eh_comprador()));
+  end if;
+  if not exists (select 1 from pg_policies where tablename = 'crm_precos_concorrente' and policyname = 'tudo') then
+    create policy tudo on public.crm_precos_concorrente for all to authenticated using ((select public.crm_eh_admin()) or (select public.crm_eh_comprador())) with check ((select public.crm_eh_admin()) or (select public.crm_eh_comprador()));
+  end if;
+end $$;

@@ -693,7 +693,9 @@
     const ph = c.pedirHoje || [], cs = c.custoSubiu || [], sf = c.semFornecedor || [];
     const temIA = CRM.turma && CRM.turma.perguntar && CRM.store().assistente;
     return '<section class="cartao painel-comprador"><h2>Painel do comprador <small>o que precisa da sua atenção hoje</small></h2>' +
-      (temIA ? '<p><button type="button" class="btn" data-acao="compras-analise">💬 Pedir a análise de compras de hoje</button> <small class="dica">a IA olha a reposição, os fornecedores e o estoque parado e sugere o pedido</small></p>' : '') +
+      '<p class="acoes">' + (temIA ? '<button type="button" class="btn" data-acao="compras-analise">💬 Pedir a análise de compras de hoje</button> ' : '') +
+        (CRM.telas.concorrentes ? '<button type="button" class="btn sec" data-acao="aba" data-id="concorrentes">⚖ Comparar com os concorrentes</button> ' : '') +
+        (temIA ? '<small class="dica">a IA olha a reposição, os fornecedores, o estoque parado e os preços dos concorrentes</small>' : '') + '</p>' +
       '<div class="g-tres">' +
       '<div><h3>Pedir hoje <small>' + ph.length + '</small></h3>' + (ph.length ? '<ul class="g-tend">' + ph.slice(0, 8).map(f => '<li><span>' + esc(f.nome) + '</span><strong>' + esc(R.moeda(f.custo)) + '</strong><small>' +
           [f.urgentes ? f.urgentes + ' produto(s) acabam antes da entrega (' + f.prazo + ' dias)' : '', f.diaDePedido ? 'hoje é dia de pedido' : '', f.faltaMinimo > 0 ? 'faltam ' + R.moeda(f.faltaMinimo) + ' para o mínimo' : ''].filter(Boolean).map(esc).join(' · ') +

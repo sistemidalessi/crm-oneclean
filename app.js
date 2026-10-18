@@ -322,7 +322,7 @@
   // ------------------------------------------------------------ render
   const ABAS = [
     ['inicio', 'Início', '⌂'], ['fila', 'Fila do dia', '▶'], ['funil', 'Funil', '▥'], ['empresas', 'Empresas', '▦'], ['pessoas', 'Pessoas', '☺'],
-    ['negocios', 'Negócios', '$'], ['pedidos', 'Pedidos', '☰'], ['agenda', 'Atividades', '▣'], ['relatorios', 'Relatórios', '▲'], ['ajustes', 'Configurações', '⚙'], ['compras', 'Compras', '▤'], ['estoque', 'Estoque', '▦'], ['gestao', 'Gestão', '◆'], ['caixa', 'Caixa', '◈'], ['emails', 'E-mails', '✉'], ['ofertas', 'Ofertas', '✦'], ['fiscal', 'Fiscal', '§']
+    ['negocios', 'Negócios', '$'], ['pedidos', 'Pedidos', '☰'], ['agenda', 'Atividades', '▣'], ['relatorios', 'Relatórios', '▲'], ['ajustes', 'Configurações', '⚙'], ['compras', 'Compras', '▤'], ['estoque', 'Estoque', '▦'], ['gestao', 'Gestão', '◆'], ['caixa', 'Caixa', '◈'], ['emails', 'E-mails', '✉'], ['ofertas', 'Ofertas', '✦'], ['fiscal', 'Fiscal', '§'], ['concorrentes', 'Concorrentes', '⚖']
   ];
   CRM.ABAS = ABAS;
   // Relatórios do FKN que estão pendentes neste turno (manhã/tarde): [{ arquivo, ultimo, turno }].
@@ -389,8 +389,8 @@
     if (!E.eu) return;
     // Comprador: só Compras e Estoque. Compras, Estoque e Gestão: administrador. Configurações: gestor.
     // Logística (Fase 3): só Pedidos (a separação). O comprador vê também as faltas e a consulta de estoque em Pedidos.
-    const abas = CRM.ehLogistica() ? ABAS.filter(a => a[0] === 'pedidos') : CRM.ehComprador() ? ABAS.filter(a => a[0] === 'compras' || a[0] === 'estoque' || a[0] === 'pedidos')
-      : ABAS.filter(a => (a[0] !== 'ajustes' || CRM.ehGestor()) && ((a[0] !== 'gestao' && a[0] !== 'compras' && a[0] !== 'estoque' && a[0] !== 'caixa' && a[0] !== 'fiscal') || CRM.ehAdmin()));
+    const abas = CRM.ehLogistica() ? ABAS.filter(a => a[0] === 'pedidos') : CRM.ehComprador() ? ABAS.filter(a => a[0] === 'compras' || a[0] === 'estoque' || a[0] === 'pedidos' || a[0] === 'concorrentes')
+      : ABAS.filter(a => (a[0] !== 'ajustes' || CRM.ehGestor()) && ((a[0] !== 'gestao' && a[0] !== 'compras' && a[0] !== 'estoque' && a[0] !== 'caixa' && a[0] !== 'fiscal' && a[0] !== 'concorrentes') || CRM.ehAdmin()));
     if (!abas.some(a => a[0] === E.aba)) E.aba = abas[0][0];
     ['#buscaGlobal', '[data-acao="novo-menu"]', '#sino'].forEach(s => { const el = $(s); if (el) el.hidden = CRM.foraDeVendas(); });
     const al = R.alertas(E.D, E.ix, E.cfg, CRM.hoje(), CRM.carteira());
