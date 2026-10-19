@@ -1314,6 +1314,11 @@ Respostas dele: histórico das notas de compra **buscado na Sefaz**; concorrente
   (✱ = trocado no CRM). IA (`crm-assistente` v2): ferramentas `fornecedores` e `precos_compra` (histórico do FKN +
   itens das notas de compra), `reposicao` com o prazo do fornecedor; o system manda juntar o pedido por fornecedor,
   avisar do mínimo e não inventar preço de concorrente.
+  **19/10: cadastro dos fornecedores pela planilha.** `crm_fornecedores` ainda vazio. Mandei ao Anderson um Excel para o
+  comprador preencher (93 fornecedores com venda em 12 meses, os 15 principais com ★; colunas: prazo em dias, pedido
+  mínimo, frete CIF/FOB/CIF acima de, dias de pedido seg–sáb com X, pagamento, contato, telefone, e-mail, "Ainda
+  compramos?" → `ativo`, observações). O arquivo **não é versionado** (dados da empresa). Quando voltar preenchido: ler
+  com openpyxl e gravar por `insert … on conflict (codigo) do update` (sem delete; `dias_pedido` 1=seg…6=sáb).
 - **Concorrentes:** levantamento de 20 (pesquisa na web, 18/10) no repositório **privado** `sistemi-dalessi`,
   `docs/oneclean/concorrentes.md` (este repositório é público: estratégia da OneClean não vem para cá). Esperando o
   Anderson escolher quais acompanhar; 8 publicam preço na internet (base para uma cesta de itens comparada por mês).
