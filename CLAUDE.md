@@ -1326,6 +1326,15 @@ Respostas dele: histórico das notas de compra **buscado na Sefaz**; concorrente
   chamada da `crm-fiscal` por nota (`dfe_ciencia` com `chave`). Em 19/10: busca completa (NSU 2390), 295 DF-e; 272
   compras como histórico (até 16/10 de manhã), 5 pendentes (16–17/10, todas "aguardando"; a da oficina Centro
   Automotivo SBC não é mercadoria) e 15 só com resumo (12 antigas para a ciência em lote, 3 de 19/10).
+  **Tela de notas de compra arrumada (19/10, pedido do Anderson: "está confuso, é uma das mais importantes"):** a lista
+  "Notas de compra para dar entrada" vem em cima (as mais novas primeiro), com a explicação curta (dar entrada soma no
+  estoque do CRM e não lança contas a pagar; "Não é mercadoria" tira da lista sem mexer no estoque, a despesa fica no
+  Caixa); subir XML à mão e o "como funciona" recolhidos; entradas dadas e deixadas de lado recolhidas; as notas de antes
+  do estoque viram só uma linha ("N notas como histórico de preço"); o bloco da Sefaz vai embaixo. **Despesa reconhecida
+  pela nota** (`estoque.js pareceDespesa`): NCM 2710/2711/2207 (combustível) ou CFOP 5929/6929 (nota de cupom de posto),
+  565x/666x (combustível), 5933/6933 (serviço) em todos os itens → selo "💡 parece despesa" e o botão principal vira
+  "Não é mercadoria" (formulário com o motivo: despesa, material de uso, nota repetida, outro). Itens das pendentes pela
+  `crm_compra_itens` (RLS admin/comprador).
 - **3 — fornecedores e painel do comprador (18/10, feito):** tabelas `crm_fornecedores` (código do FKN; prazo de entrega,
   pedido mínimo, frete CIF/FOB/CIF acima de X, dias de pedido 1=seg…6=sáb, pagamento, contato), `crm_produto_fornecedor`
   (produto sem fornecedor ou com o errado no FKN; fornecedor nulo = volta ao do FKN, sem apagar linha) e

@@ -111,3 +111,11 @@ test('chegou? nota de compra pendente × última entrada no FKN', () => {
   assert.equal(r.get('d').estado, 'sem_dado');
   assert.equal(r.get('e').estado, 'aguardando', 'fornecedor achado, mas sem entrada depois da emissão');
 });
+
+test('nota de compra que parece despesa: combustível, cupom do posto, serviço', () => {
+  assert.equal(S.pareceDespesa([{ ncm: '22071090', cfop: '5929' }, { ncm: '27101921', cfop: '5929' }]), 'combustível');
+  assert.equal(S.pareceDespesa([{ ncm: '99999999', cfop: '5933' }]), 'serviço');
+  assert.equal(S.pareceDespesa([{ ncm: '34025000', cfop: '5101' }]), null, 'mercadoria');
+  assert.equal(S.pareceDespesa([{ ncm: '27101921', cfop: '5656' }, { ncm: '34025000', cfop: '5102' }]), null, 'nota misturada não é despesa');
+  assert.equal(S.pareceDespesa([]), null);
+});

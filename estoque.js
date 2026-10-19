@@ -215,8 +215,21 @@
     return out;
   }
 
+  // Nota de compra que não é mercadoria para revender (19/10/2026: o abastecimento do caminhão veio pela Sefaz como nota
+  // de compra): combustível pelo NCM (2710 óleos/diesel/gasolina, 2711 gás, 2207 etanol) ou CFOP de combustível, de nota
+  // emitida para cupom fiscal (5929/6929) ou de serviço. Devolve o motivo ou null.
+  const CFOP_DESPESA = { 5929: 'nota de cupom fiscal (posto)', 6929: 'nota de cupom fiscal (posto)', 5655: 'combustível', 5656: 'combustível', 5667: 'combustível',
+    6655: 'combustível', 6656: 'combustível', 6667: 'combustível', 5933: 'serviço', 6933: 'serviço' };
+  function pareceDespesa(itens) {
+    const l = (itens || []).filter(Boolean);
+    if (!l.length) return null;
+    const motivo = it => (/^(2710|2711|2207)/.test(String(it.ncm || '')) ? 'combustível' : CFOP_DESPESA[Number(it.cfop)] || null);
+    const m = l.map(motivo);
+    return m.every(Boolean) ? (m.includes('combustível') ? 'combustível' : m[0]) : null;
+  }
+
   const TIPOS = { inicial: 'saldo inicial (FKN)', saida: 'saída (nota)', entrada: 'entrada (compra)', ajuste: 'ajuste', inventario: 'inventário', estorno: 'estorno' };
-  const api = { junta, valor, sequencia, lerContagem, atualFkn, ehCaixa, TIPOS, extrasDoXml, stDoDet, compraDoXml, custoItem, sugere, avisosDfe, sugereFornecedor, chegadaCompras };
+  const api = { junta, valor, sequencia, lerContagem, atualFkn, ehCaixa, TIPOS, extrasDoXml, stDoDet, compraDoXml, custoItem, sugere, avisosDfe, sugereFornecedor, chegadaCompras, pareceDespesa };
   raiz.CRMEstoque = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);
@@ -232,7 +245,7 @@
 
   let saldo = null, fkn = [], fotos = [], difs = [], fotoVista = null, carregando = false, compras = [], lendoCompras = '';
   const filtro = { ver: 'saldo', busca: '', soDif: false };
-  let dfe = [], dfeEst = null, buscouDfe = false, buscandoDfe = '', fornDocs = [], fornCad = [], itensProd = [];
+  let dfe = [], dfeEst = null, buscouDfe = false, buscandoDfe = '', fornDocs = [], fornCad = [], itensProd = [], itensPend = [];
 
   async function carrega() {
     if (carregando) return;
@@ -243,6 +256,8 @@
         st.dfe ? st.dfe().catch(() => []) : [], st.dfeEstado ? st.dfeEstado().catch(() => null) : null]);
       [fornDocs, fornCad, itensProd] = await Promise.all([st.fornecedorDocs ? st.fornecedorDocs().catch(() => []) : [], st.fornecedores ? st.fornecedores().catch(() => []) : [],
         st.comprasItensProduto && compras.some(c => c.situacao === 'pendente') ? st.comprasItensProduto().catch(() => []) : []]);
+      const idsPend = compras.filter(c => c.situacao === 'pendente').map(c => c.id);
+      itensPend = idsPend.length && st.compraItensDe ? await st.compraItensDe(idsPend).catch(() => []) : [];
       if (st.modo === 'supabase' && podeSefaz() && !buscouDfe && (!dfeEst || !dfeEst.proxima_em || Date.parse(dfeEst.proxima_em) < Date.now())) { buscouDfe = true; setTimeout(() => buscaSefaz(true), 50); }
       const conferida = fotos.find(f => f.conferida_em);
       fotoVista = fotoVista || (conferida && conferida.id) || null;
@@ -330,29 +345,43 @@
     return CRM.selo('? sem como saber', 'cinza', 'nenhum item ligado e fornecedor não achado na listagem do FKN: confira com o recebimento');
   }
   const ORDEM_CHEGADA = { chegou: 0, provavel: 1, aguardando: 2, sem_dado: 3 };
+  const HISTORICO = 'antes do início do estoque do CRM';
   function telaCompras() {
     const ch = S.chegadaCompras({ compras: compras.filter(c => c.situacao === 'pendente'), itensProd, fkn, fknForn: fknFornecedores() });
     const listagem = (fkn || []).reduce((m, x) => (x.atualizado_em && x.atualizado_em > m ? x.atualizado_em : m), '');
-    const ordem = c => { const x = ch.get(c.id); return x ? ORDEM_CHEGADA[x.estado] : 9; };
-    const pend = compras.filter(c => c.situacao === 'pendente').sort((a, b) => ordem(a) - ordem(b) || String(b.emitida_em).localeCompare(String(a.emitida_em))),
-      feitas = compras.filter(c => c.situacao !== 'pendente').slice(0, 30);
-    const chegaram = pend.filter(c => ordem(c) <= 1).length;
-    const linhaC = c => { const x = ch.get(c.id), veio = x && (x.estado === 'chegou' || x.estado === 'provavel');
+    const despesa = new Map();
+    compras.filter(c => c.situacao === 'pendente').forEach(c => { const m = S.pareceDespesa(itensPend.filter(i => i.compra_id === c.id)); if (m) despesa.set(c.id, m); });
+    const ordem = c => (despesa.has(c.id) ? -1 : ch.has(c.id) ? ORDEM_CHEGADA[ch.get(c.id).estado] : 9);
+    // as mais novas em cima (pedido do Anderson, 19/10); dentro do mesmo dia, as que chegaram primeiro
+    const pend = compras.filter(c => c.situacao === 'pendente').sort((a, b) => String(b.emitida_em).slice(0, 10).localeCompare(String(a.emitida_em).slice(0, 10)) || ordem(a) - ordem(b)),
+      lancadas = compras.filter(c => c.situacao === 'lancada').slice(0, 30),
+      deixadas = compras.filter(c => c.situacao === 'ignorada' && !String(c.obs || '').startsWith(HISTORICO)).slice(0, 30),
+      historico = compras.filter(c => c.situacao === 'ignorada' && String(c.obs || '').startsWith(HISTORICO)).length;
+    const chegaram = pend.filter(c => !despesa.has(c.id) && ordem(c) >= 0 && ordem(c) <= 1).length;
+    const linhaC = c => { const x = ch.get(c.id), desp = despesa.get(c.id), veio = !desp && x && (x.estado === 'chegou' || x.estado === 'provavel');
       return '<tr><td><strong>' + esc(c.fornecedor_nome || '?') + '</strong><small>NF ' + esc(c.numero) + ' · ' + esc(quando(c.emitida_em)) + '</small></td>' +
-      '<td class="num">' + R.moeda(c.valor_total) + '</td><td>' + (c.situacao === 'pendente' ? CRM.selo('pendente', 'ambar') + ' ' + seloChegada(x, listagem) : c.situacao === 'lancada' ? CRM.selo('entrada ' + quando(c.lancada_em), 'verde') : CRM.selo('deixada de lado', 'cinza') + (c.obs ? ' <small>' + esc(c.obs) + '</small>' : '')) + '</td>' +
-      '<td class="num">' + (c.situacao === 'pendente' ? '<button type="button" class="btn' + (veio ? '' : ' sec') + '" data-acao="es-compra" data-id="' + esc(c.id) + '">Conferir e dar entrada</button> <button type="button" class="mini" data-acao="es-compra-ignorar" data-id="' + esc(c.id) + '" title="Deixar de lado (não é mercadoria para o estoque)">✕</button>'
+      '<td class="num">' + R.moeda(c.valor_total) + '</td><td>' + (c.situacao === 'pendente'
+        ? (desp ? CRM.selo('💡 parece despesa (' + desp + '): não é mercadoria', 'azul', 'não entra no estoque; a despesa vai no Caixa') : CRM.selo('pendente', 'ambar') + ' ' + seloChegada(x, listagem))
+        : c.situacao === 'lancada' ? CRM.selo('entrada ' + quando(c.lancada_em), 'verde') : CRM.selo('deixada de lado', 'cinza') + (c.obs ? ' <small>' + esc(c.obs) + '</small>' : '')) + '</td>' +
+      '<td class="num">' + (c.situacao === 'pendente'
+        ? (desp ? '<button type="button" class="btn" data-acao="es-compra-ignorar" data-id="' + esc(c.id) + '">Não é mercadoria</button> <button type="button" class="mini" data-acao="es-compra" data-id="' + esc(c.id) + '" title="Ver os itens e dar entrada assim mesmo">☰</button>'
+          : '<button type="button" class="btn' + (veio ? '' : ' sec') + '" data-acao="es-compra" data-id="' + esc(c.id) + '">Conferir e dar entrada</button> <button type="button" class="btn sec" data-acao="es-compra-ignorar" data-id="' + esc(c.id) + '" title="Despesa, material de uso, nota repetida…: não entra no estoque">Não é mercadoria</button>')
         : '<button type="button" class="mini" data-acao="es-compra" data-id="' + esc(c.id) + '" title="Ver os itens">☰</button>') + '</td></tr>'; };
-    return blocoSefaz() + '<section class="cartao"><h2>Notas de compra</h2>' +
-      '<p>Suba o <strong>XML</strong> das notas dos fornecedores (vários de uma vez, ou o .zip). Cada uma fica pendente até você conferir: ligue cada item a um produto nosso e diga o fator ' +
-      '(ex.: a caixa com 25 pacotes = 25). O CRM lembra a ligação para a próxima nota do mesmo fornecedor. A entrada soma no estoque com o custo do item (valor + IPI + ST + frete) e refaz o custo médio.</p>' +
-      '<p class="dica">Enquanto o FKN roda junto, a nota de compra continua entrando no FKN também, e as parcelas <strong>não</strong> vão para o contas a pagar do CRM (o FKN já manda; ia duplicar no Caixa).</p>' +
-      (lendoCompras ? '<p class="cob-lendo">' + esc(lendoCompras) + '</p>' : '<label class="btn sec arquivo">Escolher XML ou ZIP<input type="file" id="esCompraArq" multiple accept=".xml,.zip,text/xml,application/xml,application/zip"></label>') +
-      '<h3>Pendentes <small>' + pend.length + (chegaram ? ' · ' + chegaram + (chegaram === 1 ? ' já chegou' : ' já chegaram') : '') + '</small></h3>' +
-      (pend.length ? '<p class="dica">Só dê entrada no que chegou. Enquanto o FKN roda junto, quem diz é ele: o selo verde aparece quando a listagem do FKN mostra entrada dos produtos da nota depois da emissão' +
-        (listagem ? ' (última listagem: ' + esc(quando(listagem)) + ')' : '') + '. "Provável" é pelo nome do fornecedor, quando nenhum item está ligado ainda.</p>' : '') +
-      (pend.length ? '<div class="tabela-rolagem"><table class="tabela"><tbody>' + pend.map(linhaC).join('') + '</tbody></table></div>' : '<p class="vazio">Nenhuma nota esperando entrada.</p>') +
-      (feitas.length ? '<details data-chave="es-compras-feitas"><summary>Últimas lançadas ou deixadas de lado (' + feitas.length + ')</summary><div class="tabela-rolagem"><table class="tabela"><tbody>' + feitas.map(linhaC).join('') + '</tbody></table></div></details>' : '') +
-      '</section>';
+    const tabela = l => '<div class="tabela-rolagem"><table class="tabela"><tbody>' + l.map(linhaC).join('') + '</tbody></table></div>';
+    return '<section class="cartao"><h2>Notas de compra para dar entrada <small>' + pend.length + (chegaram ? ' · ' + chegaram + (chegaram === 1 ? ' já chegou' : ' já chegaram') : '') + '</small></h2>' +
+      (pend.length ? '<p class="dica">As mais novas em cima. Só dê entrada no que chegou: enquanto o FKN roda junto, o selo verde aparece quando a listagem do FKN mostra entrada dos produtos da nota' +
+        (listagem ? ' (última listagem: ' + esc(quando(listagem)) + ')' : '') + '. <strong>Dar entrada</strong> soma no estoque do CRM e <strong>não</strong> lança nada no contas a pagar (o FKN já lança). ' +
+        '<strong>Não é mercadoria</strong> (combustível, serviço, material de uso, nota repetida): sai da lista sem mexer no estoque; a despesa fica no Caixa.</p>' + tabela(pend)
+        : '<p class="vazio">Nenhuma nota esperando entrada.</p>') +
+      '<details data-chave="es-compras-como"><summary>Subir XML à mão e como a entrada funciona</summary>' +
+        '<p>As notas chegam sozinhas pela Sefaz (abaixo). Se precisar, suba o <strong>XML</strong> (vários de uma vez, ou o .zip). Na entrada, ligue cada item a um produto nosso e diga o fator ' +
+        '(ex.: a caixa com 25 pacotes = 25); o CRM lembra a ligação para a próxima nota do mesmo fornecedor. O custo do item é valor + IPI + ST + frete e refaz o custo médio.</p>' +
+        (lendoCompras ? '<p class="cob-lendo">' + esc(lendoCompras) + '</p>' : '<label class="btn sec arquivo">Escolher XML ou ZIP<input type="file" id="esCompraArq" multiple accept=".xml,.zip,text/xml,application/xml,application/zip"></label>') +
+      '</details>' +
+      (lancadas.length ? '<details data-chave="es-compras-lancadas"><summary>Entradas dadas (' + lancadas.length + ')</summary>' + tabela(lancadas) + '</details>' : '') +
+      (deixadas.length ? '<details data-chave="es-compras-deixadas"><summary>Deixadas de lado (' + deixadas.length + ')</summary>' + tabela(deixadas) + '</details>' : '') +
+      (historico ? '<p class="dica">' + historico + ' nota(s) de antes do início do estoque do CRM ficam só como histórico de preço (já estão no saldo que veio do FKN).</p>' : '') +
+      '</section>' + blocoSefaz();
   }
 
   // Grava cada XML de compra em crm_compras (pendente, para o comprador conferir). Nota de ANTES do início do estoque do
@@ -654,7 +683,7 @@
         };
         CRM.abrirForm({
           titulo: 'NF ' + c.numero + ' · ' + (c.fornecedor_nome || ''), largura: 'extra', campos: [], valores: {},
-          intro: (pend ? 'Ligue cada item a um produto nosso e diga o fator (quantas unidades do nosso estoque vêm em 1 unidade da nota). "Não é estoque": frete, brinde, material de uso.'
+          intro: (pend ? 'Ligue cada item a um produto nosso e diga o fator (quantas unidades do nosso estoque vêm em 1 unidade da nota). "Não é estoque": frete, brinde, material de uso. Dar entrada soma no estoque do CRM; não lança nada no contas a pagar.'
             : 'Entrada dada em ' + quando(c.lancada_em) + '.') + (c.parcelas && c.parcelas.length ? ' Parcelas da nota: ' + c.parcelas.map(p => R.dataBR(p.vencimento) + ' ' + R.moeda(p.valor)).join(', ') + ' (não vão para o contas a pagar enquanto o FKN roda junto).' : ''),
           htmlDepois: '<datalist id="esProdutos">' + [...nomeDe.entries()].map(([k, v]) => '<option value="' + esc(k) + '">' + esc(v || '') + '</option>').join('') + '</datalist>' +
             '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Item da nota</th><th>Produto nosso</th><th>Fator</th><th></th></tr></thead><tbody>' + itens.map(linhaI).join('') + '</tbody></table></div>',
@@ -684,9 +713,20 @@
     },
     'es-compra-ignorar': async id => {
       const c = compras.find(x => x.id === id); if (!c) return;
-      const obs = prompt('Deixar de lado a NF ' + c.numero + ' de ' + (c.fornecedor_nome || '') + '? Diga o motivo (ex.: material de uso, serviço, nota repetida):');
-      if (obs == null) return;
-      try { await CRM.store().compraIgnorar(id, obs); compras = await CRM.store().compras(200); CRM.render(); } catch (e) { CRM.falhou(e); }
+      const desp = S.pareceDespesa(itensPend.filter(i => i.compra_id === id));
+      CRM.abrirForm({
+        titulo: 'Não é mercadoria: NF ' + c.numero + ' · ' + (c.fornecedor_nome || ''),
+        intro: 'A nota sai da lista sem entrar no estoque e sem ir para o contas a pagar do CRM. Se for despesa (combustível, serviço), ela vai no Caixa: lance lá se ainda não lançou.' +
+          (desp ? ' Pelos itens, parece ' + desp + '.' : ''),
+        campos: [{ nome: 'motivo', rotulo: 'O que é', tipo: 'select', obrigatorio: true, opcoes: [['despesa', 'Despesa (combustível, serviço, manutenção)'], ['uso', 'Material de uso e consumo da empresa'],
+          ['repetida', 'Nota repetida'], ['outro', 'Outro']] }, { nome: 'obs', rotulo: 'Observação', dica: 'ex.: abastecimento do caminhão (contrato com o posto)' }],
+        valores: { motivo: desp ? 'despesa' : '', obs: desp === 'combustível' || desp === 'nota de cupom fiscal (posto)' ? 'abastecimento' : '' },
+        salvarTexto: 'Tirar da lista',
+        aoSalvar: async v => {
+          const nome = { despesa: 'despesa', uso: 'material de uso', repetida: 'nota repetida', outro: 'outro' }[v.motivo] || v.motivo;
+          await CRM.store().compraIgnorar(id, nome + (v.obs ? ': ' + v.obs : ''));
+          compras = await CRM.store().compras(200); CRM.toast('Tirada da lista (' + nome + ').'); CRM.render();
+        } });
     },
     'es-contagem': () => {
       CRM.abrirForm({
