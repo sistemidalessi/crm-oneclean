@@ -702,8 +702,14 @@
   function painelComprador(c) {
     const ph = c.pedirHoje || [], cs = c.custoSubiu || [], sf = c.semFornecedor || [];
     const temIA = CRM.turma && CRM.turma.perguntar && CRM.store().assistente;
-    return '<section class="cartao painel-comprador"><h2>Painel do comprador <small>o que precisa da sua atenção hoje</small></h2>' +
-      '<p class="acoes">' + (temIA ? '<button type="button" class="btn" data-acao="compras-analise">💬 Pedir a análise de compras de hoje</button> ' : '') +
+    const an = CRM.turma && CRM.turma.analise ? CRM.turma.analise() : null, gerando = CRM.gerandoAnalise && CRM.gerandoAnalise();
+    const blocoIA = temIA && CRM.store().analiseCompras ? '<div class="analise-ia"><h3>🧠 Análise de compras de hoje' + (an && an.em ? ' <small>feita às ' + esc(new Date(an.em).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' })) + '</small>' : '') + '</h3>' +
+      (gerando ? '<p class="cob-lendo">O comprador sênior está olhando a reposição, os fornecedores, as notas de compra, o custo e o estoque parado…</p>'
+        : an && an.texto ? '<div class="analise-texto">' + CRM.turma.fmt(an.texto) + '</div>' : '<p class="vazio">Ainda não feita hoje.</p>') +
+      '<p class="acoes">' + (!gerando ? '<button type="button" class="btn' + (an && an.texto ? ' sec' : '') + '" data-acao="compras-analise-gerar">' + (an && an.texto ? '↻ Refazer agora' : 'Fazer a análise de hoje') + '</button> ' : '') +
+        '<button type="button" class="btn sec" data-acao="compras-analise">💬 Conversar com o comprador sênior</button></p></div>' : '';
+    return '<section class="cartao painel-comprador"><h2>Painel do comprador <small>o que precisa da sua atenção hoje</small></h2>' + blocoIA +
+      '<p class="acoes">' +
         (CRM.telas.concorrentes ? '<button type="button" class="btn sec" data-acao="aba" data-id="concorrentes">⚖ Comparar com os concorrentes</button> ' : '') +
         (temIA ? '<small class="dica">a IA olha a reposição, os fornecedores, o estoque parado e os preços dos concorrentes</small>' : '') + '</p>' +
       '<div class="g-tres">' +
@@ -811,6 +817,7 @@
       CRM.render();
       const t = document.querySelector('.filtros-compras'); if (t && t.scrollIntoView) t.scrollIntoView({ block: 'start' });
     },
+    'compras-analise-gerar': () => { const an = CRM.turma.analise(); CRM.turma.gerarAnalise(!!(an && an.texto)); },
     'compras-analise': () => CRM.turma && CRM.turma.perguntar && CRM.turma.perguntar('Faça a análise de compras de hoje como comprador sênior: o que pedir e de qual fornecedor (com quantidades e o porquê), ' +
       'o que acaba antes da entrega, fornecedores perto do pedido mínimo, preço de compra que subiu e o estoque parado que vale uma oferta.'),
     'compras-pedido-fornecedor': i => {

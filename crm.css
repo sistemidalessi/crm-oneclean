@@ -992,3 +992,9 @@ pre.of-previa { white-space: pre-wrap; font-family: inherit; font-size: .88rem; 
 /* Concorrentes: a célula do concorrente mais barato que a nossa tabela */
 .tabela.concorrentes tbody tr > td.cc-menor { background: var(--vermelho-fundo); }
 .tabela.concorrentes td small { display: inline; }
+
+/* análise de compras do dia (comprador sênior, 19/10) */
+.analise-ia { border: 1px solid var(--borda); border-left: 4px solid var(--verde, #a9c451); border-radius: 12px; padding: 10px 14px; margin: 6px 0 12px; background: var(--papel); }
+.analise-ia h3 { margin: 0 0 6px; }
+.analise-texto { line-height: 1.5; }
+.analise-texto ul { margin: 4px 0 4px 18px; padding: 0; }

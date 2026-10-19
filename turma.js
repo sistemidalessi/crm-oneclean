@@ -60,6 +60,10 @@
       if (cs.desconhecidos) poe('dfe-desc', 'urgente', plural(cs.desconhecidos, 'fornecedor que nunca vendeu para a empresa apareceu nas notas da Sefaz', 'fornecedores que nunca venderam para a empresa apareceram nas notas da Sefaz'), 'estoque', 'compras', 'auditoria');
       if (cs.prazo) poe('dfe-prazo', 'urgente', plural(cs.prazo, 'nota de compra perto do prazo da resposta à Sefaz', 'notas de compra perto do prazo da resposta à Sefaz'), 'estoque', 'compras', 'auditoria');
     }
+    if (c.analise) {
+      if (c.analise.pronta) poe('ia-compras', 'atencao', 'Análise de compras de hoje pronta: o que pedir e de quem', 'compras', null, 'compras-setor-interno');
+      else if (c.analise.gerando) poe('ia-compras', 'info', 'Preparando a análise de compras de hoje…', 'compras', null, 'compras-setor-interno');
+    }
     if (c.admin) {
       const cx = r.caixa || {}, rc = r.receber || {};
       if (cx.vencidas) poe('cx-venc', 'urgente', plural(cx.vencidas, 'conta vencida sem baixa', 'contas vencidas sem baixa') + ' (' + reais(cx.vencidas_valor) + ')', 'caixa');
@@ -113,9 +117,22 @@
   const FALA_TELA = cfgT.falas || {};
   let resumo = {}, resumoEm = 0, resumoOk = false, itens = [], painelAberto = false;
   let marcas = [], marcasOk = false, brutos = [], marcados = [], verMarcados = false;
+  // Análise de compras do dia (comprador sênior, 19/10/2026): o primeiro administrador ou comprador que abre o CRM no
+  // dia faz a IA preparar (uma vez por dia, guardada no banco); o Clean avisa e o painel do comprador mostra.
+  let analise = null, analiseDia = '', gerandoAnalise = false;
+  const fazAnalise = () => (CRM.ehAdmin() || CRM.ehComprador()) && CRM.store().analiseCompras;
+  async function gerarAnalise(refazer) {
+    if (gerandoAnalise || !fazAnalise()) return analise;
+    gerandoAnalise = true; CRM.render();
+    try { analise = await CRM.store().analiseCompras(refazer); analiseDia = CRM.hoje(); }
+    catch (e) { if (refazer) CRM.falhou(e); }
+    gerandoAnalise = false; CRM.render();
+    return analise;
+  }
+  CRM.gerandoAnalise = () => gerandoAnalise;
 
   // perguntar: abre o painel e manda a pergunta (botões prontos das telas, ex.: "Pedir a análise de compras de hoje")
-  CRM.turma = { img, dados, ativo: true, atualizar, depoisRender, perguntar: t => setTimeout(() => { abrePainel(); perguntar(t); }, 0) };   // depois do clique (senão o "clique fora" fecha o painel)
+  CRM.turma = { img, dados, ativo: true, atualizar, depoisRender, perguntar: t => setTimeout(() => { abrePainel(); perguntar(t); }, 0), fmt: t => fmt(t), analise: () => analise, gerarAnalise };   // depois do clique (senão o "clique fora" fecha o painel)
 
   async function atualizar(forca) {
     const st = CRM.store();
@@ -124,6 +141,12 @@
     resumoEm = Date.now();
     try { resumo = (await st.turmaResumo()) || {}; resumoOk = true; } catch (e) { /* o guia segue com o que já tem */ }
     if (st.turmaMarcas) try { marcas = (await st.turmaMarcas()) || []; marcasOk = true; } catch (e) { /* sem as marcas, mostra tudo */ }
+    if (fazAnalise() && analiseDia !== CRM.hoje()) {
+      try { analise = await st.analiseHoje(CRM.hoje()); analiseDia = CRM.hoje(); } catch (e) { analise = null; }
+      // ninguém fez ainda hoje: prepara em segundo plano (uma vez por dia neste navegador)
+      let ja = ''; try { ja = localStorage.getItem('crm_analise_tentada') || ''; } catch (e) { /* ok */ }
+      if (!analise && st.modo === 'supabase' && ja !== CRM.hoje()) { try { localStorage.setItem('crm_analise_tentada', CRM.hoje()); } catch (e) { /* ok */ } gerarAnalise(false); }
+    }
     CRM.render();
   }
   setInterval(() => { if (document.visibilityState === 'visible') atualizar(true); }, 5 * 60000);
@@ -149,7 +172,8 @@
       gestor: CRM.ehGestor(), admin: CRM.ehAdmin(), comprador: CRM.ehComprador(), op: CRM.ehLogistica() || CRM.ehGestor(),
       fkn: CRM.lembreteFkn ? CRM.lembreteFkn() : [], recusas: CRM.recusasFkn ? CRM.recusasFkn() : [],
       vigiasParados: CRM.ehAdmin() ? (E().vigias || []).filter(c => raiz.CRMDados.situacaoVigia(c).estado === 'parado').map(c => c.nome) : [],
-      papel: eu.papel
+      papel: eu.papel,
+      analise: fazAnalise() ? { pronta: !!(analise && analise.texto), gerando: gerandoAnalise } : null
     });
   }
 

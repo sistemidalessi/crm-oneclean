@@ -1335,6 +1335,18 @@ Respostas dele: histórico das notas de compra **buscado na Sefaz**; concorrente
   565x/666x (combustível), 5933/6933 (serviço) em todos os itens → selo "💡 parece despesa" e o botão principal vira
   "Não é mercadoria" (formulário com o motivo: despesa, material de uso, nota repetida, outro). Itens das pendentes pela
   `crm_compra_itens` (RLS admin/comprador).
+- **Comprador sênior de verdade (19/10, pedido do Anderson: "IA funcionando forte na página de compras"):**
+  `supabase/functions/crm-assistente/comprador.ts` (deploy junto do `index.ts`, `crm-assistente` v4) traz o **manual do
+  comprador** (vai como 2º bloco do system quando a tela/mascote é de Compras, Estoque, Concorrentes ou Ofertas, só para
+  admin e comprador) e 4 ferramentas novas: `pedido_sugerido` (por fornecedor: venda/dia 90 dias com o fator da caixa,
+  cobertura, curva ABC dos 90 dias, alvo = venda/dia × (dias + prazo) com piso no mínimo, menos saldo e já pedido,
+  arredondado para a caixa; total, mínimo e quanto falta, frete, dia de pedido; fornecedor "não compramos" vai para "sem
+  fornecedor"), `estoque_parado`, `margens` (contra `margem_minima` da configuração, 23% padrão; preço que dá a mínima) e
+  `notas_de_compra` (pendentes com chegou/aguardando e despesa, só resumo sem ciência). **Análise de compras do dia**
+  (`acao: 'analise_compras'`): o 1º admin/comprador que abre o CRM no dia dispara (uma vez por dia por navegador; o banco
+  devolve a já feita), fica em `crm_ia_analises` (dia, tipo, texto; RLS leitura admin/comprador; grava só a função), o
+  Clean avisa ("Análise de compras de hoje pronta") e o Painel do comprador mostra no topo com "Refazer agora" e
+  "Conversar com o comprador sênior". Custo medido nas 4 perguntas de outubro: ~US$ 0,06 cada.
 - **3 — fornecedores e painel do comprador (18/10, feito):** tabelas `crm_fornecedores` (código do FKN; prazo de entrega,
   pedido mínimo, frete CIF/FOB/CIF acima de X, dias de pedido 1=seg…6=sáb, pagamento, contato), `crm_produto_fornecedor`
   (produto sem fornecedor ou com o errado no FKN; fornecedor nulo = volta ao do FKN, sem apagar linha) e

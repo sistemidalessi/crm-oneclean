@@ -1190,6 +1190,11 @@
     if (r.error) throw await erroDaFuncao(r);
     return r.data;
   };
+  // Análise de compras do dia (comprador sênior, 19/10/2026): feita uma vez por dia pela crm-assistente.
+  Supa.prototype.analiseCompras = async function (refazer) { return this.assistente({ acao: 'analise_compras', refazer: !!refazer }); };
+  Supa.prototype.analiseHoje = async function (dia) { return unwrap(await this.sb.from('crm_ia_analises').select('dia, texto, em').eq('dia', dia).eq('tipo', 'compras').maybeSingle()); };
+  Local.prototype.analiseCompras = async function () { const a = { dia: R.hojeISO(), texto: '(modo local: sem IA) Aqui aparece a análise de compras do dia: **o que pedir hoje e de quem**, as notas que chegaram, o custo que subiu e o estoque parado.', em: new Date().toISOString(), nova: true }; this._analise = a; return a; };
+  Local.prototype.analiseHoje = async function (dia) { return this._analise && this._analise.dia === dia ? this._analise : null; };
   // modo local: sem IA (serve para ver a tela); responde só com o eco da pergunta
   Local.prototype.assistente = async function (corpo) {
     if (corpo.acao === 'situacao') return { ligado: true, hoje: 0, limite: 40, custo_mes: null };

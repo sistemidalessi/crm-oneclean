@@ -3,6 +3,8 @@
 // especialista da tela) e a IA responde consultando o CRM.
 //   POST { acao: 'situacao' }                                         → { ligado, hoje, limite, custo_mes? }
 //   POST { pergunta, conversa_id?, tela?, mascote?: {id, nome, papel} } → { conversa_id, resposta, ferramentas }
+//   POST { acao: 'analise_compras', refazer? }  (admin e comprador)  → { dia, texto, em, nova }: a análise de compras
+//        do dia (comprador.ts), feita uma vez por dia e guardada em crm_ia_analises; refazer = de novo.
 // Regras que valem sempre:
 //   - SÓ CONSULTA. Nenhuma ferramenta grava nada; para fazer, a resposta aponta a tela.
 //   - Toda consulta roda com o LOGIN de quem pergunta (cliente com o token dele): a RLS de sempre decide o que
@@ -15,6 +17,7 @@
 // Deploy: verify_jwt ligado (o padrão).
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2.116.0';
 import Anthropic from 'npm:@anthropic-ai/sdk@0.129.0';
+import { COMPRADOR, PERGUNTA_ANALISE, ferramentasComprador } from './comprador.ts';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -332,10 +335,64 @@ const FERRAMENTAS: Record<string, Ferr> = {
   }
 };
 
+// as ferramentas e o manual do comprador sênior (comprador.ts)
+Object.assign(FERRAMENTAS, ferramentasComprador({ tudo, obj, n2, normaliza, somaDias }));
+const ehCompra = (tela: string, m: Record<string, unknown>) => /compra|estoque|concorr|oferta/i.test(tela + ' ' + String(m.papel || '') + ' ' + String(m.id || ''));
+
 const custo = (u: { entrada: number; saida: number; lido: number; escrito: number }) =>
   Math.round((u.entrada * PRECO.entrada + u.saida * PRECO.saida + u.lido * PRECO.lido + u.escrito * PRECO.escrito) / 1e6 * 100000) / 100000;
 const hojeSP = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
 const agoraSP = () => new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+// O laço da conversa: a IA pede ferramentas, o CRM responde, até ela dar o texto (no máximo VOLTAS rodadas).
+async function roda(ia: Anthropic, system: unknown, tools: Anthropic.Tool[], mensagens: Anthropic.Beta.BetaMessageParam[], ctx: Ctx, papel: string) {
+  const usadasF: string[] = [];
+  const tok = { entrada: 0, saida: 0, lido: 0, escrito: 0 };
+  let texto = '', erro: string | null = null;
+  try {
+    for (let volta = 0; volta < VOLTAS; volta++) {
+      const r = await ia.beta.messages.create({
+        model: MODELO, max_tokens: 8000,
+        betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default',
+        output_config: { effort: 'low' },
+        cache_control: { type: 'ephemeral' },
+        system, tools, messages: mensagens
+        // deno-lint-ignore no-explicit-any
+      } as any);
+      tok.entrada += r.usage.input_tokens || 0; tok.saida += r.usage.output_tokens || 0;
+      tok.lido += r.usage.cache_read_input_tokens || 0; tok.escrito += r.usage.cache_creation_input_tokens || 0;
+      mensagens.push({ role: 'assistant', content: r.content });
+      if (r.stop_reason === 'refusal') { texto = 'Não consigo responder essa pergunta. Tente perguntar de outro jeito.'; break; }
+      if (r.stop_reason === 'pause_turn') continue;
+      // deno-lint-ignore no-explicit-any
+      const pedidas = (r.content as any[]).filter(b => b.type === 'tool_use');
+      if (r.stop_reason !== 'tool_use' || !pedidas.length) {
+        // deno-lint-ignore no-explicit-any
+        texto = (r.content as any[]).filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
+        if (r.stop_reason === 'max_tokens') texto += '\n\n(a resposta ficou comprida e foi cortada; pergunte de um jeito mais específico)';
+        break;
+      }
+      const resultados = await Promise.all(pedidas.map(async b => {
+        const f = FERRAMENTAS[b.name];
+        usadasF.push(b.name);
+        if (!f || !f.papeis.includes(papel)) return { type: 'tool_result' as const, tool_use_id: b.id, is_error: true, content: 'ferramenta não liberada para este perfil' };
+        try {
+          const saida = JSON.stringify(await f.roda(ctx, b.input || {}));
+          return { type: 'tool_result' as const, tool_use_id: b.id, content: saida.length > 14000 ? saida.slice(0, 14000) + '…(cortado)' : saida };
+        } catch (e) {
+          console.error('[crm-assistente] ' + b.name + ': ' + ((e as Error).message || e));
+          return { type: 'tool_result' as const, tool_use_id: b.id, is_error: true, content: 'a consulta falhou' };
+        }
+      }));
+      mensagens.push({ role: 'user', content: resultados });
+      if (volta === VOLTAS - 1) texto = 'Precisei de consultas demais para essa pergunta. Tente dividir em perguntas menores.';
+    }
+  } catch (e) {
+    erro = e instanceof Anthropic.APIError ? 'API ' + e.status : ((e as Error).message || 'falha');
+    console.error('[crm-assistente] ' + erro);
+  }
+  return { texto, erro, usadasF, tok };
+}
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
@@ -365,15 +422,21 @@ Deno.serve(async (req) => {
   if (!chave) return resposta(503, { erro: 'a IA ainda não está ligada: falta a chave da Anthropic nos segredos do Supabase (ANTHROPIC_API_KEY)' });
   if ((usadas || 0) >= limite) return resposta(429, { erro: 'você já fez ' + limite + ' perguntas hoje (o limite do dia). Amanhã libera de novo.' });
 
-  const pergunta = String(c.pergunta ?? '').trim().slice(0, 2000);
+  const analise = c.acao === 'analise_compras';
+  if (analise) {
+    if (!['admin', 'comprador'].includes(eu.papel)) return resposta(403, { erro: 'a análise de compras é do comprador e do administrador' });
+    const { data: ja } = await db.from('crm_ia_analises').select('dia, texto, em').eq('dia', hoje).eq('tipo', 'compras').maybeSingle();
+    if (ja && !c.refazer) return resposta(200, Object.assign({ nova: false }, ja));
+  }
+  const pergunta = analise ? PERGUNTA_ANALISE : String(c.pergunta ?? '').trim().slice(0, 2000);
   if (!pergunta) return resposta(400, { erro: 'escreva a pergunta' });
   const m = c.mascote && typeof c.mascote === 'object' ? c.mascote : {};
   const quemResponde = String(m.nome || 'Clean').slice(0, 40) + (m.papel ? ' (' + String(m.papel).slice(0, 60) + ')' : '');
-  const tela = String(c.tela || '').slice(0, 40);
+  const tela = analise ? 'Compras (análise do dia)' : String(c.tela || '').slice(0, 40);
 
   // conversa: a mesma (só do próprio usuário) ou nova
   let conversa: { id: string; mensagens: Anthropic.Beta.BetaMessageParam[] } | null = null;
-  if (c.conversa_id) {
+  if (c.conversa_id && !analise) {
     const { data } = await db.from('crm_assistente_conversas').select('id, mensagens').eq('id', String(c.conversa_id)).eq('user_id', eu.user_id).maybeSingle();
     if (data && Array.isArray(data.mensagens) && data.mensagens.length < 60) conversa = { id: data.id, mensagens: data.mensagens };
   }
@@ -385,54 +448,19 @@ Deno.serve(async (req) => {
   const ctx: Ctx = { u, papel: eu.papel, meuId: eu.user_id, hoje, usuarios: new Map((us || []).map(x => [x.user_id, x.nome])) };
   const minhas = Object.entries(FERRAMENTAS).filter(([, f]) => f.papeis.includes(eu.papel));
   const tools = minhas.map(([, f]) => f.def);
-  const usadasF: string[] = [];
-  const tok = { entrada: 0, saida: 0, lido: 0, escrito: 0 };
-  const ia = new Anthropic({ apiKey: chave, timeout: 120000, maxRetries: 1 });
-  let texto = '', erro: string | null = null;
-  try {
-    for (let volta = 0; volta < VOLTAS; volta++) {
-      const r = await ia.beta.messages.create({
-        model: MODELO, max_tokens: 8000,
-        betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default',
-        output_config: { effort: 'low' },
-        cache_control: { type: 'ephemeral' },
-        system: SISTEMA, tools, messages: mensagens
-        // deno-lint-ignore no-explicit-any
-      } as any);
-      tok.entrada += r.usage.input_tokens || 0; tok.saida += r.usage.output_tokens || 0;
-      tok.lido += r.usage.cache_read_input_tokens || 0; tok.escrito += r.usage.cache_creation_input_tokens || 0;
-      mensagens.push({ role: 'assistant', content: r.content });
-      if (r.stop_reason === 'refusal') { texto = 'Não consigo responder essa pergunta. Tente perguntar de outro jeito.'; break; }
-      if (r.stop_reason === 'pause_turn') continue;
-      // deno-lint-ignore no-explicit-any
-      const pedidas = (r.content as any[]).filter(b => b.type === 'tool_use');
-      if (r.stop_reason !== 'tool_use' || !pedidas.length) {
-        // deno-lint-ignore no-explicit-any
-        texto = (r.content as any[]).filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
-        if (r.stop_reason === 'max_tokens') texto += '\n\n(a resposta ficou comprida e foi cortada; pergunte de um jeito mais específico)';
-        break;
-      }
-      const resultados = await Promise.all(pedidas.map(async b => {
-        const f = FERRAMENTAS[b.name];
-        usadasF.push(b.name);
-        if (!f || !f.papeis.includes(eu.papel)) return { type: 'tool_result' as const, tool_use_id: b.id, is_error: true, content: 'ferramenta não liberada para este perfil' };
-        try {
-          const saida = JSON.stringify(await f.roda(ctx, b.input || {}));
-          return { type: 'tool_result' as const, tool_use_id: b.id, content: saida.length > 14000 ? saida.slice(0, 14000) + '…(cortado)' : saida };
-        } catch (e) {
-          console.error('[crm-assistente] ' + b.name + ': ' + ((e as Error).message || e));
-          return { type: 'tool_result' as const, tool_use_id: b.id, is_error: true, content: 'a consulta falhou' };
-        }
-      }));
-      mensagens.push({ role: 'user', content: resultados });
-      if (volta === VOLTAS - 1) texto = 'Precisei de consultas demais para essa pergunta. Tente dividir em perguntas menores.';
-    }
-  } catch (e) {
-    erro = e instanceof Anthropic.APIError ? 'API ' + e.status : ((e as Error).message || 'falha');
-    console.error('[crm-assistente] ' + erro);
-  }
+  const comprador = ['admin', 'comprador'].includes(eu.papel) && (analise || ehCompra(tela, m));
+  const system = comprador ? [{ type: 'text', text: SISTEMA }, { type: 'text', text: COMPRADOR }] : SISTEMA;
+  const r0 = await roda(new Anthropic({ apiKey: chave, timeout: 120000, maxRetries: 1 }), system, tools, mensagens, ctx, eu.papel);
+  const { texto, erro, usadasF, tok } = r0;
   // a conversa só guarda turnos completos: se deu erro no meio, não grava o pedaço
   let conversaId = conversa ? conversa.id : null;
+  if (analise && !erro && texto) {
+    const linha = { dia: hoje, tipo: 'compras', texto, em: new Date().toISOString(), por: eu.user_id, custo_usd: custo(tok) };
+    await db.from('crm_ia_analises').upsert(linha, { onConflict: 'dia,tipo' });
+    await db.from('crm_assistente_uso').insert({ user_id: eu.user_id, conversa_id: null, tela, mascote: 'analise', ferramentas: usadasF,
+      tokens_entrada: tok.entrada, tokens_saida: tok.saida, cache_lido: tok.lido, cache_escrito: tok.escrito, custo_usd: custo(tok), erro: null });
+    return resposta(200, { nova: true, dia: hoje, texto, em: linha.em });
+  }
   if (!erro && texto) {
     const titulo = pergunta.slice(0, 80);
     if (conversaId) await db.from('crm_assistente_conversas').update({ mensagens, atualizado_em: new Date().toISOString() }).eq('id', conversaId).eq('user_id', eu.user_id);

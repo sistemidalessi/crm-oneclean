@@ -3335,3 +3335,20 @@ grant select, insert, update, delete on public.crm_turma_marcas to authenticated
 drop policy if exists dono on public.crm_turma_marcas;
 create policy dono on public.crm_turma_marcas for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
+
+-- Análise de compras do dia pela IA (comprador sênior, 19/10/2026): uma por dia, gravada pela crm-assistente (service
+-- role); o comprador e o administrador leem.
+create table if not exists public.crm_ia_analises (
+  dia date not null,
+  tipo text not null check (tipo in ('compras')),
+  texto text not null,
+  em timestamptz not null default now(),
+  por uuid,
+  custo_usd numeric(10,5),
+  primary key (dia, tipo)
+);
+alter table public.crm_ia_analises enable row level security;
+revoke all on public.crm_ia_analises from anon, public;
+grant select on public.crm_ia_analises to authenticated;
+drop policy if exists le on public.crm_ia_analises;
+create policy le on public.crm_ia_analises for select to authenticated using ((select public.crm_eh_admin()) or (select public.crm_eh_comprador()));

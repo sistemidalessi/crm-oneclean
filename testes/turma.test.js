@@ -85,3 +85,11 @@ test('marcas nos avisos: resolvido some até aparecer coisa nova; amanhã volta 
   const texto = T.aplicaMarcas([{ id: 'a', texto: 'Relatório recusado' }], [{ id: 'a', tipo: 'resolvido', texto: 'Relatório recusado' }], '2026-10-19', true);
   assert.equal(texto.visiveis.length, 0, 'sem número: some enquanto o texto for o mesmo');
 });
+
+test('guia: aviso da análise de compras do dia (admin e comprador)', () => {
+  const pronta = T.guia({ analise: { pronta: true, gerando: false } });
+  assert.deepStrictEqual(pronta.map(x => [x.id, x.nivel, x.aba]), [['ia-compras', 'atencao', 'compras']]);
+  assert.strictEqual(T.guia({ analise: { pronta: false, gerando: true } })[0].nivel, 'info');
+  assert.strictEqual(T.guia({ analise: { pronta: false, gerando: false } }).length, 0);
+  assert.strictEqual(T.guia({}).length, 0, 'sem papel de compra, nada');
+});
