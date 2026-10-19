@@ -225,12 +225,17 @@ Deno.serve(async (req) => {
   const pasta = 'sugestoes/' + codigo;
   const { data: velhos } = await db.storage.from(BUCKET).list(pasta, { limit: 100 });
   if (velhos && velhos.length) await db.storage.from(BUCKET).remove(velhos.map(v => pasta + '/' + v.name));
-  const vistos = new Set<string>(), candidatos: Record<string, unknown>[] = [];
+  // a mesma foto vem em vários endereços (og:image, JSON-LD, galeria): fica uma só, pelo conteúdo do arquivo ou pelo tamanho na mesma página
+  const vistos = new Set<string>(), iguais = new Set<string>(), candidatos: Record<string, unknown>[] = [];
   const unicos = achadas.filter(a => { if (vistos.has(a.url)) return false; vistos.add(a.url); return true; }).slice(0, 10);
   await Promise.all(unicos.map(async (a, i) => {
     const r = await baixa(a.url, 3_000_000, 9000, 'image/*');
     const m = r && medeImagem(r.bytes);
     if (!r || !m || (m.largura && m.largura < 200) || (m.altura && m.altura < 200)) return;
+    const hash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', r.bytes))).map(x => x.toString(16).padStart(2, '0')).join('');
+    const mesma = a.pagina + '|' + m.largura + 'x' + m.altura; // mesmo site e mesmo tamanho: a mesma foto recomprimida
+    if (iguais.has(hash) || iguais.has(mesma)) return;
+    iguais.add(hash); iguais.add(mesma);
     const caminho = pasta + '/' + (i + 1) + '-' + Date.now().toString(36) + '.' + m.ext;
     const up = await db.storage.from(BUCKET).upload(caminho, r.bytes, { contentType: m.tipo, upsert: true, cacheControl: '3600' });
     if (up.error) return;

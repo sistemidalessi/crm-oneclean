@@ -1454,7 +1454,15 @@ https://claude.ai/artifact/AkJoPA2gw7i3Wz99fcDY7p: Produtos, Ficha, Buscar foto,
   "parecido" do site da Embalagens Leal e o catálogo em PDF), 2 sem nada (cloro Cloraclor e saco 100 L Leal: marca própria
   / pouco presente na web). Daí a v2: Haiku, 3 buscas, concorrentes bloqueados. Contas para o lote: 739 produtos venderam
   em 90 dias, 277 em 5 notas ou mais, 161 em 10 ou mais, 68 em 20 ou mais (de 1.711 ativos).
-- **Falta:** o 2º teste de 5 (com o Haiku) e, pelo custo dele, combinar com o Anderson o tamanho do lote.
+- **2º teste (19/10, 17h18, Haiku 5.5, v2):** **US$ 0,027 por produto** (48 a 51 mil tokens, 2 buscas) e qualidade
+  MELHOR: álcool 70 Audax 5 L (EAN batendo em duas lojas, ficha técnica e FISPQ em PDF do fabricante, 12 especificações),
+  luva Sanro Standard M (foto e ficha do fabricante, CA 1494, 16 especificações), detergente Agipro Cleene 5 L (EAN, ficha
+  e FISPQ do fabricante, 19 especificações), flanela 38×58 (3 fotos de loja, 5 especificações). Só 4 dos 5 voltaram (o 5º
+  provavelmente caiu na publicação da v3 no meio da busca). A mesma foto vinha 2–3 vezes (og:image, JSON-LD, galeria):
+  a v3 descarta a repetida pelo conteúdo do arquivo e por "mesma página + mesmo tamanho". Conta do lote no Haiku:
+  161 produtos (10+ notas) ≈ US$ 4,40; 277 (5+) ≈ US$ 7,50; 739 (venderam em 90 dias) ≈ US$ 20; os 1.711 ≈ US$ 46.
+  IA do mês até aqui: US$ 1,88 (limite da chave US$ 10).
+- **Falta:** o Anderson decidir o tamanho do lote (cabe no limite do mês ou aumentar o limite da chave).
 
 ## NF-e emitida pelo CRM — Fase 4 da saída do FKN (16/10/2026, pedido do Anderson)
 
