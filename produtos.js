@@ -83,10 +83,11 @@
       .slice(0, quantos == null ? Infinity : quantos).map(x => x.codigo);
   }
 
-  // Custo médio por produto das buscas já feitas (ou a estimativa antes do teste) → total estimado do lote, em US$.
-  const CUSTO_PADRAO = 0.08;
+  // Custo médio por produto das 10 buscas mais recentes (a lista vem da mais nova para a mais velha; as antigas podem ser
+  // de outro modelo) ou a estimativa antes de medir → total estimado do lote, em US$.
+  const CUSTO_PADRAO = 0.05;
   function custoEstimado(n, sugestoes) {
-    const l = (sugestoes || []).map(x => num(x.custo_usd)).filter(v => v > 0);
+    const l = (sugestoes || []).map(x => num(x.custo_usd)).filter(v => v > 0).slice(0, 10);
     const medio = l.length ? l.reduce((s, v) => s + v, 0) / l.length : CUSTO_PADRAO;
     return { medio: Math.round(medio * 1000) / 1000, total: Math.round(n * medio * 100) / 100, medido: l.length };
   }

@@ -1425,9 +1425,11 @@ https://claude.ai/artifact/AkJoPA2gw7i3Wz99fcDY7p: Produtos, Ficha, Buscar foto,
   começado) e, na ficha, "Buscar foto e ficha (IA)", "Subir foto", "Tirar foto" (câmera do celular), "Editar a ficha"
   (marca, fabricante, descrição, especificações "Nome: valor" por linha, subir PDF da ficha e da FISPQ) e "tirar a foto".
   Miniaturas também no Saldo por produto. A foto é **reduzida no navegador** (900 px, JPEG, fundo branco) antes de guardar.
-- **IA (Edge Function `crm-produto-buscar`, só admin/comprador):** Claude **Sonnet 5.5** (metade do preço do Opus;
-  `CRM_FOTOS_MODELO` nos Secrets troca) com as ferramentas de **busca e leitura da web** da Anthropic (até 4 buscas e 4
-  páginas por produto; não abre PDF). Recebe a descrição do FKN, a unidade, a linha, o **código de barras** (cadastro
+- **IA (Edge Function `crm-produto-buscar`, só admin/comprador):** Claude **Haiku 5.5** desde a v2 (`CRM_FOTOS_MODELO` nos
+  Secrets troca; se a API recusar o Haiku com as ferramentas, aquele produto vai pelo Sonnet 5.5) com as ferramentas de
+  **busca e leitura da web** da Anthropic (no Haiku as versões básicas, sem filtro dinâmico; até 3 buscas e 3 páginas de
+  5 mil tokens por produto; não abre PDF). **Os sites dos concorrentes cadastrados (`crm_concorrentes`) ficam bloqueados**
+  na busca e na leitura, e página deles que escapar é descartada: foto de loja de concorrente não entra no catálogo. Recebe a descrição do FKN, a unidade, a linha, o **código de barras** (cadastro
   fiscal ou nota de compra), como o fornecedor escreve na nota e o fornecedor; devolve JSON (marca, fabricante, descrição,
   especificações só do que a fonte diz, páginas com tipo fabricante/fornecedor/loja, "código de barras bate", ficha,
   FISPQ, observação). O **servidor** abre as páginas, tira a foto anunciada (og:image, JSON-LD do produto, foto principal
@@ -1446,8 +1448,13 @@ https://claude.ai/artifact/AkJoPA2gw7i3Wz99fcDY7p: Produtos, Ficha, Buscar foto,
   custo) só admin/comprador. Bucket **público** `crm-produtos-fotos` (fotos e fichas de fabricante são públicas; nada de
   cliente vai nele): `fotos/`, `fichas/`, `sugestoes/`; gravar e ler pela API só admin/comprador (política "crm fotos le"
   para copiar a sugestão aprovada). CSP: `img-src` com `https://*.supabase.co` e `blob:`.
-- **Falta:** o **teste de custo com 5 produtos** (o Anderson ou o comprador clica "Buscar" com "Teste: os 5…") e eu confiro
-  o custo e a qualidade antes do lote grande.
+- **1º teste de 5 (19/10, 17h05, Sonnet 5.5, até 4 buscas):** US$ 1,21 (US$ 0,14 a 0,33 por produto; 45 a 132 mil tokens
+  lidos cada, quase tudo resultado de busca e página). Qualidade honesta: 3 com sugestão (fibra British com 2 fotos e
+  especificações; saco alvejado Caebi, mas a foto principal era da loja de um concorrente; saco de lixo 40 L Leal só com
+  "parecido" do site da Embalagens Leal e o catálogo em PDF), 2 sem nada (cloro Cloraclor e saco 100 L Leal: marca própria
+  / pouco presente na web). Daí a v2: Haiku, 3 buscas, concorrentes bloqueados. Contas para o lote: 739 produtos venderam
+  em 90 dias, 277 em 5 notas ou mais, 161 em 10 ou mais, 68 em 20 ou mais (de 1.711 ativos).
+- **Falta:** o 2º teste de 5 (com o Haiku) e, pelo custo dele, combinar com o Anderson o tamanho do lote.
 
 ## NF-e emitida pelo CRM — Fase 4 da saída do FKN (16/10/2026, pedido do Anderson)
 

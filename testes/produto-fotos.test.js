@@ -119,7 +119,9 @@ test('paraBuscar e custoEstimado: o lote pega os mais vendidos sem foto e sem su
   assert.deepEqual(X.paraBuscar(l, [], 5), ['010356', '280056']);
   assert.deepEqual(X.paraBuscar(l, [{ codigo: '010356', situacao: 'recusada' }], 5), ['280056']);
   assert.deepEqual(X.paraBuscar(l, [{ codigo: '010356', situacao: 'erro' }], 1), ['010356']);   // erro: tenta de novo
-  assert.deepEqual(X.custoEstimado(10, []), { medio: X.CUSTO_PADRAO, total: 0.8, medido: 0 });
+  assert.deepEqual(X.custoEstimado(10, []), { medio: X.CUSTO_PADRAO, total: 0.5, medido: 0 });
+  const doze = [0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.3, 0.3].map(c => ({ custo_usd: c }));
+  assert.equal(X.custoEstimado(1, doze).medio, 0.02); // só as 10 mais recentes
   assert.deepEqual(X.custoEstimado(100, [{ custo_usd: 0.05 }, { custo_usd: 0.07 }, { custo_usd: 0 }]), { medio: 0.06, total: 6, medido: 2 });
 });
 
