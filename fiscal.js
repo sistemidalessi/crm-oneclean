@@ -10,7 +10,9 @@
    - item com ICMS-ST (CFOP 5405): CST 60 (ou CSOSN 500) e CEST obrigatório; sem ST (5102), nunca CST 60;
    - produtos de limpeza FORA da ST em SP desde 01/08/2026: a Portaria SRE 20/2026 (DOE 05/05/2026) revogou o
      Anexo XIII da Portaria CAT 68/2019 (e a SRE 55/2025, base de cálculo). Venda interna volta a ser 5102, CST 00,
-     18% (alíquota interna geral). Estoque de 31/07/2026: Portaria CAT 28/2020 (com o contador). */
+     18% (alíquota interna geral). Estoque de 31/07/2026: Portaria CAT 28/2020 (com o contador);
+   - perfumaria e higiene pessoal (Anexo XI, com o papel higiênico) FORA da ST desde 01/04/2026 (Portaria SRE 94/2025) e
+     papelaria e papel desde 01/07/2026 (Portaria SRE 9/2026): mesma correção (19/10/2026; ver FORA_ST_SP). */
 (function (raiz) {
   'use strict';
 
@@ -28,9 +30,41 @@
     cestSegmento: '11',
     ncmPrefixos: ['28289011', '28289019', '32064100', '34012090', '3402', '38089419']
   };
+  // Grupos de produtos que saíram da ST em SP (anexos da Portaria CAT 68/2019 revogados), na ordem em que o NCM é
+  // procurado (a limpeza primeiro: 3401.20.90 é sabão de limpeza, o resto da 3401 é sabonete). Datas e CEST tirados de
+  // fontes secundárias em 15 e 19/10/2026 (o texto oficial não foi lido: a rede da sessão barra o site da Sefaz-SP) —
+  // conferir com o contador. Ver docs/legislacao/registro.md.
+  // - limpeza: o CEST do segmento 11 basta, como sempre foi (a lista de NCM é que está incompleta).
+  // - higiene e papel: o produto entra pelo NCM. CEST do segmento com NCM fora da lista (ex.: mexedor de café
+  //   3924.10.00 com CEST 20.062.00; gel clarificante 2827.32.00 com CEST 20.044.00 — o cadastro do FKN tem desses)
+  //   NÃO corrige sozinho: vira o alerta "CEST incoerente com o NCM: conferir".
+  // - papel higiênico (4818.10.00; CEST 20.042.00 folha simples e 20.043.00 folha dupla ou mais) estava no Anexo XI:
+  //   01/04/2026. Toalha e interfolha de papel (4818.20.00, CEST 20.044.00): não se confirmou se estavam no Anexo XI
+  //   (01/04) ou no de papel (01/07); fica 01/07, a data em que os dois anexos já estavam revogados, com o aviso.
+  const FORA_ST_SP = [
+    Object.assign({ id: 'limpeza', nome: 'Produto de limpeza', norma: 'Portaria SRE 20/2026', anexo: 'o Anexo XIII', cestSoBasta: true,
+      cestSegmentos: [LIMPEZA_FORA_ST_SP.cestSegmento] }, LIMPEZA_FORA_ST_SP),
+    { id: 'higiene', nome: 'Produto de higiene pessoal', desde: '2026-04-01', norma: 'Portaria SRE 94/2025', anexo: 'o Anexo XI (perfumaria e higiene pessoal)',
+      cestSegmentos: ['20'], ncmPrefixos: ['48181000', '33', '3401', '4014100', '5601210', '82121', '960321', '9619'] },
+    { id: 'papel', nome: 'Papel e papelaria', desde: '2026-07-01', norma: 'Portaria SRE 9/2026', anexo: 'o anexo de papelaria e papel',
+      cestSegmentos: ['19'], ncmPrefixos: ['48', '3926100', '8214100', '8305', '9608', '9609', '9610', '9611'] }
+  ];
   const ALIQ_ICMS_SP = 18;
-  const ehLimpezaForaST = (ncm, cests) => (cests || []).some(c => String(c || '').replace(/\D/g, '').slice(0, 2) === LIMPEZA_FORA_ST_SP.cestSegmento) ||
-    LIMPEZA_FORA_ST_SP.ncmPrefixos.some(p => String(ncm || '').indexOf(p) === 0);
+  const segmentoCest = c => String(c || '').replace(/\D/g, '').slice(0, 2);
+  const ncmNoGrupo = (g, ncm) => !!ncm && g.ncmPrefixos.some(p => String(ncm).indexOf(p) === 0);
+  const cestNoGrupo = (g, cests) => (cests || []).some(c => g.cestSegmentos.indexOf(segmentoCest(c)) !== -1);
+  const ehLimpezaForaST = (ncm, cests) => cestNoGrupo(FORA_ST_SP[0], cests) || ncmNoGrupo(FORA_ST_SP[0], ncm);
+  // Em que grupo fora da ST o produto está. → { grupo, cestIncoerente } (grupo nulo: fora das listas). cestIncoerente:
+  // o grupo que o CEST indica quando o NCM não confirma (não corrige; só alerta).
+  function grupoForaST(ncms, cests) {
+    const lista = (ncms || []).filter(Boolean);
+    if (cestNoGrupo(FORA_ST_SP[0], cests) || lista.some(n => ncmNoGrupo(FORA_ST_SP[0], n))) return { grupo: FORA_ST_SP[0], cestIncoerente: null };
+    const pelaNcm = FORA_ST_SP.find(g => lista.some(n => ncmNoGrupo(g, n)));
+    if (pelaNcm) return { grupo: pelaNcm, cestIncoerente: null };
+    const pelaCest = FORA_ST_SP.find(g => cestNoGrupo(g, cests));
+    if (pelaCest && pelaCest.cestSoBasta) return { grupo: pelaCest, cestIncoerente: null };
+    return { grupo: null, cestIncoerente: pelaCest || null };
+  }
   const n2 = v => (v == null || v === '' ? null : Math.round(Number(v) * 10000) / 10000);
   const ehVenda = cfop => /^5(1|4)/.test(String(cfop || ''));
   const ehST = cfop => /^54/.test(String(cfop || ''));
@@ -40,6 +74,8 @@
   const ehToalha = d => /\bTOALHA/i.test(String(d || ''));
   const fmtNcm = v => (/^\d{8}$/.test(String(v || '')) ? v.slice(0, 4) + '.' + v.slice(4, 6) + '.' + v.slice(6) : String(v || '—'));
   const dataBR = v => (v ? String(v).slice(8, 10) + '/' + String(v).slice(5, 7) + '/' + String(v).slice(0, 4) : '');
+  const fmtCest = v => { const d = String(v || '').replace(/\D/g, ''); return d.length === 7 ? d.slice(0, 2) + '.' + d.slice(2, 5) + '.' + d.slice(5) : String(v || '—'); };
+  const vespera = d => { const t = new Date(d + 'T12:00:00Z'); t.setUTCDate(t.getUTCDate() - 1); return t.toISOString().slice(0, 10); };
 
   // A combinação usada mais recentemente (empate: a mais frequente).
   const maisRecente = l => l.slice().sort((a, b) => String(b.ultima).localeCompare(String(a.ultima)) || (b.n || 0) - (a.n || 0))[0] || null;
@@ -72,24 +108,33 @@
     }
 
     // 2) ICMS e ST
-    const limpeza = ehLimpezaForaST(ncm, r.cests) || ncms.some(x => ehLimpezaForaST(x.ncm));
-    let limpezaCorrigida = false;
-    if (venda && limpeza) {
-      const stDepois = vendas.filter(c => (ehST(c.cfop) || CST_ST.indexOf(String(c.cst_icms)) !== -1) && String(c.ultima || '') >= LIMPEZA_FORA_ST_SP.desde)
+    const comST = c => ehST(c.cfop) || CST_ST.indexOf(String(c.cst_icms)) !== -1;
+    const { grupo, cestIncoerente } = grupoForaST([ncm].concat(ncms.map(x => x.ncm)), r.cests);
+    let foraSTCorrigida = false;
+    if (venda && grupo) {
+      const desde = dataBR(grupo.desde);
+      const stDepois = vendas.filter(c => comST(c) && String(c.ultima || '') >= grupo.desde)
         .sort((a, b) => String(b.ultima).localeCompare(String(a.ultima)))[0];
-      const depois = stDepois ? ' O FKN ainda emitiu com ST depois de 01/08/2026 (última em ' + dataBR(stDepois.ultima) +
-        '): as notas desde então merecem conferência com o contador. O estoque de 31/07/2026 segue a Portaria CAT 28/2020.' : '';
-      if (ehST(venda.cfop) || CST_ST.indexOf(String(venda.cst_icms)) !== -1) {
-        alerta('erro', 'Produto de limpeza saiu da substituição tributária em SP a partir de 01/08/2026 (Portaria SRE 20/2026 revogou o Anexo XIII ' +
-          'da Portaria CAT 68/2019), e as notas usam CFOP ' + venda.cfop + ' e CST ' + (venda.cst_icms || 'vazio') +
-          '. Proposta corrigida para CFOP 5102, CST 00 e ICMS de 18%; o CEST deixa de ser obrigatório.' + depois, true);
+      const depois = stDepois ? ' O FKN ainda emitiu com ST depois de ' + desde + ' (última em ' + dataBR(stDepois.ultima) +
+        '): as notas desde então merecem conferência com o contador. O estoque de ' + dataBR(vespera(grupo.desde)) + ' segue a Portaria CAT 28/2020.' : '';
+      const toalha = grupo.id === 'papel' && (/^4818/.test(String(ncm || '')) || (r.cests || []).some(c => segmentoCest(c) === '20'))
+        ? ' Toalha e interfolha de papel (CEST 20.044.00) podem ter saído da ST já em 01/04/2026, se estavam no Anexo XI: conferir com o contador.' : '';
+      if (comST(venda)) {
+        alerta('erro', grupo.nome + ' saiu da substituição tributária em SP a partir de ' + desde + ' (' + grupo.norma + ' revogou ' + grupo.anexo +
+          ' da Portaria CAT 68/2019), e as notas usam CFOP ' + venda.cfop + ' e CST ' + (venda.cst_icms || 'vazio') +
+          '. Proposta corrigida para CFOP 5102, CST 00 e ICMS de 18%; o CEST deixa de ser obrigatório.' + depois + toalha, true);
         Object.assign(venda, { cfop: '5102', cst_icms: '00', aliq_icms: ALIQ_ICMS_SP, red_bc_icms: null });
-        limpezaCorrigida = true;
+        foraSTCorrigida = true;
       } else if (stDepois) {
-        alerta('atencao', 'Produto de limpeza (fora da ST em SP desde 01/08/2026, Portaria SRE 20/2026).' + depois);
+        alerta('atencao', grupo.nome + ' (fora da ST em SP desde ' + desde + ', ' + grupo.norma + ').' + depois + toalha);
       }
+    } else if (venda && cestIncoerente && vendas.some(c => comST(c) && String(c.ultima || '') >= cestIncoerente.desde)) {
+      const cest = (r.cests || []).find(c => cestIncoerente.cestSegmentos.indexOf(segmentoCest(c)) !== -1);
+      alerta('atencao', 'CEST incoerente com o NCM: conferir. O CEST ' + fmtCest(cest) + ' é de ' + cestIncoerente.nome.toLowerCase() +
+        ' (fora da ST em SP desde ' + dataBR(cestIncoerente.desde) + ', ' + cestIncoerente.norma + '), mas o NCM ' + fmtNcm(ncm) +
+        ' não é desse grupo. A proposta segue as notas até o contador dizer se o produto ainda tem ST; corrigir o CEST ou o NCM no cadastro.');
     }
-    if (venda && !limpezaCorrigida) {
+    if (venda && !foraSTCorrigida) {
       if (ehST(venda.cfop) && CST_ST.indexOf(String(venda.cst_icms)) === -1)
         alerta('erro', 'Venda com ST (CFOP ' + venda.cfop + ') e CST de ICMS ' + (venda.cst_icms || 'vazio') + ': com ICMS-ST já recolhido o CST é 60.');
       if (!ehST(venda.cfop) && CST_ST.indexOf(String(venda.cst_icms)) !== -1)
@@ -148,7 +193,7 @@
     return out;
   }
 
-  const api = { NCM_PAPEL_HIGIENICO, LIMPEZA_FORA_ST_SP, ehLimpezaForaST, analisa, clientes, fmtNcm, ehVenda, ehST };
+  const api = { NCM_PAPEL_HIGIENICO, LIMPEZA_FORA_ST_SP, FORA_ST_SP, ehLimpezaForaST, grupoForaST, analisa, clientes, fmtNcm, ehVenda, ehST };
   raiz.CRMFiscal = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);

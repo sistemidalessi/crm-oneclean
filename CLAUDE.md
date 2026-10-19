@@ -1439,6 +1439,16 @@ Sefaz por um serviço fiscal na VPS da Agilité; notas de compra pelo DF-e; bole
   com 5405/CST 60 para **5102, CST 00, 18%** (alerta `erro` corrigido); se o FKN emitiu com ST depois de 01/08, o alerta pede
   conferência das notas com o contador (estoque de 31/07: CAT 28/2020). A lista de NCM ficou **incompleta** (a rede da sessão
   barra o site da Sefaz): conferir com o texto oficial ou o contador e completar a constante.
+- **Higiene e papel fora da ST em SP (19/10, pedido do Anderson, achado do vigia):** a regra virou a lista `FORA_ST_SP`
+  (`fiscal.js`; `LIMPEZA_FORA_ST_SP`/`ehLimpezaForaST` continuam): **limpeza** desde 01/08/2026 (SRE 20/2026; CEST 11 ou NCM,
+  igual a antes), **higiene pessoal** (Anexo XI, com o papel higiênico 4818.10.00 / CEST 20.042.00 e 20.043.00) desde
+  01/04/2026 (SRE 94/2025) e **papel e papelaria** (CEST 19 e NCM do capítulo 48, inclusive toalha e interfolha 4818.20.00 /
+  CEST 20.044.00) desde 01/07/2026 (SRE 9/2026). A toalha ficou em 01/07 porque não se confirmou se estava no Anexo XI (o
+  alerta diz que pode ser 01/04). Mesma correção e mesmo texto da limpeza (5102/00/18%, aviso das notas com ST depois da
+  data, estoque da véspera pela CAT 28/2020). Higiene e papel entram **pelo NCM** (`grupoForaST`): CEST do segmento com NCM
+  fora da lista (mexedor de café 3924.10.00 com CEST 20.062.00, gel clarificante 2827.32.00 com CEST 20.044.00) **não corrige**;
+  vira "CEST incoerente com o NCM: conferir" (atenção, só se vendeu com ST depois da data). Datas e CEST de fontes secundárias
+  (texto oficial não lido): conferir com o contador. PIS/COFINS do papel higiênico (CST 06) não mudou.
 - **Leitura dos XML (15/10, fim da tarde; 2.609 notas válidas, 36.067 itens, 1.189 produtos):** todo papel
   higiênico saiu com PIS/COFINS **CST 01 (1,65% + 7,6%) até ~01/04/2026** e CST 06 (alíquota zero) depois — alguém
   corrigiu em abril —, **menos o 300005**, que no dia 23/04 trocou para o NCM 4818.20.00 e **voltou a sair com CST 01**

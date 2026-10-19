@@ -103,6 +103,48 @@ test('limpeza fora da ST em SP desde 01/08/2026 (Portaria SRE 20/2026): 5405/CST
   assert.equal(F.ehLimpezaForaST('48181000', []), false);
 });
 
+test('higiene (01/04/2026, SRE 94/2025) e papel (01/07/2026, SRE 9/2026) fora da ST em SP', () => {
+  const st = { cfop: '5405', cst_icms: '60', aliq_icms: null, cst_pis: '06', aliq_pis: null, cst_cofins: '06', aliq_cofins: null };
+  // papel higiênico com CEST 20.042.00 vendido com ST: 5102/00/18%, PIS/COFINS (CST 06) intocados
+  let r = F.analisa({ codigo: 'P1', descricao: 'PAPEL HIGIENICO FOLHA SIMPLES 8X300', ncms: { 48181000: { n: 40, ultima: '2026-10-10' } },
+    cests: ['2004200'], gtins: [], origens: ['0'], combos: [combo(Object.assign({}, st, { n: 40, ultima: '2026-10-10' }))] });
+  assert.deepEqual([r.regra.venda.cfop, r.regra.venda.cst_icms, r.regra.venda.aliq_icms, r.regra.venda.cst_pis, r.regra.venda.aliq_pis], ['5102', '00', 18, '06', null]);
+  assert.equal(r.alertas.length, 1);
+  assert.equal(r.alertas[0].corrigido, true);
+  assert.match(r.alertas[0].texto, /^Produto de higiene pessoal saiu da substituição tributária em SP a partir de 01\/04\/2026 \(Portaria SRE 94\/2025 revogou o Anexo XI/);
+  assert.match(r.alertas[0].texto, /O estoque de 31\/03\/2026 segue a Portaria CAT 28\/2020/);
+  // toalha 20.044.00 com ST em 15/07: grupo do papel (01/07), corrigida, com aviso das notas e da data a confirmar
+  r = F.analisa({ codigo: 'T1', descricao: 'TOALHA INTERFOLHA EXEMPLO 2X1000', ncms: { 48182000: { n: 12, ultima: '2026-07-15' } },
+    cests: ['2004400'], gtins: [], origens: ['0'], combos: [combo(Object.assign({}, st, { n: 12, ultima: '2026-07-15' }))] });
+  assert.deepEqual([r.regra.venda.cfop, r.regra.venda.cst_icms, r.regra.venda.aliq_icms], ['5102', '00', 18]);
+  assert.equal(r.alertas[0].nivel, 'erro');
+  assert.match(r.alertas[0].texto, /^Papel e papelaria saiu .* 01\/07\/2026 \(Portaria SRE 9\/2026/);
+  assert.match(r.alertas[0].texto, /depois de 01\/07\/2026 \(última em 15\/07\/2026\): as notas desde então merecem conferência com o contador/);
+  assert.match(r.alertas[0].texto, /O estoque de 30\/06\/2026/);
+  assert.match(r.alertas[0].texto, /podem ter saído da ST já em 01\/04\/2026/);
+  // papelaria (CEST segmento 19) já saindo sem ST, mas com ST depois de 01/07: só atenção
+  r = F.analisa({ codigo: 'Q1', descricao: 'BLOCO DE ANOTACOES EXEMPLO', ncms: { 48201000: { n: 6, ultima: '2026-10-01' } },
+    cests: ['1900100'], gtins: [], origens: ['0'], combos: [combo({ ultima: '2026-10-01', n: 3 }), combo(Object.assign({}, st, { ultima: '2026-07-20', n: 3 }))] });
+  assert.equal(r.regra.venda.cfop, '5102');
+  assert.deepEqual(r.alertas.map(a => a.nivel), ['atencao']);
+  assert.match(r.alertas[0].texto, /^Papel e papelaria \(fora da ST em SP desde 01\/07\/2026, Portaria SRE 9\/2026\)\. O FKN ainda emitiu com ST/);
+  // CEST incoerente com o NCM: não corrige, alerta
+  r = F.analisa({ codigo: 'M1', descricao: 'MEXEDOR DE CAFE EXEMPLO', ncms: { 39241000: { n: 9, ultima: '2026-10-05' } },
+    cests: ['2006200'], gtins: [], origens: ['0'], combos: [combo(Object.assign({}, st, { cst_pis: '01', aliq_pis: 1.65, cst_cofins: '01', aliq_cofins: 7.6, ultima: '2026-10-05' }))] });
+  assert.deepEqual([r.regra.venda.cfop, r.regra.venda.cst_icms], ['5405', '60']);
+  assert.deepEqual(r.alertas.map(a => a.nivel), ['atencao']);
+  assert.match(r.alertas[0].texto, /^CEST incoerente com o NCM: conferir\. O CEST 20\.062\.00 é de produto de higiene pessoal .* NCM 3924\.10\.00/);
+  // fora das listas: nada muda
+  r = F.analisa({ codigo: 'Z1', descricao: 'LUVA NITRILICA EXEMPLO', ncms: { 40151900: { n: 9, ultima: '2026-10-05' } },
+    cests: ['1006100'], gtins: [], origens: ['0'], combos: [combo(Object.assign({}, st, { cst_pis: '01', aliq_pis: 1.65, cst_cofins: '01', aliq_cofins: 7.6, ultima: '2026-10-05' }))] });
+  assert.deepEqual([r.regra.venda.cfop, r.regra.venda.cst_icms, r.alertas.length], ['5405', '60', 0]);
+  // grupos
+  assert.equal(F.grupoForaST(['34022000'], ['2004400']).grupo.id, 'limpeza', 'a limpeza continua com a mesma regra');
+  assert.equal(F.grupoForaST(['48181000'], []).grupo.id, 'higiene');
+  assert.equal(F.grupoForaST(['48182000'], []).grupo.id, 'papel');
+  assert.equal(F.grupoForaST(['28273200'], ['2004400']).cestIncoerente.id, 'higiene');
+});
+
 test('verificações: dispenser/suporte de papel higiênico não é papel; papel já certo avisa do PIS/COFINS cobrado antes', () => {
   let r = F.analisa({ codigo: 'F', descricao: 'DISP.PAPEL HIG. BCO VELOX PREMISSE', ncms: { 39259090: { n: 5, ultima: '2026-09-01' } }, cests: [], gtins: [], origens: ['0'], combos: [combo({})] });
   assert.deepEqual([r.ncm, r.alertas.length, r.regra.venda.cst_pis], ['39259090', 0, '01']);
