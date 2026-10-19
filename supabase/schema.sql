@@ -2220,6 +2220,13 @@ create table if not exists public.crm_compra_itens (
   codigo text, fator numeric(14,4),
   unique (compra_id, ordem)
 );
+-- ICMS-ST que veio em cada item da nota de compra (19/10/2026): base, alíquota, ICMS próprio do substituto e ICMS-ST do
+-- item inteiro (estoque.js stDoDet). A revenda com CST 60 informa isso, proporcional, da compra mais recente (fiscal.js).
+alter table public.crm_compra_itens add column if not exists st_cst text;
+alter table public.crm_compra_itens add column if not exists st_base numeric(16,2);
+alter table public.crm_compra_itens add column if not exists st_aliq numeric(7,4);
+alter table public.crm_compra_itens add column if not exists st_proprio numeric(16,2);
+alter table public.crm_compra_itens add column if not exists st_valor numeric(16,2);
 create table if not exists public.crm_compra_vinculos (
   fornecedor_doc text not null, cod_fornecedor text not null,
   codigo text not null, fator numeric(14,4) not null default 1 check (fator > 0),

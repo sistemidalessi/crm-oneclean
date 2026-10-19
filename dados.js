@@ -528,6 +528,16 @@
   Supa.prototype.compras = async function (limite) { return unwrap(await this.sb.from('crm_compras').select('*').order('emitida_em', { ascending: false }).limit(limite || 200)); };
   Supa.prototype.compraItens = async function (id) { return unwrap(await this.sb.from('crm_compra_itens').select('*').eq('compra_id', id).order('ordem')); };
   Supa.prototype.compraVinculos = async function () { return unwrap(await this.sb.from('crm_compra_vinculos').select('*').limit(20000)); };
+  // Itens de compra com o ICMS-ST lido do XML (19/10/2026), junto com a nota: para o ICMS-ST "retido anteriormente" (fiscal.js).
+  Supa.prototype.comprasSt = async function () {
+    const out = [];
+    for (let de = 0; ; de += PAGINA) {
+      const l = unwrap(await this.sb.from('crm_compra_itens').select('id, codigo, fator, cod_fornecedor, descricao, ean, unidade, quantidade, ordem, st_cst, st_base, st_aliq, st_proprio, st_valor, crm_compras(numero, emitida_em, fornecedor_doc, fornecedor_nome)')
+        .not('st_cst', 'is', null).order('id').range(de, de + PAGINA - 1));
+      out.push(...l.map(i => Object.assign({}, i, i.crm_compras || {}, { crm_compras: undefined })));
+      if (l.length < PAGINA) return out;
+    }
+  };
   Supa.prototype.compraGravar = async function (compra, itens) {
     const r = unwrap(await this.sb.from('crm_compras').upsert(compra, { onConflict: 'chave', ignoreDuplicates: true }).select());
     if (!r || !r.length) return null; // já estava no CRM
@@ -556,6 +566,11 @@
   Local.prototype.compras = async function () { return this._compras || []; };
   Local.prototype.compraItens = async function (id) { return (this._compraItens || []).filter(i => i.compra_id === id); };
   Local.prototype.compraVinculos = async function () { return []; };
+  Local.prototype.comprasSt = async function () {
+    const cs = new Map((this._compras || []).map(c => [c.id, c]));
+    return (this._compraItens || []).filter(i => i.st_cst).map(i => { const c = cs.get(i.compra_id) || {};
+      return Object.assign({}, i, { numero: c.numero, emitida_em: c.emitida_em, fornecedor_doc: c.fornecedor_doc, fornecedor_nome: c.fornecedor_nome }); });
+  };
   Local.prototype.compraGravar = async function (compra, itens) {
     this._compras = this._compras || []; this._compraItens = this._compraItens || [];
     if (this._compras.some(c => c.chave === compra.chave)) return null;

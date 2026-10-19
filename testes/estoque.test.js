@@ -78,3 +78,17 @@ test('notas da Sefaz: fornecedor que nunca vendeu e o prazo da resposta definiti
   assert.deepEqual(t.prazos.map(p => p.chave), ['f', 'a', 'c'], 'com "todas": também as de fornecedor conhecido, a mais apertada primeiro');
   assert.equal(S.sugereFornecedor('LTDA COMERCIO', base.fknForn), null, 'só palavras genéricas não sugerem');
 });
+
+test('ICMS-ST de cada item da nota de compra (stDoDet): substituto, quem revendeu e sem ST', () => {
+  const S = require('../estoque.js');
+  const det = icms => '<prod><cProd>1</cProd></prod><imposto><ICMS>' + icms + '</ICMS></imposto>';
+  assert.deepEqual(S.stDoDet(det('<ICMS10><orig>0</orig><CST>10</CST><vBC>100.00</vBC><pICMS>18.00</pICMS><vICMS>18.00</vICMS><vBCST>140.00</vBCST><pICMSST>18.00</pICMSST><vICMSST>7.20</vICMSST></ICMS10>')),
+    { st_cst: '10', st_base: 140, st_aliq: 18, st_proprio: 18, st_valor: 7.2 });
+  assert.deepEqual(S.stDoDet(det('<ICMS60><orig>0</orig><CST>60</CST><vBCSTRet>84.80</vBCSTRet><pST>18.00</pST><vICMSSubstituto>8.50</vICMSSubstituto><vICMSSTRet>6.70</vICMSSTRet></ICMS60>')),
+    { st_cst: '60', st_base: 84.8, st_aliq: 18, st_proprio: 8.5, st_valor: 6.7 });
+  assert.deepEqual(S.stDoDet(det('<ICMS60><orig>0</orig><CST>60</CST></ICMS60>')), { st_cst: '60', st_base: null, st_aliq: null, st_proprio: null, st_valor: null });
+  assert.deepEqual(S.stDoDet(det('<ICMSSN202><orig>0</orig><CSOSN>202</CSOSN><vBCST>50.00</vBCST><pICMSST>18.00</pICMSST><vICMSST>2.00</vICMSST></ICMSSN202>')),
+    { st_cst: '202', st_base: 50, st_aliq: 18, st_proprio: null, st_valor: 2 });
+  assert.deepEqual(S.stDoDet(det('<ICMS00><orig>0</orig><CST>00</CST><vBC>100.00</vBC><pICMS>18.00</pICMS><vICMS>18.00</vICMS></ICMS00>')),
+    { st_cst: '00', st_base: null, st_aliq: null, st_proprio: null, st_valor: null });
+});

@@ -1406,6 +1406,19 @@ o serviço na VPS da Agilité (não no servidor do escritório).
   (1 ano desde 19/10, antes 120 dias; prefere a nota que traz o valor — o FKN manda CST 60 sem valor em vários produtos, como os sacos de lixo); lê o XML guardado e grava por UNIDADE (UN/CX…) em `crm_fiscal_produtos.regra.st_ret` (vBCSTRet, pST,
   vICMSSubstituto, vICMSSTRet ÷ qCom). `pedido.js` multiplica pela quantidade; sem o valor, avisa e sai só com o CST 60.
   "Atualizar as propostas" (fiscal.js) preserva o `st_ret`. Anderson clicou (134 produtos aprendidos) e atualizou a VPS.
+  **ICMS-ST pela nota de COMPRA (19/10/2026, pedido do Anderson: "seguir o que é correto perante a lei; a maioria das
+  compras dá entrada pelo XML"):** na revenda com CST 60 a NF-e informa o ICMS-ST "retido anteriormente" (base, pST, ICMS
+  próprio do substituto, ICMS-ST) da **entrada mais recente**, proporcional à quantidade (critério da CAT 42/2018 de SP;
+  o contador confirma). `estoque.js stDoDet` lê o grupo ICMS de cada item do XML de compra (CST 10/30/70/90 e CSOSN
+  20x/900: vBCST, pICMSST, vICMS, vICMSST; CST 60/CSOSN 500: os campos "Ret") → `crm_compra_itens.st_cst/st_base/st_aliq/
+  st_proprio/st_valor` (aplicado em produção). `fiscal.js stDasCompras` (produto pelo item lançado → ligação do fornecedor →
+  código de barras na mesma unidade; nunca adivinha fator) grava `regra.st_ret[unidade]` com `origem: 'compra'` (base e
+  caixas de `crm_estoque_unidades`) e `regra.st_entrada` (com_st | sem_valor | sem_st). O botão da aba Fiscal → Emissão
+  "Aprender o ICMS-ST (notas de compra e do FKN)" roda o do FKN primeiro e o das compras por cima; o do FKN só fica para
+  produto sem nota de compra no CRM. `alertaEntrada`: vendido com 5405/CST 60 e a última compra **sem ST** → erro "não há
+  ICMS-ST retido para repassar" (aparece também no "Atualizar as propostas", que preserva `st_ret` e `st_entrada`).
+  Em 19/10 **não havia nenhuma nota de compra no CRM** (DF-e ainda sem a atualização da VPS; nenhuma subida à mão):
+  o valor ainda é o do FKN.
   **Teste 3 autorizado** (NF 2-3, interfolha 290001, 5405/CST 60: vBCSTRet 8.22, pST 18, vICMSSubstituto 0.86, vICMSSTRet 0.61
   = os da NF 2651 do FKN; tributos aproximados 7.42).
   **Cadastros que ainda vêm do FKN (pergunta do Anderson, 16/10):** produto (o mestre de pedido/estoque/nota é a listagem

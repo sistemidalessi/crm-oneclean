@@ -193,7 +193,69 @@
     return out;
   }
 
-  const api = { NCM_PAPEL_HIGIENICO, LIMPEZA_FORA_ST_SP, FORA_ST_SP, ehLimpezaForaST, grupoForaST, analisa, clientes, fmtNcm, ehVenda, ehST };
+  // ICMS-ST "retido anteriormente" pela nota de ENTRADA (19/10/2026, pedido do Anderson: "seguir o que é correto perante a
+  // lei"). Na revenda com CST 60 a NF-e informa a base, a alíquota, o ICMS próprio do substituto e o ICMS-ST que vieram na
+  // compra da mercadoria, proporcionais à quantidade vendida; usa-se a entrada MAIS RECENTE de cada produto (o mesmo
+  // critério da Portaria CAT 42/2018 de SP para o ressarcimento; conferir com o contador). O que se aprendia das notas
+  // do FKN fica só para o produto que ainda não tem nota de compra no CRM.
+  // linhas: itens de crm_compra_itens com a compra (emitida_em, numero, fornecedor_doc, fornecedor_nome) e os campos st_*.
+  // ctx: { vinculos: Map('doc|cod' → {codigo, fator}), porGtin: Map(gtin → {codigo, unidade}), unidadeBase: Map(codigo → un),
+  //        caixas: Map(codigo → [{ unidade, fator }]) }.
+  // → { produtos: { codigo: { situacao: 'com_st'|'sem_valor'|'sem_st', cst, nota, fornecedor, quando, st_ret: { UN: {...} } } },
+  //     semLigacao: [{ fornecedor, cod_fornecedor, descricao }] }
+  const unNorm = t => String(t || '').trim().toUpperCase().replace(/Ç/g, 'C');
+  const r6 = v => Math.round(v * 1e6) / 1e6;
+  function stDasCompras(linhas, ctx) {
+    ctx = ctx || {};
+    const ultimo = {}, semLigacao = [];
+    (linhas || []).forEach(l => {
+      if (!l || !l.st_cst) return;            // item gravado antes da leitura do ICMS-ST
+      let codigo = l.codigo || null, fator = Number(l.fator) || 0;
+      if (!codigo) {
+        const v = ctx.vinculos && ctx.vinculos.get(l.fornecedor_doc + '|' + l.cod_fornecedor);
+        if (v) { codigo = v.codigo; fator = Number(v.fator) || 0; }
+      }
+      if (!codigo && l.ean && ctx.porGtin) {   // mesmo código de barras e a mesma unidade: fator 1
+        const p = ctx.porGtin.get(String(l.ean));
+        if (p && unNorm(p.unidade) === unNorm(l.unidade)) { codigo = p.codigo; fator = 1; }
+      }
+      const q = (Number(l.quantidade) || 0) * fator;
+      if (!codigo || !(q > 0)) { semLigacao.push({ fornecedor: l.fornecedor_nome || l.fornecedor_doc, cod_fornecedor: l.cod_fornecedor, descricao: l.descricao }); return; }
+      const ja = ultimo[codigo], chave = String(l.emitida_em || '') + '|' + String(l.numero || '').padStart(12, '0');
+      if (ja && ja._chave >= chave) return;
+      ultimo[codigo] = Object.assign({}, l, { codigo, q, _chave: chave });
+    });
+    const produtos = {};
+    Object.keys(ultimo).forEach(codigo => {
+      const l = ultimo[codigo], base = { cst: l.st_cst, nota: l.numero == null ? null : String(l.numero), fornecedor: l.fornecedor_nome || l.fornecedor_doc || null, quando: l.emitida_em || null };
+      const temST = l.st_valor != null || l.st_base != null;
+      const ehST = /^(10|30|60|70|90|201|202|203|500|900)$/.test(String(l.st_cst));
+      if (!ehST) { produtos[codigo] = Object.assign({ situacao: 'sem_st' }, base); return; }
+      if (!temST) { produtos[codigo] = Object.assign({ situacao: 'sem_valor' }, base); return; }
+      const por = (v, f) => (v == null ? null : r6(Number(v) / l.q * f));
+      const unidade = (f) => ({ vBCSTRet: por(l.st_base, f) || 0, pST: Number(l.st_aliq) || 0, vICMSSubstituto: por(l.st_proprio, f), vICMSSTRet: por(l.st_valor, f) || 0,
+        origem: 'compra', nota: base.nota, fornecedor: base.fornecedor, quando: base.quando });
+      const st_ret = {};
+      const ub = unNorm((ctx.unidadeBase && ctx.unidadeBase.get(codigo)) || l.unidade || 'UN');
+      st_ret[ub] = unidade(1);
+      ((ctx.caixas && ctx.caixas.get(codigo)) || []).forEach(c => { const u = unNorm(c.unidade); if (u && u !== ub && Number(c.fator) > 0) st_ret[u] = unidade(Number(c.fator)); });
+      produtos[codigo] = Object.assign({ situacao: 'com_st', st_ret }, base);
+    });
+    return { produtos, semLigacao };
+  }
+  // Alerta da proposta pela última compra: vendemos com ST (5405/CST 60), mas a última compra veio SEM ST, ou com ST e sem
+  // os valores. regra.st_entrada = { situacao, cst, nota, fornecedor, quando } (gravado por stDasCompras).
+  function alertaEntrada(regra) {
+    const e = regra && regra.st_entrada, v = regra && regra.venda;
+    if (!e || !v || !(ehST(v.cfop) || CST_ST.indexOf(String(v.cst_icms)) !== -1)) return null;
+    const de = ' (NF ' + (e.nota || '?') + (e.fornecedor ? ' de ' + e.fornecedor : '') + (e.quando ? ', ' + dataBR(String(e.quando).slice(0, 10)) : '') + ')';
+    if (e.situacao === 'sem_st') return { nivel: 'erro', texto: 'Vendido com ICMS-ST (CFOP ' + v.cfop + ', CST ' + (v.cst_icms || '—') + '), mas a última compra' + de +
+      ' veio sem ST (CST ' + (e.cst || '—') + '): não há ICMS-ST retido para repassar. O produto pode ter saído da ST ou a compra veio errada; conferir com o contador.' };
+    if (e.situacao === 'sem_valor') return { nivel: 'atencao', texto: 'A última compra' + de + ' veio com ST (CST ' + e.cst + ') mas sem os valores do ICMS-ST retido: pedir ao fornecedor ou conferir com o contador.' };
+    return null;
+  }
+
+  const api = { NCM_PAPEL_HIGIENICO, LIMPEZA_FORA_ST_SP, FORA_ST_SP, ehLimpezaForaST, grupoForaST, stDasCompras, alertaEntrada, analisa, clientes, fmtNcm, ehVenda, ehST };
   raiz.CRMFiscal = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);
@@ -219,6 +281,36 @@
     CRM.render();
   }
   const andamento = t => { rodando = t; const el = document.getElementById('fiAndamento'); if (el) el.textContent = t; else CRM.render(); };
+
+  // ICMS-ST pela nota de compra mais recente (19/10/2026): grava regra.st_ret[unidade] (origem 'compra', passa por cima do
+  // aprendido do FKN) e regra.st_entrada (o que a última compra trouxe), com o alerta de "vendido com ST e comprado sem".
+  async function aprenderDasCompras() {
+    const st = CRM.store();
+    const [linhas, vinc, unid, est, prods] = await Promise.all([st.comprasSt(), st.compraVinculos().catch(() => []), st.estoqueUnidades().catch(() => []),
+      st.estoque().catch(() => []), st.fiscalProdutos()]);
+    const base = c => String(c || '').replace(/\.\d+$/, '');
+    const ctx = { vinculos: new Map((vinc || []).map(v => [v.fornecedor_doc + '|' + v.cod_fornecedor, v])), porGtin: new Map(), unidadeBase: new Map(), caixas: new Map() };
+    (prods || []).forEach(p => { if (p.gtin) ctx.porGtin.set(String(p.gtin), { codigo: p.codigo, unidade: p.unidade }); if (p.unidade) ctx.unidadeBase.set(p.codigo, p.unidade); });
+    (est || []).forEach(e => { if (e.codigo === base(e.codigo) && e.unidade) ctx.unidadeBase.set(e.codigo, e.unidade); });
+    (unid || []).forEach(u => { const l = ctx.caixas.get(u.codigo) || []; l.push(u); ctx.caixas.set(u.codigo, l); });
+    const r = F.stDasCompras(linhas, ctx), porCod = new Map((prods || []).map(p => [p.codigo, p]));
+    const DO_ENTRADA = /^(Vendido com ICMS-ST \(|A última compra )/;
+    const salvar = [], cont = { com_st: 0, sem_st: 0, sem_valor: 0, semCadastro: 0 };
+    Object.keys(r.produtos).forEach(cod => {
+      const x = r.produtos[cod], p = porCod.get(cod);
+      if (!p) { cont.semCadastro++; return; }
+      cont[x.situacao]++;
+      const regra = Object.assign({}, p.regra || {}, { st_entrada: { situacao: x.situacao, cst: x.cst, nota: x.nota, fornecedor: x.fornecedor, quando: x.quando } });
+      if (x.st_ret) regra.st_ret = Object.assign({}, regra.st_ret || {}, x.st_ret);
+      const ae = F.alertaEntrada(regra);
+      const alertas = (p.alertas || []).filter(a => !DO_ENTRADA.test(a.texto || '')).concat(ae ? [ae] : []);
+      salvar.push({ codigo: cod, regra, alertas });
+    });
+    for (let i = 0; i < salvar.length; i += 200) await st.fiscalProdutosSalvar(salvar.slice(i, i + 200));
+    produtos = null;
+    return Object.assign(cont, { itens: (linhas || []).length, semLigacao: r.semLigacao.length });
+  }
+  CRM.fiscalSt = { aprenderDasCompras };
 
   // Lê do XML guardado a tributação das notas que ainda não foram lidas (6 downloads de cada vez).
   async function lerNotas() {
@@ -251,8 +343,13 @@
     const linhas = resumo.map(F.analisa).map(a => {
       const ja = atuais.get(a.codigo);
       const base = { codigo: a.codigo, descricao: a.descricao, unidade: a.unidade, alertas: a.alertas };
-      // o ICMS-ST aprendido das notas (regra.st_ret, emissao.js) não se perde ao refazer a proposta
-      const regra = ja && ja.regra && ja.regra.st_ret ? Object.assign({}, a.regra, { st_ret: ja.regra.st_ret }) : a.regra;
+      // o ICMS-ST aprendido (regra.st_ret das notas de compra ou do FKN, e regra.st_entrada da última compra; emissao.js)
+      // não se perde ao refazer a proposta
+      const guarda = {};
+      ['st_ret', 'st_entrada'].forEach(k => { if (ja && ja.regra && ja.regra[k]) guarda[k] = ja.regra[k]; });
+      const regra = Object.assign({}, a.regra, guarda);
+      const ae = F.alertaEntrada(ja && ja.situacao === 'conferido' ? Object.assign({}, ja.regra, guarda) : regra);
+      if (ae) base.alertas = base.alertas.concat([ae]);
       return ja && ja.situacao === 'conferido' ? base : Object.assign(base, { ncm: a.ncm, cest: a.cest, gtin: a.gtin, origem: a.origem, regra, situacao: 'proposta' });
     });
     await CRM.store().fiscalProdutosSalvar(linhas);

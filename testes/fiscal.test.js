@@ -166,3 +166,32 @@ test('clientes: o que falta para emitir a nota', () => {
   assert.deepEqual([r.total, r.completos], [3, 1]);
   assert.deepEqual(r.faltando.map(x => x.falta), [['IE (é contribuinte)', 'código do município'], ['CNPJ/CPF', 'tem IE mas está como não contribuinte', 'endereço']]);
 });
+
+test('ICMS-ST retido pela compra mais recente (stDasCompras) e alerta de "vendido com ST, comprado sem"', () => {
+  const l = (o) => Object.assign({ fornecedor_doc: '11222333000144', fornecedor_nome: 'FORNECEDOR EXEMPLO', cod_fornecedor: 'A1', descricao: 'SACO EXEMPLO', ean: null,
+    unidade: 'FD', quantidade: 10, ordem: 1, st_cst: '10', st_base: 140, st_aliq: 18, st_proprio: 18, st_valor: 7.2 }, o);
+  const ctx = { vinculos: new Map([['11222333000144|A1', { codigo: 'P1', fator: 10 }]]), porGtin: new Map([['7890000000017', { codigo: 'P2', unidade: 'UN' }]]),
+    unidadeBase: new Map([['P1', 'PT'], ['P2', 'UN']]), caixas: new Map([['P1', [{ unidade: 'CX', fator: 5 }]]]) };
+  const r = F.stDasCompras([
+    l({ numero: 100, emitida_em: '2026-09-01T10:00:00-03:00', st_valor: 99 }),                 // mais antiga: não vale
+    l({ numero: 200, emitida_em: '2026-10-10T10:00:00-03:00' }),                               // 10 FD × 10 = 100 PT
+    l({ numero: 201, emitida_em: '2026-10-11T10:00:00-03:00', cod_fornecedor: 'B9', ean: '7890000000017', unidade: 'UN', quantidade: 4, st_cst: '00', st_base: null, st_aliq: null, st_proprio: null, st_valor: null }),
+    l({ numero: 202, emitida_em: '2026-10-12T10:00:00-03:00', cod_fornecedor: 'ZZ', descricao: 'SEM LIGACAO' }),
+    l({ numero: 50, emitida_em: '2026-10-01T10:00:00-03:00', st_cst: null })                   // gravado antes da leitura do ST
+  ], ctx);
+  assert.equal(r.produtos.P1.situacao, 'com_st');
+  assert.equal(r.produtos.P1.nota, '200');
+  assert.deepEqual(Object.keys(r.produtos.P1.st_ret).sort(), ['CX', 'PT']);
+  const pt = r.produtos.P1.st_ret.PT;
+  assert.deepEqual([pt.vBCSTRet, pt.pST, pt.vICMSSubstituto, pt.vICMSSTRet, pt.origem], [1.4, 18, 0.18, 0.072, 'compra']);
+  assert.deepEqual([r.produtos.P1.st_ret.CX.vBCSTRet, r.produtos.P1.st_ret.CX.vICMSSTRet], [7, 0.36]);
+  assert.equal(r.produtos.P2.situacao, 'sem_st', 'ligado pelo código de barras na mesma unidade');
+  assert.equal(r.semLigacao.length, 1);
+  const st = { cfop: '5405', cst_icms: '60' };
+  const a = F.alertaEntrada({ venda: st, st_entrada: { situacao: 'sem_st', cst: '00', nota: '201', fornecedor: 'FORNECEDOR EXEMPLO', quando: '2026-10-11T10:00:00-03:00' } });
+  assert.equal(a.nivel, 'erro');
+  assert.match(a.texto, /^Vendido com ICMS-ST \(CFOP 5405, CST 60\), mas a última compra \(NF 201 de FORNECEDOR EXEMPLO, 11\/10\/2026\) veio sem ST \(CST 00\)/);
+  assert.equal(F.alertaEntrada({ venda: { cfop: '5102', cst_icms: '00' }, st_entrada: { situacao: 'sem_st', cst: '00' } }), null, 'vendido sem ST: nada a avisar');
+  assert.equal(F.alertaEntrada({ venda: st, st_entrada: { situacao: 'com_st' } }), null);
+  assert.equal(F.alertaEntrada({ venda: st, st_entrada: { situacao: 'sem_valor', cst: '60', nota: '9' } }).nivel, 'atencao');
+});

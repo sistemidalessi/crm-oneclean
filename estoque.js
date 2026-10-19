@@ -67,9 +67,26 @@
     let m;
     while ((m = re.exec(String(xml || '')))) {
       const prod = (/<prod>([\s\S]*?)<\/prod>/.exec(m[2]) || [])[1] || '';
-      out.set(+m[1], { frete: r2(tag(prod, 'vFrete')), outras: r2(num(tag(prod, 'vSeg')) + num(tag(prod, 'vOutro'))) });
+      out.set(+m[1], Object.assign({ frete: r2(tag(prod, 'vFrete')), outras: r2(num(tag(prod, 'vSeg')) + num(tag(prod, 'vOutro'))) }, stDoDet(m[2])));
     }
     return out;
+  }
+  // ICMS-ST que veio na nota de compra (19/10/2026): é o que a nossa nota de revenda com CST 60 informa como "retido
+  // anteriormente" (base, alíquota, ICMS próprio do substituto e ICMS-ST), proporcional à quantidade vendida.
+  // Fornecedor substituto (CST 10/30/70/90, CSOSN 201/202/203/900): vBCST, pICMSST, vICMS próprio e vICMSST.
+  // Fornecedor que revendeu (CST 60, CSOSN 500, grupo ICMSST): os campos de "retido anteriormente".
+  // Sem ST: só o CST (st_base etc. nulos). Valores do item inteiro (a conta por unidade é em fiscal.js).
+  const ou = (x, t) => { const v = tag(x, t); return v === '' ? null : r2(v); };
+  function stDoDet(det) {
+    const icms = (/<ICMS>([\s\S]*?)<\/ICMS>/.exec(String(det || '')) || [])[1] || '';
+    const g = /<(ICMS\w*)>([\s\S]*?)<\/\1>/.exec(icms);
+    if (!g) return { st_cst: null, st_base: null, st_aliq: null, st_proprio: null, st_valor: null };
+    const x = g[2], cst = tag(x, 'CST') || tag(x, 'CSOSN') || null;
+    if (/^(10|30|70|90|201|202|203|900)$/.test(cst || '') && tag(x, 'vICMSST') !== '')
+      return { st_cst: cst, st_base: ou(x, 'vBCST'), st_aliq: ou(x, 'pICMSST'), st_proprio: /^(30|201|202|203)$/.test(cst) ? null : ou(x, 'vICMS'), st_valor: ou(x, 'vICMSST') };
+    if (/^(60|500)$/.test(cst || '') || g[1] === 'ICMSST')
+      return { st_cst: cst || '60', st_base: ou(x, 'vBCSTRet'), st_aliq: ou(x, 'pST'), st_proprio: ou(x, 'vICMSSubstituto'), st_valor: ou(x, 'vICMSSTRet') };
+    return { st_cst: cst, st_base: null, st_aliq: null, st_proprio: null, st_valor: null };
   }
   // Nota do fornecedor (lerXml de nfe.js + o XML) → { compra, itens } para gravar em crm_compras/crm_compra_itens.
   // nossoDoc: CNPJ da OneClean (a nota tem de ser PARA ela, e não emitida por ela).
@@ -85,7 +102,9 @@
       itens: (d.itens || []).map(it => {
         const f = it.fiscal || {}, e = ex.get(it.ordem) || {};
         return { ordem: it.ordem, cod_fornecedor: it.codigo, descricao: it.descricao, ean: f.gtin || null, ncm: it.ncm, cfop: it.cfop, unidade: it.unidade,
-          quantidade: num(it.quantidade), valor_total: r2(it.valor_total), ipi: r2(f.v_ipi), st: r2(f.v_icms_st), frete: num(e.frete), outras: num(e.outras) };
+          quantidade: num(it.quantidade), valor_total: r2(it.valor_total), ipi: r2(f.v_ipi), st: r2(f.v_icms_st), frete: num(e.frete), outras: num(e.outras),
+          st_cst: e.st_cst || null, st_base: e.st_base == null ? null : e.st_base, st_aliq: e.st_aliq == null ? null : e.st_aliq,
+          st_proprio: e.st_proprio == null ? null : e.st_proprio, st_valor: e.st_valor == null ? null : e.st_valor };
       })
     };
   }
@@ -164,7 +183,7 @@
   }
 
   const TIPOS = { inicial: 'saldo inicial (FKN)', saida: 'saída (nota)', entrada: 'entrada (compra)', ajuste: 'ajuste', inventario: 'inventário', estorno: 'estorno' };
-  const api = { junta, valor, sequencia, lerContagem, atualFkn, ehCaixa, TIPOS, extrasDoXml, compraDoXml, custoItem, sugere, avisosDfe, sugereFornecedor };
+  const api = { junta, valor, sequencia, lerContagem, atualFkn, ehCaixa, TIPOS, extrasDoXml, stDoDet, compraDoXml, custoItem, sugere, avisosDfe, sugereFornecedor };
   raiz.CRMEstoque = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);

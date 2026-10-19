@@ -227,12 +227,15 @@
       (amb === 'homologacao' ? '<p class="dica">Para passar para produção: serviço fiscal e certificado conferidos, Sefaz 107, e pelo menos uma nota de teste autorizada em homologação' +
         (nfes ? ' (até agora: ' + homAut + ')' : '') + '. O contador confere a tabela fiscal antes.</p>' : '') +
       '<h3>Tabela do IBPT (tributos aproximados na nota, Lei 12.741)</h3>' + ibptHtml() +
-      '<h3>ICMS-ST já recolhido (produtos com CST 60)</h3><p class="dica">A nota do CRM informa, nos produtos com substituição tributária, o mesmo ICMS-ST que o FKN informa: ' +
-        'o CRM lê a nota mais recente do FKN de cada produto e guarda o valor por unidade. Rodar de novo de vez em quando (ou depois de uma compra com preço novo).</p>' +
-      '<p class="acoes"><button type="button" class="btn sec" data-acao="nf-aprender-st"' + (testando ? ' disabled' : '') + '>Aprender o ICMS-ST das notas do FKN</button></p></section>';
+      '<h3>ICMS-ST já recolhido (produtos com CST 60)</h3><p class="dica">Na revenda com substituição tributária a nota informa o ICMS-ST que veio na ' +
+        '<strong>compra mais recente</strong> do produto (base, alíquota, ICMS próprio do fornecedor e ICMS-ST), proporcional à quantidade vendida. ' +
+        'O CRM tira esses valores das notas de compra (Estoque → Notas de compra, pelo XML); o produto que ainda não tem nota de compra no CRM fica com o ' +
+        'que o FKN informa nas notas dele. Rodar de novo depois de dar entrada em compras.</p>' +
+      (stUltimo ? '<p class="dica">' + esc(stUltimo) + '</p>' : '') +
+      '<p class="acoes"><button type="button" class="btn sec" data-acao="nf-aprender-st"' + (testando ? ' disabled' : '') + '>Aprender o ICMS-ST (notas de compra e do FKN)</button></p></section>';
   }
 
-  let ibpt = null, ibptCarregando = false;
+  let ibpt = null, ibptCarregando = false, stUltimo = '';
   function ibptHtml() {
     if (ibpt === null && !ibptCarregando) { ibptCarregando = true; CRM.store().ibptInfo().then(r => { ibpt = r || {}; ibptCarregando = false; CRM.render(); }).catch(() => { ibpt = {}; ibptCarregando = false; }); }
     const i = ibpt || {}, br = d => (d ? String(d).slice(0, 10).split('-').reverse().join('/') : '');
@@ -466,10 +469,15 @@
       testando = ''; CRM.render();
     },
     'nf-aprender-st': async () => {
-      testando = 'Lendo as notas do FKN com ICMS-ST (pode levar um minuto)…'; CRM.render();
+      testando = 'Lendo as notas do FKN e as de compra com ICMS-ST (pode levar um minuto)…'; CRM.render();
       try {
+        // primeiro o FKN; depois as notas de compra, que valem mais (passam por cima no mesmo produto e unidade)
         const r = await chama({ acao: 'aprender_st' });
-        CRM.toast('ICMS-ST aprendido de ' + r.lidas + ' nota(s) do FKN: ' + r.produtos + ' produto(s).' + (r.semXml ? ' ' + r.semXml + ' nota(s) sem XML guardado.' : ''));
+        const c = CRM.fiscalSt ? await CRM.fiscalSt.aprenderDasCompras() : null;
+        stUltimo = 'Última leitura: ' + r.produtos + ' produto(s) pelas notas do FKN' + (c ? '; pelas notas de compra, ' + c.com_st + ' com ICMS-ST, ' +
+          c.sem_st + ' comprado(s) sem ST, ' + c.sem_valor + ' com ST sem os valores' + (c.semLigacao ? ' e ' + c.semLigacao + ' item(ns) de compra sem ligação a um produto (ligar em Estoque → Notas de compra)' : '') : '') +
+          '. Depois, "Atualizar as propostas" na regra de cada produto.';
+        CRM.toast(stUltimo);
       } catch (e) { CRM.falhou(e); }
       testando = ''; CRM.render();
     },
