@@ -1347,6 +1347,10 @@ Respostas dele: histórico das notas de compra **buscado na Sefaz**; concorrente
   devolve a já feita), fica em `crm_ia_analises` (dia, tipo, texto; RLS leitura admin/comprador; grava só a função), o
   Clean avisa ("Análise de compras de hoje pronta") e o Painel do comprador mostra no topo com "Refazer agora" e
   "Conversar com o comprador sênior". Custo medido nas 4 perguntas de outubro: ~US$ 0,06 cada.
+  1ª análise real em 19/10 15:40 (US$ 0,16; boa), mas a tela não mostrou: o navegador desistiu de esperar (~1 min) antes
+  de o servidor gravar. Agora, se a chamada falhar, a tela procura a gravada (6 vezes, a cada 20 s). **Pendências** ao lado
+  da análise (pedido do Anderson): notas de compra para dar entrada (quantas já chegaram), despesa para tirar da lista,
+  notas da Sefaz sem ciência e "Pedir hoje" (rola até Pedido por fornecedor); cada linha leva à tela certa.
 - **3 — fornecedores e painel do comprador (18/10, feito):** tabelas `crm_fornecedores` (código do FKN; prazo de entrega,
   pedido mínimo, frete CIF/FOB/CIF acima de X, dias de pedido 1=seg…6=sáb, pagamento, contato), `crm_produto_fornecedor`
   (produto sem fornecedor ou com o errado no FKN; fornecedor nulo = volta ao do FKN, sem apagar linha) e

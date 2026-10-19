@@ -1192,6 +1192,11 @@
   };
   // Análise de compras do dia (comprador sênior, 19/10/2026): feita uma vez por dia pela crm-assistente.
   Supa.prototype.analiseCompras = async function (refazer) { return this.assistente({ acao: 'analise_compras', refazer: !!refazer }); };
+  // Pendências do comprador no Painel (19/10/2026): notas de compra esperando entrada e as da Sefaz sem ciência.
+  Supa.prototype.comprasPendentes = async function () { return unwrap(await this.sb.from('crm_compras').select('id, numero, fornecedor_nome, emitida_em, valor_total').eq('situacao', 'pendente').order('emitida_em', { ascending: false }).limit(100)); };
+  Supa.prototype.dfeSemCiencia = async function () { const r = await this.sb.from('crm_dfe').select('chave', { count: 'exact', head: true }).eq('situacao', 'autorizada').is('xml_em', null).is('manifestada_em', null); if (r.error) throw r.error; return r.count || 0; };
+  Local.prototype.comprasPendentes = async function () { return (this._compras || []).filter(c => c.situacao === 'pendente'); };
+  Local.prototype.dfeSemCiencia = async function () { return 0; };
   Supa.prototype.analiseHoje = async function (dia) { return unwrap(await this.sb.from('crm_ia_analises').select('dia, texto, em').eq('dia', dia).eq('tipo', 'compras').maybeSingle()); };
   Local.prototype.analiseCompras = async function () { const a = { dia: R.hojeISO(), texto: '(modo local: sem IA) Aqui aparece a análise de compras do dia: **o que pedir hoje e de quem**, as notas que chegaram, o custo que subiu e o estoque parado.', em: new Date().toISOString(), nova: true }; this._analise = a; return a; };
   Local.prototype.analiseHoje = async function (dia) { return this._analise && this._analise.dia === dia ? this._analise : null; };

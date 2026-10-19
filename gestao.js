@@ -364,6 +364,14 @@
     const [fornecedores, produtoForn, custoHist] = await Promise.all([st.fornecedores ? st.fornecedores().catch(() => []) : [],
       st.produtoForn ? st.produtoForn().catch(() => []) : [], st.custoHist ? st.custoHist(90).catch(() => []) : []]);
     extra = { fornecedores, produtoForn, custoHist };
+    // pendências do comprador (notas de compra para dar entrada, Sefaz sem ciência): sem as tabelas, o painel segue sem
+    try {
+      const compras = st.comprasPendentes ? await st.comprasPendentes() : [];
+      const ids = compras.map(c => c.id);
+      const [itensProd, itensPend, semCiencia] = await Promise.all([ids.length && st.comprasItensProduto ? st.comprasItensProduto().catch(() => []) : [],
+        ids.length && st.compraItensDe ? st.compraItensDe(ids).catch(() => []) : [], st.dfeSemCiencia ? st.dfeSemCiencia().catch(() => 0) : 0]);
+      extra.pend = { compras, itensProd, itensPend, semCiencia };
+    } catch (e) { extra.pend = null; }
     lendoEstoque = false;
     CRM.render();
   }
@@ -674,7 +682,7 @@
     const todos = c.todosFornecedores || [];
     if (!c.estoque || !c.estoque.completo) return '';
     const cad = todos.filter(f => f.cadastro).length;
-    return '<section class="cartao"><h2>Pedido por fornecedor <small>' + l.length + ' fornecedor(es) · ' + esc(R.moeda(c.estoque.valorSugestao)) + ' para ' + c.dias + ' dias</small></h2>' +
+    return '<section class="cartao" id="comprasPorForn"><h2>Pedido por fornecedor <small>' + l.length + ' fornecedor(es) · ' + esc(R.moeda(c.estoque.valorSugestao)) + ' para ' + c.dias + ' dias</small></h2>' +
       (l.length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Fornecedor</th><th class="num">Produtos</th><th class="num">Custo estimado</th><th class="num">Pedido mínimo</th><th class="num">Prazo</th><th>Frete</th><th></th></tr></thead><tbody>' +
       l.map((f, i) => '<tr><td><button type="button" class="link" data-acao="compras-ver-fornecedor" data-id="' + i + '">' + esc(f.nome) + '</button>' + (f.cod ? ' <small>' + esc(f.cod) + '</small>' : '') +
           (f.urgentes ? ' ' + CRM.selo(f.urgentes + ' pedir hoje', 'vermelho') : '') + (f.diaDePedido ? ' ' + CRM.selo('dia de pedido', 'azul') : '') + '</td>' +
@@ -708,7 +716,8 @@
         : an && an.texto ? '<div class="analise-texto">' + CRM.turma.fmt(an.texto) + '</div>' : '<p class="vazio">Ainda não feita hoje.</p>') +
       '<p class="acoes">' + (!gerando ? '<button type="button" class="btn' + (an && an.texto ? ' sec' : '') + '" data-acao="compras-analise-gerar">' + (an && an.texto ? '↻ Refazer agora' : 'Fazer a análise de hoje') + '</button> ' : '') +
         '<button type="button" class="btn sec" data-acao="compras-analise">💬 Conversar com o comprador sênior</button></p></div>' : '';
-    return '<section class="cartao painel-comprador"><h2>Painel do comprador <small>o que precisa da sua atenção hoje</small></h2>' + blocoIA +
+    return '<section class="cartao painel-comprador"><h2>Painel do comprador <small>o que precisa da sua atenção hoje</small></h2>' +
+      '<div class="painel-topo">' + blocoIA + pendenciasCompra(c) + '</div>' +
       '<p class="acoes">' +
         (CRM.telas.concorrentes ? '<button type="button" class="btn sec" data-acao="aba" data-id="concorrentes">⚖ Comparar com os concorrentes</button> ' : '') +
         (temIA ? '<small class="dica">a IA olha a reposição, os fornecedores, o estoque parado e os preços dos concorrentes</small>' : '') + '</p>' +
@@ -723,6 +732,32 @@
           '<ul class="g-tend">' + sf.slice(0, 5).map(g => '<li><span>' + esc(R.nomeDeItem(g.descricao)) + '</span><button type="button" class="mini" data-acao="compras-troca-forn" data-id="' + esc(g.codigo) + '">definir</button><small>' + esc(g.codigo + (g.valor12 ? ' · ' + R.moeda(g.valor12) + ' em 12 meses' : '') + (g.fornecedorNoFkn ? ' · no FKN: ' + R.nomeDeItem(g.fornecedorNoFkn) + ' (não compramos)' : '')) + '</small></li>').join('') + '</ul>' +
           '<p><button type="button" class="link" data-acao="compras-sem-forn">ver todos na tabela</button></p>' : '<p class="vazio">Todo produto que vende tem fornecedor.</p>') + '</div>' +
       '</div></section>';
+  }
+
+  // Pendências do comprador ao lado da análise (19/10/2026, pedido do Anderson: "trazer as pendências… dar um
+  // destaque para não esquecer"): notas de compra para dar entrada (as que já chegaram), despesa para tirar da lista,
+  // notas da Sefaz sem ciência e os fornecedores para pedir hoje.
+  function pendenciasCompra(c) {
+    const p = extra.pend, S = raiz.CRMEstoque, ph = c.pedirHoje || [];
+    const li = (acao, id, texto, sub, cor) => '<li><button type="button" class="link' + (cor ? ' ' + cor : '') + '" data-acao="' + acao + '" data-id="' + esc(id) + '">' + esc(texto) + '</button>' + (sub ? '<small>' + esc(sub) + '</small>' : '') + '</li>';
+    const itens = [];
+    if (p && p.compras.length && S) {
+      const fknForn = [];
+      const vistos = new Set();
+      (estoque || []).forEach(x => { if (x.fornecedor_cod && x.fornecedor && !vistos.has(x.fornecedor_cod)) { vistos.add(x.fornecedor_cod); fknForn.push({ cod: x.fornecedor_cod, nome: x.fornecedor }); } });
+      (extra.fornecedores || []).forEach(f => fknForn.push({ cod: f.codigo, nome: f.nome }));
+      const desp = p.compras.filter(n => S.pareceDespesa(p.itensPend.filter(i => i.compra_id === n.id)));
+      const merc = p.compras.filter(n => desp.indexOf(n) === -1);
+      const ch = S.chegadaCompras({ compras: merc, itensProd: p.itensProd, fkn: estoque, fknForn });
+      const chegou = merc.filter(n => { const x = ch.get(n.id); return x && (x.estado === 'chegou' || x.estado === 'provavel'); }).length;
+      if (merc.length) itens.push(li('turma-ir', 'estoque:compras', '📥 ' + merc.length + (merc.length === 1 ? ' nota de compra' : ' notas de compra') + ' para dar entrada',
+        (chegou ? chegou + (chegou === 1 ? ' já chegou' : ' já chegaram') + ' · ' : '') + (merc.length - chegou) + ' aguardando a mercadoria', chegou ? 'forte' : ''));
+      if (desp.length) itens.push(li('turma-ir', 'estoque:compras', '💡 ' + desp.length + (desp.length === 1 ? ' nota parece despesa' : ' notas parecem despesa') + ': tirar da lista', desp.map(n => n.fornecedor_nome).slice(0, 2).join(', ')));
+    }
+    if (p && p.semCiencia) itens.push(li('turma-ir', 'estoque:compras', '📨 ' + p.semCiencia + (p.semCiencia === 1 ? ' nota da Sefaz' : ' notas da Sefaz') + ' sem ciência', 'dar quando a mercadoria chegar (o XML vem depois)'));
+    if (ph.length) itens.push(li('compras-ir-pedido', '', '🛒 Pedir hoje: ' + ph.length + (ph.length === 1 ? ' fornecedor' : ' fornecedores') + ' · ' + R.moeda(ph.reduce((s, f) => s + f.custo, 0)),
+      ph.slice(0, 3).map(f => f.nome).join(', ') + (ph.length > 3 ? '…' : ''), 'forte'));
+    return '<div class="pend-compras"><h3>📌 Pendências</h3>' + (itens.length ? '<ul>' + itens.join('') + '</ul>' : '<p class="vazio">Nada pendente nas compras.</p>') + '</div>';
   }
 
   function formFornecedor(cod) {
@@ -817,6 +852,7 @@
       CRM.render();
       const t = document.querySelector('.filtros-compras'); if (t && t.scrollIntoView) t.scrollIntoView({ block: 'start' });
     },
+    'compras-ir-pedido': () => { const s = document.getElementById('comprasPorForn'); if (s && s.scrollIntoView) s.scrollIntoView({ block: 'start', behavior: 'smooth' }); },
     'compras-analise-gerar': () => { const an = CRM.turma.analise(); CRM.turma.gerarAnalise(!!(an && an.texto)); },
     'compras-analise': () => CRM.turma && CRM.turma.perguntar && CRM.turma.perguntar('Faça a análise de compras de hoje como comprador sênior: o que pedir e de qual fornecedor (com quantidades e o porquê), ' +
       'o que acaba antes da entrega, fornecedores perto do pedido mínimo, preço de compra que subiu e o estoque parado que vale uma oferta.'),

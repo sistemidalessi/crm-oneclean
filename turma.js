@@ -125,7 +125,15 @@
     if (gerandoAnalise || !fazAnalise()) return analise;
     gerandoAnalise = true; CRM.render();
     try { analise = await CRM.store().analiseCompras(refazer); analiseDia = CRM.hoje(); }
-    catch (e) { if (refazer) CRM.falhou(e); }
+    catch (e) {
+      // a análise leva perto de 1 minuto: o navegador pode desistir de esperar antes de o servidor terminar e gravar
+      // (19/10/2026, 1º uso real). Então procura a gravada algumas vezes antes de dar por perdida.
+      for (let i = 0; i < 6 && !(analise && analise.texto); i++) {
+        await new Promise(r => setTimeout(r, 20000));
+        try { analise = await CRM.store().analiseHoje(CRM.hoje()); } catch (e2) { /* tenta de novo */ }
+      }
+      if (!(analise && analise.texto) && refazer) CRM.falhou(e);
+    }
     gerandoAnalise = false; CRM.render();
     return analise;
   }

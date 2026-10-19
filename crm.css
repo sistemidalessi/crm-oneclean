@@ -998,3 +998,16 @@ pre.of-previa { white-space: pre-wrap; font-family: inherit; font-size: .88rem; 
 .analise-ia h3 { margin: 0 0 6px; }
 .analise-texto { line-height: 1.5; }
 .analise-texto ul { margin: 4px 0 4px 18px; padding: 0; }
+
+/* painel do comprador: análise do dia + pendências lado a lado (19/10) */
+.painel-topo { display: grid; grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr); gap: 12px; align-items: start; margin: 6px 0 12px; }
+.painel-topo .analise-ia { margin: 0; }
+.pend-compras { border: 1px solid var(--borda); border-left: 4px solid var(--ambar, #e0a100); border-radius: 12px; padding: 10px 14px; background: var(--papel); }
+.pend-compras h3 { margin: 0 0 6px; }
+.pend-compras ul { list-style: none; margin: 0; padding: 0; }
+.pend-compras li { padding: 6px 0; border-top: 1px solid var(--borda); }
+.pend-compras li:first-child { border-top: 0; }
+.pend-compras li .link { text-align: left; font-weight: 600; }
+.pend-compras li .link.forte { color: var(--azul-escuro, #134f5f); font-weight: 800; }
+.pend-compras li small { display: block; color: var(--suave); }
+@media (max-width: 800px) { .painel-topo { grid-template-columns: 1fr; } }
