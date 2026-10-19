@@ -454,6 +454,9 @@
     const aut = dfe.filter(d => d.situacao === 'autorizada');
     const completas = aut.filter(d => d.xml_em && !tem.has(d.chave)), resumo = aut.filter(d => !d.xml_em);
     const semCiencia = resumo.filter(d => !d.manifestada_em), aguardando = resumo.filter(d => d.manifestada_em);
+    // Ciência só do que já chegou (decisão do Anderson, 19/10): as de antes do início do estoque do CRM já estão no saldo
+    // (entraram pelo FKN) e vão juntas num clique; as de depois, uma a uma, quando a mercadoria chegar.
+    const ini = inicioEstoque(), antigas = ini ? semCiencia.filter(d => d.emitida_em && d.emitida_em < ini) : [];
     const e = dfeEst || {}, espera = e.proxima_em && Date.parse(e.proxima_em) > Date.now();
     return '<section class="cartao"><h2>Notas da Sefaz <small>emitidas contra o nosso CNPJ nos últimos 3 meses</small></h2>' +
       '<p>' + (e.ultima_em ? 'Última consulta: <strong>' + esc(quando(e.ultima_em)) + '</strong>' + (e.ultimo_motivo ? ' (' + esc(e.ultimo_motivo) + ')' : '') + '. ' : 'Ainda não consultou. ') +
@@ -463,12 +466,26 @@
       '<p>' + aut.length + ' nota(s) vista(s) · ' + (aut.length - resumo.length) + ' com o XML completo · ' + resumo.length + ' só com o resumo' + (aguardando.length ? ' (' + aguardando.length + ' esperando a Sefaz liberar o XML)' : '') + '.</p>' +
       (semCiencia.length ? '<p class="dica">O XML completo (itens e preços) só vem depois da <strong>Ciência da Operação</strong>: o aviso à Sefaz de que a empresa sabe da nota. ' +
           'Não confirma nem recusa a compra. ' + (CRM.ehAdmin() ? '' : 'Quem dá a ciência é o administrador.') + '</p>' +
-        (CRM.ehAdmin() ? '<p class="acoes"><button type="button" class="btn sec" data-acao="es-sefaz-ciencia">Dar ciência e pedir o XML de ' + Math.min(20, semCiencia.length) + ' nota(s)' + (semCiencia.length > 20 ? ' (de ' + semCiencia.length + '; 20 por vez)' : '') + '</button></p>' : '') : '') +
+        (CRM.ehAdmin() && antigas.length ? '<p class="acoes"><button type="button" class="btn sec" data-acao="es-sefaz-ciencia-antigas">Dar ciência nas ' + antigas.length + ' nota(s) de antes de ' +
+          esc(quando(ini).slice(0, 5)) + ' (a mercadoria já está no estoque)</button></p>' : '') +
+        (CRM.ehAdmin() && semCiencia.length > antigas.length ? '<p class="dica">As mais novas: dê a ciência na nota (na lista abaixo) quando a mercadoria chegar; aí o XML vem e a nota fica pendente para a entrada.</p>' : '') : '') +
       (resumo.length ? '<details data-chave="es-sefaz-resumos"><summary>Só com o resumo (' + resumo.length + ')</summary><div class="tabela-rolagem"><table class="tabela"><tbody>' +
         resumo.slice(0, 100).map(d => '<tr><td><strong>' + esc(d.emitente_nome || '?') + '</strong><small>' + esc(quando(d.emitida_em)) + '</small></td><td class="num">' + R.moeda(d.valor) + '</td><td>' +
           (d.manifestada_em ? CRM.selo('ciência dada', 'azul') : d.manifesto_motivo ? CRM.selo(d.manifesto_motivo.slice(0, 60), 'vermelho') : CRM.selo('falta ciência', 'ambar')) +
+          (!d.manifestada_em && CRM.ehAdmin() ? ' <button type="button" class="mini" data-acao="es-sefaz-ciencia-uma" data-id="' + esc(d.chave) + '" title="Dar a Ciência da Operação desta nota (quando a mercadoria chegar)">dar ciência</button>' : '') +
           (d.conclusiva_tipo ? ' ' + CRM.selo(NOME_RESP[d.conclusiva_tipo], 'verde') : CRM.ehAdmin() ? ' <button type="button" class="mini" data-acao="es-dfe-resp" data-id="' + esc(d.chave + '|desconhecimento') + '" title="Responder Desconhecimento à Sefaz">desconheço</button>' : '') + '</td></tr>').join('') +
         '</tbody></table></div></details>' : '') + '</section>' + blocoAvisosDfe();
+  }
+
+  const inicioEstoque = () => (saldo || []).reduce((m, x) => (x.inicio && (!m || x.inicio < m) ? x.inicio : m), null);
+  // uma por vez (a crm-fiscal recebe uma chave e confere que ainda falta a ciência)
+  async function ciencia(chaves) {
+    let ok = 0, falha = 0;
+    for (const ch of chaves) {
+      try { const r = await CRM.store().dfeCiencia(ch); ok += r.ok || 0; falha += r.falha || 0; } catch (e) { falha++; }
+    }
+    CRM.toast('Ciência dada em ' + ok + ' nota(s)' + (falha ? ', ' + falha + ' com problema (veja na lista)' : '') + '. O XML completo chega na próxima consulta à Sefaz (até 1 hora).', !!falha);
+    const st = CRM.store(); dfe = await st.dfe().catch(() => dfe); CRM.render();
   }
 
   async function lerCompras(files) {
@@ -602,11 +619,19 @@
       await manda(null);
     },
     'es-sefaz-trazer': async () => { await trazDfe(false); CRM.render(); },
-    'es-sefaz-ciencia': async () => {
-      if (!confirm('Dar a Ciência da Operação das notas que ainda não têm o XML completo (até 20)?\nÉ só o aviso à Sefaz de que a empresa sabe da nota: não confirma nem recusa a compra.')) return;
-      try { const r = await CRM.store().dfeCiencia(); CRM.toast('Ciência dada em ' + r.ok + ' nota(s)' + (r.falha ? ', ' + r.falha + ' com problema (veja na lista)' : '') + '. O XML completo chega na próxima consulta (até 1 hora).', !!r.falha); }
-      catch (e) { CRM.falhou(e); }
-      const st = CRM.store(); dfe = await st.dfe().catch(() => dfe); CRM.render();
+    'es-sefaz-ciencia-antigas': async () => {
+      const ini = inicioEstoque(), l = ini ? dfe.filter(d => d.situacao === 'autorizada' && !d.xml_em && !d.manifestada_em && d.emitida_em && d.emitida_em < ini) : [];
+      if (!l.length) return;
+      if (!confirm('Dar a Ciência da Operação de ' + l.length + ' nota(s) emitidas antes de ' + quando(ini).slice(0, 5) + '?\n\n' +
+        l.map(d => '· ' + (d.emitente_nome || '?') + ' (' + quando(d.emitida_em).slice(0, 5) + ', ' + R.moeda(d.valor) + ')').join('\n') +
+        '\n\nÉ só o aviso à Sefaz de que a empresa sabe da nota (a mercadoria já está no estoque): não confirma nem recusa a compra.')) return;
+      await ciencia(l.map(d => d.chave));
+    },
+    'es-sefaz-ciencia-uma': async chave => {
+      const d = dfe.find(x => x.chave === chave); if (!d) return;
+      if (!confirm('A mercadoria desta nota já chegou?\n\n' + (d.emitente_nome || '?') + ' · ' + quando(d.emitida_em).slice(0, 5) + ' · ' + R.moeda(d.valor) +
+        '\n\nDar a Ciência da Operação (o aviso à Sefaz de que a empresa sabe da nota; não confirma nem recusa a compra). O XML vem na próxima consulta e a nota fica pendente para a entrada.')) return;
+      await ciencia([chave]);
     },
     'es-compra': async id => {
       const c = compras.find(x => x.id === id); if (!c) return;

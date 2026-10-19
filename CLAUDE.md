@@ -1320,6 +1320,12 @@ Respostas dele: histórico das notas de compra **buscado na Sefaz**; concorrente
   chegadaCompras` compara com a `ult_entrada` (caixa `.1` conta como o produto) ≥ data da emissão; sem item achado, o
   fornecedor pelo nome (`sugereFornecedor`) dá só o "provável". Conferido nas 186 notas antigas (que chegaram): 82 de 86
   com produto achado pelo código de barras saem "chegou". Depois do paralelo: botão "mercadoria chegou" da logística.
+  **Ciência só do que chegou (19/10):** o botão que dava ciência em até 20 de uma vez saiu. Agora: "Dar ciência nas N
+  nota(s) de antes de <início do estoque>" (a mercadoria já está no saldo que veio do FKN; a confirmação lista cada
+  nota) e, nas mais novas, "dar ciência" em cada linha, com a pergunta "a mercadoria desta nota já chegou?". Uma
+  chamada da `crm-fiscal` por nota (`dfe_ciencia` com `chave`). Em 19/10: busca completa (NSU 2390), 295 DF-e; 272
+  compras como histórico (até 16/10 de manhã), 5 pendentes (16–17/10, todas "aguardando"; a da oficina Centro
+  Automotivo SBC não é mercadoria) e 15 só com resumo (12 antigas para a ciência em lote, 3 de 19/10).
 - **3 — fornecedores e painel do comprador (18/10, feito):** tabelas `crm_fornecedores` (código do FKN; prazo de entrega,
   pedido mínimo, frete CIF/FOB/CIF acima de X, dias de pedido 1=seg…6=sáb, pagamento, contato), `crm_produto_fornecedor`
   (produto sem fornecedor ou com o errado no FKN; fornecedor nulo = volta ao do FKN, sem apagar linha) e
