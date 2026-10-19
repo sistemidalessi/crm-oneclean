@@ -1440,7 +1440,7 @@ https://claude.ai/artifact/AkJoPA2gw7i3Wz99fcDY7p: Produtos, Ficha, Buscar foto,
 - **Aprovar:** grade "Para aprovar" (a foto escolhida grande + até 4 outras; já vem marcada a de código de barras batendo
   ou "mesmo produto" de fabricante/fornecedor), "Ver e corrigir" (escolher a foto ou "nenhuma serve", corrigir marca,
   descrição e especificações, guardar ou não a ficha e a FISPQ), "Recusar", "Aprovar as marcadas". Lote: "Teste: os 5 mais
-  vendidos sem foto", 20, 50, 200 ou todos, **três de cada vez**, com o custo estimado pela média medida (antes do teste,
+  vendidos sem foto", 20, 50, 200 ou todos, **cinco de cada vez** (desde 19/10 à noite; antes três), com o tempo que falta, com o custo estimado pela média medida (antes do teste,
   US$ 0,08 por produto) e "Parar". Limite da chave: US$ 10/mês (aviso na tela e na confirmação).
 - **Banco:** `crm_produto_fotos` (codigo, caminho, fonte, fonte_url) e `crm_produto_info` (marca, fabricante, descrição,
   especificacoes [{nome, valor}], ficha_caminho/url, fispq_caminho/url, fonte_url) — a equipe ativa lê, admin/comprador
@@ -1462,7 +1462,8 @@ https://claude.ai/artifact/AkJoPA2gw7i3Wz99fcDY7p: Produtos, Ficha, Buscar foto,
   a v3 descarta a repetida pelo conteúdo do arquivo e por "mesma página + mesmo tamanho". Conta do lote no Haiku:
   161 produtos (10+ notas) ≈ US$ 4,40; 277 (5+) ≈ US$ 7,50; 739 (venderam em 90 dias) ≈ US$ 20; os 1.711 ≈ US$ 46.
   IA do mês até aqui: US$ 1,88 (limite da chave US$ 10).
-- **Falta:** o Anderson decidir o tamanho do lote (cabe no limite do mês ou aumentar o limite da chave).
+- **Decisão do Anderson (19/10, noite):** rodar o lote completo em 20/10, depois de aumentar o limite da chave no console da
+  Anthropic. Os 1.711 a ~US$ 0,027 ≈ US$ 46 e ~3 horas com cinco de cada vez (tela aberta, computador sem dormir).
 
 ## NF-e emitida pelo CRM — Fase 4 da saída do FKN (16/10/2026, pedido do Anderson)
 

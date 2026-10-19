@@ -344,7 +344,7 @@
   }
 
   async function rodaLote(codigos) {
-    lote = { total: codigos.length, feitos: 0, achou: 0, erros: 0, custo: 0, parar: false };
+    lote = { total: codigos.length, feitos: 0, achou: 0, erros: 0, custo: 0, parar: false, inicio: Date.now() };
     CRM.render();
     const fila = codigos.slice();
     const trabalha = async () => {
@@ -356,7 +356,7 @@
         CRM.render();
       }
     };
-    await Promise.all([trabalha(), trabalha(), trabalha()]); // três de cada vez
+    await Promise.all([1, 2, 3, 4, 5].map(trabalha)); // cinco de cada vez (o que der erro, como limite da API, volta no próximo lote)
     const r = lote; lote = null;
     ia = await st().produtoBuscar({ acao: 'situacao' }).catch(() => ia);
     CRM.toast('Busca terminada: ' + r.feitos + ' produto(s), ' + r.achou + ' com sugestão para aprovar, custo ' + usd(r.custo) + '.');
@@ -380,7 +380,9 @@
         '<strong>Nada aparece para as vendedoras antes de você aprovar.</strong></p>' +
         '<p class="dica">IA no mês: ' + (ia ? usd(ia.custo_mes) + ' (fotos e fichas: ' + usd(ia.custo_fotos_mes) + ')' : '—') + ' · limite da chave: US$ 10 por mês · ' +
           (est.medido ? 'custo médio medido: ' + usd(est.medio) + ' por produto (' + est.medido + ' busca(s))' : 'custo por produto ainda não medido (estimativa ' + usd(est.medio) + '): comece pelo teste de 5') + '</p></div>' +
-        (lote ? '<div class="pf-andamento" role="status"><strong>Buscando ' + lote.feitos + ' de ' + lote.total + '…</strong> ' + lote.achou + ' com sugestão · ' + usd(lote.custo) + ' até agora ' +
+        (lote ? '<div class="pf-andamento" role="status"><strong>Buscando ' + lote.feitos + ' de ' + lote.total + '…</strong> ' + lote.achou + ' com sugestão · ' + usd(lote.custo) + ' até agora' +
+            (lote.feitos >= 5 ? ' · faltam uns ' + Math.max(1, Math.round((Date.now() - lote.inicio) / lote.feitos * (lote.total - lote.feitos) / 60000)) + ' min' : '') +
+            ' · deixe esta tela aberta e o computador sem dormir ' +
             '<button type="button" class="btn sec" data-acao="pf-lote-parar"' + (lote.parar ? ' disabled' : '') + '>' + (lote.parar ? 'Parando…' : 'Parar') + '</button></div>'
           : '<div class="pf-lote-acao"><label class="filtro-inline">Quais <select data-pf-quantos>' + CRM.opcoesHTML(opc, fl.quantos) + '</select></label>' +
             '<button type="button" class="btn" data-acao="pf-lote"' + (n && ia && ia.ligado ? '' : ' disabled') + '>Buscar ' + n + ' produto(s) · custo estimado ' + usd(est.total) + '</button>' +
