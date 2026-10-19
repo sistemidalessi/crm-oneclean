@@ -6,6 +6,24 @@ urgência. O vigia só escreve aqui; quem muda o sistema é a sessão de desenvo
 
 <!-- novas entradas abaixo desta linha -->
 
+## 19/10/2026 — Papelaria e papel fora da ST em SP desde 01/07/2026 (Portaria SRE 9/2026)
+- **O que mudou:** a Portaria SRE nº 9/2026 (assinada em 17/03, DOE 18/03/2026) revogou anexos da Portaria CAT 68/2019 —
+  entre eles o de **papelaria e papel** (revogação integral), além de materiais de construção, bebidas frias/água e
+  sorvetes — e as portarias de base de cálculo correspondentes (SRE 88/2025, 89/2025 e 29/2024). Junto com a SRE 94/2025
+  (perfumaria e higiene, 01/04/2026), confirma que **papel higiênico, toalhas e demais papéis não têm mais ST em SP**,
+  no mais tardar desde 01/07/2026.
+- **Norma e link:** Portaria SRE 9/2026 — https://legislacao.fazenda.sp.gov.br/paginas/Portaria-CAT-68-de-2019.aspx
+  (consolidada; a rede da sessão barra o site); cópia: https://www.legisweb.com.br/legislacao/?id=492605 ; resumo:
+  https://documentacao.senior.com.br/exigenciaslegais/noticias/estadual/2026/2026-03-25-icms-sp-portaria-sre-no-9-2026-excluidos-diversos-produtos-da-substituicao-tributaria-a-partir-de-01-07-2026/
+- **Desde quando:** 01/07/2026. Estoque na data: Portaria CAT 28/2020 (crédito do ICMS-ST do estoque, em geral em 12 parcelas).
+- **O que muda no sistema:** `fiscal.js` hoje só reconhece **limpeza** fora da ST (`LIMPEZA_FORA_ST_SP`, desde 01/08). Precisa
+  tratar também os CEST do segmento **20** (higiene pessoal, inclusive 20.042.00/20.043.00 papel higiênico — desde 01/04/2026)
+  e do segmento de **papel/papelaria** (desde 01/07/2026): proposta 5102/CST 00/18%, e as vendas com 5405/CST 60 depois
+  dessas datas vão para o contador (pelo registro de 15/10, ~R$ 692 mil em itens do segmento 20 com 5405 desde 01/04).
+  Atualizar `monitoramento.md` (linha "ICMS SP"). Conferir com o contador e com o texto oficial a data de cada item
+  (toalha 20.044.00: 01/04 ou 01/07).
+- **Urgência:** **alta** — já em vigor; afeta o produto mais vendido (papel higiênico/toalha) e a emissão direta da Fase 4.
+
 ## 16/10/2026 — CNPJ alfanumérico já vale na NF-e (desde 01/07/2026)
 - **O que mudou:** a Receita passou a atribuir CNPJ com letras e números (12 primeiras posições alfanuméricas, 2
   dígitos verificadores numéricos). A **NT 2026.004** (v1.00 de abril, v1.01 de 08/06/2026) mudou o esquema da NF-e/NFC-e:
@@ -59,6 +77,13 @@ urgência. O vigia só escreve aqui; quem muda o sistema é a sessão de desenvo
 - **O que muda no sistema:** se confirmado, `fiscal.js` trata o segmento 20 como fora da ST desde 01/04/2026 (igual à
   limpeza desde 01/08) e as notas com 5405 depois disso vão para o contador. Até lá, **nada no código**.
 - **Urgência:** **alta** — valor grande; confirmar com o contador e com o texto oficial.
+- **Confirmado em 19/10/2026 (parcial, por fontes secundárias; texto oficial ainda não lido):** a tabela do Anexo XI
+  da CAT 68/2019 trazia o **papel higiênico** (CEST **20.042.00** folha simples e **20.043.00** folha dupla/tripla/
+  quádrupla, NCM 4818.10.00), e o Anexo XI foi revogado pela Portaria SRE 94/2025 a partir de **01/04/2026** (fontes:
+  https://simtax.com.br/fim-substituicao-tributaria-perfumaria-sp/ , https://www.legisweb.com.br/noticia/?id=32102). A
+  "SRE 09/2026" existe (ver entrada de 19/10): ela revogou o anexo de **papelaria e papel** a partir de 01/07/2026. Falta
+  ver no texto oficial se toalha/interfolha de papel (CEST 20.044.00, 4818.20.00) estava no Anexo XI ou no de papel;
+  pelas duas portarias, desde 01/07/2026 os dois anexos estão revogados.
 
 ## 15/10/2026 — ICMS-ST em SP: produtos de limpeza fora da ST desde 01/08/2026
 - **O que mudou:** a Portaria SRE nº 20/2026 (DOE 05/05/2026) revogou os Anexos XII (ração) e XIII (**produtos de
