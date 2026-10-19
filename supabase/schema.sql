@@ -3299,3 +3299,21 @@ $$;
 create or replace function public.crm_dfe_lembrete_todas() returns boolean language sql stable security invoker set search_path = public as $$
   select coalesce((select (dados->'fiscal'->>'dfe_lembrete_todas')::boolean from crm_config where id = 1), false)
 $$;
+
+-- Selo "chegou" das notas de compra pendentes (19/10/2026): o produto nosso de cada item — o item já ligado, a ligação
+-- lembrada do fornecedor (crm_compra_vinculos) ou o código de barras (crm_fiscal_produtos.gtin). O navegador compara
+-- com a última entrada da listagem do FKN (estoque.js chegadaCompras). Só admin e comprador (os mesmos da RLS de
+-- crm_compras); o teste de papel roda uma vez, não por linha.
+create or replace function public.crm_compras_itens_produto()
+returns table (compra_id uuid, ordem integer, codigo text, como text)
+language sql stable security definer set search_path = public as $$
+  select i.compra_id, i.ordem, regexp_replace(coalesce(i.codigo, v.codigo, g.codigo), '\.\d+$', ''),
+    case when i.codigo is not null then 'item' when v.codigo is not null then 'vinculo' else 'ean' end
+  from crm_compras c join crm_compra_itens i on i.compra_id = c.id
+  left join crm_compra_vinculos v on v.fornecedor_doc = c.fornecedor_doc and v.cod_fornecedor = i.cod_fornecedor
+  left join lateral (select p.codigo from crm_fiscal_produtos p where i.ean ~ '^\d{8,14}$' and p.gtin = i.ean order by p.codigo limit 1) g on true
+  where c.situacao = 'pendente' and coalesce(i.codigo, v.codigo, g.codigo) is not null
+    and ((select public.crm_eh_admin()) or (select public.crm_eh_comprador()))
+$$;
+revoke all on function public.crm_compras_itens_produto() from public, anon;
+grant execute on function public.crm_compras_itens_produto() to authenticated;

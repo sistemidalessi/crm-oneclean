@@ -543,6 +543,8 @@
     const l = unwrap(await this.sb.from('crm_compra_itens').select('crm_compras(chave)').is('st_cst', null).limit(20000));
     return [...new Set(l.map(i => (i.crm_compras || {}).chave).filter(Boolean))];
   };
+  // produto nosso de cada item das notas pendentes (item ligado, ligação lembrada ou código de barras): para o selo "chegou"
+  Supa.prototype.comprasItensProduto = async function () { return unwrap(await this.sb.rpc('crm_compras_itens_produto')); };
   Supa.prototype.compraItensSt = async function (lista) { return unwrap(await this.sb.rpc('crm_compra_itens_st', { p: lista })); };
   Supa.prototype.compraGravar = async function (compra, itens) {
     const r = unwrap(await this.sb.from('crm_compras').upsert(compra, { onConflict: 'chave', ignoreDuplicates: true }).select());
@@ -579,6 +581,10 @@
   };
   Local.prototype.comprasSemSt = async function () { return []; };
   Local.prototype.compraItensSt = async function () { return 0; };
+  Local.prototype.comprasItensProduto = async function () {
+    const pend = new Set((this._compras || []).filter(c => c.situacao === 'pendente').map(c => c.id));
+    return (this._compraItens || []).filter(i => pend.has(i.compra_id) && i.codigo).map(i => ({ compra_id: i.compra_id, ordem: i.ordem, codigo: i.codigo, como: 'item' }));
+  };
   Local.prototype.compraGravar = async function (compra, itens) {
     this._compras = this._compras || []; this._compraItens = this._compraItens || [];
     if (this._compras.some(c => c.chave === compra.chave)) return null;

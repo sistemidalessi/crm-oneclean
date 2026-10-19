@@ -92,3 +92,22 @@ test('ICMS-ST de cada item da nota de compra (stDoDet): substituto, quem revende
   assert.deepEqual(S.stDoDet(det('<ICMS00><orig>0</orig><CST>00</CST><vBC>100.00</vBC><pICMS>18.00</pICMS><vICMS>18.00</vICMS></ICMS00>')),
     { st_cst: '00', st_base: null, st_aliq: null, st_proprio: null, st_valor: null });
 });
+
+test('chegou? nota de compra pendente × última entrada no FKN', () => {
+  const compras = [
+    { id: 'a', emitida_em: '2026-10-20T13:00:00Z', fornecedor_nome: 'LEALPLASTIC INDUSTRIA PLASTICA LTDA' },
+    { id: 'b', emitida_em: '2026-10-20T13:00:00Z', fornecedor_nome: 'LEALPLASTIC INDUSTRIA PLASTICA LTDA' },
+    { id: 'c', emitida_em: '2026-10-20T13:00:00Z', fornecedor_nome: 'POLAR IND COM PAPEIS DESCART LTDA' },
+    { id: 'd', emitida_em: '2026-10-20T13:00:00Z', fornecedor_nome: 'NINGUEM CONHECIDO SA' },
+    { id: 'e', emitida_em: '2026-10-22T13:00:00Z', fornecedor_nome: 'POLAR IND COM PAPEIS DESCART LTDA' }];
+  const fkn = [{ codigo: '100', fornecedor_cod: '00005', ult_entrada: '2026-10-21' }, { codigo: '100.1', fornecedor_cod: '00005', ult_entrada: '2026-10-21' },
+    { codigo: '101', fornecedor_cod: '00005', ult_entrada: '2026-10-01' }, { codigo: '200', fornecedor_cod: '00010', ult_entrada: '2026-10-20' }];
+  const itensProd = [{ compra_id: 'a', codigo: '100.1' }, { compra_id: 'a', codigo: '101' }, { compra_id: 'b', codigo: '101' }];
+  const fknForn = [{ cod: '00005', nome: 'LEALPLASTIC INDUSTRIA PLASTICA LTDA EPP' }, { cod: '00010', nome: 'POLAR IND COM PAPEIS DESCART LTDA' }];
+  const r = S.chegadaCompras({ compras, itensProd, fkn, fknForn });
+  assert.deepEqual(r.get('a'), { estado: 'chegou', em: '2026-10-21', ligados: 2, comEntrada: 1 }, 'a caixa (.1) conta como o produto');
+  assert.equal(r.get('b').estado, 'aguardando', 'entrada do produto antes da emissão não é desta nota');
+  assert.equal(r.get('c').estado, 'provavel'); assert.equal(r.get('c').em, '2026-10-20');
+  assert.equal(r.get('d').estado, 'sem_dado');
+  assert.equal(r.get('e').estado, 'aguardando', 'fornecedor achado, mas sem entrada depois da emissão');
+});

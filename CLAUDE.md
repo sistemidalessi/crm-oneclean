@@ -1302,6 +1302,15 @@ Respostas dele: histórico das notas de compra **buscado na Sefaz**; concorrente
   **Decisão do Anderson (19/10): ciência continua manual, de propósito.** Com o XML vem a obrigação de dar entrada, então
   ele só dá ciência quando a mercadoria chegou (o resumo fica no CRM até lá). Ideia para depois: a logística avisar no CRM
   "mercadoria chegou" e isso liberar/pedir a ciência daquela nota. Em 19/10: 61 DF-e (52 com XML, 9 só resumo), NSU 1514 de 2390.
+  **Selo "chegou" (19/10, pedido do Anderson: "pra oficializar a entrada eu preciso saber se a mercadoria já foi
+  entregue"):** cada nota de compra **pendente** mostra ✓ chegou (entrou no FKN em DD/MM) / ✓? provável / ⏳ aguardando
+  chegada / ? sem como saber, e as que chegaram vêm primeiro, com o botão de entrada destacado. Durante o paralelo quem
+  diz é o FKN: o comprador só dá entrada lá quando a mercadoria chega, e a listagem traz a `ult_entrada` de cada produto.
+  RPC `crm_compras_itens_produto()` (security definer, admin/comprador, papel testado uma vez) acha o produto nosso de cada
+  item: item já ligado → `crm_compra_vinculos` → código de barras (`crm_fiscal_produtos.gtin`); `estoque.js
+  chegadaCompras` compara com a `ult_entrada` (caixa `.1` conta como o produto) ≥ data da emissão; sem item achado, o
+  fornecedor pelo nome (`sugereFornecedor`) dá só o "provável". Conferido nas 186 notas antigas (que chegaram): 82 de 86
+  com produto achado pelo código de barras saem "chegou". Depois do paralelo: botão "mercadoria chegou" da logística.
 - **3 — fornecedores e painel do comprador (18/10, feito):** tabelas `crm_fornecedores` (código do FKN; prazo de entrega,
   pedido mínimo, frete CIF/FOB/CIF acima de X, dias de pedido 1=seg…6=sáb, pagamento, contato), `crm_produto_fornecedor`
   (produto sem fornecedor ou com o errado no FKN; fornecedor nulo = volta ao do FKN, sem apagar linha) e
