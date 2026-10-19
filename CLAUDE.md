@@ -1403,6 +1403,52 @@ Respostas dele: histórico das notas de compra **buscado na Sefaz**; concorrente
   tabela; vermelho = mais barato. "Sugerir a cesta" = 20 mais vendidos da curva A. A IA tem a ferramenta `concorrentes`.
   Levantamento e os escolhidos pelo Anderson: `sistemi-dalessi` (privado), `docs/oneclean/concorrentes.md`.
 
+## Fotos e fichas técnicas dos produtos (19/10/2026, pedidos do Anderson)
+
+Pedidos: "estoque para o vendedor consultar o produto… seria muito bom se aparecesse foto"; "quando a vendedora for incluir
+um item, ela pesquisa em toda totalidade, no entanto aparece pra ela somente as informações pertinentes a vendas e não o
+cadastro completo"; "a IA buscar foto e as fichas técnicas, que normalmente tem no site dos fabricantes… sempre deixando os
+cadastros da forma mais completa possível". Layout aprovado antes na simulação (artifact
+https://claude.ai/artifact/AkJoPA2gw7i3Wz99fcDY7p: Produtos, Ficha, Buscar foto, Fotos em lote).
+
+- **Vendas → Estoque** (aba `produtos`, `produtos.js`; admin, gestora e vendedores): o catálogo do estoque inteiro em
+  cartões — foto, "mais vendido" (os 15% que saíram em mais notas em 90 dias, `crm_produtos_vendidos`), disponível
+  (verde / "Pouco" se dura menos de ~15 dias pela venda de 90 / "Em falta · a caminho N"), preço da tabela A e da caixa,
+  "Ver ficha" e "+ Pedido". Busca por todas as palavras em qualquer ordem (nome, código, marca, linha), filtro de linha,
+  "Só com estoque" (com busca, mostra também o que está em falta), ordem. **Sem custo de compra, conferência, notas nem
+  fornecedor.** A **ficha** (janela) mostra foto, disponível/reservado/a caminho, descrição, especificações, os PDFs
+  (ficha técnica e FISPQ), preço por faixa A–D com a margem (a vendedora vê margem, decisão de 16/10) e a venda de 90 dias;
+  "+ Adicionar ao pedido" põe o produto na linha de digitação do pedido aberto (ou de um novo: `CRM.pedidos.incluirItem`).
+- **No pedido:** botão "🔍 Procurar com foto" ao lado de Qtde/Preço/Desc (o mesmo catálogo numa janela, "Incluir"), a
+  miniatura do produto escolhido (clique = ficha) e miniaturas na grade dos itens e em "Consultar estoque".
+- **Comprador e administrador:** Compras e estoque → Estoque → quadro **"Fotos e fichas"** (abre mesmo sem o estoque do CRM
+  começado) e, na ficha, "Buscar foto e ficha (IA)", "Subir foto", "Tirar foto" (câmera do celular), "Editar a ficha"
+  (marca, fabricante, descrição, especificações "Nome: valor" por linha, subir PDF da ficha e da FISPQ) e "tirar a foto".
+  Miniaturas também no Saldo por produto. A foto é **reduzida no navegador** (900 px, JPEG, fundo branco) antes de guardar.
+- **IA (Edge Function `crm-produto-buscar`, só admin/comprador):** Claude **Sonnet 5.5** (metade do preço do Opus;
+  `CRM_FOTOS_MODELO` nos Secrets troca) com as ferramentas de **busca e leitura da web** da Anthropic (até 4 buscas e 4
+  páginas por produto; não abre PDF). Recebe a descrição do FKN, a unidade, a linha, o **código de barras** (cadastro
+  fiscal ou nota de compra), como o fornecedor escreve na nota e o fornecedor; devolve JSON (marca, fabricante, descrição,
+  especificações só do que a fonte diz, páginas com tipo fabricante/fornecedor/loja, "código de barras bate", ficha,
+  FISPQ, observação). O **servidor** abre as páginas, tira a foto anunciada (og:image, JSON-LD do produto, foto principal
+  de WooCommerce/VTEX/Magento) e os links de PDF, baixa (só http(s) público, sem IP interno, 3 redirecionamentos conferidos,
+  imagem ≥ 200 px até 3 MB, PDF de verdade até 10 MB) e guarda em `sugestoes/<codigo>/`. Partes puras em `pagina.js` (o
+  mesmo arquivo nos testes do Node). Custo de cada busca em `crm_assistente_uso` (tela `fotos`); `acao: 'situacao'` dá o
+  gasto do mês (toda a IA e só fotos). **Nada vai para a equipe sem o comprador aprovar.**
+- **Aprovar:** grade "Para aprovar" (a foto escolhida grande + até 4 outras; já vem marcada a de código de barras batendo
+  ou "mesmo produto" de fabricante/fornecedor), "Ver e corrigir" (escolher a foto ou "nenhuma serve", corrigir marca,
+  descrição e especificações, guardar ou não a ficha e a FISPQ), "Recusar", "Aprovar as marcadas". Lote: "Teste: os 5 mais
+  vendidos sem foto", 20, 50, 200 ou todos, **três de cada vez**, com o custo estimado pela média medida (antes do teste,
+  US$ 0,08 por produto) e "Parar". Limite da chave: US$ 10/mês (aviso na tela e na confirmação).
+- **Banco:** `crm_produto_fotos` (codigo, caminho, fonte, fonte_url) e `crm_produto_info` (marca, fabricante, descrição,
+  especificacoes [{nome, valor}], ficha_caminho/url, fispq_caminho/url, fonte_url) — a equipe ativa lê, admin/comprador
+  gravam; `crm_produto_fotos_sugestoes` (candidatos, info, busca, erro, situação sugerida/aprovada/recusada/sem/erro,
+  custo) só admin/comprador. Bucket **público** `crm-produtos-fotos` (fotos e fichas de fabricante são públicas; nada de
+  cliente vai nele): `fotos/`, `fichas/`, `sugestoes/`; gravar e ler pela API só admin/comprador (política "crm fotos le"
+  para copiar a sugestão aprovada). CSP: `img-src` com `https://*.supabase.co` e `blob:`.
+- **Falta:** o **teste de custo com 5 produtos** (o Anderson ou o comprador clica "Buscar" com "Teste: os 5…") e eu confiro
+  o custo e a qualidade antes do lote grande.
+
 ## NF-e emitida pelo CRM — Fase 4 da saída do FKN (16/10/2026, pedido do Anderson)
 
 **Caminho:** navegador → Edge Function `crm-fiscal` (login de quem clicou; emite: admin, gestora e logística; cancela:

@@ -1279,6 +1279,96 @@
   Local.prototype.nfesDoMes = async function () { return []; };
   Local.prototype.nfeInutilizacoes = async function () { return (this._inuts || []).slice(); };
 
+  // ---------------------------------------------------------------- fotos e fichas técnicas dos produtos (19/10/2026)
+  // Bucket público crm-produtos-fotos (fotos/, fichas/, sugestoes/); crm_produto_fotos e crm_produto_info a equipe toda lê,
+  // só administrador e comprador gravam (RLS). A busca pela IA é a Edge Function crm-produto-buscar.
+  const FOTOS = 'crm-produtos-fotos';
+  Supa.prototype.fotoUrl = function (caminho) { return caminho ? this.sb.storage.from(FOTOS).getPublicUrl(caminho).data.publicUrl : ''; };
+  Supa.prototype.produtoFotos = async function () {
+    const out = [];
+    for (let de = 0; ; de += PAGINA) {
+      const l = unwrap(await comTentativas(() => this.sb.from('crm_produto_fotos').select('codigo, caminho, fonte, fonte_url, atualizado_em').order('codigo').range(de, de + PAGINA - 1)));
+      out.push(...l);
+      if (l.length < PAGINA) return out;
+    }
+  };
+  Supa.prototype.produtoInfos = async function () {
+    const out = [];
+    for (let de = 0; ; de += PAGINA) {
+      const l = unwrap(await comTentativas(() => this.sb.from('crm_produto_info').select('*').order('codigo').range(de, de + PAGINA - 1)));
+      out.push(...l);
+      if (l.length < PAGINA) return out;
+    }
+  };
+  Supa.prototype.produtoSugestoes = async function () { return unwrap(await this.sb.from('crm_produto_fotos_sugestoes').select('*').order('em', { ascending: false }).limit(3000)); };
+  Supa.prototype.produtosVendidos = async function (dias) {
+    const out = [];
+    for (let de = 0; ; de += PAGINA) {
+      const l = unwrap(await comTentativas(() => this.sb.rpc('crm_produtos_vendidos', { p_dias: dias || 90 }).range(de, de + PAGINA - 1)));
+      out.push(...l);
+      if (l.length < PAGINA) return out;
+    }
+  };
+  Supa.prototype.produtoBuscar = async function (corpo) {
+    const r = await this.sb.functions.invoke('crm-produto-buscar', { body: corpo });
+    if (r.error) throw await erroDaFuncao(r);
+    return r.data;
+  };
+  // Arquivo do bucket como Blob (a foto sugerida, para reduzir antes de guardar; a ficha em PDF, para copiar): pela API
+  // (política "crm fotos le", só administrador e comprador), que não depende do CORS do endereço público.
+  Supa.prototype.fotoBaixar = async function (caminho) {
+    const r = await this.sb.storage.from(FOTOS).download(caminho);
+    if (r.error) throw new Error('não consegui baixar o arquivo (' + (r.error.message || r.error) + ')');
+    return r.data;
+  };
+  // Guarda um arquivo novo (nome único: o navegador pode guardar por um ano) e devolve o caminho.
+  Supa.prototype.fotoSubir = async function (pasta, codigo, blob, ext) {
+    const caminho = pasta + '/' + String(codigo).replace(/[^0-9A-Za-z.\-]/g, '_') + '-' + Date.now().toString(36) + '.' + ext;
+    unwrap(await this.sb.storage.from(FOTOS).upload(caminho, blob, { contentType: blob.type || undefined, upsert: false, cacheControl: '31536000' }));
+    return caminho;
+  };
+  Supa.prototype.fotoApagar = async function (caminhos) { const l = (caminhos || []).filter(Boolean); if (l.length) await this.sb.storage.from(FOTOS).remove(l); };
+  Supa.prototype.produtoFotoGravar = async function (linha) { return unwrap(await this.sb.from('crm_produto_fotos').upsert(Object.assign({}, linha, { atualizado_em: new Date().toISOString() })).select().single()); };
+  Supa.prototype.produtoFotoTirar = async function (codigo) { return unwrap(await this.sb.from('crm_produto_fotos').delete().eq('codigo', codigo)); };
+  Supa.prototype.produtoInfoGravar = async function (linha) { return unwrap(await this.sb.from('crm_produto_info').upsert(Object.assign({}, linha, { atualizado_em: new Date().toISOString() })).select().single()); };
+  Supa.prototype.sugestaoMarcar = async function (codigo, situacao) { return unwrap(await this.sb.from('crm_produto_fotos_sugestoes').update({ situacao }).eq('codigo', codigo)); };
+
+  // Modo local: as fotos ficam no navegador como data: (serve para ver as telas); sem IA (a busca devolve "sem").
+  const lsObj = k => lsLe(k, {});
+  Local.prototype.fotoUrl = function (caminho) { return caminho && /^data:/.test(caminho) ? caminho : (lsObj('crm_fotos_arquivos')[caminho] || ''); };
+  Local.prototype.produtoFotos = async function () { return Object.values(lsObj('crm_produto_fotos')); };
+  Local.prototype.produtoInfos = async function () { return Object.values(lsObj('crm_produto_info')); };
+  Local.prototype.produtoSugestoes = async function () { return Object.values(lsObj('crm_produto_sugestoes')); };
+  Local.prototype.produtosVendidos = async function () {
+    const m = new Map();
+    (this.ler().notas || []).forEach(n => (n.itens || []).forEach(i => { if (!i.codigo) return; const k = String(i.codigo).replace(/\.\d+$/, ''); m.set(k, (m.get(k) || 0) + Number(i.quantidade || 0)); }));
+    return [...m.entries()].map(([codigo, quantidade]) => ({ codigo, quantidade, notas: 1 }));
+  };
+  Local.prototype.produtoBuscar = async function (corpo) {
+    if (corpo.acao === 'situacao') return { ligado: false, custo_mes: 0, custo_fotos_mes: 0 };
+    const l = { codigo: corpo.codigo, candidatos: [], info: null, busca: corpo.busca || '', erro: 'modo local: sem IA', situacao: 'erro', em: new Date().toISOString(), custo_usd: 0 };
+    const s = lsObj('crm_produto_sugestoes'); s[corpo.codigo] = l; lsGrava('crm_produto_sugestoes', s);
+    return l;
+  };
+  Local.prototype.fotoBaixar = async function (caminho) {
+    const u = this.fotoUrl(caminho), m = /^data:([^;,]+);base64,(.*)$/.exec(u || '');
+    if (!m) throw new Error('arquivo não encontrado');
+    const bin = atob(m[2]), b = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) b[i] = bin.charCodeAt(i);
+    return new Blob([b], { type: m[1] });
+  };
+  Local.prototype.fotoSubir = async function (pasta, codigo, blob, ext) {
+    const dataUrl = await new Promise((ok, erro) => { const f = new FileReader(); f.onload = () => ok(f.result); f.onerror = erro; f.readAsDataURL(blob); });
+    const caminho = pasta + '/' + codigo + '-' + Date.now().toString(36) + '.' + ext, a = lsObj('crm_fotos_arquivos');
+    a[caminho] = dataUrl; lsGrava('crm_fotos_arquivos', a);
+    return caminho;
+  };
+  Local.prototype.fotoApagar = async function (caminhos) { const a = lsObj('crm_fotos_arquivos'); (caminhos || []).forEach(c => delete a[c]); lsGrava('crm_fotos_arquivos', a); };
+  Local.prototype.produtoFotoGravar = async function (linha) { const s = lsObj('crm_produto_fotos'); s[linha.codigo] = Object.assign({}, linha, { atualizado_em: new Date().toISOString() }); lsGrava('crm_produto_fotos', s); return s[linha.codigo]; };
+  Local.prototype.produtoFotoTirar = async function (codigo) { const s = lsObj('crm_produto_fotos'); delete s[codigo]; lsGrava('crm_produto_fotos', s); };
+  Local.prototype.produtoInfoGravar = async function (linha) { const s = lsObj('crm_produto_info'); s[linha.codigo] = Object.assign({}, s[linha.codigo], linha, { atualizado_em: new Date().toISOString() }); lsGrava('crm_produto_info', s); return s[linha.codigo]; };
+  Local.prototype.sugestaoMarcar = async function (codigo, situacao) { const s = lsObj('crm_produto_sugestoes'); if (s[codigo]) s[codigo].situacao = situacao; lsGrava('crm_produto_sugestoes', s); };
+
   raiz.CRMDados = { TABELAS, INTEIRAS, PARCIAIS, aplicaMudancas, marcaRecarga, chave, Local, Supa, uuid, vazio, LOCAL_ADMIN, cascataMemoria, situacaoVigia, PARADO_MIN, lembreteFkn };
   if (typeof module !== 'undefined' && module.exports) module.exports = raiz.CRMDados;
 })(typeof window !== 'undefined' ? window : globalThis);

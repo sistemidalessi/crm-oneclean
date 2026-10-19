@@ -3352,3 +3352,84 @@ revoke all on public.crm_ia_analises from anon, public;
 grant select on public.crm_ia_analises to authenticated;
 drop policy if exists le on public.crm_ia_analises;
 create policy le on public.crm_ia_analises for select to authenticated using ((select public.crm_eh_admin()) or (select public.crm_eh_comprador()));
+
+-- Fotos e fichas técnicas dos produtos (19/10/2026, pedido do Anderson: "aparecer a foto do produto" para a vendedora e
+-- "a IA buscar foto e as fichas técnicas, que normalmente tem no site dos fabricantes... deixando os cadastros da forma
+-- mais completa possível"). A IA (Edge Function crm-produto-buscar) procura na web e guarda o que achou como SUGESTÃO;
+-- só depois que o comprador (ou o administrador) aprova entra na foto e na ficha que a equipe vê. Bucket público
+-- (fotos e fichas de fabricante são públicas por natureza; nada de cliente vai nele): fotos/<codigo>-<n>.<ext>,
+-- fichas/<codigo>-<tipo>.pdf e sugestoes/<codigo>/...
+create table if not exists public.crm_produto_fotos (
+  codigo text primary key,
+  caminho text not null,
+  fonte text, fonte_url text,
+  atualizado_em timestamptz default now(),
+  atualizado_por uuid default auth.uid()
+);
+create table if not exists public.crm_produto_fotos_sugestoes (
+  codigo text primary key,
+  candidatos jsonb default '[]'::jsonb,   -- [{ caminho, url, pagina, site, tipo, ean_bate, obs }]
+  info jsonb,                             -- { marca, fabricante, descricao, especificacoes, ficha, fispq, fonte_url }
+  busca text, erro text,
+  situacao text default 'sugerida' check (situacao in ('sugerida', 'aprovada', 'recusada', 'sem', 'erro')),
+  em timestamptz default now(),
+  custo_usd numeric(10,5),
+  por uuid default auth.uid()
+);
+create table if not exists public.crm_produto_info (
+  codigo text primary key,
+  marca text, fabricante text, descricao text,
+  especificacoes jsonb not null default '[]'::jsonb,  -- [{ nome, valor }]: rendimento, diluição, aroma, medidas…
+  ficha_caminho text, ficha_url text, fispq_caminho text, fispq_url text, fonte_url text,
+  atualizado_em timestamptz not null default now(),
+  atualizado_por uuid default auth.uid()
+);
+alter table public.crm_produto_fotos enable row level security;
+alter table public.crm_produto_fotos_sugestoes enable row level security;
+alter table public.crm_produto_info enable row level security;
+drop policy if exists le on public.crm_produto_fotos;
+create policy le on public.crm_produto_fotos for select to authenticated using ((select public.crm_eh_ativo()));
+drop policy if exists grava on public.crm_produto_fotos;
+create policy grava on public.crm_produto_fotos for insert to authenticated with check ((select public.crm_eh_admin()) or (select public.crm_eh_comprador()));
+drop policy if exists muda on public.crm_produto_fotos;
+create policy muda on public.crm_produto_fotos for update to authenticated using ((select public.crm_eh_admin()) or (select public.crm_eh_comprador()))
+  with check ((select public.crm_eh_admin()) or (select public.crm_eh_comprador()));
+drop policy if exists tira on public.crm_produto_fotos;
+create policy tira on public.crm_produto_fotos for delete to authenticated using ((select public.crm_eh_admin()) or (select public.crm_eh_comprador()));
+drop policy if exists tudo on public.crm_produto_fotos_sugestoes;
+create policy tudo on public.crm_produto_fotos_sugestoes for all to authenticated using ((select public.crm_eh_admin()) or (select public.crm_eh_comprador()))
+  with check ((select public.crm_eh_admin()) or (select public.crm_eh_comprador()));
+drop policy if exists le on public.crm_produto_info;
+create policy le on public.crm_produto_info for select to authenticated using ((select public.crm_eh_ativo()));
+drop policy if exists grava on public.crm_produto_info;
+create policy grava on public.crm_produto_info for insert to authenticated with check ((select public.crm_eh_admin()) or (select public.crm_eh_comprador()));
+drop policy if exists muda on public.crm_produto_info;
+create policy muda on public.crm_produto_info for update to authenticated using ((select public.crm_eh_admin()) or (select public.crm_eh_comprador()))
+  with check ((select public.crm_eh_admin()) or (select public.crm_eh_comprador()));
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+  values ('crm-produtos-fotos', 'crm-produtos-fotos', true, 10485760, array['image/jpeg', 'image/png', 'image/webp', 'application/pdf'])
+  on conflict (id) do update set public = true, file_size_limit = excluded.file_size_limit, allowed_mime_types = excluded.allowed_mime_types;
+drop policy if exists "crm fotos grava" on storage.objects;
+create policy "crm fotos grava" on storage.objects for insert to authenticated
+  with check (bucket_id = 'crm-produtos-fotos' and ((select public.crm_eh_admin()) or (select public.crm_eh_comprador())));
+drop policy if exists "crm fotos muda" on storage.objects;
+create policy "crm fotos muda" on storage.objects for update to authenticated
+  using (bucket_id = 'crm-produtos-fotos' and ((select public.crm_eh_admin()) or (select public.crm_eh_comprador())));
+drop policy if exists "crm fotos le" on storage.objects;
+create policy "crm fotos le" on storage.objects for select to authenticated
+  using (bucket_id = 'crm-produtos-fotos' and ((select public.crm_eh_admin()) or (select public.crm_eh_comprador())));
+drop policy if exists "crm fotos tira" on storage.objects;
+create policy "crm fotos tira" on storage.objects for delete to authenticated
+  using (bucket_id = 'crm-produtos-fotos' and ((select public.crm_eh_admin()) or (select public.crm_eh_comprador())));
+-- Quanto saiu de cada produto nas notas (sem valor), para o catálogo ordenar pelos mais vendidos: qualquer usuário ativo.
+create or replace function public.crm_produtos_vendidos(p_dias integer default 90)
+returns table (codigo text, quantidade numeric, notas integer)
+language sql stable security definer set search_path = public as $$
+  select regexp_replace(i.codigo, '\.\d+$', ''), round(sum(i.quantidade), 3), count(distinct n.id)::int
+    from public.crm_nota_itens i join public.crm_notas n on n.id = i.nota_id
+   where public.crm_eh_ativo() and not coalesce(n.cancelada, false) and coalesce(i.codigo, '') <> ''
+     and n.emitida_em >= now() - make_interval(days => least(greatest(coalesce(p_dias, 90), 1), 400))
+   group by 1;
+$$;
+revoke all on function public.crm_produtos_vendidos(integer) from public, anon;
+grant execute on function public.crm_produtos_vendidos(integer) to authenticated;

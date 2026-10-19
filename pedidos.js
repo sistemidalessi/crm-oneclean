@@ -328,7 +328,7 @@
       '<p class="dica"><strong>Disponível</strong> = físico − reservado pelos pedidos do CRM. "A caminho" é o que já foi pedido ao fornecedor. A caixa fechada (código ".1") aparece em caixas.</p>' +
       '<p class="acoes"><input type="search" placeholder="Código ou nome do produto" value="' + esc(f.est) + '" data-pd-est class="of-busca" autofocus></p>' +
       (!f.est ? '<p class="vazio">Digite o código ou parte do nome.</p>' : l.length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Produto</th><th>Un</th><th class="num">Disponível</th><th class="num">Físico</th><th class="num">Reservado</th><th class="num">A caminho</th><th class="num">Preço tabela</th>' +
-        (veCusto() ? '<th class="num">Custo</th>' : '') + '</tr></thead><tbody>' + l.map(d => '<tr><td><strong>' + esc(R.nomeDeItem(d.descricao)) + '</strong><small>' + esc(d.codigo) + (d.localizacao ? ' · ' + esc(d.localizacao) : '') + '</small></td><td>' + esc(d.unidade || '') + '</td>' +
+        (veCusto() ? '<th class="num">Custo</th>' : '') + '</tr></thead><tbody>' + l.map(d => '<tr><td>' + (CRM.produtos ? '<button type="button" class="pd-info-foto" data-acao="pf-ficha" data-id="' + esc(d.codigo) + '" title="Ver a ficha">' + CRM.produtos.miniatura(d.codigo) + '</button>' : '') + '<strong>' + esc(R.nomeDeItem(d.descricao)) + '</strong><small>' + esc(d.codigo) + (d.localizacao ? ' · ' + esc(d.localizacao) : '') + '</small></td><td>' + esc(d.unidade || '') + '</td>' +
           '<td class="num"><strong class="' + (num(d.disponivel) <= 0 ? 'neg' : '') + '">' + qtd(Math.floor(num(d.disponivel) * 1000) / 1000) + '</strong></td><td class="num">' + qtd(d.fisico) + '</td><td class="num">' + qtd(d.reservado) + '</td><td class="num">' + qtd(d.a_caminho) + '</td>' +
           '<td class="num">' + preco(d.preco_venda) + '</td>' + (veCusto() ? '<td class="num">' + preco(d.custo) + '</td>' : '') + '</tr>').join('') + '</tbody></table></div>' : '<p class="vazio">Nada com esse nome ou código.</p>') + '</section>';
   }
@@ -471,7 +471,7 @@
       (gest ? '<th class="num">Margem</th>' : '') + '<th class="num">Preço total</th><th>Faixa</th><th class="num">Comis%</th><th class="num">Desc s/tab</th>' + (o.ler ? '' : '<th class="num">Disp.</th><th></th>') + '</tr></thead><tbody>' +
       (itens.length ? itens.map((it, i) => {
         const l = P.linha(it, o.ctx), fa = falta(i), d = porCod.get(it.codigo);
-        return '<tr' + (o.sel === i ? ' class="sel"' : '') + '><td>' + String(i + 1).padStart(3, '0') + '</td><td>' + esc(it.codigo || '') + '</td><td>' + esc(it.descricao) + (it.obs ? '<small>' + esc(it.obs) + '</small>' : '') + '</td><td>' + esc(it.unidade || '') + '</td>' +
+        return '<tr' + (o.sel === i ? ' class="sel"' : '') + '><td>' + String(i + 1).padStart(3, '0') + '</td><td>' + esc(it.codigo || '') + '</td><td>' + (it.codigo && CRM.produtos ? CRM.produtos.miniatura(it.codigo, 'pequena') : '') + esc(it.descricao) + (it.obs ? '<small>' + esc(it.obs) + '</small>' : '') + '</td><td>' + esc(it.unidade || '') + '</td>' +
           '<td class="num">' + qtd(it.quantidade) + '</td><td class="num">' + (fa > 0 ? '<strong class="neg">' + qtd(fa) + '</strong>' : '0') + '</td><td class="num">' + preco(it.preco) + '</td><td class="num">' + preco(it.desconto) + '</td>' +
           (gest ? '<td class="num">' + (l.margem == null ? '—' : l.abaixoMinimo ? '<strong class="neg" title="abaixo da margem mínima: precisa da liberação da gestora">' + pct(l.margem) + '</strong>' : pct(l.margem)) + '</td>' : '') + '<td class="num">' + preco(l.total) + '</td><td>' + esc(P.rotuloFaixa(l.faixa)) + '</td><td class="num">' + (l.comissao == null ? '—' : preco(l.comissao)) + '</td>' +
           '<td class="num">' + (l.sobreTab == null ? '—' : preco(l.sobreTab)) + '</td>' +
@@ -568,7 +568,8 @@
         '<label class="campo"><span>Qtde' + (l.unidade ? ' (' + esc(l.unidade) + ')' : '') + '</span><input id="pdQtd" data-seq="' + x.seq + '" type="number" step="any" min="0" value="' + esc(l.quantidade) + '" inputmode="decimal"></label>' +
         '<label class="campo"><span>Preço un</span><input id="pdPreco" data-seq="' + x.seq + '" type="number" step="any" min="0" value="' + esc(l.preco) + '" inputmode="decimal"></label>' +
         '<label class="campo"><span>Desc %</span><input id="pdDesc" data-seq="' + x.seq + '" type="number" step="any" min="0" max="100" value="' + esc(l.desconto) + '" inputmode="decimal"></label>' +
-        '<div class="pd-info" id="pdInfo">' + (dd ? 'Disponível <strong class="' + (num(dd.disponivel) < num(l.quantidade) ? 'neg' : '') + '">' + qtd(Math.floor(num(dd.disponivel) * 1000) / 1000) + ' ' + esc(dd.unidade || '') + '</strong>' +
+        (CRM.produtos ? '<button type="button" class="btn sec pd-procurar" data-acao="pd-procurar-foto" title="Procurar no estoque com foto, disponível e preço">🔍 Procurar com foto</button>' : '') +
+        '<div class="pd-info" id="pdInfo">' + (dd && CRM.produtos ? '<button type="button" class="pd-info-foto" data-acao="pf-ficha" data-id="' + esc(dd.codigo) + '" title="Ver a ficha do produto">' + CRM.produtos.miniatura(dd.codigo) + '</button>' : '') + (dd ? 'Disponível <strong class="' + (num(dd.disponivel) < num(l.quantidade) ? 'neg' : '') + '">' + qtd(Math.floor(num(dd.disponivel) * 1000) / 1000) + ' ' + esc(dd.unidade || '') + '</strong>' +
           (dd.a_caminho ? ' · a caminho ' + qtd(dd.a_caminho) : '') + ' · preço tabela R$ ' + preco(dd.preco_venda) + ' · líquido R$ ' + preco(lin.precoLiq) + ' · total R$ ' + preco(lin.total) +
           ' · faixa ' + esc(P.rotuloFaixa(lin.faixa)) + (lin.comissao != null ? ' · comissão ' + preco(lin.comissao) + '%' : '') + (dd.custo != null ? ' · custo R$ ' + preco(dd.custo) : '') + (lin.margem != null ? ' · margem <strong class="' + (lin.abaixoMinimo ? 'neg' : '') + '">' + pct(lin.margem) + '</strong>' +
             (lin.abaixoMinimo ? ' <strong class="neg">abaixo da margem mínima de ' + pct(P.margemMinima(E().cfg)) + ': o pedido fica bloqueado até a gestora liberar</strong>' : '') : '') : 'Escolha o produto: o CRM mostra o disponível e o preço da tabela.') + '</div>' +
@@ -795,7 +796,16 @@
     pedido: id => ped(id),
     recarregar: () => recarrega(),
     separados: () => (peds || []).filter(p => p.situacao === 'separado'),
-    verNfe: async () => { fechaFichas(); E().aba = 'pedidos'; ed = null; aberto = null; f.ver = 'nfe'; if (peds === null) await carrega(true); CRM.render(); }
+    verNfe: async () => { fechaFichas(); E().aba = 'pedidos'; ed = null; aberto = null; f.ver = 'nfe'; if (peds === null) await carrega(true); CRM.render(); },
+    // "+ Pedido" do catálogo com foto (produtos.js): põe o produto na linha de digitação do pedido aberto (ou de um novo)
+    incluirItem: async cod => {
+      fechaFichas(); E().aba = 'pedidos'; aberto = null;
+      if (peds === null) await carrega(true);
+      if (!ed) ed = novoEd({});
+      ed.aba = 'produtos'; linhaNova(); escolheProduto(cod);
+      CRM.render();
+      setTimeout(() => { const q = document.querySelector('#pdQtd'); if (q) q.focus(); }, 80);
+    }
   };
 
   CRM.telas.pedidos = {
@@ -863,6 +873,10 @@
     'pd-faixa': fx => { const c = document.querySelector('.pd-janela'); leLinha(c); const d = porCod.get(ed.linha.codigo); if (d) { ed.linha.preco = P.precoDaFaixa(d.preco_venda, fx, P.tabelaDe(E().cfg)); ed.linha.desconto = 0; } CRM.render(); },
     'pd-item-salvar': () => { const c = document.querySelector('.pd-janela'); leLinha(c); try { salvaItem(); CRM.render(); } catch (e) { CRM.toast(e.message, true); } },
     'pd-item-cancelar': () => { linhaNova(); CRM.render(); },
+    'pd-procurar-foto': () => {
+      const c = document.querySelector('.pd-janela'); if (c) leLinha(c);
+      CRM.produtos.escolher(cod => { if (!ed) return; linhaNova(); escolheProduto(cod); CRM.render(); setTimeout(() => { const q = document.querySelector('#pdQtd'); if (q) q.focus(); }, 80); });
+    },
     'pd-item-editar': i => { const it = ed.itens[Number(i)]; linhaNova(); ed.sel = Number(i); ed.linha = { codigo: it.codigo || '', descricao: it.descricao, unidade: it.unidade || '', quantidade: it.quantidade, preco: it.preco, desconto: it.desconto }; CRM.render(); },
     'pd-item-excluir': i => { ed.itens.splice(Number(i), 1); ed.sel = null; CRM.render(); },
     'pd-organizar': () => { ed.itens.sort((a, b) => String(a.descricao).localeCompare(String(b.descricao), 'pt-BR')); CRM.render(); },

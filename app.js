@@ -322,13 +322,13 @@
   // ------------------------------------------------------------ render
   const ABAS = [
     ['inicio', 'Início', '⌂'], ['fila', 'Fila do dia', '▶'], ['funil', 'Funil', '▥'], ['empresas', 'Empresas', '▦'], ['pessoas', 'Pessoas', '☺'],
-    ['negocios', 'Negócios', '$'], ['pedidos', 'Pedidos', '☰'], ['agenda', 'Atividades', '▣'], ['relatorios', 'Relatórios', '▲'], ['ajustes', 'Configurações', '⚙'], ['compras', 'Compras', '▤'], ['estoque', 'Estoque', '▦'], ['gestao', 'Gestão', '◆'], ['caixa', 'Caixa', '◈'], ['emails', 'E-mails', '✉'], ['ofertas', 'Ofertas', '✦'], ['fiscal', 'Fiscal', '§'], ['concorrentes', 'Concorrentes', '⚖']
+    ['negocios', 'Negócios', '$'], ['pedidos', 'Pedidos', '☰'], ['agenda', 'Atividades', '▣'], ['relatorios', 'Relatórios', '▲'], ['ajustes', 'Configurações', '⚙'], ['compras', 'Compras', '▤'], ['estoque', 'Estoque', '▦'], ['gestao', 'Gestão', '◆'], ['caixa', 'Caixa', '◈'], ['emails', 'E-mails', '✉'], ['ofertas', 'Ofertas', '✦'], ['fiscal', 'Fiscal', '§'], ['concorrentes', 'Concorrentes', '⚖'], ['produtos', 'Estoque', '▦']
   ];
   CRM.ABAS = ABAS;
   // Os grupos do menu de cima (cada tela num grupo só; a ordem é a do menu).
   const GRUPOS = [
     { id: 'inicio', nome: 'Início', telas: ['inicio'] },
-    { id: 'vendas', nome: 'Vendas', telas: ['fila', 'funil', 'negocios', 'empresas', 'pessoas', 'agenda'] },
+    { id: 'vendas', nome: 'Vendas', telas: ['fila', 'funil', 'negocios', 'empresas', 'pessoas', 'produtos', 'agenda'] },
     { id: 'pedidos', nome: 'Pedidos', telas: ['pedidos'] },
     { id: 'compras', nome: 'Compras e estoque', telas: ['compras', 'estoque', 'concorrentes'] },
     { id: 'financeiro', nome: 'Financeiro', telas: ['caixa', 'gestao', 'fiscal'] },

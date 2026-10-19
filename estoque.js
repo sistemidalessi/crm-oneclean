@@ -294,7 +294,8 @@
         ult && r.sem_explicacao ? 'vermelho' : ult ? 'verde' : '', 'conferencia') +
       kpi('Dias seguidos sem diferença sem explicação', seq.dias + ' de 15', seq.dias >= 15 ? 'pronto para a Fase 3 do plano' : 'a meta para confiar no estoque do CRM', seq.dias >= 15 ? 'verde' : '', 'conferencia') +
       kpi('Notas de compra', compras.filter(c => c.situacao === 'pendente').length + ' pendente(s)', 'subir o XML e dar entrada no estoque', compras.some(c => c.situacao === 'pendente') ? 'ambar' : '', 'compras') +
-      kpi('Contagem e ajuste', '✎', 'inventário por contagem ou acerto de um produto', '', 'contagem') + '</div>';
+      kpi('Contagem e ajuste', '✎', 'inventário por contagem ou acerto de um produto', '', 'contagem') +
+      (CRM.produtos ? kpi('Fotos e fichas', '📷', 'foto, ficha técnica e FISPQ de cada produto (a IA procura, você aprova)', '', 'fotos') : '') + '</div>';
   }
 
   function telaSaldo(linhas) {
@@ -306,7 +307,7 @@
       '<p class="acoes"><input type="search" placeholder="Procurar produto, código ou fornecedor" value="' + esc(filtro.busca) + '" data-es-busca class="of-busca"> ' +
       '<label class="filtro-inline"><input type="checkbox" data-es-sodif' + (filtro.soDif ? ' checked' : '') + '> só com diferença</label></p>' +
       (l.length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Produto</th><th class="num">Saldo CRM</th><th class="num">FKN agora</th><th class="num">Diferença</th><th class="num">Custo médio</th><th>Último movimento</th><th></th></tr></thead><tbody>' +
-        l.slice(0, 300).map(x => '<tr><td><strong>' + esc(R.nomeDeItem(x.descricao || x.codigo)) + '</strong><small>' + esc(x.codigo) + (x.unidade ? ' · ' + esc(x.unidade) : '') + (x.fornecedor ? ' · ' + esc(x.fornecedor) : '') + '</small></td>' +
+        l.slice(0, 300).map(x => '<tr><td>' + (CRM.produtos ? '<button type="button" class="pd-info-foto" data-acao="pf-ficha" data-id="' + esc(x.codigo) + '" title="Ficha e foto">' + CRM.produtos.miniatura(x.codigo) + '</button>' : '') + '<strong>' + esc(R.nomeDeItem(x.descricao || x.codigo)) + '</strong><small>' + esc(x.codigo) + (x.unidade ? ' · ' + esc(x.unidade) : '') + (x.fornecedor ? ' · ' + esc(x.fornecedor) : '') + '</small></td>' +
           '<td class="num">' + qtd(x.saldo) + '</td><td class="num">' + qtd(x.fkn) + '</td>' +
           '<td class="num">' + (x.dif == null ? '—' : Math.abs(x.dif) < 0.0005 ? '✓' : '<strong>' + qtd(x.dif) + '</strong>') + '</td>' +
           '<td class="num">' + (x.custo == null ? '—' : R.moeda(x.custo)) + '</td><td>' + esc(quando(x.ultMov)) + '</td>' +
@@ -550,10 +551,11 @@
     render() {
       if (!(CRM.ehAdmin() || CRM.ehComprador())) return '<div class="cartao"><p class="vazio">Esta tela é do administrador e do comprador.</p></div>';
       if (saldo === null) { setTimeout(carrega, 0); return cabecalho() + '<div class="cartao"><p class="vazio">Carregando…</p></div>'; }
-      if (!saldo.length) return cabecalho() + naoComecado();
+      if (!saldo.length) return cabecalho() + (filtro.ver === 'fotos' && CRM.produtos ? CRM.produtos.telaFotos() : naoComecado());
       const linhas = S.junta(saldo, fkn);
       return cabecalho() + quadros(linhas) +
-        (filtro.ver === 'conferencia' ? telaConferencia() : filtro.ver === 'contagem' ? telaContagem() : filtro.ver === 'compras' ? telaCompras() : telaSaldo(linhas));
+        (filtro.ver === 'conferencia' ? telaConferencia() : filtro.ver === 'contagem' ? telaContagem() : filtro.ver === 'compras' ? telaCompras()
+          : filtro.ver === 'fotos' && CRM.produtos ? CRM.produtos.telaFotos() : telaSaldo(linhas));
     },
     depois(c) {
       const b = c.querySelector('[data-es-busca]');
@@ -562,11 +564,14 @@
       if (d) d.addEventListener('change', () => { filtro.soDif = d.checked; CRM.render(); });
       const arq = c.querySelector('#esCompraArq');
       if (arq) arq.addEventListener('change', () => lerCompras(arq.files).catch(CRM.falhou));
+      if (filtro.ver === 'fotos' && CRM.produtos) CRM.produtos.depoisFotos(c);
       const f = c.querySelector('[data-es-foto]');
       if (f) f.addEventListener('change', async () => { fotoVista = Number(f.value); difs = await CRM.store().estoqueDifs(fotoVista).catch(() => []); CRM.render(); });
     }
   };
 
+  // a tela de fotos e fichas (produtos.js) abre daqui: Compras e estoque → Estoque → Fotos e fichas
+  CRM.estoqueVer = ver => { CRM.estado.aba = 'estoque'; filtro.ver = ver; CRM.render(); };
   Object.assign(CRM.acoes, {
     'es-ver': id => { filtro.ver = id; CRM.render(); },
     'es-recarregar': () => { saldo = null; fotoVista = null; carrega(); },
