@@ -2927,8 +2927,8 @@ $$;
 revoke all on function public.crm_ibpt_carregar(jsonb) from public, anon;
 grant execute on function public.crm_ibpt_carregar(jsonb) to authenticated;
 
--- ICMS-ST retido (CST 60) como o FKN informa: a nota mais recente de cada produto com CST 60 (série do FKN, últimos 120
--- dias). A crm-fiscal ("Aprender o ICMS-ST", aba Fiscal) lê esses XML e guarda o valor por unidade em
+-- ICMS-ST retido (CST 60) como o FKN informa: a nota mais recente de cada produto com CST 60 (série do FKN, último ano;
+-- eram 120 dias até 19/10/2026), preferindo a que traz o vICMSSTRet (o FKN às vezes manda o CST 60 sem os valores). A crm-fiscal ("Aprender o ICMS-ST", aba Fiscal) lê esses XML e guarda o valor por unidade em
 -- crm_fiscal_produtos.regra.st_ret[unidade]. Só a chave de serviço.
 create or replace function public.crm_fiscal_st_amostras() returns table (codigo text, chave text, emitida_em timestamptz)
 language plpgsql stable security definer set search_path = public as $$
@@ -2937,10 +2937,12 @@ begin
   return query
   select distinct on (i.codigo) i.codigo, n.chave, n.emitida_em
     from public.crm_fiscal_itens i join public.crm_notas n on n.id = i.nota_id
-   where i.cst_icms in ('60', '500') and not n.cancelada and n.chave is not null and n.emitida_em > now() - interval '120 days'
-   order by i.codigo, n.emitida_em desc;
+   where i.cst_icms in ('60', '500') and not n.cancelada and n.chave is not null and n.emitida_em > now() - interval '1 year'
+   order by i.codigo, (coalesce(i.v_st_ret, 0) > 0) desc, n.emitida_em desc;
 end;
 $$;
+revoke all on function public.crm_fiscal_st_amostras() from public, anon, authenticated;
+grant execute on function public.crm_fiscal_st_amostras() to service_role;
 
 -- Turma (mascotes, 17/10/2026): números do "guia do dia" do assistente, num pedido só. SECURITY INVOKER: cada bloco
 -- conta só o que a RLS deixa a pessoa ver (a vendedora, os pedidos dela; o Caixa, só o administrador). Bloco que a

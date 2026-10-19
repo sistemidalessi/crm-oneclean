@@ -1391,7 +1391,7 @@ o serviço na VPS da Agilité (não no servidor do escritório).
   pedido em ordem alfabética. Função temporária `crm-amostra-xml` (leitura de amostras) **desligada** (410).
   **ICMS-ST retido (16/10, noite) — código pronto:** `crm-fiscal` v6 ação `aprender_st` (botão "Aprender o ICMS-ST das notas
   do FKN" na aba Fiscal, só admin): `crm_fiscal_st_amostras()` dá a nota mais recente do FKN de cada produto com CST 60
-  (120 dias); lê o XML guardado e grava por UNIDADE (UN/CX…) em `crm_fiscal_produtos.regra.st_ret` (vBCSTRet, pST,
+  (1 ano desde 19/10, antes 120 dias; prefere a nota que traz o valor — o FKN manda CST 60 sem valor em vários produtos, como os sacos de lixo); lê o XML guardado e grava por UNIDADE (UN/CX…) em `crm_fiscal_produtos.regra.st_ret` (vBCSTRet, pST,
   vICMSSubstituto, vICMSSTRet ÷ qCom). `pedido.js` multiplica pela quantidade; sem o valor, avisa e sai só com o CST 60.
   "Atualizar as propostas" (fiscal.js) preserva o `st_ret`. Anderson clicou (134 produtos aprendidos) e atualizou a VPS.
   **Teste 3 autorizado** (NF 2-3, interfolha 290001, 5405/CST 60: vBCSTRet 8.22, pST 18, vICMSSubstituto 0.86, vICMSSTRet 0.61
