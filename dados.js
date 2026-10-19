@@ -1178,6 +1178,10 @@
   Supa.prototype.ibptCarregar = async function (linhas) { return unwrap(await this.sb.rpc('crm_ibpt_carregar', { p_linhas: linhas })); };
   // Turma (turma.js): números do guia do dia, contados pela RLS de quem pergunta.
   Supa.prototype.turmaResumo = async function () { return unwrap(await this.sb.rpc('crm_turma_resumo')); };
+  // Avisos do guia marcados por quem está logado (resolvido / amanhã): crm_turma_marcas, RLS só o dono.
+  Supa.prototype.turmaMarcas = async function () { return unwrap(await this.sb.from('crm_turma_marcas').select('id, tipo, texto, n, ate')); };
+  Supa.prototype.turmaMarcar = async function (m) { return unwrap(await this.sb.from('crm_turma_marcas').upsert(Object.assign({}, m, { em: new Date().toISOString() }), { onConflict: 'user_id,id' })); };
+  Supa.prototype.turmaDesmarcar = async function (ids) { return unwrap(await this.sb.from('crm_turma_marcas').delete().in('id', ids)); };
   // Conversa com a IA da turma (crm-assistente): só consulta, com o login de quem pergunta.
   Supa.prototype.assistente = async function (corpo) {
     const r = await this.sb.functions.invoke('crm-assistente', { body: corpo });
@@ -1189,6 +1193,9 @@
     if (corpo.acao === 'situacao') return { ligado: true, hoje: 0, limite: 40, custo_mes: null };
     return { conversa_id: corpo.conversa_id || 'local', resposta: '(modo local: sem IA) Você perguntou: **' + corpo.pergunta + '**\n- No sistema ligado ao banco eu consulto os dados e respondo aqui.', ferramentas: [] };
   };
+  Local.prototype.turmaMarcas = async function () { return lsLe('crm_turma_marcas', []); };
+  Local.prototype.turmaMarcar = async function (m) { lsGrava('crm_turma_marcas', lsLe('crm_turma_marcas', []).filter(x => x.id !== m.id).concat(m)); return m; };
+  Local.prototype.turmaDesmarcar = async function (ids) { lsGrava('crm_turma_marcas', lsLe('crm_turma_marcas', []).filter(x => ids.indexOf(x.id) === -1)); };
   Local.prototype.turmaResumo = async function () {
     const peds = (() => { try { return JSON.parse(raiz.localStorage.getItem('crm_pedidos') || '[]'); } catch (e) { return []; } })();
     const conta = f => peds.filter(f).length, aberto = p => p.situacao === 'aberto', bloq = p => (p.bloqueios || []).some(b => (p.liberado || []).indexOf(b) === -1);

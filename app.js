@@ -503,6 +503,7 @@
 
   // ------------------------------------------------------------ ações por delegação
   const ACOES = CRM.acoes = {
+    'atualizar-pagina': () => location.reload(),
     'recarregar-dados': () => CRM.recarregar(false, { completa: true }).then(() => { if (!E.falhaCarga) CRM.toast('Dados carregados.'); }),
     'ver-integracoes': () => { CRM.gravaPref('ajustes', 'integracoes'); CRM.irPara('ajustes'); },
     aba: id => CRM.irPara(id),

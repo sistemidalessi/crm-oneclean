@@ -1265,6 +1265,15 @@ e círculo); recortados sem fundo com o rembg (isnet) em `assets/turma/<id>.webp
   (`crm_compra_itens`), curva ABC, sugestão de pedido pronta para aprovar, e concorrentes pela busca na web (ferramenta de
   servidor `web_search`, só admin/comprador, com custo à parte) — combinar com ele.
 
+- **Marcar os avisos do Clean (19/10, pedido do Anderson: "se tem alguma coisa lá é porque eu ainda não olhei"):**
+  cada aviso do painel tem ✓ (resolvido: some até o número do aviso subir ou o texto mudar) e ⏰ (volta amanhã); sem
+  marcar, fica pendente. "ver os N já vistos" lista os marcados com ↺ (desfazer). A conta do Clean e a do especialista no
+  alto da tela só contam o que não foi marcado. Regra pura `turma.js aplicaMarcas` (testes/turma.test.js); marcas em
+  `crm_turma_marcas` (RLS: cada um só as suas; vale em qualquer computador). Marca de aviso que sumiu é apagada só depois
+  que os dados e o resumo carregaram (assim o aviso que volta outro dia aparece). `revoke` de anon da tabela fica para o
+  SQL Editor (o conector cai; sem política para anon, a RLS já barra).
+- **⟳ Atualizar** na barra de cima (19/10, pedido do Anderson): recarrega a página (os dados e a versão mais nova).
+
 ## Comprador sênior (17–18/10/2026, pedido do Anderson: "vamos começar o comprador sênior")
 
 Respostas dele: histórico das notas de compra **buscado na Sefaz**; concorrentes **eu pesquiso e sugiro**; fornecedores

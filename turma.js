@@ -78,7 +78,27 @@
     return daTela.slice(0, max || 3);
   }
 
-  const T = { especialista, saudacao, guia, contagem, falasDaTela, NIVEL };
+  // Marcas de quem está logado nos avisos (19/10, pedido do Anderson: "se tem alguma coisa lá é porque eu ainda não
+  // olhei"): "resolvido" some até aparecer coisa nova (o número do aviso subir ou o texto mudar); "amanhã" volta no dia
+  // seguinte; sem marca fica pendente. completo = os dados já carregaram: só então a marca de aviso que sumiu é apagada
+  // (assim, quando o aviso voltar outro dia, aparece). vencidas: ids das marcas que já não valem (a tela apaga).
+  const numDe = t => { const m = String(t || '').match(/\d+/); return m ? Number(m[0]) : null; };
+  function aplicaMarcas(itens, marcas, hoje, completo) {
+    const m = new Map((marcas || []).map(x => [x.id, x])), ids = new Set(), visiveis = [], marcados = [], vencidas = [];
+    (itens || []).forEach(x => {
+      ids.add(x.id);
+      const k = m.get(x.id);
+      let esconde = false;
+      if (k && k.tipo === 'amanha') esconde = !!k.ate && hoje < k.ate;
+      else if (k && k.tipo === 'resolvido') { const a = numDe(k.texto), b = numDe(x.texto); esconde = a != null && b != null ? b <= a : k.texto === x.texto; }
+      if (k && !esconde) vencidas.push(x.id);
+      if (esconde) marcados.push(Object.assign({ marca: k }, x)); else visiveis.push(x);
+    });
+    if (completo) m.forEach((k, id) => { if (!ids.has(id)) vencidas.push(id); });
+    return { visiveis, marcados, vencidas };
+  }
+
+  const T = { especialista, saudacao, guia, contagem, falasDaTela, aplicaMarcas, numDe, NIVEL };
   if (typeof module !== 'undefined' && module.exports) { module.exports = T; return; }
   raiz.CRMTurma = T;
 
@@ -91,7 +111,8 @@
   const dados = id => Object.assign({ nome: id, papel: '' }, (cfgT.mascotes || {})[id] || {});
   const img = (id, rosto) => pasta + id + (rosto ? '-rosto' : '') + '.webp' + v;
   const FALA_TELA = cfgT.falas || {};
-  let resumo = {}, resumoEm = 0, itens = [], painelAberto = false;
+  let resumo = {}, resumoEm = 0, resumoOk = false, itens = [], painelAberto = false;
+  let marcas = [], marcasOk = false, brutos = [], marcados = [], verMarcados = false;
 
   // perguntar: abre o painel e manda a pergunta (botões prontos das telas, ex.: "Pedir a análise de compras de hoje")
   CRM.turma = { img, dados, ativo: true, atualizar, depoisRender, perguntar: t => setTimeout(() => { abrePainel(); perguntar(t); }, 0) };   // depois do clique (senão o "clique fora" fecha o painel)
@@ -101,7 +122,8 @@
     if (!st || !st.turmaResumo || !E().eu) return;
     if (!forca && Date.now() - resumoEm < 60000) return;
     resumoEm = Date.now();
-    try { resumo = (await st.turmaResumo()) || {}; } catch (e) { /* o guia segue com o que já tem */ }
+    try { resumo = (await st.turmaResumo()) || {}; resumoOk = true; } catch (e) { /* o guia segue com o que já tem */ }
+    if (st.turmaMarcas) try { marcas = (await st.turmaMarcas()) || []; marcasOk = true; } catch (e) { /* sem as marcas, mostra tudo */ }
     CRM.render();
   }
   setInterval(() => { if (document.visibilityState === 'visible') atualizar(true); }, 5 * 60000);
@@ -110,6 +132,16 @@
   const subDe = aba => { const tl = CRM.telas[aba]; try { return tl && tl.turmaSub ? tl.turmaSub() : null; } catch (e) { return null; } };
 
   function calcula(al) {
+    brutos = guiaBruto(al);
+    const r = aplicaMarcas(brutos, marcas, CRM.hoje(), resumoOk && marcasOk && !!E().D);
+    marcados = r.marcados;
+    if (r.vencidas.length) {   // apaga já da memória (não repete o pedido a cada desenho) e depois no banco
+      marcas = marcas.filter(k => r.vencidas.indexOf(k.id) === -1);
+      const st = CRM.store(); if (st.turmaDesmarcar) st.turmaDesmarcar(r.vencidas).catch(() => {});
+    }
+    return r.visiveis;
+  }
+  function guiaBruto(al) {
     const eu = E().eu || {};
     return guia({
       vendas: !CRM.foraDeVendas(), al, resumo,
@@ -153,8 +185,13 @@
   function fechaPainel() { painelAberto = false; const p = $('#turmaPainel'); if (p) p.hidden = true; }
   function itemHtml(x) {
     const m = x.mascote || especialista(cfgT, x.aba, x.sub);
-    return '<button type="button" class="turma-item ' + x.nivel + '" data-acao="turma-ir" data-id="' + esc(x.aba + (x.sub ? ':' + x.sub : '')) + '">' +
-      '<img src="' + esc(img(m, true)) + '" alt="">' + '<span>' + esc(x.texto) + '</span><b aria-hidden="true">›</b></button>';
+    const quando = x.marca ? (x.marca.tipo === 'amanha' ? 'volta amanhã' : 'resolvido') : '';
+    return '<div class="turma-linha' + (x.marca ? ' marcado' : '') + '"><button type="button" class="turma-item ' + x.nivel + '" data-acao="turma-ir" data-id="' + esc(x.aba + (x.sub ? ':' + x.sub : '')) + '">' +
+      '<img src="' + esc(img(m, true)) + '" alt="">' + '<span>' + esc(x.texto) + (quando ? ' <small>(' + quando + ')</small>' : '') + '</span><b aria-hidden="true">›</b></button>' +
+      '<span class="turma-marcar">' + (x.marca
+        ? '<button type="button" class="mini" data-acao="turma-desmarcar" data-id="' + esc(x.id) + '" title="Voltar a mostrar como pendente">↺</button>'
+        : '<button type="button" class="mini" data-acao="turma-marcar" data-id="resolvido|' + esc(x.id) + '" title="Resolvido: some até aparecer coisa nova">✓</button>' +
+          '<button type="button" class="mini" data-acao="turma-marcar" data-id="amanha|' + esc(x.id) + '" title="Lembrar amanhã">⏰</button>') + '</span></div>';
   }
   // ---- a conversa com a IA (crm-assistente): fica montada uma vez (o que se digita não some quando a tela redesenha)
   const chat = { conversa: null, msgs: [], enviando: false, situacao: null, montado: false };
@@ -250,7 +287,10 @@
       '<p>' + esc(itens.length ? 'Eu sou o ' + d.nome + '. Separei o que está esperando você:' : 'Eu sou o ' + d.nome + '. Por aqui está tudo em dia.') + '</p></div></div>' +
       // com conversa aberta, a lista de avisos recolhe numa linha (clicar abre de novo)
       (chat.msgs.length && !chat.verGuia ? (itens.length ? '<p class="turma-recolhido"><button type="button" class="link" data-acao="turma-ver-guia">ver os ' + itens.length + ' aviso(s) do dia</button></p>' : '')
-        : nestaTela + (resto.length ? '<h4>' + (aqui.length || nestaTela ? 'No resto do sistema' : 'No sistema') + '</h4>' + resto.map(itemHtml).join('') : ''));
+        : nestaTela + (resto.length ? '<h4>' + (aqui.length || nestaTela ? 'No resto do sistema' : 'No sistema') + '</h4>' + resto.map(itemHtml).join('') : '') +
+          (itens.length ? '<p class="turma-dica">✓ resolvido · ⏰ lembrar amanhã · sem marcar, fica pendente</p>' : '') +
+          (marcados.length ? '<p class="turma-recolhido"><button type="button" class="link" data-acao="turma-ver-marcados">' + (verMarcados ? 'esconder' : 'ver') + ' os ' + marcados.length + ' já vistos (resolvidos ou para amanhã)</button></p>' +
+            (verMarcados ? marcados.map(itemHtml).join('') : '') : ''));
     const g = p.querySelector('#turmaGuia');
     if (g.dataset.html !== gh) { g.innerHTML = gh; g.dataset.html = gh; }
     desenhaChat();
@@ -306,6 +346,21 @@
     },
     'turma-sugestao': t => perguntar(t),
     'turma-ver-guia': () => { chat.verGuia = !chat.verGuia; desenhaPainel(); },
+    'turma-ver-marcados': () => { verMarcados = !verMarcados; desenhaPainel(); },
+    'turma-marcar': v => {
+      const i = String(v).indexOf('|'), tipo = String(v).slice(0, i), id = String(v).slice(i + 1);
+      const x = brutos.find(b => b.id === id);
+      if (!x) return;
+      const m = { id, tipo, texto: x.texto, n: numDe(x.texto), ate: tipo === 'amanha' ? raiz.CRMRegras.somaDias(CRM.hoje(), 1) : null };
+      marcas = marcas.filter(k => k.id !== id).concat(m);
+      CRM.render();
+      CRM.store().turmaMarcar(m).catch(e => CRM.falhou(e));
+    },
+    'turma-desmarcar': id => {
+      marcas = marcas.filter(k => k.id !== id);
+      CRM.render();
+      CRM.store().turmaDesmarcar([id]).catch(e => CRM.falhou(e));
+    },
     'turma-nova': () => { chat.conversa = null; chat.msgs = []; desenhaChat(); const ta = $('#turmaChat textarea'); if (ta) ta.focus(); },
     'turma-ir': id => {
       const [aba, sub] = String(id).split(':');

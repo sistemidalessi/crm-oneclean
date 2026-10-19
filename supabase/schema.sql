@@ -3317,3 +3317,21 @@ language sql stable security definer set search_path = public as $$
 $$;
 revoke all on function public.crm_compras_itens_produto() from public, anon;
 grant execute on function public.crm_compras_itens_produto() to authenticated;
+
+-- Avisos do guia da turma marcados por quem está logado (19/10/2026, pedido do Anderson): "resolvido" (some até o
+-- número do aviso subir ou o texto mudar) e "amanhã" (volta no dia seguinte). Fica no banco para valer em qualquer
+-- computador; cada um só vê e mexe nas suas (turma.js aplicaMarcas).
+create table if not exists public.crm_turma_marcas (
+  user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  id text not null,
+  tipo text not null check (tipo in ('resolvido', 'amanha')),
+  texto text, n integer, ate date,
+  em timestamptz not null default now(),
+  primary key (user_id, id)
+);
+alter table public.crm_turma_marcas enable row level security;
+revoke all on public.crm_turma_marcas from anon, public;
+grant select, insert, update, delete on public.crm_turma_marcas to authenticated;
+drop policy if exists dono on public.crm_turma_marcas;
+create policy dono on public.crm_turma_marcas for all to authenticated
+  using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));

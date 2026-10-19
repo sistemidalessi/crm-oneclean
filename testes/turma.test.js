@@ -69,3 +69,19 @@ test('turma: avisos das notas de compra da Sefaz para o comprador', () => {
     [['dfe-desc', 'urgente', 'estoque', 'compras', 'auditoria'], ['dfe-prazo', 'urgente', 'estoque', 'compras', 'auditoria']]);
   assert.equal(T.guia({ vendas: true, al: {}, resumo: { compras_sefaz: { desconhecidos: 2 } } }).filter(x => /^dfe-/.test(x.id)).length, 0, 'vendedor não vê');
 });
+
+test('marcas nos avisos: resolvido some até aparecer coisa nova; amanhã volta no dia seguinte', () => {
+  const itens = [{ id: 'hoje', texto: '3 tarefas para hoje' }, { id: 'cx-venc', texto: '2 contas vencidas sem baixa (R$ 10,00)' },
+    { id: 'fkn-0', texto: 'Puxar do FKN: listagem' }, { id: 'leads', texto: '1 lead sem atendimento' }];
+  const marcas = [{ id: 'hoje', tipo: 'resolvido', texto: '4 tarefas para hoje' }, { id: 'cx-venc', tipo: 'resolvido', texto: '1 conta vencida sem baixa (R$ 5,00)' },
+    { id: 'fkn-0', tipo: 'amanha', ate: '2026-10-20' }, { id: 'sumiu', tipo: 'resolvido', texto: 'x' }];
+  const r = T.aplicaMarcas(itens, marcas, '2026-10-19', true);
+  assert.deepEqual(r.visiveis.map(x => x.id), ['cx-venc', 'leads'], 'o número subiu (1 → 2): volta a aparecer');
+  assert.deepEqual(r.marcados.map(x => x.id), ['hoje', 'fkn-0'], 'baixou de 4 para 3: continua resolvido; amanhã ainda não chegou');
+  assert.deepEqual(r.vencidas.sort(), ['cx-venc', 'sumiu']);
+  const amanha = T.aplicaMarcas(itens, marcas, '2026-10-20', false);
+  assert.ok(amanha.visiveis.some(x => x.id === 'fkn-0'), 'no dia seguinte volta');
+  assert.ok(!amanha.vencidas.includes('sumiu'), 'sem os dados carregados não apaga a marca do aviso que sumiu');
+  const texto = T.aplicaMarcas([{ id: 'a', texto: 'Relatório recusado' }], [{ id: 'a', tipo: 'resolvido', texto: 'Relatório recusado' }], '2026-10-19', true);
+  assert.equal(texto.visiveis.length, 0, 'sem número: some enquanto o texto for o mesmo');
+});

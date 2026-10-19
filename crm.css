@@ -944,6 +944,16 @@ pre.of-previa { white-space: pre-wrap; font-family: inherit; font-size: .88rem; 
 .turma-esp strong { display: block; font-size: .9rem; }
 .turma-esp small { color: var(--suave); font-size: .78rem; }
 .turma-fala { margin: 2px 0 6px; color: var(--suave); font-size: .88rem; }
+/* marcar o aviso: ✓ resolvido / ⏰ amanhã (19/10) */
+.turma-linha { display: flex; align-items: center; gap: 4px; }
+.turma-linha .turma-item { flex: 1; min-width: 0; }
+.turma-linha.marcado .turma-item { opacity: .6; border-left-color: var(--borda); }
+.turma-marcar { display: flex; gap: 2px; }
+.turma-marcar .mini { padding: 2px 6px; }
+.turma-dica { margin: 8px 0 0; color: var(--suave); font-size: .75rem; text-align: center; }
+/* atualizar (recarrega a página) na barra de cima */
+.btn-atualizar { appearance: none; border: 1px solid rgba(255,255,255,.35); background: transparent; color: #fff; font: inherit; font-weight: 600; border-radius: 10px; padding: 6px 10px; cursor: pointer; white-space: nowrap; }
+.btn-atualizar:hover { background: rgba(255,255,255,.12); }
 
 /* login: o anfitrião ao lado do cartão */
 .entrada-par { display: flex; align-items: flex-end; gap: 6px; }
