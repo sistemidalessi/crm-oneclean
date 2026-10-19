@@ -1299,6 +1299,9 @@ Respostas dele: histórico das notas de compra **buscado na Sefaz**; concorrente
   Tabela `crm_fornecedor_docs`, colunas `crm_dfe.conclusiva_*`, funções `crm_dfe_doc_conhecido`, `crm_dfe_prazo_dias`,
   `crm_dfe_lembrete_todas`; o guia do Clean avisa (urgente) admin e comprador (`crm_turma_resumo` → `compras_sefaz`).
   Regra pura `avisosDfe` em `estoque.js` (testes em `estoque.test.js`). A ciência automática continua **desligada**.
+  **Decisão do Anderson (19/10): ciência continua manual, de propósito.** Com o XML vem a obrigação de dar entrada, então
+  ele só dá ciência quando a mercadoria chegou (o resumo fica no CRM até lá). Ideia para depois: a logística avisar no CRM
+  "mercadoria chegou" e isso liberar/pedir a ciência daquela nota. Em 19/10: 61 DF-e (52 com XML, 9 só resumo), NSU 1514 de 2390.
 - **3 — fornecedores e painel do comprador (18/10, feito):** tabelas `crm_fornecedores` (código do FKN; prazo de entrega,
   pedido mínimo, frete CIF/FOB/CIF acima de X, dias de pedido 1=seg…6=sáb, pagamento, contato), `crm_produto_fornecedor`
   (produto sem fornecedor ou com o errado no FKN; fornecedor nulo = volta ao do FKN, sem apagar linha) e
