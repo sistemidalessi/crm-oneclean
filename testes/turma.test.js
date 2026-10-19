@@ -61,3 +61,11 @@ test('falas da tela: a sub-aba aberta primeiro, no máximo 3', () => {
   assert.deepStrictEqual(T.falasDaTela(g, 'pedidos', null, 2).map(x => x.id), ['nfe-pend', 'bloqueados']);
   assert.deepStrictEqual(T.falasDaTela(g, 'agenda'), []);
 });
+
+test('turma: avisos das notas de compra da Sefaz para o comprador', () => {
+  const T = require('../turma.js');
+  const g = T.guia({ vendas: false, al: {}, resumo: { compras_sefaz: { desconhecidos: 2, prazo: 1 } }, comprador: true });
+  assert.deepEqual(g.filter(x => /^dfe-/.test(x.id)).map(x => [x.id, x.nivel, x.aba, x.sub, x.mascote]),
+    [['dfe-desc', 'urgente', 'estoque', 'compras', 'auditoria'], ['dfe-prazo', 'urgente', 'estoque', 'compras', 'auditoria']]);
+  assert.equal(T.guia({ vendas: true, al: {}, resumo: { compras_sefaz: { desconhecidos: 2 } } }).filter(x => /^dfe-/.test(x.id)).length, 0, 'vendedor não vê');
+});

@@ -1287,6 +1287,18 @@ Respostas dele: histórico das notas de compra **buscado na Sefaz**; concorrente
   (`cd /opt/oneclean-fiscal && git pull -q && systemctl restart oneclean-fiscal && systemctl is-active oneclean-fiscal`) e
   apertar "Buscar na Sefaz agora". Se der erro de certificado do servidor da Sefaz nacional (cadeia diferente da de SP),
   acrescentar a raiz em `cadeia.pem` (nunca desligar a verificação).
+- **Fornecedor desconhecido e prazo da resposta (19/10, pedido do Anderson antes de ligar a ciência automática):**
+  em Estoque → Notas de compra, embaixo das Notas da Sefaz: **"⚠ Fornecedor que nunca vendeu para a empresa"** (CNPJ
+  emitente fora do cadastro de fornecedores, das notas de compra que deram entrada e do que o comprador já marcou, com a
+  sugestão de qual fornecedor do FKN parece ser; "Conheço" liga ao fornecedor, "Não reconheço" marca) e **"⏳ Resposta
+  definitiva à Sefaz"** (notas sem resposta a 30 dias ou menos do prazo; por padrão só as de fornecedor não reconhecido,
+  todas com `fiscal.dfe_lembrete_todas = true`; prazo `fiscal.dfe_prazo_dias`, padrão 90 dias da emissão pelo Ajuste
+  SINIEF 14/2026 que o vigia anotou: **conferir com o contador**). Botões só do admin, com confirmação: Confirmar,
+  Desconhecimento, Não realizada (justificativa 15–255) → `crm-fiscal` v8 `dfe_manifestar` → serviço fiscal `/manifestar`
+  (`dfe.js`: `manifestacao`/`manifesta`, eventos 210200/210220/210240 validados no XSD; precisa do `git pull` na VPS).
+  Tabela `crm_fornecedor_docs`, colunas `crm_dfe.conclusiva_*`, funções `crm_dfe_doc_conhecido`, `crm_dfe_prazo_dias`,
+  `crm_dfe_lembrete_todas`; o guia do Clean avisa (urgente) admin e comprador (`crm_turma_resumo` → `compras_sefaz`).
+  Regra pura `avisosDfe` em `estoque.js` (testes em `estoque.test.js`). A ciência automática continua **desligada**.
 - **3 — fornecedores e painel do comprador (18/10, feito):** tabelas `crm_fornecedores` (código do FKN; prazo de entrega,
   pedido mínimo, frete CIF/FOB/CIF acima de X, dias de pedido 1=seg…6=sáb, pagamento, contato), `crm_produto_fornecedor`
   (produto sem fornecedor ou com o errado no FKN; fornecedor nulo = volta ao do FKN, sem apagar linha) e

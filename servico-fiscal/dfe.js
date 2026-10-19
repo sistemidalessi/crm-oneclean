@@ -39,9 +39,26 @@ const envelopeDist = xml => '<?xml version="1.0" encoding="utf-8"?><soap12:Envel
 const envelopeEv = xml => '<?xml version="1.0" encoding="utf-8"?><soap12:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" ' +
   'xmlns:soap12="http://www.w3.org/2003/05/soap-envelope"><soap12:Body><nfeDadosMsg xmlns="' + WSDL_EV + '">' + xml + '</nfeDadosMsg></soap12:Body></soap12:Envelope>';
 
-// Ciência da Operação (sem a assinatura): { id, infEvento }
-const ciencia = ({ ambiente, cnpj, chave, quando }) =>
-  S.infEvento({ ambiente, cnpj, chave, tpEvento: '210210', seq: 1, quando, cOrgao: C_ORGAO_AN, detalhe: '<descEvento>Ciencia da Operacao</descEvento>' });
+// Manifestação do destinatário (sem a assinatura): { id, infEvento }. A ciência é provisória ("fiquei sabendo"); as outras
+// três são a resposta definitiva (19/10/2026): confirmação, desconhecimento e operação não realizada (esta com justificativa
+// de 15 a 255 caracteres). As descrições são as do leiauteConfRecebto (sem acento, exatamente assim).
+const EVENTOS = {
+  ciencia: ['210210', 'Ciencia da Operacao'], confirmacao: ['210200', 'Confirmacao da Operacao'],
+  desconhecimento: ['210220', 'Desconhecimento da Operacao'], nao_realizada: ['210240', 'Operacao nao Realizada']
+};
+const xml = v => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+function manifestacao({ ambiente, cnpj, chave, quando, tipo, justificativa }) {
+  const e = EVENTOS[tipo];
+  if (!e) throw new Error('manifestação desconhecida: ' + tipo);
+  let detalhe = '<descEvento>' + e[1] + '</descEvento>';
+  if (tipo === 'nao_realizada') {
+    const j = String(justificativa || '').replace(/\s+/g, ' ').trim();
+    if (j.length < 15) throw new Error('a justificativa da operação não realizada precisa de pelo menos 15 letras');
+    detalhe += '<xJust>' + xml(j.slice(0, 255)) + '</xJust>';
+  }
+  return S.infEvento({ ambiente, cnpj, chave, tpEvento: e[0], seq: 1, quando, cOrgao: C_ORGAO_AN, detalhe });
+}
+const ciencia = args => manifestacao(Object.assign({}, args, { tipo: 'ciencia' }));
 
 // ---------------------------------------------------------------- respostas
 // retDistDFeInt → { cStat, xMotivo, ultNSU, maxNSU, docs: [{ nsu, schema, xml }] } (docZip = base64 de gzip)
@@ -89,14 +106,15 @@ async function busca(cfg, { cnpj, ultNSU, chave }) {
   const r = leDist(await S.posta(AN[cfg.ambiente === 'producao' ? 'producao' : 'homologacao'].dist, WSDL_DIST + '/nfeDistDFeInteresse', corpo, cfg, /retDistDFeInt/));
   return Object.assign(r, { docs: r.docs.map(resumoDoc) });
 }
-async function daCiencia(cfg, { cnpj, chave, quando }) {
-  const inf = ciencia({ ambiente: cfg.ambiente, cnpj, chave, quando });
+async function manifesta(cfg, { cnpj, chave, quando, tipo, justificativa }) {
+  const inf = manifestacao({ ambiente: cfg.ambiente, cnpj, chave, quando, tipo, justificativa });
   const sig = A.assinaElemento(inf.infEvento, inf.id, cfg.certPem, cfg.keyPem);
   const xmlEv = S.montaEvento(inf.infEvento, sig);
   const r = S.leRetorno(await S.posta(AN[cfg.ambiente === 'producao' ? 'producao' : 'homologacao'].evento, WSDL_EV + '/nfeRecepcaoEvento',
     envelopeEv(S.envEvento(Date.now(), xmlEv)), cfg));
-  // 135 = registrado; 573 = já havia ciência para esta nota (duplicidade de evento): os dois valem
+  // 135 = registrado; 573 = já havia esse evento para esta nota (duplicidade): os dois valem
   return { cStat: r.eventoStat, xMotivo: r.eventoMotivo || r.xMotivo, ok: r.eventoStat === 135 || r.eventoStat === 573, protocolo: r.protocolo };
 }
+const daCiencia = (cfg, a) => manifesta(cfg, Object.assign({}, a, { tipo: 'ciencia' }));
 
-module.exports = { AN, msgDist, ciencia, envelopeDist, envelopeEv, leDist, resumoDoc, busca, daCiencia };
+module.exports = { AN, EVENTOS, msgDist, ciencia, manifestacao, envelopeDist, envelopeEv, leDist, resumoDoc, busca, daCiencia, manifesta };

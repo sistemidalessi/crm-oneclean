@@ -4,7 +4,8 @@
 // (servico-fiscal/, que assina com o A1 e fala com a Sefaz-SP). A nota autorizada entra no CRM pelo mesmo caminho do
 // vigia (crm-notas): estoque, títulos das parcelas, comissão, XML guardado.
 // Secrets: FISCAL_URL (https://fiscal.oneclean.com.br) e FISCAL_TOKEN (gerado na VPS; ver servico-fiscal/INSTALAR.md).
-// Notas de COMPRA (dfe_buscar, dfe_ciencia): administrador e comprador; a ciência, só o administrador.
+// Notas de COMPRA (dfe_buscar, dfe_ciencia, dfe_manifestar): administrador e comprador; a ciência e a resposta definitiva
+// (confirmação, desconhecimento, operação não realizada), só o administrador.
 // Deploy: verify_jwt LIGADO.
 import { createClient } from 'npm:@supabase/supabase-js@2.116.0';
 
@@ -179,6 +180,22 @@ async function dfeCiencias(db: ReturnType<typeof createClient>, fiscal: Linha, c
   return { ok, falha };
 }
 
+// Resposta definitiva a uma nota de compra (19/10/2026): confirmacao | desconhecimento | nao_realizada (com justificativa).
+const CONCLUSIVAS = ['confirmacao', 'desconhecimento', 'nao_realizada'];
+async function dfeManifestar(db: ReturnType<typeof createClient>, fiscal: Linha, chave: string, tipo: string, justificativa: string, eu: string) {
+  if (!/^\d{44}$/.test(chave)) throw new Error('chave inválida');
+  if (!CONCLUSIVAS.includes(tipo)) throw new Error('resposta desconhecida');
+  const { data: n } = await db.from('crm_dfe').select('chave, situacao, conclusiva_tipo').eq('chave', chave).maybeSingle();
+  if (!n) throw new Error('nota de compra não encontrada');
+  if ((n as Linha).conclusiva_tipo) throw new Error('esta nota já tem resposta definitiva');
+  const cnpj = String(((fiscal.emitente as Linha) || {}).cnpj || '').replace(/\D/g, '');
+  const ev = await servico('/manifestar', { ambiente: 'producao', cnpj, chave, tipo, justificativa: justificativa || null });
+  const agora = new Date().toISOString();
+  await db.from('crm_dfe').update(ev.ok ? { conclusiva_tipo: tipo, conclusiva_em: agora, conclusiva_cstat: ev.cStat, conclusiva_motivo: ev.xMotivo, conclusiva_por: eu, atualizado_em: agora }
+    : { conclusiva_cstat: ev.cStat, conclusiva_motivo: ev.xMotivo, atualizado_em: agora }).eq('chave', chave);
+  return ev;
+}
+
 async function gravaResultado(db: ReturnType<typeof createClient>, nfeId: string, r: Linha, eu: string) {
   const patch: Linha = { situacao: r.situacao === 'pendente' ? 'pendente' : r.situacao === 'bloqueada' ? 'bloqueada' : r.situacao, atualizado_em: new Date().toISOString() };
   for (const [k, c] of [['chave', 'chave'], ['cStat', 'cstat'], ['motivo', 'motivo'], ['protocolo', 'protocolo'], ['nfeXml', 'nfe_xml'], ['procXml', 'proc_xml'], ['totais', 'totais'], ['avisos', 'avisos'], ['nota', 'nota']] as const)
@@ -227,6 +244,10 @@ Deno.serve(async (req) => {
     if (acao === 'dfe_ciencia') {
       if (eu.papel !== 'admin') throw new Error('só o administrador dá a ciência das notas de compra');
       return resposta(200, await dfeCiencias(db, fiscal, b.chave ? [String(b.chave)] : null));
+    }
+    if (acao === 'dfe_manifestar') {
+      if (eu.papel !== 'admin') throw new Error('só o administrador responde à Sefaz pelas notas de compra');
+      return resposta(200, await dfeManifestar(db, fiscal, String(b.chave || ''), String(b.tipo || ''), String(b.justificativa || ''), quem.user.id));
     }
     if (acao === 'aprender_st') {
       if (eu.papel !== 'admin') throw new Error('só o administrador');

@@ -111,8 +111,60 @@
     return { codigo: melhor.codigo, fator, como: 'descrição parecida (confira)' };
   }
 
+  // ---- notas de compra da Sefaz (19/10/2026, pedido do Anderson antes de ligar a ciência automática)
+  // Fornecedor que nunca vendeu para a empresa e o prazo da resposta definitiva (confirmação, desconhecimento, operação
+  // não realizada). conhecidos: Set dos CNPJs já conhecidos (cadastro de fornecedores, notas de compra que deram entrada);
+  // docs: crm_fornecedor_docs (o comprador disse "conheço" ou "não reconheço"); fknForn: [{ cod, nome }] da listagem do FKN
+  // (para sugerir qual é); prazoDias: da emissão (padrão 90); avisoDias: quantos dias antes avisar; todas: lembrete de toda
+  // nota sem resposta (senão só das de fornecedor "não reconheço").
+  const GENERICAS = new Set(['LTDA', 'EIRELI', 'COMERCIO', 'COM', 'IND', 'INDUSTRIA', 'INDUSTRIAL', 'PRODUTOS', 'PROD', 'DISTRIBUIDORA', 'DIST', 'DISTRIBUICAO',
+    'EPP', 'MATERIAIS', 'MAT', 'LIMPEZA', 'HIGIENE', 'EQUIP', 'EQUIPAMENTOS', 'EMBALAGENS', 'DESCARTAVEIS', 'BRASIL', 'IMPORTACAO', 'EXPORTACAO', 'COMERCIAL', 'GRUPO']);
+  const palavrasForn = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim().split(' ')
+    .filter(w => w.length > 2 && !GENERICAS.has(w));
+  function sugereFornecedor(nome, fknForn) {
+    const p = new Set(palavrasForn(nome));
+    if (!p.size) return null;
+    let melhor = null;
+    (fknForn || []).forEach(f => { const q = palavrasForn(f.nome); if (!q.length) return;
+      const comuns = q.filter(w => p.has(w)).length, nota = comuns / Math.min(p.size, q.length);
+      if (comuns && nota >= 0.5 && (!melhor || nota > melhor.nota)) melhor = { cod: f.cod, nome: f.nome, nota }; });
+    return melhor;
+  }
+  const diasAte = (de, ate) => Math.round((Date.parse(ate + 'T12:00:00Z') - Date.parse(de + 'T12:00:00Z')) / 864e5);
+  const maisDias = (d, n) => new Date(Date.parse(d + 'T12:00:00Z') + n * 864e5).toISOString().slice(0, 10);
+  function avisosDfe({ dfe, docs, conhecidos, fknForn, hoje, prazoDias, avisoDias, todas }) {
+    const prazo = num(prazoDias) > 0 ? num(prazoDias) : 90, aviso = avisoDias == null ? 30 : num(avisoDias);
+    const marc = new Map((docs || []).map(d => [d.doc, d]));
+    const grupos = new Map();
+    (dfe || []).filter(d => d.situacao === 'autorizada' && d.emitente_doc).forEach(d => {
+      const g = grupos.get(d.emitente_doc) || { doc: d.emitente_doc, nome: d.emitente_nome || '', notas: [], valor: 0 };
+      g.notas.push(d); g.valor += num(d.valor); if (!g.nome && d.emitente_nome) g.nome = d.emitente_nome;
+      grupos.set(d.emitente_doc, g);
+    });
+    const desconhecidos = [], naoReconhecidos = [];
+    grupos.forEach(g => {
+      g.notas.sort((a, b) => String(a.emitida_em).localeCompare(String(b.emitida_em)));
+      g.primeira = dia(g.notas[0].emitida_em); g.ultima = dia(g.notas[g.notas.length - 1].emitida_em);
+      const m = marc.get(g.doc);
+      if (m && m.situacao === 'desconhecido') naoReconhecidos.push(Object.assign(g, { semResposta: g.notas.filter(n => !n.conclusiva_tipo).length }));
+      else if (!m && !(conhecidos && conhecidos.has(g.doc))) desconhecidos.push(Object.assign(g, { sugestao: sugereFornecedor(g.nome, fknForn) }));
+    });
+    const prazos = [];
+    (dfe || []).forEach(d => {
+      if (d.situacao !== 'autorizada' || d.conclusiva_tipo || !d.emitida_em) return;
+      const m = marc.get(d.emitente_doc), ruim = !!(m && m.situacao === 'desconhecido');
+      if (!todas && !ruim) return;
+      const vence = maisDias(dia(d.emitida_em), prazo), resta = diasAte(hoje, vence);
+      if (resta > aviso) return;
+      prazos.push({ chave: d.chave, nome: d.emitente_nome || '', doc: d.emitente_doc, valor: num(d.valor), emitida: dia(d.emitida_em), vence, resta, desconhecido: ruim });
+    });
+    prazos.sort((a, b) => a.resta - b.resta);
+    desconhecidos.sort((a, b) => b.valor - a.valor);
+    return { desconhecidos, naoReconhecidos, prazos, prazoDias: prazo };
+  }
+
   const TIPOS = { inicial: 'saldo inicial (FKN)', saida: 'saída (nota)', entrada: 'entrada (compra)', ajuste: 'ajuste', inventario: 'inventário', estorno: 'estorno' };
-  const api = { junta, valor, sequencia, lerContagem, atualFkn, ehCaixa, TIPOS, extrasDoXml, compraDoXml, custoItem, sugere };
+  const api = { junta, valor, sequencia, lerContagem, atualFkn, ehCaixa, TIPOS, extrasDoXml, compraDoXml, custoItem, sugere, avisosDfe, sugereFornecedor };
   raiz.CRMEstoque = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);
@@ -128,7 +180,7 @@
 
   let saldo = null, fkn = [], fotos = [], difs = [], fotoVista = null, carregando = false, compras = [], lendoCompras = '';
   const filtro = { ver: 'saldo', busca: '', soDif: false };
-  let dfe = [], dfeEst = null, buscouDfe = false, buscandoDfe = '';
+  let dfe = [], dfeEst = null, buscouDfe = false, buscandoDfe = '', fornDocs = [], fornCad = [];
 
   async function carrega() {
     if (carregando) return;
@@ -137,6 +189,7 @@
       const st = CRM.store();
       [saldo, fkn, fotos, compras, dfe, dfeEst] = await Promise.all([st.estoqueSaldo(), st.estoque(), st.estoqueFotos(60), st.compras ? st.compras(200).catch(() => []) : [],
         st.dfe ? st.dfe().catch(() => []) : [], st.dfeEstado ? st.dfeEstado().catch(() => null) : null]);
+      [fornDocs, fornCad] = await Promise.all([st.fornecedorDocs ? st.fornecedorDocs().catch(() => []) : [], st.fornecedores ? st.fornecedores().catch(() => []) : []]);
       if (st.modo === 'supabase' && podeSefaz() && !buscouDfe && (!dfeEst || !dfeEst.proxima_em || Date.parse(dfeEst.proxima_em) < Date.now())) { buscouDfe = true; setTimeout(() => buscaSefaz(true), 50); }
       const conferida = fotos.find(f => f.conferida_em);
       fotoVista = fotoVista || (conferida && conferida.id) || null;
@@ -282,6 +335,47 @@
     if (r.novas || !sozinho) CRM.toast(r.novas + ' nota(s) da Sefaz no CRM' + (r.historico ? ' (' + r.historico + ' de antes do estoque do CRM, só como histórico de preço)' : '') + (r.erros.length ? ' · ' + r.erros.length + ' com problema: ' + r.erros.slice(0, 2).join(' | ') : '') + '.', !!r.erros.length);
     compras = await st.compras(200).catch(() => compras);
   }
+  // Fornecedor desconhecido e prazo da resposta definitiva (S.avisosDfe): os CNPJs conhecidos saem do cadastro de
+  // fornecedores, das notas de compra que deram entrada e do que o comprador já marcou.
+  const docDe = v => String(v || '').replace(/[^0-9A-Z]/gi, '').toUpperCase();
+  function fknFornecedores() {
+    const m = new Map();
+    (fkn || []).forEach(x => { if (x.fornecedor_cod && x.fornecedor && !m.has(x.fornecedor_cod)) m.set(x.fornecedor_cod, x.fornecedor); });
+    (fornCad || []).forEach(f => m.set(f.codigo, f.nome));
+    return [...m.entries()].map(([cod, nome]) => ({ cod, nome })).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+  }
+  function avisos() {
+    const fiscal = (CRM.estado.cfg && CRM.estado.cfg.fiscal) || {};
+    const conhecidos = new Set((fornCad || []).map(f => docDe(f.cnpj)).filter(Boolean).concat(compras.filter(c => c.situacao === 'lancada').map(c => docDe(c.fornecedor_doc))));
+    return S.avisosDfe({ dfe, docs: fornDocs, conhecidos, fknForn: fknFornecedores(), hoje: CRM.hoje(), prazoDias: fiscal.dfe_prazo_dias, avisoDias: 30, todas: fiscal.dfe_lembrete_todas === true });
+  }
+  const NOME_RESP = { confirmacao: 'Confirmar a operação', desconhecimento: 'Desconhecimento', nao_realizada: 'Operação não realizada' };
+  function blocoAvisosDfe() {
+    const a = avisos(), adm = CRM.ehAdmin();
+    let h = '';
+    if (a.desconhecidos.length) h += '<section class="cartao aviso-dfe"><h2>⚠ Fornecedor que nunca vendeu para a empresa <small>' + a.desconhecidos.length + ' CNPJ(s) nas notas da Sefaz</small></h2>' +
+      '<p>Confira se a compra aconteceu. Se não reconhecer, marque "Não reconheço": a nota entra no lembrete para responder <strong>Desconhecimento</strong> à Sefaz dentro do prazo.</p>' +
+      '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Emitente</th><th class="num">Notas</th><th class="num">Valor</th><th>Período</th><th></th></tr></thead><tbody>' +
+      a.desconhecidos.map(g => '<tr><td><strong>' + esc(g.nome || '?') + '</strong><small>CNPJ ' + esc(R.formataCNPJ ? R.formataCNPJ(g.doc) : g.doc) +
+          (g.sugestao ? ' · parece o fornecedor <strong>' + esc(g.sugestao.nome) + '</strong> do FKN' : '') + '</small></td>' +
+        '<td class="num">' + g.notas.length + '</td><td class="num">' + R.moeda(g.valor) + '</td><td><small>' + esc(R.dataBR(g.primeira) + (g.ultima !== g.primeira ? ' a ' + R.dataBR(g.ultima) : '')) + '</small></td>' +
+        '<td class="num"><button type="button" class="btn sec" data-acao="es-dfe-conheco" data-id="' + esc(g.doc) + '">Conheço</button> ' +
+          '<button type="button" class="mini" data-acao="es-dfe-naoreconheco" data-id="' + esc(g.doc) + '">Não reconheço</button></td></tr>').join('') +
+      '</tbody></table></div></section>';
+    if (a.prazos.length || a.naoReconhecidos.some(g => g.semResposta)) h += '<section class="cartao aviso-dfe"><h2>⏳ Resposta definitiva à Sefaz <small>prazo de ' + a.prazoDias + ' dias da emissão (conferir com o contador)</small></h2>' +
+      (a.prazos.length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Emitente</th><th class="num">Valor</th><th>Emitida</th><th>Prazo</th><th></th></tr></thead><tbody>' +
+        a.prazos.map(p => '<tr><td><strong>' + esc(p.nome || '?') + '</strong>' + (p.desconhecido ? ' ' + CRM.selo('não reconhecido', 'vermelho') : '') + '<small>chave …' + esc(p.chave.slice(-12)) + '</small></td>' +
+          '<td class="num">' + R.moeda(p.valor) + '</td><td>' + esc(R.dataBR(p.emitida)) + '</td><td>' + CRM.selo(p.resta < 0 ? 'venceu em ' + R.dataBR(p.vence) : p.resta === 0 ? 'vence hoje' : 'faltam ' + p.resta + ' dia(s) · ' + R.dataBR(p.vence), p.resta <= 10 ? 'vermelho' : 'ambar') + '</td>' +
+          '<td class="num">' + (adm ? (p.desconhecido ? '<button type="button" class="btn" data-acao="es-dfe-resp" data-id="' + esc(p.chave + '|desconhecimento') + '">Responder Desconhecimento</button> ' : '') +
+            '<button type="button" class="mini" data-acao="es-dfe-resp" data-id="' + esc(p.chave + '|confirmacao') + '">Confirmar</button> ' +
+            '<button type="button" class="mini" data-acao="es-dfe-resp" data-id="' + esc(p.chave + '|nao_realizada') + '">Não realizada</button>' + (p.desconhecido ? '' : ' <button type="button" class="mini" data-acao="es-dfe-resp" data-id="' + esc(p.chave + '|desconhecimento') + '">Desconheço</button>')
+            : '<small>quem responde é o administrador</small>') + '</td></tr>').join('') + '</tbody></table></div>'
+        : '<p class="vazio">Nenhuma nota perto do prazo.</p>') +
+      (a.naoReconhecidos.length ? '<p class="dica">Não reconhecidos: ' + a.naoReconhecidos.map(g => esc(g.nome || g.doc) + ' (' + g.semResposta + ' sem resposta)').join(' · ') +
+        '. As notas deles aparecem aqui quando faltarem 30 dias para o prazo; dá para responder antes pela lista "Só com o resumo".</p>' : '') + '</section>';
+    return h;
+  }
+
   function blocoSefaz() {
     const st = CRM.store();
     if (!st || !st.dfe || st.modo !== 'supabase' || !podeSefaz()) return '';
@@ -301,8 +395,9 @@
         (CRM.ehAdmin() ? '<p class="acoes"><button type="button" class="btn sec" data-acao="es-sefaz-ciencia">Dar ciência e pedir o XML de ' + Math.min(20, semCiencia.length) + ' nota(s)' + (semCiencia.length > 20 ? ' (de ' + semCiencia.length + '; 20 por vez)' : '') + '</button></p>' : '') : '') +
       (resumo.length ? '<details data-chave="es-sefaz-resumos"><summary>Só com o resumo (' + resumo.length + ')</summary><div class="tabela-rolagem"><table class="tabela"><tbody>' +
         resumo.slice(0, 100).map(d => '<tr><td><strong>' + esc(d.emitente_nome || '?') + '</strong><small>' + esc(quando(d.emitida_em)) + '</small></td><td class="num">' + R.moeda(d.valor) + '</td><td>' +
-          (d.manifestada_em ? CRM.selo('ciência dada', 'azul') : d.manifesto_motivo ? CRM.selo(d.manifesto_motivo.slice(0, 60), 'vermelho') : CRM.selo('falta ciência', 'ambar')) + '</td></tr>').join('') +
-        '</tbody></table></div></details>' : '') + '</section>';
+          (d.manifestada_em ? CRM.selo('ciência dada', 'azul') : d.manifesto_motivo ? CRM.selo(d.manifesto_motivo.slice(0, 60), 'vermelho') : CRM.selo('falta ciência', 'ambar')) +
+          (d.conclusiva_tipo ? ' ' + CRM.selo(NOME_RESP[d.conclusiva_tipo], 'verde') : CRM.ehAdmin() ? ' <button type="button" class="mini" data-acao="es-dfe-resp" data-id="' + esc(d.chave + '|desconhecimento') + '" title="Responder Desconhecimento à Sefaz">desconheço</button>' : '') + '</td></tr>').join('') +
+        '</tbody></table></div></details>' : '') + '</section>' + blocoAvisosDfe();
   }
 
   async function lerCompras(files) {
@@ -398,6 +493,43 @@
       });
     },
     'es-sefaz': () => buscaSefaz(false),
+    'es-dfe-conheco': doc => {
+      const a = avisos(), g = a.desconhecidos.find(x => x.doc === doc);
+      const forn = fknFornecedores();
+      CRM.abrirForm({ titulo: 'Conheço este fornecedor', intro: (g ? g.nome + ' · ' : '') + 'CNPJ ' + doc + '. Diga de qual fornecedor do FKN é (se for um que já está lá).',
+        campos: [{ nome: 'fornecedor_cod', rotulo: 'Fornecedor no FKN', tipo: 'select', largo: true, opcoes: [['', '— não está no FKN —']].concat(forn.map(f => [f.cod, f.nome + ' (' + f.cod + ')'])) },
+          { nome: 'obs', rotulo: 'Observação', largo: true }],
+        valores: { fornecedor_cod: g && g.sugestao ? g.sugestao.cod : '' },
+        aoSalvar: async v => {
+          await CRM.store().salvarFornecedorDoc({ doc, situacao: 'conhecido', fornecedor_cod: v.fornecedor_cod || null, nome: g ? g.nome : null, obs: v.obs || null });
+          fornDocs = await CRM.store().fornecedorDocs().catch(() => fornDocs); CRM.toast('Fornecedor marcado como conhecido.'); CRM.render();
+        } });
+    },
+    'es-dfe-naoreconheco': async doc => {
+      const g = avisos().desconhecidos.find(x => x.doc === doc);
+      if (!confirm('Marcar ' + ((g && g.nome) || doc) + ' como NÃO RECONHECIDO?\nAs notas dele entram no lembrete para responder Desconhecimento à Sefaz (o administrador responde; dá para fazer já pela lista "Só com o resumo").')) return;
+      await CRM.store().salvarFornecedorDoc({ doc, situacao: 'desconhecido', nome: g ? g.nome : null });
+      fornDocs = await CRM.store().fornecedorDocs().catch(() => fornDocs); CRM.toast('Marcado como não reconhecido.'); CRM.render();
+    },
+    'es-dfe-resp': async id => {
+      const [chave, tipo] = String(id).split('|'), d = dfe.find(x => x.chave === chave);
+      if (!d) return;
+      const quem = (d.emitente_nome || '?') + ' · ' + R.moeda(d.valor) + ' · ' + R.dataBR(String(d.emitida_em).slice(0, 10));
+      const manda = async just => {
+        try { const r = await CRM.store().dfeManifestar(chave, tipo, just); CRM.toast(r && r.ok ? NOME_RESP[tipo] + ' registrado na Sefaz.' : 'A Sefaz recusou: ' + ((r && r.xMotivo) || 'sem motivo'), !(r && r.ok)); }
+        catch (e) { CRM.falhou(e); }
+        dfe = await CRM.store().dfe().catch(() => dfe); CRM.render();
+      };
+      if (tipo === 'nao_realizada') {
+        CRM.abrirForm({ titulo: 'Operação não realizada', intro: quem + '. Use quando a compra foi combinada mas não aconteceu (mercadoria recusada, devolvida antes da entrada). Vai à Sefaz em nome da empresa e não tem volta.',
+          campos: [{ nome: 'just', rotulo: 'Justificativa (15 a 255 letras)', tipo: 'textarea', obrigatorio: true, largo: true }],
+          aoSalvar: async v => { if (String(v.just).trim().length < 15) throw new Error('a justificativa precisa de pelo menos 15 letras'); await manda(v.just); } });
+        return;
+      }
+      const texto = tipo === 'confirmacao' ? 'CONFIRMAR à Sefaz que a compra aconteceu e a mercadoria chegou?' : 'Responder DESCONHECIMENTO à Sefaz (a empresa não reconhece esta nota)?';
+      if (!confirm(texto + '\n\n' + quem + '\n\nVai à Sefaz em nome da empresa e não tem volta.')) return;
+      await manda(null);
+    },
     'es-sefaz-trazer': async () => { await trazDfe(false); CRM.render(); },
     'es-sefaz-ciencia': async () => {
       if (!confirm('Dar a Ciência da Operação das notas que ainda não têm o XML completo (até 20)?\nÉ só o aviso à Sefaz de que a empresa sabe da nota: não confirma nem recusa a compra.')) return;

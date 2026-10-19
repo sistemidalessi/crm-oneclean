@@ -539,6 +539,11 @@
   Supa.prototype.dfeEstado = async function () { return unwrap(await this.sb.from('crm_dfe_estado').select('*').eq('id', 1).maybeSingle()); };
   Supa.prototype.dfeBuscar = async function () { return this.fiscal({ acao: 'dfe_buscar' }); };
   Supa.prototype.dfeCiencia = async function (chave) { return this.fiscal({ acao: 'dfe_ciencia', chave: chave || null }); };
+  // resposta definitiva (19/10/2026): confirmacao | desconhecimento | nao_realizada (com justificativa); só o administrador
+  Supa.prototype.dfeManifestar = async function (chave, tipo, justificativa) { return this.fiscal({ acao: 'dfe_manifestar', chave, tipo, justificativa: justificativa || null }); };
+  // CNPJ emitente que o comprador conhece (e de qual fornecedor do FKN é) ou não reconhece
+  Supa.prototype.fornecedorDocs = async function () { return unwrap(await this.sb.from('crm_fornecedor_docs').select('*')); };
+  Supa.prototype.salvarFornecedorDoc = async function (d) { return unwrap(await this.sb.from('crm_fornecedor_docs').upsert(Object.assign({}, d, { em: new Date().toISOString() }), { onConflict: 'doc' })); };
   Supa.prototype.dfeXml = async function (chave) {
     const r = await this.sb.storage.from('crm-compras-xml').download(chave + '.xml');
     if (r.error) return null;
@@ -562,6 +567,9 @@
   Local.prototype.dfeEstado = async function () { return null; };
   Local.prototype.dfeBuscar = async function () { throw new Error('a busca na Sefaz só funciona ligada ao banco'); };
   Local.prototype.dfeCiencia = Local.prototype.dfeBuscar;
+  Local.prototype.dfeManifestar = Local.prototype.dfeBuscar;
+  Local.prototype.fornecedorDocs = async function () { return []; };
+  Local.prototype.salvarFornecedorDoc = async function () { return null; };
   Local.prototype.dfeXml = async function () { return null; };
   Local.prototype.compraLancar = async function () { throw new Error('a entrada no estoque só funciona ligada ao banco'); };
   Local.prototype.compraIgnorar = async function (id, obs) { const c = (this._compras || []).find(x => x.id === id); if (c) Object.assign(c, { situacao: 'ignorada', obs }); return c; };

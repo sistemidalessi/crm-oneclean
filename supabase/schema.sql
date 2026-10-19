@@ -2991,6 +2991,18 @@ begin
       from public.crm_titulos where vencimento < hoje and not abono and cartorio_em is null;
     r := r || jsonb_build_object('receber', x);
   exception when others then null; end;
+  begin
+    -- notas de compra da Sefaz (19/10/2026): fornecedor que nunca vendeu para a empresa e o prazo da resposta definitiva
+    select jsonb_build_object(
+      'desconhecidos', (select count(distinct d.emitente_doc) from public.crm_dfe d
+         where d.situacao = 'autorizada' and d.emitente_doc is not null and not public.crm_dfe_doc_conhecido(d.emitente_doc)
+           and not exists (select 1 from public.crm_fornecedor_docs f where f.doc = d.emitente_doc)),
+      'prazo', (select count(*) from public.crm_dfe d where d.situacao = 'autorizada' and d.conclusiva_tipo is null and d.emitida_em is not null
+         and d.emitida_em + make_interval(days => public.crm_dfe_prazo_dias()) < now() + interval '30 days'
+         and (exists (select 1 from public.crm_fornecedor_docs f where f.doc = d.emitente_doc and f.situacao = 'desconhecido') or public.crm_dfe_lembrete_todas())))
+      into x;
+    r := r || jsonb_build_object('compras_sefaz', x);
+  exception when others then null; end;
   return r;
 end;
 $$;
@@ -3224,3 +3236,43 @@ do $$ begin
     create policy tudo on public.crm_precos_concorrente for all to authenticated using ((select public.crm_eh_admin()) or (select public.crm_eh_comprador())) with check ((select public.crm_eh_admin()) or (select public.crm_eh_comprador()));
   end if;
 end $$;
+
+-- ============================================================ notas de compra: fornecedor desconhecido e prazo (19/10/2026)
+-- Pedido do Anderson (antes de ligar a ciência automática): avisar quando aparece nota de um fornecedor que nunca vendeu
+-- para a empresa e lembrar o prazo da resposta definitiva (confirmação, desconhecimento, operação não realizada).
+-- crm_fornecedor_docs: o comprador diz "conheço" (e de qual fornecedor do FKN é) ou "não reconheço" cada CNPJ emitente.
+-- Conhecido também = CNPJ no cadastro de fornecedores ou de uma nota de compra que já deu entrada. Prazo: config
+-- fiscal.dfe_prazo_dias (padrão 90, contado da emissão; Ajuste SINIEF 14/2026 segundo o vigia: conferir com o contador).
+-- O lembrete vale para as notas de fornecedor "não reconheço" e, com fiscal.dfe_lembrete_todas = true, para todas.
+alter table public.crm_dfe add column if not exists conclusiva_tipo text check (conclusiva_tipo is null or conclusiva_tipo in ('confirmacao', 'desconhecimento', 'nao_realizada'));
+alter table public.crm_dfe add column if not exists conclusiva_em timestamptz;
+alter table public.crm_dfe add column if not exists conclusiva_cstat integer;
+alter table public.crm_dfe add column if not exists conclusiva_motivo text;
+alter table public.crm_dfe add column if not exists conclusiva_por uuid;
+create table if not exists public.crm_fornecedor_docs (
+  doc            text primary key,
+  situacao       text not null check (situacao in ('conhecido', 'desconhecido')),
+  fornecedor_cod text,
+  nome           text,
+  obs            text,
+  em             timestamptz not null default now(),
+  por            uuid default auth.uid()
+);
+alter table public.crm_fornecedor_docs enable row level security;
+grant select, insert, update on public.crm_fornecedor_docs to authenticated;
+do $$ begin
+  if not exists (select 1 from pg_policies where tablename = 'crm_fornecedor_docs' and policyname = 'tudo') then
+    create policy tudo on public.crm_fornecedor_docs for all to authenticated using ((select public.crm_eh_admin()) or (select public.crm_eh_comprador())) with check ((select public.crm_eh_admin()) or (select public.crm_eh_comprador()));
+  end if;
+end $$;
+create or replace function public.crm_dfe_doc_conhecido(p_doc text) returns boolean language sql stable security invoker set search_path = public as $$
+  select exists (select 1 from crm_fornecedor_docs where doc = p_doc and situacao = 'conhecido')
+      or exists (select 1 from crm_fornecedores where regexp_replace(upper(coalesce(cnpj, '')), '[^0-9A-Z]', '', 'g') = p_doc)
+      or exists (select 1 from crm_compras where fornecedor_doc = p_doc and situacao = 'lancada')
+$$;
+create or replace function public.crm_dfe_prazo_dias() returns integer language sql stable security invoker set search_path = public as $$
+  select coalesce(nullif((select dados->'fiscal'->>'dfe_prazo_dias' from crm_config where id = 1), '')::int, 90)
+$$;
+create or replace function public.crm_dfe_lembrete_todas() returns boolean language sql stable security invoker set search_path = public as $$
+  select coalesce((select (dados->'fiscal'->>'dfe_lembrete_todas')::boolean from crm_config where id = 1), false)
+$$;

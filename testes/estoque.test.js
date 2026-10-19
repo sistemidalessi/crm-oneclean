@@ -56,3 +56,25 @@ test('nota de compra do XML: itens com IPI, ST, frete e outras; custo na unidade
   assert.deepEqual(S.sugere(itens[1], '99888777000166', ctx), { codigo: '010001', fator: 1, como: 'descrição parecida (confira)' });
   assert.deepEqual(S.sugere({ descricao: 'LUVA NITRILICA', unidade: 'CX' }, 'x', ctx).codigo, null, 'nada parecido: o comprador escolhe');
 });
+
+test('notas da Sefaz: fornecedor que nunca vendeu e o prazo da resposta definitiva', () => {
+  const S = require('../estoque.js');
+  const dfe = [
+    { chave: 'a', situacao: 'autorizada', emitente_doc: '111', emitente_nome: 'CONHECIDO LTDA', emitida_em: '2026-08-01T10:00:00-03:00', valor: 10 },
+    { chave: 'b', situacao: 'autorizada', emitente_doc: '222', emitente_nome: 'AUDAX QUIMICA LTDA', emitida_em: '2026-10-10T10:00:00-03:00', valor: 50 },
+    { chave: 'c', situacao: 'autorizada', emitente_doc: '333', emitente_nome: 'NOTA ESTRANHA LTDA', emitida_em: '2026-08-01T10:00:00-03:00', valor: 900 },
+    { chave: 'd', situacao: 'autorizada', emitente_doc: '333', emitente_nome: 'NOTA ESTRANHA LTDA', emitida_em: '2026-07-01T10:00:00-03:00', valor: 5, conclusiva_tipo: 'desconhecimento' },
+    { chave: 'e', situacao: 'cancelada', emitente_doc: '444', emitente_nome: 'CANCELADA SA', emitida_em: '2026-10-01T10:00:00-03:00', valor: 1 },
+    { chave: 'f', situacao: 'autorizada', emitente_doc: '555', emitente_nome: 'MARCADO CONHECIDO', emitida_em: '2026-07-25T10:00:00-03:00', valor: 3 }];
+  const base = { dfe, hoje: '2026-10-19', prazoDias: 90, avisoDias: 30, conhecidos: new Set(['111']),
+    docs: [{ doc: '333', situacao: 'desconhecido' }, { doc: '555', situacao: 'conhecido' }],
+    fknForn: [{ cod: '00059', nome: 'SALES EQUIP E PROD HIG PROF LTDA' }, { cod: '00207', nome: 'AUDAX QUIMICA INDUSTRIA E COMERCIO DE PR' }] };
+  const r = S.avisosDfe(base);
+  assert.deepEqual(r.desconhecidos.map(g => [g.doc, g.sugestao && g.sugestao.cod]), [['222', '00207']], 'só o CNPJ nunca visto; a cancelada não conta');
+  assert.deepEqual(r.naoReconhecidos.map(g => [g.doc, g.notas.length, g.semResposta]), [['333', 2, 1]]);
+  // 01/08 + 90 dias = 30/10: faltam 11 dias; a já respondida (d) sai; sem "todas", só a do não reconhecido
+  assert.deepEqual(r.prazos.map(p => [p.chave, p.vence, p.resta, p.desconhecido]), [['c', '2026-10-30', 11, true]]);
+  const t = S.avisosDfe(Object.assign({}, base, { todas: true }));
+  assert.deepEqual(t.prazos.map(p => p.chave), ['f', 'a', 'c'], 'com "todas": também as de fornecedor conhecido, a mais apertada primeiro');
+  assert.equal(S.sugereFornecedor('LTDA COMERCIO', base.fknForn), null, 'só palavras genéricas não sugerem');
+});

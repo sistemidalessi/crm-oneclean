@@ -56,6 +56,9 @@
       const es = r.estoque || {};
       if (es.sem_explicacao) poe('estoque-dif', 'atencao', plural(es.sem_explicacao, 'diferença de estoque sem explicação', 'diferenças de estoque sem explicação'), 'estoque', 'conferencia');
       if (es.abaixo_minimo) poe('estoque-min', 'info', plural(es.abaixo_minimo, 'produto abaixo do mínimo', 'produtos abaixo do mínimo'), 'compras');
+      const cs = r.compras_sefaz || {};
+      if (cs.desconhecidos) poe('dfe-desc', 'urgente', plural(cs.desconhecidos, 'fornecedor que nunca vendeu para a empresa apareceu nas notas da Sefaz', 'fornecedores que nunca venderam para a empresa apareceram nas notas da Sefaz'), 'estoque', 'compras', 'auditoria');
+      if (cs.prazo) poe('dfe-prazo', 'urgente', plural(cs.prazo, 'nota de compra perto do prazo da resposta à Sefaz', 'notas de compra perto do prazo da resposta à Sefaz'), 'estoque', 'compras', 'auditoria');
     }
     if (c.admin) {
       const cx = r.caixa || {}, rc = r.receber || {};

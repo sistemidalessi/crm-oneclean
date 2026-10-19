@@ -26,13 +26,19 @@ test('consulta por NSU e por chave e a ciência passam nos esquemas oficiais', {
     const casos = [[D.msgDist({ ambiente: 'producao', cnpj: '11222333000181', ultNSU: 0 }), 'distDFeInt_v1.01.xsd'],
       [D.msgDist({ ambiente: 'homologacao', cnpj: '11222333000181', ultNSU: 1234 }), 'distDFeInt_v1.01.xsd'],
       [D.msgDist({ ambiente: 'producao', cnpj: '11222333000181', chave: CHAVE }), 'distDFeInt_v1.01.xsd'],
-      [ev, 'envConfRecebto_v1.00.xsd']];
+      [ev, 'envConfRecebto_v1.00.xsd']].concat(['confirmacao', 'desconhecimento', 'nao_realizada'].map(tipo => {
+        const m = D.manifestacao({ ambiente: 'producao', cnpj: '11222333000181', chave: CHAVE, quando: '2026-10-20T11:00:00-03:00', tipo, justificativa: 'Mercadoria não foi entregue & devolvida' });
+        return [S.envEvento(2, S.montaEvento(m.infEvento, A.assinaElemento(m.infEvento, m.id, certPem, keyPem))), 'envConfRecebto_v1.00.xsd'];
+      }));
     for (const [xml, xsd] of casos) {
       const f = path.join(dir, 'm.xml'); fs.writeFileSync(f, xml);
       const r = spawnSync('xmllint', ['--noout', '--schema', path.join(ESQ, xsd), f]);
       assert.strictEqual(r.status, 0, xsd + ': ' + String(r.stderr));
     }
     assert.strictEqual(inf.id, 'ID210210' + CHAVE + '01');
+    assert.strictEqual(D.manifestacao({ ambiente: 'producao', cnpj: '1', chave: CHAVE, quando: 'x', tipo: 'desconhecimento' }).id, 'ID210220' + CHAVE + '01');
+    assert.throws(() => D.manifestacao({ ambiente: 'producao', cnpj: '1', chave: CHAVE, quando: 'x', tipo: 'nao_realizada', justificativa: 'curta' }), /15 letras/);
+    assert.throws(() => D.manifestacao({ ambiente: 'producao', cnpj: '1', chave: CHAVE, quando: 'x', tipo: 'outra' }), /desconhecida/);
     assert.match(inf.infEvento, /<cOrgao>91<\/cOrgao>/);
     assert.match(D.msgDist({ ambiente: 'producao', cnpj: '1', ultNSU: 1234 }), /<ultNSU>000000000001234<\/ultNSU>/);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
