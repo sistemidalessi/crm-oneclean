@@ -3433,3 +3433,19 @@ language sql stable security definer set search_path = public as $$
 $$;
 revoke all on function public.crm_produtos_vendidos(integer) from public, anon;
 grant execute on function public.crm_produtos_vendidos(integer) to authenticated;
+-- "Na sua carteira, quem compra" (ficha do produto, 19/10/2026): SECURITY INVOKER, então a RLS das notas faz a carteira
+-- (a vendedora vê os clientes dela; gestora, administrador e comprador veem todos). Índice pelo código sem o ".1" da caixa.
+create index if not exists crm_nota_itens_base_idx on public.crm_nota_itens ((regexp_replace(codigo, '\.\d+$', '')));
+create or replace function public.crm_produto_clientes(p_codigo text, p_limite integer default 8)
+returns table (empresa_id uuid, nome text, ultima timestamptz, quantidade numeric, notas integer)
+language sql stable security invoker set search_path = public as $$
+  select n.empresa_id, coalesce(max(n.cliente_nome), ''), max(n.emitida_em), round(sum(i.quantidade), 3), count(distinct n.id)::int
+    from public.crm_nota_itens i join public.crm_notas n on n.id = i.nota_id
+   where regexp_replace(i.codigo, '\.\d+$', '') = regexp_replace(coalesce(p_codigo, ''), '\.\d+$', '')
+     and not coalesce(n.cancelada, false)
+   group by n.empresa_id
+   order by max(n.emitida_em) desc
+   limit least(greatest(coalesce(p_limite, 8), 1), 30);
+$$;
+revoke all on function public.crm_produto_clientes(text, integer) from public, anon;
+grant execute on function public.crm_produto_clientes(text, integer) to authenticated;

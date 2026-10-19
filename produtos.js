@@ -102,7 +102,18 @@
   // A foto que já vem marcada para aprovar no lote: a de código de barras batendo ou "mesmo produto" de fabricante/fornecedor.
   const confiavel = c => !!(c && (c.ean_bate || (c.mesmo === 'sim' && c.tipo !== 'loja')));
 
-  const API = { catalogo, estado, filtra, linhas, paraBuscar, custoEstimado, specsTexto, specsDe, confiavel, CUSTO_PADRAO };
+  // "Mandar foto e preço pelo WhatsApp" (simulação aprovada): o texto que a vendedora manda ao cliente. O preço é o da
+  // tabela A (a negociação é dela); foto e ficha técnica vão como link (o arquivo público do CRM).
+  function textoWhats(x, fotoUrl, fichaUrl) {
+    const nome = x.nome || x.descricao, br = v => Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const inf = x.info || {};
+    return ['*' + nome + '*' + (inf.marca && sem(nome).indexOf(sem(inf.marca)) === -1 ? ' (' + inf.marca + ')' : ''),
+      inf.descricao || '',
+      x.preco ? 'Preço: R$ ' + br(x.preco) + (x.unidade ? ' (' + String(x.unidade).toUpperCase() + ')' : '') + (x.caixa && x.caixa.preco ? ' · caixa' + (x.caixa.fator ? ' com ' + x.caixa.fator : '') + ': R$ ' + br(x.caixa.preco) : '') : '',
+      fotoUrl ? 'Foto: ' + fotoUrl : '', fichaUrl ? 'Ficha técnica: ' + fichaUrl : ''].filter(Boolean).join('\n');
+  }
+
+  const API = { catalogo, estado, filtra, linhas, paraBuscar, custoEstimado, specsTexto, specsDe, confiavel, textoWhats, CUSTO_PADRAO };
   raiz.CRMProdutos = API;
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
 })(typeof window !== 'undefined' ? window : globalThis);
@@ -237,12 +248,16 @@
         '<div class="pf-numeros"><div class="' + e.cls + '"><span>Disponível</span><strong>' + qtd(Math.floor(x.disponivel * 1000) / 1000) + '</strong><small>' + (e.dias ? 'pouco: dura ~' + e.dias + ' dia(s)' : e.cls === 'falta' ? 'em falta' : 'para vender agora') + '</small></div>' +
           '<div><span>Reservado</span><strong>' + qtd(x.reservado) + '</strong><small>em pedidos abertos</small></div>' +
           '<div class="caminho"><span>A caminho</span><strong>' + qtd(x.a_caminho) + '</strong><small>já pedido ao fornecedor</small></div></div>' +
+        (CRM.foraDeVendas() ? '' : '<p class="acoes"><a class="btn sec" href="' + esc('https://wa.me/?text=' + encodeURIComponent(X.textoWhats(Object.assign({ nome: nome(x) }, x), u,
+          inf.ficha_caminho ? st().fotoUrl(inf.ficha_caminho) : inf.ficha_url || ''))) + '" target="_blank" rel="noopener noreferrer">📲 Mandar foto e preço pelo WhatsApp</a></p>') +
         (inf.descricao ? '<p class="pf-descricao">' + esc(inf.descricao) + '</p>' : '') +
         (pdf(inf.ficha_caminho, inf.ficha_url, 'Ficha técnica') || pdf(inf.fispq_caminho, inf.fispq_url, 'FISPQ') ? '<p class="acoes">' + pdf(inf.ficha_caminho, inf.ficha_url, 'Ficha técnica') + ' ' + pdf(inf.fispq_caminho, inf.fispq_url, 'FISPQ (segurança)') + '</p>' : '') +
         ((inf.especificacoes || []).length ? '<h3>Especificações</h3><table class="tabela pf-specs"><tbody>' + inf.especificacoes.map(s => '<tr><th>' + esc(s.nome) + '</th><td>' + esc(s.valor) + '</td></tr>').join('') + '</tbody></table>' : '') +
         (faixas ? '<h3>Preço por faixa</h3><table class="tabela pf-faixas"><thead><tr><th>Faixa</th><th class="num">Preço</th>' + (x.custo != null ? '<th class="num">Margem</th>' : '') + '</tr></thead><tbody>' + faixas + '</tbody></table>' +
           (x.caixa && x.caixa.preco ? '<p class="dica">Caixa fechada (' + esc(x.caixa.codigo) + '): R$ ' + preco(x.caixa.preco) + ' na tabela A.</p>' : '') : '') +
-        '<p class="dica">Últimos 90 dias: ' + (x.vendas ? qtd(x.vendido) + ' ' + esc(x.unidade || 'un') + ' em ' + x.vendas + ' nota(s)' : 'nenhuma venda') + '.</p>' +
+        '<div class="pf-venda"><div class="pf-quadro"><h3>Venda</h3><p>Últimos 90 dias: <strong>' + (x.vendas ? qtd(x.vendido) + ' ' + esc(x.unidade || 'un') + '</strong> em ' + x.vendas + ' nota(s) · média ' +
+          qtd(Math.round(x.vendido / 90 * 10) / 10) + ' por dia' : 'nenhuma venda</strong>') + '</p></div>' +
+          '<div class="pf-quadro"><h3>' + (CRM.ehGestor() || podeFotos() ? 'Quem compra' : 'Na sua carteira, quem compra') + '</h3><div data-pf-clientes="' + esc(x.codigo) + '"><p class="dica">Carregando…</p></div></div></div>' +
       '</section></div>';
   }
   let aoEscolher = null; // o pedido aberto que pediu "procurar com foto"
@@ -252,12 +267,23 @@
     if (!x) { CRM.toast('Produto ' + cod + ' não está no estoque.', true); return; }
     const incluir = aoEscolher || (CRM.pedidos && CRM.pedidos.incluirItem && !CRM.foraDeVendas() ? c => CRM.pedidos.incluirItem(c) : null);
     CRM.abrirForm({
-      titulo: nome(x), largura: 'extra', campos: [], htmlAntes: fichaHTML(x), semFoco: true,
+      titulo: nome(x), largura: 'extra', campos: [], htmlAntes: fichaHTML(x), semFoco: true, extras: form => clientes(form, x.codigo),
       salvarTexto: incluir ? '+ Adicionar ao pedido' : 'Fechar',
       aoSalvar: async () => { if (incluir) { const fn = incluir; aoEscolher = null; await fn(x.codigo); } }
     });
   }
   async function carregaJa() { if (lista === null) { await carrega(); } }
+  // "Na sua carteira, quem compra": pelas notas que a pessoa enxerga (a RLS das notas faz a carteira), a última compra primeiro
+  async function clientes(form, cod) {
+    const el = form.querySelector('[data-pf-clientes]');
+    if (!el || !st().produtoClientes) return;
+    try {
+      const l = await st().produtoClientes(cod, 8);
+      el.innerHTML = l.length ? '<ul class="pf-clientes">' + l.map(c => '<li>' + (c.empresa_id ? '<button type="button" class="link" data-acao="abrir-empresa" data-id="' + esc(c.empresa_id) + '">' +
+          esc((CRM.empresa(c.empresa_id) || {}).nome || c.nome || '—') + '</button>' : esc(c.nome || '—')) + '<small>última compra ' + esc(quando(c.ultima)) + ' · ' + qtd(c.quantidade) + ' em ' + c.notas + ' nota(s)</small></li>').join('') + '</ul>'
+        : '<p class="dica">Ninguém ' + (CRM.ehGestor() || podeFotos() ? '' : 'da sua carteira ') + 'comprou ainda pelas notas do CRM.</p>';
+    } catch (e) { el.innerHTML = '<p class="dica">Não consegui carregar agora.</p>'; }
+  }
 
   // ----------------------------------------------------------------- escolher o produto no pedido, com foto
   function escolher(fn) {
@@ -306,11 +332,11 @@
       i.click();
     });
   }
-  async function subir(cod, camera) {
+  async function subir(cod, camera, depois) {
     const arq = await escolheArquivo('image/*', camera);
     if (!arq) return;
     if (!/^image\//.test(arq.type)) { CRM.toast('Escolha uma imagem (foto).', true); return; }
-    try { await guardaFoto(cod, arq, camera ? 'foto tirada pelo comprador' : 'enviada pelo comprador', null); CRM.toast('Foto guardada.'); reabreFicha(cod); } catch (e) { CRM.falhou(e); }
+    try { await guardaFoto(cod, arq, camera ? 'foto tirada pelo comprador' : 'enviada pelo comprador', null); CRM.toast('Foto guardada.'); (depois || reabreFicha)(cod); } catch (e) { CRM.falhou(e); }
   }
   const reabreFicha = cod => { const d = document.querySelector('#dlgForm'); if (d && d.open) abrirFicha(cod); else CRM.render(); };
 
@@ -435,12 +461,18 @@
     const pdf = (a, rot) => a ? '<a href="' + esc(a.caminho ? st().fotoUrl(a.caminho) : a.url) + '" target="_blank" rel="noopener noreferrer">' + rot + (a.caminho ? '' : ' (só o link: não consegui baixar)') + '</a>' : '';
     CRM.abrirForm({
       titulo: 'Conferir: ' + nome(x), largura: 'extra', semFoco: true, salvarTexto: 'Aprovar',
-      intro: 'Escolha a foto que é o mesmo produto (mesma embalagem e tamanho) e corrija o que precisar. Ela fica guardada no CRM e aparece para as vendedoras.' +
-        (inf.eans && inf.eans.length ? ' Código de barras no cadastro: ' + inf.eans.join(', ') + '.' : '') + (sg.busca ? ' A IA procurou por: ' + sg.busca + '.' : ''),
-      htmlAntes: (cs.length ? '<div class="pf-escolha">' + cs.map((c, i) => '<label class="pf-opcao"><input type="radio" name="foto" value="' + i + '"' + (i === (fl.escolha[cod] || 0) ? ' checked' : '') + '>' +
-          '<img src="' + esc(st().fotoUrl(c.caminho)) + '" alt="" loading="lazy"><small>' + esc((c.site || c.tipo) + (c.largura ? ' · ' + c.largura + '×' + c.altura + ' px' : '')) +
-          (c.ean_bate ? ' · código de barras bate' : '') + '</small>' + (c.pagina ? '<a href="' + esc(c.pagina) + '" target="_blank" rel="noopener noreferrer">ver a página</a>' : '') + '</label>').join('') +
-          '<label class="pf-opcao"><input type="radio" name="foto" value="-1"><span class="pf-sem">nenhuma serve</span></label></div>' : '<p class="vazio">A IA não achou foto. Dá para subir uma depois, na ficha do produto.</p>') +
+      intro: 'Código ' + cod + (inf.eans && inf.eans.length ? ' · código de barras ' + inf.eans.join(', ') : ' · sem código de barras no cadastro') + (inf.marca ? ' · marca ' + inf.marca : '') +
+        '. Escolha a foto que é o mesmo produto (mesma embalagem e tamanho) e corrija o que precisar. Ela fica guardada no CRM e aparece para as vendedoras.',
+      htmlAntes: '<div class="pf-rebusca"><label class="campo"><span>A IA procurou por</span><input type="text" data-pf-rebusca value="' + esc(sg.busca || nome(x)) + '"></label>' +
+          '<button type="button" class="btn sec" data-acao="pf-buscar-de-novo" data-id="' + esc(cod) + '">Buscar de novo</button></div>' +
+        (cs.length ? '<div class="pf-escolha">' + cs.map((c, i) => '<label class="pf-opcao' + (c.ean_bate ? ' bate' : '') + '"><input type="radio" name="foto" value="' + i + '"' + (i === (fl.escolha[cod] || 0) ? ' checked' : '') + '>' +
+          '<span class="pf-opcao-foto"><img src="' + esc(st().fotoUrl(c.caminho)) + '" alt="" loading="lazy">' + (c.ean_bate ? '<span class="pf-selo verde">código de barras bate</span>' : '') + '</span>' +
+          '<strong>' + esc(c.tipo === 'fabricante' ? 'Site do fabricante' : c.tipo === 'fornecedor' ? 'Site do fornecedor' : 'Loja on-line') + '</strong><small>' + esc((c.site || '') + (c.largura ? ' · ' + c.largura + '×' + c.altura + ' px' : '')) + '</small>' +
+          (c.pagina ? '<a href="' + esc(c.pagina) + '" target="_blank" rel="noopener noreferrer">ver a página</a>' : '') + '</label>').join('') +
+          '<label class="pf-opcao"><input type="radio" name="foto" value="-1"' + (fl.escolha[cod] === -1 ? ' checked' : '') + '><span class="pf-sem">nenhuma serve (deixar sem foto)</span></label></div>' : '<p class="vazio">A IA não achou foto. Suba uma pelos botões abaixo ou busque de novo com outras palavras.</p>') +
+        '<p class="acoes"><button type="button" class="btn sec" data-acao="pf-subir-revisar" data-id="' + esc(cod) + '">Subir foto do computador</button> ' +
+          '<button type="button" class="btn sec" data-acao="pf-camera-revisar" data-id="' + esc(cod) + '">Tirar foto com o celular</button>' +
+          (x.foto ? ' <small>já tem foto guardada: aprovar com "nenhuma serve" mantém a foto e guarda só a ficha</small>' : '') + '</p>' +
         (inf.ficha || inf.fispq ? '<p class="acoes">' + pdf(inf.ficha, '📄 Ficha técnica') + ' ' + pdf(inf.fispq, '📄 FISPQ') + '</p>' : '') +
         (inf.fonte ? '<p class="dica">Especificações tiradas de <a href="' + esc(inf.fonte) + '" target="_blank" rel="noopener noreferrer">' + esc(inf.fonte.replace(/^https?:\/\//, '').slice(0, 70)) + '</a>.</p>' : '') +
         (inf.obs ? '<p class="dica"><strong>A IA pede para conferir:</strong> ' + esc(inf.obs) + '</p>' : ''),
@@ -505,6 +537,20 @@
     'pf-escolhe': id => { const fn = aoEscolher; aoEscolher = null; const d = document.querySelector('#dlgForm'); if (d && d.open) d.close(); if (fn) fn(id); },
     'pf-ir-fotos': () => { if (CRM.estoqueVer) CRM.estoqueVer('fotos'); },
     'pf-subir': id => subir(id, false),
+    // dentro da conferência da sugestão: a foto do comprador vale e a ficha da IA ainda pode ser aprovada
+    'pf-subir-revisar': id => subir(id, false, c => { fl.escolha[c] = -1; revisar(c); }),
+    'pf-camera-revisar': id => subir(id, true, c => { fl.escolha[c] = -1; revisar(c); }),
+    'pf-buscar-de-novo': async id => {
+      const i = document.querySelector('#dlgForm [data-pf-rebusca]'), busca = i ? i.value.trim() : '';
+      const d = document.querySelector('#dlgForm'); if (d && d.open) d.close();
+      CRM.toast('A IA está procurando de novo (de 30 segundos a 2 minutos)…');
+      try {
+        const r = await buscarUm(id, busca);
+        ia = await st().produtoBuscar({ acao: 'situacao' }).catch(() => ia);
+        fl.escolha[id] = 0; CRM.render();
+        if (r.situacao === 'sugerida') revisar(id); else CRM.toast(r.situacao === 'erro' ? 'Não deu: ' + (r.erro || 'erro') : 'A IA não achou nada com essas palavras.', r.situacao === 'erro');
+      } catch (e) { CRM.falhou(e); }
+    },
     'pf-camera': id => subir(id, true),
     'pf-foto-tirar': async id => {
       if (!confirm('Tirar a foto deste produto? As vendedoras deixam de ver.')) return;

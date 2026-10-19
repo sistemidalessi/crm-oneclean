@@ -134,3 +134,10 @@ test('especificações em texto e a foto que já vem marcada', () => {
   assert.equal(X.confiavel({ mesmo: 'sim', tipo: 'loja' }), false);
   assert.equal(X.confiavel(null), false);
 });
+
+test('textoWhats: nome, marca, descrição, preço da tabela e da caixa, foto e ficha', () => {
+  const x = { nome: 'Detergente 500ml neutro ype', unidade: 'FR', preco: 2.9, caixa: { fator: 24, preco: 66 }, info: { marca: 'Ypê', descricao: 'Para lavar louças.' } };
+  assert.equal(X.textoWhats(x, 'https://f/foto.jpg', 'https://f/ft.pdf'),
+    '*Detergente 500ml neutro ype*\nPara lavar louças.\nPreço: R$ 2,90 (FR) · caixa com 24: R$ 66,00\nFoto: https://f/foto.jpg\nFicha técnica: https://f/ft.pdf');
+  assert.equal(X.textoWhats({ nome: 'Luva Sanro', preco: null, info: { marca: 'Sanro' } }, '', ''), '*Luva Sanro*');
+});

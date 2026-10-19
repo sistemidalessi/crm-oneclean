@@ -1331,6 +1331,8 @@
   Supa.prototype.produtoFotoGravar = async function (linha) { return unwrap(await this.sb.from('crm_produto_fotos').upsert(Object.assign({}, linha, { atualizado_em: new Date().toISOString() })).select().single()); };
   Supa.prototype.produtoFotoTirar = async function (codigo) { return unwrap(await this.sb.from('crm_produto_fotos').delete().eq('codigo', codigo)); };
   Supa.prototype.produtoInfoGravar = async function (linha) { return unwrap(await this.sb.from('crm_produto_info').upsert(Object.assign({}, linha, { atualizado_em: new Date().toISOString() })).select().single()); };
+  // Quem compra o produto, pelas notas que a pessoa enxerga (RLS: a vendedora vê a carteira dela), a compra mais recente primeiro.
+  Supa.prototype.produtoClientes = async function (codigo, limite) { return unwrap(await this.sb.rpc('crm_produto_clientes', { p_codigo: codigo, p_limite: limite || 8 })); };
   Supa.prototype.sugestaoMarcar = async function (codigo, situacao) { return unwrap(await this.sb.from('crm_produto_fotos_sugestoes').update({ situacao }).eq('codigo', codigo)); };
 
   // Modo local: as fotos ficam no navegador como data: (serve para ver as telas); sem IA (a busca devolve "sem").
@@ -1367,6 +1369,14 @@
   Local.prototype.produtoFotoGravar = async function (linha) { const s = lsObj('crm_produto_fotos'); s[linha.codigo] = Object.assign({}, linha, { atualizado_em: new Date().toISOString() }); lsGrava('crm_produto_fotos', s); return s[linha.codigo]; };
   Local.prototype.produtoFotoTirar = async function (codigo) { const s = lsObj('crm_produto_fotos'); delete s[codigo]; lsGrava('crm_produto_fotos', s); };
   Local.prototype.produtoInfoGravar = async function (linha) { const s = lsObj('crm_produto_info'); s[linha.codigo] = Object.assign({}, s[linha.codigo], linha, { atualizado_em: new Date().toISOString() }); lsGrava('crm_produto_info', s); return s[linha.codigo]; };
+  Local.prototype.produtoClientes = async function (codigo, limite) {
+    const base = c => String(c || '').replace(/\.\d+$/, ''), m = new Map();
+    (this.ler().notas || []).filter(n => !n.cancelada).forEach(n => (n.itens || []).filter(i => base(i.codigo) === base(codigo)).forEach(i => {
+      const k = n.empresa_id || n.cliente_nome, c = m.get(k) || { empresa_id: n.empresa_id || null, nome: n.cliente_nome || '', ultima: n.emitida_em, quantidade: 0, notas: new Set() };
+      c.quantidade += Number(i.quantidade || 0); c.notas.add(n.id); if (String(n.emitida_em) > String(c.ultima)) c.ultima = n.emitida_em; m.set(k, c);
+    }));
+    return [...m.values()].map(c => Object.assign(c, { notas: c.notas.size })).sort((a, b) => String(b.ultima).localeCompare(String(a.ultima))).slice(0, limite || 8);
+  };
   Local.prototype.sugestaoMarcar = async function (codigo, situacao) { const s = lsObj('crm_produto_sugestoes'); if (s[codigo]) s[codigo].situacao = situacao; lsGrava('crm_produto_sugestoes', s); };
 
   raiz.CRMDados = { TABELAS, INTEIRAS, PARCIAIS, aplicaMudancas, marcaRecarga, chave, Local, Supa, uuid, vazio, LOCAL_ADMIN, cascataMemoria, situacaoVigia, PARADO_MIN, lembreteFkn };

@@ -1088,3 +1088,19 @@ pre.of-previa { white-space: pre-wrap; font-family: inherit; font-size: .88rem; 
 .form-corpo > .pf-ficha, .form-corpo > .pf-escolha, .form-corpo > .pf-filtros, .form-corpo > [data-pf-lista], .form-corpo > .acoes, .form-corpo > .dica { margin-left: 18px; margin-right: 18px; }
 .form-corpo > .pf-ficha, .form-corpo > .pf-filtros, .form-corpo > .pf-escolha { margin-top: 14px; }
 .pf-opcao .pf-sem, .pf-ficha-foto > .pf-sem { box-sizing: border-box; width: 100%; }
+.pf-venda { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-top: 14px; }
+.pf-quadro { border: 1px solid var(--borda); border-radius: 12px; padding: 10px 14px; }
+.pf-quadro h3 { margin: 0 0 6px; font-size: .95rem; }
+.pf-quadro p { margin: 0; }
+.pf-clientes { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.pf-clientes li { display: grid; }
+.pf-clientes small { color: var(--suave); }
+.form-corpo > .pf-rebusca { margin: 14px 18px 0; display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
+.pf-rebusca .campo { flex: 1 1 360px; min-width: 0; }
+.pf-opcao-foto { position: relative; display: block; }
+.pf-opcao-foto .pf-selo.verde { background: var(--verde); }
+.pf-opcao.bate { border-color: var(--verde); }
+.pf-opcao strong { font-size: .85rem; }
+.pf-opcao, .pf-opcao > * { min-width: 0; }
+.pf-opcao .pf-sem { aspect-ratio: auto; min-height: 140px; height: 100%; }
+.pf-opcao-foto .pf-selo { white-space: nowrap; font-size: .68rem; top: 6px; left: 6px; }

@@ -1419,6 +1419,15 @@ https://claude.ai/artifact/AkJoPA2gw7i3Wz99fcDY7p: Produtos, Ficha, Buscar foto,
   fornecedor.** A **ficha** (janela) mostra foto, disponível/reservado/a caminho, descrição, especificações, os PDFs
   (ficha técnica e FISPQ), preço por faixa A–D com a margem (a vendedora vê margem, decisão de 16/10) e a venda de 90 dias;
   "+ Adicionar ao pedido" põe o produto na linha de digitação do pedido aberto (ou de um novo: `CRM.pedidos.incluirItem`).
+- **O que faltava da simulação (19/10, noite, pedido do Anderson):** na ficha, "📲 Mandar foto e preço pelo WhatsApp"
+  (`wa.me/?text=`: a vendedora escolhe o contato; nome, marca, descrição, preço da tabela A e da caixa, links da foto e da
+  ficha técnica — `textoWhats`), o quadro **Venda** (90 dias, média por dia) e **"Na sua carteira, quem compra"**
+  (`crm_produto_clientes`, SECURITY INVOKER: a RLS das notas faz a carteira; gestora/admin/comprador veem "Quem compra";
+  clique abre a empresa). Na conferência da sugestão: linha com código, código de barras e marca, **"A IA procurou por"**
+  editável + "Buscar de novo", selo verde "código de barras bate" na foto, a origem (site do fabricante / fornecedor / loja)
+  e "Subir foto do computador" / "Tirar foto com o celular" ali mesmo (a foto do comprador fica e "nenhuma serve" já vem
+  marcada para aprovar só a ficha). Ficou de fora de propósito: a galeria de várias fotos (guardamos uma por produto) e a
+  ficha em página inteira (é janela, para não perder o pedido aberto).
 - **No pedido:** botão "🔍 Procurar com foto" ao lado de Qtde/Preço/Desc (o mesmo catálogo numa janela, "Incluir"), a
   miniatura do produto escolhido (clique = ficha) e miniaturas na grade dos itens e em "Consultar estoque".
 - **Comprador e administrador:** Compras e estoque → Estoque → quadro **"Fotos e fichas"** (abre mesmo sem o estoque do CRM
