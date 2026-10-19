@@ -284,8 +284,27 @@
 
   // ICMS-ST pela nota de compra mais recente (19/10/2026): grava regra.st_ret[unidade] (origem 'compra', passa por cima do
   // aprendido do FKN) e regra.st_entrada (o que a última compra trouxe), com o alerta de "vendido com ST e comprado sem".
+  // Notas de compra gravadas antes da leitura do ICMS-ST: relê o XML guardado e completa os itens (só o vazio).
+  async function completarStDasCompras(st) {
+    const chaves = (await st.comprasSemSt()).slice(), lista = [];
+    let semXml = 0;
+    await Promise.all(Array.from({ length: 6 }, async () => {
+      for (let c; (c = chaves.shift());) {
+        let xml = null;
+        try { xml = await st.dfeXml(c); } catch (e) { xml = null; }
+        if (!xml) { semXml++; continue; }
+        raiz.CRMEstoque.extrasDoXml(xml).forEach((x, ordem) => {
+          if (x.st_cst) lista.push({ chave: c, ordem, st_cst: x.st_cst, st_base: x.st_base, st_aliq: x.st_aliq, st_proprio: x.st_proprio, st_valor: x.st_valor });
+        });
+      }
+    }));
+    let n = 0;
+    for (let i = 0; i < lista.length; i += 500) n += (await st.compraItensSt(lista.slice(i, i + 500))) || 0;
+    return { completados: n, semXml };
+  }
   async function aprenderDasCompras() {
     const st = CRM.store();
+    const comp = await completarStDasCompras(st);
     const [linhas, vinc, unid, est, prods] = await Promise.all([st.comprasSt(), st.compraVinculos().catch(() => []), st.estoqueUnidades().catch(() => []),
       st.estoque().catch(() => []), st.fiscalProdutos()]);
     const base = c => String(c || '').replace(/\.\d+$/, '');
@@ -308,7 +327,7 @@
     });
     for (let i = 0; i < salvar.length; i += 200) await st.fiscalProdutosSalvar(salvar.slice(i, i + 200));
     produtos = null;
-    return Object.assign(cont, { itens: (linhas || []).length, semLigacao: r.semLigacao.length });
+    return Object.assign(cont, { itens: (linhas || []).length, semLigacao: r.semLigacao.length, completados: comp.completados, semXml: comp.semXml });
   }
   CRM.fiscalSt = { aprenderDasCompras };
 

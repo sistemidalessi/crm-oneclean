@@ -538,6 +538,12 @@
       if (l.length < PAGINA) return out;
     }
   };
+  // Notas de compra com item ainda sem o ICMS-ST (gravadas antes de 19/10/2026) e o preenchimento pelo XML guardado.
+  Supa.prototype.comprasSemSt = async function () {
+    const l = unwrap(await this.sb.from('crm_compra_itens').select('crm_compras(chave)').is('st_cst', null).limit(20000));
+    return [...new Set(l.map(i => (i.crm_compras || {}).chave).filter(Boolean))];
+  };
+  Supa.prototype.compraItensSt = async function (lista) { return unwrap(await this.sb.rpc('crm_compra_itens_st', { p: lista })); };
   Supa.prototype.compraGravar = async function (compra, itens) {
     const r = unwrap(await this.sb.from('crm_compras').upsert(compra, { onConflict: 'chave', ignoreDuplicates: true }).select());
     if (!r || !r.length) return null; // já estava no CRM
@@ -571,6 +577,8 @@
     return (this._compraItens || []).filter(i => i.st_cst).map(i => { const c = cs.get(i.compra_id) || {};
       return Object.assign({}, i, { numero: c.numero, emitida_em: c.emitida_em, fornecedor_doc: c.fornecedor_doc, fornecedor_nome: c.fornecedor_nome }); });
   };
+  Local.prototype.comprasSemSt = async function () { return []; };
+  Local.prototype.compraItensSt = async function () { return 0; };
   Local.prototype.compraGravar = async function (compra, itens) {
     this._compras = this._compras || []; this._compraItens = this._compraItens || [];
     if (this._compras.some(c => c.chave === compra.chave)) return null;

@@ -475,7 +475,8 @@
         const r = await chama({ acao: 'aprender_st' });
         const c = CRM.fiscalSt ? await CRM.fiscalSt.aprenderDasCompras() : null;
         stUltimo = 'Última leitura: ' + r.produtos + ' produto(s) pelas notas do FKN' + (c ? '; pelas notas de compra, ' + c.com_st + ' com ICMS-ST, ' +
-          c.sem_st + ' comprado(s) sem ST, ' + c.sem_valor + ' com ST sem os valores' + (c.semLigacao ? ' e ' + c.semLigacao + ' item(ns) de compra sem ligação a um produto (ligar em Estoque → Notas de compra)' : '') : '') +
+          c.sem_st + ' comprado(s) sem ST, ' + c.sem_valor + ' com ST sem os valores' + (c.semLigacao ? ' e ' + c.semLigacao + ' item(ns) de compra sem ligação a um produto (ligar em Estoque → Notas de compra)' : '') +
+          (c.completados ? ' (' + c.completados + ' item(ns) de compra completados pelo XML guardado)' : '') : '') +
           '. Depois, "Atualizar as propostas" na regra de cada produto.';
         CRM.toast(stUltimo);
       } catch (e) { CRM.falhou(e); }

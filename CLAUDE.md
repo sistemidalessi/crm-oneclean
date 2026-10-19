@@ -1422,6 +1422,8 @@ o serviço na VPS da Agilité (não no servidor do escritório).
   "Aprender o ICMS-ST (notas de compra e do FKN)" roda o do FKN primeiro e o das compras por cima; o do FKN só fica para
   produto sem nota de compra no CRM. `alertaEntrada`: vendido com 5405/CST 60 e a última compra **sem ST** → erro "não há
   ICMS-ST retido para repassar" (aparece também no "Atualizar as propostas", que preserva `st_ret` e `st_entrada`).
+  Itens gravados antes da leitura do ST (as 52 notas trazidas da Sefaz em 19/10, com a versão antiga presa no Pages): o
+  mesmo botão relê o XML guardado (`crm-compras-xml`) e completa só o vazio (`crm_compra_itens_st`, admin/comprador).
   Em 19/10 **não havia nenhuma nota de compra no CRM** (DF-e ainda sem a atualização da VPS; nenhuma subida à mão):
   o valor ainda é o do FKN.
   **Teste 3 autorizado** (NF 2-3, interfolha 290001, 5405/CST 60: vBCSTRet 8.22, pST 18, vICMSSubstituto 0.86, vICMSSTRet 0.61

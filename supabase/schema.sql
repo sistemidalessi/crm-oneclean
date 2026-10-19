@@ -2250,6 +2250,22 @@ create policy grava on public.crm_compra_itens for insert to authenticated with 
 drop policy if exists tudo on public.crm_compra_vinculos;
 create policy tudo on public.crm_compra_vinculos for select to authenticated using ((select public.crm_eh_admin()) or (select public.crm_eh_comprador()));
 
+-- Completa o ICMS-ST dos itens gravados antes da leitura do ST (19/10/2026): o navegador relê o XML guardado
+-- (crm-compras-xml) e manda [{chave, ordem, st_cst, st_base, st_aliq, st_proprio, st_valor}]; só preenche o que está vazio.
+create or replace function public.crm_compra_itens_st(p jsonb) returns integer language plpgsql security definer set search_path = public as $$
+declare n integer;
+begin
+  if not (public.crm_eh_admin() or public.crm_eh_comprador()) then raise exception 'só o administrador ou o comprador'; end if;
+  update public.crm_compra_itens i set st_cst = x.st_cst, st_base = x.st_base, st_aliq = x.st_aliq, st_proprio = x.st_proprio, st_valor = x.st_valor
+    from jsonb_to_recordset(coalesce(p, '[]'::jsonb)) as x(chave text, ordem integer, st_cst text, st_base numeric, st_aliq numeric, st_proprio numeric, st_valor numeric),
+         public.crm_compras c
+   where c.chave = x.chave and i.compra_id = c.id and i.ordem = x.ordem and i.st_cst is null and x.st_cst is not null;
+  get diagnostics n = row_count;
+  return n;
+end $$;
+revoke all on function public.crm_compra_itens_st(jsonb) from public, anon;
+grant execute on function public.crm_compra_itens_st(jsonb) to authenticated;
+
 create or replace function public.crm_compra_lancar(p_compra uuid, p_itens jsonb) returns jsonb language plpgsql security definer set search_path = public as $$
 declare c record; it record; x jsonb; cod text; f numeric; q numeric; custo numeric; n integer := 0; ign integer := 0; agora timestamptz := now();
 begin
