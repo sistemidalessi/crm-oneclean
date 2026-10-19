@@ -101,6 +101,14 @@ test('estoque do FKN: leitura do CSV e sugestão de pedido', () => {
   assert.equal(c2.produtos.find(g => g.codigo === '010002').fornecedor, 'Fornecedor Dois', 'troca de fornecedor feita no CRM');
   assert.deepEqual(c2.custoSubiu.map(x => [x.codigo, Math.round(x.pct)]), [['010001', 10]], 'só a alta de 3% ou mais');
   assert.deepEqual(c2.todosFornecedores.map(x => x.cod).sort(), ['00059', '00077']);
+  // fornecedor marcado "não compramos": os produtos dele ficam sem fornecedor (e lembram de quem eram no FKN)
+  const c3 = G.compras(D, ix, cfg, HOJE, 30, est2, { fornecedores: [{ codigo: '00059', nome: 'Fornecedor Um', prazo_dias: 15, ativo: false }], produtoForn: [{ codigo: '010002', fornecedor: '00059' }] });
+  const d3 = c3.produtos.find(g => g.codigo === '010001');
+  assert.equal(d3.fornecedorCod, null); assert.equal(d3.fornecedorNoFkn, 'FORNECEDOR UM LTDA'); assert.equal(d3.prazo, 7);
+  assert.ok(c3.semFornecedor.some(g => g.codigo === '010001'));
+  assert.ok(!c3.pedidoPorFornecedor.some(f => f.cod === '00059'), 'não vira pedido para quem não compramos');
+  assert.equal(c3.produtos.find(g => g.codigo === '010002').fornecedorCod, '00059', 'trocado à mão no CRM continua valendo');
+  assert.equal(c3.todosFornecedores.find(f => f.cod === '00059').naoCompramos, true);
 });
 
 test('gestão: negócios abertos e conversão só do funil de vendas (pós-venda fora)', () => {

@@ -1322,6 +1322,14 @@ Respostas dele: histórico das notas de compra **buscado na Sefaz**; concorrente
   mínimo, frete CIF/FOB/CIF acima de, dias de pedido seg–sáb com X, pagamento, contato, telefone, e-mail, "Ainda
   compramos?" → `ativo`, observações). O arquivo **não é versionado** (dados da empresa). Quando voltar preenchido: ler
   com openpyxl e gravar por `insert … on conflict (codigo) do update` (sem delete; `dias_pedido` 1=seg…6=sáb).
+  **Parte 1 voltou e foi gravada (19/10):** os 15 principais. 11 com prazo (2 a 30 dias; Embalac 30, Audax 14), mínimo
+  (R$ 350 a 5.000), pagamento e contato; todos sem e-mail de pedido (pedem pelo WhatsApp). O comprador apagou as
+  colunas de dia de pedido e pôs "0" no frete: **gravado como CIF** (anotado em `obs`; confirmar com o Anderson). Quatro
+  "nunca comprei" (00117 Carillo, 00217 TDA, 00017 Coposul, 00125 Euro Paper) → `ativo = false`. **Regra nova
+  (`gestao.js`):** produto cujo fornecedor do FKN está com `ativo = false` fica **sem fornecedor** (vai para "Vende e não
+  tem fornecedor", com "no FKN: X (não compramos)") até o comprador dizer de quem compra (✎/definir); troca feita no CRM
+  continua valendo; quem "não compramos" sai da lista de troca e aparece apagado no cadastro; caixinha "Ainda compramos
+  deste fornecedor" no formulário.
 - **Concorrentes:** levantamento de 20 (pesquisa na web, 18/10) no repositório **privado** `sistemi-dalessi`,
   `docs/oneclean/concorrentes.md` (este repositório é público: estratégia da OneClean não vem para cá). Esperando o
   Anderson escolher quais acompanhar; 8 publicam preço na internet (base para uma cesta de itens comparada por mês).
