@@ -20,7 +20,7 @@ window.CRM_CONFIG = {
     pasta: 'assets/turma/', versao: '8',
     principal: 'clean', anfitriao: 'andi',
     // 20/10/2026: o Andi agora é a foto do Anderson e só apresenta o sistema (quem ajuda no dia a dia é o Clean)
-    boasVindas: 'Seja bem-vindo! Eu sou o Andi, e é um prazer receber você. Entre com o seu e-mail e a sua senha: você está entrando no mundo da OneClean.',
+    boasVindas: 'Olá, seja bem-vindo! É um prazer receber você. Entre com o seu e-mail e a sua senha: você está entrando no mundo da OneClean.',
     mascotes: {
       andi: { nome: 'Andi', papel: 'Boas-vindas' },
       clean: { nome: 'Clean', papel: 'Assistente do sistema' },
