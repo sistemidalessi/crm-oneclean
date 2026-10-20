@@ -1927,14 +1927,13 @@ e WhatsApp. Valor real do parado em 15/10: **R$ 79 mil em 271 produtos** (depois
   → 404). **Reenvio feito pelo Anderson às 09:48:** NF 2428 e NF 2363 (2 parcelas, um PDF) com `wa_status` "enviado com o PDF"
   (subida para a Meta OK, sem cair no link); NF 2430 ficou de fora porque a vendedora já tinha mandado ao cliente às 09:40.
   Confirmado pelo Anderson: o anexo chegou às vendedoras. O webhook de status ficou pronto no item seguinte (`crm-whatsapp-retorno`).
-- **Lote de fotos "Todos sem foto" (20/10, 13:11, 1.703 produtos):** começou sem erro, 10 produtos por minuto, todos com
-  sugestão nos primeiros 48; custo real US$ 0,044 por produto (mediana US$ 0,03), porque 1 em cada 5 passava de 100 mil
-  tokens e caía na tabela cara do Haiku. Limite da chave subido pelo Anderson para US$ 80. **A PUBLICAR DEPOIS DO LOTE** (pedido
-  do Anderson; publicar no meio derruba as buscas em andamento): `crm-produto-buscar` com 2 buscas e 2 páginas de até 4 mil
-  tokens (código já no repositório, ainda não publicado na função). **Também esperando o lote:** a ordem alfabética e a baixa em lote (abaixo) — o
-  push publica o site e o CRM aberto recarrega sozinho, o que interromperia o lote no navegador do Anderson. Depois do
-  lote: push → `node ferramentas/fixa-motor-notas.js` → commit/push → publicar `crm-notas` e `crm-produto-buscar` → rodar
-  de novo os que deram erro.
+- **Lote de fotos "Todos sem foto" (20/10, 13:11–~16:30, 1.703 produtos):** terminou. 1.736 buscas (com as repetidas
+  dos erros), **US$ 69,07** (média US$ 0,040; mediana US$ 0,03 — 1 em cada 5 passava de 100 mil tokens e caía na tabela
+  cara do Haiku). Resultado: **1.631 com sugestão** (1.540 com foto, 475 com ficha técnica, 239 com FISPQ), 76 sem nada,
+  4 com erro. Parou uma vez às 14:39 (aba fechada ou computador dormindo, sem erro) e seguiu dos que faltavam. Limite da
+  chave subido pelo Anderson para US$ 80 (IA do mês: US$ 71,12). Depois do lote, publicados: `crm-produto-buscar` v6 (2
+  buscas e 2 páginas de até 4 mil tokens), a ordem alfabética e a baixa em lote (abaixo) e `crm-notas` v34 (fixada no
+  `be97389`, por causa do `regras.js`). **Falta o Anderson (ou o comprador): aprovar as sugestões** em Estoque → Fotos e fichas.
 - **Baixa em lote no Caixa (20/10, Anderson: "dar a baixa tudo de uma vez… como se fosse eu dando ok que foi pago").**
   Na barra dos marcados (caixinhas das Contas a pagar e Ctrl+clique / 🧮 Somar no fluxo), o botão **"✓ Dar baixa nos N"**
   (só o que está marcado e ainda em aberto; o já pago fica como está) abre a conferência com a lista e o total de
