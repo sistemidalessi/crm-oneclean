@@ -17,11 +17,12 @@ window.CRM_CONFIG = {
   // (topo, de corpo inteiro, guia do dia e conversa); o especialista de cada tela aparece dentro do painel; o Andi
   // recebe no login. turma.js explica. Trocar um desenho: mesmo nome de arquivo e subir a `versao`.
   turma: {
-    pasta: 'assets/turma/', versao: '7',
+    pasta: 'assets/turma/', versao: '8',
     principal: 'clean', anfitriao: 'andi',
-    boasVindas: 'Olá! Eu sou o Andi, assistente virtual da OneClean. Entre com o seu e-mail e a sua senha para começar.',
+    // 20/10/2026: o Andi agora é a foto do Anderson e só apresenta o sistema (quem ajuda no dia a dia é o Clean)
+    boasVindas: 'Seja bem-vindo! Eu sou o Andi, e é um prazer receber você. Entre com o seu e-mail e a sua senha: você está entrando no mundo da OneClean.',
     mascotes: {
-      andi: { nome: 'Andi', papel: 'Assistente virtual' },
+      andi: { nome: 'Andi', papel: 'Boas-vindas' },
       clean: { nome: 'Clean', papel: 'Assistente do sistema' },
       gotti: { nome: 'Gotti', papel: 'Produtos e higiene' },
       capiclean: { nome: 'CapiClean', papel: 'Relacionamento e campanhas' },

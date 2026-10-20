@@ -1517,6 +1517,11 @@ preços de custo as vendedoras não enxergam)".
   margem mínima continua conferida no banco (o bloqueio PREÇO). Tabelas de custo (`crm_estoque`, `crm_estoque_mov`,
   `crm_estoque_saldo`, `crm_custo_historico`, `crm_compra_itens`) já eram só admin/comprador. Conferido como vendedora e como
   gestora com `set local role authenticated` + `request.jwt.claims`.
+- **Andi no login com a foto do Anderson (20/10, noite, pedido dele, como fez na Agilité):** `assets/turma/andi.webp`
+  (corpo inteiro recortado da foto que ele mandou, fundo transparente, 340×900) e `andi-rosto.webp` (o círculo do rosto),
+  `turma.versao` 8. O Andi só apresenta o sistema (papel "Boas-vindas"); quem ajuda no dia a dia continua sendo o Clean.
+  Fala: "Seja bem-vindo! Eu sou o Andi, e é um prazer receber você. Entre com o seu e-mail e a sua senha: você está
+  entrando no mundo da OneClean." No login, foto com 340 px de altura e balão de 230 px.
 - **Compras a caminho / Pedidos ao fornecedor (20/10, noite; simulação https://claude.ai/artifact/UQyuCaNcT19jEN98kmAnyX,
   opção A aprovada):** o comprador registra o pedido em Compras → "Pedido por fornecedor" → **Registrar pedido** (itens da
   sugestão, quantidade editável, previsão = hoje + prazo do fornecedor, editável); "Exportar para o FKN" continua para lançar
