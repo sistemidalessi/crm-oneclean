@@ -232,6 +232,7 @@
       await st.pedidosAtualizar().catch(() => null);
       [peds, disp, faltas, boloes] = await Promise.all([st.pedidos(), st.estoqueDisponivel().catch(() => []), st.pedidosFaltas().catch(() => []), st.boloes().catch(() => [])]);
       porCod = new Map(disp.map(d => [d.codigo, d]));
+      if (CRM.aCaminho) { CRM.aCaminho.limpa(); await CRM.aCaminho.garante(); } // compras a caminho, com a data (compras-pedidos.js)
       listaProdutosHTML = '<datalist id="pdProdutos">' + R.ordemAlfa(disp.filter(d => d.situacao !== 'INATIVO'), d => d.descricao).map(d => '<option value="' + esc(d.codigo + ' — ' + d.descricao) + '">' +
         esc('disp. ' + qtd(d.disponivel) + ' ' + (d.unidade || '') + (d.preco_venda ? ' · R$ ' + preco(d.preco_venda) : '')) + '</option>').join('') + '</datalist>';
     } catch (e) { peds = peds || []; if (!silencio) CRM.falhou(e); }
@@ -575,7 +576,7 @@
         '<label class="campo"><span>Desc %</span><input id="pdDesc" data-seq="' + x.seq + '" type="number" step="any" min="0" max="100" value="' + esc(l.desconto) + '" inputmode="decimal"></label>' +
         (CRM.produtos ? '<button type="button" class="btn sec pd-procurar" data-acao="pd-procurar-foto" title="Procurar no estoque com foto, disponível e preço">🔍 Procurar com foto</button>' : '') +
         '<div class="pd-info" id="pdInfo">' + (dd && CRM.produtos ? '<button type="button" class="pd-info-foto" data-acao="pf-ficha" data-id="' + esc(dd.codigo) + '" title="Ver a ficha do produto">' + CRM.produtos.miniatura(dd.codigo) + '</button>' : '') + (dd ? 'Disponível <strong class="' + (num(dd.disponivel) < num(l.quantidade) ? 'neg' : '') + '">' + qtd(Math.floor(num(dd.disponivel) * 1000) / 1000) + ' ' + esc(dd.unidade || '') + '</strong>' +
-          (dd.a_caminho ? ' · a caminho ' + qtd(dd.a_caminho) : '') + ' · preço tabela R$ ' + preco(dd.preco_venda) + ' · líquido R$ ' + preco(lin.precoLiq) + ' · total R$ ' + preco(lin.total) +
+          (CRM.aCaminho && CRM.aCaminho.texto(dd.codigo, dd.unidade) ? ' · <strong>' + esc(CRM.aCaminho.texto(dd.codigo, dd.unidade)) + '</strong>' : dd.a_caminho ? ' · a caminho ' + qtd(dd.a_caminho) + ' (FKN, sem data)' : '') + ' · preço tabela R$ ' + preco(dd.preco_venda) + ' · líquido R$ ' + preco(lin.precoLiq) + ' · total R$ ' + preco(lin.total) +
           ' · faixa ' + esc(P.rotuloFaixa(lin.faixa)) + (lin.comissao != null ? ' · comissão ' + preco(lin.comissao) + '%' : '') + (veCusto() && dd.custo != null ? ' · custo R$ ' + preco(dd.custo) : '') + (veMargem() && lin.margem != null ? ' · margem <strong class="' + (lin.abaixoMinimo ? 'neg' : '') + '">' + pct(lin.margem) + '</strong>' +
             (lin.abaixoMinimo ? ' <strong class="neg">abaixo da margem mínima de ' + pct(P.margemMinima(E().cfg)) + ': o pedido fica bloqueado até a gestora liberar</strong>' : '') : '') +
           (!veMargem() && P.abaixoDaTabela(lin) ? ' <strong class="neg">abaixo da tabela A: o pedido pode ficar bloqueado até a gestora liberar</strong>' : '') : 'Escolha o produto: o CRM mostra o disponível e o preço da tabela.') + '</div>' +

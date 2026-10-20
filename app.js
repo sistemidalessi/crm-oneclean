@@ -323,7 +323,7 @@
   // ------------------------------------------------------------ render
   const ABAS = [
     ['inicio', 'Início', '⌂'], ['fila', 'Fila do dia', '▶'], ['funil', 'Funil', '▥'], ['empresas', 'Empresas', '▦'], ['pessoas', 'Pessoas', '☺'],
-    ['negocios', 'Negócios', '$'], ['pedidos', 'Pedidos', '☰'], ['agenda', 'Atividades', '▣'], ['relatorios', 'Relatórios', '▲'], ['ajustes', 'Configurações', '⚙'], ['compras', 'Compras', '▤'], ['estoque', 'Estoque', '▦'], ['gestao', 'Gestão', '◆'], ['caixa', 'Caixa', '◈'], ['emails', 'E-mails', '✉'], ['ofertas', 'Ofertas', '✦'], ['fiscal', 'Fiscal', '§'], ['concorrentes', 'Concorrentes', '⚖'], ['produtos', 'Produtos', '▦']
+    ['negocios', 'Negócios', '$'], ['pedidos', 'Pedidos', '☰'], ['agenda', 'Atividades', '▣'], ['relatorios', 'Relatórios', '▲'], ['ajustes', 'Configurações', '⚙'], ['compras', 'Compras', '▤'], ['estoque', 'Estoque', '▦'], ['gestao', 'Gestão', '◆'], ['caixa', 'Caixa', '◈'], ['emails', 'E-mails', '✉'], ['ofertas', 'Ofertas', '✦'], ['fiscal', 'Fiscal', '§'], ['concorrentes', 'Concorrentes', '⚖'], ['produtos', 'Produtos', '▦'], ['pedcompra', 'Pedidos ao fornecedor', '⇢']
   ];
   CRM.ABAS = ABAS;
   // Os grupos do menu de cima (cada tela num grupo só; a ordem é a do menu). Produtos (20/10/2026) fica em Vendas para
@@ -332,7 +332,7 @@
     { id: 'inicio', nome: 'Início', telas: ['inicio'] },
     { id: 'vendas', nome: 'Vendas', telas: ['fila', 'funil', 'negocios', 'empresas', 'pessoas', 'produtos', 'agenda'] },
     { id: 'pedidos', nome: 'Pedidos', telas: ['pedidos'] },
-    { id: 'compras', nome: 'Compras e estoque', telas: ['compras', 'estoque', 'produtos', 'concorrentes'] },
+    { id: 'compras', nome: 'Compras e estoque', telas: ['compras', 'pedcompra', 'estoque', 'produtos', 'concorrentes'] },
     { id: 'financeiro', nome: 'Financeiro', telas: ['caixa', 'gestao', 'fiscal'] },
     { id: 'marketing', nome: 'Marketing', telas: ['emails', 'ofertas'] },
     { id: 'relatorios', nome: 'Relatórios', telas: ['relatorios'] },
@@ -403,8 +403,8 @@
     if (!E.eu) return;
     // Comprador: só Compras e Estoque. Compras, Estoque e Gestão: administrador. Configurações: gestor.
     // Logística (Fase 3): só Pedidos (a separação). O comprador vê também as faltas e a consulta de estoque em Pedidos.
-    const abas = CRM.ehLogistica() ? ABAS.filter(a => a[0] === 'pedidos') : CRM.ehComprador() ? ABAS.filter(a => a[0] === 'compras' || a[0] === 'estoque' || a[0] === 'produtos' || a[0] === 'pedidos' || a[0] === 'concorrentes')
-      : ABAS.filter(a => (a[0] !== 'ajustes' || CRM.ehGestor()) && ((a[0] !== 'gestao' && a[0] !== 'compras' && a[0] !== 'estoque' && a[0] !== 'caixa' && a[0] !== 'fiscal' && a[0] !== 'concorrentes') || CRM.ehAdmin()));
+    const abas = CRM.ehLogistica() ? ABAS.filter(a => a[0] === 'pedidos') : CRM.ehComprador() ? ABAS.filter(a => a[0] === 'compras' || a[0] === 'pedcompra' || a[0] === 'estoque' || a[0] === 'produtos' || a[0] === 'pedidos' || a[0] === 'concorrentes')
+      : ABAS.filter(a => (a[0] !== 'ajustes' || CRM.ehGestor()) && ((a[0] !== 'gestao' && a[0] !== 'compras' && a[0] !== 'pedcompra' && a[0] !== 'estoque' && a[0] !== 'caixa' && a[0] !== 'fiscal' && a[0] !== 'concorrentes') || CRM.ehAdmin()));
     if (!abas.some(a => a[0] === E.aba)) E.aba = abas[0][0];
     ['#buscaGlobal', '[data-acao="novo-menu"]', '#sino'].forEach(s => { const el = $(s); if (el) el.hidden = CRM.foraDeVendas(); });
     // 20/10/2026 (Anderson: "pode juntar o sino com o Clean"): com a turma ligada, os avisos do sino (boletos, tarefas,

@@ -94,9 +94,10 @@ test('catalogo: uma linha por produto, caixa junto, foto, ficha e o mais vendido
   assert.equal(l[1].foto.caminho, 'fotos/010078-a.jpg');
 });
 
-test('estado: falta (com o que está a caminho), pouco pela venda de 90 dias, ok', () => {
+test('estado: falta, pouco pela venda de 90 dias, ok', () => {
   const l = X.catalogo({ disp: DISP, vendidos: VEND });
-  assert.deepEqual(X.estado(l[2]), { cls: 'falta', texto: 'Em falta · a caminho 50' });
+  // o que está a caminho a tela mostra à parte, com a data (20/10/2026)
+  assert.deepEqual(X.estado(l[2]), { cls: 'falta', texto: 'Em falta' });
   const p = X.estado(l[0]);                // 3 disponíveis, 120 em 90 dias = 1,33 por dia → dura ~2 dias
   assert.equal(p.cls, 'pouco');
   assert.equal(p.dias, 2);

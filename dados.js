@@ -1347,6 +1347,24 @@
   // Tela Produtos (20/10/2026): os códigos de barras para a pesquisa (todos) e o que só o administrador e o comprador veem
   // de um produto (saldo e custo médio do livro, histórico do custo, últimas notas de compra, embalagens). Cada parte
   // que a RLS não deixar ver volta vazia.
+  // Pedidos ao fornecedor (20/10/2026, compras a caminho): o comprador e o administrador leem os pedidos (os em aberto e os
+  // dos últimos 90 dias), os itens e o andamento calculado no banco; toda a equipe lê o que está a caminho (sem custo).
+  Supa.prototype.compraPedidos = async function () {
+    const desde = new Date(Date.now() - 90 * 864e5).toISOString();
+    const pedidos = await paginado((de, ate) => this.sb.from('crm_compra_pedidos').select('*').or('situacao.eq.aberto,criado_em.gte.' + desde).order('criado_em', { ascending: false }).order('id').range(de, ate));
+    const ids = pedidos.map(x => x.id), itens = [];
+    for (let i = 0; i < ids.length; i += 200) itens.push(...(unwrap(await this.sb.from('crm_compra_pedido_itens').select('*').in('pedido_id', ids.slice(i, i + 200))) || []));
+    const [andamento, fornecedores, pend, caminho] = await Promise.all([
+      paginado((de, ate) => this.sb.rpc('crm_compra_pedidos_andamento').range(de, ate)), this.fornecedores().catch(() => []),
+      paginado((de, ate) => this.sb.from('crm_estoque').select('codigo').gt('pend_fornecedor', 0).order('codigo').range(de, ate)).catch(() => []),
+      this.aCaminho().catch(() => [])]);
+    const comPedido = new Set(caminho.map(x => String(x.codigo)));
+    const fknSemPedido = new Set(pend.map(x => String(x.codigo).replace(/\.\d+$/, '')).filter(c => !comPedido.has(c))).size;
+    return { pedidos, itens, andamento, fornecedores, fknSemPedido };
+  };
+  Supa.prototype.compraPedidoGravar = async function (p) { return unwrap(await this.sb.rpc('crm_compra_pedido_gravar', { p })); };
+  Supa.prototype.compraPedidoAcao = async function (id, acao, previsao) { return unwrap(await this.sb.rpc('crm_compra_pedido_acao', { p_id: id, p_acao: acao, p_previsao: previsao || null })); };
+  Supa.prototype.aCaminho = async function () { return paginado((de, ate) => this.sb.rpc('crm_a_caminho').range(de, ate)); };
   // NCM de cada produto para o orçamento do cliente (20/10/2026): só o NCM, para qualquer pessoa ativa.
   Supa.prototype.produtosNcm = async function () { return paginado((de, ate) => this.sb.rpc('crm_produtos_ncm').range(de, ate)); };
   Supa.prototype.produtosEans = async function () { return paginado((de, ate) => this.sb.rpc('crm_produtos_eans').range(de, ate)); };
@@ -1400,6 +1418,33 @@
   Local.prototype.produtoInfoGravar = async function (linha) { const s = lsObj('crm_produto_info'); s[linha.codigo] = Object.assign({}, s[linha.codigo], linha, { atualizado_em: new Date().toISOString() }); lsGrava('crm_produto_info', s); return s[linha.codigo]; };
   Local.prototype.produtosEans = async function () { return []; };
   Local.prototype.produtosNcm = async function () { return lsLe('crm_produtos_ncm', []); };
+  // Pedidos ao fornecedor no modo local: guardados no navegador; o andamento fica zerado (sem notas de compra).
+  Local.prototype.compraPedidos = async function () {
+    const l = lsLe('crm_compra_pedidos', []);
+    return { pedidos: l.map(p => Object.assign({}, p, { itens: undefined })), itens: [].concat(...l.map(p => (p.itens || []).map(i => Object.assign({ pedido_id: p.id }, i)))),
+      andamento: [], fornecedores: lsLe('crm_fornecedores', []), fknSemPedido: 0 };
+  };
+  Local.prototype.compraPedidoGravar = async function (p) {
+    const l = lsLe('crm_compra_pedidos', []), id = l.reduce((m, x) => Math.max(m, x.id), 0) + 1;
+    const its = (p.itens || []).filter(i => Number(i.quantidade) > 0).map((i, k) => Object.assign({ ordem: k + 1, cancelado: 0 }, i, { codigo: String(i.codigo).replace(/\.\d+$/, '') }));
+    if (!its.length) throw new Error('o pedido precisa de pelo menos um item com quantidade');
+    const r = { id, fornecedor_cod: p.fornecedor_cod || null, fornecedor_nome: p.fornecedor_nome, previsao: p.previsao, obs: p.obs || null, situacao: 'aberto', criado_em: new Date().toISOString(), criado_por: LOCAL_ADMIN };
+    lsGrava('crm_compra_pedidos', l.concat(Object.assign({}, r, { itens: its })));
+    return Object.assign({}, r, { itens: its.length });
+  };
+  Local.prototype.compraPedidoAcao = async function (id, acao, previsao) {
+    const l = lsLe('crm_compra_pedidos', []), p = l.find(x => x.id === id);
+    if (!p) throw new Error('pedido não encontrado');
+    if (acao === 'previsao') p.previsao = previsao;
+    else if (acao === 'chegou' || acao === 'cancelar_resto') { p.situacao = 'recebido'; if (acao === 'cancelar_resto') (p.itens || []).forEach(i => { i.cancelado = i.quantidade; }); }
+    else if (acao === 'cancelar') p.situacao = 'cancelado';
+    lsGrava('crm_compra_pedidos', l);
+    return p;
+  };
+  Local.prototype.aCaminho = async function () {
+    return [].concat(...lsLe('crm_compra_pedidos', []).filter(p => p.situacao === 'aberto').map(p => (p.itens || []).map(i => ({
+      codigo: i.codigo, pedido_id: p.id, pedido_em: p.criado_em, previsao: p.previsao, falta: Number(i.quantidade) - Number(i.cancelado || 0), faturado: 0, faturado_em: null }))));
+  };
   Local.prototype.produtoDetalhe = async function () { return { saldo: null, hist: [], compras: [], unidades: [] }; };
   Local.prototype.produtoClientes = async function (codigo, limite) {
     const base = c => String(c || '').replace(/\.\d+$/, ''), m = new Map();

@@ -1517,6 +1517,28 @@ preços de custo as vendedoras não enxergam)".
   margem mínima continua conferida no banco (o bloqueio PREÇO). Tabelas de custo (`crm_estoque`, `crm_estoque_mov`,
   `crm_estoque_saldo`, `crm_custo_historico`, `crm_compra_itens`) já eram só admin/comprador. Conferido como vendedora e como
   gestora com `set local role authenticated` + `request.jwt.claims`.
+- **Compras a caminho / Pedidos ao fornecedor (20/10, noite; simulação https://claude.ai/artifact/UQyuCaNcT19jEN98kmAnyX,
+  opção A aprovada):** o comprador registra o pedido em Compras → "Pedido por fornecedor" → **Registrar pedido** (itens da
+  sugestão, quantidade editável, previsão = hoje + prazo do fornecedor, editável); "Exportar para o FKN" continua para lançar
+  lá no paralelo. Tela nova **Compras e estoque → Pedidos ao fornecedor** (`compras-pedidos.js`, aba `pedcompra`, admin e
+  comprador): em aberto / atrasados / recebidos, item a item (pedido, faturado, entrou, falta), mudar previsão, cobrar o
+  fornecedor pelo WhatsApp (telefone do cadastro), chegou tudo, cancelar o que falta, cancelar.
+  - **Banco:** `crm_compra_pedidos` + `crm_compra_pedido_itens` (RLS só admin/comprador; grava por `crm_compra_pedido_gravar`
+    e `crm_compra_pedido_acao`). Andamento **calculado** em `crm_compra_andamento_int()` (interna): por produto, as notas de
+    compra (`crm_compras` não ignoradas, desde 1 dia antes do 1º pedido em aberto; produto pelo item, pela ligação lembrada
+    do fornecedor ou pelo código de barras; unidade pelo fator do item/ligação/embalagem) atendem os pedidos em aberto na
+    ordem; **faturado** = veio na nota, **entrou** = nota lançada no CRM ou última entrada do FKN ≥ dia da nota. Pedido
+    fechado à mão sai da conta. Previsão com nota: dia da nota + 2. Conferido com uma nota real de 16/10 (dois pedidos de
+    teste atendidos na ordem, desfeito). A sequência do id foi reiniciada depois dos testes.
+  - **Vendedora:** `crm_a_caminho()` (toda a equipe; quantidade e datas, sem custo nem fornecedor): cartão da grade, ficha,
+    página do produto (KPI "A caminho" e "depois que chegar: N livres para vender") e o pedido de venda mostram "12 GL
+    comprados em 20/10 · chegam ~27/10", "faturados pelo fornecedor em 19/10 · chegam ~21/10" ou "previsão era 15/10
+    (atrasado)"; sem pedido no CRM, "N pedidos no FKN (sem data)". `CRM.aCaminho` (garante/de/texto/limpa).
+  - **Sugestão de compra:** "já pedido" = o maior entre a pendência do FKN e o que falta chegar dos pedidos do CRM (no
+    paralelo o mesmo pedido costuma estar nos dois). Testes: `testes/compras-pedidos.test.js` e `gestao.test.js`.
+  - **Falta o Anderson (SQL Editor; pelo conector cai):** `revoke all on function public.crm_compra_andamento_int() from
+    public, anon, authenticated;` e `revoke ... from public, anon` em `crm_compra_pedido_gravar(jsonb)`,
+    `crm_compra_pedidos_andamento()`, `crm_a_caminho()`, `crm_compra_pedido_acao(bigint, text, date)`.
 - **NCM no orçamento do cliente (20/10, noite, Anderson: "sempre nos orçamentos para enviar aos clientes, deve sair o NCM
   também"):** cada item sai com "Cód. 010049 · NCM 3402.20.00" (`fichas.js`, `garanteNcm`/`ncmDe`; a caixa ".1" usa o da
   unidade). O NCM vem de `crm_produtos_ncm()` (só o NCM, para qualquer pessoa ativa: da regra fiscal e, na falta, da nota de

@@ -153,11 +153,15 @@
   // já passaram da data, mas ainda não sumiram) soma a quantidade habitual de cada item.
   // Tendência: quantidade vendida nos últimos 90 dias × os 90 anteriores.
   // extra (comprador sênior, 18/10/2026): { fornecedores: crm_fornecedores, produtoForn: crm_produto_fornecedor,
-  // custoHist: crm_custo_historico }. Sem cadastro, o prazo do fornecedor é PRAZO_PADRAO (estimado).
+  // custoHist: crm_custo_historico, aCaminho: crm_a_caminho (pedidos ao fornecedor registrados no CRM, 20/10/2026) }.
+  // Sem cadastro, o prazo do fornecedor é PRAZO_PADRAO (estimado).
   function compras(D, ix, cfg, hoje, dias, estoque, extra) {
     dias = dias || 30;
     extra = extra || {};
     const fMap = new Map((extra.fornecedores || []).map(f => [String(f.codigo), f]));
+    // o que falta chegar dos pedidos registrados no CRM, por produto
+    const pedidoCrm = new Map();
+    (extra.aCaminho || []).forEach(x => { const k = codigoFKN(x.codigo); pedidoCrm.set(k, (pedidoCrm.get(k) || 0) + num(x.falta)); });
     const trocas = new Map((extra.produtoForn || []).filter(x => x.fornecedor).map(x => [codigoFKN(x.codigo), String(x.fornecedor)]));
     const nomeForn = new Map();
     (estoque || []).forEach(x => { if (x.fornecedor_cod && x.fornecedor && !nomeForn.has(x.fornecedor_cod)) nomeForn.set(x.fornecedor_cod, x.fornecedor); });
@@ -227,7 +231,10 @@
     const aplica = (g, e) => {
       g.saldo = e.quantidade;
       g.custoUnit = custoDe(e);
-      g.pedido = e.pend_fornecedor || 0;
+      // já pedido: a pendência do FKN ou o pedido registrado no CRM, o maior (no paralelo o mesmo pedido costuma estar nos
+      // dois: o comprador exporta para o FKN o que registrou aqui)
+      g.pedidoCrm = pedidoCrm.get(codigoFKN(e.codigo)) || 0;
+      g.pedido = Math.max(e.pend_fornecedor || 0, g.pedidoCrm);
       g.minimo = e.estoque_min || 0;
       g.maximo = e.estoque_max || 0;
       g.fornecedor = e.fornecedor || null; g.fornecedorCod = e.fornecedor_cod || null;
@@ -363,9 +370,9 @@
     const st = CRM.store();
     try { estoque = st.estoque ? await st.estoque() : []; } catch (e) { estoque = []; CRM.falhou(e); }
     // comprador sênior: cadastro dos fornecedores, trocas de fornecedor e o histórico do custo (sem as tabelas, segue sem)
-    const [fornecedores, produtoForn, custoHist] = await Promise.all([st.fornecedores ? st.fornecedores().catch(() => []) : [],
-      st.produtoForn ? st.produtoForn().catch(() => []) : [], st.custoHist ? st.custoHist(90).catch(() => []) : []]);
-    extra = { fornecedores, produtoForn, custoHist };
+    const [fornecedores, produtoForn, custoHist, aCaminho] = await Promise.all([st.fornecedores ? st.fornecedores().catch(() => []) : [],
+      st.produtoForn ? st.produtoForn().catch(() => []) : [], st.custoHist ? st.custoHist(90).catch(() => []) : [], st.aCaminho ? st.aCaminho().catch(() => []) : []]);
+    extra = { fornecedores, produtoForn, custoHist, aCaminho };
     // pendências do comprador (notas de compra para dar entrada, Sefaz sem ciência): sem as tabelas, o painel segue sem
     try {
       const compras = st.comprasPendentes ? await st.comprasPendentes() : [];
@@ -544,6 +551,7 @@
       const l = filtraProdutos(c);
       ultimo = Object.assign({}, ultimo || {}, { c, filtrados: l });
       CRM.comprasAtual = () => (estoque ? c : null); // a oferta de queima de estoque (ofertas.js) monta a partir daqui
+      CRM.comprasRecarregar = () => { estoque = null; }; // pedido ao fornecedor registrado (compras-pedidos.js): refaz a sugestão
       const botao = '<label class="btn sec arquivo" title="No FKN: Listagem cadastral de produtos (SIFN108), salvar em CSV. O CSV simples de estoque também serve.">Atualizar estoque (listagem do FKN)<input type="file" id="gEstoque" accept=".csv,.txt,text/csv"></label>';
       const velho = e && e.em && R.diasEntre(R.diaLocal(e.em), hoje) > 3;
       const curva = g => (g.classe === '—' ? '<small>—</small>' : CRM.selo(g.classe, g.classe === 'A' ? 'verde' : g.classe === 'B' ? 'azul' : 'etiqueta'));
@@ -693,7 +701,8 @@
         '<td class="num">' + (f.cod ? f.prazo + ' dias' + (f.prazoEstimado ? '<br><small>estimado</small>' : '') : '—') + '</td>' +
         '<td><small>' + esc(fretePor(f.cadastro)) + (f.freteCif === true ? ' ✓' : '') + '</small></td>' +
         '<td class="num">' + (f.cod ? '<button type="button" class="mini" data-acao="compras-forn-editar" data-id="' + esc(f.cod) + '" title="Prazo, pedido mínimo, frete, dias de pedido e contato">✎ Cadastro</button> ' : '') +
-          '<button type="button" class="mini" data-acao="compras-pedido-fornecedor" data-id="' + i + '">Exportar pedido</button></td></tr>').join('') +
+          (CRM.comprasPedidos ? '<button type="button" class="mini" data-acao="compras-registrar" data-id="' + i + '" title="Registra o pedido no CRM: as vendedoras veem o que está a caminho e quando chega">Registrar pedido</button> ' : '') +
+          '<button type="button" class="mini" data-acao="compras-pedido-fornecedor" data-id="' + i + '" title="Planilha para lançar no FKN">Exportar para o FKN</button></td></tr>').join('') +
       '</tbody></table></div>' : '<p class="vazio">Nada para pedir no prazo escolhido.</p>') +
       '<details data-chave="compras-fornecedores"><summary>Cadastro dos fornecedores <small>' + cad + ' de ' + todos.length + ' preenchidos</small></summary>' +
         '<p class="dica">Prazo de entrega (sem cadastro o CRM usa 7 dias), pedido mínimo, frete, dias em que se faz o pedido e o contato. Com isso a sugestão já conta o que sai até a mercadoria chegar e avisa quando faltar para o mínimo.</p>' +
@@ -858,6 +867,10 @@
     'compras-analise-gerar': () => { const an = CRM.turma.analise(); CRM.turma.gerarAnalise(!!(an && an.texto)); },
     'compras-analise': () => CRM.turma && CRM.turma.perguntar && CRM.turma.perguntar('Faça a análise de compras de hoje como comprador sênior: o que pedir e de qual fornecedor (com quantidades e o porquê), ' +
       'o que acaba antes da entrega, fornecedores perto do pedido mínimo, preço de compra que subiu e o estoque parado que vale uma oferta.'),
+    'compras-registrar': i => {
+      const f = ultimo && ultimo.c && ultimo.c.pedidoPorFornecedor[+i];
+      if (f && CRM.comprasPedidos) CRM.comprasPedidos.registrar(f);
+    },
     'compras-pedido-fornecedor': i => {
       const f = ultimo && ultimo.c && ultimo.c.pedidoPorFornecedor[+i];
       if (!f) return;

@@ -43,8 +43,9 @@
   function estado(x) {
     const d = Math.floor(num(x.disponivel) * 1000) / 1000, porDia = num(x.vendido) / 90;
     const n = d.toLocaleString('pt-BR', { maximumFractionDigits: 3 });
-    // negativo = vendido sem estoque, esperando a compra chegar (20/10/2026: o número aparece, não só "em falta")
-    if (d <= 0) return { cls: 'falta', texto: (d < 0 ? 'Em falta: ' + n + ' (vendido sem estoque)' : 'Em falta') + (num(x.a_caminho) > 0 ? ' · a caminho ' + num(x.a_caminho).toLocaleString('pt-BR') : '') };
+    // negativo = vendido sem estoque, esperando a compra chegar (20/10/2026: o número aparece, não só "em falta"). O que
+    // está a caminho (com a data) a tela mostra à parte (compras-pedidos.js).
+    if (d <= 0) return { cls: 'falta', texto: d < 0 ? 'Em falta: ' + n + ' (vendido sem estoque)' : 'Em falta' };
     if (porDia > 0 && d < porDia * 15) return { cls: 'pouco', texto: 'Pouco: ' + n + ' disponíve' + (d === 1 ? 'l' : 'is'), dias: Math.max(1, Math.round(d / porDia)) };
     return { cls: 'ok', texto: n + ' disponíve' + (d === 1 ? 'l' : 'is') };
   }
@@ -253,9 +254,11 @@
         s.produtosVendidos(90).catch(vazio), s.produtosEans ? s.produtosEans().catch(vazio) : [],
         cuidaJa ? s.estoque().catch(vazio) : [], cuidaJa ? s.produtoForn().catch(vazio) : [], cuidaJa ? s.fornecedores().catch(vazio) : [],
         CRM.ehAdmin() ? s.fiscalProdutos().catch(() => null) : null]);
+      const cm = CRM.aCaminho ? await CRM.aCaminho.garante() : null;
       fotos = new Map(fs.map(x => [x.codigo, x]));
       fornLista = fornecedores;
       lista = X.cadastro(X.catalogo({ disp, fotos: fs, infos, vendidos }), { eans, estoque, forn, fornecedores, fiscal });
+      lista.forEach(x => { x.caminho = (cm && cm.get(x.codigo)) || null; });
       if (podeFotos()) {
         [sugs, ia] = await Promise.all([s.produtoSugestoes().catch(() => []), s.produtoBuscar({ acao: 'situacao' }).catch(() => null)]);
         sugs.filter(x => x.situacao === 'sugerida' && !fl.marcados.has(x.codigo) && X.confiavel((x.candidatos || [])[0], (x.info || {}).eans) && !(lista.find(p => p.codigo === x.codigo) || {}).foto).forEach(x => fl.marcados.add(x.codigo));
@@ -280,6 +283,11 @@
   }
   const prod = cod => (lista || []).find(x => x.codigo === base(cod));
 
+  // O que está a caminho, em texto: o pedido do CRM (quantidade e data) ou, sem ele, a pendência do FKN (sem data).
+  const CP = raiz.CRMComprasPedidos;
+  const caminhoTexto = x => (x.caminho && CP ? CP.textoCaminho(x.caminho, x.unidade) : num(x.a_caminho) > 0 ? qtd(x.a_caminho) + ' pedidos no FKN (sem data)' : '');
+  const caminhoQtd = x => (x.caminho ? x.caminho.falta : num(x.a_caminho));
+
   // ----------------------------------------------------------------- cartão e catálogo
   function cartao(x, modo) {
     const e = X.estado(x), u = x.foto ? st().fotoUrl(x.foto.caminho) : '';
@@ -290,6 +298,7 @@
       '<div class="pf-corpo"><strong class="pf-nome">' + esc(nome(x)) + '</strong>' +
         '<small>' + esc(x.codigo) + (x.unidade ? ' · ' + esc(x.unidade) : '') + (x.caixa && x.caixa.fator ? ' · caixa com ' + qtd(x.caixa.fator) : '') + (x.info && x.info.marca ? ' · ' + esc(x.info.marca) : '') + '</small>' +
         '<span class="pf-disp ' + e.cls + '">' + esc(e.texto) + '</span>' +
+        (caminhoTexto(x) ? '<small class="pf-caminho' + (x.caminho && x.caminho.atrasado ? ' atrasado' : '') + '">' + esc(caminhoTexto(x)) + '</small>' : '') +
         (x.preco ? '<span class="pf-preco"><small>Tabela A</small> <strong>R$ ' + preco(x.preco) + '</strong>' + (x.caixa && x.caixa.preco ? ' <small>· caixa R$ ' + preco(x.caixa.preco) + '</small>' : '') + '</span>' : '<span class="pf-preco"><small>sem preço de tabela</small></span>') +
         (modo === 'tela' && podeFotos() ? '<span class="chips">' + X.selosDe(x, quem()).map(z => CRM.selo(z[0], z[1])).join('') + '</span>' : '') +
         '<div class="pf-botoes"><button type="button" class="btn sec" data-acao="' + (modo === 'tela' ? 'pf-abrir' : 'pf-ficha') + '" data-id="' + esc(x.codigo) + '">' + (modo === 'tela' ? 'Abrir' : 'Ver ficha') + '</button>' +
@@ -350,7 +359,7 @@
           (inf.marca ? ' · marca ' + esc(inf.marca) : '') + (inf.fabricante && inf.fabricante !== inf.marca ? ' · ' + esc(inf.fabricante) : '') + '</p>' +
         '<div class="pf-numeros"><div class="' + e.cls + '"><span>Disponível</span><strong>' + qtd(Math.floor(x.disponivel * 1000) / 1000) + '</strong><small>' + (e.dias ? 'pouco: dura ~' + e.dias + ' dia(s)' : e.cls === 'falta' ? 'em falta' : 'para vender agora') + '</small></div>' +
           '<div><span>Reservado</span><strong>' + qtd(x.reservado) + '</strong><small>em pedidos abertos</small></div>' +
-          '<div class="caminho"><span>A caminho</span><strong>' + qtd(x.a_caminho) + '</strong><small>já pedido ao fornecedor</small></div></div>' +
+          '<div class="caminho"><span>A caminho</span><strong>' + qtd(caminhoQtd(x)) + '</strong><small>' + esc(caminhoTexto(x) || 'nada pedido ao fornecedor') + '</small></div></div>' +
         (CRM.foraDeVendas() ? '' : '<p class="acoes"><a class="btn sec" href="' + esc('https://wa.me/?text=' + encodeURIComponent(X.textoWhats(Object.assign({ nome: nome(x) }, x), u,
           inf.ficha_caminho ? st().fotoUrl(inf.ficha_caminho) : inf.ficha_url || ''))) + '" target="_blank" rel="noopener noreferrer">📲 Mandar foto e preço pelo WhatsApp</a></p>') +
         (inf.descricao ? '<p class="pf-descricao">' + esc(inf.descricao) + '</p>' : '') +
@@ -636,7 +645,7 @@
   }
 
   Object.assign(CRM.acoes, {
-    'pf-recarregar': () => { lista = null; det.clear(); carrega(); },
+    'pf-recarregar': () => { lista = null; det.clear(); if (CRM.aCaminho) CRM.aCaminho.limpa(); carrega(); },
     'pf-mais': () => { f.limite += 60; const c = document.querySelector('#dlgForm[open] [data-pf-lista]'); if (c) c.innerHTML = grade('escolher'); else CRM.render(); },
     'pf-linha': id => { f.linha = f.linha === id ? '' : id; f.limite = 60; const c = document.querySelector('#dlgForm[open] [data-pf-lista]'); if (c) { c.innerHTML = grade('escolher'); c.parentNode.querySelectorAll('[data-acao="pf-linha"]').forEach(b => b.classList.toggle('ativo', b.dataset.id === f.linha)); } else CRM.render(); },
     'pf-ficha': id => abrirFicha(id),
@@ -777,6 +786,7 @@
             (!CRM.foraDeVendas() ? '<a class="btn sec" href="' + esc('https://wa.me/?text=' + encodeURIComponent(X.textoWhats(Object.assign({ nome: nome(x) }, x), u, inf.ficha_caminho ? st().fotoUrl(inf.ficha_caminho) : inf.ficha_url || ''))) + '" target="_blank" rel="noopener noreferrer">📲 Mandar foto e preço pelo WhatsApp</a> ' : '') +
             (podeFotos() ? '<button type="button" class="btn sec" data-acao="pf-info-editar" data-id="' + esc(x.codigo) + '">Editar a ficha</button>' : '') + '</p></div>' +
         '<div class="kpis pc-kpis"><div class="kpi' + (x.disponivel > 0 ? '' : ' alerta') + '"><span>Disponível</span><strong>' + qtd(Math.floor(x.disponivel * 1000) / 1000) + '</strong><small>' + esc(x.unidade || '') + '</small></div>' +
+          (caminhoQtd(x) > 0 ? '<div class="kpi' + (x.caminho && x.caminho.atrasado ? ' alerta' : '') + '"><span>A caminho</span><strong>' + qtd(caminhoQtd(x)) + '</strong><small>' + esc(caminhoTexto(x)) + '</small></div>' : '') +
           '<div class="kpi verde"><span>Preço A</span><strong>' + (x.preco ? 'R$ ' + preco(x.preco) : '—') + '</strong><small>tabela Padrão</small></div>' +
           (vc ? '<div class="kpi"><span>Custo</span><strong>R$ ' + preco(x.custo) + '</strong><small>do cadastro</small></div><div class="kpi"><span>Margem na A</span><strong>' + pct(mg) + '</strong><small>mínima ' + pct(P ? P.margemMinima(CRM.estado.cfg) : 23) + '</small></div>' : '') +
         '</div></section>' +
@@ -820,8 +830,10 @@
     const e = X.estado(x), c = x.cad, cuida = podeFotos(), porDia = num(x.vendido) / 90;
     const k = (t, v, sub, cls) => '<div class="kpi ' + (cls || '') + '"><span>' + esc(t) + '</span><strong>' + v + '</strong>' + (sub ? '<small>' + esc(sub) + '</small>' : '') + '</div>';
     return '<div class="kpis">' + k('Físico', qtd(x.fisico), x.unidade || '') + k('Reservado', qtd(x.reservado), 'em pedidos abertos') + k('Disponível', qtd(Math.floor(x.disponivel * 1000) / 1000), e.cls === 'falta' ? 'em falta' : e.dias ? 'pouco: dura ~' + e.dias + ' dia(s)' : 'para vender agora', e.cls === 'falta' ? 'alerta' : 'verde') +
-        k('A caminho', qtd(x.a_caminho), 'já pedido ao fornecedor') + (cuida && c ? k('Mínimo / máximo', qtd(c.min) + ' / ' + (c.max ? qtd(c.max) : '—'), 'do FKN', X.noMinimo(x) ? 'alerta' : '') : '') +
+        k('A caminho', qtd(caminhoQtd(x)), caminhoTexto(x) || 'nada pedido ao fornecedor', x.caminho && x.caminho.atrasado ? 'alerta' : '') + (cuida && c ? k('Mínimo / máximo', qtd(c.min) + ' / ' + (c.max ? qtd(c.max) : '—'), 'do FKN', X.noMinimo(x) ? 'alerta' : '') : '') +
         k('Venda por dia', porDia ? qtd(Math.round(porDia * 10) / 10) : '0', 'média dos últimos 90 dias') + '</div>' +
+      (x.caminho && x.disponivel < 0 ? '<p class="dica">Depois que chegar: <strong>' + qtd(Math.max(x.disponivel + x.caminho.falta, 0)) + ' ' + esc(x.unidade || '') + ' livres para vender</strong> (' +
+        qtd(x.caminho.falta) + ' a caminho − ' + qtd(-x.disponivel) + ' já vendidos).</p>' : '') +
       (x.caixa ? '<p class="dica">Caixa fechada (' + esc(x.caixa.codigo) + (x.caixa.fator ? ', ' + qtd(x.caixa.fator) + ' ' + esc(x.unidade || '') : '') + '): ' + qtd(Math.floor(num(x.caixa.disponivel) * 1000) / 1000) + ' disponível(is).</p>' : '') +
       (cuida ? (c ? dl([['Última entrada', dataBR(c.ult_entrada)], ['Última saída', dataBR(c.ult_saida)]]) : '') +
         '<h3>Últimos movimentos <small>do livro do estoque</small></h3>' + (d.carregando ? '<p class="dica">Carregando…</p>' : (d.movs || []).length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Quando</th><th>Tipo</th><th class="num">Qtd.</th><th>Detalhe</th></tr></thead><tbody>' +
