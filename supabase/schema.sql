@@ -3544,3 +3544,18 @@ language sql stable security definer set search_path = public as $$
 $$;
 revoke all on function public.crm_pedidos_situacoes() from public, anon;
 grant execute on function public.crm_pedidos_situacoes() to authenticated;
+
+-- NCM de cada produto para o orçamento enviado ao cliente (20/10/2026, Anderson: "sempre nos orçamentos para enviar aos
+-- clientes, deve sair o NCM também"). Só o NCM sai daqui: o cadastro fiscal continua só do administrador. O da regra
+-- fiscal (lida das notas) vale; na falta, o da nota de compra mais recente.
+create or replace function public.crm_produtos_ncm() returns table (codigo text, ncm text)
+language sql stable security definer set search_path = public as $$
+  select distinct on (x.codigo) x.codigo, x.ncm from (
+    select f.codigo, f.ncm, 0 o, f.atualizado_em em from public.crm_fiscal_produtos f where f.ncm ~ '^\d{8}$'
+    union all
+    select i.codigo, i.ncm, 1, c.emitida_em from public.crm_compra_itens i join public.crm_compras c on c.id = i.compra_id
+     where i.codigo is not null and i.ncm ~ '^\d{8}$'
+  ) x where (select public.crm_eh_ativo()) order by x.codigo, x.o, x.em desc nulls last;
+$$;
+revoke all on function public.crm_produtos_ncm() from public, anon;
+grant execute on function public.crm_produtos_ncm() to authenticated;

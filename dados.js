@@ -1347,6 +1347,8 @@
   // Tela Produtos (20/10/2026): os códigos de barras para a pesquisa (todos) e o que só o administrador e o comprador veem
   // de um produto (saldo e custo médio do livro, histórico do custo, últimas notas de compra, embalagens). Cada parte
   // que a RLS não deixar ver volta vazia.
+  // NCM de cada produto para o orçamento do cliente (20/10/2026): só o NCM, para qualquer pessoa ativa.
+  Supa.prototype.produtosNcm = async function () { return paginado((de, ate) => this.sb.rpc('crm_produtos_ncm').range(de, ate)); };
   Supa.prototype.produtosEans = async function () { return paginado((de, ate) => this.sb.rpc('crm_produtos_eans').range(de, ate)); };
   Supa.prototype.produtoDetalhe = async function (codigo) {
     const ok = async (q, vazio) => { try { return unwrap(await q) || vazio; } catch (e) { return vazio; } };
@@ -1397,6 +1399,7 @@
   Local.prototype.produtoFotoTirar = async function (codigo) { const s = lsObj('crm_produto_fotos'); delete s[codigo]; lsGrava('crm_produto_fotos', s); };
   Local.prototype.produtoInfoGravar = async function (linha) { const s = lsObj('crm_produto_info'); s[linha.codigo] = Object.assign({}, s[linha.codigo], linha, { atualizado_em: new Date().toISOString() }); lsGrava('crm_produto_info', s); return s[linha.codigo]; };
   Local.prototype.produtosEans = async function () { return []; };
+  Local.prototype.produtosNcm = async function () { return lsLe('crm_produtos_ncm', []); };
   Local.prototype.produtoDetalhe = async function () { return { saldo: null, hist: [], compras: [], unidades: [] }; };
   Local.prototype.produtoClientes = async function (codigo, limite) {
     const base = c => String(c || '').replace(/\.\d+$/, ''), m = new Map();

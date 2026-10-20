@@ -722,8 +722,20 @@
   const iniciais = s => { s = String(s || '').replace(/\s+/g, ' ').trim(); if (!soMaiusculas(s)) return s;
     return acentua(s.toLowerCase()).split(' ').map((w, k) => /^[a-z]{2}$/i.test(w) && /^(sp|rj|mg|pr|sc|rs|ba|go|df|es|pe|ce|ms|mt|pa|am)$/.test(w) ? w.toUpperCase()
       : k && PEQUENAS.has(w) ? w : w.replace(/^(\S)/, c => c.toUpperCase())).join(' ').replace(/\/(\w{2})\b/g, (m, uf) => '/' + uf.toUpperCase()); };
+  // NCM dos itens (20/10/2026, Anderson: "sempre nos orçamentos para enviar aos clientes, deve sair o NCM também"):
+  // carregado uma vez (crm_produtos_ncm); a caixa ".1" usa o da unidade. "40151900" → "4015.19.00".
+  let ncms = null, pedindoNcm = null;
+  const garanteNcm = () => {
+    if (ncms) return Promise.resolve(ncms);
+    if (!pedindoNcm) pedindoNcm = (CRM.store() && CRM.store().produtosNcm ? CRM.store().produtosNcm() : Promise.resolve([]))
+      .then(l => { ncms = new Map((l || []).map(x => [String(x.codigo), x.ncm])); return ncms; }).catch(() => { pedindoNcm = null; return new Map(); });
+    return pedindoNcm;
+  };
+  const ncmDe = cod => { if (!ncms || !cod) return ''; const c = String(cod), v = ncms.get(c) || ncms.get(c.replace(/\.\d+$/, '')) || ''; return v.replace(/^(\d{4})(\d{2})(\d{2})$/, '$1.$2.$3'); };
+  fichas.garanteNcm = garanteNcm;
   // Monta o documento (HTML) da proposta e o nome do arquivo.
   function montaProposta(p) {
+    garanteNcm(); // a 1ª vez só começa a carregar; quem gera o PDF espera (baixarPdfProposta)
     const n = CRM.negocio(p.negocio_id);
     const e = n && CRM.empresa(n.empresa_id);
     const c = n && n.contato_id ? CRM.contato(n.contato_id) : (e && principal(e.id));
@@ -769,7 +781,7 @@
       (cartoes.length ? '<section class="cartoes c' + cartoes.length + '">' + cartoes.map(x => '<div><strong>' + esc(x[0]) + '</strong><span>' + esc(x[1]) + '</span></div>').join('') + '</section>' : '') +
       '<h2 class="titulo-itens">Produtos selecionados</h2>' +
       '<table class="itens"><thead><tr><th class="n">#</th><th>Produto / embalagem</th><th class="num">Qtd.</th><th class="num">Unitário</th>' + (comDesc ? '<th class="num">Desc.</th>' : '') + '<th class="num">Total</th></tr></thead><tbody>' +
-      itens.map((it, i) => '<tr><td class="n">' + (i + 1) + '</td><td><span class="prod">' + esc(frase(it.descricao)) + '</span>' + (it.codigo ? '<span class="cod">Cód. ' + esc(it.codigo) + '</span>' : '') + '</td>' +
+      itens.map((it, i) => '<tr><td class="n">' + (i + 1) + '</td><td><span class="prod">' + esc(frase(it.descricao)) + '</span>' + (it.codigo ? '<span class="cod">Cód. ' + esc(it.codigo) + (ncmDe(it.codigo) ? ' · NCM ' + esc(ncmDe(it.codigo)) : '') + '</span>' : '') + '</td>' +
         '<td class="num qtd">' + esc(qtd(it.quantidade)) + (it.unidade ? ' ' + esc(it.unidade) : '') + '</td><td class="num">' + esc(precoUnit(it.preco)) + '</td>' +
         (comDesc ? '<td class="num">' + (R.num(it.desconto) ? esc(R.numero(it.desconto)) + '%' : '—') + '</td>' : '') +
         '<td class="num tot">' + esc(R.moeda(totalDe(it))) + '</td></tr>').join('') + '</tbody></table>' +
@@ -878,10 +890,11 @@
   // Botão "Baixar PDF" (e o fim da importação do orçamento): pergunta onde salvar e gera o PDF.
   // alvo já escolhido (importação) pode vir pronto; false = a pessoa cancelou a janela.
   fichas.baixarPdfProposta = async (p, alvo) => {
-    const m = montaProposta(p);
+    let m = montaProposta(p);
     if (alvo === undefined) alvo = await pedeArquivo(m.nome);
     if (alvo === false) { CRM.toast('PDF não salvo. Quando quiser, clique em "Baixar PDF" na proposta.'); return; }
     CRM.toast('Gerando o PDF…');
+    if (!ncms) { await garanteNcm(); m = montaProposta(p); } // o NCM dos itens (depois de escolher onde salvar: a janela precisa do clique)
     try {
       const arq = await salva(await geraPdf(m), m.nome, alvo);
       CRM.toast('PDF salvo: ' + arq + (alvo ? '' : ' (pasta Downloads)') + '. Agora é só anexar no WhatsApp ou no e-mail.');

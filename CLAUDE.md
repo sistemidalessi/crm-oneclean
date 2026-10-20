@@ -1517,6 +1517,10 @@ preços de custo as vendedoras não enxergam)".
   margem mínima continua conferida no banco (o bloqueio PREÇO). Tabelas de custo (`crm_estoque`, `crm_estoque_mov`,
   `crm_estoque_saldo`, `crm_custo_historico`, `crm_compra_itens`) já eram só admin/comprador. Conferido como vendedora e como
   gestora com `set local role authenticated` + `request.jwt.claims`.
+- **NCM no orçamento do cliente (20/10, noite, Anderson: "sempre nos orçamentos para enviar aos clientes, deve sair o NCM
+  também"):** cada item sai com "Cód. 010049 · NCM 3402.20.00" (`fichas.js`, `garanteNcm`/`ncmDe`; a caixa ".1" usa o da
+  unidade). O NCM vem de `crm_produtos_ncm()` (só o NCM, para qualquer pessoa ativa: da regra fiscal e, na falta, da nota de
+  compra mais recente; 1.191 produtos em 20/10); o cadastro fiscal continua só do administrador.
 - **Saldo negativo na sugestão de compra (20/10, noite, Anderson: "teria que ficar negativo, até para o comprador saber o
   que comprar"):** `gestao.js` e a ferramenta `pedido_sugerido` (`comprador.ts`) usam o saldo como ele é: o que foi vendido
   sem estoque sai do que está pedido (antes contava zero e o pedido saía a menos: 290027 com −2.914 e 3.000 pedidos não
