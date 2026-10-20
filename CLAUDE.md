@@ -1536,9 +1536,8 @@ preços de custo as vendedoras não enxergam)".
     (atrasado)"; sem pedido no CRM, "N pedidos no FKN (sem data)". `CRM.aCaminho` (garante/de/texto/limpa).
   - **Sugestão de compra:** "já pedido" = o maior entre a pendência do FKN e o que falta chegar dos pedidos do CRM (no
     paralelo o mesmo pedido costuma estar nos dois). Testes: `testes/compras-pedidos.test.js` e `gestao.test.js`.
-  - **Falta o Anderson (SQL Editor; pelo conector cai):** `revoke all on function public.crm_compra_andamento_int() from
-    public, anon, authenticated;` e `revoke ... from public, anon` em `crm_compra_pedido_gravar(jsonb)`,
-    `crm_compra_pedidos_andamento()`, `crm_a_caminho()`, `crm_compra_pedido_acao(bigint, text, date)`.
+  - `revoke` rodados pelo Anderson no SQL Editor e conferidos: `crm_compra_andamento_int()` só para as funções do banco
+    (nem quem está logado chama); as outras quatro só para quem está logado. `crm_a_caminho()` continua respondendo à vendedora.
 - **NCM no orçamento do cliente (20/10, noite, Anderson: "sempre nos orçamentos para enviar aos clientes, deve sair o NCM
   também"):** cada item sai com "Cód. 010049 · NCM 3402.20.00" (`fichas.js`, `garanteNcm`/`ncmDe`; a caixa ".1" usa o da
   unidade). O NCM vem de `crm_produtos_ncm()` (só o NCM, para qualquer pessoa ativa: da regra fiscal e, na falta, da nota de
