@@ -287,10 +287,12 @@ const FERRAMENTAS: Record<string, Ferr> = {
     def: { name: 'pedidos', description: 'Pedidos em andamento (aberto, em separação, separado esperando a NF-e) com cliente, valor, entrega e bloqueios ainda não liberados. Até 30.', strict: true,
       input_schema: obj({ situacao: { type: 'string', enum: ['todos', 'aberto', 'separacao', 'separado'] } }, ['situacao']) },
     async roda(c, i) {
-      let q = c.u.from('crm_pedidos').select('numero, empresa_id, situacao, valor_total, entrega, bloqueios, liberado, vendedor_id, dados, criado_em').order('criado_em', { ascending: false }).limit(30);
-      q = String(i.situacao) === 'todos' ? q.in('situacao', ['aberto', 'separacao', 'separado']) : q.eq('situacao', String(i.situacao));
-      const { data, error } = await q;
+      // pela função (20/10/2026): a vendedora não lê mais a tabela direto, e os itens vêm sem o custo para ela
+      const { data: todos, error } = await c.u.rpc('crm_pedidos_ler', { p_desde: new Date().toISOString() }).range(0, 999);
       if (error) throw error;
+      const quer = String(i.situacao);
+      // deno-lint-ignore no-explicit-any
+      const data = ((todos || []) as any[]).filter(p => quer === 'todos' ? ['aberto', 'separacao', 'separado'].includes(p.situacao) : p.situacao === quer).slice(0, 30);
       const ids = [...new Set((data || []).map(p => p.empresa_id))];
       const { data: emps } = ids.length ? await c.u.from('crm_empresas').select('id, nome').in('id', ids) : { data: [] };
       const nome = new Map((emps || []).map(e => [e.id, e.nome]));

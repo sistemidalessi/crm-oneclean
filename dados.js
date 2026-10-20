@@ -984,12 +984,12 @@
   };
 
   // Pedido de venda (Fase 3, 16/10/2026): carregado à parte (a tela Pedidos e a ficha). Os em aberto, em separação
-  // ou separados, e os faturados/cancelados dos últimos 60 dias. Tudo que grava é função do banco.
+  // ou separados, e os faturados/cancelados dos últimos 60 dias. Tudo que grava é função do banco. Lidos pela função
+  // crm_pedidos_ler (20/10/2026): para a vendedora, os itens vêm sem o custo.
   Supa.prototype.pedidos = async function () {
     const desde = new Date(Date.now() - 60 * 864e5).toISOString(), out = [];
     for (let de = 0; ; de += PAGINA) {
-      const l = unwrap(await comTentativas(() => this.sb.from('crm_pedidos').select('*').or('situacao.in.(aberto,separacao,separado),criado_em.gte.' + desde)
-        .order('criado_em', { ascending: false }).range(de, de + PAGINA - 1)));
+      const l = unwrap(await comTentativas(() => this.sb.rpc('crm_pedidos_ler', { p_desde: desde }).range(de, de + PAGINA - 1)));
       out.push(...l);
       if (l.length < PAGINA) return out;
     }
@@ -1344,6 +1344,22 @@
   Supa.prototype.produtoInfoGravar = async function (linha) { return unwrap(await this.sb.from('crm_produto_info').upsert(Object.assign({}, linha, { atualizado_em: new Date().toISOString() })).select().single()); };
   // Quem compra o produto, pelas notas que a pessoa enxerga (RLS: a vendedora vê a carteira dela), a compra mais recente primeiro.
   Supa.prototype.produtoClientes = async function (codigo, limite) { return unwrap(await this.sb.rpc('crm_produto_clientes', { p_codigo: codigo, p_limite: limite || 8 })); };
+  // Tela Produtos (20/10/2026): os códigos de barras para a pesquisa (todos) e o que só o administrador e o comprador veem
+  // de um produto (saldo e custo médio do livro, histórico do custo, últimas notas de compra, embalagens). Cada parte
+  // que a RLS não deixar ver volta vazia.
+  Supa.prototype.produtosEans = async function () { return paginado((de, ate) => this.sb.rpc('crm_produtos_eans').range(de, ate)); };
+  Supa.prototype.produtoDetalhe = async function (codigo) {
+    const ok = async (q, vazio) => { try { return unwrap(await q) || vazio; } catch (e) { return vazio; } };
+    const [saldo, hist, compras, unidades] = await Promise.all([
+      ok(this.sb.from('crm_estoque_saldo').select('*').eq('codigo', codigo).maybeSingle(), null),
+      ok(this.sb.from('crm_custo_historico').select('*').eq('codigo', codigo).order('em', { ascending: false }).limit(12), []),
+      ok(this.sb.from('crm_compra_itens').select('quantidade, unidade, valor_total, ipi, st, frete, outras, fator, cod_fornecedor, crm_compras!inner(numero, emitida_em, fornecedor_nome)').eq('codigo', codigo).limit(60), []),
+      ok(this.sb.from('crm_estoque_unidades').select('*').eq('codigo', codigo).order('unidade'), [])
+    ]);
+    const comp = (compras || []).map(i => Object.assign({}, i, i.crm_compras || {}, { crm_compras: undefined }))
+      .sort((a, b) => String(b.emitida_em || '').localeCompare(String(a.emitida_em || ''))).slice(0, 10);
+    return { saldo, hist, compras: comp, unidades };
+  };
   Supa.prototype.sugestaoMarcar = async function (codigo, situacao) { return unwrap(await this.sb.from('crm_produto_fotos_sugestoes').update({ situacao }).eq('codigo', codigo)); };
 
   // Modo local: as fotos ficam no navegador como data: (serve para ver as telas); sem IA (a busca devolve "sem").
@@ -1380,6 +1396,8 @@
   Local.prototype.produtoFotoGravar = async function (linha) { const s = lsObj('crm_produto_fotos'); s[linha.codigo] = Object.assign({}, linha, { atualizado_em: new Date().toISOString() }); lsGrava('crm_produto_fotos', s); return s[linha.codigo]; };
   Local.prototype.produtoFotoTirar = async function (codigo) { const s = lsObj('crm_produto_fotos'); delete s[codigo]; lsGrava('crm_produto_fotos', s); };
   Local.prototype.produtoInfoGravar = async function (linha) { const s = lsObj('crm_produto_info'); s[linha.codigo] = Object.assign({}, s[linha.codigo], linha, { atualizado_em: new Date().toISOString() }); lsGrava('crm_produto_info', s); return s[linha.codigo]; };
+  Local.prototype.produtosEans = async function () { return []; };
+  Local.prototype.produtoDetalhe = async function () { return { saldo: null, hist: [], compras: [], unidades: [] }; };
   Local.prototype.produtoClientes = async function (codigo, limite) {
     const base = c => String(c || '').replace(/\.\d+$/, ''), m = new Map();
     (this.ler().notas || []).filter(n => !n.cancelada).forEach(n => (n.itens || []).filter(i => base(i.codigo) === base(codigo)).forEach(i => {

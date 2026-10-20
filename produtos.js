@@ -27,7 +27,8 @@
       const cx = caixas.get(d.codigo), v = vm.get(d.codigo);
       return {
         codigo: d.codigo, descricao: d.descricao || d.codigo, unidade: d.unidade || '', linha: d.linha || '', familia: d.familia || '', situacao: d.situacao || '',
-        disponivel: num(d.disponivel), reservado: num(d.reservado), a_caminho: num(d.a_caminho), preco: d.preco_venda == null ? null : num(d.preco_venda),
+        fisico: num(d.fisico), disponivel: num(d.disponivel), reservado: num(d.reservado), a_caminho: num(d.a_caminho), preco: d.preco_venda == null ? null : num(d.preco_venda),
+        localizacao: d.localizacao || '',
         custo: d.custo == null ? null : num(d.custo),
         caixa: cx ? { codigo: cx.codigo, fator: num(cx.fator) || null, preco: cx.preco_venda == null ? null : num(cx.preco_venda), disponivel: num(cx.disponivel) } : null,
         foto: fm.get(d.codigo) || null, info: im.get(d.codigo) || null, vendido: v ? num(v.quantidade) : 0, vendas: v ? num(v.notas) : 0
@@ -116,7 +117,108 @@
       fotoUrl ? 'Foto: ' + fotoUrl : '', fichaUrl ? 'Ficha técnica: ' + fichaUrl : ''].filter(Boolean).join('\n');
   }
 
-  const API = { catalogo, estado, filtra, linhas, paraBuscar, custoEstimado, specsTexto, specsDe, bate, confiavel, textoWhats, CUSTO_PADRAO };
+  // ------------------------------------------------------------- tela Produtos (20/10/2026, simulação aprovada)
+  // O cadastro como no FKN (Cadastro → Produto): pesquisa por código, descrição ou código de barras, em lista ou grade, e a
+  // página do produto em abas. O que cada um vê (Anderson, 20/10): a vendedora vê Geral, Preços (sem custo nem margem),
+  // Estoque, Vendas e Foto e ficha, sem editar; Fornecedor é do administrador e do comprador; Fiscal, do administrador.
+  // O custo nem chega ao navegador da vendedora (crm_estoque_disponivel devolve o custo só para administrador, gestora e
+  // comprador); quem pode ver recebe também a linha do cadastro (crm_estoque), o fornecedor e o fiscal.
+  // `ex`: { estoque (linhas de crm_estoque), forn (crm_produto_fornecedor), fornecedores (crm_fornecedores), fiscal
+  // (crm_fiscal_produtos), eans ([{codigo, ean}]) } — o que a pessoa não puder ler vem vazio.
+  function cadastro(l, ex) {
+    ex = ex || {};
+    const em = new Map((ex.estoque || []).map(e => [e.codigo, e])), troca = new Map((ex.forn || []).map(x => [x.codigo, x.fornecedor]));
+    const fm = new Map((ex.fornecedores || []).map(x => [String(x.codigo), x])), fis = new Map((ex.fiscal || []).map(x => [x.codigo, x]));
+    const eans = new Map();
+    (ex.eans || []).forEach(x => { const b = base(x.codigo); if (!eans.has(b)) eans.set(b, []); if (eans.get(b).indexOf(x.ean) === -1) eans.get(b).push(x.ean); });
+    return (l || []).map(x => {
+      const c = em.get(x.codigo) || null, f = fis.get(x.codigo) || null, tr = troca.get(x.codigo);
+      const fcod = tr || (c && c.fornecedor_cod ? String(c.fornecedor_cod) : '');
+      const fnome = fcod ? ((fm.get(fcod) || {}).nome || (!tr && c && c.fornecedor) || fcod) : '';
+      const e = (eans.get(x.codigo) || []).slice();
+      if (f && f.gtin && e.indexOf(f.gtin) === -1) e.unshift(f.gtin);
+      return Object.assign({}, x, {
+        cad: c ? { min: c.estoque_min == null ? null : num(c.estoque_min), max: c.estoque_max == null ? null : num(c.estoque_max), ult_entrada: c.ult_entrada || null,
+          ult_saida: c.ult_saida || null, custo_compra: c.custo_compra == null ? null : num(c.custo_compra), localizacao: c.localizacao || '' } : null,
+        forn: fcod ? { cod: fcod, nome: fnome, trocado: !!tr } : null, fiscal: ex.fiscal ? f : undefined, ncm: f ? f.ncm || '' : null, eans: e
+      });
+    });
+  }
+  const margemDe = (preco, custo) => (num(preco) > 0 && custo != null ? Math.round((num(preco) - num(custo)) / num(preco) * 1000) / 10 : null);
+  const noMinimo = x => !!(x.cad && x.cad.min > 0 && x.disponivel <= x.cad.min);
+  // Os atalhos da pesquisa (com quantos há em cada um). Os de cadastro só para quem cuida dele (`cuida`); o NCM, só
+  // para quem tem o fiscal (`fiscal`).
+  const ATALHOS = [
+    ['todos', 'Todos', () => true],
+    ['estoque', 'Com estoque', x => x.disponivel > 0],
+    ['falta', 'Em falta', x => !(x.disponivel > 0)],
+    ['vendidos', 'Mais vendidos', x => !!x.maisVendido],
+    ['minimo', 'No mínimo', noMinimo, 'cuida'],
+    ['semfoto', 'Sem foto', x => !x.foto, 'cuida'],
+    ['semforn', 'Sem fornecedor', x => !x.forn, 'cuida'],
+    ['semncm', 'Sem NCM', x => x.fiscal !== undefined && !x.ncm, 'fiscal'],
+    ['inativos', 'Inativos', x => x.situacao === 'INATIVO', 'cuida']
+  ];
+  function atalhos(l, quem) {
+    quem = quem || {};
+    return ATALHOS.filter(a => !a[3] || quem[a[3]]).map(a => ({ id: a[0], nome: a[1], n: (l || []).filter(x => (a[0] === 'inativos' || x.situacao !== 'INATIVO') && a[2](x)).length }));
+  }
+  // Pesquisa da tela: todas as palavras em qualquer ordem (código, descrição, linha, família, marca, fabricante, código de
+  // barras); um número de 8 a 14 dígitos também acha pelo código de barras inteiro. Inativo só no atalho "Inativos".
+  function pesquisa(l, f) {
+    f = f || {};
+    const termos = sem(f.busca).split(/\s+/).filter(Boolean), at = ATALHOS.find(a => a[0] === (f.atalho || 'todos')) || ATALHOS[0];
+    const out = (l || []).filter(x => {
+      if (at[0] !== 'inativos' && x.situacao === 'INATIVO') return false;
+      if (!at[2](x)) return false;
+      if (f.linha && x.linha !== f.linha) return false;
+      if (f.forn === '__sem' ? x.forn : f.forn && (!x.forn || x.forn.cod !== f.forn)) return false;
+      if (!termos.length) return true;
+      const t = sem([x.codigo, x.descricao, x.linha, x.familia, x.info && x.info.marca, x.info && x.info.fabricante].concat(x.eans || []).join(' '));
+      return termos.every(p => t.indexOf(p) !== -1);
+    });
+    const nome = (a, b) => String(a.descricao).localeCompare(String(b.descricao), 'pt-BR');
+    const mg = x => { const m = margemDe(x.preco, x.custo); return m == null ? Infinity : m; };
+    const ordem = f.ordem === 'codigo' ? (a, b) => String(a.codigo).localeCompare(String(b.codigo), 'pt-BR', { numeric: true })
+      : f.ordem === 'vendidos' ? (a, b) => b.vendas - a.vendas || nome(a, b)
+      : f.ordem === 'estoque' ? (a, b) => b.disponivel - a.disponivel || nome(a, b)
+      : f.ordem === 'margem' ? (a, b) => mg(a) - mg(b) || nome(a, b) : nome;
+    const q = String(f.busca || '').trim().toUpperCase();
+    const exato = x => x.codigo === q || (x.eans || []).indexOf(q) !== -1;
+    return out.sort((a, b) => exato(b) - exato(a) || ordem(a, b));
+  }
+  // Fornecedores para o filtro: os que aparecem nos produtos, em ordem alfabética.
+  function fornecedoresDe(l) {
+    const m = new Map();
+    (l || []).forEach(x => { if (x.forn && !m.has(x.forn.cod)) m.set(x.forn.cod, x.forn.nome); });
+    return [...m.entries()].map(([cod, nome]) => ({ cod, nome })).sort((a, b) => String(a.nome).localeCompare(String(b.nome), 'pt-BR'));
+  }
+  // Os selos de situação da linha (lista e cartão).
+  function selosDe(x, quem) {
+    quem = quem || {};
+    const l = [];
+    if (x.situacao === 'INATIVO') l.push(['inativo', '']);
+    if (!(x.disponivel > 0)) l.push(['em falta', 'vermelho']);
+    else if (quem.cuida && noMinimo(x)) l.push(['no mínimo', 'ambar']);
+    if (quem.cuida && !x.forn) l.push(['sem fornecedor', 'ambar']);
+    if (quem.fiscal && x.fiscal !== undefined && !x.ncm) l.push(['sem NCM', 'vermelho']);
+    if (quem.cuida && !x.foto) l.push(['sem foto', 'azul']);
+    return l;
+  }
+  // Anterior e próximo da lista que está na tela (as setas da página do produto, como no FKN).
+  function vizinhos(l, cod) {
+    const i = (l || []).findIndex(x => x.codigo === cod);
+    return { ant: i > 0 ? l[i - 1] : null, prox: i !== -1 && i < l.length - 1 ? l[i + 1] : null, pos: i + 1, total: (l || []).length };
+  }
+  // Embalagens do produto: a unidade, a caixa fechada (variante ".1" do FKN) e as outras unidades conhecidas (notas de compra).
+  function embalagens(x, unidades) {
+    const out = [{ unidade: x.unidade || 'UN', fator: 1, codigo: x.codigo, preco: x.preco }];
+    if (x.caixa) out.push({ unidade: 'CX', fator: x.caixa.fator, codigo: x.caixa.codigo, preco: x.caixa.preco });
+    (unidades || []).forEach(u => { if (!out.some(o => o.unidade === u.unidade)) out.push({ unidade: u.unidade, fator: num(u.fator) || null, codigo: null, preco: null, origem: u.origem }); });
+    return out;
+  }
+
+  const API = { catalogo, estado, filtra, linhas, cadastro, atalhos, pesquisa, fornecedoresDe, selosDe, vizinhos, embalagens, margemDe, noMinimo, paraBuscar, custoEstimado, specsTexto, specsDe, bate, confiavel, textoWhats, CUSTO_PADRAO };
   raiz.CRMProdutos = API;
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
 })(typeof window !== 'undefined' ? window : globalThis);
@@ -135,7 +237,7 @@
   const st = () => CRM.store();
   const nome = x => R.nomeDeItem(x.descricao || x.codigo);
 
-  let lista = null, carregando = false, sugs = [], ia = null, lote = null;
+  let lista = null, carregando = false, sugs = [], ia = null, lote = null, fornLista = [];
   let fotos = null; // Map(codigo → linha de crm_produto_fotos), carregado também sozinho (miniaturas no pedido e no estoque)
   const f = { busca: '', linha: '', soEstoque: true, ordem: 'vendidos', limite: 60 };
   const fl = { ver: 'aprovar', busca: '', quantos: '5', marcados: new Set(), escolha: {} };
@@ -145,9 +247,14 @@
     carregando = true;
     try {
       const s = st();
-      const [disp, fs, infos, vendidos] = await Promise.all([s.estoqueDisponivel(), s.produtoFotos().catch(() => []), s.produtoInfos().catch(() => []), s.produtosVendidos(90).catch(() => [])]);
+      const vazio = () => [], cuidaJa = podeFotos();
+      const [disp, fs, infos, vendidos, eans, estoque, forn, fornecedores, fiscal] = await Promise.all([s.estoqueDisponivel(), s.produtoFotos().catch(vazio), s.produtoInfos().catch(vazio),
+        s.produtosVendidos(90).catch(vazio), s.produtosEans ? s.produtosEans().catch(vazio) : [],
+        cuidaJa ? s.estoque().catch(vazio) : [], cuidaJa ? s.produtoForn().catch(vazio) : [], cuidaJa ? s.fornecedores().catch(vazio) : [],
+        CRM.ehAdmin() ? s.fiscalProdutos().catch(() => null) : null]);
       fotos = new Map(fs.map(x => [x.codigo, x]));
-      lista = X.catalogo({ disp, fotos: fs, infos, vendidos });
+      fornLista = fornecedores;
+      lista = X.cadastro(X.catalogo({ disp, fotos: fs, infos, vendidos }), { eans, estoque, forn, fornecedores, fiscal });
       if (podeFotos()) {
         [sugs, ia] = await Promise.all([s.produtoSugestoes().catch(() => []), s.produtoBuscar({ acao: 'situacao' }).catch(() => null)]);
         sugs.filter(x => x.situacao === 'sugerida' && !fl.marcados.has(x.codigo) && X.confiavel((x.candidatos || [])[0], (x.info || {}).eans) && !(lista.find(p => p.codigo === x.codigo) || {}).foto).forEach(x => fl.marcados.add(x.codigo));
@@ -176,14 +283,15 @@
   function cartao(x, modo) {
     const e = X.estado(x), u = x.foto ? st().fotoUrl(x.foto.caminho) : '';
     return '<article class="pf-cartao">' +
-      '<button type="button" class="pf-foto" data-acao="pf-ficha" data-id="' + esc(x.codigo) + '" aria-label="Ver a ficha de ' + esc(nome(x)) + '">' +
+      '<button type="button" class="pf-foto" data-acao="' + (modo === 'tela' ? 'pf-abrir' : 'pf-ficha') + '" data-id="' + esc(x.codigo) + '" aria-label="Ver a ficha de ' + esc(nome(x)) + '">' +
         (u ? '<img src="' + esc(u) + '" alt="" loading="lazy">' : '<span class="pf-sem">sem foto ainda</span>') +
         (x.maisVendido ? '<span class="pf-selo">mais vendido</span>' : '') + '</button>' +
       '<div class="pf-corpo"><strong class="pf-nome">' + esc(nome(x)) + '</strong>' +
         '<small>' + esc(x.codigo) + (x.unidade ? ' · ' + esc(x.unidade) : '') + (x.caixa && x.caixa.fator ? ' · caixa com ' + qtd(x.caixa.fator) : '') + (x.info && x.info.marca ? ' · ' + esc(x.info.marca) : '') + '</small>' +
         '<span class="pf-disp ' + e.cls + '">' + esc(e.texto) + '</span>' +
         (x.preco ? '<span class="pf-preco"><small>Tabela A</small> <strong>R$ ' + preco(x.preco) + '</strong>' + (x.caixa && x.caixa.preco ? ' <small>· caixa R$ ' + preco(x.caixa.preco) + '</small>' : '') + '</span>' : '<span class="pf-preco"><small>sem preço de tabela</small></span>') +
-        '<div class="pf-botoes"><button type="button" class="btn sec" data-acao="pf-ficha" data-id="' + esc(x.codigo) + '">Ver ficha</button>' +
+        (modo === 'tela' && podeFotos() ? '<span class="chips">' + X.selosDe(x, quem()).map(z => CRM.selo(z[0], z[1])).join('') + '</span>' : '') +
+        '<div class="pf-botoes"><button type="button" class="btn sec" data-acao="' + (modo === 'tela' ? 'pf-abrir' : 'pf-ficha') + '" data-id="' + esc(x.codigo) + '">' + (modo === 'tela' ? 'Abrir' : 'Ver ficha') + '</button>' +
           (modo === 'escolher' ? '<button type="button" class="btn" data-acao="pf-escolhe" data-id="' + esc(x.codigo) + '">Incluir</button>'
             : CRM.pedidos && CRM.pedidos.incluirItem && !CRM.foraDeVendas() ? '<button type="button" class="btn" data-acao="pf-pedido" data-id="' + esc(x.codigo) + '">+ Pedido</button>' : '') +
         '</div></div></article>';
@@ -204,17 +312,8 @@
       : '<p class="vazio">Nenhum produto ' + (f.busca ? 'com "' + esc(f.busca) + '"' : 'aqui') + (f.soEstoque && !f.busca ? ' com estoque' : '') + '.</p>');
   }
 
-  CRM.telas.produtos = {
-    render() {
-      if (lista === null) { setTimeout(carrega, 0); return '<div class="cabecalho"><div><h1>Estoque</h1></div></div><div class="cartao"><p class="vazio">Carregando…</p></div>'; }
-      const semFoto = lista.filter(x => !x.foto && x.disponivel > 0).length;
-      return '<div class="cabecalho"><div><h1>Estoque</h1><p class="sub">o que temos para vender agora: foto, disponível, preço de tabela e a ficha técnica de cada produto</p></div>' +
-        '<div class="acoes">' + (podeFotos() ? '<button type="button" class="btn sec" data-acao="pf-ir-fotos">Fotos e fichas' + (semFoto ? ' (' + semFoto + ' sem foto)' : '') + '</button>' : '') +
-        '<button type="button" class="btn sec" data-acao="pf-recarregar"' + (carregando ? ' disabled' : '') + '>Atualizar</button></div></div>' +
-        '<section class="cartao">' + filtrosHTML('tela') + '<div data-pf-lista>' + grade('tela') + '</div></section>';
-    },
-    depois(c) { ligaFiltros(c, 'tela', () => grade('tela')); }
-  };
+  // (a tela Produtos fica mais abaixo, depois da ficha)
+
   // a busca redesenha só a grade (o campo não perde o foco nem o cursor)
   function ligaFiltros(c, alvo, desenha) {
     const b = c.querySelector('[data-pf-busca="' + alvo + '"]'), lst = c.querySelector('[data-pf-lista]');
@@ -536,7 +635,7 @@
   }
 
   Object.assign(CRM.acoes, {
-    'pf-recarregar': () => { lista = null; carrega(); },
+    'pf-recarregar': () => { lista = null; det.clear(); carrega(); },
     'pf-mais': () => { f.limite += 60; const c = document.querySelector('#dlgForm[open] [data-pf-lista]'); if (c) c.innerHTML = grade('escolher'); else CRM.render(); },
     'pf-linha': id => { f.linha = f.linha === id ? '' : id; f.limite = 60; const c = document.querySelector('#dlgForm[open] [data-pf-lista]'); if (c) { c.innerHTML = grade('escolher'); c.parentNode.querySelectorAll('[data-acao="pf-linha"]').forEach(b => b.classList.toggle('ativo', b.dataset.id === f.linha)); } else CRM.render(); },
     'pf-ficha': id => abrirFicha(id),
@@ -597,5 +696,243 @@
     }
   });
 
-  CRM.produtos = { miniatura, abrirFicha, escolher, telaFotos, depoisFotos, garanteFotos, recarregar: () => { lista = null; } };
+  // ----------------------------------------------------------------- tela Produtos (20/10/2026, simulação aprovada)
+  // Pesquisa em lista ou grade (cada pessoa escolhe; o CRM lembra) e a página do produto em abas. A vendedora começa na
+  // grade; o administrador, a gestora e o comprador, na lista.
+  const quem = () => ({ cuida: podeFotos(), fiscal: CRM.ehAdmin() });
+  const veCusto = () => CRM.ehGestor() || CRM.ehComprador();
+  const pc = { busca: '', linha: '', forn: '', atalho: 'todos', ordem: 'nome', limite: 100, aberto: null, aba: 'geral' };
+  const det = new Map(); // código → o que só o administrador e o comprador veem (saldo, custo, compras, embalagens, movimentos)
+  const chaveModo = () => 'crm_produtos_modo_' + (CRM.meuId ? CRM.meuId() : '');
+  function modo() {
+    let m = null;
+    try { m = raiz.localStorage.getItem(chaveModo()); } catch (e) { /* sem armazenamento: o padrão */ }
+    return m === 'lista' || m === 'grade' ? m : (CRM.papel() === 'vendedor' ? 'grade' : 'lista');
+  }
+  const visiveis = () => X.pesquisa(lista, pc);
+  const dataBR = iso => (iso ? R.dataBR(String(iso).slice(0, 10)) : '—');
+  const pct = v => (v == null ? '—' : Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + '%');
+  const emb = x => (x.unidade || 'UN') + (x.caixa && x.caixa.fator ? ' · CX c/ ' + qtd(x.caixa.fator) : '');
+  const selos = x => X.selosDe(x, quem()).map(z => CRM.selo(z[0], z[1])).join(' ');
+
+  function atalhosHTML() {
+    const base0 = lista.filter(x => (!pc.linha || x.linha === pc.linha) && (!pc.forn || (pc.forn === '__sem' ? !x.forn : x.forn && x.forn.cod === pc.forn)));
+    const nb = X.pesquisa(base0, { busca: pc.busca, atalho: 'inativos' }).length;
+    return X.atalhos(X.pesquisa(base0, { busca: pc.busca, atalho: 'todos' }).concat(nb ? X.pesquisa(base0, { busca: pc.busca, atalho: 'inativos' }) : []), quem())
+      .map(a => '<button type="button" class="chip-filtro' + (pc.atalho === a.id ? ' ativo' : '') + '" data-acao="pc-atalho" data-id="' + a.id + '" aria-pressed="' + (pc.atalho === a.id) + '">' + esc(a.nome) + ' <small>' + a.n + '</small></button>').join('');
+  }
+  function barra() {
+    const ls = X.linhas(lista), fs = X.fornecedoresDe(lista), m = modo();
+    const ordens = [['nome', 'Descrição (A–Z)'], ['codigo', 'Código'], ['vendidos', 'Mais vendidos'], ['estoque', 'Mais estoque']].concat(veCusto() ? [['margem', 'Menor margem']] : []);
+    return '<div class="pc-barra">' +
+      '<label class="pc-pesquisa"><span class="sr">Pesquisar produto</span><input type="search" data-pc-busca value="' + esc(pc.busca) + '" placeholder="Código, descrição ou código de barras (pode bipar)" autocomplete="off" aria-label="Pesquisar produto"><small>Enter abre o 1º</small></label>' +
+      '<label class="campo"><span>Linha</span><select data-pc-linha>' + CRM.opcoesHTML([['', 'Todas']].concat(R.ordemAlfa(ls, l => l.nome).map(l => [l.nome, R.nomeDeItem(l.nome)])), pc.linha) + '</select></label>' +
+      (podeFotos() ? '<label class="campo"><span>Fornecedor</span><select data-pc-forn>' + CRM.opcoesHTML([['', 'Todos']].concat(fs.map(f => [f.cod, f.nome])).concat([['__sem', '(sem fornecedor)']]), pc.forn) + '</select></label>' : '') +
+      '<label class="campo"><span>Ordem</span><select data-pc-ordem>' + CRM.opcoesHTML(ordens, pc.ordem) + '</select></label></div>' +
+      '<div class="pc-barra2"><div class="chips" data-pc-atalhos>' + atalhosHTML() + '</div><span class="flex"></span><span class="dica" data-pc-conta></span>' +
+      '<div class="pc-modo" role="group" aria-label="Como mostrar"><button type="button" class="mini' + (m === 'lista' ? ' ativo' : '') + '" data-acao="pc-modo" data-id="lista" aria-pressed="' + (m === 'lista') + '">☰ Lista</button>' +
+        '<button type="button" class="mini' + (m === 'grade' ? ' ativo' : '') + '" data-acao="pc-modo" data-id="grade" aria-pressed="' + (m === 'grade') + '">▦ Grade</button></div></div>';
+  }
+  function tabelaLista(l) {
+    const cuida = podeFotos(), vc = veCusto();
+    return '<div class="cartao pc-lista"><div class="tabela-rolagem"><table class="tabela pc-tabela"><thead><tr><th><span class="sr">Foto</span></th><th>Código</th><th>Descrição</th><th>Linha</th>' +
+      (cuida ? '<th>Fornecedor</th>' : '') + '<th>Embalagem</th><th class="num">Disponível</th><th class="num">Preço A</th>' + (vc ? '<th class="num">Margem</th>' : '') + '<th>Situação</th></tr></thead><tbody>' +
+      l.map(x => {
+        const mg = vc ? X.margemDe(x.preco, x.custo) : null, mmin = P ? P.margemMinima(CRM.estado.cfg) : 23;
+        return '<tr class="pc-linha" data-acao="pf-abrir" data-id="' + esc(x.codigo) + '"><td>' + miniatura(x.codigo) + '</td><td class="num-cod">' + esc(x.codigo) + '</td>' +
+          '<td><button type="button" class="link" data-acao="pf-abrir" data-id="' + esc(x.codigo) + '">' + esc(nome(x)) + '</button>' + (x.info && x.info.marca ? '<small>' + esc(x.info.marca) + '</small>' : '') + '</td>' +
+          '<td>' + esc(x.linha ? R.nomeDeItem(x.linha) : '—') + '</td>' + (cuida ? '<td>' + esc(x.forn ? R.nomeDeItem(x.forn.nome) : '—') + '</td>' : '') + '<td>' + esc(emb(x)) + '</td>' +
+          '<td class="num' + (x.disponivel > 0 ? '' : ' neg') + '">' + qtd(Math.floor(x.disponivel * 1000) / 1000) + '</td><td class="num"><strong>' + (x.preco ? preco(x.preco) : '—') + '</strong></td>' +
+          (vc ? '<td class="num' + (mg != null && mg < mmin ? ' neg' : '') + '">' + pct(mg) + '</td>' : '') + '<td>' + selos(x) + '</td></tr>';
+      }).join('') + '</tbody></table></div></div>';
+  }
+  function resultado() {
+    const l = visiveis(), lim = pc.limite;
+    if (!l.length) return '<div class="cartao"><p class="vazio">Nenhum produto' + (pc.busca ? ' com "' + esc(pc.busca) + '"' : '') + ' aqui. Tente parte do nome (luva, copo, saco), o código ou o código de barras.</p></div>';
+    return (modo() === 'grade' ? '<div class="pf-grade">' + l.slice(0, lim).map(x => cartao(x, 'tela')).join('') + '</div>' : tabelaLista(l.slice(0, lim))) +
+      (l.length > lim ? '<p class="acoes"><button type="button" class="btn sec" data-acao="pc-mais">Mostrar mais (' + (l.length - lim) + ')</button></p>' : '');
+  }
+  const contagem = () => { const n = visiveis().length, t = lista.filter(x => x.situacao !== 'INATIVO').length; return n + ' de ' + t.toLocaleString('pt-BR') + ' produtos'; };
+
+  // ----------------------------------------------------------------- página do produto
+  const ABAS_PROD = () => [['geral', 'Geral'], ['precos', 'Preços'], ['estoque', 'Estoque'], ['vendas', 'Vendas']]
+    .concat(CRM.ehAdmin() ? [['fiscal', 'Fiscal']] : []).concat(podeFotos() ? [['fornecedor', 'Fornecedor']] : []).concat([['foto', 'Foto e ficha']]);
+  const dl = pares => '<dl class="dados pc-dados">' + pares.filter(Boolean).map(([k, v]) => '<dt>' + esc(k) + '</dt><dd>' + (v == null || v === '' ? '—' : esc(v)) + '</dd>').join('') + '</dl>';
+  function pagina(x) {
+    const viz = X.vizinhos(visiveis(), x.codigo), u = x.foto ? st().fotoUrl(x.foto.caminho) : '', inf = x.info || {}, d = det.get(x.codigo) || {};
+    const abas = ABAS_PROD(); if (!abas.some(a => a[0] === pc.aba)) pc.aba = 'geral';
+    const vc = veCusto() && x.custo != null, mg = vc ? X.margemDe(x.preco, x.custo) : null, sg = sugs.find(z => z.codigo === x.codigo && z.situacao === 'sugerida');
+    const corpo = { geral: abaGeral, precos: abaPrecos, estoque: abaEstoque, vendas: abaVendas, fiscal: abaFiscal, fornecedor: abaFornecedor, foto: abaFoto }[pc.aba](x, d);
+    return '<div class="pc-nav"><button type="button" class="link" data-acao="pc-voltar">‹ Voltar à pesquisa</button><span class="flex"></span>' +
+        (viz.ant ? '<button type="button" class="link" data-acao="pf-abrir" data-id="' + esc(viz.ant.codigo) + '">‹ ' + esc(viz.ant.codigo) + ' ' + esc(nome(viz.ant)) + '</button>' : '') +
+        (viz.pos ? '<small>' + viz.pos + ' de ' + viz.total + '</small>' : '') +
+        (viz.prox ? '<button type="button" class="link" data-acao="pf-abrir" data-id="' + esc(viz.prox.codigo) + '">' + esc(viz.prox.codigo) + ' ' + esc(nome(viz.prox)) + ' ›</button>' : '') + '</div>' +
+      '<section class="cartao pc-topo"><div class="pc-foto">' + (u ? '<img src="' + esc(u) + '" alt="' + esc(nome(x)) + '">' : '<span class="pf-sem">sem foto ainda</span>') + '</div>' +
+        '<div class="pc-titulo"><div class="chips">' + CRM.selo(x.situacao === 'INATIVO' ? 'inativo' : 'ativo', x.situacao === 'INATIVO' ? '' : 'verde') + (x.maisVendido ? ' ' + CRM.selo('mais vendido', 'azul') : '') +
+          (podeFotos() && sg ? ' ' + CRM.selo('foto da IA para aprovar', 'azul') : '') + ' ' + selos(x) + '</div>' +
+          '<h1>' + esc(nome(x)) + '</h1><p class="sub">Código <strong>' + esc(x.codigo) + '</strong>' + ((x.eans || []).length ? ' · código de barras <strong>' + esc(x.eans[0]) + '</strong>' : '') +
+          ' · ' + esc(emb(x)) + (x.linha ? ' · ' + esc(R.nomeDeItem(x.linha)) : '') + (inf.marca ? ' · marca ' + esc(inf.marca) : '') + '</p>' +
+          '<p class="acoes">' + (!CRM.foraDeVendas() && CRM.pedidos && CRM.pedidos.incluirItem ? '<button type="button" class="btn" data-acao="pf-pedido" data-id="' + esc(x.codigo) + '">+ Pedido</button> ' : '') +
+            (!CRM.foraDeVendas() ? '<a class="btn sec" href="' + esc('https://wa.me/?text=' + encodeURIComponent(X.textoWhats(Object.assign({ nome: nome(x) }, x), u, inf.ficha_caminho ? st().fotoUrl(inf.ficha_caminho) : inf.ficha_url || ''))) + '" target="_blank" rel="noopener noreferrer">📲 Mandar foto e preço pelo WhatsApp</a> ' : '') +
+            (podeFotos() ? '<button type="button" class="btn sec" data-acao="pf-info-editar" data-id="' + esc(x.codigo) + '">Editar a ficha</button>' : '') + '</p></div>' +
+        '<div class="kpis pc-kpis"><div class="kpi' + (x.disponivel > 0 ? '' : ' alerta') + '"><span>Disponível</span><strong>' + qtd(Math.floor(x.disponivel * 1000) / 1000) + '</strong><small>' + esc(x.unidade || '') + '</small></div>' +
+          '<div class="kpi verde"><span>Preço A</span><strong>' + (x.preco ? 'R$ ' + preco(x.preco) : '—') + '</strong><small>tabela Padrão</small></div>' +
+          (vc ? '<div class="kpi"><span>Custo</span><strong>R$ ' + preco(x.custo) + '</strong><small>do cadastro</small></div><div class="kpi"><span>Margem na A</span><strong>' + pct(mg) + '</strong><small>mínima ' + pct(P ? P.margemMinima(CRM.estado.cfg) : 23) + '</small></div>' : '') +
+        '</div></section>' +
+      '<section class="cartao"><div class="pc-abas" role="group" aria-label="Abas do produto">' + abas.map(a => '<button type="button" class="' + (pc.aba === a[0] ? 'ativo' : '') + '" data-acao="pc-aba" data-id="' + a[0] + '" aria-pressed="' + (pc.aba === a[0]) + '">' + esc(a[1]) + '</button>').join('') + '</div>' +
+        '<div class="pc-corpo">' + corpo + '</div></section>';
+  }
+  function abaGeral(x, d) {
+    const inf = x.info || {}, cuida = podeFotos(), es = X.embalagens(x, d.unidades);
+    return '<div class="pc-colunas"><div><h3>Identificação</h3>' + dl([['Código', x.codigo], ['Situação', x.situacao === 'INATIVO' ? 'Inativo' : 'Ativo'], ['Descrição (na nota)', x.descricao],
+        ['Unidade', x.unidade], ['Linha', x.linha ? R.nomeDeItem(x.linha) : ''], ['Família', x.familia && !/^0+$/.test(x.familia) ? R.nomeDeItem(String(x.familia).replace(/^\d+\s*/, '')) : ''],
+        ['Marca', inf.marca], ['Fabricante', inf.fabricante], ['Código de barras', (x.eans || []).join(', ')], cuida ? ['Localização no galpão', (x.cad && x.cad.localizacao) || x.localizacao] : null]) + '</div>' +
+      '<div><h3>Embalagens</h3><div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Embalagem</th><th class="num">Contém</th><th>Código</th><th class="num">Preço A</th></tr></thead><tbody>' +
+        es.map(e => '<tr><td>' + esc(e.unidade) + '</td><td class="num">' + (e.fator ? qtd(e.fator) + ' ' + esc(x.unidade || '') : '—') + '</td><td>' + esc(e.codigo || (e.origem === 'manual' ? 'acertada no CRM' : 'das notas de compra')) + '</td><td class="num">' + (e.preco ? 'R$ ' + preco(e.preco) : '—') + '</td></tr>').join('') +
+        '</tbody></table></div>' + (cuida ? '<p class="acoes"><button type="button" class="mini" data-acao="pc-emb" data-id="' + esc(x.codigo) + '">+ Embalagem</button></p>' : '') +
+        (x.caixa ? '<p class="dica">No FKN a caixa é outro código (' + esc(x.caixa.codigo) + '); aqui fica no mesmo produto, e o estoque é um só.</p>' : '') + '</div>' +
+      '<div><h3>Para a vendedora</h3>' + (inf.descricao ? '<p class="pf-descricao">' + esc(inf.descricao) + '</p>' : '<p class="vazio">Sem descrição ainda' + (cuida ? ': vem da ficha aprovada em Fotos e fichas, ou em "Editar a ficha".' : '.') + '</p>') +
+        ((inf.especificacoes || []).length ? '<table class="tabela pf-specs"><tbody>' + inf.especificacoes.map(z => '<tr><th>' + esc(z.nome) + '</th><td>' + esc(z.valor) + '</td></tr>').join('') + '</tbody></table>' : '') + '</div></div>' +
+      '<p class="dica">Descrição, unidade, linha, preço e mínimo vêm da listagem do FKN e mudam lá enquanto ele for o cadastro principal.' + (cuida ? ' No CRM: a ficha (foto, descrição, especificações, PDFs), o fornecedor e as embalagens.' : '') + '</p>';
+  }
+  function abaPrecos(x, d) {
+    const tab = P ? P.tabelaDe(CRM.estado.cfg) : null, vc = veCusto() && x.custo != null, mmin = P ? P.margemMinima(CRM.estado.cfg) : 23;
+    if (!tab || !x.preco) return '<p class="vazio">Este produto não tem preço de tabela no FKN.</p>';
+    const fx = P.FAIXAS.filter(f => tab[f] != null).sort((a, b) => tab[a] - tab[b]);
+    const cx = x.caixa && x.caixa.preco ? x.caixa : null;
+    let h = '<div class="pc-colunas"><div><h3>Tabelas de preço <small>tabela Padrão, como no FKN</small></h3><div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Tabela</th><th class="num">Acréscimo</th><th class="num">Preço</th>' +
+      (cx ? '<th class="num">Caixa</th>' : '') + (vc ? '<th class="num">Margem</th>' : '') + '</tr></thead><tbody>' +
+      fx.map(f => { const pr = P.precoDaFaixa(x.preco, f, tab), m = vc ? X.margemDe(pr, x.custo) : null;
+        return '<tr><td><strong>' + esc(P.rotuloFaixa(f)) + '</strong></td><td class="num">' + (tab[f] ? (tab[f] > 0 ? '+' : '') + tab[f] + '%' : 'base') + '</td><td class="num"><strong>R$ ' + preco(pr) + '</strong></td>' +
+          (cx ? '<td class="num">R$ ' + preco(P.precoDaFaixa(cx.preco, f, tab)) + '</td>' : '') + (vc ? '<td class="num' + (m != null && m < mmin ? ' neg' : '') + '">' + pct(m) + '</td>' : '') + '</tr>'; }).join('') +
+      '</tbody></table></div><p class="dica">' + (vc ? 'Abaixo de ' + pct(mmin) + ' de margem o pedido fica bloqueado até a gestora liberar.' : 'A comissão sai pela faixa do preço praticado. Abaixo da tabela A o pedido pode ficar bloqueado até a gestora liberar.') + '</p></div>';
+    if (vc) {
+      const s0 = d.saldo, c = x.cad;
+      h += '<div><h3>Custo</h3>' + dl([['Custo do cadastro', 'R$ ' + preco(x.custo)], s0 && s0.custo_medio != null ? ['Custo médio (livro do estoque)', 'R$ ' + preco(s0.custo_medio)] : null,
+          c && c.custo_compra != null ? ['Último custo de compra (FKN)', 'R$ ' + preco(c.custo_compra)] : null]) +
+        (podeFotos() ? '<h3>Histórico do custo</h3>' + (d.carregando ? '<p class="dica">Carregando…</p>' : (d.hist || []).length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Quando</th><th class="num">De</th><th class="num">Para</th></tr></thead><tbody>' +
+          d.hist.map(z => '<tr><td>' + esc(dataBR(z.em)) + '</td><td class="num">R$ ' + preco(z.custo_de) + '</td><td class="num">R$ ' + preco(z.custo_para) + '</td></tr>').join('') + '</tbody></table></div>' : '<p class="vazio">O custo não mudou desde que o CRM começou a acompanhar.</p>') : '') + '</div>';
+    }
+    return h + '</div>';
+  }
+  function abaEstoque(x, d) {
+    const e = X.estado(x), c = x.cad, cuida = podeFotos(), porDia = num(x.vendido) / 90;
+    const k = (t, v, sub, cls) => '<div class="kpi ' + (cls || '') + '"><span>' + esc(t) + '</span><strong>' + v + '</strong>' + (sub ? '<small>' + esc(sub) + '</small>' : '') + '</div>';
+    return '<div class="kpis">' + k('Físico', qtd(x.fisico), x.unidade || '') + k('Reservado', qtd(x.reservado), 'em pedidos abertos') + k('Disponível', qtd(Math.floor(x.disponivel * 1000) / 1000), e.cls === 'falta' ? 'em falta' : e.dias ? 'pouco: dura ~' + e.dias + ' dia(s)' : 'para vender agora', e.cls === 'falta' ? 'alerta' : 'verde') +
+        k('A caminho', qtd(x.a_caminho), 'já pedido ao fornecedor') + (cuida && c ? k('Mínimo / máximo', qtd(c.min) + ' / ' + (c.max ? qtd(c.max) : '—'), 'do FKN', X.noMinimo(x) ? 'alerta' : '') : '') +
+        k('Venda por dia', porDia ? qtd(Math.round(porDia * 10) / 10) : '0', 'média dos últimos 90 dias') + '</div>' +
+      (x.caixa ? '<p class="dica">Caixa fechada (' + esc(x.caixa.codigo) + (x.caixa.fator ? ', ' + qtd(x.caixa.fator) + ' ' + esc(x.unidade || '') : '') + '): ' + qtd(Math.floor(num(x.caixa.disponivel) * 1000) / 1000) + ' disponível(is).</p>' : '') +
+      (cuida ? (c ? dl([['Última entrada', dataBR(c.ult_entrada)], ['Última saída', dataBR(c.ult_saida)]]) : '') +
+        '<h3>Últimos movimentos <small>do livro do estoque</small></h3>' + (d.carregando ? '<p class="dica">Carregando…</p>' : (d.movs || []).length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Quando</th><th>Tipo</th><th class="num">Qtd.</th><th>Detalhe</th></tr></thead><tbody>' +
+          d.movs.map(m => '<tr><td>' + esc(dataBR(m.quando)) + '</td><td>' + esc(((raiz.CRMEstoque || {}).TIPOS || {})[m.tipo] || m.tipo) + '</td><td class="num">' + (m.quantidade > 0 ? '+' : '') + qtd(m.quantidade) + '</td><td>' + esc(m.motivo || '') + '</td></tr>').join('') +
+          '</tbody></table></div><p class="acoes"><button type="button" class="mini" data-acao="es-movs" data-id="' + esc(x.codigo) + '">Ver todos os movimentos</button></p>' : '<p class="vazio">Nenhum movimento no livro do estoque.</p>') : '');
+  }
+  function abaVendas(x) {
+    return '<div class="pc-colunas"><div><h3>Vendido</h3>' + dl([['Últimos 90 dias', x.vendas ? qtd(x.vendido) + ' ' + (x.unidade || 'un') + ' em ' + x.vendas + ' nota(s)' : 'nenhuma venda'],
+        ['Média por dia', qtd(Math.round(num(x.vendido) / 90 * 10) / 10)], ['Curva', x.maisVendido ? 'entre os mais vendidos' : '—']]) + '</div>' +
+      '<div><h3>' + (CRM.ehGestor() || podeFotos() ? 'Quem compra' : 'Na sua carteira, quem compra') + '</h3><div data-pf-clientes="' + esc(x.codigo) + '"><p class="dica">Carregando…</p></div></div></div>';
+  }
+  const ROT_REGRA = { cfop: 'CFOP', cst_icms: 'CST do ICMS', aliq_icms: 'Alíquota do ICMS (%)', red_bc_icms: 'Redução da base do ICMS (%)', cst_pis: 'CST do PIS', aliq_pis: 'Alíquota do PIS (%)',
+    cst_cofins: 'CST da COFINS', aliq_cofins: 'Alíquota da COFINS (%)', mva: 'MVA (%)', cst_ipi: 'CST do IPI', aliq_ipi: 'Alíquota do IPI (%)' };
+  function abaFiscal(x) {
+    const f = x.fiscal;
+    if (!f) return '<p class="vazio">Sem regra fiscal ainda: ela nasce da leitura das notas (aba Fiscal).</p><p class="acoes"><button type="button" class="btn sec" data-acao="pc-ir-fiscal">Abrir a aba Fiscal</button></p>';
+    const ncm = String(f.ncm || '').replace(/^(\d{4})(\d{2})(\d{2})$/, '$1.$2.$3');
+    const regras = Object.entries(f.regra || {}).filter(([, v]) => v && typeof v === 'object');
+    return '<div class="pc-colunas"><div>' + dl([['NCM', ncm], ['CEST', f.cest], ['Código de barras', f.gtin], ['Origem', f.origem === '0' ? '0 – Nacional' : f.origem],
+        ['Situação', f.situacao === 'conferido' ? 'conferida' : f.situacao === 'proposta' ? 'proposta (falta o de acordo do contador)' : f.situacao], f.conferido_em ? ['Conferida em', dataBR(f.conferido_em)] : null]) +
+        ((f.alertas || []).length ? '<ul class="pc-alertas">' + f.alertas.map(a => '<li>' + esc(typeof a === 'string' ? a : a.texto || a.msg || JSON.stringify(a)) + '</li>').join('') + '</ul>' : '') + '</div>' +
+      regras.map(([k, v]) => '<div><h3>Regra: ' + esc(k.replace(/_/g, ' ')) + '</h3>' + dl(Object.entries(v).map(([kk, vv]) => [ROT_REGRA[kk] || kk.replace(/_/g, ' '), vv == null ? '' : String(vv).replace('.', ',')])) + '</div>').join('') + '</div>' +
+      '<p class="acoes"><button type="button" class="btn sec" data-acao="pc-ir-fiscal">Abrir a aba Fiscal</button></p>';
+  }
+  function abaFornecedor(x, d) {
+    const fo = x.forn, cad = fo ? (fornLista || []).find(z => String(z.codigo) === String(fo.cod)) : null;
+    const cu = i => { const q = num(i.quantidade) * (num(i.fator) || 1); return q > 0 ? (num(i.valor_total) + num(i.ipi) + num(i.st) + num(i.frete) + num(i.outras)) / q : null; };
+    return '<div class="pc-colunas"><div><h3>Fornecedor</h3>' + (fo ? dl([['Fornecedor', R.nomeDeItem(fo.nome)], ['Código', fo.cod], ['De onde', fo.trocado ? 'definido no CRM' : 'do cadastro do FKN']]) : '<p class="vazio">Sem fornecedor: diga de quem se compra.</p>') +
+        '<p class="acoes"><button type="button" class="btn sec" data-acao="pc-forn" data-id="' + esc(x.codigo) + '">' + (fo ? 'Trocar o fornecedor' : 'Definir o fornecedor') + '</button></p></div>' +
+      '<div><h3>Cadastro do fornecedor</h3>' + (cad ? dl([['Prazo de entrega', cad.prazo_dias != null ? cad.prazo_dias + ' dia(s)' : ''], ['Pedido mínimo', cad.pedido_minimo != null ? R.moeda(cad.pedido_minimo) : ''],
+          ['Frete', cad.frete === 'cif' ? 'CIF' : cad.frete === 'fob' ? 'FOB' : cad.frete === 'cif_acima' ? 'CIF acima de ' + R.moeda(cad.frete_cif_acima) : cad.frete], ['Dias de pedido', (cad.dias_pedido || []).map(n => ['', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'][n]).join(', ')],
+          ['Pagamento', cad.pagamento], ['Contato', [cad.contato, cad.telefone, cad.email].filter(Boolean).join(' · ')]]) : '<p class="vazio">Sem prazo, mínimo e frete cadastrados (Compras → Fornecedores).</p>') + '</div></div>' +
+      '<h3>Últimas compras <small>pelas notas de compra</small></h3>' + (d.carregando ? '<p class="dica">Carregando…</p>' : (d.compras || []).length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Data</th><th>Nota</th><th>Fornecedor</th><th class="num">Quantidade</th><th class="num">Custo un.</th></tr></thead><tbody>' +
+        d.compras.map(i => '<tr><td>' + esc(dataBR(i.emitida_em)) + '</td><td>' + esc(i.numero || '') + '</td><td>' + esc(R.nomeDeItem(i.fornecedor_nome || '')) + '</td><td class="num">' + qtd(num(i.quantidade) * (num(i.fator) || 1)) + ' ' + esc(x.unidade || '') + '</td><td class="num">' + (cu(i) != null ? 'R$ ' + preco(cu(i)) : '—') + '</td></tr>').join('') +
+        '</tbody></table></div><p class="dica">Custo unitário com IPI, ST, frete e outras despesas da nota.</p>' : '<p class="vazio">Nenhuma nota de compra deste produto no CRM ainda.</p>');
+  }
+  function abaFoto(x) {
+    const u = x.foto ? st().fotoUrl(x.foto.caminho) : '', inf = x.info || {}, sg = sugs.find(z => z.codigo === x.codigo && z.situacao === 'sugerida');
+    const pdf = (cam, url, rot) => cam || url ? '<a class="btn sec" href="' + esc(cam ? st().fotoUrl(cam) : url) + '" target="_blank" rel="noopener noreferrer">📄 ' + rot + '</a>' : '';
+    return '<div class="pc-colunas"><div class="pc-foto grande">' + (u ? '<img src="' + esc(u) + '" alt="' + esc(nome(x)) + '">' : '<span class="pf-sem">sem foto ainda</span>') + '</div><div>' +
+      (podeFotos() && sg ? '<p class="aviso-notas">A IA achou uma sugestão para este produto. Confira antes de aprovar. <button type="button" class="btn" data-acao="pf-revisar" data-id="' + esc(x.codigo) + '">Conferir a sugestão</button></p>' : '') +
+      (podeFotos() && x.foto ? '<p class="dica">Foto de ' + esc(quando(x.foto.atualizado_em)) + (x.foto.fonte ? ' · ' + esc(x.foto.fonte) : '') + '</p>' : '') +
+      (pdf(inf.ficha_caminho, inf.ficha_url, 'Ficha técnica') || pdf(inf.fispq_caminho, inf.fispq_url, 'FISPQ') ? '<p class="acoes">' + pdf(inf.ficha_caminho, inf.ficha_url, 'Ficha técnica') + ' ' + pdf(inf.fispq_caminho, inf.fispq_url, 'FISPQ (segurança)') + '</p>' : '<p class="vazio">Sem ficha técnica nem FISPQ ainda.</p>') +
+      (podeFotos() ? '<p class="acoes"><button type="button" class="btn sec" data-acao="pf-buscar-um" data-id="' + esc(x.codigo) + '">Buscar foto e ficha (IA)</button> <button type="button" class="btn sec" data-acao="pf-subir" data-id="' + esc(x.codigo) + '">Subir foto</button> ' +
+        '<button type="button" class="btn sec" data-acao="pf-camera" data-id="' + esc(x.codigo) + '">Tirar foto</button> <button type="button" class="btn sec" data-acao="pf-info-editar" data-id="' + esc(x.codigo) + '">Editar a ficha</button>' +
+        (x.foto ? ' <button type="button" class="mini" data-acao="pf-foto-tirar" data-id="' + esc(x.codigo) + '">tirar a foto</button>' : '') + '</p>' : '') + '</div></div>';
+  }
+  function carregaDetalhe(cod) {
+    if (!podeFotos() || det.has(cod)) return;
+    det.set(cod, { carregando: true });
+    const s = st();
+    Promise.all([s.produtoDetalhe ? s.produtoDetalhe(cod).catch(() => ({})) : {}, s.estoqueMovs(cod, 12).catch(() => [])])
+      .then(([dd, movs]) => { det.set(cod, Object.assign({}, dd, { movs })); if (pc.aberto === cod) CRM.render(); });
+  }
+
+  CRM.telas.produtos = {
+    turmaSub: () => (pc.aberto ? 'produto' : modo()),
+    render() {
+      if (lista === null) { setTimeout(carrega, 0); return '<div class="cabecalho"><div><h1>Produtos</h1></div></div><div class="cartao"><p class="vazio">Carregando…</p></div>'; }
+      const x = pc.aberto ? prod(pc.aberto) : null;
+      if (x) return pagina(x);
+      const semFoto = podeFotos() ? lista.filter(z => !z.foto && z.disponivel > 0).length : 0;
+      return '<div class="cabecalho"><div><h1>Produtos</h1><p class="sub">pesquise pelo código, pela descrição ou pelo código de barras; clique para ver tudo do produto</p></div>' +
+        '<div class="acoes">' + (podeFotos() ? '<button type="button" class="btn sec" data-acao="pf-ir-fotos">Fotos e fichas' + (semFoto ? ' (' + semFoto + ' sem foto)' : '') + '</button>' : '') +
+        '<button type="button" class="btn sec" data-acao="pf-recarregar"' + (carregando ? ' disabled' : '') + '>Atualizar</button></div></div>' +
+        '<section class="cartao pc-busca">' + barra() + '</section><div data-pc-lista>' + resultado() + '</div>';
+    },
+    depois(c) {
+      if (pc.aberto) {
+        carregaDetalhe(pc.aberto);
+        if (pc.aba === 'vendas') clientes(c, pc.aberto);
+        return;
+      }
+      const conta = c.querySelector('[data-pc-conta]'); if (conta) conta.textContent = contagem();
+      const b = c.querySelector('[data-pc-busca]'), lst = c.querySelector('[data-pc-lista]'), ats = c.querySelector('[data-pc-atalhos]');
+      if (b && lst) {
+        b.addEventListener('input', () => { pc.busca = b.value; pc.limite = 100; lst.innerHTML = resultado(); if (ats) ats.innerHTML = atalhosHTML(); if (conta) conta.textContent = contagem(); });
+        b.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); const p0 = visiveis()[0]; if (p0) CRM.acoes['pf-abrir'](p0.codigo); } });
+      }
+      [['[data-pc-linha]', 'linha'], ['[data-pc-forn]', 'forn'], ['[data-pc-ordem]', 'ordem']].forEach(([sel, k]) => {
+        const e = c.querySelector(sel); if (e) e.addEventListener('change', () => { pc[k] = e.value; pc.limite = 100; CRM.render(); });
+      });
+    }
+  };
+  function formForn(cod) {
+    const x = prod(cod); if (!x) return;
+    const m = new Map();
+    (fornLista || []).filter(z => z.ativo !== false || (x.forn && String(z.codigo) === x.forn.cod)).forEach(z => m.set(String(z.codigo), z.nome));
+    X.fornecedoresDe(lista).forEach(z => { if (!m.has(z.cod)) m.set(z.cod, z.nome); });
+    CRM.abrirForm({ titulo: 'Fornecedor do produto', intro: nome(x) + ' (' + cod + '). Vale só no CRM; no FKN o cadastro continua como está.',
+      campos: [{ nome: 'fornecedor', rotulo: 'Fornecedor', tipo: 'select', largo: true, alfa: true, opcoes: [['', x.forn && x.forn.trocado ? '— voltar ao do FKN —' : '—']].concat([...m.entries()].map(([k, v]) => [k, R.nomeDeItem(v) + ' (' + k + ')'])) }],
+      valores: { fornecedor: (x.forn && x.forn.trocado && x.forn.cod) || '' },
+      aoSalvar: async v => { await st().trocarFornecedor(cod, v.fornecedor || null); CRM.toast(v.fornecedor ? 'Fornecedor definido.' : 'Volta a valer o fornecedor do FKN.'); lista = null; det.delete(cod); carrega(); } });
+  }
+  function formEmb(cod) {
+    const x = prod(cod); if (!x) return;
+    CRM.abrirForm({ titulo: 'Embalagem de ' + nome(x), intro: 'Quantas unidades (' + (x.unidade || 'UN') + ') vêm em cada embalagem. Vale para as notas de compra e para a conversão do estoque.',
+      campos: [{ nome: 'unidade', rotulo: 'Embalagem (ex.: CX, FD, PCT)', obrigatorio: true }, { nome: 'fator', rotulo: 'Contém quantas ' + (x.unidade || 'unidades'), tipo: 'number', obrigatorio: true }],
+      valores: { unidade: 'CX', fator: '' },
+      aoSalvar: async v => { const u = String(v.unidade).trim().toUpperCase(), f = Number(v.fator); if (!u || !(f > 0)) throw new Error('diga a embalagem e quanto ela contém'); await st().estoqueUnidadeSalvar(cod, u, f); det.delete(cod); CRM.toast('Embalagem guardada.'); CRM.render(); } });
+  }
+  Object.assign(CRM.acoes, {
+    'pf-abrir': id => { pc.aberto = base(id); CRM.estado.aba = 'produtos'; CRM.render(); raiz.scrollTo && raiz.scrollTo(0, 0); },
+    'pc-voltar': () => { pc.aberto = null; CRM.render(); },
+    'pc-aba': id => { pc.aba = id; CRM.render(); },
+    'pc-modo': id => { try { raiz.localStorage.setItem(chaveModo(), id); } catch (e) { /* fica só nesta sessão */ } pc.limite = 100; CRM.render(); },
+    'pc-atalho': id => { pc.atalho = id; pc.limite = 100; CRM.render(); },
+    'pc-mais': () => { pc.limite += 100; CRM.render(); },
+    'pc-forn': id => formForn(id),
+    'pc-emb': id => formEmb(id),
+    'pc-ir-fiscal': () => { CRM.estado.aba = 'fiscal'; CRM.render(); }
+  });
+
+  CRM.produtos = { miniatura, abrirFicha, escolher, telaFotos, depoisFotos, garanteFotos, recarregar: () => { lista = null; det.clear(); }, abrir: cod => CRM.acoes['pf-abrir'](cod) };
 })(typeof window !== 'undefined' ? window : globalThis);

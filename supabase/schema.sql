@@ -2424,7 +2424,7 @@ returns table (codigo text, descricao text, unidade text, localizacao text, linh
   fisico numeric, reservado numeric, disponivel numeric, a_caminho numeric, preco_venda numeric, custo numeric, fator numeric, base text)
 -- plpgsql de propósito: como função SQL o mesmo corpo levava 500 ms (2.288 produtos); assim, 45 ms
 language plpgsql stable security definer set search_path = public as $$
-declare vc boolean := public.crm_eh_membro() or public.crm_eh_comprador(); -- custo: equipe de vendas (como no FKN) e comprador; logística não
+declare vc boolean := public.crm_eh_gestor() or public.crm_eh_comprador(); -- custo: administrador, gestora e comprador (20/10/2026: a vendedora não vê; logística também não)
 begin
   if not public.crm_eh_ativo() then return; end if;
   return query
@@ -2553,6 +2553,31 @@ revoke all on function public.crm_pedidos_atualizar() from public, anon;
 grant execute on function public.crm_pedidos_atualizar() to authenticated, service_role;
 
 -- Grava o pedido (novo ou em aberto): equipe de vendas, cliente da carteira. Só a gestora escolhe outro(a) vendedor(a).
+-- Custo fora da vista da vendedora (20/10/2026, Anderson: "preços de custo as vendedoras não enxergam"; muda a decisão
+-- de 16/10, quando a equipe de vendas via custo e margem como no FKN). Custo e margem: administrador, gestora e comprador.
+-- 1) O pedido como cada um pode ver: sem o custo dos itens para quem não é gestora/administrador/comprador.
+create or replace function public.crm_pedido_saida(r public.crm_pedidos) returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if public.crm_eh_gestor() or public.crm_eh_comprador() then return to_jsonb(r); end if;
+  return to_jsonb(r) || jsonb_build_object('itens',
+    coalesce((select jsonb_agg(o.i - 'custo' order by o.n) from jsonb_array_elements(r.itens) with ordinality o(i, n)), '[]'::jsonb));
+end;
+$$;
+revoke all on function public.crm_pedido_saida(public.crm_pedidos) from public, anon;
+grant execute on function public.crm_pedido_saida(public.crm_pedidos) to authenticated;
+-- 2) A lista de pedidos da tela (os em aberto, em separação ou separados e os dos últimos dias), pela função: a
+-- vendedora deixa de ler a tabela direto (a política "ler" fica só com gestora, administrador, logística e comprador).
+create or replace function public.crm_pedidos_ler(p_desde timestamptz) returns setof jsonb
+language sql stable security definer set search_path = public as $$
+  select public.crm_pedido_saida(p) from public.crm_pedidos p
+   where p.id in (select public.crm_pedidos_meus())
+     and (p.situacao in ('aberto', 'separacao', 'separado') or p.criado_em >= p_desde)
+   order by p.criado_em desc, p.id;
+$$;
+revoke all on function public.crm_pedidos_ler(timestamptz) from public, anon;
+grant execute on function public.crm_pedidos_ler(timestamptz) to authenticated;
+-- 3) As funções que gravam o pedido (abaixo) devolvem o pedido por public.crm_pedido_saida.
 create or replace function public.crm_pedido_gravar(p jsonb) returns jsonb language plpgsql security definer set search_path = public as $$
 declare r public.crm_pedidos; emp uuid := nullif(p->>'empresa_id', '')::uuid; its jsonb; vp numeric; fr numeric; vend uuid; pid uuid := nullif(p->>'id', '')::uuid;
 begin
@@ -2584,7 +2609,7 @@ begin
   end if;
   perform public.crm_pedidos_atualizar();
   select * into r from public.crm_pedidos where id = r.id;
-  return to_jsonb(r);
+  return public.crm_pedido_saida(r);
 end;
 $$;
 revoke all on function public.crm_pedido_gravar(jsonb) from public, anon;
@@ -2621,7 +2646,7 @@ begin
   end if;
   perform public.crm_pedidos_atualizar();
   select * into r from public.crm_pedidos where id = p_id;
-  return to_jsonb(r);
+  return public.crm_pedido_saida(r);
 end;
 $$;
 revoke all on function public.crm_pedido_situacao(uuid, text, text) from public, anon;
@@ -2644,7 +2669,7 @@ begin
       liberado_por = case when p_liberar then auth.uid() end, liberado_em = case when p_liberar then now() end, atualizado_em = now() where id = p_id;
   end if;
   select * into r from public.crm_pedidos where id = p_id;
-  return to_jsonb(r);
+  return public.crm_pedido_saida(r);
 end;
 $$;
 revoke all on function public.crm_pedido_liberar(uuid, boolean, boolean) from public, anon;
@@ -2659,7 +2684,7 @@ begin
   update public.crm_pedidos set comentarios = comentarios || jsonb_build_array(jsonb_build_object('quando', now(), 'por', auth.uid(),
     'nome', (select nome from public.crm_usuarios where user_id = auth.uid()), 'texto', left(btrim(p_texto), 2000))), atualizado_em = now()
    where id = p_id returning * into r;
-  return to_jsonb(r);
+  return public.crm_pedido_saida(r);
 end;
 $$;
 revoke all on function public.crm_pedido_comentar(uuid, text) from public, anon;
@@ -2693,7 +2718,7 @@ begin
   update public.crm_pedidos set itens = jsonb_set(itens, array[p_idx::text, 'separado'], to_jsonb(coalesce(p_ok, false)), false), atualizado_em = now()
    where id = p_id and situacao = 'separacao' and p_idx >= 0 and p_idx < jsonb_array_length(itens) returning * into r;
   if r.id is null then raise exception 'pedido fora da separação'; end if;
-  return to_jsonb(r);
+  return public.crm_pedido_saida(r);
 end;
 $$;
 revoke all on function public.crm_pedido_separar_item(uuid, integer, boolean) from public, anon;
@@ -2720,7 +2745,7 @@ begin
     atualizado_por = auth.uid(), atualizado_em = now()
    where p.id = p_id and p.situacao in ('aberto', 'separacao', 'separado') returning * into r;
   if r.id is null then raise exception 'o pedido não está em aberto nem em separação'; end if;
-  return to_jsonb(r);
+  return public.crm_pedido_saida(r);
 end;
 $$;
 revoke all on function public.crm_pedido_faturar(uuid, uuid) from public, anon;
@@ -3496,3 +3521,16 @@ language sql stable set search_path = public as $$
   select coalesce(sum(custo_usd), 0), coalesce(sum(custo_usd) filter (where tela = 'fotos'), 0)
     from public.crm_assistente_uso where criado_em >= p_desde
 $$;
+
+-- Códigos de barras de cada produto para a pesquisa da tela Produtos (20/10/2026): o do cadastro fiscal e os das notas
+-- de compra. Só o código de barras sai daqui (as tabelas de origem continuam só do administrador e do comprador).
+create or replace function public.crm_produtos_eans() returns table (codigo text, ean text)
+language sql stable security definer set search_path = public as $$
+  select distinct x.codigo, x.ean from (
+    select f.codigo, f.gtin ean from public.crm_fiscal_produtos f where f.gtin ~ '^\d{8,14}$'
+    union all
+    select i.codigo, i.ean from public.crm_compra_itens i where i.codigo is not null and i.ean ~ '^\d{8,14}$'
+  ) x where x.ean !~ '^0+$' and (select public.crm_eh_ativo());
+$$;
+revoke all on function public.crm_produtos_eans() from public, anon;
+grant execute on function public.crm_produtos_eans() to authenticated;

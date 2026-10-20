@@ -186,10 +186,14 @@
   const itensParaRepetir = (pedido, itensNota) => (pedido ? (pedido.itens || []).map(i => ({ codigo: i.codigo || null, descricao: i.descricao, unidade: i.unidade || null, quantidade: num(i.quantidade), preco: num(i.preco), desconto: num(i.desconto) }))
     : (itensNota || []).filter(i => ehVendaCfop(i.cfop)).map(i => ({ codigo: i.codigo || null, descricao: i.descricao, unidade: i.unidade || null, quantidade: num(i.quantidade), preco: num(i.valor_unitario), desconto: 0 })));
 
+  // Para quem não vê a margem (a vendedora): o preço abaixo da tabela A é o sinal de que o pedido pode travar (a margem
+  // mínima de 23% é a da tabela A).
+  const abaixoDaTabela = l => !!(l && (l.faixa === 'NEG' || l.faixa === 'ABAIXO'));
+
   const FRETE_CONTA = [['0', '0-Remetente (CIF)'], ['1', '1-Destinatário (FOB)'], ['2', '2-Terceiros'], ['9', '9-Sem frete']];
 
   const P = { TABELA_PADRAO, PLANOS_PADRAO, MARGEM_MINIMA, margemMinima, apuraComissao, totalComAjustes, itensParaRepetir, ehVendaCfop, FAIXAS, FRETE_CONTA, ROTULO_BLOQUEIO, tabelaDe, planosDe, planoDoUsuario, precoLiq, totalItem, precoDaFaixa, faixaDoPreco, rotuloFaixa,
-    margem, sobreTabela, linha, totais, bloqueiosAbertos, situacao, bolao, ultimasCompras, procura, itensDaProposta, entregaDoCliente, entregaTexto };
+    margem, sobreTabela, abaixoDaTabela, linha, totais, bloqueiosAbertos, situacao, bolao, ultimasCompras, procura, itensDaProposta, entregaDoCliente, entregaTexto };
   raiz.CRMPedidos = P;
   if (typeof module !== 'undefined') module.exports = P;
 })(typeof window !== 'undefined' ? window : globalThis);
@@ -210,9 +214,10 @@
   const ehLog = () => CRM.papel() === 'logistica';
   const ehOp = () => ehLog() || CRM.ehGestor();                       // logística ou gestora/administrador
   const ehVenda = () => ['admin', 'gestor', 'vendedor'].indexOf(CRM.papel()) !== -1;
-  // custo e margem: equipe de vendas (como no FKN, para saber se há espaço na negociação) e comprador; a logística não vê
-  const veCusto = () => ehVenda() || CRM.ehComprador();
-  const veMargem = () => ehVenda();
+  // custo e margem: administrador, gestora e comprador (20/10/2026, Anderson: "preços de custo as vendedoras não
+  // enxergam"; antes a equipe de vendas via, como no FKN). O banco já não manda o custo para a vendedora nem para a logística.
+  const veCusto = () => CRM.ehGestor() || CRM.ehComprador();
+  const veMargem = () => CRM.ehGestor();
 
   let peds = null, disp = [], faltas = [], boloes = [], carregando = false;
   let porCod = new Map();
@@ -571,8 +576,9 @@
         (CRM.produtos ? '<button type="button" class="btn sec pd-procurar" data-acao="pd-procurar-foto" title="Procurar no estoque com foto, disponível e preço">🔍 Procurar com foto</button>' : '') +
         '<div class="pd-info" id="pdInfo">' + (dd && CRM.produtos ? '<button type="button" class="pd-info-foto" data-acao="pf-ficha" data-id="' + esc(dd.codigo) + '" title="Ver a ficha do produto">' + CRM.produtos.miniatura(dd.codigo) + '</button>' : '') + (dd ? 'Disponível <strong class="' + (num(dd.disponivel) < num(l.quantidade) ? 'neg' : '') + '">' + qtd(Math.floor(num(dd.disponivel) * 1000) / 1000) + ' ' + esc(dd.unidade || '') + '</strong>' +
           (dd.a_caminho ? ' · a caminho ' + qtd(dd.a_caminho) : '') + ' · preço tabela R$ ' + preco(dd.preco_venda) + ' · líquido R$ ' + preco(lin.precoLiq) + ' · total R$ ' + preco(lin.total) +
-          ' · faixa ' + esc(P.rotuloFaixa(lin.faixa)) + (lin.comissao != null ? ' · comissão ' + preco(lin.comissao) + '%' : '') + (dd.custo != null ? ' · custo R$ ' + preco(dd.custo) : '') + (lin.margem != null ? ' · margem <strong class="' + (lin.abaixoMinimo ? 'neg' : '') + '">' + pct(lin.margem) + '</strong>' +
-            (lin.abaixoMinimo ? ' <strong class="neg">abaixo da margem mínima de ' + pct(P.margemMinima(E().cfg)) + ': o pedido fica bloqueado até a gestora liberar</strong>' : '') : '') : 'Escolha o produto: o CRM mostra o disponível e o preço da tabela.') + '</div>' +
+          ' · faixa ' + esc(P.rotuloFaixa(lin.faixa)) + (lin.comissao != null ? ' · comissão ' + preco(lin.comissao) + '%' : '') + (veCusto() && dd.custo != null ? ' · custo R$ ' + preco(dd.custo) : '') + (veMargem() && lin.margem != null ? ' · margem <strong class="' + (lin.abaixoMinimo ? 'neg' : '') + '">' + pct(lin.margem) + '</strong>' +
+            (lin.abaixoMinimo ? ' <strong class="neg">abaixo da margem mínima de ' + pct(P.margemMinima(E().cfg)) + ': o pedido fica bloqueado até a gestora liberar</strong>' : '') : '') +
+          (!veMargem() && P.abaixoDaTabela(lin) ? ' <strong class="neg">abaixo da tabela A: o pedido pode ficar bloqueado até a gestora liberar</strong>' : '') : 'Escolha o produto: o CRM mostra o disponível e o preço da tabela.') + '</div>' +
         (dd && num(dd.preco_venda) > 0 ? '<div class="pd-faixas">Tabela: ' + P.FAIXAS.slice().reverse().map(fx => '<button type="button" class="mini" data-acao="pd-faixa" data-id="' + fx + '" title="' + (tab[fx] >= 0 ? '+' : '') + tab[fx] + '%">' + P.rotuloFaixa(fx) + ' ' + preco(P.precoDaFaixa(dd.preco_venda, fx, tab)) + '</button>').join('') + '</div>' : '') +
         '<p class="acoes"><button type="button" class="btn" data-acao="pd-item-salvar">' + (x.sel != null ? 'Salvar item' : 'Inserir item') + '</button> ' + (x.sel != null || l.codigo ? '<button type="button" class="btn sec" data-acao="pd-item-cancelar">Cancelar item</button> ' : '') +
         (x.empresa_id ? '<button type="button" class="btn sec" data-acao="pd-ultimas">Últimas compras</button> <button type="button" class="btn sec" data-acao="pd-importar-ultimas">Importar últimas compras</button> <button type="button" class="btn sec" data-acao="pd-repetir" title="Repetir um pedido ou uma nota anterior do cliente, com os preços dela">Repetir pedido</button> ' : '') +

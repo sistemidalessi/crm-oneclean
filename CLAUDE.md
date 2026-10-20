@@ -1176,7 +1176,8 @@ BLOQUEADO/liberado, bloqueios ESTOQUE / ATRASO DUPL / SEM ENTRADA, lista de sepa
   separação primeiro. A reserva do FKN (pend. cliente) **não** entra: no paralelo todo pedido deve passar pelo CRM.
 - **Bloqueios:** ESTOQUE (falta), ATRASO (duplicata vencida do cliente), SEM ENTRADA (pagamento "à vista/antecipado/pix/
   transferência/depósito" sem "Entrada recebida"), PREÇO (**margem do item abaixo de 23%**, `cfg.margem_minima`, ou sem preço; sem custo, abaixo da faixa negativa;
-  `cfg.pedido_trava_preco = false` desliga). A vendedora vê a margem em vermelho ao digitar.
+  `cfg.pedido_trava_preco = false` desliga). A gestora vê a margem em vermelho ao digitar; a vendedora (20/10, sem custo nem
+  margem) vê "abaixo da tabela A: o pedido pode ficar bloqueado" (`P.abaixoDaTabela`: faixa neg./abaixo).
 - Localização no galpão: vazia no FKN (ainda não precisou); o bolão ordena por linha, família e nome até ser preenchida.
 - **Papel logística** (`crm_eh_logistica`): só a aba Pedidos (Pedidos, Consultar estoque, Separação, Faltas); não vê
   cliente nem financeiro (endereço e telefone vão no próprio pedido, `dados`). O comprador vê Consultar estoque e Faltas.
@@ -1430,7 +1431,7 @@ https://claude.ai/artifact/AkJoPA2gw7i3Wz99fcDY7p: Produtos, Ficha, Buscar foto,
   "Ver ficha" e "+ Pedido". Busca por todas as palavras em qualquer ordem (nome, código, marca, linha), filtro de linha,
   "Só com estoque" (com busca, mostra também o que está em falta), ordem. **Sem custo de compra, conferência, notas nem
   fornecedor.** A **ficha** (janela) mostra foto, disponível/reservado/a caminho, descrição, especificações, os PDFs
-  (ficha técnica e FISPQ), preço por faixa A–D com a margem (a vendedora vê margem, decisão de 16/10) e a venda de 90 dias;
+  (ficha técnica e FISPQ), preço por faixa A–D (a margem só para administrador, gestora e comprador: decisão de 20/10, que trocou a de 16/10) e a venda de 90 dias;
   "+ Adicionar ao pedido" põe o produto na linha de digitação do pedido aberto (ou de um novo: `CRM.pedidos.incluirItem`).
 - **O que faltava da simulação (19/10, noite, pedido do Anderson):** na ficha, "📲 Mandar foto e preço pelo WhatsApp"
   (`wa.me/?text=`: a vendedora escolhe o contato; nome, marca, descrição, preço da tabela A e da caixa, links da foto e da
@@ -1489,6 +1490,35 @@ https://claude.ai/artifact/AkJoPA2gw7i3Wz99fcDY7p: Produtos, Ficha, Buscar foto,
   IA do mês até aqui: US$ 1,88 (limite da chave US$ 10).
 - **Decisão do Anderson (19/10, noite):** rodar o lote completo em 20/10, depois de aumentar o limite da chave no console da
   Anthropic. Os 1.711 a ~US$ 0,027 ≈ US$ 46 e ~3 horas com cinco de cada vez (tela aberta, computador sem dormir).
+
+## Tela Produtos e custo fora da vista da vendedora (20/10/2026, simulação aprovada pelo Anderson)
+Simulação: https://claude.ai/artifact/7zCCPrur1ca1nNKmTSsmpF. "Aprovado, pode fazer com a sua sugestão de quem vê o quê (onde
+preços de custo as vendedoras não enxergam)".
+- **Tela Produtos** (`produtos.js`, aba `produtos`): o Cadastro → Produto do FKN. Fica em **Vendas** para quem vende e em
+  **Compras e estoque** para quem tem aquela área (administrador e comprador; `app.js`, `temCompras`). Pesquisa por código,
+  descrição ou **código de barras** (`crm_produtos_eans`: só o código de barras, das notas de compra e do fiscal; pode bipar;
+  Enter abre o 1º), filtros Linha, Fornecedor (admin/comprador) e Ordem (A–Z padrão, código, mais vendidos, mais estoque,
+  menor margem para quem vê custo), atalhos com contagem (Todos, Com estoque, Em falta, Mais vendidos; para admin/comprador
+  No mínimo, Sem foto, Sem fornecedor, Inativos; Sem NCM só admin). **Lista ou grade** lembrada por pessoa
+  (`crm_produtos_modo_<user>` no navegador): a vendedora começa na grade, os demais na lista.
+- **Página do produto**: anterior/próximo da lista na tela, foto, selos, + Pedido, WhatsApp, e as abas **Geral** (identificação,
+  embalagens com a caixa ".1" junto, texto para a vendedora), **Preços** (tabela Padrão neg.–F, caixa; custo, margem,
+  custo médio e histórico só para quem vê custo), **Estoque** (físico, reservado, disponível, a caminho; mín./máx., última
+  entrada/saída e movimentos para admin/comprador), **Vendas** (90 dias e quem compra, pela carteira), **Fiscal** (só admin:
+  NCM, CEST, origem, a regra), **Fornecedor** (admin/comprador: troca no CRM, cadastro, últimas notas de compra com custo
+  unitário) e **Foto e ficha**. Descrição, preço e mínimo continuam vindo do FKN; no CRM se edita a ficha, o fornecedor e as
+  embalagens (`crm_estoque_unidades`). Regras puras: `cadastro`, `pesquisa`, `atalhos`, `selosDe`, `vizinhos`, `embalagens`
+  (`testes/produtos-cadastro.test.js`); `Supa.produtoDetalhe` (saldo, histórico do custo, compras, embalagens, cada parte vazia
+  se a RLS não deixar).
+- **Custo e margem só para administrador, gestora e comprador** (muda a decisão de 16/10, quando a equipe de vendas via
+  custo e margem como no FKN). No banco: `crm_estoque_disponivel` manda o custo só para `crm_eh_gestor()`/comprador; os pedidos
+  saem por `crm_pedido_saida(r)` (sem o `custo` dos itens para os outros), lidos por `crm_pedidos_ler(p_desde)` (dados.js e a
+  ferramenta `pedidos` do `crm-assistente` v7) e devolvidos assim por gravar/situação/liberar/comentar/separar/faturar. A
+  margem mínima continua conferida no banco (o bloqueio PREÇO). Tabelas de custo (`crm_estoque`, `crm_estoque_mov`,
+  `crm_estoque_saldo`, `crm_custo_historico`, `crm_compra_itens`) já eram só admin/comprador. Conferido como vendedora e como
+  gestora com `set local role authenticated` + `request.jwt.claims`.
+- **Parte B (depois que a tela nova publicar):** a política `ler` de `crm_pedidos` fica só gestora/admin/logística/comprador
+  (a vendedora lê pela função). `revoke` das funções novas de `public, anon` pelo Anderson no SQL Editor.
 
 ## NF-e emitida pelo CRM — Fase 4 da saída do FKN (16/10/2026, pedido do Anderson)
 
