@@ -93,3 +93,25 @@ test('guia: aviso da análise de compras do dia (admin e comprador)', () => {
   assert.strictEqual(T.guia({ analise: { pronta: false, gerando: false } }).length, 0);
   assert.strictEqual(T.guia({}).length, 0, 'sem papel de compra, nada');
 });
+
+test('agenda do Clean: o número do topo é a lista "Pra fazer"; tarefas são as de quem está logado', () => {
+  const alEquipe = { atrasadas: [1, 2, 3, 4], deHoje: new Array(99).fill(1), recompra: [1, 2], negociosParados: [1] };
+  const alMeu = { atrasadas: [], deHoje: [1, 2], leadsSemAtendimento: [] };
+  const g = T.guia({ vendas: true, al: alEquipe, alMeu, alEquipe, resumo: { compras_sefaz: { desconhecidos: 64 } }, gestor: true, admin: true, analise: { pronta: true } });
+  const fazer = T.praFazer(g);
+  assert.deepStrictEqual(fazer.map(x => x.id), ['dfe-desc', 'hoje', 'ia-compras']);
+  assert.strictEqual(T.contagem(g), fazer.length);
+  assert.strictEqual(g.find(x => x.id === 'hoje').texto, '2 tarefas suas para hoje');
+  assert.strictEqual(g.find(x => x.id === 'hoje').sub, 'minhas');
+  const eq = g.find(x => x.id === 'eq-tarefas');
+  assert.deepStrictEqual([eq.nivel, eq.texto, eq.sub], ['info', 'Equipe: 4 tarefas atrasadas e 99 para hoje', 'equipe']);
+  assert.ok(!g.some(x => x.id === 'atrasadas'), 'as 4 atrasadas são da equipe, não de quem está logado');
+  // a vendedora não vê a linha da equipe
+  assert.ok(!T.guia({ vendas: true, al: alMeu, alMeu, alEquipe: null }).some(x => x.id === 'eq-tarefas'));
+});
+
+test('ordem da agenda: urgente antes; no mesmo nível, o da tela aberta primeiro', () => {
+  const l = [{ id: 'a', nivel: 'atencao', aba: 'compras' }, { id: 'b', nivel: 'atencao', aba: 'agenda' }, { id: 'c', nivel: 'urgente', aba: 'estoque' }];
+  assert.deepStrictEqual(T.ordemAgenda(l, 'agenda').map(x => x.id), ['c', 'b', 'a']);
+  assert.deepStrictEqual(T.ordemAgenda(l, 'compras').map(x => x.id), ['c', 'a', 'b']);
+});

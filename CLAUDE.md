@@ -1272,6 +1272,17 @@ e círculo); recortados sem fundo com o rembg (isnet) em `assets/turma/<id>.webp
   `crm_turma_marcas` (RLS: cada um só as suas; vale em qualquer computador). Marca de aviso que sumiu é apagada só depois
   que os dados e o resumo carregaram (assim o aviso que volta outro dia aparece). `revoke` de anon da tabela fica para o
   SQL Editor (o conector cai; sem política para anon, a RLS já barra).
+- **O Clean é uma agenda (20/10, Anderson: "o Clean está falando 3 coisas… quando eu abro, cadê as 3? … tem muito mais
+  do que 3 coisas… tem que funcionar perfeitamente como se fosse uma agenda").** Causa: o número do topo contava só
+  urgente + atenção, mas o painel listava tudo junto (com os informativos de recompra, sem contato e parados) e, em cima,
+  o especialista da tela com "nenhuma conta vencida"; e as "99 tarefas para hoje" eram da **equipe toda** (a visão do topo),
+  não de quem estava logado. Agora: **"Pra fazer (N)"** = exatamente o N do topo (`praFazer`, `ordemAgenda`: urgente antes,
+  a tela aberta primeiro, com a etiqueta "nesta tela"); **"Para acompanhar"** (informativos, "não entram na conta");
+  tarefas atrasadas/de hoje e leads são **os de quem está logado** (`alMeu`, "2 tarefas suas para hoje") e abrem
+  Atividades filtrada nele na semana de hoje; para gestor(a)/admin, a equipe vira uma linha em "Para acompanhar"
+  ("Equipe: 4 tarefas atrasadas e 99 para hoje", abre Atividades da equipe). O especialista da tela saiu do topo do painel
+  e foi para a conversa ("Nesta tela quem responde é …"). Testes em `testes/turma.test.js`; conferido no navegador.
+  O sino (🔔) continua com a conta própria dele (avisos de negócio/tarefa), separado do Clean.
 - **⟳ Atualizar** na barra de cima (19/10, pedido do Anderson): recarrega a página (os dados e a versão mais nova).
 
 ## Comprador sênior (17–18/10/2026, pedido do Anderson: "vamos começar o comprador sênior")

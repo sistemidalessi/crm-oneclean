@@ -27,15 +27,20 @@
   const saudacao = hora => (hora < 5 ? 'Boa noite' : hora < 12 ? 'Bom dia' : hora < 18 ? 'Boa tarde' : 'Boa noite');
 
   // O guia do dia: [{ id, nivel, texto, aba, sub, mascote }], do mais urgente para o menos.
-  // c = { papel, vendas, al, resumo, boletos, fkn: [{arquivo}], recusas, vigiasParados, admin, gestor, op, comprador }
+  // c = { papel, vendas, al, alMeu, alEquipe, resumo, boletos, fkn: [{arquivo}], recusas, vigiasParados, admin, gestor, op, comprador }
+  // 20/10/2026 (Anderson: "o Clean fala 3 coisas e quando eu abro, cadê as 3? … tem que funcionar como uma agenda"):
+  // tarefas e leads são os DE QUEM ESTÁ LOGADO (alMeu); o da equipe vai para a gestora só como acompanhamento.
   function guia(c) {
     const it = [], poe = (id, nivel, texto, aba, sub, mascote) => it.push({ id, nivel, texto, aba, sub: sub || null, mascote: mascote || null });
-    const al = c.al || {}, r = c.resumo || {}, n = a => (a || []).length;
+    const al = c.al || {}, meu = c.alMeu || al, r = c.resumo || {}, n = a => (a || []).length;
     if (c.vendas) {
       if (c.boletos) poe('boletos', 'urgente', plural(c.boletos, 'cliente com boleto atualizado para mandar', 'clientes com boleto atualizado para mandar'), 'fila', null, 'cobranca');
-      if (n(al.atrasadas)) poe('atrasadas', 'urgente', plural(n(al.atrasadas), 'tarefa atrasada', 'tarefas atrasadas'), 'inicio');
-      if (n(al.deHoje)) poe('hoje', 'atencao', plural(n(al.deHoje), 'tarefa para hoje', 'tarefas para hoje'), 'inicio');
-      if (n(al.leadsSemAtendimento)) poe('leads', 'atencao', plural(n(al.leadsSemAtendimento), 'lead sem atendimento', 'leads sem atendimento'), 'fila');
+      if (n(meu.atrasadas)) poe('atrasadas', 'urgente', plural(n(meu.atrasadas), 'tarefa sua atrasada', 'tarefas suas atrasadas'), 'agenda', 'minhas');
+      if (n(meu.deHoje)) poe('hoje', 'atencao', plural(n(meu.deHoje), 'tarefa sua para hoje', 'tarefas suas para hoje'), 'agenda', 'minhas');
+      if (n(meu.leadsSemAtendimento)) poe('leads', 'atencao', plural(n(meu.leadsSemAtendimento), 'lead seu sem atendimento', 'leads seus sem atendimento'), 'fila');
+      const eq = c.gestor ? c.alEquipe : null;
+      if (eq && (n(eq.atrasadas) || n(eq.deHoje))) poe('eq-tarefas', 'info', 'Equipe: ' + [n(eq.atrasadas) ? plural(n(eq.atrasadas), 'tarefa atrasada', 'tarefas atrasadas') : '',
+        n(eq.deHoje) ? plural(n(eq.deHoje), 'para hoje', 'para hoje') : ''].filter(Boolean).join(' e '), 'agenda', 'equipe');
       if (n(al.recompra)) poe('recompra', 'info', plural(n(al.recompra), 'cliente no ritmo de recompra', 'clientes no ritmo de recompra'), 'fila');
       if (n(al.clientesSemContato)) poe('semcontato', 'info', plural(n(al.clientesSemContato), 'cliente sem contato há tempo', 'clientes sem contato há tempo'), 'fila');
       if (n(al.negociosParados)) poe('parados', 'info', plural(n(al.negociosParados), 'negócio parado', 'negócios parados'), 'funil');
@@ -73,8 +78,13 @@
     }
     return it.sort((a, b) => NIVEL[a.nivel] - NIVEL[b.nivel]);
   }
-  // Selo do principal: só o que pede ação (urgente + atenção).
-  const contagem = itens => (itens || []).filter(x => x.nivel !== 'info').length;
+  // Selo do principal: só o que pede ação (urgente + atenção) — exatamente a lista "Pra fazer" do painel;
+  // os informativos ficam em "Para acompanhar" e não entram na conta.
+  const praFazer = itens => (itens || []).filter(x => x.nivel !== 'info');
+  const contagem = itens => praFazer(itens).length;
+  // a ordem da agenda: urgente antes; no mesmo nível, o da tela aberta primeiro
+  const ordemAgenda = (itens, aba) => (itens || []).map((x, i) => [x, i])
+    .sort((a, b) => NIVEL[a[0].nivel] - NIVEL[b[0].nivel] || (b[0].aba === aba) - (a[0].aba === aba) || a[1] - b[1]).map(x => x[0]);
   // O que o especialista fala na tela: os itens do guia daquela tela (a sub-aba primeiro) ou a fala de "tudo em dia".
   function falasDaTela(itens, aba, sub, max) {
     const daTela = (itens || []).filter(x => x.aba === aba);
@@ -102,7 +112,7 @@
     return { visiveis, marcados, vencidas };
   }
 
-  const T = { especialista, saudacao, guia, contagem, falasDaTela, aplicaMarcas, numDe, NIVEL };
+  const T = { especialista, saudacao, guia, contagem, praFazer, ordemAgenda, falasDaTela, aplicaMarcas, numDe, NIVEL };
   if (typeof module !== 'undefined' && module.exports) { module.exports = T; return; }
   raiz.CRMTurma = T;
 
@@ -174,8 +184,11 @@
   }
   function guiaBruto(al) {
     const eu = E().eu || {};
+    const D = E().D, R = raiz.CRMRegras;
+    const meu = D && E().ix ? R.alertas(D, E().ix, E().cfg, CRM.hoje(), CRM.meuId()) : al;
+    const equipe = CRM.ehGestor() && D && E().ix ? R.alertas(D, E().ix, E().cfg, CRM.hoje(), null) : null;
     return guia({
-      vendas: !CRM.foraDeVendas(), al, resumo,
+      vendas: !CRM.foraDeVendas(), al, alMeu: meu, alEquipe: equipe, resumo,
       boletos: CRM.cobranca && !CRM.foraDeVendas() ? CRM.cobranca.paraFila().length : 0,
       gestor: CRM.ehGestor(), admin: CRM.ehAdmin(), comprador: CRM.ehComprador(), op: CRM.ehLogistica() || CRM.ehGestor(),
       fkn: CRM.lembreteFkn ? CRM.lembreteFkn() : [], recusas: CRM.recusasFkn ? CRM.recusasFkn() : [],
@@ -215,11 +228,11 @@
     situacaoChat();
   }
   function fechaPainel() { painelAberto = false; const p = $('#turmaPainel'); if (p) p.hidden = true; }
-  function itemHtml(x) {
+  function itemHtml(x, aba) {
     const m = x.mascote || especialista(cfgT, x.aba, x.sub);
     const quando = x.marca ? (x.marca.tipo === 'amanha' ? 'volta amanhã' : 'resolvido') : '';
     return '<div class="turma-linha' + (x.marca ? ' marcado' : '') + '"><button type="button" class="turma-item ' + x.nivel + '" data-acao="turma-ir" data-id="' + esc(x.aba + (x.sub ? ':' + x.sub : '')) + '">' +
-      '<img src="' + esc(img(m, true)) + '" alt="">' + '<span>' + esc(x.texto) + (quando ? ' <small>(' + quando + ')</small>' : '') + '</span><b aria-hidden="true">›</b></button>' +
+      '<img src="' + esc(img(m, true)) + '" alt="">' + '<span>' + esc(x.texto) + (quando ? ' <small>(' + quando + ')</small>' : '') + (aba && x.aba === aba && !x.marca ? ' <small class="turma-aqui">nesta tela</small>' : '') + '</span><b aria-hidden="true">›</b></button>' +
       '<span class="turma-marcar">' + (x.marca
         ? '<button type="button" class="mini" data-acao="turma-desmarcar" data-id="' + esc(x.id) + '" title="Voltar a mostrar como pendente">↺</button>'
         : '<button type="button" class="mini" data-acao="turma-marcar" data-id="resolvido|' + esc(x.id) + '" title="Resolvido: some até aparecer coisa nova">✓</button>' +
@@ -251,7 +264,7 @@
     const st = CRM.store(), q = quemResponde();
     if (!st || !st.assistente) { el.innerHTML = '<p class="dica">A conversa com a IA funciona com o sistema ligado ao banco.</p>'; return; }
     if (!chat.montado) {
-      el.innerHTML = '<h4>Pergunte para a turma</h4><div class="turma-msgs"></div>' +
+      el.innerHTML = '<h4>Pergunte para a turma</h4><p class="turma-quem"></p><div class="turma-msgs"></div>' +
         '<form class="turma-pergunta"><textarea rows="2" maxlength="2000" aria-label="Sua pergunta"></textarea><button type="submit" class="btn">Perguntar</button></form>' +
         '<p class="turma-chat-rodape"><span data-turma-sit></span> <button type="button" class="link" data-acao="turma-nova">nova conversa</button></p>';
       const f = el.querySelector('form'), ta = el.querySelector('textarea');
@@ -260,6 +273,9 @@
       chat.montado = true;
     }
     const ta = el.querySelector('textarea');
+    const quem = el.querySelector('.turma-quem');
+    // o especialista da tela aberta responde aqui (rosto, nome e a área dele)
+    if (quem) quem.innerHTML = q.id && q.id !== cfgT.principal ? '<img src="' + esc(img(q.id, true)) + '" alt=""> Nesta tela quem responde é <strong>' + esc(q.nome) + '</strong>' + (q.papel ? ' <small>(' + esc(q.papel) + ')</small>' : '') : '';
     ta.placeholder = 'Pergunte ao ' + q.nome + '… (Enter envia)';
     ta.disabled = chat.enviando || (chat.situacao && !chat.situacao.ligado);
     el.querySelector('button[type=submit]').disabled = ta.disabled;
@@ -306,23 +322,21 @@
     if (!p || !b) return;
     const eu = E().eu || {}, d = dados(cfgT.principal);
     const aba = E().aba, sub = subDe(aba);
-    const aqui = falasDaTela(itens, aba, sub, 20), resto = itens.filter(x => x.aba !== aba);
+    // 20/10/2026 (Anderson: "o Clean está falando 3 coisas… quando eu abro, cadê as 3?"): o painel é uma agenda.
+    // "Pra fazer (N)" = exatamente o N do topo (urgente e atenção), a tela aberta primeiro; "Para acompanhar" =
+    // os informativos, que não entram na conta. O especialista da tela fica na conversa (é quem responde).
+    const fazer = ordemAgenda(praFazer(itens), aba), acompanhar = ordemAgenda(itens.filter(x => x.nivel === 'info'), aba);
     const primeiro = String(eu.nome || '').split(' ')[0];
     if (!p.querySelector('#turmaGuia')) p.innerHTML = '<div id="turmaGuia"></div><div id="turmaChat" class="turma-chat"></div>';
-    // o especialista da tela aberta aparece aqui dentro (não espalhado pela tela): rosto, nome e o que ele tem a dizer
-    const esp = especialista(cfgT, aba, sub), de = dados(esp);
-    const nestaTela = esp && esp !== cfgT.principal
-      ? '<div class="turma-esp"><img src="' + esc(img(esp, true)) + '" alt=""><div><strong>' + esc(de.nome) + '</strong><small>' + esc(de.papel) + '</small></div></div>' +
-        (aqui.length ? aqui.map(itemHtml).join('') : '<p class="turma-fala">' + esc(FALA_TELA[aba + ':' + sub] || FALA_TELA[aba] || 'Por aqui está tudo em dia.') + '</p>')
-      : (aqui.length ? '<h4>Nesta tela</h4>' + aqui.map(itemHtml).join('') : '');
     const gh = '<div class="turma-cab"><img src="' + esc(img(cfgT.principal)) + '" alt=""><div><strong>' + esc(saudacao(Number(new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo', hour: 'numeric', hour12: false })) % 24) + (primeiro ? ', ' + primeiro : '') + '!') + '</strong>' +
-      '<p>' + esc(itens.length ? 'Eu sou o ' + d.nome + '. Separei o que está esperando você:' : 'Eu sou o ' + d.nome + '. Por aqui está tudo em dia.') + '</p></div></div>' +
+      '<p>' + esc(fazer.length ? 'Eu sou o ' + d.nome + '. Você tem ' + (fazer.length === 1 ? '1 coisa' : fazer.length + ' coisas') + ' pra fazer:' : 'Eu sou o ' + d.nome + '. Nada pendente pra fazer agora.') + '</p></div></div>' +
       // com conversa aberta, a lista de avisos recolhe numa linha (clicar abre de novo)
-      (chat.msgs.length && !chat.verGuia ? (itens.length ? '<p class="turma-recolhido"><button type="button" class="link" data-acao="turma-ver-guia">ver os ' + itens.length + ' aviso(s) do dia</button></p>' : '')
-        : nestaTela + (resto.length ? '<h4>' + (aqui.length || nestaTela ? 'No resto do sistema' : 'No sistema') + '</h4>' + resto.map(itemHtml).join('') : '') +
+      (chat.msgs.length && !chat.verGuia ? (itens.length ? '<p class="turma-recolhido"><button type="button" class="link" data-acao="turma-ver-guia">ver a agenda (' + fazer.length + ' pra fazer)</button></p>' : '')
+        : (fazer.length ? '<h4>Pra fazer <span class="turma-n">' + fazer.length + '</span></h4>' + fazer.map(x => itemHtml(x, aba)).join('') : '') +
+          (acompanhar.length ? '<h4 class="turma-h-info">Para acompanhar <small>não entram na conta</small></h4>' + acompanhar.map(x => itemHtml(x, aba)).join('') : '') +
           (itens.length ? '<p class="turma-dica">✓ resolvido · ⏰ lembrar amanhã · sem marcar, fica pendente</p>' : '') +
           (marcados.length ? '<p class="turma-recolhido"><button type="button" class="link" data-acao="turma-ver-marcados">' + (verMarcados ? 'esconder' : 'ver') + ' os ' + marcados.length + ' já vistos (resolvidos ou para amanhã)</button></p>' +
-            (verMarcados ? marcados.map(itemHtml).join('') : '') : ''));
+            (verMarcados ? marcados.map(x => itemHtml(x)).join('') : '') : ''));
     const g = p.querySelector('#turmaGuia');
     if (g.dataset.html !== gh) { g.innerHTML = gh; g.dataset.html = gh; }
     desenhaChat();
@@ -397,7 +411,9 @@
     'turma-ir': id => {
       const [aba, sub] = String(id).split(':');
       fechaPainel();
-      CRM.irPara(aba);
+      // Atividades: as tarefas de quem clicou (ou a equipe toda), na semana de hoje
+      if (aba === 'agenda') CRM.irPara(aba, { responsavel: sub === 'minhas' ? CRM.meuId() : '', semana: raiz.CRMRegras.inicioSemana(CRM.hoje()) });
+      else CRM.irPara(aba);
       if (sub && aba === 'caixa' && CRM.acoes['cx-vista']) CRM.acoes['cx-vista'](sub);
       if (sub && aba === 'pedidos' && CRM.acoes['pd-ver']) CRM.acoes['pd-ver'](sub);
       if (sub && aba === 'estoque' && CRM.acoes['es-ver']) CRM.acoes['es-ver'](sub);

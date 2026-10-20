@@ -1104,3 +1104,10 @@ pre.of-previa { white-space: pre-wrap; font-family: inherit; font-size: .88rem; 
 .pf-opcao, .pf-opcao > * { min-width: 0; }
 .pf-opcao .pf-sem { aspect-ratio: auto; min-height: 140px; height: 100%; }
 .pf-opcao-foto .pf-selo { white-space: nowrap; font-size: .68rem; top: 6px; left: 6px; }
+/* agenda do Clean (20/10/2026): "Pra fazer (N)" = o número do topo; "Para acompanhar" não entra na conta */
+.turma-painel h4 .turma-n { display: inline-block; min-width: 1.4em; padding: 0 5px; margin-left: 4px; border-radius: 999px; background: var(--vermelho-fundo); color: var(--vermelho); font-weight: 700; text-align: center; letter-spacing: 0; }
+.turma-painel h4.turma-h-info small { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.turma-item .turma-aqui { display: inline-block; margin-left: 4px; padding: 0 6px; border-radius: 999px; background: var(--realce); color: var(--suave); font-size: .7rem; }
+.turma-item.info { opacity: .85; }
+.turma-quem { display: flex; align-items: center; gap: 6px; margin: 0 0 6px; color: var(--suave); font-size: .82rem; }
+.turma-quem img { width: 24px; height: 24px; border-radius: 50%; }
