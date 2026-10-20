@@ -72,7 +72,7 @@
   // ---- ações sobre um lançamento
   const pagar = (l, dia) => grava(l.id, { situacao: 'pago', pago_em: dia, baixa: 'caixa', baixado_em: agora() });
   // valor: o que entrou de fato (o cliente em atraso pagou com juros, ou só uma parte); sem ele, o do título
-  async function receberTitulo(dup, dia, valor) {
+  async function receberTitulo(dup, dia, valor, quieto) {
     const t = titulos().find(x => x.duplicata === dup);
     if (!t) return;
     const v = valor > 0 ? r2(valor) : r2(t.valor);
@@ -80,13 +80,13 @@
     const lig = ligadasPorTitulo(F.lancamentos, titulos(), nomeTitulo).get(dup);
     if (lig) {
       await grava(lig.id, { situacao: 'pago', pago_em: dia, baixa: 'caixa', baixado_em: agora(), valor: v, titulo_duplicata: dup });
-      CRM.toast('Recebido em ' + dm(dia) + ': ' + R.moeda(v) + ' (' + lig.descricao + ')');
+      if (!quieto) CRM.toast('Recebido em ' + dm(dia) + ': ' + R.moeda(v) + ' (' + lig.descricao + ')');
       return;
     }
     await insere({ tipo: 'entrada', descricao: 'Recebido: ' + nomeTitulo(t) + ' · ' + t.duplicata, categoria: 'Duplicatas recebidas', valor: v,
       vencimento: t.vencimento, situacao: 'pago', pago_em: dia, baixa: 'caixa', baixado_em: agora(), origem: 'titulo', titulo_duplicata: t.duplicata,
       entre_empresas: ENTRE_EMPRESAS.test(nomeTitulo(t)), observacoes: v !== r2(t.valor) ? 'Título de ' + R.moeda(t.valor) + '; entrou ' + R.moeda(v) + '.' : null });
-    CRM.toast('Recebido em ' + dm(dia) + ': ' + R.moeda(v));
+    if (!quieto) CRM.toast('Recebido em ' + dm(dia) + ': ' + R.moeda(v));
   }
   // Título baixado no FKN (sumiu da listagem do contas a receber) sem "Recebi" aqui: o administrador diz
   // se o dinheiro entrou (dia e valor) ou não (abatimento, devolução, cancelamento). crm_fin_titulos_baixados.
@@ -689,8 +689,64 @@
     return '<div class="cx-soma" id="' + id + '"><span><strong>' + m.n + '</strong> marcado(s)</span>' +
       (m.saidas && m.entradas ? '<span>saídas −' + esc(R.moeda(m.saidas)) + '</span><span>entradas +' + esc(R.moeda(m.entradas)) + '</span>' : '') +
       '<span class="cx-soma-total">' + (m.so != null ? (m.entradas ? 'Total a receber' : 'Total a pagar') : 'Saldo') + ' <strong>' + esc(R.moeda(valor)) + '</strong></span>' +
+      (paraBaixar(qual).length ? '<button type="button" class="mini verde" data-acao="cx-soma-baixar" data-id="' + qual + '" title="dá baixa de uma vez no que está marcado e ainda em aberto">✓ Dar baixa nos ' + paraBaixar(qual).length + '</button>' : '') +
       '<button type="button" class="mini" data-acao="cx-soma-copiar" data-id="' + Number(valor).toFixed(2) + '">Copiar valor</button>' +
       '<button type="button" class="mini" data-acao="cx-soma-limpar" data-id="' + qual + '">Limpar</button>' + (extra || '') + '</div>';
+  }
+  // ---- baixa em lote (20/10/2026, Anderson: "dar a baixa tudo de uma vez… como se fosse eu dando ok que foi pago"):
+  // o que está marcado e ainda em aberto (o já pago fica como está). Na grade, cada item com o dia da coluna.
+  function paraBaixar(qual) {
+    if (!F) return [];
+    if (qual === 'grade') {
+      const vistos = new Map();
+      for (const k of naGrade.keys()) {
+        const i = k.lastIndexOf('|'), chave = k.slice(0, i), dia = k.slice(i + 1);
+        if (vistos.has(chave)) continue;
+        if (chave.indexOf('tit:') === 0) {
+          const t = titulos().find(x => x.duplicata === chave.slice(4));
+          if (t) vistos.set(chave, { tit: t, dia, valor: r2(t.valor), entrada: true, nome: nomeTitulo(t) + ' · ' + t.duplicata });
+        } else {
+          const l = lanc(chave.slice(chave.indexOf(':') + 1));
+          if (l && l.situacao !== 'pago') vistos.set(chave, { l, dia, valor: r2(l.valor), entrada: l.tipo === 'entrada', nome: l.descricao });
+        }
+      }
+      return [...vistos.values()];
+    }
+    return F.lancamentos.filter(x => marcados.has(x.id) && x.situacao !== 'pago')
+      .map(l => ({ l, dia: null, valor: r2(l.valor), entrada: l.tipo === 'entrada', nome: l.descricao }));
+  }
+  function formBaixaLote(qual) {
+    const l = paraBaixar(qual);
+    if (!l.length) { CRM.toast('Entre os marcados, nada está em aberto.'); return; }
+    const tot = a => a.reduce((t, x) => t + x.valor, 0), sai = l.filter(x => !x.entrada), ent = l.filter(x => x.entrada);
+    const grade = qual === 'grade';
+    CRM.abrirForm({
+      titulo: 'Dar baixa em ' + l.length + (l.length === 1 ? ' item' : ' itens'),
+      intro: [sai.length ? sai.length + ' pagamento(s): ' + R.moeda(tot(sai)) : '', ent.length ? ent.length + ' recebimento(s): ' + R.moeda(tot(ent)) : ''].filter(Boolean).join(' · ') +
+        '\nO que já estava pago entre os marcados fica como está. Para desfazer uma baixa, abra o item e use "Desfazer a baixa".',
+      htmlAntes: '<ul class="cx-lote">' + l.slice(0, 20).map(x => '<li>' + (x.entrada ? '↓ ' : '↑ ') + esc(x.nome) + ' — <strong>' + esc(R.moeda(x.valor)) + '</strong>' +
+        (grade ? ' <small>' + esc(dm(x.dia)) + '</small>' : x.l && x.l.vencimento ? ' <small>vence ' + esc(dm(x.l.vencimento)) + '</small>' : '') + '</li>').join('') +
+        (l.length > 20 ? '<li><small>… e mais ' + (l.length - 20) + '</small></li>' : '') + '</ul>',
+      campos: [{ nome: 'quando', rotulo: 'Pago / recebido em', tipo: 'select', largo: true, padrao: grade ? 'coluna' : 'hoje',
+          opcoes: grade ? [['coluna', 'No dia de cada coluna (o que está no futuro fica com hoje)'], ['hoje', 'Hoje'], ['data', 'Outra data']]
+            : [['hoje', 'Hoje'], ['venc', 'No vencimento de cada uma (o que está no futuro fica com hoje)'], ['data', 'Outra data']] },
+        { nome: 'data', rotulo: 'Data (se "Outra data")', tipo: 'data', padrao: hoje() }],
+      salvarTexto: 'Dar baixa',
+      aoSalvar: async v => {
+        let ok = 0, valor = 0;
+        const falhas = [];
+        for (const x of l) {
+          const dia = v.quando === 'hoje' ? hoje() : v.quando === 'data' ? diaDaBaixa(v.data) : diaDaBaixa(grade ? x.dia : x.l.vencimento);
+          try {
+            if (x.tit) await receberTitulo(x.tit.duplicata, dia, null, true); else await pagar(x.l, dia);
+            ok++; valor += x.valor;
+          } catch (e) { falhas.push(x.nome + ' (' + ((e && e.message) || 'erro') + ')'); }
+        }
+        if (grade) naGrade.clear(); else { marcados.clear(); ultimoMarcado = null; }
+        CRM.render();
+        CRM.toast('Baixa dada em ' + ok + ' item(ns), ' + R.moeda(valor) + '.' + (falhas.length ? ' Não deu em ' + falhas.length + ': ' + falhas.join('; ') : ''), !!falhas.length);
+      }
+    });
   }
   const barraSoma = () => barraDe(somaMarcadas(), 'lista', 'Marque as contas na caixinha à esquerda para somar (Shift+clique marca várias de uma vez).');
   // Fluxo de caixa (14/10, Anderson: "no fluxo de caixa eu conseguiria?"): Ctrl+clique num item marca para somar;
@@ -852,6 +908,7 @@
     'cx-soma-limpar': qual => {
       if (qual === 'grade') { naGrade.clear(); atualizaSomaGrade(); return; }
       marcados.clear(); ultimoMarcado = null; atualizaSoma(); const t = document.querySelector('[data-acao="cx-marca-todas"]'); if (t) t.checked = false; },
+    'cx-soma-baixar': qual => formBaixaLote(qual),
     'cx-soma-copiar': v => {
       const txt = Number(v).toFixed(2).replace('.', ',');
       (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject(new Error('sem área de transferência')))

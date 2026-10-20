@@ -1931,10 +1931,17 @@ e WhatsApp. Valor real do parado em 15/10: **R$ 79 mil em 271 produtos** (depois
   sugestão nos primeiros 48; custo real US$ 0,044 por produto (mediana US$ 0,03), porque 1 em cada 5 passava de 100 mil
   tokens e caía na tabela cara do Haiku. Limite da chave subido pelo Anderson para US$ 80. **A PUBLICAR DEPOIS DO LOTE** (pedido
   do Anderson; publicar no meio derruba as buscas em andamento): `crm-produto-buscar` com 2 buscas e 2 páginas de até 4 mil
-  tokens (código já no repositório, ainda não publicado na função). **Também esperando o lote:** a ordem alfabética (abaixo) — o
+  tokens (código já no repositório, ainda não publicado na função). **Também esperando o lote:** a ordem alfabética e a baixa em lote (abaixo) — o
   push publica o site e o CRM aberto recarrega sozinho, o que interromperia o lote no navegador do Anderson. Depois do
   lote: push → `node ferramentas/fixa-motor-notas.js` → commit/push → publicar `crm-notas` e `crm-produto-buscar` → rodar
   de novo os que deram erro.
+- **Baixa em lote no Caixa (20/10, Anderson: "dar a baixa tudo de uma vez… como se fosse eu dando ok que foi pago").**
+  Na barra dos marcados (caixinhas das Contas a pagar e Ctrl+clique / 🧮 Somar no fluxo), o botão **"✓ Dar baixa nos N"**
+  (só o que está marcado e ainda em aberto; o já pago fica como está) abre a conferência com a lista e o total de
+  pagamentos e de recebimentos e pergunta a data: Contas a pagar → hoje / no vencimento de cada uma / outra data; fluxo →
+  no dia de cada coluna / hoje / outra data (o futuro sempre vira hoje, como o ✓). Usa o mesmo `pagar` e
+  `receberTitulo` do ✓ (título com previsão ligada vira o recebimento; espelho com a Agilité como sempre). Conferido no
+  navegador nos dois caminhos.
 - **Ordem alfabética em todo o sistema (20/10, pedido do Anderson: "quando eu clico em categoria… em ordem alfabética…
   leva esse padrão para todo o sistema").** Regra única em `regras.js` (`ordemAlfa`, `alfaOpcoes`, `comparaAlfa`: sem
   acento nem maiúscula, "Item 2" antes de "Item 10"; nas opções de select, "Todos/—" no começo e "Outro…"/`__x` no fim
