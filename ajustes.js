@@ -246,6 +246,7 @@
       { nome: 'equipe', rotulo: 'Equipe', dica: 'ex.: Interno, Externo, Campinas' },
       { nome: 'telefone', rotulo: 'Telefone / WhatsApp da linha', tipo: 'tel', dica: '(11) 90000-0000', ajuda: 'aparece nas propostas, para o cliente falar com a pessoa' },
       { nome: 'nomes_nota_txt', rotulo: 'Nome na nota fiscal (se for diferente do nome)', largo: true, dica: 'ex.: DIRETO', ajuda: 'como o FKN escreve "VENDEDOR: …" nas notas desta pessoa; vários, separados por vírgula' },
+      { nome: 'tela_inicial', rotulo: 'Tela ao entrar no CRM', tipo: 'select', opcoes: [['', 'Padrão do papel (administrador: Gestão; vendedor: Fila do dia; comprador: Compras)']].concat(CRM.ABAS.map(a => [a[0], a[1]])), ajuda: 'a pessoa também pode trocar a dela no menu do nome, no alto' },
       { nome: 'recebe_leads', rotulo: 'Recebe leads do rodízio (o comprador nunca recebe)', tipo: 'checkbox', largo: true },
       { nome: 'ativo', rotulo: 'Ativo (desmarcar tira o acesso na hora)', tipo: 'checkbox', largo: true }
     ];
@@ -265,6 +266,7 @@
         const nomesNota = String(v.nomes_nota_txt || '').split(',').map(x => x.trim()).filter(Boolean);
         delete v.nomes_nota_txt;
         if (u) v.nomes_nota = nomesNota;
+        v.tela_inicial = v.tela_inicial || null;
         if (u) {
           if (u.user_id === CRM.meuId() && (v.papel !== 'admin' || !v.ativo)) throw new Error('você não pode tirar o seu próprio acesso de administrador');
           delete v.email;
@@ -276,7 +278,7 @@
           await CRM.store().adminUsuarios({ acao: 'criar', nome: v.nome, email: v.email, senha: v.senha, papel: v.papel, equipe: v.equipe, recebe_leads: v.recebe_leads, ativo: v.ativo });
           await CRM.recarregar();
           const novo = E().D.usuarios.find(x => String(x.email || '').toLowerCase() === String(v.email).toLowerCase());
-          if (novo && (nomesNota.length || v.telefone)) await CRM.atualizar('usuarios', novo.user_id, Object.assign(nomesNota.length ? { nomes_nota: nomesNota } : {}, v.telefone ? { telefone: v.telefone } : {}));
+          if (novo && (nomesNota.length || v.telefone || v.tela_inicial)) await CRM.atualizar('usuarios', novo.user_id, Object.assign(nomesNota.length ? { nomes_nota: nomesNota } : {}, v.telefone ? { telefone: v.telefone } : {}, v.tela_inicial ? { tela_inicial: v.tela_inicial } : {}));
           alert('Usuário criado.\n\nLogin: ' + v.email + '\nSenha provisória: ' + v.senha + '\n\nPasse para a pessoa (ela pode trocar depois).');
         } else {
           delete v.senha;

@@ -14,9 +14,17 @@
 
   const pref = (k, p) => { try { return localStorage.getItem('sd-crm-pref-' + k) || p; } catch (e) { return p; } };
   const gravaPref = (k, v) => { try { localStorage.setItem('sd-crm-pref-' + k, v); } catch (e) { /* ok */ } };
+  // A tela em uso fica na aba do navegador (sessionStorage): recarregar continua nela; abrir o CRM de novo começa na
+  // tela ao entrar da pessoa (telaInicial, logo abaixo).
+  // Tela que abre ao entrar no CRM (20/10/2026, pedido do Anderson): a escolhida para a pessoa (crm_usuarios.tela_inicial)
+  // ou o padrão do papel — administrador na Gestão, vendedor na Fila do dia, comprador em Compras, logística em Pedidos.
+  const TELA_INICIAL_PADRAO = { admin: 'gestao', gestor: 'inicio', vendedor: 'fila', comprador: 'compras', logistica: 'pedidos' };
+  const telaInicial = u => (u && u.tela_inicial) || TELA_INICIAL_PADRAO[u && u.papel] || 'inicio';
+  function abaDaSessao() { try { return sessionStorage.getItem('sd-crm-aba') || ''; } catch (e) { return ''; } }
+  function gravaAbaDaSessao(a) { try { sessionStorage.setItem('sd-crm-aba', a); } catch (e) { /* ok */ } }
 
   const E = CRM.estado = {
-    aba: pref('aba', 'inicio'),
+    aba: abaDaSessao() || 'inicio',
     eu: null,
     D: DD.vazio(),
     ix: R.indexa(DD.vazio()),
@@ -399,12 +407,14 @@
     if (window.scrollY !== l.jy || window.scrollX !== l.jx) window.scrollTo(l.jx, l.jy);
   }
 
+  CRM.abasPermitidas = () => CRM.ehLogistica() ? ABAS.filter(a => a[0] === 'pedidos') : CRM.ehComprador() ? ABAS.filter(a => a[0] === 'compras' || a[0] === 'pedcompra' || a[0] === 'estoque' || a[0] === 'produtos' || a[0] === 'pedidos' || a[0] === 'concorrentes')
+    : ABAS.filter(a => (a[0] !== 'ajustes' || CRM.ehGestor()) && ((a[0] !== 'gestao' && a[0] !== 'compras' && a[0] !== 'pedcompra' && a[0] !== 'estoque' && a[0] !== 'caixa' && a[0] !== 'fiscal' && a[0] !== 'concorrentes') || CRM.ehAdmin()));
+
   function renderAgora() {
     if (!E.eu) return;
     // Comprador: só Compras e Estoque. Compras, Estoque e Gestão: administrador. Configurações: gestor.
     // Logística (Fase 3): só Pedidos (a separação). O comprador vê também as faltas e a consulta de estoque em Pedidos.
-    const abas = CRM.ehLogistica() ? ABAS.filter(a => a[0] === 'pedidos') : CRM.ehComprador() ? ABAS.filter(a => a[0] === 'compras' || a[0] === 'pedcompra' || a[0] === 'estoque' || a[0] === 'produtos' || a[0] === 'pedidos' || a[0] === 'concorrentes')
-      : ABAS.filter(a => (a[0] !== 'ajustes' || CRM.ehGestor()) && ((a[0] !== 'gestao' && a[0] !== 'compras' && a[0] !== 'pedcompra' && a[0] !== 'estoque' && a[0] !== 'caixa' && a[0] !== 'fiscal' && a[0] !== 'concorrentes') || CRM.ehAdmin()));
+    const abas = CRM.abasPermitidas();
     if (!abas.some(a => a[0] === E.aba)) E.aba = abas[0][0];
     ['#buscaGlobal', '[data-acao="novo-menu"]', '#sino'].forEach(s => { const el = $(s); if (el) el.hidden = CRM.foraDeVendas(); });
     // 20/10/2026 (Anderson: "pode juntar o sino com o Clean"): com a turma ligada, os avisos do sino (boletos, tarefas,
@@ -477,7 +487,7 @@
   }
 
   CRM.irPara = (aba, filtros) => {
-    E.aba = aba; gravaPref('aba', aba);
+    E.aba = aba; gravaAbaDaSessao(aba);
     if (filtros) E.filtros[aba] = Object.assign({}, E.filtros[aba] || {}, filtros);
     $('#conteudo').scrollTop = 0;
     if (window.scrollY) window.scrollTo(0, 0);
@@ -528,6 +538,7 @@
       ['Recarregar dados', () => CRM.recarregar(false, { completa: true }).then(() => CRM.toast('Atualizado.'))],
       ['Ativar lembretes na tela', pedirNotificacao],
       ['Atalhos do teclado', mostraAtalhos],
+      ['Tela ao entrar no CRM', formTelaInicial],
       store.modo === 'supabase' ? ['Alterar minha senha', formMinhaSenha] : ['Carregar dados de exemplo', () => CRM.ajustes.carregarExemplos()],
       store.modo === 'supabase' ? ['Sair', () => sb.auth.signOut()] : ['Apagar tudo deste navegador', () => CRM.ajustes.apagarTudoLocal()]
     ]),
@@ -754,6 +765,25 @@
     });
   }
 
+  // Cada pessoa escolhe a própria tela ao entrar (o administrador também ajusta em Configurações → Equipe).
+  function formTelaInicial() {
+    const padrao = TELA_INICIAL_PADRAO[E.eu.papel] || 'inicio';
+    const nomeDe = t => (ABAS.find(a => a[0] === t) || [t, t])[1];
+    CRM.abrirForm({
+      titulo: 'Tela ao entrar no CRM',
+      intro: 'A tela que aparece primeiro quando você abre o CRM.',
+      campos: [{ nome: 'tela', rotulo: 'Abrir em', tipo: 'select', largo: true,
+        opcoes: [['', 'Padrão do seu papel (' + nomeDe(padrao) + ')']].concat(CRM.abasPermitidas().map(a => [a[0], a[1]])) }],
+      valores: { tela: E.eu.tela_inicial || '' },
+      aoSalvar: async v => {
+        await store.minhaTelaInicial(v.tela || null);
+        E.eu.tela_inicial = v.tela || null;
+        const u = E.ix.porId.usuarios.get(E.eu.user_id); if (u) u.tela_inicial = E.eu.tela_inicial;
+        CRM.toast('Pronto: o CRM vai abrir em ' + nomeDe(telaInicial(E.eu)) + '.');
+      }
+    });
+  }
+
   function formMinhaSenha() {
     CRM.abrirForm({
       titulo: 'Alterar minha senha',
@@ -809,6 +839,7 @@
     await CRM.recarregar(false, { completa: true });
     const atual = E.ix.porId.usuarios.get(E.eu.user_id);
     if (atual) E.eu = atual;
+    if (!abaDaSessao()) { E.aba = telaInicial(E.eu); gravaAbaDaSessao(E.aba); } // abriu o CRM agora: a tela ao entrar
     document.title = nomeInstalacao() + ' · CRM';
     CRM.render();
     const al = R.alertas(E.D, E.ix, E.cfg, CRM.hoje(), CRM.meuId());

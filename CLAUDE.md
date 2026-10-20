@@ -1529,6 +1529,13 @@ preços de custo as vendedoras não enxergam)".
   navegador; celular e outros computadores da pessoa continuam) e aviso "Novo dia: entre de novo para começar."; aba
   aberta de um dia para o outro pede o login quando a pessoa volta à aba ou depois de 30 min sem mexer (não corta quem
   está digitando). O "Sair" do menu continua saindo de todos os aparelhos (padrão do Supabase).
+- **Tela ao entrar (20/10, pedido do Anderson: "eu queria enxergar já a Gestão"):** `crm_usuarios.tela_inicial` (vazia =
+  padrão do papel: administrador **Gestão**, vendedor **Fila do dia**, comprador **Compras**, logística **Pedidos**, gestor
+  Início; `TELA_INICIAL_PADRAO` no `app.js`, fora do `regras.js` para não mexer no motor da `crm-notas`). O administrador
+  ajusta em Configurações → Equipe (editar usuário → "Tela ao entrar no CRM"); cada pessoa troca a dela no menu do nome
+  → "Tela ao entrar no CRM" (função `crm_minha_tela_inicial`, SECURITY DEFINER, só a própria linha e só essa coluna;
+  anônimo e valor inválido barrados, testado). A tela em uso fica no `sessionStorage` da aba: recarregar (inclusive a
+  versão nova) continua onde estava; abrir o CRM de novo começa na tela ao entrar. `revoke` da função: rodar no SQL Editor.
 - **Compras a caminho / Pedidos ao fornecedor (20/10, noite; simulação https://claude.ai/artifact/UQyuCaNcT19jEN98kmAnyX,
   opção A aprovada):** o comprador registra o pedido em Compras → "Pedido por fornecedor" → **Registrar pedido** (itens da
   sugestão, quantidade editável, previsão = hoje + prazo do fornecedor, editável); "Exportar para o FKN" continua para lançar

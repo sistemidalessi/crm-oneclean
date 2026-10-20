@@ -3720,3 +3720,21 @@ end;
 $$;
 revoke all on function public.crm_compra_pedido_acao(bigint, text, date) from public, anon;
 grant execute on function public.crm_compra_pedido_acao(bigint, text, date) to authenticated;
+
+-- ============================================================ tela ao entrar (20/10/2026)
+-- A tela que abre ao entrar no CRM: escolhida pelo administrador (Configurações → Equipe) ou pela própria pessoa
+-- (menu do nome → "Tela ao entrar no CRM"); vazia = padrão do papel (app.js, telaInicial: admin Gestão, vendedor Fila do dia,
+-- comprador Compras, logística Pedidos). A tabela de usuários só o admin altera; a pessoa muda só esta coluna, pela função.
+alter table public.crm_usuarios add column if not exists tela_inicial text;
+alter table public.crm_usuarios drop constraint if exists crm_usuarios_tela_inicial_ok;
+alter table public.crm_usuarios add constraint crm_usuarios_tela_inicial_ok check (tela_inicial is null or tela_inicial ~ '^[a-z]{2,20}$');
+
+create or replace function public.crm_minha_tela_inicial(p_tela text)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  if auth.uid() is null or not crm_eh_ativo() then raise exception 'sem acesso'; end if;
+  if coalesce(p_tela, '') <> '' and p_tela !~ '^[a-z]{2,20}$' then raise exception 'tela inválida'; end if;
+  update crm_usuarios set tela_inicial = nullif(p_tela, '') where user_id = auth.uid();
+end $$;
+revoke all on function public.crm_minha_tela_inicial(text) from public, anon;
+grant execute on function public.crm_minha_tela_inicial(text) to authenticated;

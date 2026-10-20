@@ -164,6 +164,7 @@
     return Promise.resolve(achado);
   };
 
+  Local.prototype.minhaTelaInicial = async function (tela) { const u = await this.usuarioAtual(); if (u) await this.atualizar('usuarios', u.user_id, { tela_inicial: tela || null }); };
   Local.prototype.atualizarVarios = function (t, ids, patch) {
     const d = this.ler();
     const k = chave(t);
@@ -1366,6 +1367,8 @@
   Supa.prototype.compraPedidoAcao = async function (id, acao, previsao) { return unwrap(await this.sb.rpc('crm_compra_pedido_acao', { p_id: id, p_acao: acao, p_previsao: previsao || null })); };
   Supa.prototype.aCaminho = async function () { return paginado((de, ate) => this.sb.rpc('crm_a_caminho').range(de, ate)); };
   // NCM de cada produto para o orçamento do cliente (20/10/2026): só o NCM, para qualquer pessoa ativa.
+  // Tela ao entrar (20/10/2026): cada pessoa muda só a dela (função do banco; a tabela de usuários só o admin altera).
+  Supa.prototype.minhaTelaInicial = async function (tela) { unwrap(await this.sb.rpc('crm_minha_tela_inicial', { p_tela: tela || '' })); };
   Supa.prototype.produtosNcm = async function () { return paginado((de, ate) => this.sb.rpc('crm_produtos_ncm').range(de, ate)); };
   Supa.prototype.produtosEans = async function () { return paginado((de, ate) => this.sb.rpc('crm_produtos_eans').range(de, ate)); };
   Supa.prototype.produtoDetalhe = async function (codigo) {
