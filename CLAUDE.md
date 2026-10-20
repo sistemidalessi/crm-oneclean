@@ -1959,6 +1959,7 @@ e WhatsApp. Valor real do parado em 15/10: **R$ 79 mil em 271 produtos** (depois
   - **Falta o Anderson** (passo a passo em `sistemi-dalessi/docs/meta-whatsapp-passo-a-passo.md`, "Parte 2"): "Criar o modelo do
     cliente" e esperar a aprovação; `WHATSAPP_APP_SECRET` e `WHATSAPP_VERIFY_TOKEN` nos Secrets; o webhook no app da Meta
     (campo `messages`); "Ligar o retorno"; teste com o próprio celular.
+- **Política de privacidade (20/10):** `privacidade.html` (pública, sem script), exigida pela Meta para publicar o app do WhatsApp; dados da OneClean tirados do emitente fiscal. Endereço: https://sistemidalessi.github.io/crm-oneclean/privacidade.html
 - **Volta do contato (14/10, pedido do Anderson):** o próximo passo da janela "Como foi…" tem também **"Em 15 dias"**.
 - **Regra (14/10, Anderson): título recebido antes do vencimento é ADIANTADO.** A Santa Casa (002435/01, R$ 7.422,15) venceria
   em 25/10 e pagou em 14/10: o "Recebi" gravou certo, mas o cartão não dizia que o cliente adiantou. Agora `caixa-calculo.js`

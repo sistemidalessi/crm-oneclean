@@ -1111,3 +1111,11 @@ pre.of-previa { white-space: pre-wrap; font-family: inherit; font-size: .88rem; 
 .turma-item.info { opacity: .85; }
 .turma-quem { display: flex; align-items: center; gap: 6px; margin: 0 0 6px; color: var(--suave); font-size: .82rem; }
 .turma-quem img { width: 24px; height: 24px; border-radius: 50%; }
+/* política de privacidade (privacidade.html, 20/10/2026): página pública para o app da Meta */
+.politica { max-width: 760px; text-align: left; line-height: 1.55; }
+.politica h1 { text-align: center; }
+.politica .sub { text-align: center; color: var(--suave); margin-top: -6px; }
+.politica h2 { font-size: 1.02rem; margin: 18px 0 6px; }
+.politica ul { padding-left: 20px; }
+.pagina-longa { align-items: flex-start; }
+.politica p, .politica ul { margin: 6px 0; }
