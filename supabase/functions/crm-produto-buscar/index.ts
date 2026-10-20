@@ -36,12 +36,14 @@ function precoDe(modelo: string, prompt: number) {
 }
 // As ferramentas da web: as versões com filtro dinâmico (Opus/Sonnet) ou as básicas (Haiku). Sites bloqueados = os dos
 // concorrentes cadastrados (crm_concorrentes): foto de loja de concorrente não serve para o nosso catálogo.
+// 20/10/2026 (lote de 1.703): 1 em cada 5 buscas passava de 100 mil tokens num pedido (a 3ª busca e a 3ª página
+// acumulam) e caía na tabela cara do Haiku (US$ 0,09–0,13 contra US$ 0,03). Agora 2 buscas e 2 páginas de até 4 mil tokens.
 function ferramentasWeb(modelo: string, bloqueados: string[]) {
   const novo = !/haiku/.test(modelo), bl = bloqueados.length ? { blocked_domains: bloqueados } : {};
   return [
-    { type: novo ? 'web_search_20260209' : 'web_search_20250305', name: 'web_search', max_uses: 3, ...bl,
+    { type: novo ? 'web_search_20260209' : 'web_search_20250305', name: 'web_search', max_uses: 2, ...bl,
       user_location: { type: 'approximate', country: 'BR', region: 'São Paulo', city: 'São Paulo', timezone: 'America/Sao_Paulo' } },
-    { type: novo ? 'web_fetch_20260209' : 'web_fetch_20250910', name: 'web_fetch', max_uses: 3, max_content_tokens: 5000, ...bl }
+    { type: novo ? 'web_fetch_20260209' : 'web_fetch_20250910', name: 'web_fetch', max_uses: 2, max_content_tokens: 4000, ...bl }
   ];
 }
 const BUCKET = 'crm-produtos-fotos';
@@ -57,7 +59,7 @@ Como trabalhar:
   fragrância flores do campo, galão de 5 litros, marca Barbarex. A última palavra costuma ser a marca.
 - O código de barras (EAN/GTIN), quando vier, é a melhor prova de que é o mesmo produto: procure por ele também.
 - Prefira nesta ordem: o site do fabricante; o site de um distribuidor ou do fornecedor; uma loja on-line grande.
-- Você tem no máximo 3 buscas e 3 páginas. Comece pelo código de barras (se houver) ou por marca + produto + "fabricante";
+- Você tem no máximo 2 buscas e 2 páginas. Comece pelo código de barras (se houver) ou por marca + produto + "fabricante";
   abra (web_fetch) só as 1 ou 2 páginas mais promissoras, em HTML. NÃO abra PDF: só anote o endereço da ficha técnica e
   da FISPQ/FDS (o sistema baixa depois). Se o fornecedor de quem compramos tiver site com o produto, ele serve.
 - Nos saneantes e químicos (desinfetante, detergente, cloro, álcool, cera, removedor, sabonete…) procure também a FISPQ

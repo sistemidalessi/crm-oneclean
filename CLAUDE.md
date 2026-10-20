@@ -1927,6 +1927,11 @@ e WhatsApp. Valor real do parado em 15/10: **R$ 79 mil em 271 produtos** (depois
   → 404). **Reenvio feito pelo Anderson às 09:48:** NF 2428 e NF 2363 (2 parcelas, um PDF) com `wa_status` "enviado com o PDF"
   (subida para a Meta OK, sem cair no link); NF 2430 ficou de fora porque a vendedora já tinha mandado ao cliente às 09:40.
   Confirmado pelo Anderson: o anexo chegou às vendedoras. O webhook de status ficou pronto no item seguinte (`crm-whatsapp-retorno`).
+- **Lote de fotos "Todos sem foto" (20/10, 13:11, 1.703 produtos):** começou sem erro, 10 produtos por minuto, todos com
+  sugestão nos primeiros 48; custo real US$ 0,044 por produto (mediana US$ 0,03), porque 1 em cada 5 passava de 100 mil
+  tokens e caía na tabela cara do Haiku. Limite da chave subido pelo Anderson para US$ 80. **A PUBLICAR DEPOIS DO LOTE** (pedido
+  do Anderson; publicar no meio derruba as buscas em andamento): `crm-produto-buscar` com 2 buscas e 2 páginas de até 4 mil
+  tokens (código já no repositório, ainda não publicado na função).
 - **Boleto direto ao CLIENTE pelo WhatsApp da empresa (20/10/2026, aprovado pelo Anderson na simulação
   https://claude.ai/artifact/5Fy5wK12vEuke5S8ohHN1J, "com o botão Já paguei e … irá ao cartório automaticamente … algo bem
   cordial").** O `wa.me` não anexa arquivo; então o cliente recebe pelo número da empresa o modelo **`boleto_cliente`**
