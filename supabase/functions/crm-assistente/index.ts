@@ -414,8 +414,9 @@ Deno.serve(async (req) => {
   if (c.acao === 'situacao') {
     let custoMes = null;
     if (eu.papel === 'admin') {
-      const { data } = await db.from('crm_assistente_uso').select('custo_usd').gte('criado_em', hoje.slice(0, 7) + '-01T03:00:00Z').limit(20000);
-      custoMes = Math.round((data || []).reduce((s, x) => s + Number(x.custo_usd || 0), 0) * 100) / 100;
+      // somado no banco (20/10/2026: somar aqui lia só as 1.000 primeiras linhas)
+      const { data } = await db.rpc('crm_ia_custo_mes', { p_desde: hoje.slice(0, 7) + '-01T03:00:00Z' });
+      custoMes = Math.round(Number(((data && data[0]) || {}).total || 0) * 100) / 100;
     }
     return resposta(200, { ligado: !!chave, hoje: usadas || 0, limite, custo_mes: custoMes });
   }

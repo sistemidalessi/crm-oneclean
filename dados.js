@@ -220,6 +220,16 @@
 
   // ================================================================ Supabase
   const PAGINA = 1000; // limite padrão do PostgREST no Supabase
+  // Lista inteira em páginas de 1.000 (20/10/2026: as sugestões de fotos passaram de 1.000 e a tela via só as primeiras —
+  // "Todos sem foto" mostrava 716 já buscados). consulta(de, ate) monta a busca com uma ordem estável (chave única no fim).
+  async function paginado(consulta) {
+    const out = [];
+    for (let de = 0; ; de += PAGINA) {
+      const l = unwrap(await comTentativas(() => consulta(de, de + PAGINA - 1))) || [];
+      out.push(...l);
+      if (l.length < PAGINA) return out;
+    }
+  }
   const LOTE = 500;
 
   function Supa(cliente) { this.modo = 'supabase'; this.sb = cliente; }
@@ -450,7 +460,8 @@
   Supa.prototype.fornecedores = async function () { return unwrap(await this.sb.from('crm_fornecedores').select('*').order('nome')); };
   Supa.prototype.produtoForn = async function () { return unwrap(await this.sb.from('crm_produto_fornecedor').select('codigo, fornecedor').not('fornecedor', 'is', null)); };
   Supa.prototype.custoHist = async function (dias) {
-    return unwrap(await this.sb.from('crm_custo_historico').select('*').gte('em', new Date(Date.now() - (dias || 90) * 864e5).toISOString()).order('em', { ascending: false }).limit(2000));
+    const desde = new Date(Date.now() - (dias || 90) * 864e5).toISOString();
+    return paginado((de, ate) => this.sb.from('crm_custo_historico').select('*').gte('em', desde).order('em', { ascending: false }).order('id').range(de, ate));
   };
   Supa.prototype.salvarFornecedor = async function (f) {
     return unwrap(await this.sb.from('crm_fornecedores').upsert(Object.assign({}, f, { atualizado_em: new Date().toISOString() }), { onConflict: 'codigo' }).select().single());
@@ -462,7 +473,7 @@
   // Comparação mensal com os concorrentes (18/10/2026): lista, cesta e preços lançados pelo comprador.
   Supa.prototype.concorrentes = async function () { return unwrap(await this.sb.from('crm_concorrentes').select('*').order('ordem')); };
   Supa.prototype.cesta = async function () { return unwrap(await this.sb.from('crm_cesta').select('*').order('ordem')); };
-  Supa.prototype.precosConcorrente = async function (desde) { return unwrap(await this.sb.from('crm_precos_concorrente').select('*').gte('mes', desde).limit(5000)); };
+  Supa.prototype.precosConcorrente = async function (desde) { return paginado((de, ate) => this.sb.from('crm_precos_concorrente').select('*').gte('mes', desde).order('id').range(de, ate)); };
   Supa.prototype.salvarConcorrente = async function (k) {
     if (k.id) return unwrap(await this.sb.from('crm_concorrentes').update({ nome: k.nome, site: k.site, obs: k.obs, ativo: k.ativo, ordem: k.ordem }).eq('id', k.id).select().single());
     return unwrap(await this.sb.from('crm_concorrentes').insert({ nome: k.nome, site: k.site || null, ordem: k.ordem || 0 }).select().single());
@@ -519,15 +530,15 @@
     return unwrap(await this.sb.from('crm_estoque_mov').select('*').eq('codigo', codigo).order('quando', { ascending: false }).limit(limite || 200));
   };
   Supa.prototype.estoqueFotos = async function (limite) { return unwrap(await this.sb.from('crm_estoque_fotos').select('*').order('gerado_em', { ascending: false }).limit(limite || 60)); };
-  Supa.prototype.estoqueDifs = async function (fotoId) { return unwrap(await this.sb.from('crm_estoque_difs').select('*').eq('foto_id', fotoId).order('codigo').limit(5000)); };
-  Supa.prototype.estoqueUnidades = async function () { return unwrap(await this.sb.from('crm_estoque_unidades').select('*').order('codigo').limit(5000)); };
+  Supa.prototype.estoqueDifs = async function (fotoId) { return paginado((de, ate) => this.sb.from('crm_estoque_difs').select('*').eq('foto_id', fotoId).order('codigo').range(de, ate)); };
+  Supa.prototype.estoqueUnidades = async function () { return paginado((de, ate) => this.sb.from('crm_estoque_unidades').select('*').order('codigo').order('unidade').range(de, ate)); };
   Supa.prototype.estoqueUnidadeSalvar = async function (codigo, unidade, fator) {
     return unwrap(await this.sb.from('crm_estoque_unidades').upsert({ codigo, unidade, fator, origem: 'manual', atualizado_em: new Date().toISOString() }, { onConflict: 'codigo,unidade' }).select().single());
   };
   // Notas de compra (entrada pelo XML): grava pendente (a mesma chave não entra duas vezes), lista, dá entrada, deixa de lado.
   Supa.prototype.compras = async function (limite) { return unwrap(await this.sb.from('crm_compras').select('*').order('emitida_em', { ascending: false }).limit(limite || 200)); };
   Supa.prototype.compraItens = async function (id) { return unwrap(await this.sb.from('crm_compra_itens').select('*').eq('compra_id', id).order('ordem')); };
-  Supa.prototype.compraVinculos = async function () { return unwrap(await this.sb.from('crm_compra_vinculos').select('*').limit(20000)); };
+  Supa.prototype.compraVinculos = async function () { return paginado((de, ate) => this.sb.from('crm_compra_vinculos').select('*').order('fornecedor_doc').order('cod_fornecedor').range(de, ate)); };
   // Itens de compra com o ICMS-ST lido do XML (19/10/2026), junto com a nota: para o ICMS-ST "retido anteriormente" (fiscal.js).
   Supa.prototype.comprasSt = async function () {
     const out = [];
@@ -540,7 +551,7 @@
   };
   // Notas de compra com item ainda sem o ICMS-ST (gravadas antes de 19/10/2026) e o preenchimento pelo XML guardado.
   Supa.prototype.comprasSemSt = async function () {
-    const l = unwrap(await this.sb.from('crm_compra_itens').select('crm_compras(chave)').is('st_cst', null).limit(20000));
+    const l = await paginado((de, ate) => this.sb.from('crm_compra_itens').select('id, crm_compras(chave)').is('st_cst', null).order('id').range(de, ate));
     return [...new Set(l.map(i => (i.crm_compras || {}).chave).filter(Boolean))];
   };
   // produto nosso de cada item das notas pendentes (item ligado, ligação lembrada ou código de barras): para o selo "chegou"
@@ -921,7 +932,7 @@
   // Boletos atualizados dos últimos 90 dias (o(a) vendedor(a) recebe só os da carteira — RLS).
   Supa.prototype.boletos = async function () {
     const desde = new Date(Date.now() - 90 * 864e5).toISOString();
-    return unwrap(await comTentativas(() => this.sb.from('crm_boletos').select('*').gte('criado_em', desde).order('criado_em').limit(2000))) || [];
+    return paginado((de, ate) => this.sb.from('crm_boletos').select('*').gte('criado_em', desde).order('criado_em').order('id').range(de, ate));
   };
   Local.prototype.boletos = async function () { return this.ler().boletos || []; };
   // O(a) vendedor(a) mandou o boleto ao cliente (só pela função: ela não altera a tabela).
@@ -1300,7 +1311,7 @@
       if (l.length < PAGINA) return out;
     }
   };
-  Supa.prototype.produtoSugestoes = async function () { return unwrap(await this.sb.from('crm_produto_fotos_sugestoes').select('*').order('em', { ascending: false }).limit(3000)); };
+  Supa.prototype.produtoSugestoes = async function () { return paginado((de, ate) => this.sb.from('crm_produto_fotos_sugestoes').select('*').order('em', { ascending: false }).order('codigo').range(de, ate)); };
   Supa.prototype.produtosVendidos = async function (dias) {
     const out = [];
     for (let de = 0; ; de += PAGINA) {

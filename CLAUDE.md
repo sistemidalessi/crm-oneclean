@@ -1934,6 +1934,14 @@ e WhatsApp. Valor real do parado em 15/10: **R$ 79 mil em 271 produtos** (depois
   chave subido pelo Anderson para US$ 80 (IA do mês: US$ 71,12). Depois do lote, publicados: `crm-produto-buscar` v6 (2
   buscas e 2 páginas de até 4 mil tokens), a ordem alfabética e a baixa em lote (abaixo) e `crm-notas` v34 (fixada no
   `be97389`, por causa do `regras.js`). **Falta o Anderson (ou o comprador): aprovar as sugestões** em Estoque → Fotos e fichas.
+- **Limite de 1.000 linhas do banco (20/10, Anderson: "toda vez que eu ponho Todos sem foto, traz 716").** O PostgREST do
+  Supabase devolve no máximo 1.000 linhas por consulta, mesmo com `.limit(3000)`. As sugestões de fotos (1.711) chegavam
+  cortadas: "Para aprovar 941" (eram 1.631) e "Buscar 716" (eram 5); e a "IA no mês" somava só 1.000 das 1.752 linhas
+  (US$ 41,80 em vez de US$ 71,12). Corrigido: `paginado()` em `dados.js` (páginas de 1.000 com ordem estável) nas sugestões
+  e, por precaução, em custo histórico, preços de concorrente, diferenças e unidades do estoque, vínculos e itens de compra
+  e boletos; a soma do mês vem do banco (`crm_ia_custo_mes`, SECURITY INVOKER) na `crm-produto-buscar` v7. A `crm-assistente`
+  tem a mesma correção no código, **ainda não publicada** (só muda o "uso do mês" no rodapé da conversa, que só o admin vê):
+  publicar junto na próxima mudança dela. **Regra:** lista que pode passar de 1.000 linhas → `paginado()`; soma → no banco.
 - **Baixa em lote no Caixa (20/10, Anderson: "dar a baixa tudo de uma vez… como se fosse eu dando ok que foi pago").**
   Na barra dos marcados (caixinhas das Contas a pagar e Ctrl+clique / 🧮 Somar no fluxo), o botão **"✓ Dar baixa nos N"**
   (só o que está marcado e ainda em aberto; o já pago fica como está) abre a conferência com a lista e o total de

@@ -3487,3 +3487,12 @@ revoke all on public.crm_whatsapp_eventos from anon, public, authenticated;
 grant select on public.crm_whatsapp_eventos to authenticated;
 drop policy if exists le on public.crm_whatsapp_eventos;
 create policy le on public.crm_whatsapp_eventos for select to authenticated using ((select public.crm_eh_admin()));
+
+-- Custo da IA no mês somado no banco (20/10/2026: a soma feita na Edge Function lia só as 1.000 primeiras linhas).
+-- SECURITY INVOKER: as funções chamam com a chave de serviço; quem chamar logado só soma o que a RLS deixa ver.
+create or replace function public.crm_ia_custo_mes(p_desde timestamptz)
+returns table (total numeric, fotos numeric)
+language sql stable set search_path = public as $$
+  select coalesce(sum(custo_usd), 0), coalesce(sum(custo_usd) filter (where tela = 'fotos'), 0)
+    from public.crm_assistente_uso where criado_em >= p_desde
+$$;

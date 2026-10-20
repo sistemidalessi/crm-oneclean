@@ -129,9 +129,10 @@ Deno.serve(async (req) => {
   try { c = await req.json(); } catch { return resposta(400, { erro: 'corpo inválido' }); }
 
   if (c.acao === 'situacao') {
-    const { data } = await db.from('crm_assistente_uso').select('custo_usd, tela').gte('criado_em', hojeSP().slice(0, 7) + '-01T03:00:00Z').limit(20000);
-    const soma = (f: (x: { tela: string | null }) => boolean) => Math.round((data || []).filter(f).reduce((s, x) => s + Number(x.custo_usd || 0), 0) * 100) / 100;
-    return resposta(200, { ligado: !!chave, custo_mes: soma(() => true), custo_fotos_mes: soma(x => x.tela === 'fotos') });
+    // somado no banco (20/10/2026: somar aqui lia só as 1.000 primeiras linhas e o mês aparecia pela metade)
+    const { data } = await db.rpc('crm_ia_custo_mes', { p_desde: hojeSP().slice(0, 7) + '-01T03:00:00Z' });
+    const m = (data && data[0]) || { total: 0, fotos: 0 }, r2 = (v: unknown) => Math.round(Number(v || 0) * 100) / 100;
+    return resposta(200, { ligado: !!chave, custo_mes: r2(m.total), custo_fotos_mes: r2(m.fotos) });
   }
   if (c.acao !== 'buscar') return resposta(400, { erro: 'ação desconhecida' });
   if (!chave) return resposta(503, { erro: 'a IA ainda não está ligada: falta a chave da Anthropic nos segredos do Supabase (ANTHROPIC_API_KEY)' });
