@@ -43,7 +43,8 @@
   function estado(x) {
     const d = Math.floor(num(x.disponivel) * 1000) / 1000, porDia = num(x.vendido) / 90;
     const n = d.toLocaleString('pt-BR', { maximumFractionDigits: 3 });
-    if (d <= 0) return { cls: 'falta', texto: 'Em falta' + (num(x.a_caminho) > 0 ? ' · a caminho ' + num(x.a_caminho).toLocaleString('pt-BR') : '') };
+    // negativo = vendido sem estoque, esperando a compra chegar (20/10/2026: o número aparece, não só "em falta")
+    if (d <= 0) return { cls: 'falta', texto: (d < 0 ? 'Em falta: ' + n + ' (vendido sem estoque)' : 'Em falta') + (num(x.a_caminho) > 0 ? ' · a caminho ' + num(x.a_caminho).toLocaleString('pt-BR') : '') };
     if (porDia > 0 && d < porDia * 15) return { cls: 'pouco', texto: 'Pouco: ' + n + ' disponíve' + (d === 1 ? 'l' : 'is'), dias: Math.max(1, Math.round(d / porDia)) };
     return { cls: 'ok', texto: n + ' disponíve' + (d === 1 ? 'l' : 'is') };
   }

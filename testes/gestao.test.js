@@ -96,7 +96,9 @@ test('estoque do FKN: leitura do CSV e sugestão de pedido', () => {
   // 15 dias de prazo: 5,3 + 0,178 × 15 = 8 − 1 = 7; e acaba antes de chegar → pedir hoje
   assert.equal(d2.prazo, 15); assert.equal(d2.comprar, 7); assert.equal(d2.urgente, true);
   const f = c2.pedidoPorFornecedor.find(x => x.cod === '00059');
-  assert.equal(f.custo, 175); assert.equal(f.faltaMinimo, 325); assert.equal(f.diaDePedido, true); assert.equal(f.freteCif, false); assert.equal(f.urgentes, 1);
+  assert.equal(f.custo, 175); assert.equal(f.faltaMinimo, 325); assert.equal(f.diaDePedido, true); assert.equal(f.freteCif, false);
+  // o "SEM SALDO" (−3, vendido sem estoque) agora entra: compra 3 e é urgente (20/10/2026)
+  assert.equal(f.urgentes, 2); assert.equal(c2.sugestao.find(g => g.codigo === '010004').comprar, 3);
   assert.deepEqual(c2.pedirHoje.map(x => x.cod), ['00059']);
   assert.equal(c2.produtos.find(g => g.codigo === '010002').fornecedor, 'Fornecedor Dois', 'troca de fornecedor feita no CRM');
   assert.deepEqual(c2.custoSubiu.map(x => [x.codigo, Math.round(x.pct)]), [['010001', 10]], 'só a alta de 3% ou mais');
@@ -170,6 +172,12 @@ test('listagem de produtos do FKN: fornecedor, mínimo, pedido e a caixa fechada
   const luva = c.produtos.find(x => x.codigo === '010005');
   assert.deepEqual([luva.comprar, luva.pelaMinimo], [12, true]);
   assert.ok(c.estoque.completo);
+  // Saldo negativo (vendeu sem estoque) entra negativo (20/10/2026): detergente com −3 e 4 a caminho → os 4 não bastam.
+  const neg = l.map(x => Object.assign({ atualizado_em: '2026-10-01T17:00:00Z' }, x, x.codigo === '010001' ? { quantidade: -3 } : x.codigo === '010001.1' ? { quantidade: 0 } : {}));
+  const gn = G.compras(D, R.indexa(D), R.config({}), HOJE, 30, neg).produtos.find(x => x.codigo === '010001');
+  assert.equal(gn.saldo, -3);
+  assert.ok(gn.comprar > g.comprar + 3, 'compra o que precisa mais o que já foi vendido sem estoque: ' + gn.comprar);
+  assert.equal(gn.urgente, true);
   assert.deepEqual(c.pedidoPorFornecedor.map(f => [f.nome, f.itens.length, f.custo]), [['Sem fornecedor no FKN', 1, 48]]);
   assert.deepEqual(c.listas.fornecedores, ['FORNECEDOR DOIS LTDA', 'FORNECEDOR UM LTDA']);
   assert.ok(!c.parado.some(x => x.codigo === '010001.1'), 'a caixa não aparece como parada separada');

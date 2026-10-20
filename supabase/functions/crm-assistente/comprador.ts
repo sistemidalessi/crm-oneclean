@@ -127,18 +127,19 @@ export function ferramentasComprador(h: Ajuda) {
         const grupos = new Map<string, Linha>();
         produtos.forEach(p => {
           if (f && !normaliza((p.forn_cod || '') + ' ' + (p.forn_nome || '')).includes(f)) return;
-          const saldo = Math.max(0, Number(p.quantidade || 0)), pend = Number(p.pend_fornecedor || 0), min = Number(p.estoque_min || 0);
+          // saldo negativo (vendido sem estoque) entra negativo: o que já foi vendido sai do que está pedido (20/10/2026)
+          const saldo = Number(p.quantidade || 0), pend = Number(p.pend_fornecedor || 0), min = Number(p.estoque_min || 0);
           const prazo = p.forn && p.forn.prazo_dias != null ? Number(p.forn.prazo_dias) : 7;
-          if (!(p.dia > 0) && !(min > 0 && saldo + pend < min)) return;
+          if (!(p.dia > 0) && !(min > 0 && saldo + pend < min) && !(saldo + pend < 0)) return;
           const alvo = Math.max(p.dia * (dias + prazo), min), comprar = Math.ceil(alvo - saldo - pend - 1e-9);
           if (comprar <= 0) return;
-          const urgente = (p.dia > 0 && saldo + pend <= p.dia * prazo) || (min > 0 && saldo < min);
+          const urgente = (p.dia > 0 && saldo + pend <= p.dia * prazo) || (min > 0 && saldo < min) || saldo < 0;
           const k = p.forn_cod || '';
           if (!grupos.has(k)) grupos.set(k, { codigo: k || null, nome: p.forn_nome || 'Sem fornecedor (definir em Compras)', cad: p.forn, prazo, itens: [], total: 0, urgentes: 0, sem_custo: 0 });
           const g = grupos.get(k)!;
           const qtd = p.caixa ? Math.ceil(comprar / p.caixa) * p.caixa : comprar;
           g.itens.push({ codigo: p.codigo, descricao: p.descricao, unidade: p.unidade, abc: p.abc, saldo: n2(saldo), minimo: n2(min), ja_pedido: n2(pend), venda_dia: n2(p.dia),
-            cobertura_dias: p.dia > 0 ? Math.round(saldo / p.dia) : null, comprar: n2(qtd), caixas: p.caixa ? Math.ceil(comprar / p.caixa) : null, custo_unit: n2(p.custo), total: n2(qtd * p.custo), urgente });
+            cobertura_dias: p.dia > 0 ? Math.round(Math.max(0, saldo) / p.dia) : null, comprar: n2(qtd), caixas: p.caixa ? Math.ceil(comprar / p.caixa) : null, custo_unit: n2(p.custo), total: n2(qtd * p.custo), urgente });
           g.total += qtd * p.custo; if (!p.custo) g.sem_custo++; if (urgente) g.urgentes++;
         });
         const lista = [...grupos.values()].sort((a, b) => (!a.codigo ? 1 : 0) - (!b.codigo ? 1 : 0) || b.urgentes - a.urgentes || b.total - a.total);

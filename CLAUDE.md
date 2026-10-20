@@ -1517,6 +1517,11 @@ preços de custo as vendedoras não enxergam)".
   margem mínima continua conferida no banco (o bloqueio PREÇO). Tabelas de custo (`crm_estoque`, `crm_estoque_mov`,
   `crm_estoque_saldo`, `crm_custo_historico`, `crm_compra_itens`) já eram só admin/comprador. Conferido como vendedora e como
   gestora com `set local role authenticated` + `request.jwt.claims`.
+- **Saldo negativo na sugestão de compra (20/10, noite, Anderson: "teria que ficar negativo, até para o comprador saber o
+  que comprar"):** `gestao.js` e a ferramenta `pedido_sugerido` (`comprador.ts`) usam o saldo como ele é: o que foi vendido
+  sem estoque sai do que está pedido (antes contava zero e o pedido saía a menos: 290027 com −2.914 e 3.000 pedidos não
+  pedia nada) e saldo negativo é urgente. Cobertura em dias continua com piso zero. No catálogo, "Em falta: −45 (vendido sem
+  estoque)". 70 produtos estavam negativos no livro em 20/10.
 - **Parte B (feita às 18h de 20/10, depois de o Pages publicar o `198609c`):** a política `ler` de `crm_pedidos` ficou só
   gestora/admin/logística/comprador (a vendedora lê pela função); o guia do Clean conta por `crm_pedidos_situacoes()` (só
   situação e bloqueios). Conferido: vendedora 0 lendo direto, 3 pela função, nenhum item com custo; gestora e comprador com

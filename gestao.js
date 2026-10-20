@@ -215,7 +215,9 @@
 
     // Com o estoque do FKN: necessidade no período = o maior entre a previsão dos clientes e o
     // consumo médio dos últimos 90 dias. Comprar = necessidade (com piso no estoque mínimo do FKN)
-    // − saldo − o que já foi pedido ao fornecedor (saldo negativo conta zero). A caixa fechada
+    // − saldo − o que já foi pedido ao fornecedor. Saldo negativo (vendido sem estoque, esperando a compra chegar) entra
+    // negativo: o que já foi vendido sai do que está pedido (20/10/2026, Anderson: "teria que ficar negativo, até para o
+    // comprador saber o que comprar"; antes contava zero e o pedido saía a menos). A caixa fechada
     // é o mesmo estoque da unidade (juntaVariantes não soma).
     const itensEst = juntaVariantes(estoque);
     const est = new Map(itensEst.map(x => [x.codigo, x]));
@@ -247,11 +249,11 @@
       // o pedido chega em "prazo" dias: o que sai até lá também precisa estar no estoque (comprador sênior)
       g.ateChegar = g.consumoDia * g.prazo;
       const alvo = Math.max(g.necessidade + g.ateChegar, g.minimo);
-      g.comprar = g.inativo ? 0 : Math.max(0, Math.ceil(alvo - Math.max(0, g.saldo) - g.pedido - 1e-9));
+      g.comprar = g.inativo ? 0 : Math.max(0, Math.ceil(alvo - g.saldo - g.pedido - 1e-9));
       g.pelaMinimo = g.comprar > 0 && g.minimo > g.necessidade;
       g.caixas = g.caixa && g.comprar ? Math.ceil(g.comprar / g.caixa.fator) : null;
       // pedir hoje: com o que tem e o que já está pedido, acaba antes de um pedido novo chegar (ou já está abaixo do mínimo)
-      g.urgente = !g.inativo && g.comprar > 0 && g.consumoDia > 0 && (Math.max(0, g.saldo) + g.pedido <= g.ateChegar || (g.minimo > 0 && g.saldo < g.minimo));
+      g.urgente = !g.inativo && g.comprar > 0 && ((g.consumoDia > 0 && g.saldo + g.pedido <= g.ateChegar) || (g.minimo > 0 && g.saldo < g.minimo) || g.saldo < 0);
     };
     lista.forEach(g => {
       const e = (g.codigo && est.get(codigoFKN(g.codigo))) || estPorNome.get(R.normaliza(g.descricao));
