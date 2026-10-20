@@ -1911,7 +1911,9 @@ e WhatsApp. Valor real do parado em 15/10: **R$ 79 mil em 271 produtos** (depois
   boleto>` → link assinado de 5 min; vale 45 dias da criação; UUID aleatório) — e não baixa mais o arquivo para anexar à mão
   (`mensagemBoleto(..., links)`, `linksPdf`; modelo próprio sem a frase do PDF: o link vai no fim). "📎 Mandar o arquivo PDF"
   (Compartilhar) continua para mandar o arquivo de verdade. Testado: `crm-pdf` pelo `pg_net` (boleto real → PDF; id inexistente
-  → 404). **Falta:** o reenvio dos 3 de hoje (o Anderson clica) e o webhook de status da Meta (entregue/lido/falhou).
+  → 404). **Reenvio feito pelo Anderson às 09:48:** NF 2428 e NF 2363 (2 parcelas, um PDF) com `wa_status` "enviado com o PDF"
+  (subida para a Meta OK, sem cair no link); NF 2430 ficou de fora porque a vendedora já tinha mandado ao cliente às 09:40.
+  **Falta:** confirmar no celular da vendedora que o arquivo chegou e o webhook de status da Meta (entregue/lido/falhou).
 - **Volta do contato (14/10, pedido do Anderson):** o próximo passo da janela "Como foi…" tem também **"Em 15 dias"**.
 - **Regra (14/10, Anderson): título recebido antes do vencimento é ADIANTADO.** A Santa Casa (002435/01, R$ 7.422,15) venceria
   em 25/10 e pagou em 14/10: o "Recebi" gravou certo, mas o cartão não dizia que o cliente adiantou. Agora `caixa-calculo.js`
