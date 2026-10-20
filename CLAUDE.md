@@ -1517,8 +1517,11 @@ preços de custo as vendedoras não enxergam)".
   margem mínima continua conferida no banco (o bloqueio PREÇO). Tabelas de custo (`crm_estoque`, `crm_estoque_mov`,
   `crm_estoque_saldo`, `crm_custo_historico`, `crm_compra_itens`) já eram só admin/comprador. Conferido como vendedora e como
   gestora com `set local role authenticated` + `request.jwt.claims`.
-- **Parte B (depois que a tela nova publicar):** a política `ler` de `crm_pedidos` fica só gestora/admin/logística/comprador
-  (a vendedora lê pela função). `revoke` das funções novas de `public, anon` pelo Anderson no SQL Editor.
+- **Parte B (feita às 18h de 20/10, depois de o Pages publicar o `198609c`):** a política `ler` de `crm_pedidos` ficou só
+  gestora/admin/logística/comprador (a vendedora lê pela função); o guia do Clean conta por `crm_pedidos_situacoes()` (só
+  situação e bloqueios). Conferido: vendedora 0 lendo direto, 3 pela função, nenhum item com custo; gestora e comprador com
+  custo. **Falta o Anderson:** `revoke` de `public, anon` em `crm_pedido_saida`, `crm_pedidos_ler`, `crm_pedidos_situacoes` e
+  `crm_produtos_eans` no SQL Editor (pelo conector cai).
 
 ## NF-e emitida pelo CRM — Fase 4 da saída do FKN (16/10/2026, pedido do Anderson)
 

@@ -2380,9 +2380,9 @@ alter table public.crm_boloes enable row level security;
 revoke all on public.crm_pedidos, public.crm_boloes from anon, public;
 grant select on public.crm_pedidos, public.crm_boloes to authenticated;
 drop policy if exists ler on public.crm_pedidos;
+-- 20/10/2026: a vendedora não lê mais a tabela direto (os itens têm o custo); lê por crm_pedidos_ler, sem o custo.
 create policy ler on public.crm_pedidos for select to authenticated using (
-  (select public.crm_eh_gestor()) or (select public.crm_eh_logistica()) or (select public.crm_eh_comprador())
-  or vendedor_id = (select auth.uid()) or empresa_id in (select public.crm_empresas_minhas()));
+  (select public.crm_eh_gestor()) or (select public.crm_eh_logistica()) or (select public.crm_eh_comprador()));
 drop policy if exists ler on public.crm_boloes;
 create policy ler on public.crm_boloes for select to authenticated using ((select public.crm_eh_ativo()));
 
@@ -3008,7 +3008,7 @@ begin
       'liberados',  count(*) filter (where situacao = 'aberto' and not exists (select 1 from unnest(bloqueios) b where b <> all (liberado))),
       'separacao',  count(*) filter (where situacao = 'separacao'),
       'separado',   count(*) filter (where situacao = 'separado'))
-      into x from public.crm_pedidos where situacao in ('aberto', 'separacao', 'separado');
+      into x from public.crm_pedidos_situacoes();
     r := r || jsonb_build_object('pedidos', x);
   exception when others then null; end;
   begin
@@ -3534,3 +3534,13 @@ language sql stable security definer set search_path = public as $$
 $$;
 revoke all on function public.crm_produtos_eans() from public, anon;
 grant execute on function public.crm_produtos_eans() to authenticated;
+
+-- Situação e bloqueios dos pedidos que a pessoa vê (20/10/2026), para o guia do Clean (crm_turma_resumo é SECURITY
+-- INVOKER e a vendedora não lê mais crm_pedidos direto). Só situação e bloqueios: nada de itens nem custo.
+create or replace function public.crm_pedidos_situacoes() returns table (situacao text, bloqueios text[], liberado text[])
+language sql stable security definer set search_path = public as $$
+  select p.situacao, p.bloqueios, p.liberado from public.crm_pedidos p
+   where p.situacao in ('aberto', 'separacao', 'separado') and p.id in (select public.crm_pedidos_meus());
+$$;
+revoke all on function public.crm_pedidos_situacoes() from public, anon;
+grant execute on function public.crm_pedidos_situacoes() to authenticated;
