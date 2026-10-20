@@ -1520,8 +1520,15 @@ preços de custo as vendedoras não enxergam)".
 - **Andi no login com a foto do Anderson (20/10, noite, pedido dele, como fez na Agilité):** `assets/turma/andi.webp`
   (corpo inteiro recortado da foto que ele mandou, fundo transparente, 340×900) e `andi-rosto.webp` (o círculo do rosto),
   `turma.versao` 8. O Andi só apresenta o sistema (papel "Boas-vindas"); quem ajuda no dia a dia continua sendo o Clean.
-  Fala: "Seja bem-vindo! Eu sou o Andi, e é um prazer receber você. Entre com o seu e-mail e a sua senha: você está
-  entrando no mundo da OneClean." No login, foto com 340 px de altura e balão de 230 px.
+  Fala (ajustada no mesmo dia, sem o nome): "Olá, seja bem-vindo! É um prazer receber você. Entre com o seu e-mail e a
+  sua senha: você está entrando no mundo da OneClean." A foto tem a **altura do cartão do login** (o balão fica por cima
+  dela, `position: absolute`).
+- **Login 1 vez por dia (20/10, pedido do Anderson):** a 1ª vez no dia passa pela tela de login mesmo com a sessão
+  guardada (o navegador continua lembrando e-mail e senha; é só clicar em Entrar). `app.js`: preferência `login-dia`
+  (gravada ao entrar com a senha ou ao criar senha nova); sessão de outro dia → `signOut({ scope: 'local' })` (só este
+  navegador; celular e outros computadores da pessoa continuam) e aviso "Novo dia: entre de novo para começar."; aba
+  aberta de um dia para o outro pede o login quando a pessoa volta à aba ou depois de 30 min sem mexer (não corta quem
+  está digitando). O "Sair" do menu continua saindo de todos os aparelhos (padrão do Supabase).
 - **Compras a caminho / Pedidos ao fornecedor (20/10, noite; simulação https://claude.ai/artifact/UQyuCaNcT19jEN98kmAnyX,
   opção A aprovada):** o comprador registra o pedido em Compras → "Pedido por fornecedor" → **Registrar pedido** (itens da
   sugestão, quantidade editável, previsão = hoje + prazo do fornecedor, editável); "Exportar para o FKN" continua para lançar

@@ -724,6 +724,7 @@
       const r = await sb.auth.signInWithPassword({ email: $('#loginEmail').value.trim(), password: $('#loginSenha').value });
       b.disabled = false;
       if (r.error) { telaLogin(/invalid/i.test(r.error.message) ? 'E-mail ou senha incorretos.' : 'Não foi possível entrar: ' + r.error.message); return; }
+      marcaLoginDoDia();
       entrar(r.data.user);
     });
     $('#esqueci').addEventListener('click', async () => {
@@ -748,6 +749,7 @@
       const r = await sb.auth.updateUser({ password: s1 });
       if (r.error) { erro.textContent = r.error.message; erro.hidden = false; return; }
       history.replaceState(null, '', location.pathname);
+      marcaLoginDoDia();
       entrar(r.data.user);
     });
   }
@@ -766,6 +768,26 @@
       }
     });
   }
+
+  // 20/10/2026 (pedido do Anderson): a 1ª vez no dia passa pela tela de login, mesmo com a sessão guardada
+  // (o navegador continua lembrando e-mail e senha). A saída é só deste navegador (scope local).
+  const LOGIN_DIA = 'login-dia';
+  function marcaLoginDoDia() { gravaPref(LOGIN_DIA, R.hojeISO()); }
+  function loginDeHoje() { return pref(LOGIN_DIA, '') === R.hojeISO(); }
+  async function pedeLoginDoDia() {
+    E.eu = null; E.marca = null;
+    try { await sb.auth.signOut({ scope: 'local' }); } catch (e) { console.error(e); }
+    telaLogin(null, 'Novo dia: entre de novo para começar.');
+  }
+  // aba que ficou aberta de um dia para o outro: pede o login quando a pessoa volta (sem cortar quem está digitando)
+  let mexeuEm = Date.now();
+  ['pointerdown', 'keydown'].forEach(t => document.addEventListener(t, () => { mexeuEm = Date.now(); }, true));
+  function vigiaDiaNovo() {
+    if (!sb || !E.eu || loginDeHoje()) return;
+    if (document.hidden || Date.now() - mexeuEm > 30 * 60 * 1000) pedeLoginDoDia();
+  }
+  setInterval(vigiaDiaNovo, 60 * 1000);
+  document.addEventListener('visibilitychange', vigiaDiaNovo);
 
   async function entrar(usuario) {
     let eu = null;
@@ -873,6 +895,7 @@
     });
     const s = await sb.auth.getSession();
     if (recuperando && s.data && s.data.session) { telaNovaSenha(); return; }
+    if (s.data && s.data.session && !loginDeHoje()) { await pedeLoginDoDia(); return; }
     if (s.data && s.data.session) await entrar(s.data.session.user);
     else telaLogin();
   }
