@@ -1535,7 +1535,7 @@ preços de custo as vendedoras não enxergam)".
   ajusta em Configurações → Equipe (editar usuário → "Tela ao entrar no CRM"); cada pessoa troca a dela no menu do nome
   → "Tela ao entrar no CRM" (função `crm_minha_tela_inicial`, SECURITY DEFINER, só a própria linha e só essa coluna;
   anônimo e valor inválido barrados, testado). A tela em uso fica no `sessionStorage` da aba: recarregar (inclusive a
-  versão nova) continua onde estava; abrir o CRM de novo começa na tela ao entrar. `revoke` da função: rodar no SQL Editor.
+  versão nova) continua onde estava; abrir o CRM de novo começa na tela ao entrar. `revoke` da função rodado pelo Anderson e conferido.
 - **Compras a caminho / Pedidos ao fornecedor (20/10, noite; simulação https://claude.ai/artifact/UQyuCaNcT19jEN98kmAnyX,
   opção A aprovada):** o comprador registra o pedido em Compras → "Pedido por fornecedor" → **Registrar pedido** (itens da
   sugestão, quantidade editável, previsão = hoje + prazo do fornecedor, editável); "Exportar para o FKN" continua para lançar
