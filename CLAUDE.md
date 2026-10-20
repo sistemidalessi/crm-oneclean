@@ -1282,7 +1282,9 @@ e círculo); recortados sem fundo com o rembg (isnet) em `assets/turma/<id>.webp
   Atividades filtrada nele na semana de hoje; para gestor(a)/admin, a equipe vira uma linha em "Para acompanhar"
   ("Equipe: 4 tarefas atrasadas e 99 para hoje", abre Atividades da equipe). O especialista da tela saiu do topo do painel
   e foi para a conversa ("Nesta tela quem responde é …"). Testes em `testes/turma.test.js`; conferido no navegador.
-  O sino (🔔) continua com a conta própria dele (avisos de negócio/tarefa), separado do Clean.
+  **Sino junto com o Clean (20/10, "pode juntar o sino com o Clean"):** com a turma ligada o 🔔 some (`app.js`); tudo o
+  que ele contava (boletos, tarefas, leads, parados, sem contato, recompra) já está na agenda do Clean. Instalação sem
+  turma continua com o sino.
 - **⟳ Atualizar** na barra de cima (19/10, pedido do Anderson): recarrega a página (os dados e a versão mais nova).
 
 ## Comprador sênior (17–18/10/2026, pedido do Anderson: "vamos começar o comprador sênior")

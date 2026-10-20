@@ -405,6 +405,9 @@
       : ABAS.filter(a => (a[0] !== 'ajustes' || CRM.ehGestor()) && ((a[0] !== 'gestao' && a[0] !== 'compras' && a[0] !== 'estoque' && a[0] !== 'caixa' && a[0] !== 'fiscal' && a[0] !== 'concorrentes') || CRM.ehAdmin()));
     if (!abas.some(a => a[0] === E.aba)) E.aba = abas[0][0];
     ['#buscaGlobal', '[data-acao="novo-menu"]', '#sino'].forEach(s => { const el = $(s); if (el) el.hidden = CRM.foraDeVendas(); });
+    // 20/10/2026 (Anderson: "pode juntar o sino com o Clean"): com a turma ligada, os avisos do sino (boletos, tarefas,
+    // leads, parados, sem contato, recompra) já estão na agenda do Clean; o sino some para não haver duas contas.
+    if (CRM.turma && CRM.turma.ativo && $('#sino')) $('#sino').hidden = true;
     const al = R.alertas(E.D, E.ix, E.cfg, CRM.hoje(), CRM.carteira());
     const nTarefas = al.atrasadas.length + al.deHoje.length;
     // Menu no topo em grupos (18/10/2026, pedido do Anderson: "igual ao sistema da Agilité", mais largura na tela):
