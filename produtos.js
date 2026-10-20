@@ -370,14 +370,18 @@
   }
 
   async function rodaLote(codigos) {
-    lote = { total: codigos.length, feitos: 0, achou: 0, erros: 0, custo: 0, parar: false, inicio: Date.now() };
+    lote = { total: codigos.length, feitos: 0, achou: 0, erros: 0, custo: 0, parar: false, inicio: Date.now(), seguidos: 0 };
+    // 20/10/2026: erros seguidos = a chave da IA bateu o limite (ou a API caiu); para em vez de marcar o resto como erro
+    const errou = msg => { lote.erros++; if (++lote.seguidos >= 8 && !lote.parar) { lote.parar = true; CRM.toast('A IA parou de responder (' + (msg || 'erros seguidos') + '). Pode ser o limite da chave da Anthropic: confira o limite e o crédito no console e rode de novo; o que já foi achado fica guardado.', true); } };
     CRM.render();
     const fila = codigos.slice();
     const trabalha = async () => {
       while (fila.length && !lote.parar) {
         const cod = fila.shift();
-        try { const r = await buscarUm(cod); lote.custo += num(r.custo_usd); if (r.situacao === 'sugerida') lote.achou++; else if (r.situacao === 'erro') lote.erros++; }
-        catch (e) { lote.erros++; if (/503|chave|ligada/i.test(e.message || '')) { lote.parar = true; CRM.toast(e.message, true); } }
+        try {
+          const r = await buscarUm(cod); lote.custo += num(r.custo_usd);
+          if (r.situacao === 'erro') errou(r.erro); else { lote.seguidos = 0; if (r.situacao === 'sugerida') lote.achou++; }
+        } catch (e) { errou(e.message); if (/503|chave|ligada/i.test(e.message || '')) { lote.parar = true; CRM.toast(e.message, true); } }
         lote.feitos++;
         CRM.render();
       }
@@ -404,7 +408,7 @@
       '<section class="cartao pf-lote"><div><h2>Buscar fotos e fichas em lote</h2>' +
         '<p>A IA procura cada produto pelo nome, pela marca e pelo código de barras, de preferência no site do fabricante: a foto, a descrição, as especificações, a ficha técnica e a FISPQ. ' +
         '<strong>Nada aparece para as vendedoras antes de você aprovar.</strong></p>' +
-        '<p class="dica">IA no mês: ' + (ia ? usd(ia.custo_mes) + ' (fotos e fichas: ' + usd(ia.custo_fotos_mes) + ')' : '—') + ' · limite da chave: US$ 10 por mês · ' +
+        '<p class="dica">IA no mês: ' + (ia ? usd(ia.custo_mes) + ' (fotos e fichas: ' + usd(ia.custo_fotos_mes) + ')' : '—') + ' · o limite é o da chave no console da Anthropic · ' +
           (est.medido ? 'custo médio medido: ' + usd(est.medio) + ' por produto (' + est.medido + ' busca(s))' : 'custo por produto ainda não medido (estimativa ' + usd(est.medio) + '): comece pelo teste de 5') + '</p></div>' +
         (lote ? '<div class="pf-andamento" role="status"><strong>Buscando ' + lote.feitos + ' de ' + lote.total + '…</strong> ' + lote.achou + ' com sugestão · ' + usd(lote.custo) + ' até agora' +
             (lote.feitos >= 5 ? ' · faltam uns ' + Math.max(1, Math.round((Date.now() - lote.inicio) / lote.feitos * (lote.total - lote.feitos) / 60000)) + ' min' : '') +
@@ -572,7 +576,7 @@
     'pf-lote': () => {
       const cods = X.paraBuscar(lista, sugs, fl.quantos === 'todos' ? null : Number(fl.quantos)), est = X.custoEstimado(cods.length, sugs);
       if (!cods.length) return;
-      if (!confirm('Mandar a IA procurar ' + cods.length + ' produto(s)?\nCusto estimado: ' + usd(est.total) + ' (limite da chave: US$ 10 por mês; já usado no mês: ' + usd(ia && ia.custo_mes) + ').\nDeixe esta tela aberta até terminar.')) return;
+      if (!confirm('Mandar a IA procurar ' + cods.length + ' produto(s)?\nCusto estimado: ' + usd(est.total) + ' (já usado no mês: ' + usd(ia && ia.custo_mes) + '; confira se o limite da chave no console da Anthropic cobre).\nDeixe esta tela aberta até terminar.')) return;
       rodaLote(cods).catch(CRM.falhou);
     },
     'pf-lote-parar': () => { if (lote) { lote.parar = true; CRM.render(); } },
