@@ -1956,9 +1956,12 @@ e WhatsApp. Valor real do parado em 15/10: **R$ 79 mil em 271 produtos** (depois
     pelo WhatsApp da empresa" em cada linha ainda não mandada ao cliente (também nas já cobradas por link) e o selo "no WhatsApp
     do cliente dd/mm · entregue/lido", "cartório em dd/mm" (vermelho se venceu) e "cliente disse que pagou". Integrações:
     modelo do cliente, segredos, "Ligar o retorno" e as últimas mensagens recebidas.
-  - **Falta o Anderson** (passo a passo em `sistemi-dalessi/docs/meta-whatsapp-passo-a-passo.md`, "Parte 2"): "Criar o modelo do
-    cliente" e esperar a aprovação; `WHATSAPP_APP_SECRET` e `WHATSAPP_VERIFY_TOKEN` nos Secrets; o webhook no app da Meta
-    (campo `messages`); "Ligar o retorno"; teste com o próprio celular.
+  - **Feito pelo Anderson em 20/10:** "Criar o modelo do cliente" (em análise na Meta), `WHATSAPP_APP_SECRET` e
+    `WHATSAPP_VERIFY_TOKEN` nos Secrets, webhook verificado no app da Meta (no painel novo: Casos de uso → Conectar no
+    WhatsApp → Etapa 2 → Configurar webhooks), **app publicado** (só publicado recebe webhook de produção; exigiu a política
+    de privacidade). **Retorno conferido às 15:16 UTC:** o "Teste" mandado do celular dele ao número da OneClean chegou em
+    `crm_whatsapp_eventos`. **Falta:** a Meta aprovar o `boleto_cliente` e o 1º envio real ao próprio celular (tocar em "Já paguei").
+    Cuidado: na tela da chave secreta do app, "Redefinir" troca a chave (não dá para desfazer); o certo é "Mostrar".
 - **Política de privacidade (20/10):** `privacidade.html` (pública, sem script), exigida pela Meta para publicar o app do WhatsApp; dados da OneClean tirados do emitente fiscal. Endereço: https://sistemidalessi.github.io/crm-oneclean/privacidade.html
 - **Volta do contato (14/10, pedido do Anderson):** o próximo passo da janela "Como foi…" tem também **"Em 15 dias"**.
 - **Regra (14/10, Anderson): título recebido antes do vencimento é ADIANTADO.** A Santa Casa (002435/01, R$ 7.422,15) venceria
