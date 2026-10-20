@@ -4,6 +4,9 @@
 // endereço, que abre o PDF: GET ?b=<id do boleto> → redireciona para um link assinado de 5 minutos do bucket privado.
 // Sem login (o cliente abre no celular dele): o id é um UUID aleatório (122 bits) e o link vale 45 dias da criação do
 // boleto; boleto sem PDF, apagado ou mais velho dá página simples de "não disponível".
+// GET ?f=<id do boleto> (20/10/2026): botão "Falar comigo" da mensagem que o cliente recebe pelo número da empresa
+// (modelo boleto_cliente) → abre o WhatsApp do(a) vendedor(a) da carteira com a mensagem pronta ("Olá, Renata! Recebi
+// o boleto atualizado da NF 2428.") e anota o clique (cli_falou_em). Vale 90 dias.
 // Deploy: verify_jwt DESLIGADO (o cliente não tem login).
 import { createClient } from 'npm:@supabase/supabase-js@2.116.0';
 
@@ -15,9 +18,31 @@ const pagina = (status: number, texto: string) => new Response(
 
 Deno.serve(async (req) => {
   if (req.method !== 'GET' && req.method !== 'HEAD') return pagina(405, 'Endereço só para abrir o PDF.');
-  const id = new URL(req.url).searchParams.get('b') || '';
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) return pagina(404, 'Link inválido.');
+  const q = new URL(req.url).searchParams;
+  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
   const db = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } });
+  const f = q.get('f') || '';
+  if (f) {
+    if (!UUID.test(f)) return pagina(404, 'Link inválido.');
+    const { data: b } = await db.from('crm_boletos').select('id, empresa_id, cli_msg, criado_em, nota_numero, duplicata').eq('id', f).maybeSingle();
+    if (!b || !b.empresa_id) return pagina(404, 'Não achei este boleto. Responda a mensagem que recebeu e retornamos.');
+    if (Date.now() - Date.parse(b.criado_em) > 90 * 864e5) return pagina(410, 'Este link expirou. Responda a mensagem que recebeu e retornamos.');
+    const { data: e } = await db.from('crm_empresas').select('responsavel_id').eq('id', b.empresa_id).maybeSingle();
+    const { data: u } = e && e.responsavel_id ? await db.from('crm_usuarios').select('nome, telefone').eq('user_id', e.responsavel_id).maybeSingle() : { data: null };
+    let tel = String((u && u.telefone) || '').replace(/\D/g, '');
+    if (tel.length === 10 || tel.length === 11) tel = '55' + tel;
+    if (tel.length < 12) return pagina(404, 'Não achei o contato de quem te atende. Responda a mensagem que recebeu e retornamos.');
+    const irmaos = b.cli_msg ? ((await db.from('crm_boletos').select('nota_numero, duplicata').eq('cli_msg', b.cli_msg)).data || [b]) : [b];
+    const docs = [...new Set(irmaos.map(x => (x.nota_numero ? 'NF ' + x.nota_numero : 'duplicata ' + x.duplicata)))];
+    const texto = 'Olá, ' + String((u && u.nome) || '').trim().split(/\s+/)[0] + '! Recebi o boleto atualizado ' + (docs.length > 1 ? 'das ' : 'da ') +
+      (docs.length < 2 ? docs.join('') : docs.slice(0, -1).join(', ') + ' e ' + docs[docs.length - 1]) + '.';
+    const agora = new Date().toISOString();
+    if (req.method === 'GET') await db.from('crm_boletos').update({ cli_falou_em: agora }).eq(b.cli_msg ? 'cli_msg' : 'id', b.cli_msg || b.id).is('cli_falou_em', null);
+    if (req.method === 'GET') await db.from('crm_whatsapp_eventos').insert({ tipo: 'clique', wamid: b.cli_msg, payload: 'falar:' + b.id, texto: 'Falar comigo' });
+    return new Response(null, { status: 302, headers: { Location: 'https://wa.me/' + tel + '?text=' + encodeURIComponent(texto), 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex' } });
+  }
+  const id = q.get('b') || '';
+  if (!UUID.test(id)) return pagina(404, 'Link inválido.');
   const { data: b } = await db.from('crm_boletos').select('arquivo, criado_em, nota_numero, duplicata').eq('id', id).maybeSingle();
   if (!b || !b.arquivo) return pagina(404, 'Este boleto não está mais disponível. Peça um novo a quem te mandou.');
   if (Date.now() - Date.parse(b.criado_em) > VALIDADE_DIAS * 864e5) return pagina(410, 'Este link expirou. Peça o boleto atualizado a quem te mandou.');

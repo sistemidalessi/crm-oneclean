@@ -164,7 +164,23 @@
     return lista.filter(b => b.arquivo && b.id && !vistos.has(b.arquivo) && vistos.add(b.arquivo)).map(b => String(base).replace(/\/+$/, '') + '/functions/v1/crm-pdf?b=' + b.id);
   }
 
-  const C = { lerLinha, linhaDeCodigo, formataLinha, dataDoFator, confereBoleto, casaBoleto, boletosPendentes, boletoAtual, mensagemBoleto, linksPdf, textoBoletos, MODELO_BOLETO };
+  // números do cadastro do cliente que podem receber o boleto pelo WhatsApp da empresa (20/10/2026): celulares
+  // primeiro, o contato principal antes, sem repetir; o servidor só aceita número que está no cadastro
+  function telefonesCliente(e, contatos) {
+    const wa = v => { let d = String(v || '').replace(/\D/g, ''); if (d.length === 10 || d.length === 11) d = '55' + d; return d.length >= 12 && d.length <= 13 ? d : ''; };
+    const l = [], vistos = new Set();
+    const poe = (v, rotulo, contatoId, principal) => {
+      const d = wa(v);
+      if (!d || vistos.has(d)) return;
+      vistos.add(d);
+      l.push({ tel: d, rotulo, contatoId: contatoId || '', celular: /^55\d{2}9\d{8}$/.test(d), principal: !!principal });
+    };
+    (contatos || []).forEach(c => ['whatsapp', 'celular', 'telefone'].forEach(k => poe(c[k], c.nome || 'contato', c.id, c.principal)));
+    if (e) ['whatsapp', 'telefone'].forEach(k => poe(e[k], 'telefone da empresa'));
+    return l.map((x, i) => [x, i]).sort((a, b) => (b[0].celular - a[0].celular) || (b[0].principal - a[0].principal) || a[1] - b[1]).map(x => x[0]);
+  }
+
+  const C = { telefonesCliente, lerLinha, linhaDeCodigo, formataLinha, dataDoFator, confereBoleto, casaBoleto, boletosPendentes, boletoAtual, mensagemBoleto, linksPdf, textoBoletos, MODELO_BOLETO };
   raiz.CRMCobranca = C;
   if (typeof module !== 'undefined') module.exports = C;
 
@@ -196,12 +212,34 @@
   function seloTitulo(t) {
     const b = boletoAtual(E().boletos, t.duplicata);
     if (!b) return '';
+    if (b.cli_pagou_em) return ' ' + CRM.selo('cliente disse que pagou ' + dm(R.diaLocal(b.cli_pagou_em)) + ' — o financeiro confere', 'verde');
+    if (b.cli_em) return ' ' + seloCliente(b);
     if (b.cobrado_em) return ' ' + CRM.selo('boleto atualizado enviado ' + dm(R.diaLocal(b.cobrado_em)) + (b.cobrado_por ? ' por ' + R.primeiroNome(CRM.nomeUsuario(b.cobrado_por)) : ''), 'verde');
     return ' ' + CRM.selo('boleto atualizado ' + R.moeda(b.valor) + ' · vence ' + dm(b.vencimento) + ' — enviar', 'ambar');
   }
-  const botoesEnvio = (id, grande) => '<button type="button" class="' + (grande ? 'btn ouro' : 'mini wa') + '" data-acao="cob-whats" data-id="' + esc(id) + '" title="abre a conversa do cliente com a mensagem e o link do PDF (boleto e nota fiscal)">WhatsApp com o boleto e o PDF</button> ' +
+  // mensagem ao cliente pelo número da empresa (modelo boleto_cliente aprovado na Meta): PDF anexo, em nome do(a)
+  // vendedor(a), aviso cordial do cartório e os botões "Falar comigo" e "Já paguei" (o retorno vira tarefa)
+  let cliOk = false, cliLido = 0;
+  function cliSituacao() {
+    if (!CRM.store().whatsapp || Date.now() - cliLido < 600000) return;
+    cliLido = Date.now();
+    CRM.store().whatsapp({ acao: 'pronto' }).then(r => { const antes = cliOk; cliOk = !!(r && r.cliente); if (antes !== cliOk) CRM.render(); }).catch(() => {});
+  }
+  const ST_CLI = { enviado: ['enviado', 'azul'], entregue: ['entregue', 'azul'], lido: ['lido', 'verde'], falhou: ['não chegou', 'vermelho'] };
+  function seloCliente(b) {
+    const st = ST_CLI[b.cli_status] || [b.cli_status || '', 'azul'];
+    const venceu = b.cli_prazo && b.cli_prazo < hoje() && !b.cli_pagou_em;
+    return CRM.selo('no WhatsApp do cliente ' + dm(R.diaLocal(b.cli_em)) + ' · ' + st[0], st[1]) +
+      (b.cli_status === 'falhou' && b.cli_erro ? ' <small>' + esc(b.cli_erro) + '</small>' : '') +
+      (b.cli_pagou_em ? ' ' + CRM.selo('cliente disse que pagou ' + dm(R.diaLocal(b.cli_pagou_em)), 'verde')
+        : b.cli_prazo ? ' ' + CRM.selo((venceu ? 'prazo do cartório venceu ' : 'cartório em ') + dm(b.cli_prazo), venceu ? 'vermelho' : 'ambar') : '') +
+      (b.cli_falou_em ? ' <small>tocou em "Falar comigo"</small>' : '');
+  }
+  const podeCliente = l => cliOk && l.some(b => b.arquivo);
+  const botoesEnvio = (id, grande) => { cliSituacao(); const meta = podeCliente(pendentesDe(id)); return (meta ? '<button type="button" class="' + (grande ? 'btn ouro' : 'mini wa') + '" data-acao="cob-cliente" data-id="' + esc(id) + '" title="o cliente recebe do número da empresa, em seu nome, o PDF anexo, o valor, a linha digitável e os botões Falar comigo e Já paguei">📲 Mandar ao cliente pelo WhatsApp da ' + esc(CRM.nomeInstalacao()) + '</button> ' : '') +
+    '<button type="button" class="' + (meta ? (grande ? 'btn sec' : 'mini') : grande ? 'btn ouro' : 'mini wa') + '" data-acao="cob-whats" data-id="' + esc(id) + '" title="abre a conversa do cliente com a mensagem e o link do PDF (boleto e nota fiscal)">' + (meta ? 'ou pelo meu WhatsApp, com o link' : 'WhatsApp com o boleto e o PDF') + '</button> ' +
     (podeCompartilhar() && pendentesDe(id).some(b => b.arquivo) ? '<button type="button" class="' + (grande ? 'btn sec' : 'mini') + '" data-acao="cob-compartilhar" data-id="' + esc(id) + '" title="manda o ARQUIVO PDF (resumo, nota fiscal e boleto) pelo WhatsApp ou outro app; você escolhe o contato">📎 Mandar o arquivo PDF</button> ' : '') +
-    '<button type="button" class="' + (grande ? 'btn sec' : 'mini') + '" data-acao="cob-feito" data-id="' + esc(id) + '" title="mandou por outro caminho (e-mail, telefone): marca como enviado">Já mandei</button>';
+    '<button type="button" class="' + (grande ? 'btn sec' : 'mini') + '" data-acao="cob-feito" data-id="' + esc(id) + '" title="mandou por outro caminho (e-mail, telefone): marca como enviado">Já mandei</button>'; };
   function blocoEmpresa(id, semBotoes) {
     const l = pendentesDe(id);
     if (!l.length) return '';
@@ -407,6 +445,37 @@
     await concluiTarefas(e.id);
     if (peloZap && a) F.esperaVolta(e, c, a, 'whatsapp');
     CRM.render();
+  }
+
+  // ---- boleto ao cliente pelo WhatsApp da empresa (vendedor(a) da carteira, gestor(a) ou admin)
+  function formCliente(e, lista) {
+    const tels = telefonesCliente(e, CRM.doEmpresa('contatos', e.id));
+    if (!tels.length) { CRM.toast('Cliente sem telefone no CRM: cadastre o celular do financeiro na ficha.', true); return; }
+    const dias = Number((E().cfg || {}).cobranca_prazo_cartorio) || 5;
+    const vend = CRM.nomeUsuario(e.responsavel_id);
+    CRM.abrirForm({
+      titulo: 'Mandar ao cliente pelo WhatsApp da ' + CRM.nomeInstalacao(),
+      intro: 'O cliente recebe do número da empresa, em nome de ' + R.primeiroNome(vend) + ': o PDF completo anexo (resumo, nota fiscal e boleto), o valor atualizado, a linha digitável ' +
+        'e um aviso cordial de que, se não for pago em ' + dias + ' dias úteis, o título segue para o cartório. Dois botões: "Falar comigo" abre o WhatsApp de ' + R.primeiroNome(vend) +
+        ' com a mensagem pronta, e "Já paguei" avisa ' + R.primeiroNome(vend) + ' e o financeiro (vira tarefa). Se o cliente responder, também vira tarefa.',
+      htmlAntes: '<ul class="cob-lista">' + lista.map(b => '<li>' + esc(nomeNF(b)) + ': <strong>' + esc(R.moeda(b.valor)) + '</strong>' +
+        (Number(b.valor) > Number(b.valor_original) + 0.005 ? ' <small>(original ' + esc(R.moeda(b.valor_original)) + ')</small>' : '') + ', venceu ' + esc(R.dataBR(b.vencimento)) + '</li>').join('') + '</ul>',
+      campos: [{ nome: 'tel', rotulo: 'Para qual número', tipo: 'select', largo: true, opcoes: tels.map(x => [x.tel, x.rotulo + ' · ' + telBR(x.tel) + (x.celular ? '' : ' (fixo: só se tiver WhatsApp)')]) }],
+      valores: { tel: tels[0].tel },
+      salvarTexto: 'Mandar',
+      aoSalvar: async v => {
+        const r = await CRM.store().whatsapp({ acao: 'cliente', boletos: lista.map(b => b.id), telefone: v.tel });
+        const agora = new Date().toISOString(), ids = new Set(lista.map(b => b.id));
+        E().boletos = (E().boletos || []).map(b => (ids.has(b.id) ? Object.assign({}, b, { cli_msg: r.id, cli_status: 'enviado', cli_em: agora, cli_erro: null, cli_tel: r.para, cli_prazo: r.prazo,
+          cobrado_em: b.cobrado_em || agora, cobrado_por: b.cobrado_por || CRM.meuId() }) : b));
+        const sel = tels.find(x => x.tel === v.tel), c = sel && sel.contatoId ? CRM.contato(sel.contatoId) : null;
+        await CRM.fichas.registraAuto(e, c, 'whatsapp', 'Boleto atualizado enviado ao cliente pelo WhatsApp da ' + CRM.nomeInstalacao() + ' (' + telBR(r.para) + '), com o PDF anexo: ' +
+          lista.map(b => nomeNF(b) + ' ' + R.moeda(b.valor)).join('; ') + '. Na mensagem, o cartório depois de ' + R.dataBR(r.prazo) + '.');
+        await concluiTarefas(e.id);
+        CRM.render();
+        CRM.toast('Mandado a ' + telBR(r.para) + ' com o PDF anexo. Se o cliente tocar em "Já paguei" ou responder, vira tarefa.');
+      }
+    });
   }
 
   // ---- administrador: cartório
@@ -674,7 +743,8 @@
       const meta = b.wa_status === 'falhou' ? ' ' + CRM.selo('WhatsApp da OneClean falhou', 'vermelho') + (b.wa_erro ? ' <small>' + esc(b.wa_erro) + '</small>' : '')
         : b.wa_status === 'enviado' ? ' ' + CRM.selo('pelo WhatsApp da OneClean, sem o PDF anexo', 'ambar') + (b.wa_erro ? ' <small>' + esc(b.wa_erro) + '</small>' : '')
         : b.wa_status ? ' ' + CRM.selo('pelo WhatsApp da OneClean: ' + b.wa_status, 'verde') : '';
-      return (b.avisado_em ? CRM.selo('no WhatsApp do(a) vendedor(a) ' + dm(R.diaLocal(b.avisado_em)), 'azul') : CRM.selo('falta mandar ao(à) vendedor(a)', 'ambar')) + meta + det +
+      const cli = b.cli_em ? ' ' + seloCliente(b) : podeCliente([b]) ? ' <button type="button" class="mini wa" data-acao="cob-cliente-boleto" data-id="' + esc(b.id) + '" title="o cliente recebe do número da empresa o PDF anexo, em nome do(a) vendedor(a) da carteira">📲 Ao cliente pelo WhatsApp da empresa</button>' : '';
+      return (b.cli_em ? '' : b.avisado_em ? CRM.selo('no WhatsApp do(a) vendedor(a) ' + dm(R.diaLocal(b.avisado_em)), 'azul') : CRM.selo('falta mandar ao(à) vendedor(a)', 'ambar')) + (b.cli_em ? '' : meta) + cli + det +
         ' <button type="button" class="mini" data-acao="cob-ja-cobrou" data-id="' + esc(b.id) + '" title="o(a) vendedor(a) já mandou ao cliente: tira da Fila e conclui a tarefa">Já cobrou</button>' + ver + refaz;
     };
     const avisar = porVendedora(paraAvisar());
@@ -703,6 +773,7 @@
   }
   function depoisAba(el) {
     waSituacao();
+    cliSituacao();
     if (paraAvisar().length && podeCompartilhar()) preCarrega(paraAvisar());
     const arq = el.querySelector('#cobArq');
     if (arq) arq.addEventListener('change', () => { const f = [].slice.call(arq.files); arq.value = ''; lerArquivos(f).catch(CRM.falhou); });
@@ -729,6 +800,18 @@
       if (link.indexOf('https://wa.me/?') === 0) CRM.toast('Cliente sem celular no CRM: escolha o contato no WhatsApp. Depois cadastre o celular do financeiro na ficha.');
       // 20/10/2026: o PDF vai como link na mensagem (o cliente abre no celular); não baixa mais o arquivo para anexar à mão
       (async () => { await marcaCobrado(e, lista, c, texto, true); })().catch(CRM.falhou);
+    },
+    'cob-cliente': id => {
+      const e = CRM.empresa(id), lista = pendentesDe(id);
+      if (e && lista.length) formCliente(e, lista);
+    },
+    'cob-cliente-boleto': id => {
+      const b0 = boleto(id), e = b0 && CRM.empresa(b0.empresa_id);
+      if (!e) return;
+      // os boletos atuais do mesmo cliente, ainda não mandados a ele (vão juntos, um PDF só por boleto)
+      const l = vencidosACobrar().filter(t => t.empresa_id === e.id).map(t => boletoAtual(E().boletos, t.duplicata)).filter(b => b && b.arquivo && !b.cli_em);
+      fechaForm();
+      setTimeout(() => formCliente(e, l.some(b => b.id === b0.id) ? l : [b0]), 0);
     },
     'cob-avisar': (u, el) => {
       const usr = CRM.usuario(u), lista = paraAvisar().filter(b => vendedoraDe(b) === u);

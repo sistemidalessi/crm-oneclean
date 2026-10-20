@@ -1913,7 +1913,39 @@ e WhatsApp. Valor real do parado em 15/10: **R$ 79 mil em 271 produtos** (depois
   (Compartilhar) continua para mandar o arquivo de verdade. Testado: `crm-pdf` pelo `pg_net` (boleto real → PDF; id inexistente
   → 404). **Reenvio feito pelo Anderson às 09:48:** NF 2428 e NF 2363 (2 parcelas, um PDF) com `wa_status` "enviado com o PDF"
   (subida para a Meta OK, sem cair no link); NF 2430 ficou de fora porque a vendedora já tinha mandado ao cliente às 09:40.
-  **Falta:** confirmar no celular da vendedora que o arquivo chegou e o webhook de status da Meta (entregue/lido/falhou).
+  Confirmado pelo Anderson: o anexo chegou às vendedoras. O webhook de status ficou pronto no item seguinte (`crm-whatsapp-retorno`).
+- **Boleto direto ao CLIENTE pelo WhatsApp da empresa (20/10/2026, aprovado pelo Anderson na simulação
+  https://claude.ai/artifact/5Fy5wK12vEuke5S8ohHN1J, "com o botão Já paguei e … irá ao cartório automaticamente … algo bem
+  cordial").** O `wa.me` não anexa arquivo; então o cliente recebe pelo número da empresa o modelo **`boleto_cliente`**
+  (utilidade, pt_BR): PDF completo no cabeçalho, corpo em nome da pessoa da carteira ("Olá, Maria! Aqui é Renata, da OneClean."),
+  notas e vencimento, valor com juros e original, linha digitável, **aviso cordial do cartório** com a data ("Para sua
+  tranquilidade, pedimos a gentileza de regularizar até segunda-feira, 27/10/2026. Depois dessa data, o título segue
+  automaticamente para o cartório…"), rodapé "OneClean · financeiro" e dois botões: **URL "Falar comigo"** (o texto neutro serve a
+  qualquer pessoa da equipe e casa com o "fale comigo pelo botão abaixo"; vai para `crm-pdf?f=<id do boleto>`, que redireciona ao
+  `wa.me` da pessoa da carteira com "Olá, Renata! Recebi o boleto atualizado da NF 2428." e anota `cli_falou_em`) e **resposta
+  rápida "Já paguei"** (payload `pagou:<id>`). Prazo = `crm_config.dados.cobranca_prazo_cartorio` dias úteis (padrão 5; campo em
+  Configurações → Automações), sábado e domingo não contam (feriado conta: pequeno). **O CRM não manda sozinho ao cartório**:
+  a Cobrança marca em vermelho "prazo do cartório venceu" e o botão Cartório continua manual.
+  - `crm-whatsapp` v13: ações `pronto` (qualquer pessoa ativa: modelo do cliente aprovado?), `cliente` (pessoa da carteira,
+    gestor(a) ou admin; um cliente por vez; **o número precisa estar no cadastro** do cliente ou de um contato; a pessoa da
+    carteira precisa ter celular; sobe o PDF para a Meta e manda; grava `cli_msg/cli_status/cli_em/cli_tel/cli_por/cli_prazo` e
+    marca `cobrado_em`), `criar_modelo_cliente`, `assinar_retorno` (`POST /{waba}/subscribed_apps`); `situacao` traz os dois
+    modelos e o retorno (assinado, segredos, endereço, últimos eventos). O resto continua só do admin.
+  - **`crm-whatsapp-retorno`** (verify_jwt desligado; nova): GET de conferência com `WHATSAPP_VERIFY_TOKEN`; POST só com a
+    assinatura `X-Hub-Signature-256` (HMAC do `WHATSAPP_APP_SECRET`); sem os dois segredos responde 503 e não grava nada.
+    Status → `cli_status` / `wa_entrega` (só sobe; `logica.js`, testado no Node); "Já paguei" (botão ou texto claro; "pago
+    amanhã" não conta) → `cli_pagou_em`, tarefa para a pessoa da carteira e para cada admin, e um obrigado ao cliente; outra
+    resposta → tarefa com o texto e, no máximo a cada 12 h, "Repassei para Renata…" com o `wa.me` dela. O número da Meta pode vir
+    **sem o 9** (`variantesBR`). Tudo em `crm_whatsapp_eventos` (RLS: só admin lê). Testado pelo `pg_net`: GET errado 403,
+    POST sem segredos 503; `crm-pdf?f=` inexistente 404.
+  - Tela: ficha/Fila com **"📲 Mandar ao cliente pelo WhatsApp da OneClean"** (escolhe o número: celulares primeiro,
+    `telefonesCliente`); o WhatsApp com link e o "📎 Mandar o arquivo PDF" continuam como reserva; na Cobrança, "📲 Ao cliente
+    pelo WhatsApp da empresa" em cada linha ainda não mandada ao cliente (também nas já cobradas por link) e o selo "no WhatsApp
+    do cliente dd/mm · entregue/lido", "cartório em dd/mm" (vermelho se venceu) e "cliente disse que pagou". Integrações:
+    modelo do cliente, segredos, "Ligar o retorno" e as últimas mensagens recebidas.
+  - **Falta o Anderson** (passo a passo em `sistemi-dalessi/docs/meta-whatsapp-passo-a-passo.md`, "Parte 2"): "Criar o modelo do
+    cliente" e esperar a aprovação; `WHATSAPP_APP_SECRET` e `WHATSAPP_VERIFY_TOKEN` nos Secrets; o webhook no app da Meta
+    (campo `messages`); "Ligar o retorno"; teste com o próprio celular.
 - **Volta do contato (14/10, pedido do Anderson):** o próximo passo da janela "Como foi…" tem também **"Em 15 dias"**.
 - **Regra (14/10, Anderson): título recebido antes do vencimento é ADIANTADO.** A Santa Casa (002435/01, R$ 7.422,15) venceria
   em 25/10 e pagou em 14/10: o "Recebi" gravou certo, mas o cartão não dizia que o cliente adiantou. Agora `caixa-calculo.js`

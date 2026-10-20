@@ -104,3 +104,13 @@ test('mensagemBoleto com o link do PDF (20/10/2026: o WhatsApp da vendedora só 
   assert.equal(C.mensagemBoleto(null, [b], vars), C.mensagemBoleto(null, [b], vars, [])); // sem link: como antes
   assert.deepEqual(C.linksPdf([b], ''), []);
 });
+
+test('números do cliente para o boleto pela empresa: celular primeiro, principal antes, sem repetir', () => {
+  const l = C.telefonesCliente({ telefone: '(11) 4123-4567', whatsapp: '' }, [
+    { id: 'a', nome: 'Compras', telefone: '1141234567' },
+    { id: 'b', nome: 'Maria', celular: '11 98765-4321', principal: true },
+    { id: 'c', nome: 'José', whatsapp: '5511912345678', celular: '11987654321' }]);
+  assert.deepStrictEqual(l.map(x => [x.tel, x.rotulo, x.celular]), [
+    ['5511987654321', 'Maria', true], ['5511912345678', 'José', true], ['551141234567', 'Compras', false]]);
+  assert.deepStrictEqual(C.telefonesCliente(null, []), []);
+});

@@ -69,6 +69,8 @@
       ajuda: '{saudacao} = "Olá, Maria!"; {itens} = o que o cliente costuma levar (pelas notas); também {empresa}, {primeiro_nome}, {vendedor_primeiro_nome}, {minha_empresa}' },
     { nome: 'modelo_boleto', rotulo: 'Mensagem do boleto atualizado (WhatsApp da cobrança)', tipo: 'textarea', largo: true,
       ajuda: 'vazio = a mensagem padrão do CRM. {boletos} = cada boleto com valor, vencimento e linha digitável; {titulos_boleto} = "a NF 2300 (vencida em 01/10)"; também {saudacao}, {empresa}, {vendedor_primeiro_nome}, {minha_empresa}' },
+    { nome: 'cobranca_prazo_cartorio', rotulo: 'Boleto ao cliente pelo WhatsApp da empresa: prazo do aviso de cartório (dias úteis)', tipo: 'numero', passo: '1', min: 1, largo: true,
+      ajuda: 'a mensagem diz, com cordialidade, que depois dessa data o título segue para o cartório; vazio = 5 dias úteis' },
     { nome: 'auto_retomar_perda', rotulo: 'Negócio perdido cria tarefa para retomar o contato', tipo: 'checkbox' },
     { nome: 'dias_retomar_perda', rotulo: '… depois de (dias)', tipo: 'numero', passo: '1', min: 1 },
     { nome: 'etapa_ao_enviar_proposta', rotulo: 'Ao enviar proposta, mover o negócio para a etapa', tipo: 'select', largo: true },
@@ -937,7 +939,23 @@
       '<p>Modelo "boleto_vendedora": ' + (ms ? CRM.selo(ms[0], ms[1]) + (m.rejected_reason && m.rejected_reason !== 'NONE' ? ' <small>' + esc(m.rejected_reason) + '</small>' : '') : CRM.selo('ainda não criado', 'ambar')) + '</p>' +
       '<p>' + (!m || m.status === 'REJECTED' ? '<button type="button" class="btn sec" data-acao="wa-criar-modelo">Criar o modelo de mensagem</button> ' : '') +
       (m && m.status === 'APPROVED' ? '<button type="button" class="btn sec" data-acao="wa-teste">Mandar um teste para o meu celular</button>' : '') + '</p>' +
-      '<p class="dica">Com o modelo aprovado e o número conectado, a Cobrança ganha "Enviar pelo WhatsApp da OneClean": cada vendedor(a) recebe o boleto com o PDF completo anexo, sem você abrir nada.</p></section>';
+      '<p class="dica">Com o modelo aprovado e o número conectado, a Cobrança ganha "Enviar pelo WhatsApp da empresa": cada vendedor(a) recebe o boleto com o PDF completo anexo, sem você abrir nada.</p>' +
+      waCliente(w) + '</section>';
+  }
+  // 20/10/2026: o boleto ao CLIENTE pelo número da empresa (modelo boleto_cliente) e o retorno da Meta (crm-whatsapp-retorno)
+  function waCliente(w) {
+    const m = w.modelo_cliente, ms = m ? (STATUS_META[m.status] || [m.status, 'cinza']) : null, r = w.retorno || {};
+    const msgs = (r.ultimos || []).filter(x => x.tipo === 'mensagem' || x.tipo === 'clique');
+    return '<h3>Boleto ao cliente</h3>' +
+      '<p>Modelo "boleto_cliente" (PDF anexo, em nome do(a) vendedor(a), aviso cordial do cartório, botões "Falar comigo" e "Já paguei"): ' +
+      (ms ? CRM.selo(ms[0], ms[1]) + (m.category && m.category !== 'UTILITY' ? ' ' + CRM.selo('a Meta mudou para ' + m.category, 'ambar') : '') + (m.rejected_reason && m.rejected_reason !== 'NONE' ? ' <small>' + esc(m.rejected_reason) + '</small>' : '') : CRM.selo('ainda não criado', 'ambar')) +
+      (!m || m.status === 'REJECTED' ? ' <button type="button" class="btn sec" data-acao="wa-criar-modelo-cliente">Criar o modelo do cliente</button>' : '') + '</p>' +
+      '<h3>Retorno da Meta (entregue, lido, "Já paguei", respostas)</h3>' +
+      '<p>Segredos ' + (r.segredos ? CRM.selo('guardados', 'verde') : CRM.selo('faltam WHATSAPP_APP_SECRET e WHATSAPP_VERIFY_TOKEN nos segredos do Supabase', 'ambar')) +
+      ' · conta ligada ao app ' + (r.assinado ? CRM.selo('sim', 'verde') : r.assinado === false ? CRM.selo('não', 'ambar') + ' <button type="button" class="btn sec" data-acao="wa-assinar-retorno">Ligar o retorno</button>' : CRM.selo('não consegui ver', 'cinza')) + '</p>' +
+      '<p>Endereço de retorno (no app da Meta → WhatsApp → Configuração → Webhook, campo "messages"): <code>' + esc(r.endereco || '') + '</code></p>' +
+      (msgs.length ? '<details><summary>Últimas mensagens recebidas (' + msgs.length + ')</summary><ul>' + msgs.map(x => '<li>' + esc(R.dataHoraBR(x.criado_em)) + ' · ' + esc(x.de || '') + ' · ' + esc(x.texto || x.payload || '') + '</li>').join('') + '</ul></details>' : '') +
+      '<p class="dica">O passo a passo está em sistemi-dalessi/docs/meta-whatsapp-passo-a-passo.md (parte "Retorno"). Os segredos vão só no Supabase, nunca no chat.</p>';
   }
   const AGILITE_ESPELHO = 'https://sistema.agiliteservice.com.br/api/caixa/espelho';
   function espelhoAgilite(url, quando) {
@@ -1125,6 +1143,12 @@
       const url = f.elements.url.value.trim(), senha = f.elements.senha.value.trim();
       if (!/^https:\/\//.test(url)) { CRM.toast('O endereço precisa começar com https://'); return; }
       try { await CRM.store().espelhoConfigura(url, senha); f.elements.senha.value = ''; CRM.toast(senha ? 'Endereço e senha da Agilité guardados.' : 'Endereço guardado.'); integ = null; CRM.render(); } catch (e) { CRM.falhou(e); }
+    },
+    'wa-criar-modelo-cliente': async () => {
+      try { await CRM.store().whatsapp({ acao: 'criar_modelo_cliente' }); CRM.toast('Modelo do cliente enviado para a Meta aprovar (de minutos a 1 dia).'); integ = null; CRM.render(); } catch (e) { CRM.falhou(e); }
+    },
+    'wa-assinar-retorno': async () => {
+      try { await CRM.store().whatsapp({ acao: 'assinar_retorno' }); CRM.toast('Conta do WhatsApp ligada ao app: o retorno da Meta passa a chegar.'); integ = null; CRM.render(); } catch (e) { CRM.falhou(e); }
     },
     'wa-criar-modelo': async () => {
       try { await CRM.store().whatsapp({ acao: 'criar_modelo' }); CRM.toast('Modelo enviado para a Meta aprovar (de minutos a 1 dia).'); integ = null; CRM.render(); } catch (e) { CRM.falhou(e); }

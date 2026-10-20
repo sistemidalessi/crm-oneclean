@@ -3449,3 +3449,41 @@ language sql stable security invoker set search_path = public as $$
 $$;
 revoke all on function public.crm_produto_clientes(text, integer) from public, anon;
 grant execute on function public.crm_produto_clientes(text, integer) to authenticated;
+
+-- ================================================================
+-- Boleto ao CLIENTE pelo WhatsApp da empresa (20/10/2026, pedido do Anderson): modelo boleto_cliente (PDF anexo, em
+-- nome do(a) vendedor(a), aviso cordial do cartório, botões "Falar comigo" e "Já paguei"), mandado pela crm-whatsapp
+-- (acao 'cliente'); o retorno da Meta (entregue, lido, "Já paguei", respostas) chega pela crm-whatsapp-retorno.
+alter table public.crm_boletos add column if not exists wa_entrega text;        -- entregue | lido | falhou (mensagem ao(à) vendedor(a))
+alter table public.crm_boletos add column if not exists cli_msg text;           -- id da mensagem ao cliente na Meta
+alter table public.crm_boletos add column if not exists cli_status text;        -- enviado | entregue | lido | falhou
+alter table public.crm_boletos add column if not exists cli_em timestamptz;
+alter table public.crm_boletos add column if not exists cli_erro text;
+alter table public.crm_boletos add column if not exists cli_tel text;
+alter table public.crm_boletos add column if not exists cli_por uuid;
+alter table public.crm_boletos add column if not exists cli_prazo date;         -- data do aviso de cartório na mensagem
+alter table public.crm_boletos add column if not exists cli_pagou_em timestamptz; -- o cliente tocou em "Já paguei"
+alter table public.crm_boletos add column if not exists cli_falou_em timestamptz; -- o cliente tocou em "Falar comigo"
+create index if not exists crm_boletos_wa_msg_idx on public.crm_boletos (wa_msg);
+create index if not exists crm_boletos_cli_msg_idx on public.crm_boletos (cli_msg);
+-- tudo o que a Meta manda (status, mensagens, cliques e as respostas automáticas); só o administrador lê,
+-- quem grava é a Edge Function (service_role)
+create table if not exists public.crm_whatsapp_eventos (
+  id bigint generated always as identity primary key,
+  tipo text not null,            -- status | mensagem | clique | resposta
+  wamid text,
+  status text,
+  de text,
+  texto text,
+  payload text,
+  contexto text,
+  bruto jsonb,
+  criado_em timestamptz not null default now()
+);
+create index if not exists crm_whatsapp_eventos_wamid_idx on public.crm_whatsapp_eventos (wamid);
+create index if not exists crm_whatsapp_eventos_de_idx on public.crm_whatsapp_eventos (de, criado_em);
+alter table public.crm_whatsapp_eventos enable row level security;
+revoke all on public.crm_whatsapp_eventos from anon, public, authenticated;
+grant select on public.crm_whatsapp_eventos to authenticated;
+drop policy if exists le on public.crm_whatsapp_eventos;
+create policy le on public.crm_whatsapp_eventos for select to authenticated using ((select public.crm_eh_admin()));
