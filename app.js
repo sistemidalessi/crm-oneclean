@@ -56,7 +56,8 @@
   CRM.doNegocio = (t, id) => E.ix.porNegocio[t].get(id) || [];
   CRM.resumo = id => E.ix.resumo.get(id) || {};
   CRM.situacao = e => R.situacaoEfetiva(e, E.ix.resumo.get(e.id), E.cfg, CRM.hoje());
-  CRM.opcoes = tipo => E.D.opcoes.filter(o => o.tipo === tipo).sort((a, b) => a.ordem - b.ordem || a.nome.localeCompare(b.nome, 'pt-BR')).map(o => o.nome);
+  // origens, segmentos, motivos de perda…: em ordem alfabética (20/10/2026, o padrão das listas de nomes)
+  CRM.opcoes = tipo => R.ordemAlfa(E.D.opcoes.filter(o => o.tipo === tipo).map(o => o.nome));
   // Funis em ordem de uso: o que tem mais negócios primeiro (o principal abre por padrão).
   CRM.funis = () => {
     const nomes = [...new Set(E.D.etapas.map(e => e.funil || 'Vendas'))];

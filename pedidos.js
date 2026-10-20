@@ -227,7 +227,7 @@
       await st.pedidosAtualizar().catch(() => null);
       [peds, disp, faltas, boloes] = await Promise.all([st.pedidos(), st.estoqueDisponivel().catch(() => []), st.pedidosFaltas().catch(() => []), st.boloes().catch(() => [])]);
       porCod = new Map(disp.map(d => [d.codigo, d]));
-      listaProdutosHTML = '<datalist id="pdProdutos">' + disp.filter(d => d.situacao !== 'INATIVO').map(d => '<option value="' + esc(d.codigo + ' — ' + d.descricao) + '">' +
+      listaProdutosHTML = '<datalist id="pdProdutos">' + R.ordemAlfa(disp.filter(d => d.situacao !== 'INATIVO'), d => d.descricao).map(d => '<option value="' + esc(d.codigo + ' — ' + d.descricao) + '">' +
         esc('disp. ' + qtd(d.disponivel) + ' ' + (d.unidade || '') + (d.preco_venda ? ' · R$ ' + preco(d.preco_venda) : '')) + '</option>').join('') + '</datalist>';
     } catch (e) { peds = peds || []; if (!silencio) CRM.falhou(e); }
     carregando = false;
@@ -541,7 +541,7 @@
     const pags = [...new Set(PAGAMENTOS.concat((E().D.propostas || []).map(p => p.dados && p.dados.pagamento).filter(Boolean)))].slice(0, 60);
     let corpo;
     if (x.aba === 'dados') {
-      const emps = (E().D.empresas || []).slice().sort((a, b) => String(a.nome).localeCompare(String(b.nome), 'pt-BR'));   // em ordem alfabética (pedido do Anderson)
+      const emps = R.ordemAlfa(E().D.empresas || [], c => c.nome);   // em ordem alfabética (pedido do Anderson)
       corpo = '<div class="campos pd-campos">' +
         '<label class="campo largo"><span>Cliente *</span><input data-ed-cliente list="pdClientes" value="' + esc(e ? e.nome + (e.cnpj ? ' · ' + e.cnpj : '') : '') + '" placeholder="Nome, CNPJ ou cidade" autocomplete="off"></label>' +
         '<datalist id="pdClientes">' + emps.slice(0, 5000).map(c => '<option value="' + esc(c.nome + (c.cnpj ? ' · ' + c.cnpj : '')) + '">' + esc([c.cidade, CRM.nomeUsuario(c.responsavel_id)].filter(Boolean).join(' · ')) + '</option>').join('') + '</datalist>' +
@@ -550,7 +550,7 @@
         '<label class="campo"><span>Tabela</span><input value="PADRAO" disabled></label>' +
         '<label class="campo"><span>Tipo de pedido</span><select data-ed="tipo">' + CRM.opcoesHTML([['normal', 'Normal'], ['programado', 'Programado']], x.tipo) + '</select></label>' +
         '<label class="campo"><span>Faturar em / entrega</span><input type="date" data-ed="entrega" value="' + esc(x.entrega || '') + '"></label>' +
-        '<label class="campo"><span>Forma de pagamento</span><input data-ed="dados.pagamento" list="pdPags" value="' + esc(d.pagamento) + '" autocomplete="off"></label><datalist id="pdPags">' + pags.map(s => '<option value="' + esc(s) + '">').join('') + '</datalist>' +
+        '<label class="campo"><span>Forma de pagamento</span><input data-ed="dados.pagamento" list="pdPags" value="' + esc(d.pagamento) + '" autocomplete="off"></label><datalist id="pdPags">' + R.ordemAlfa(pags).map(s => '<option value="' + esc(s) + '">').join('') + '</datalist>' +
         inp('Transportadora', 'dados.transportadora', d.transportadora) +
         '<label class="campo"><span>Frete por conta</span><select data-ed="dados.frete_conta">' + CRM.opcoesHTML(P.FRETE_CONTA, d.frete_conta) + '</select></label>' +
         inp('Valor do frete (R$)', 'frete', x.frete || '', ' type="number" step="0.01" min="0" inputmode="decimal"') + inp('Qtde de volumes', 'dados.volumes', d.volumes, ' type="number" min="0"') +

@@ -145,7 +145,7 @@
 
   // ================================================================ Listas
   TELAS.listas = () => [['origem', 'Origens de lead'], ['segmento', 'Segmentos'], ['motivo_perda', 'Motivos de perda']].map(([tipo, titulo]) => {
-    const l = E().D.opcoes.filter(o => o.tipo === tipo).sort((a, b) => a.ordem - b.ordem || a.nome.localeCompare(b.nome, 'pt-BR'));
+    const l = R.ordemAlfa(E().D.opcoes.filter(o => o.tipo === tipo), o => o.nome);
     return '<section class="cartao"><h2>' + esc(titulo) + ' <small>' + l.length + '</small></h2><div class="etiquetas">' +
       l.map(o => '<span class="etiqueta-edit">' + esc(o.nome) + '<button type="button" class="mini" data-acao="opcao-editar" data-id="' + esc(o.id) + '" title="Editar">✎</button></span>').join('') +
       '</div><p><button type="button" class="btn sec" data-acao="opcao-nova" data-id="' + tipo + '">+ Adicionar</button>' +
@@ -290,7 +290,7 @@
     CRM.abrirForm({
       titulo: 'Transferir carteira',
       intro: 'Passa as empresas, os negócios abertos e as tarefas pendentes de um vendedor para outro (ex.: quando alguém sai da equipe). O histórico fica como está.',
-      campos: [{ nome: 'de', rotulo: 'De', tipo: 'select', opcoes: E().D.usuarios.map(u => [u.user_id, u.nome + (u.ativo === false ? ' (desativado)' : '')]), largo: true },
+      campos: [{ nome: 'de', rotulo: 'De', tipo: 'select', alfa: true, opcoes: E().D.usuarios.map(u => [u.user_id, u.nome + (u.ativo === false ? ' (desativado)' : '')]), largo: true },
         { nome: 'para', rotulo: 'Para', tipo: 'select', opcoes: CRM.opcoesUsuarios(), largo: true }],
       salvarTexto: 'Transferir',
       aoSalvar: async v => {

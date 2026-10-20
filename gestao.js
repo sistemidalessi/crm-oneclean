@@ -795,7 +795,7 @@
     const atual = g && g.fornecedorTrocado ? g.fornecedorCod : null;
     const todos = ((c && c.todosFornecedores) || []).filter(f => !f.naoCompramos || f.cod === atual);
     CRM.abrirForm({ titulo: 'Fornecedor do produto', intro: (g ? R.nomeDeItem(g.descricao) + ' (' + codigo + ')' : codigo) + '. Vale só no CRM; no FKN o cadastro continua como está.',
-      campos: [{ nome: 'fornecedor', rotulo: 'Fornecedor', tipo: 'select', largo: true, opcoes: [['', g && g.fornecedorTrocado ? '— voltar ao do FKN —' : '—']].concat(todos.map(f => [f.cod, f.nome + ' (' + f.cod + ')'])) }],
+      campos: [{ nome: 'fornecedor', rotulo: 'Fornecedor', tipo: 'select', largo: true, alfa: true, opcoes: [['', g && g.fornecedorTrocado ? '— voltar ao do FKN —' : '—']].concat(todos.map(f => [f.cod, f.nome + ' (' + f.cod + ')'])) }],
       valores: { fornecedor: (g && g.fornecedorTrocado && g.fornecedorCod) || '' },
       aoSalvar: async v => { await CRM.store().trocarFornecedor(codigo, v.fornecedor || null); CRM.toast(v.fornecedor ? 'Fornecedor definido.' : 'Volta a valer o fornecedor do FKN.'); estoque = null; CRM.render(); } });
   }

@@ -85,7 +85,7 @@
       campos: [{ nome: 'assunto', rotulo: 'Assunto', obrigatorio: true, largo: true, dica: 'Novidades da {minha_empresa} para {empresa}' },
         { nome: 'corpo', rotulo: 'Texto', tipo: 'textarea', linhas: 10, obrigatorio: true, largo: true,
           dica: '{saudacao}\n\nAqui é {vendedor_primeiro_nome}, da {minha_empresa}. Chegaram novidades…\n\nUm abraço,\n{vendedor}' },
-        { nome: 'segmento', rotulo: 'Só para o segmento', tipo: 'select', opcoes: [['', 'Todos os segmentos']].concat(segs) },
+        { nome: 'segmento', rotulo: 'Só para o segmento', tipo: 'select', alfa: true, opcoes: [['', 'Todos os segmentos']].concat(segs) },
         { nome: 'desde', rotulo: 'Começa em', tipo: 'data', obrigatorio: true },
         { nome: 'ativa', rotulo: 'Ativa', tipo: 'checkbox' }],
       valores: c ? { assunto: c.assunto, corpo: c.corpo, segmento: c.segmento || '', desde: String(c.desde).slice(0, 10), ativa: c.ativa !== false } : { desde: CRM.hoje(), ativa: true },

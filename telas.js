@@ -143,7 +143,7 @@
   function esquecidos(lista, hoje) {
     if (!lista.length) return '';
     const dias = Math.max(R.num(E().cfg.dias_esquecido), E().cfg.dias_parado);
-    const motivos = E().D.opcoes.filter(o => o.tipo === 'motivo_perda').map(o => o.nome);
+    const motivos = CRM.opcoes('motivo_perda');
     const padrao = motivos.find(m => /retorno/i.test(m)) || motivos[0] || '';
     const total = lista.reduce((s, n) => s + R.num(n.valor), 0);
     return '<section class="cartao" id="alerta-negocios-esquecidos"><details><summary><h2>Negócios esquecidos <small>' + lista.length + ' · ' + esc(R.moeda(total)) +
@@ -322,7 +322,7 @@
           aoSalvar: async x => { const copia = Object.assign({}, f); delete copia.limite; await CRM.inserir('filtros', { usuario_id: CRM.meuId(), tela, nome: x.nome, filtros: copia }); CRM.toast('Filtro salvo.'); } });
       } else if (v === '__apagar') {
         const meus = E().D.filtros.filter(x => x.tela === tela && x.usuario_id === CRM.meuId());
-        CRM.abrirForm({ titulo: 'Apagar filtro salvo', campos: [{ nome: 'id', rotulo: 'Filtro', tipo: 'select', opcoes: meus.map(x => [x.id, x.nome]), largo: true }], salvarTexto: 'Apagar',
+        CRM.abrirForm({ titulo: 'Apagar filtro salvo', campos: [{ nome: 'id', rotulo: 'Filtro', tipo: 'select', alfa: true, opcoes: meus.map(x => [x.id, x.nome]), largo: true }], salvarTexto: 'Apagar',
           aoSalvar: async x => { await CRM.remover('filtros', x.id); CRM.toast('Filtro apagado.'); } });
       } else if (v) {
         const salvo = E().D.filtros.find(x => x.id === v);

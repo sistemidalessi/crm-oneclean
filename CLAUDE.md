@@ -1931,7 +1931,20 @@ e WhatsApp. Valor real do parado em 15/10: **R$ 79 mil em 271 produtos** (depois
   sugestão nos primeiros 48; custo real US$ 0,044 por produto (mediana US$ 0,03), porque 1 em cada 5 passava de 100 mil
   tokens e caía na tabela cara do Haiku. Limite da chave subido pelo Anderson para US$ 80. **A PUBLICAR DEPOIS DO LOTE** (pedido
   do Anderson; publicar no meio derruba as buscas em andamento): `crm-produto-buscar` com 2 buscas e 2 páginas de até 4 mil
-  tokens (código já no repositório, ainda não publicado na função).
+  tokens (código já no repositório, ainda não publicado na função). **Também esperando o lote:** a ordem alfabética (abaixo) — o
+  push publica o site e o CRM aberto recarrega sozinho, o que interromperia o lote no navegador do Anderson. Depois do
+  lote: push → `node ferramentas/fixa-motor-notas.js` → commit/push → publicar `crm-notas` e `crm-produto-buscar` → rodar
+  de novo os que deram erro.
+- **Ordem alfabética em todo o sistema (20/10, pedido do Anderson: "quando eu clico em categoria… em ordem alfabética…
+  leva esse padrão para todo o sistema").** Regra única em `regras.js` (`ordemAlfa`, `alfaOpcoes`, `comparaAlfa`: sem
+  acento nem maiúscula, "Item 2" antes de "Item 10"; nas opções de select, "Todos/—" no começo e "Outro…"/`__x` no fim
+  ficam no lugar). Aplicada: toda lista de sugestão (`sugestoes` do formulário, ex.: categorias do Caixa; `cxCats`,
+  `cxForn`, produtos, clientes e formas de pagamento do pedido, produtos do estoque), `CRM.opcoes` (origens, segmentos,
+  motivos de perda — a "ordem" das Configurações deixa de valer) e a tela de Listas, e `alfa: true` nos selects de nomes
+  (pessoas, negócios, produtos do catálogo, filtros salvos, segmento da campanha, fornecedor, produto do concorrente,
+  usuário "De"). **Ficam na ordem de propósito:** etapas do funil, status, tipos, prazos ("Amanhã, 2 dias…"), meses,
+  códigos fiscais, telefones (celular primeiro), "O que foi" do Caixa. Usuários já vinham em ordem (`usuariosAtivos`).
+  Mexeu em `regras.js` → `fixa-motor-notas.js` e republicar `crm-notas`.
 - **Boleto direto ao CLIENTE pelo WhatsApp da empresa (20/10/2026, aprovado pelo Anderson na simulação
   https://claude.ai/artifact/5Fy5wK12vEuke5S8ohHN1J, "com o botão Já paguei e … irá ao cartório automaticamente … algo bem
   cordial").** O `wa.me` não anexa arquivo; então o cliente recebe pelo número da empresa o modelo **`boleto_cliente`**

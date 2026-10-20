@@ -211,7 +211,7 @@
           opcoes: abertos.map(x => [x.id, (x.id === padraoNeg ? 'Mesmo negócio: ' : '') + x.titulo + ' · ' + ((CRM.etapa(x.etapa_id) || {}).nome || '') + ' · ' + R.moeda(x.valor)])
             .concat([['novo', 'Abrir um negócio novo (outra venda): Orçamento ' + o.numero + (etapa ? ' (etapa ' + etapa.nome + ')' : '')]]) },
         { nome: 'responsavel_id', rotulo: 'Responsável', tipo: 'select', opcoes: CRM.opcoesUsuarios(), padrao: (vend && vend.user_id) || (emp && emp.responsavel_id) || CRM.meuId() },
-        { nome: 'contato_id', rotulo: 'Aos cuidados de', tipo: 'select', opcoes: [['', o.ac ? o.ac + ' (só no documento)' : '—']].concat(contatos.map(c => [c.id, c.nome])), padrao: contato ? contato.id : '' }
+        { nome: 'contato_id', rotulo: 'Aos cuidados de', tipo: 'select', alfa: true, opcoes: [['', o.ac ? o.ac + ' (só no documento)' : '—']].concat(contatos.map(c => [c.id, c.nome])), padrao: contato ? contato.id : '' }
       ].filter(Boolean),
       salvarTexto: 'Importar e gerar o PDF',
       aoSalvar: async v => {

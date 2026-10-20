@@ -95,6 +95,8 @@
       input = '<textarea id="' + id + '" name="' + nome + '" rows="' + (c.linhas || 3) + '"' + dis + attr('placeholder', c.dica) + '>' + esc(val) + '</textarea>';
     } else if (c.tipo === 'select') {
       // valor gravado que não está na lista (ex.: origem "Orçamento FKN"): entra como opção, senão salvar apagava
+      // alfa: lista de nomes (pessoas, produtos, fornecedores…) em ordem alfabética; sem alfa, a ordem que veio
+      if (c.alfa) c = Object.assign({}, c, { opcoes: R.alfaOpcoes(c.opcoes) });
       const fora = v != null && v !== '' && !c.opcoes.some(o => String(o[0]) === String(v));
       input = '<select id="' + id + '" name="' + nome + '"' + dis + '>' + opcoesHTML(fora ? c.opcoes.concat([[v, /^[0-9a-f-]{36}$/i.test(String(v)) ? '(o atual)' : v]]) : c.opcoes, val) + '</select>';
     } else if (c.tipo === 'estrelas') {
@@ -107,13 +109,13 @@
     } else if (c.tipo === 'tags') {
       const lista = Array.isArray(val) ? val.join(', ') : val;
       input = '<input type="text" id="' + id + '" name="' + nome + '" value="' + esc(lista) + '" list="dl_' + nome + '"' + dis + attr('placeholder', c.dica || 'separe por vírgula') + '>' +
-        '<datalist id="dl_' + nome + '">' + (c.sugestoes || []).map(s => '<option value="' + esc(s) + '">').join('') + '</datalist>';
+        '<datalist id="dl_' + nome + '">' + R.ordemAlfa(c.sugestoes || []).map(s => '<option value="' + esc(s) + '">').join('') + '</datalist>';
     } else {
       const tipo = { numero: 'number', data: 'date', hora: 'time', email: 'email', tel: 'tel' }[c.tipo] || 'text';
       input = '<input type="' + tipo + '" id="' + id + '" name="' + nome + '" value="' + esc(val) + '"' + dis +
         (c.tipo === 'numero' ? ' step="' + (c.passo || '0.01') + '" min="' + (c.min == null ? 0 : c.min) + '"' + (c.max != null ? ' max="' + c.max + '"' : '') + ' inputmode="decimal"' : '') +
         attr('placeholder', c.dica) + (c.sugestoes ? ' list="dl_' + nome + '"' : '') + ' autocomplete="off">' +
-        (c.sugestoes ? '<datalist id="dl_' + nome + '">' + c.sugestoes.map(s => '<option value="' + esc(s) + '">').join('') + '</datalist>' : '');
+        (c.sugestoes ? '<datalist id="dl_' + nome + '">' + R.ordemAlfa([...new Set(c.sugestoes)]).map(s => '<option value="' + esc(s) + '">').join('') + '</datalist>' : '');
     }
     return '<label class="' + cls + '"' + attr('for', c.tipo === 'datahora' ? id : null) + '><span>' + esc(c.rotulo) + (c.obrigatorio ? ' *' : '') + '</span>' + input +
       (c.ajuda ? '<small>' + esc(c.ajuda) + '</small>' : '') + '<small class="aviso-campo" data-aviso="' + nome + '" hidden></small></label>';

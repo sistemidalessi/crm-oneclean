@@ -445,8 +445,8 @@
         campo('a 1ª em', '<input type="date" name="m1' + i + '" value="' + esc(pc.primeira || '') + '">', 'cx-n cx-emp') +
         campo('todo dia', '<input type="number" name="mdia' + i + '" step="1" min="1" max="31" value="' + esc(pc.dia || '') + '">', 'cx-n cx-emp');
     }
-    const listas = '<datalist id="cxCats">' + CATEGORIAS_SAIDA.concat(CATEGORIAS_ENTRADA).concat((F.regras || []).map(g => g.categoria)).filter((x, i, a) => x && a.indexOf(x) === i).map(c => '<option value="' + esc(c) + '">').join('') + '</datalist>' +
-      '<datalist id="cxForn">' + ctx.fornecedores.slice(0, 500).map(f => '<option value="' + esc(f.nome) + '">').join('') + '</datalist>';
+    const listas = '<datalist id="cxCats">' + R.ordemAlfa(CATEGORIAS_SAIDA.concat(CATEGORIAS_ENTRADA).concat((F.regras || []).map(g => g.categoria)).filter((x, i, a) => x && a.indexOf(x) === i)).map(c => '<option value="' + esc(c) + '">').join('') + '</datalist>' +
+      '<datalist id="cxForn">' + R.ordemAlfa(ctx.fornecedores, f => f.nome).slice(0, 500).map(f => '<option value="' + esc(f.nome) + '">').join('') + '</datalist>';
     CRM.abrirForm({
       titulo: 'Conferir antes de gravar',
       intro: (opts && opts.anexo ? 'Lido do documento "' + opts.nomeAnexo + '" (fica guardado no lançamento, 📎).' + (opts.avisoAnexo ? '\nAtenção: ' + opts.avisoAnexo : '') + '\n' : '') +

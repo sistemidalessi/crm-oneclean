@@ -161,7 +161,7 @@
     const e = est.get(cod) || {};
     CRM.abrirForm({ titulo: novo ? 'Produto na cesta' : 'Cesta · ' + R.nomeDeItem(e.descricao || cod),
       intro: 'A unidade de comparação deixa embalagens diferentes comparáveis: rolão por metro, interfolha por folha, químico por litro. O fator é quantas dessas há na NOSSA unidade' + (e.unidade ? ' (' + e.unidade + ')' : '') + '.',
-      campos: (novo ? [{ nome: 'codigo', rotulo: 'Produto', tipo: 'select', obrigatorio: true, largo: true, opcoes: [['', '—']].concat(opcoes) }] : []).concat([
+      campos: (novo ? [{ nome: 'codigo', rotulo: 'Produto', tipo: 'select', obrigatorio: true, largo: true, alfa: true, opcoes: [['', '—']].concat(opcoes) }] : []).concat([
         { nome: 'unidade_comp', rotulo: 'Unidade de comparação', obrigatorio: true, dica: 'ex.: metro, folha, litro, unidade' },
         { nome: 'fator', rotulo: 'Quantas há na nossa unidade', tipo: 'numero', obrigatorio: true, min: 0.0001 },
         { nome: 'ordem', rotulo: 'Ordem na lista', tipo: 'numero', min: 0 }]).concat(novo ? [] : [{ nome: 'ativo', rotulo: 'Na cesta (desmarque para tirar)', tipo: 'checkbox' }]),

@@ -959,7 +959,25 @@
     return isNaN(d) ? null : d.toISOString();
   }
 
+  // Ordem alfabética, o padrão das listas de nomes do sistema (20/10/2026, pedido do Anderson: "quando eu clico em
+  // categoria … em ordem alfabética … leva esse padrão para todo o sistema"). Sem diferença de acento nem de
+  // maiúscula, e "Item 2" antes de "Item 10". Listas com ordem de propósito (etapas do funil, status, prazos, meses)
+  // continuam como estão.
+  const COLADOR = typeof Intl !== 'undefined' ? new Intl.Collator('pt-BR', { sensitivity: 'base', numeric: true }) : null;
+  const comparaAlfa = (a, b) => (COLADOR ? COLADOR.compare(String(a == null ? '' : a), String(b == null ? '' : b)) : String(a).localeCompare(String(b), 'pt-BR'));
+  const ordemAlfa = (lista, rotulo) => (lista || []).slice().sort((a, b) => comparaAlfa(rotulo ? rotulo(a) : a, rotulo ? rotulo(b) : b));
+  // opções de <select> [valor, rótulo]: as "especiais" (valor vazio ou começando por "__", ex.: "Todos", "(sem
+  // responsável)", "Outro…") ficam onde estão — as do começo no começo, as do fim no fim — e o meio vai em ordem alfabética
+  function alfaOpcoes(ops) {
+    const l = ops || [], esp = o => String(o[0]) === '' || /^__/.test(String(o[0]));
+    let i = 0, j = l.length;
+    while (i < j && esp(l[i])) i++;
+    while (j > i && esp(l[j - 1])) j--;
+    return l.slice(0, i).concat(ordemAlfa(l.slice(i, j), o => o[1]), l.slice(j));
+  }
+
   const api = {
+    comparaAlfa, ordemAlfa, alfaOpcoes,
     TIPOS_ATIVIDADE, TIPOS_MANUAIS, SITUACOES, STATUS_NEGOCIO, STATUS_PROPOSTA, RECORRENCIAS, PAPEIS, UFS,
     ETAPAS_PADRAO, OPCOES_PADRAO, CONFIG_PADRAO, config, rotulo, num, moeda, numero, pct,
     hojeISO, diaLocal, horaLocal, momento, somaDias, somaMeses, diasEntre, dataBR, dataHoraBR, mesCurto,

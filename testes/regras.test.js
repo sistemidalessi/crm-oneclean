@@ -311,3 +311,11 @@ test('recompra inteligente: ritmo, itens habituais e mensagem', () => {
   assert.ok(msg.startsWith('Olá, Maria! Aqui é Ana, da Empresa Exemplo.'));
   assert.ok(msg.includes('• Detergente neutro 5L — 4 GL'));
 });
+
+test('ordem alfabética: sem acento nem maiúscula, número em ordem, especiais no lugar', () => {
+  assert.deepStrictEqual(R.ordemAlfa(['Tarifas bancárias', 'água', 'Aluguel', 'Item 10', 'Item 2', 'Énergia']), ['água', 'Aluguel', 'Énergia', 'Item 2', 'Item 10', 'Tarifas bancárias']);
+  assert.deepStrictEqual(R.ordemAlfa([{ n: 'b' }, { n: 'A' }], x => x.n).map(x => x.n), ['A', 'b']);
+  assert.deepStrictEqual(R.alfaOpcoes([['', 'Escolha…'], ['z', 'Zelador'], ['a', 'Ana'], ['__outro', 'Outro…']]),
+    [['', 'Escolha…'], ['a', 'Ana'], ['z', 'Zelador'], ['__outro', 'Outro…']]);
+  assert.deepStrictEqual(R.ordemAlfa(null), []);
+});

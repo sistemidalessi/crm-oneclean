@@ -528,7 +528,7 @@
       { nome: 'previsao_fechamento', rotulo: 'Previsão de fechamento', tipo: 'data' },
       { nome: 'probabilidade', rotulo: 'Chance (%)', tipo: 'numero', passo: '1', max: 100, vazioNulo: true, ajuda: 'vazio = a da etapa' },
       { nome: 'responsavel_id', rotulo: 'Responsável', tipo: 'select', opcoes: CRM.opcoesUsuarios(), desabilitado: !g, padrao: (eid && (CRM.empresa(eid) || {}).responsavel_id) || CRM.meuId() },
-      { nome: 'contato_id', rotulo: 'Pessoa', tipo: 'select', opcoes: [['', '—']].concat(contatos.map(c => [c.id, c.nome])) },
+      { nome: 'contato_id', rotulo: 'Pessoa', tipo: 'select', alfa: true, opcoes: [['', '—']].concat(contatos.map(c => [c.id, c.nome])) },
       { nome: 'origem', rotulo: 'Origem', tipo: 'select', opcoes: CRM.lista(CRM.opcoes('origem'), '(a da empresa)') },
       { nome: 'observacoes', rotulo: 'Observações', tipo: 'textarea', largo: true, linhas: 2 }
     );
@@ -620,7 +620,7 @@
     CRM.abrirForm({
       titulo: it ? 'Editar item' : 'Adicionar item',
       campos: [
-        { nome: 'produto_id', rotulo: 'Produto do catálogo', tipo: 'select', opcoes: [['', '(digitar à mão)']].concat(produtos.map(p => [p.id, p.nome + (p.codigo ? ' · ' + p.codigo : '') + ' — ' + R.moeda(p.preco)])), largo: true },
+        { nome: 'produto_id', rotulo: 'Produto do catálogo', tipo: 'select', alfa: true, opcoes: [['', '(digitar à mão)']].concat(produtos.map(p => [p.id, p.nome + (p.codigo ? ' · ' + p.codigo : '') + ' — ' + R.moeda(p.preco)])), largo: true },
         { nome: 'descricao', rotulo: 'Descrição', obrigatorio: true, largo: true },
         { nome: 'quantidade', rotulo: 'Quantidade', tipo: 'numero', passo: '0.001', padrao: 1 },
         { nome: 'preco', rotulo: 'Preço unitário (R$)', tipo: 'numero' },
@@ -968,8 +968,8 @@
       { nome: 'responsavel_id', rotulo: 'Responsável', tipo: 'select', opcoes: CRM.opcoesUsuarios(), padrao: (e && e.responsavel_id) || CRM.meuId() },
       { nome: 'recorrencia', rotulo: 'Repetir', tipo: 'select', opcoes: R.RECORRENCIAS }
     );
-    if (negs.length) campos.push({ nome: 'negocio_id', rotulo: 'Negócio', tipo: 'select', opcoes: [['', '—']].concat(negs.map(n => [n.id, n.titulo])) });
-    if (contatos.length) campos.push({ nome: 'contato_id', rotulo: 'Com quem', tipo: 'select', opcoes: [['', '—']].concat(contatos.map(c => [c.id, c.nome])) });
+    if (negs.length) campos.push({ nome: 'negocio_id', rotulo: 'Negócio', tipo: 'select', alfa: true, opcoes: [['', '—']].concat(negs.map(n => [n.id, n.titulo])) });
+    if (contatos.length) campos.push({ nome: 'contato_id', rotulo: 'Com quem', tipo: 'select', alfa: true, opcoes: [['', '—']].concat(contatos.map(c => [c.id, c.nome])) });
     if (a) campos.push({ nome: 'concluida', rotulo: 'Concluída', tipo: 'checkbox', largo: true });
     const valores = a ? Object.assign({}, a) : Object.assign({ data_hora: pre.data_hora || proximaHora(), responsavel_id: (e && e.responsavel_id) || CRM.meuId(), tipo: 'ligacao' }, pre);
     CRM.abrirForm({
@@ -1009,8 +1009,8 @@
       { nome: 'data_hora', rotulo: 'Quando aconteceu', tipo: 'datahora' },
       { nome: 'descricao', rotulo: 'O que aconteceu', tipo: 'textarea', obrigatorio: true, largo: true }
     );
-    if (contatos.length) campos.push({ nome: 'contato_id', rotulo: 'Com quem', tipo: 'select', opcoes: [['', '—']].concat(contatos.map(c => [c.id, c.nome])) });
-    if (negs.length) campos.push({ nome: 'negocio_id', rotulo: 'Negócio', tipo: 'select', opcoes: [['', '—']].concat(negs.map(n => [n.id, n.titulo])) });
+    if (contatos.length) campos.push({ nome: 'contato_id', rotulo: 'Com quem', tipo: 'select', alfa: true, opcoes: [['', '—']].concat(contatos.map(c => [c.id, c.nome])) });
+    if (negs.length) campos.push({ nome: 'negocio_id', rotulo: 'Negócio', tipo: 'select', alfa: true, opcoes: [['', '—']].concat(negs.map(n => [n.id, n.titulo])) });
     if (!a) campos.push(
       { tipo: 'secao', rotulo: 'Próximo passo (opcional)' },
       { nome: 'prox_descricao', rotulo: 'O que fazer depois', largo: true },
