@@ -129,7 +129,13 @@ test('especificações em texto e a foto que já vem marcada', () => {
   const l = [{ nome: 'Conteúdo', valor: '5 litros' }, { nome: 'Diluição', valor: '1:100 (limpeza geral)' }];
   assert.equal(X.specsTexto(l), 'Conteúdo: 5 litros\nDiluição: 1:100 (limpeza geral)');
   assert.deepEqual(X.specsDe(X.specsTexto(l) + '\n\nlinha sem dois pontos'), l.concat([{ nome: 'Observação', valor: 'linha sem dois pontos' }]));
-  assert.equal(X.confiavel({ ean_bate: true, tipo: 'loja' }), true);
+  assert.equal(X.confiavel({ ean_bate: true, tipo: 'loja' }, ['7896098900208']), true);
+  // a IA diz que o código de barras bate, mas o cadastro não tem código de barras: não vem marcada
+  assert.equal(X.confiavel({ ean_bate: true, tipo: 'loja' }, []), false);
+  assert.equal(X.confiavel({ ean_bate: true, tipo: 'loja' }), false);
+  assert.equal(X.confiavel({ ean_bate: true, mesmo: 'sim', tipo: 'fabricante' }, []), true);
+  assert.equal(X.bate({ ean_bate: true }, ['7896098900208']), true);
+  assert.equal(X.bate({ ean_bate: true }, null), false);
   assert.equal(X.confiavel({ mesmo: 'sim', tipo: 'fabricante' }), true);
   assert.equal(X.confiavel({ mesmo: 'sim', tipo: 'loja' }), false);
   assert.equal(X.confiavel(null), false);

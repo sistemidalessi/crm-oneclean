@@ -210,7 +210,8 @@ Deno.serve(async (req) => {
   type Pagina = { url: string; site: string; tipo: string; ean_bate: boolean; mesmo: string; imagem: string | null };
   // página de concorrente que escapou do bloqueio (ex.: a IA citou de memória) também não entra
   const doConcorrente = (u: string) => { try { const h = new URL(u).hostname; return bloqueados.some(d => h === d || h.endsWith('.' + d)); } catch { return false; } };
-  const paginas = (info.paginas as Pagina[]).filter(p => !doConcorrente(p.url));
+  // sem código de barras no cadastro, "o código de barras bate" é só a palavra da IA: não vale
+  const paginas = (info.paginas as Pagina[]).filter(p => !doConcorrente(p.url)).map(p => eans.length ? p : Object.assign({}, p, { ean_bate: false }));
 
   // as páginas que a IA achou: a foto anunciada e os PDFs
   const achadas: { url: string; pagina: string; site: string; tipo: string; ean_bate: boolean; mesmo: string }[] = [];

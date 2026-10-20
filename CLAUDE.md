@@ -1460,7 +1460,10 @@ https://claude.ai/artifact/AkJoPA2gw7i3Wz99fcDY7p: Produtos, Ficha, Buscar foto,
   mesmo arquivo nos testes do Node). Custo de cada busca em `crm_assistente_uso` (tela `fotos`); `acao: 'situacao'` dá o
   gasto do mês (toda a IA e só fotos). **Nada vai para a equipe sem o comprador aprovar.**
 - **Aprovar:** grade "Para aprovar" (a foto escolhida grande + até 4 outras; já vem marcada a de código de barras batendo
-  ou "mesmo produto" de fabricante/fornecedor), "Ver e corrigir" (escolher a foto ou "nenhuma serve", corrigir marca,
+  ou "mesmo produto" de fabricante/fornecedor; **"código de barras bate" só vale se o cadastro tem EAN** — 20/10: 135 das
+  360 que diziam bater não tinham EAN nenhum, era a palavra da IA; `bate(c, eans)` na tela e `ean_bate: false` na
+  `crm-produto-buscar` v8 quando não há EAN; pré-marcadas caíram de 544 para 459. **Marcada não é 100%**: o comprador
+  passa o olho antes de "Aprovar as marcadas"), "Ver e corrigir" (escolher a foto ou "nenhuma serve", corrigir marca,
   descrição e especificações, guardar ou não a ficha e a FISPQ), "Recusar", "Aprovar as marcadas". Lote: "Teste: os 5 mais
   vendidos sem foto", 20, 50, 200 ou todos, **cinco de cada vez** (desde 19/10 à noite; antes três), com o tempo que falta, com o custo estimado pela média medida (antes do teste,
   US$ 0,08 por produto) e "Parar". Limite da chave: US$ 10/mês (aviso na tela e na confirmação).

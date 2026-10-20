@@ -99,8 +99,11 @@
     return i > 0 ? { nome: x.slice(0, i).trim(), valor: x.slice(i + 1).trim() } : { nome: 'Observação', valor: x };
   }).filter(e => e.nome && e.valor).slice(0, 30);
 
+  // "Código de barras bate" só vale quando o cadastro tem o código de barras: sem ele, é a palavra da IA (20/10/2026: 135 das
+  // 360 sugestões diziam bater sem EAN nenhum no cadastro).
+  const bate = (c, eans) => !!(c && c.ean_bate && eans && eans.length);
   // A foto que já vem marcada para aprovar no lote: a de código de barras batendo ou "mesmo produto" de fabricante/fornecedor.
-  const confiavel = c => !!(c && (c.ean_bate || (c.mesmo === 'sim' && c.tipo !== 'loja')));
+  const confiavel = (c, eans) => !!(c && (bate(c, eans) || (c.mesmo === 'sim' && c.tipo !== 'loja')));
 
   // "Mandar foto e preço pelo WhatsApp" (simulação aprovada): o texto que a vendedora manda ao cliente. O preço é o da
   // tabela A (a negociação é dela); foto e ficha técnica vão como link (o arquivo público do CRM).
@@ -113,7 +116,7 @@
       fotoUrl ? 'Foto: ' + fotoUrl : '', fichaUrl ? 'Ficha técnica: ' + fichaUrl : ''].filter(Boolean).join('\n');
   }
 
-  const API = { catalogo, estado, filtra, linhas, paraBuscar, custoEstimado, specsTexto, specsDe, confiavel, textoWhats, CUSTO_PADRAO };
+  const API = { catalogo, estado, filtra, linhas, paraBuscar, custoEstimado, specsTexto, specsDe, bate, confiavel, textoWhats, CUSTO_PADRAO };
   raiz.CRMProdutos = API;
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
 })(typeof window !== 'undefined' ? window : globalThis);
@@ -147,7 +150,7 @@
       lista = X.catalogo({ disp, fotos: fs, infos, vendidos });
       if (podeFotos()) {
         [sugs, ia] = await Promise.all([s.produtoSugestoes().catch(() => []), s.produtoBuscar({ acao: 'situacao' }).catch(() => null)]);
-        sugs.filter(x => x.situacao === 'sugerida' && !fl.marcados.has(x.codigo) && X.confiavel((x.candidatos || [])[0]) && !(lista.find(p => p.codigo === x.codigo) || {}).foto).forEach(x => fl.marcados.add(x.codigo));
+        sugs.filter(x => x.situacao === 'sugerida' && !fl.marcados.has(x.codigo) && X.confiavel((x.candidatos || [])[0], (x.info || {}).eans) && !(lista.find(p => p.codigo === x.codigo) || {}).foto).forEach(x => fl.marcados.add(x.codigo));
       }
     } catch (e) { lista = lista || []; CRM.falhou(e); }
     carregando = false;
@@ -344,7 +347,7 @@
   async function buscarUm(cod, busca) {
     const r = await st().produtoBuscar({ acao: 'buscar', codigo: cod, busca: busca || undefined });
     sugs = [r].concat(sugs.filter(s => s.codigo !== cod));
-    if (r.situacao === 'sugerida' && X.confiavel((r.candidatos || [])[0])) fl.marcados.add(cod);
+    if (r.situacao === 'sugerida' && X.confiavel((r.candidatos || [])[0], (r.info || {}).eans)) fl.marcados.add(cod);
     return r;
   }
   async function aprovar(cod, o) {
@@ -440,7 +443,7 @@
       const ok = [inf.marca ? 'marca ' + inf.marca : '', (inf.especificacoes || []).length ? inf.especificacoes.length + ' especificação(ões)' : '', inf.descricao ? 'descrição' : '',
         inf.ficha ? 'ficha técnica' + (inf.ficha.caminho ? '' : ' (link)') : '', inf.fispq ? 'FISPQ' + (inf.fispq.caminho ? '' : ' (link)') : ''].filter(Boolean);
       return '<article class="pf-cartao pf-sug-cartao"><div class="pf-sug-topo">' + marca + '<div><strong>' + esc(nome(x)) + '</strong><small>' + esc(sg.codigo) +
-          (c ? ' · ' + esc(c.ean_bate ? 'código de barras bate' : c.mesmo === 'sim' ? 'mesmo produto' : c.mesmo === 'parecido' ? 'parecido: confira' : 'confira o tamanho') : '') + '</small></div></div>' +
+          (c ? ' · ' + esc(X.bate(c, inf.eans) ? 'código de barras bate' : c.mesmo === 'sim' ? 'mesmo produto' : c.mesmo === 'parecido' ? 'parecido: confira' : 'confira o tamanho') : '') + '</small></div></div>' +
         (cs.length ? '<div class="pf-sug-fotos"><button type="button" class="pf-foto grande" data-acao="pf-revisar" data-id="' + esc(sg.codigo) + '"><img src="' + esc(st().fotoUrl(c ? c.caminho : cs[0].caminho)) + '" alt="" loading="lazy"></button>' +
           (cs.length > 1 ? '<div class="pf-sug-outras">' + cs.slice(0, 4).map((k, i) => '<button type="button" class="pf-foto' + (i === esc_ ? ' sel' : '') + '" data-acao="pf-cand" data-id="' + esc(sg.codigo + '|' + i) + '" aria-label="Usar a foto ' + (i + 1) + '"><img src="' + esc(st().fotoUrl(k.caminho)) + '" alt="" loading="lazy"></button>').join('') + '</div>' : '') + '</div>'
           : '<div class="pf-foto"><span class="pf-sem">' + (sg.situacao === 'erro' ? esc(sg.erro || 'erro') : 'nenhuma foto achada') + '</span></div>') +
@@ -469,8 +472,8 @@
         '. Escolha a foto que é o mesmo produto (mesma embalagem e tamanho) e corrija o que precisar. Ela fica guardada no CRM e aparece para as vendedoras.',
       htmlAntes: '<div class="pf-rebusca"><label class="campo"><span>A IA procurou por</span><input type="text" data-pf-rebusca value="' + esc(sg.busca || nome(x)) + '"></label>' +
           '<button type="button" class="btn sec" data-acao="pf-buscar-de-novo" data-id="' + esc(cod) + '">Buscar de novo</button></div>' +
-        (cs.length ? '<div class="pf-escolha">' + cs.map((c, i) => '<label class="pf-opcao' + (c.ean_bate ? ' bate' : '') + '"><input type="radio" name="foto" value="' + i + '"' + (i === (fl.escolha[cod] || 0) ? ' checked' : '') + '>' +
-          '<span class="pf-opcao-foto"><img src="' + esc(st().fotoUrl(c.caminho)) + '" alt="" loading="lazy">' + (c.ean_bate ? '<span class="pf-selo verde">código de barras bate</span>' : '') + '</span>' +
+        (cs.length ? '<div class="pf-escolha">' + cs.map((c, i) => '<label class="pf-opcao' + (X.bate(c, inf.eans) ? ' bate' : '') + '"><input type="radio" name="foto" value="' + i + '"' + (i === (fl.escolha[cod] || 0) ? ' checked' : '') + '>' +
+          '<span class="pf-opcao-foto"><img src="' + esc(st().fotoUrl(c.caminho)) + '" alt="" loading="lazy">' + (X.bate(c, inf.eans) ? '<span class="pf-selo verde">código de barras bate</span>' : '') + '</span>' +
           '<strong>' + esc(c.tipo === 'fabricante' ? 'Site do fabricante' : c.tipo === 'fornecedor' ? 'Site do fornecedor' : 'Loja on-line') + '</strong><small>' + esc((c.site || '') + (c.largura ? ' · ' + c.largura + '×' + c.altura + ' px' : '')) + '</small>' +
           (c.pagina ? '<a href="' + esc(c.pagina) + '" target="_blank" rel="noopener noreferrer">ver a página</a>' : '') + '</label>').join('') +
           '<label class="pf-opcao"><input type="radio" name="foto" value="-1"' + (fl.escolha[cod] === -1 ? ' checked' : '') + '><span class="pf-sem">nenhuma serve (deixar sem foto)</span></label></div>' : '<p class="vazio">A IA não achou foto. Suba uma pelos botões abaixo ou busque de novo com outras palavras.</p>') +
