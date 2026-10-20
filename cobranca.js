@@ -143,13 +143,28 @@
     const um = b => (b.nota_numero ? 'a NF ' + b.nota_numero : 'a duplicata ' + b.duplicata) + (b.titulo ? ' (vencida em ' + R.dataBR(b.titulo.vencimento).slice(0, 5) + ')' : '');
     return lista.length === 1 ? um(lista[0]) : lista.slice(0, -1).map(um).join(', ') + ' e ' + um(lista[lista.length - 1]);
   }
-  function mensagemBoleto(modelo, lista, vars) {
-    const t = R.aplicaModelo(modelo || MODELO_BOLETO, Object.assign({}, vars, { boletos: textoBoletos(lista), titulos_boleto: titulosBoleto(lista) }));
+  // links: endereços do PDF completo (resumo, nota fiscal e boleto) para o cliente abrir — a mensagem do WhatsApp (wa.me)
+  // só leva texto, então o PDF vai como link (20/10/2026, pedido do Anderson). Modelo próprio sem a frase do PDF: o link
+  // vai numa linha no fim.
+  function mensagemBoleto(modelo, lista, vars, links) {
+    let t = R.aplicaModelo(modelo || MODELO_BOLETO, Object.assign({}, vars, { boletos: textoBoletos(lista), titulos_boleto: titulosBoleto(lista) }));
     // sem linha digitável (não deu para conferir): só o PDF
-    return lista.some(b => b.linha_digitavel) ? t : t.replace('É só copiar a linha digitável no app do banco. Também te mando o PDF aqui.', 'Te mando o PDF do boleto aqui.');
+    if (!lista.some(b => b.linha_digitavel)) t = t.replace('É só copiar a linha digitável no app do banco. Também te mando o PDF aqui.', 'Te mando o PDF do boleto aqui.');
+    const l = (links || []).filter(Boolean);
+    if (!l.length) return t;
+    const frase = (l.length === 1 ? 'O PDF com o boleto e a cópia da nota fiscal: ' : 'Os PDFs com os boletos e as cópias das notas fiscais: ') + l.join(' ');
+    if (t.indexOf('Também te mando o PDF aqui.') !== -1) return t.replace('Também te mando o PDF aqui.', frase);
+    if (t.indexOf('Te mando o PDF do boleto aqui.') !== -1) return t.replace('Te mando o PDF do boleto aqui.', frase);
+    return t + '\n\n' + frase;
+  }
+  // um link por PDF (os boletos do mesmo cliente dividem o PDF completo); base = endereço do Supabase da instalação
+  function linksPdf(lista, base) {
+    if (!base) return [];
+    const vistos = new Set();
+    return lista.filter(b => b.arquivo && b.id && !vistos.has(b.arquivo) && vistos.add(b.arquivo)).map(b => String(base).replace(/\/+$/, '') + '/functions/v1/crm-pdf?b=' + b.id);
   }
 
-  const C = { lerLinha, linhaDeCodigo, formataLinha, dataDoFator, confereBoleto, casaBoleto, boletosPendentes, boletoAtual, mensagemBoleto, textoBoletos, MODELO_BOLETO };
+  const C = { lerLinha, linhaDeCodigo, formataLinha, dataDoFator, confereBoleto, casaBoleto, boletosPendentes, boletoAtual, mensagemBoleto, linksPdf, textoBoletos, MODELO_BOLETO };
   raiz.CRMCobranca = C;
   if (typeof module !== 'undefined') module.exports = C;
 
@@ -184,8 +199,8 @@
     if (b.cobrado_em) return ' ' + CRM.selo('boleto atualizado enviado ' + dm(R.diaLocal(b.cobrado_em)) + (b.cobrado_por ? ' por ' + R.primeiroNome(CRM.nomeUsuario(b.cobrado_por)) : ''), 'verde');
     return ' ' + CRM.selo('boleto atualizado ' + R.moeda(b.valor) + ' · vence ' + dm(b.vencimento) + ' — enviar', 'ambar');
   }
-  const botoesEnvio = (id, grande) => '<button type="button" class="' + (grande ? 'btn ouro' : 'mini wa') + '" data-acao="cob-whats" data-id="' + esc(id) + '">WhatsApp com o boleto</button> ' +
-    (podeCompartilhar() && pendentesDe(id).some(b => b.arquivo) ? '<button type="button" class="' + (grande ? 'btn sec' : 'mini') + '" data-acao="cob-compartilhar" data-id="' + esc(id) + '" title="manda o PDF de verdade (resumo, nota fiscal e boleto) pelo WhatsApp ou outro app">📎 Compartilhar o PDF</button> ' : '') +
+  const botoesEnvio = (id, grande) => '<button type="button" class="' + (grande ? 'btn ouro' : 'mini wa') + '" data-acao="cob-whats" data-id="' + esc(id) + '" title="abre a conversa do cliente com a mensagem e o link do PDF (boleto e nota fiscal)">WhatsApp com o boleto e o PDF</button> ' +
+    (podeCompartilhar() && pendentesDe(id).some(b => b.arquivo) ? '<button type="button" class="' + (grande ? 'btn sec' : 'mini') + '" data-acao="cob-compartilhar" data-id="' + esc(id) + '" title="manda o ARQUIVO PDF (resumo, nota fiscal e boleto) pelo WhatsApp ou outro app; você escolhe o contato">📎 Mandar o arquivo PDF</button> ' : '') +
     '<button type="button" class="' + (grande ? 'btn sec' : 'mini') + '" data-acao="cob-feito" data-id="' + esc(id) + '" title="mandou por outro caminho (e-mail, telefone): marca como enviado">Já mandei</button>';
   function blocoEmpresa(id, semBotoes) {
     const l = pendentesDe(id);
@@ -594,6 +609,11 @@
     CRM.store().whatsapp({ acao: 'situacao' }).then(r => { const antes = !!(wa && wa.pronto); wa = r; wa.pronto = !!(r.ligado && r.modelo && r.modelo.status === 'APPROVED' && r.numero && r.numero.status === 'CONNECTED'); if (wa.pronto !== antes) CRM.render(); }).catch(() => {});
   }
   const waPronto = () => !!(wa && wa.pronto);
+  // mandados pela OneClean antes de 20/10 (PDF por link: chegaram sem o anexo) ou pelo link de reserva, ainda não cobrados
+  const paraReenviar = () => pendentes().filter(b => b.wa_status === 'enviado');
+  const botaoReenviar = () => { const n = paraReenviar().length; return waPronto() && n ? '<section class="cartao cob-aviso"><h2>Chegaram sem o PDF <small>' + n + ' boleto(s)</small></h2>' +
+    '<p>Mandados pelo WhatsApp da OneClean com o PDF por link: a mensagem chegou ao(à) vendedor(a), mas o anexo não. Agora o PDF sobe junto.</p>' +
+    '<p><button type="button" class="btn ouro" data-acao="cob-meta-reenviar">🔁 Reenviar às vendedoras com o PDF anexo</button></p></section>' : ''; };
   const botaoMeta = n => (waPronto() ? '<p><button type="button" class="btn ouro" data-acao="cob-meta">📤 Enviar a todas pelo WhatsApp da OneClean (' + n + ' boleto' + (n > 1 ? 's' : '') + ')</button> ' +
     '<small>cada vendedor(a) recebe sozinha o boleto com o PDF completo anexo</small></p>' : '');
   function formAvisar() {
@@ -652,6 +672,7 @@
       const refaz = b.arquivo && !b.arquivo_banco ? ' <button type="button" class="mini" data-acao="cob-pdf" data-id="' + esc(b.id) + '" title="junta o resumo e a cópia da nota fiscal (DANFE) ao boleto do banco">Montar PDF com a nota</button>' : '';
       const ver = b.arquivo ? ' <button type="button" class="mini" data-acao="cob-baixar" data-id="' + esc(b.id) + '">Ver PDF</button>' : '';
       const meta = b.wa_status === 'falhou' ? ' ' + CRM.selo('WhatsApp da OneClean falhou', 'vermelho') + (b.wa_erro ? ' <small>' + esc(b.wa_erro) + '</small>' : '')
+        : b.wa_status === 'enviado' ? ' ' + CRM.selo('pelo WhatsApp da OneClean, sem o PDF anexo', 'ambar') + (b.wa_erro ? ' <small>' + esc(b.wa_erro) + '</small>' : '')
         : b.wa_status ? ' ' + CRM.selo('pelo WhatsApp da OneClean: ' + b.wa_status, 'verde') : '';
       return (b.avisado_em ? CRM.selo('no WhatsApp do(a) vendedor(a) ' + dm(R.diaLocal(b.avisado_em)), 'azul') : CRM.selo('falta mandar ao(à) vendedor(a)', 'ambar')) + meta + det +
         ' <button type="button" class="mini" data-acao="cob-ja-cobrou" data-id="' + esc(b.id) + '" title="o(a) vendedor(a) já mandou ao cliente: tira da Fila e conclui a tarefa">Já cobrou</button>' + ver + refaz;
@@ -666,6 +687,7 @@
         '<p>' + (podeCompartilhar() ? 'Um clique por vendedor(a): o PDF completo de cada cliente vai como arquivo (escolha o WhatsApp e o(a) vendedor(a) na janela de compartilhar), com a mensagem pronta copiada.'
           : 'Um clique por vendedor(a): abre o seu WhatsApp na conversa com ele(a), com tudo pronto (valor, PDF, telefone do cliente e a mensagem para ele(a) copiar).') + '</p>' +
         botaoMeta(avisar.reduce((t, x) => t + x[1].length, 0)) + '<div class="cob-avisar">' + avisar.map(([u, l]) => botaoAvisar(u, l)).join('') + '</div></section>' : '') +
+      botaoReenviar() +
       '<section class="cartao"><h2>Vencidos para cobrar <small>' + venc.length + ' título(s) · ' + esc(R.moeda(tot(venc))) + '</small></h2>' +
       (venc.length ? [...porVend.entries()].sort((a, b) => CRM.nomeUsuario(a[0]).localeCompare(CRM.nomeUsuario(b[0]))).map(([u, l]) =>
         '<h3>' + esc(u ? CRM.nomeUsuario(u) : 'Sem vendedor(a)') + ' <small>' + l.length + ' · ' + esc(R.moeda(tot(l))) + '</small></h3>' +
@@ -699,18 +721,14 @@
       if (!e || !lista.length) return;
       const c = F.escolheContato(e, el && el.dataset.contato, x => R.linkWhatsApp(x.whatsapp || x.celular || x.telefone));
       const tel = F.telDe(e, c);
-      const texto = mensagemBoleto((E().cfg || {}).modelo_boleto, lista, F.variaveis(e, c));
+      const texto = mensagemBoleto((E().cfg || {}).modelo_boleto, lista, F.variaveis(e, c), linksPdf(lista, (raiz.CRM_CONFIG || {}).supabaseUrl));
       // sem celular no cadastro (ou só telefone fixo): abre o WhatsApp para o(a) vendedor(a) escolher o contato
       const fixo = /^(55)?\d{2}[2-5]\d{7}$/.test(String(tel || '').replace(/\D/g, ''));
       const link = !fixo && R.linkWhatsApp(tel, texto) || 'https://wa.me/?text=' + encodeURIComponent(texto);
       raiz.open(link, '_blank', 'noopener'); // antes de qualquer espera (senão o navegador bloqueia)
       if (link.indexOf('https://wa.me/?') === 0) CRM.toast('Cliente sem celular no CRM: escolha o contato no WhatsApp. Depois cadastre o celular do financeiro na ficha.');
-      (async () => {
-        let baixou = 0;
-        for (const b of lista) if (b.arquivo) { try { await baixa(b); baixou++; } catch (x) { CRM.falhou(x); } }
-        await marcaCobrado(e, lista, c, texto, true);
-        if (baixou) CRM.toast('O PDF do boleto foi baixado: anexe na conversa do WhatsApp (clipe → Documento).');
-      })().catch(CRM.falhou);
+      // 20/10/2026: o PDF vai como link na mensagem (o cliente abre no celular); não baixa mais o arquivo para anexar à mão
+      (async () => { await marcaCobrado(e, lista, c, texto, true); })().catch(CRM.falhou);
     },
     'cob-avisar': (u, el) => {
       const usr = CRM.usuario(u), lista = paraAvisar().filter(b => vendedoraDe(b) === u);
@@ -770,8 +788,9 @@
       })().catch(CRM.falhou);
     },
     // WhatsApp oficial da Meta: um clique, todas os(as) vendedores(as) recebem sozinhas (com o PDF completo anexo)
-    'cob-meta': (id, el) => {
-      const lista = paraAvisar();
+    'cob-meta-reenviar': (id, el) => CRM.acoes['cob-meta'](id, el, paraReenviar()),
+    'cob-meta': (id, el, outra) => {
+      const lista = outra || paraAvisar();
       if (!lista.length) return;
       if (el) el.disabled = true;
       (async () => {
@@ -780,12 +799,14 @@
         const okIds = new Set([].concat(...res.filter(x => x.ok).map(x => x.boletos)));
         const erros = new Map();
         res.filter(x => !x.ok).forEach(x => x.boletos.forEach(i => erros.set(i, x.erro)));
-        E().boletos = (E().boletos || []).map(b => okIds.has(b.id) ? Object.assign({}, b, { avisado_em: agora, wa_status: 'enviado', wa_erro: null })
+        const pdfDe = new Map(); res.filter(x => x.ok).forEach(x => x.boletos.forEach(i => pdfDe.set(i, x.pdf)));
+        E().boletos = (E().boletos || []).map(b => okIds.has(b.id) ? Object.assign({}, b, { avisado_em: agora, wa_status: pdfDe.get(b.id) === 'anexo' ? 'enviado com o PDF' : 'enviado', wa_erro: null })
           : erros.has(b.id) ? Object.assign({}, b, { wa_status: 'falhou', wa_erro: erros.get(b.id) }) : b);
         fechaForm();
         CRM.render();
         const falhas = res.filter(x => !x.ok);
-        CRM.toast(res.filter(x => x.ok).length + ' cliente(s) enviados pelo WhatsApp da OneClean' + (falhas.length ? ' · ' + falhas.length + ' falharam: ' + falhas.map(x => x.empresa + ' (' + x.erro + ')').join('; ') + ' — use o botão do(a) vendedor(a) para esses' : '') + '.', !!falhas.length);
+        const anexo = res.filter(x => x.ok && x.pdf === 'anexo').length, porLink = res.filter(x => x.ok && x.pdf !== 'anexo').length;
+        CRM.toast(res.filter(x => x.ok).length + ' cliente(s) enviados pelo WhatsApp da OneClean' + (anexo ? ', ' + anexo + ' com o PDF anexo' : '') + (porLink ? ', ' + porLink + ' só com o link do PDF (a subida falhou)' : '') + (falhas.length ? ' · ' + falhas.length + ' falharam: ' + falhas.map(x => x.empresa + ' (' + x.erro + ')').join('; ') + ' — use o botão do(a) vendedor(a) para esses' : '') + '.', !!falhas.length);
       })().catch(e => { if (el) el.disabled = false; CRM.falhou(e); });
     },
     'cob-ja-cobrou': id => {

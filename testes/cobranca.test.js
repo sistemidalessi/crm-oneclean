@@ -90,3 +90,17 @@ test('pendentes do(a) vendedor(a) e a mensagem pronta', () => {
   assert.doesNotMatch(venc, /copiar a linha digitável/, 'sem linha: só o PDF');
   assert.equal(C.boletosPendentes([Object.assign({}, boletos[1], { cobrado_em: 'x' })], atrasos).length, 0);
 });
+
+test('mensagemBoleto com o link do PDF (20/10/2026: o WhatsApp da vendedora só leva texto)', () => {
+  const b = { id: '11111111-2222-4333-8444-555555555555', arquivo: 'boletos/x.pdf', duplicata: '002430/01', nota_numero: 2430, valor: 449.38, valor_original: 427.72, vencimento: '2026-10-19', linha_digitavel: '00190000090380488010600001401173616040000042772', criado_em: '2026-10-20T12:00:00Z' };
+  const links = C.linksPdf([b, Object.assign({}, b, { id: 'outro', duplicata: '002430/02' })], 'https://abc.supabase.co/');
+  assert.deepEqual(links, ['https://abc.supabase.co/functions/v1/crm-pdf?b=11111111-2222-4333-8444-555555555555']); // mesmo PDF: um link só
+  const vars = { saudacao: 'Olá, Maria!', vendedor_primeiro_nome: 'Ana', minha_empresa: 'Empresa Teste' };
+  const m = C.mensagemBoleto(null, [b], vars, links);
+  assert.ok(m.indexOf('O PDF com o boleto e a cópia da nota fiscal: ' + links[0]) !== -1);
+  assert.ok(m.indexOf('Também te mando o PDF aqui.') === -1);
+  const proprio = C.mensagemBoleto('{saudacao} Segue o boleto: {boletos}', [b], vars, links);
+  assert.ok(proprio.endsWith('\n\nO PDF com o boleto e a cópia da nota fiscal: ' + links[0]));
+  assert.equal(C.mensagemBoleto(null, [b], vars), C.mensagemBoleto(null, [b], vars, [])); // sem link: como antes
+  assert.deepEqual(C.linksPdf([b], ''), []);
+});

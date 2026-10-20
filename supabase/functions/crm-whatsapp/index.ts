@@ -5,7 +5,8 @@
 //   POST { acao: 'criar_modelo' }             → cria o modelo "boleto_vendedora" (categoria utilidade, PDF no cabeçalho)
 //   POST { acao: 'registrar', pin }           → registra o número na Cloud API (PIN de 6 dígitos escolhido pelo admin)
 //   POST { acao: 'teste' }                    → manda o modelo com um PDF de exemplo ao celular de quem chamou
-//   POST { acao: 'enviar', boletos: [ids] }   → um envio por cliente (os boletos do cliente dividem o PDF completo)
+//   POST { acao: 'enviar', boletos: [ids] }   → um envio por cliente (os boletos do cliente dividem o PDF completo); o PDF
+//                                               sobe para a Meta antes (desde 20/10) e vai anexo; também serve para reenviar
 // Só o administrador. A chave da Meta fica SÓ nos segredos do Supabase (WHATSAPP_TOKEN, token permanente de um
 // usuário do sistema do portfólio OneClean); os IDs do número, da conta e do app também ficam lá (não são segredo).
 // Deploy: verify_jwt ligado (o padrão).
@@ -194,13 +195,32 @@ Deno.serve(async (req) => {
           const nf = l!.map(b => (b.nota_numero ? 'NF ' + b.nota_numero : 'duplicata ' + b.duplicata) + ', ' + moeda(Number(b.valor)) +
             (Number(b.valor) > Number(b.valor_original) + 0.005 ? ' com juros (original ' + moeda(Number(b.valor_original)) + ')' : '')).join('; ');
           const linhas = l!.filter(b => b.linha_digitavel).map(b => formataLinha(b.linha_digitavel)).join(' / ') || 'use o código de barras do PDF';
-          const { data: assinado, error: e2 } = await db.storage.from(BUCKET).createSignedUrl(arq, SETE_DIAS);
-          if (e2 || !assinado) throw new Error('não consegui o link do PDF');
           const titulo = 'Boleto atualizado - ' + l!.map(b => (b.nota_numero ? 'NF ' + b.nota_numero : b.duplicata)).join(', ') + ' - ' + (e!.nome || '');
-          const wamid = await enviaModelo(token, phoneId, para, { link: assinado.signedUrl, filename: nomeArq(titulo) },
+          // 20/10/2026: o PDF ia por LINK e a Meta baixava depois; os(as) vendedores(as) receberam a mensagem SEM o anexo.
+          // Agora o PDF sobe para a Meta antes (como no teste, que chegava com o arquivo) e a mensagem vai com o id dele;
+          // o link assinado fica só de reserva, se a subida falhar.
+          let doc: { id?: string; link?: string; filename: string }, aviso: string | null = null;
+          try {
+            const { data: arqPdf, error: e1 } = await db.storage.from(BUCKET).download(arq);
+            if (e1 || !arqPdf) throw new Error('não consegui ler o PDF guardado');
+            const fd = new FormData();
+            fd.append('messaging_product', 'whatsapp');
+            fd.append('type', 'application/pdf');
+            fd.append('file', new Blob([await arqPdf.arrayBuffer()], { type: 'application/pdf' }), nomeArq(titulo));
+            const media = await graph(token, '/' + phoneId + '/media', { method: 'POST', body: fd });
+            if (!media.id) throw new Error('a Meta não devolveu o id do PDF');
+            doc = { id: String(media.id), filename: nomeArq(titulo) };
+          } catch (eUp) {
+            const { data: assinado, error: e2 } = await db.storage.from(BUCKET).createSignedUrl(arq, SETE_DIAS);
+            if (e2 || !assinado) throw new Error('não consegui subir nem o link do PDF');
+            doc = { link: assinado.signedUrl, filename: nomeArq(titulo) };
+            aviso = 'PDF por link (a subida para a Meta falhou: ' + String((eUp as Error).message || eUp).slice(0, 120) + ')';
+          }
+          const wamid = await enviaModelo(token, phoneId, para, doc,
             [String(u.nome || '').split(' ')[0], e!.razao_social || e!.nome, nf, linhas]);
           const agora = new Date().toISOString();
-          await db.from('crm_boletos').update({ avisado_em: agora, wa_msg: wamid, wa_status: 'enviado', wa_em: agora, wa_erro: null }).in('id', l!.map(b => b.id));
+          await db.from('crm_boletos').update({ avisado_em: agora, wa_msg: wamid, wa_status: doc.id ? 'enviado com o PDF' : 'enviado', wa_em: agora, wa_erro: aviso }).in('id', l!.map(b => b.id));
+          r.pdf = doc.id ? 'anexo' : 'link';
           r.ok = true; r.id = wamid;
         } catch (err) {
           r.ok = false; r.erro = String((err as Error).message || err);

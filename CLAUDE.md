@@ -1900,6 +1900,18 @@ e WhatsApp. Valor real do parado em 15/10: **R$ 79 mil em 271 produtos** (depois
      grava `crm_boletos.wa_msg/wa_status/wa_em/wa_erro`). Tela: cartão "WhatsApp oficial (Meta)" em Configurações → Integrações
      e, na Cobrança, "📤 Enviar a todas pelo WhatsApp da OneClean" (só com número CONNECTED e modelo APPROVED). Falta o
      webhook de entregue/lido (atualizar `wa_status`).
+- **Boleto: o PDF vai junto, nas duas pontas (20/10/2026, pedido do Anderson).** No 1º uso real do "📤 Enviar a todas pelo
+  WhatsApp da OneClean" (3 clientes, 09:07) as vendedoras receberam a mensagem **sem o PDF**: a `crm-whatsapp` mandava o
+  documento por **link** e quem baixava era a Meta (falha silenciosa; sem webhook o CRM não sabe). **v12:** o PDF completo
+  sobe antes para a Meta (`/{phone}/media`, como o `teste`, que chegava com o arquivo) e a mensagem vai com o **id** da mídia;
+  o link assinado fica de reserva (`wa_status` = "enviado com o PDF" × "enviado" + `wa_erro` com o motivo). Na Cobrança,
+  quadro **"Chegaram sem o PDF"** com "🔁 Reenviar às vendedoras com o PDF anexo" (os `wa_status = 'enviado'` não cobrados) e
+  selo âmbar "sem o PDF anexo" na linha. **Vendedora → cliente:** "WhatsApp com o boleto e o PDF" (ficha, Fila, tarefa→ficha)
+  leva na mensagem o **link curto do PDF completo** — Edge Function pública **`crm-pdf`** (verify_jwt desligado; `?b=<id do
+  boleto>` → link assinado de 5 min; vale 45 dias da criação; UUID aleatório) — e não baixa mais o arquivo para anexar à mão
+  (`mensagemBoleto(..., links)`, `linksPdf`; modelo próprio sem a frase do PDF: o link vai no fim). "📎 Mandar o arquivo PDF"
+  (Compartilhar) continua para mandar o arquivo de verdade. Testado: `crm-pdf` pelo `pg_net` (boleto real → PDF; id inexistente
+  → 404). **Falta:** o reenvio dos 3 de hoje (o Anderson clica) e o webhook de status da Meta (entregue/lido/falhou).
 - **Volta do contato (14/10, pedido do Anderson):** o próximo passo da janela "Como foi…" tem também **"Em 15 dias"**.
 - **Regra (14/10, Anderson): título recebido antes do vencimento é ADIANTADO.** A Santa Casa (002435/01, R$ 7.422,15) venceria
   em 25/10 e pagou em 14/10: o "Recebi" gravou certo, mas o cartão não dizia que o cliente adiantou. Agora `caixa-calculo.js`
