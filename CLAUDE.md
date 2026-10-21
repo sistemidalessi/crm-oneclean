@@ -1678,10 +1678,16 @@ sem subir XML, sem Sefaz). Conferido no banco (transação desfeita): direto nas
 itens e vínculos; contagem ok; vendedora bloqueada. Navegador: nenhuma chamada às leituras com custo e nenhum "R$" na tela.
 `revoke` das 7 funções novas rodados pelo Anderson e conferidos em 21/10 (anônimo sem acesso; só `authenticated`).
 
+**Mais em 21/10 (decisão do Anderson):** a logística também **libera pedido bloqueado** (qualquer bloqueio, inclusive
+"entrada recebida": `crm_pedido_liberar` aceita `crm_eh_logistica()`), **cancela NF-e** e **inutiliza numeração**
+(`crm-fiscal` v11: `CANCELA = admin, gestor, logistica`, usado também no `inutilizar`). Continuam só da gestora/admin:
+"Desfazer faturado"; só do admin: fechamento do mês para o contador e configuração fiscal. Vendedora segue barrada
+(conferido no banco). Manual da logística atualizado (mesma URL).
+
 ## NF-e emitida pelo CRM — Fase 4 da saída do FKN (16/10/2026, pedido do Anderson)
 
-**Caminho:** navegador → Edge Function `crm-fiscal` (login de quem clicou; emite: admin, gestora e logística; cancela:
-admin e gestora; inutiliza, configura e fecha o mês: admin) → **serviço fiscal** na VPS da Agilité (`servico-fiscal/`,
+**Caminho:** navegador → Edge Function `crm-fiscal` (login de quem clicou; emite: admin, gestora e logística; cancela e
+inutiliza: admin, gestora e logística desde 21/10; configura e fecha o mês: admin) → **serviço fiscal** na VPS da Agilité (`servico-fiscal/`,
 Node puro, usuário `oneclean-fiscal`, porta 8787 atrás do Caddy em `fiscal.oneclean.com.br`; instalação em
 `servico-fiscal/INSTALAR.md`) → Sefaz-SP. Decisão do Anderson (15/10): emitir direto na Sefaz, como a NFS-e da Agilité, e
 o serviço na VPS da Agilité (não no servidor do escritório).

@@ -165,7 +165,7 @@
   async function carrega() {
     if (carregando) return;
     carregando = true;
-    try { [nfes, inuts] = await Promise.all([CRM.store().nfes(), CRM.ehAdmin() ? CRM.store().nfeInutilizacoes() : Promise.resolve([])]); }
+    try { [nfes, inuts] = await Promise.all([CRM.store().nfes(), ehOp() ? CRM.store().nfeInutilizacoes() : Promise.resolve([])]); }
     catch (e) { nfes = nfes || []; CRM.falhou(e); }
     carregando = false;
     CRM.render();
@@ -263,7 +263,7 @@
     if (n.chave && (s === 'pendente' || s === 'reservada' || s === 'rejeitada' || s === 'autorizada')) b.push('<button type="button" class="mini" data-acao="nf-consultar" data-id="' + esc(n.id) + '">Consultar</button>');
     if (s === 'autorizada') {
       b.push('<button type="button" class="mini" data-acao="nf-cce" data-id="' + esc(n.id) + '">Carta de correção</button>');
-      if (CRM.ehGestor()) b.push('<button type="button" class="mini perigo" data-acao="nf-cancelar" data-id="' + esc(n.id) + '">Cancelar</button>');
+      if (ehOp()) b.push('<button type="button" class="mini perigo" data-acao="nf-cancelar" data-id="' + esc(n.id) + '">Cancelar</button>');
     }
     if ((s === 'rejeitada' || s === 'bloqueada') && n.pedido_id) b.push('<button type="button" class="mini" data-acao="nf-emitir" data-id="' + esc(n.pedido_id) + '">Emitir de novo</button>');
     const evs = (n.eventos || []).filter(e => e.protocolo).map(e => (e.tipo === 'cancelar' ? 'cancelada ' : 'CC-e ' + e.seq + ' ') + quando(e.quando)).join(' · ');
@@ -287,8 +287,8 @@
         l.map(linhaNfe).join('') + '</tbody></table></div>' : '<p class="vazio">Nenhuma nota emitida pelo CRM ainda. A nota sai do pedido: abra o pedido separado e clique em "Emitir NF-e".</p>') + '</section>' +
       (CRM.ehAdmin() ? '<section class="cartao"><h2>Fechamento do mês para o contador</h2>' +
         '<p>ZIP com os XML de saída emitidos pelo CRM (produção), os eventos de cancelamento e de correção, as inutilizações e a relação de canceladas e inutilizadas. As notas da série 1 o FKN continua mandando como sempre.</p>' +
-        '<p class="acoes"><input type="month" value="' + esc(f.mes) + '" data-nf-mes> <button type="button" class="btn" data-acao="nf-fechamento">Baixar o ZIP do mês</button></p></section>' +
-        '<section class="cartao"><h2>Inutilizar numeração</h2><p class="dica">Para números que pularam e não vão ser usados (uma nota rejeitada de pedido que não sai, um salto na numeração). Nota autorizada não se inutiliza: cancela-se.</p>' +
+        '<p class="acoes"><input type="month" value="' + esc(f.mes) + '" data-nf-mes> <button type="button" class="btn" data-acao="nf-fechamento">Baixar o ZIP do mês</button></p></section>' : '') +
+      (ehOp() ? '<section class="cartao"><h2>Inutilizar numeração</h2><p class="dica">Para números que pularam e não vão ser usados (uma nota rejeitada de pedido que não sai, um salto na numeração). Nota autorizada não se inutiliza: cancela-se.</p>' +
         (inuts.length ? '<ul class="lista">' + inuts.slice(0, 20).map(i => '<li>' + esc('Série ' + i.serie + ', ' + (i.de === i.ate ? 'nº ' + i.de : 'nº ' + i.de + ' a ' + i.ate) + ' · ' + (i.ambiente === 'producao' ? 'produção' : 'homologação') + ' · ' + quando(i.criado_em) + ' · ' + (i.cstat || '') + ' ' + (i.motivo || '')) + '</li>').join('') + '</ul>' : '') +
         '<p class="acoes"><button type="button" class="btn sec" data-acao="nf-inutilizar">Inutilizar números…</button></p></section>' : '');
   }

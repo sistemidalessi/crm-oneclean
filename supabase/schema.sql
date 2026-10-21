@@ -2652,12 +2652,12 @@ $$;
 revoke all on function public.crm_pedido_situacao(uuid, text, text) from public, anon;
 grant execute on function public.crm_pedido_situacao(uuid, text, text) to authenticated;
 
--- Liberar (gestora/administrador): os bloqueios de agora ficam liberados; um bloqueio novo volta a segurar.
--- p_liberar = false desfaz. Entrada recebida (SEM ENTRADA): também a gestora/o administrador.
+-- Liberar (gestora/administrador e, desde 21/10/2026, a logística): os bloqueios de agora ficam liberados; um bloqueio
+-- novo volta a segurar. p_liberar = false desfaz. Entrada recebida (SEM ENTRADA): os mesmos.
 create or replace function public.crm_pedido_liberar(p_id uuid, p_liberar boolean, p_entrada boolean) returns jsonb language plpgsql security definer set search_path = public as $$
 declare r public.crm_pedidos;
 begin
-  if not public.crm_eh_gestor() then raise exception 'só a gestora ou o administrador libera pedido'; end if;
+  if not (public.crm_eh_gestor() or public.crm_eh_logistica()) then raise exception 'só a gestora, a logística ou o administrador libera pedido'; end if;
   select * into r from public.crm_pedidos where id = p_id for update;
   if r.id is null then raise exception 'pedido não encontrado'; end if;
   if r.situacao <> 'aberto' then raise exception 'só se libera pedido em aberto'; end if;

@@ -15,7 +15,7 @@ const CORS = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS'
 };
 const resposta = (status: number, corpo: unknown) => new Response(JSON.stringify(corpo), { status, headers: { ...CORS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
-const EMITE = ['admin', 'gestor', 'logistica'], CANCELA = ['admin', 'gestor'], DFE = ['admin', 'comprador'];
+const EMITE = ['admin', 'gestor', 'logistica'], CANCELA = ['admin', 'gestor', 'logistica'], DFE = ['admin', 'comprador'];
 type Linha = Record<string, unknown>;
 
 async function sha256(t: string) {
@@ -285,7 +285,7 @@ Deno.serve(async (req) => {
     }
     if (acao === 'cancelar' || acao === 'cce') {
       if (!nfe || nfe.situacao !== 'autorizada') throw new Error('só nota autorizada');
-      if (acao === 'cancelar' && !CANCELA.includes(String(eu.papel))) throw new Error('só a gestora ou o administrador cancela nota');
+      if (acao === 'cancelar' && !CANCELA.includes(String(eu.papel))) throw new Error('só a logística, a gestora ou o administrador cancela nota');
       const evs = (nfe.eventos as Linha[]) || [];
       const seq = acao === 'cce' ? evs.filter(e => e.tipo === 'cce').length + 1 : 1;
       const r = acao === 'cancelar'
@@ -305,7 +305,7 @@ Deno.serve(async (req) => {
       return resposta(200, { ok, evento: Object.assign({}, ev, { xml: undefined }) });
     }
     if (acao === 'inutilizar') {
-      if (eu.papel !== 'admin') throw new Error('só o administrador inutiliza numeração');
+      if (!CANCELA.includes(String(eu.papel))) throw new Error('só a logística, a gestora ou o administrador inutiliza numeração');  // 21/10/2026: logística também (pedido do Anderson)
       const s = Number(b.serie ?? serie), de = Number(b.de), ate = Number(b.ate);
       if (!(de > 0) || !(ate >= de) || ate - de > 9999) throw new Error('faixa de números inválida');
       if (String(b.texto || '').trim().length < 15) throw new Error('a justificativa precisa de pelo menos 15 letras');

@@ -3,7 +3,7 @@
    pendência/liberação): cabeçalho (cliente, tabela, pagamento, transportadora, frete, entrega), grade de produtos
    (item, código, nome, un, qtde, não atendido, preço, desconto, margem, total, comissão, desconto sobre a tabela) e,
    a mais do que o FKN, o DISPONÍVEL de cada produto (físico − reservado pelos pedidos do CRM). O pedido reserva o
-   estoque; os bloqueios (ESTOQUE, ATRASO, SEM ENTRADA, PREÇO) seguram até a gestora liberar; a logística junta os
+   estoque; os bloqueios (ESTOQUE, ATRASO, SEM ENTRADA, PREÇO) seguram até a gestora ou a logística liberar; a logística junta os
    liberados numa lista de separação (o "bolão"), separa e marca separado; a nota que chega fatura o pedido sozinha.
    Aqui: as regras puras (testes/pedidos.test.js). A tela fica no fim do arquivo. */
 (function (raiz) {
@@ -25,7 +25,7 @@
     { id: 'externo', nome: 'Externo', faixas: { ABAIXO: 0, NEG: 5, A: 5, B: 6, C: 7, D: 8, E: 9, F: 10 } }
   ];
   // Margem mínima (a da tabela A: 23%). A vendedora vê a margem para saber se tem espaço quando o cliente negocia;
-  // abaixo dela o pedido fica bloqueado (PREÇO) até a gestora liberar.
+  // abaixo dela o pedido fica bloqueado (PREÇO) até a gestora ou a logística liberar.
   const MARGEM_MINIMA = 23;
   const margemMinima = cfg => (cfg && cfg.margem_minima != null && cfg.margem_minima !== '' ? Number(cfg.margem_minima) : MARGEM_MINIMA);
   const planosDe = cfg => ((cfg && Array.isArray(cfg.comissao_planos) && cfg.comissao_planos.length) ? cfg.comissao_planos : PLANOS_PADRAO);
@@ -430,7 +430,7 @@
   // ------------------------------------------------ pedido aberto (Dados / Produtos / Comentários)
   function telaPedido(p) {
     const s = P.situacao(p, notaNumero(p)), d = p.dados || {}, ctx = ctxDe(p.vendedor_id), t = P.totais(p.itens, p.frete, ctx);
-    const fs = faltasDe(p.id), gest = CRM.ehGestor();
+    const fs = faltasDe(p.id), gest = ehOp();   // 21/10/2026: a logística também libera (pedido do Anderson)
     const bAbertos = P.bloqueiosAbertos(p);
     const botoes = [];
     if (podeEditar(p)) botoes.push('<button type="button" class="btn sec" data-acao="pd-editar" data-id="' + esc(p.id) + '">Editar</button>');
@@ -442,7 +442,7 @@
     if (ehOp() && (p.situacao === 'separacao' || p.situacao === 'separado')) botoes.push('<button type="button" class="btn sec" data-acao="pd-voltar-aberto" data-id="' + esc(p.id) + '">Voltar ao aberto</button>');
     if (CRM.nfe && CRM.nfe.podeEmitir(p)) botoes.push('<button type="button" class="btn' + (p.situacao === 'separado' ? ' verde' : '') + '" data-acao="nf-emitir" data-id="' + esc(p.id) + '">Emitir NF-e</button>');
     if (ehOp() && ['aberto', 'separacao', 'separado'].indexOf(p.situacao) !== -1) botoes.push('<button type="button" class="btn sec" data-acao="pd-faturar" data-id="' + esc(p.id) + '" title="ligar a nota que o FKN emitiu">Faturar (nota do FKN)…</button>');
-    if (gest && p.situacao === 'faturado') botoes.push('<button type="button" class="btn sec" data-acao="pd-desfaturar" data-id="' + esc(p.id) + '">Desfazer faturado</button>');
+    if (CRM.ehGestor() && p.situacao === 'faturado') botoes.push('<button type="button" class="btn sec" data-acao="pd-desfaturar" data-id="' + esc(p.id) + '">Desfazer faturado</button>');
     if ((p.situacao === 'aberto' && ehVenda()) || (ehOp() && ['separacao', 'separado'].indexOf(p.situacao) !== -1)) botoes.push('<button type="button" class="btn perigo" data-acao="pd-cancelar" data-id="' + esc(p.id) + '">Cancelar pedido</button>');
     botoes.push('<button type="button" class="btn sec" data-acao="pd-imprimir" data-id="' + esc(p.id) + '">Imprimir</button>');
     if (ehVenda() && p.negocio_id && CRM.negocio(p.negocio_id)) botoes.push('<button type="button" class="mini" data-acao="abrir-negocio" data-id="' + esc(p.negocio_id) + '">negócio</button>');
@@ -465,7 +465,7 @@
       corpo = gradeProdutos(p.itens || [], { ctx, faltas: fs, ler: true }) + rodapeTotais(t);
     }
     return '<section class="cartao pd-janela"><header class="pd-topo"><button type="button" class="btn sec" data-acao="pd-fechar">← Voltar</button><h2>Pedido ' + esc(p.numero) + ' · ' + esc(nomeCliente(p)) + '</h2>' + CRM.selo(s.rotulo, s.cor) + '</header>' +
-      (bAbertos.length ? '<p class="alerta">Bloqueado por: <strong>' + esc(bAbertos.map(b => P.ROTULO_BLOQUEIO[b] || b).join(', ')) + '</strong>.' + (gest ? ' Confira e clique em "Liberar".' : ' Quem libera é a gestora.') + '</p>' : '') +
+      (bAbertos.length ? '<p class="alerta">Bloqueado por: <strong>' + esc(bAbertos.map(b => P.ROTULO_BLOQUEIO[b] || b).join(', ')) + '</strong>.' + (gest ? ' Confira e clique em "Liberar".' : ' Quem libera é a gestora ou a logística.') + '</p>' : '') +
       '<p class="acoes">' + botoes.join(' ') + '</p>' + (CRM.nfe ? CRM.nfe.doPedido(p) : '') +
       '<div class="chips">' + abas.map(a => '<button type="button" class="chip-filtro' + (abaPed === a[0] ? ' ativo' : '') + '" data-acao="pd-aba-ped" data-id="' + a[0] + '">' + esc(a[1]) + '</button>').join('') + '</div>' + corpo + '</section>';
   }
@@ -578,8 +578,8 @@
         '<div class="pd-info" id="pdInfo">' + (dd && CRM.produtos ? '<button type="button" class="pd-info-foto" data-acao="pf-ficha" data-id="' + esc(dd.codigo) + '" title="Ver a ficha do produto">' + CRM.produtos.miniatura(dd.codigo) + '</button>' : '') + (dd ? 'Disponível <strong class="' + (num(dd.disponivel) < num(l.quantidade) ? 'neg' : '') + '">' + qtd(Math.floor(num(dd.disponivel) * 1000) / 1000) + ' ' + esc(dd.unidade || '') + '</strong>' +
           (CRM.aCaminho && CRM.aCaminho.texto(dd.codigo, dd.unidade) ? ' · <strong>' + esc(CRM.aCaminho.texto(dd.codigo, dd.unidade)) + '</strong>' : dd.a_caminho ? ' · a caminho ' + qtd(dd.a_caminho) + ' (FKN, sem data)' : '') + ' · preço tabela R$ ' + preco(dd.preco_venda) + ' · líquido R$ ' + preco(lin.precoLiq) + ' · total R$ ' + preco(lin.total) +
           ' · faixa ' + esc(P.rotuloFaixa(lin.faixa)) + (lin.comissao != null ? ' · comissão ' + preco(lin.comissao) + '%' : '') + (veCusto() && dd.custo != null ? ' · custo R$ ' + preco(dd.custo) : '') + (veMargem() && lin.margem != null ? ' · margem <strong class="' + (lin.abaixoMinimo ? 'neg' : '') + '">' + pct(lin.margem) + '</strong>' +
-            (lin.abaixoMinimo ? ' <strong class="neg">abaixo da margem mínima de ' + pct(P.margemMinima(E().cfg)) + ': o pedido fica bloqueado até a gestora liberar</strong>' : '') : '') +
-          (!veMargem() && P.abaixoDaTabela(lin) ? ' <strong class="neg">abaixo da tabela A: o pedido pode ficar bloqueado até a gestora liberar</strong>' : '') : 'Escolha o produto: o CRM mostra o disponível e o preço da tabela.') + '</div>' +
+            (lin.abaixoMinimo ? ' <strong class="neg">abaixo da margem mínima de ' + pct(P.margemMinima(E().cfg)) + ': o pedido fica bloqueado até a gestora ou a logística liberar</strong>' : '') : '') +
+          (!veMargem() && P.abaixoDaTabela(lin) ? ' <strong class="neg">abaixo da tabela A: o pedido pode ficar bloqueado até a gestora ou a logística liberar</strong>' : '') : 'Escolha o produto: o CRM mostra o disponível e o preço da tabela.') + '</div>' +
         (dd && num(dd.preco_venda) > 0 ? '<div class="pd-faixas">Tabela: ' + P.FAIXAS.slice().reverse().map(fx => '<button type="button" class="mini" data-acao="pd-faixa" data-id="' + fx + '" title="' + (tab[fx] >= 0 ? '+' : '') + tab[fx] + '%">' + P.rotuloFaixa(fx) + ' ' + preco(P.precoDaFaixa(dd.preco_venda, fx, tab)) + '</button>').join('') + '</div>' : '') +
         '<p class="acoes"><button type="button" class="btn" data-acao="pd-item-salvar">' + (x.sel != null ? 'Salvar item' : 'Inserir item') + '</button> ' + (x.sel != null || l.codigo ? '<button type="button" class="btn sec" data-acao="pd-item-cancelar">Cancelar item</button> ' : '') +
         (x.empresa_id ? '<button type="button" class="btn sec" data-acao="pd-ultimas">Últimas compras</button> <button type="button" class="btn sec" data-acao="pd-importar-ultimas">Importar últimas compras</button> <button type="button" class="btn sec" data-acao="pd-repetir" title="Repetir um pedido ou uma nota anterior do cliente, com os preços dela">Repetir pedido</button> ' : '') +
@@ -591,7 +591,7 @@
       '<div class="chips">' + abas.map(a => '<button type="button" class="chip-filtro' + (x.aba === a[0] ? ' ativo' : '') + '" data-acao="pd-aba-ed" data-id="' + a[0] + '">' + esc(a[1]) + '</button>').join('') + '</div>' +
       corpo + '<p class="acoes pd-gravar">' + (!x.id ? '<button type="button" class="btn sec" data-acao="pd-salvar-orcamento">Salvar orçamento e gerar o PDF</button> ' : '') +
       '<button type="button" class="btn verde" data-acao="pd-gravar">' + (x.id ? 'Gravar as alterações do pedido' : 'Gravar pedido (reserva o estoque)') + '</button></p>' +
-      '<p class="dica">Orçamento: vai para o negócio do cliente e sai no PDF da empresa (WhatsApp/e-mail na ficha). Pedido: reserva o estoque; se faltar produto, o cliente tiver duplicata em atraso, o pagamento for antecipado ou o preço ficar abaixo da tabela, ele fica <strong>bloqueado</strong> até a gestora liberar.</p></section>';
+      '<p class="dica">Orçamento: vai para o negócio do cliente e sai no PDF da empresa (WhatsApp/e-mail na ficha). Pedido: reserva o estoque; se faltar produto, o cliente tiver duplicata em atraso, o pagamento for antecipado ou o preço ficar abaixo da tabela, ele fica <strong>bloqueado</strong> até a gestora ou a logística liberar.</p></section>';
   }
 
   // valor do campo "data-ed" (ex.: dados.entrega.cidade) para o editor
@@ -648,7 +648,7 @@
     ed = null; aberto = r.id; abaPed = 'produtos';
     await recarrega();
     const b = P.bloqueiosAbertos(r);
-    CRM.toast('Pedido ' + r.numero + ' gravado' + (b.length ? ' — BLOQUEADO por ' + b.map(x => P.ROTULO_BLOQUEIO[x] || x).join(', ') + ' (a gestora libera)' : ' e liberado para a separação') + '.', !!b.length);
+    CRM.toast('Pedido ' + r.numero + ' gravado' + (b.length ? ' — BLOQUEADO por ' + b.map(x => P.ROTULO_BLOQUEIO[x] || x).join(', ') + ' (a gestora ou a logística libera)' : ' e liberado para a separação') + '.', !!b.length);
     const neg = n && CRM.negocio(n.id);
     if (eraNovo && neg && neg.status === 'aberto' && CRM.podeEditarNegocio(neg) && confirm('Pedido gravado. Marcar o negócio "' + neg.titulo + '" como GANHO agora?')) CRM.fichas.formGanho(Object.assign({}, neg, { valor: r.valor_total }));
   }
@@ -755,7 +755,7 @@
     const inp = (nome, v) => '<input name="' + nome + '" type="number" step="any" value="' + esc(v == null ? '' : v) + '" class="pd-num">';
     CRM.abrirForm({
       titulo: 'Tabela de preços e planos de comissão', largura: 'extra', campos: [], valores: {},
-      intro: 'A tabela PADRAO soma um percentual sobre o preço de venda do produto (o "ven" da listagem do FKN). A margem mínima trava o pedido (a gestora libera). Cada plano diz a comissão (%) de cada faixa; quem está "sem comissão" não entra na apuração.',
+      intro: 'A tabela PADRAO soma um percentual sobre o preço de venda do produto (o "ven" da listagem do FKN). A margem mínima trava o pedido (a gestora ou a logística libera). Cada plano diz a comissão (%) de cada faixa; quem está "sem comissão" não entra na apuração.',
       htmlDepois: '<h3>Tabela de preços (%)</h3><div class="tabela-rolagem"><table class="tabela"><thead><tr>' + TB.map(k => '<th>' + P.rotuloFaixa(k) + '</th>').join('') + '</tr></thead><tbody><tr>' +
         TB.map(k => '<td>' + inp('tab_' + k, tab[k]) + '</td>').join('') + '</tr></tbody></table></div>' +
         '<p class="acoes"><label class="filtro-inline">Margem mínima (%) ' + inp('margem_minima', P.margemMinima(cfg)) + '</label> <label class="filtro-inline"><input type="checkbox" name="trava"' + (cfg.pedido_trava_preco === false ? '' : ' checked') + '> bloquear o pedido abaixo dela</label></p>' +
