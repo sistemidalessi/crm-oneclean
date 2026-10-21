@@ -1655,8 +1655,9 @@ Configurações → Equipe.
   erros) e no banco por papel, numa transação desfeita: o motorista lê só a própria entrega (0 empresas, notas e títulos),
   não abre a rota do dia nem as candidatas, não altera direto, é recusado sem foto e com problema sem observação e consegue
   subir o canhoto; a vendedora não lê nem grava entrega nem canhoto; a gestora vê a rota e as candidatas; o anônimo nada.
-  **Falta o Anderson:** rodar no SQL Editor os `revoke` das seis funções novas (`crm_eh_motorista`, `crm_endereco_texto`,
-  `crm_rota_candidatas`, `crm_rota_dia`, `crm_minha_rota`, `crm_entrega_confirmar` — `from public, anon`), criar os usuários
+  `revoke` das seis funções novas (`crm_eh_motorista`, `crm_endereco_texto`, `crm_rota_candidatas`, `crm_rota_dia`,
+  `crm_minha_rota`, `crm_entrega_confirmar`) rodados pelo Anderson em 21/10 e conferidos (anônimo sem acesso, logado com
+  acesso). **Falta o Anderson:** criar os usuários
   Logística e Motorista, criar o modelo da entrega e esperar a Meta aprovar (pode reclassificar como marketing).
 - Modo local: `crm_entregas`/`crm_canhotos` no navegador e `crm_local_eu` (entrar como outro usuário da base) — para a
   demonstração e as telas dos manuais. Regras puras (`CRMRotas`) em `testes/rotas.test.js`.
