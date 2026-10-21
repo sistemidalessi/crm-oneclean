@@ -1676,7 +1676,7 @@ sempre, agora abertas a ela: `crm_estoque_contagem`, `crm_compra_lancar` (o cust
 diferença e custo médio), movimentos, contagem/ajuste e "Notas de compra para dar entrada" (sem valor, sem "Não é mercadoria",
 sem subir XML, sem Sefaz). Conferido no banco (transação desfeita): direto nas tabelas 0 linhas; pelas funções 1.713 produtos,
 itens e vínculos; contagem ok; vendedora bloqueada. Navegador: nenhuma chamada às leituras com custo e nenhum "R$" na tela.
-**Falta o Anderson:** os `revoke` das 7 funções novas (`schema.sql`, fim do arquivo).
+`revoke` das 7 funções novas rodados pelo Anderson e conferidos em 21/10 (anônimo sem acesso; só `authenticated`).
 
 ## NF-e emitida pelo CRM — Fase 4 da saída do FKN (16/10/2026, pedido do Anderson)
 
