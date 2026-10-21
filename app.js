@@ -836,10 +836,10 @@
   const LOGIN_DIA = 'login-dia';
   function marcaLoginDoDia() { gravaPref(LOGIN_DIA, R.hojeISO()); }
   function loginDeHoje() { return pref(LOGIN_DIA, '') === R.hojeISO(); }
-  async function pedeLoginDoDia() {
+  async function pedeLoginDoDia(aviso) {
     E.eu = null; E.marca = null;
     try { await sb.auth.signOut({ scope: 'local' }); } catch (e) { console.error(e); }
-    telaLogin(null, 'Novo dia: entre de novo para começar.');
+    telaLogin(null, aviso === undefined ? 'Novo dia: entre de novo para começar.' : aviso);
   }
   // aba que ficou aberta de um dia para o outro: pede o login quando a pessoa volta (sem cortar quem está digitando)
   let mexeuEm = Date.now();
@@ -958,7 +958,10 @@
     });
     const s = await sb.auth.getSession();
     if (recuperando && s.data && s.data.session) { telaNovaSenha(); return; }
-    if (s.data && s.data.session && !loginDeHoje()) { await pedeLoginDoDia(); return; }
+    // 21/10/2026 (pedido do Anderson): no app instalado (ícone na tela inicial), TODA abertura passa pelo login; recarregar
+    // a página (versão nova) não, porque a tela em uso continua no sessionStorage. No navegador vale a 1ª vez do dia.
+    const aberturaDoApp = jaInstalado() && !abaDaSessao();
+    if (s.data && s.data.session && (!loginDeHoje() || aberturaDoApp)) { await pedeLoginDoDia(loginDeHoje() ? null : undefined); return; }
     if (s.data && s.data.session) await entrar(s.data.session.user);
     else telaLogin();
   }

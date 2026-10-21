@@ -1546,7 +1546,12 @@ preços de custo as vendedoras não enxergam)".
   nos dois cadastros. Causa: "Neilor" é o contato que compra pelo Instituto TEA e pela Fisiomed ABA; no Agendor era um cadastro
   só, e a mescla de 01/10 juntou nele a "TEA CLINICA" e a "DFISIO MED PRIME" criadas pelas notas. Ficaram no TEA, à espera de
   decisão: os negócios "Neilor Fisiomed ABA" perdidos (263, 266, 2162, 2321) e o orçamento 22496 (ganho R$ 533,38, cuja NF 2699
-  já está na Fisio Med Prime).
+  já está na Fisio Med Prime). **Também passados, autorizados pelo Anderson no mesmo dia:** os 4 negócios e o orçamento 22496,
+  com 20 registros do histórico (mesmo backup).
+- **21/10 — app instalado pede o login a cada abertura** (pedido do Anderson: abriu o app no celular e entrou direto, porque já
+  tinha entrado pelo Chrome às 07:15 e o Android divide o login entre os dois): `jaInstalado() && !abaDaSessao()` em `iniciar`
+  (`app.js`) → saída local e tela de login, sem aviso de "Novo dia" quando já entrou hoje. Recarregar (versão nova) não pede,
+  porque a tela em uso fica no `sessionStorage`. No navegador continua a 1ª vez do dia.
 - **21/10 — fotos e fichas (pergunta do Anderson):** as pré-marcadas (459) têm foto confiável, **não** ficha completa: 203 com
   ficha técnica, 110 com FISPQ, 76 com as duas, 222 só a foto (não marcadas: 247 / 116 / 63 / 786). Agora cada sugestão tem
   selos (📄 Ficha técnica, ⚠ FISPQ, cinza "sem …"), filtro "Ficha técnica e FISPQ" (todas, as duas, com ficha, com FISPQ, só a
