@@ -487,7 +487,8 @@
   // o cliente vai receber duas vezes; para elas só tem que aparecer que está em atraso"): com o modelo do cliente aprovado na
   // Meta, a cobrança vai DIRETO ao cliente pelo número da empresa, sem tarefa nem mensagem para o(a) vendedor(a), que fica só
   // com o selo de título em atraso. Mandar às vendedoras continua como reserva (cliente sem celular no cadastro, por exemplo).
-  const paraClientes = () => pendentes().filter(b => b.arquivo && !b.cli_em);
+  // o que já foi mandado ao(à) vendedor(a) fica com ela (senão o cliente recebe duas vezes; Anderson, 21/10: "a partir do próximo")
+  const paraClientes = () => pendentes().filter(b => b.arquivo && !b.cli_em && !b.avisado_em);
   function porCliente(lista) {
     const g = new Map();
     lista.forEach(b => { if (b.empresa_id) { if (!g.has(b.empresa_id)) g.set(b.empresa_id, []); g.get(b.empresa_id).push(b); } });
