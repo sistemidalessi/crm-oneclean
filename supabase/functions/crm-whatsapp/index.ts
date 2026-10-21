@@ -24,7 +24,6 @@
 // usuário do sistema do portfólio OneClean); os IDs do número, da conta e do app também ficam lá (não são segredo).
 // Deploy: verify_jwt ligado (o padrão).
 import { createClient } from 'npm:@supabase/supabase-js@2.116.0';
-import { CANHOTO_EXEMPLO } from './exemplo-canhoto.ts';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -105,9 +104,14 @@ const CORPO_ENTREGA = 'Olá, {{1}}! Seu pedido acaba de ser entregue: {{2}}, rec
   'Muito obrigado pela confiança! Foi um prazer atender vocês. Qualquer coisa, é só falar com {{4}}: estamos sempre à disposição.';
 const BOTAO_FALAR_ENTREGA = 'Falar com quem me atende';
 const BOTAO_PROXIMO = 'Agendar próximo pedido';
-const b64 = (s: string) => Uint8Array.from(atob(s), ch => ch.charCodeAt(0));
+// foto de exemplo (canhoto fictício) que a Meta pede para aprovar o modelo: fica no site do CRM (assets/exemplo-canhoto.jpg);
+// outra instalação troca pelo segredo EXEMPLO_CANHOTO_URL
+const EXEMPLO_CANHOTO = Deno.env.get('EXEMPLO_CANHOTO_URL') || 'https://sistemidalessi.github.io/crm-oneclean/assets/exemplo-canhoto.jpg';
 async function exemploImagemHandle(token: string, appId: string) {
-  const img = b64(CANHOTO_EXEMPLO);
+  const r = await fetch(EXEMPLO_CANHOTO);
+  if (!r.ok || !/^image\/jpeg/.test(r.headers.get('content-type') || '')) throw new Error('não achei a foto de exemplo do canhoto (' + r.status + ')');
+  const img = new Uint8Array(await r.arrayBuffer());
+  if (img.length < 1000 || img.length > 5_000_000) throw new Error('a foto de exemplo do canhoto veio com tamanho estranho');
   const sessao = await graph(token, '/' + appId + '/uploads?file_name=canhoto.jpg&file_length=' + img.length + '&file_type=image/jpeg', { method: 'POST' });
   const up = await fetch(GRAPH + '/' + sessao.id, { method: 'POST', headers: { Authorization: 'OAuth ' + token, file_offset: '0' }, body: img });
   const uj = await up.json();
