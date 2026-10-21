@@ -220,7 +220,14 @@
     return out;
   }
 
-  const API = { catalogo, estado, filtra, linhas, cadastro, atalhos, pesquisa, fornecedoresDe, selosDe, vizinhos, embalagens, margemDe, noMinimo, paraBuscar, custoEstimado, specsTexto, specsDe, bate, confiavel, textoWhats, CUSTO_PADRAO };
+  // 21/10/2026 (Anderson: "como eu sei que a ficha foi ou não?"): o que a IA achou além da foto, para os selos e o filtro
+  // da conferência. qual: '' todas · 'completo' ficha e FISPQ · 'ficha' com ficha · 'fispq' com FISPQ · 'so-foto' sem as duas.
+  const docsDe = inf => ({ ficha: !!(inf && inf.ficha), fispq: !!(inf && inf.fispq) });
+  const filtraDocs = (l, qual) => (!qual ? l : l.filter(sg => {
+    const d = docsDe(sg.info);
+    return qual === 'completo' ? d.ficha && d.fispq : qual === 'ficha' ? d.ficha : qual === 'fispq' ? d.fispq : qual === 'so-foto' ? !d.ficha && !d.fispq : true;
+  }));
+  const API = { docsDe, filtraDocs, catalogo, estado, filtra, linhas, cadastro, atalhos, pesquisa, fornecedoresDe, selosDe, vizinhos, embalagens, margemDe, noMinimo, paraBuscar, custoEstimado, specsTexto, specsDe, bate, confiavel, textoWhats, CUSTO_PADRAO };
   raiz.CRMProdutos = API;
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
 })(typeof window !== 'undefined' ? window : globalThis);
@@ -242,7 +249,9 @@
   let lista = null, carregando = false, sugs = [], ia = null, lote = null, fornLista = [];
   let fotos = null; // Map(codigo → linha de crm_produto_fotos), carregado também sozinho (miniaturas no pedido e no estoque)
   const f = { busca: '', linha: '', soEstoque: true, ordem: 'vendidos', limite: 60 };
-  const fl = { ver: 'aprovar', busca: '', quantos: '5', marcados: new Set(), escolha: {} };
+  const fl = { ver: 'aprovar', busca: '', quantos: '5', marcados: new Set(), escolha: {}, docs: '' };
+  const MOSTRA = 120; // cartões por vez na conferência
+  let naTela = new Set(); // códigos dos cartões que estão na tela: "Aprovar as marcadas" só aprova o que se viu
 
   async function carrega() {
     if (carregando) return;
@@ -512,6 +521,9 @@
     const com = ativos.filter(x => x.foto).length, maisSem = ativos.filter(x => x.maisVendido && !x.foto).length, semFicha = ativos.filter(x => !x.info).length;
     const porSit = s => sugs.filter(x => x.situacao === s);
     const aprovar = porSit('sugerida').filter(x => prod(x.codigo));
+    const base = fl.ver === 'aprovar' ? aprovar : fl.ver === 'sem' ? porSit('sem').concat(porSit('recusada')) : porSit(fl.ver);
+    const filtrada = X.filtraDocs(base, fl.docs);
+    naTela = new Set(fl.ver === 'aprovar' ? filtrada.slice(0, MOSTRA).map(x => x.codigo) : []);
     const opc = [['5', 'Teste: os 5 mais vendidos sem foto'], ['20', 'Os 20 mais vendidos sem foto'], ['50', 'Os 50 mais vendidos sem foto'], ['200', 'Os 200 mais vendidos sem foto'], ['todos', 'Todos sem foto']];
     const n = X.paraBuscar(lista, sugs, fl.quantos === 'todos' ? null : Number(fl.quantos)).length, est = X.custoEstimado(n, sugs);
     const kpi = (t, v, cls) => '<div class="kpi ' + (cls || '') + '"><span>' + esc(t) + '</span><strong>' + v + '</strong></div>';
@@ -534,9 +546,13 @@
       '<section class="cartao"><div class="chips">' + [['aprovar', 'Para aprovar (' + aprovar.length + ')'], ['aprovada', 'Aprovadas (' + porSit('aprovada').length + ')'],
           ['sem', 'Sem foto achada (' + (porSit('sem').length + porSit('recusada').length) + ')'], ['erro', 'Com erro (' + porSit('erro').length + ')']]
           .map(c => '<button type="button" class="chip-filtro' + (fl.ver === c[0] ? ' ativo' : '') + '" data-acao="pf-ver" data-id="' + c[0] + '">' + esc(c[1]) + '</button>').join('') +
-        (fl.ver === 'aprovar' && aprovar.length ? '<span class="flex"></span><button type="button" class="btn verde" data-acao="pf-aprovar-marcadas"' + (fl.marcados.size ? '' : ' disabled') + '>Aprovar as marcadas (' + [...fl.marcados].filter(c => aprovar.some(a => a.codigo === c)).length + ')</button>' : '') + '</div>' +
-        listaSugestoes(fl.ver === 'aprovar' ? aprovar : fl.ver === 'sem' ? porSit('sem').concat(porSit('recusada')) : porSit(fl.ver)) + '</section>';
+        (fl.ver === 'aprovar' && marcadasNaTela() ? '<span class="flex"></span><button type="button" class="btn verde" data-acao="pf-aprovar-marcadas">Aprovar as marcadas (' + marcadasNaTela() + ')</button>' : '') + '</div>' +
+        (base.length ? '<div class="chips pf-docs"><span class="dica">Ficha técnica e FISPQ:</span>' + [['', 'Todas', base.length], ['completo', '📄 Ficha e ⚠ FISPQ', X.filtraDocs(base, 'completo').length],
+            ['ficha', 'Com ficha técnica', X.filtraDocs(base, 'ficha').length], ['fispq', 'Com FISPQ', X.filtraDocs(base, 'fispq').length], ['so-foto', 'Só a foto', X.filtraDocs(base, 'so-foto').length]]
+          .map(c => '<button type="button" class="chip-filtro' + (fl.docs === c[0] ? ' ativo' : '') + '" data-acao="pf-docs" data-id="' + c[0] + '">' + esc(c[1]) + ' (' + c[2] + ')</button>').join('') + '</div>' : '') +
+        listaSugestoes(filtrada) + '</section>';
   }
+  const marcadasNaTela = () => [...fl.marcados].filter(c => naTela.has(c)).length;
   function umLista() {
     if (!fl.busca.trim()) return '';
     const l = X.filtra(lista, { busca: fl.busca, ordem: 'vendidos' }).slice(0, 8);
@@ -545,22 +561,24 @@
   }
   function listaSugestoes(l) {
     if (!l.length) return '<p class="vazio">' + (fl.ver === 'aprovar' ? 'Nada para aprovar agora. Use a busca em lote ou a de um produto só.' : 'Nada aqui.') + '</p>';
-    return '<div class="pf-grade pf-sug">' + l.slice(0, 120).map(sg => {
+    return '<div class="pf-grade pf-sug">' + l.slice(0, MOSTRA).map(sg => {
       const x = prod(sg.codigo) || { codigo: sg.codigo, descricao: sg.codigo }, cs = sg.candidatos || [], esc_ = fl.escolha[sg.codigo] != null ? fl.escolha[sg.codigo] : 0;
       const c = cs[esc_], inf = sg.info || {};
       const marca = fl.ver === 'aprovar' ? '<input type="checkbox" data-pf-marca="' + esc(sg.codigo) + '"' + (fl.marcados.has(sg.codigo) ? ' checked' : '') + ' aria-label="Marcar para aprovar">' : '';
-      const ok = [inf.marca ? 'marca ' + inf.marca : '', (inf.especificacoes || []).length ? inf.especificacoes.length + ' especificação(ões)' : '', inf.descricao ? 'descrição' : '',
-        inf.ficha ? 'ficha técnica' + (inf.ficha.caminho ? '' : ' (link)') : '', inf.fispq ? 'FISPQ' + (inf.fispq.caminho ? '' : ' (link)') : ''].filter(Boolean);
+      const ok = [inf.marca ? 'marca ' + inf.marca : '', (inf.especificacoes || []).length ? inf.especificacoes.length + ' especificação(ões)' : '', inf.descricao ? 'descrição' : ''].filter(Boolean);
+      const d = X.docsDe(inf), link = a => (a && !a.caminho ? ' (link)' : '');
+      const selos = '<div class="pf-selos">' + (d.ficha ? '<span class="selo verde">📄 Ficha técnica' + link(inf.ficha) + '</span>' : '<span class="selo">sem ficha técnica</span>') +
+        (d.fispq ? '<span class="selo verde">⚠ FISPQ' + link(inf.fispq) + '</span>' : '<span class="selo">sem FISPQ</span>') + '</div>';
       return '<article class="pf-cartao pf-sug-cartao"><div class="pf-sug-topo">' + marca + '<div><strong>' + esc(nome(x)) + '</strong><small>' + esc(sg.codigo) +
           (c ? ' · ' + esc(X.bate(c, inf.eans) ? 'código de barras bate' : c.mesmo === 'sim' ? 'mesmo produto' : c.mesmo === 'parecido' ? 'parecido: confira' : 'confira o tamanho') : '') + '</small></div></div>' +
         (cs.length ? '<div class="pf-sug-fotos"><button type="button" class="pf-foto grande" data-acao="pf-revisar" data-id="' + esc(sg.codigo) + '"><img src="' + esc(st().fotoUrl(c ? c.caminho : cs[0].caminho)) + '" alt="" loading="lazy"></button>' +
           (cs.length > 1 ? '<div class="pf-sug-outras">' + cs.slice(0, 4).map((k, i) => '<button type="button" class="pf-foto' + (i === esc_ ? ' sel' : '') + '" data-acao="pf-cand" data-id="' + esc(sg.codigo + '|' + i) + '" aria-label="Usar a foto ' + (i + 1) + '"><img src="' + esc(st().fotoUrl(k.caminho)) + '" alt="" loading="lazy"></button>').join('') + '</div>' : '') + '</div>'
           : '<div class="pf-foto"><span class="pf-sem">' + (sg.situacao === 'erro' ? esc(sg.erro || 'erro') : 'nenhuma foto achada') + '</span></div>') +
         '<small>' + esc(c ? (c.site || c.tipo) + (c.largura ? ' · ' + c.largura + '×' + c.altura + ' px' : '') : '') + (ok.length ? (c ? ' · ' : '') + 'achou: ' + esc(ok.join(', ')) : '') + '</small>' +
-        (inf.obs ? '<small class="pf-obs">' + esc(inf.obs) + '</small>' : '') +
+        selos + (inf.obs ? '<small class="pf-obs">' + esc(inf.obs) + '</small>' : '') +
         '<div class="pf-botoes">' + (sg.situacao === 'sugerida' ? '<button type="button" class="btn sec" data-acao="pf-revisar" data-id="' + esc(sg.codigo) + '">Ver e corrigir</button><button type="button" class="btn sec" data-acao="pf-recusar" data-id="' + esc(sg.codigo) + '">Recusar</button>'
           : '<button type="button" class="btn sec" data-acao="pf-buscar-um" data-id="' + esc(sg.codigo) + '">Buscar de novo</button><button type="button" class="btn sec" data-acao="pf-ficha" data-id="' + esc(sg.codigo) + '">Ficha</button>') + '</div></article>';
-    }).join('') + '</div>' + (l.length > 120 ? '<p class="dica">Mostrando 120 de ' + l.length + '.</p>' : '');
+    }).join('') + '</div>' + (l.length > MOSTRA ? '<p class="dica">Mostrando ' + MOSTRA + ' de ' + l.length + '. "Aprovar as marcadas" aprova só as que estão na tela; depois aparecem as próximas.</p>' : '');
   }
   function depoisFotos(c) {
     const q = c.querySelector('[data-pf-quantos]');
@@ -693,11 +711,12 @@
     },
     'pf-lote-parar': () => { if (lote) { lote.parar = true; CRM.render(); } },
     'pf-ver': id => { fl.ver = id; CRM.render(); },
+    'pf-docs': id => { fl.docs = id || ''; CRM.render(); },
     'pf-cand': id => { const [cod, i] = id.split('|'); fl.escolha[cod] = Number(i); CRM.render(); },
     'pf-revisar': id => revisar(id),
     'pf-recusar': async id => { try { await st().sugestaoMarcar(id, 'recusada'); const s = sugs.find(x => x.codigo === id); if (s) s.situacao = 'recusada'; fl.marcados.delete(id); CRM.render(); } catch (e) { CRM.falhou(e); } },
     'pf-aprovar-marcadas': async () => {
-      const cods = [...fl.marcados].filter(c => sugs.some(s => s.codigo === c && s.situacao === 'sugerida'));
+      const cods = [...fl.marcados].filter(c => naTela.has(c) && sugs.some(s => s.codigo === c && s.situacao === 'sugerida'));
       if (!cods.length || !confirm('Aprovar ' + cods.length + ' produto(s) com a foto escolhida e a ficha que a IA achou?')) return;
       let ok = 0;
       for (const c of cods) { try { await aprovar(c); ok++; } catch (e) { CRM.toast(c + ': ' + (e.message || e), true); } }

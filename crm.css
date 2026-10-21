@@ -1079,6 +1079,8 @@ pre.of-previa { white-space: pre-wrap; font-family: inherit; font-size: .88rem; 
 .pf-sug-outras { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; align-content: start; }
 .pf-sug-outras .pf-foto.sel { outline: 2px solid var(--ouro); }
 .pf-sug-cartao > small { color: var(--suave); }
+.pf-selos { display: flex; flex-wrap: wrap; gap: 4px; }
+.pf-docs { margin-top: 8px; align-items: center; }
 .pf-obs { color: var(--ambar) !important; }
 .pf-escolha { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; margin-bottom: 12px; }
 .pf-opcao { border: 1px solid var(--borda); border-radius: 12px; padding: 8px; display: grid; gap: 4px; cursor: pointer; }

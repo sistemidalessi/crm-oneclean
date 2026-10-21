@@ -148,3 +148,16 @@ test('textoWhats: nome, marca, descrição, preço da tabela e da caixa, foto e 
     '*Detergente 500ml neutro ype*\nPara lavar louças.\nPreço: R$ 2,90 (FR) · caixa com 24: R$ 66,00\nFoto: https://f/foto.jpg\nFicha técnica: https://f/ft.pdf');
   assert.equal(X.textoWhats({ nome: 'Luva Sanro', preco: null, info: { marca: 'Sanro' } }, '', ''), '*Luva Sanro*');
 });
+
+test('docsDe e filtraDocs: selos e filtro de ficha técnica e FISPQ na conferência (21/10/2026)', () => {
+  const l = [{ codigo: 'a', info: { ficha: { caminho: 'x' }, fispq: { url: 'y' } } }, { codigo: 'b', info: { ficha: { url: 'z' } } },
+    { codigo: 'c', info: { fispq: { caminho: 'w' } } }, { codigo: 'd', info: { descricao: 'só texto' } }, { codigo: 'e', info: null }];
+  assert.deepEqual(X.docsDe(l[0].info), { ficha: true, fispq: true });
+  assert.deepEqual(X.docsDe(null), { ficha: false, fispq: false });
+  const cods = q => X.filtraDocs(l, q).map(x => x.codigo).join('');
+  assert.equal(cods(''), 'abcde');
+  assert.equal(cods('completo'), 'a');
+  assert.equal(cods('ficha'), 'ab');
+  assert.equal(cods('fispq'), 'ac');
+  assert.equal(cods('so-foto'), 'de');
+});
