@@ -1568,6 +1568,7 @@ preços de custo as vendedoras não enxergam)".
   "Ou mandar…" (reserva; `cob-para-vendedoras` cria as tarefas e abre a janela antiga). Envio por `mandaAoCliente` (o mesmo
   do botão de um cliente): marca `cli_*` e `cobrado_em`, registra no histórico e conclui a tarefa. Testado no navegador com
   o envio simulado. Boleto já mandado ao(à) vendedor(a) (`avisado_em`) não entra no envio direto (fica com ela; os 3 de 21/10 ficaram assim, decisão do Anderson).
+- **21/10 — iPhone:** a Isabela abriu o CRM no iPhone dela; o Anderson confirmou que está ok (nenhum ajuste foi preciso).
 - **21/10 — Andi no login do celular** ("cadê eu?"): abaixo de 760 px o corpo inteiro some e entra o rosto no círculo
   (`<anfitriao>-rosto.webp`, 88 px) com o balão ao lado, em cima do cartão; no computador nada mudou.
 - **21/10 — fotos e fichas (pergunta do Anderson):** as pré-marcadas (459) têm foto confiável, **não** ficha completa: 203 com
