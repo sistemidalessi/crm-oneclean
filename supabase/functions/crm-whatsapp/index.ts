@@ -219,7 +219,7 @@ Deno.serve(async (req) => {
       if (!n) return pula('nota não encontrada');
       const { data: e } = x.empresa_id ? await db.from('crm_empresas').select('id, nome, razao_social, cnpj, telefone, whatsapp, responsavel_id').eq('id', x.empresa_id).maybeSingle() : { data: null };
       if (!e) return pula('cliente sem cadastro no CRM');
-      // lista de quem não recebe (CNPJ ou raiz do CNPJ; ex.: a Uniserv) e a venda direta
+      // lista de quem não recebe (CNPJ ou raiz do CNPJ, ex.: um cliente atendido por contrato) e a venda direta
       const lista = String(dados.entrega_sem_agradecimento || '').match(/\d[\d.\/-]{6,}\d/g) || [];
       const doc = digitos(e.cnpj);
       if (doc && lista.some(t => { const d = digitos(t); return d === doc || (d.length >= 8 && doc.slice(0, 8) === d.slice(0, 8)); })) return pula('cliente da lista sem agradecimento');
