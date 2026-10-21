@@ -1557,6 +1557,9 @@ preços de custo as vendedoras não enxergam)".
   descrição, ficha técnica e FISPQ; quatro de cada vez; produto que já tem foto mantém a dele), "Aprovar só as marcadas" ficou
   como 2ª opção, e a **busca em lote aprova sozinha** o que a IA achar. PDF que falha ao copiar não derruba mais a aprovação
   (fica o link do site). Trocar depois: pelo produto (Ficha → foto, PDFs).
+- **21/10 — "Enviar a todas pelo WhatsApp da OneClean" não fazia nada:** `ligarEventos` passa o evento do clique como 3º
+  parâmetro e a ação `cob-meta` o tomava pela lista de boletos (`outra || paraAvisar()`), via `.length` vazio e saía calada.
+  Agora só aceita `Array.isArray(outra)`. Era a única ação com 3º parâmetro que não fosse o evento (conferido com grep).
 - **21/10 — Andi no login do celular** ("cadê eu?"): abaixo de 760 px o corpo inteiro some e entra o rosto no círculo
   (`<anfitriao>-rosto.webp`, 88 px) com o balão ao lado, em cima do cartão; no computador nada mudou.
 - **21/10 — fotos e fichas (pergunta do Anderson):** as pré-marcadas (459) têm foto confiável, **não** ficha completa: 203 com
