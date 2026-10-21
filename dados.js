@@ -1490,13 +1490,14 @@
   // Modo local: as entregas ficam no navegador (crm_entregas) e a foto como data: (crm_canhotos).
   const enderecoLocal = e => (e ? [[e.logradouro, e.numero].filter(Boolean).join(', '), e.complemento, e.bairro, [e.cidade, e.uf].filter(Boolean).join('/'), e.cep]
     .map(x => String(x || '').trim()).filter(Boolean).join(' · ') : '');
+  const vendedorRota = (n, u) => (/^direto$/i.test(String(n.vendedor_nome || '').trim()) ? 'Venda direta' : (u && u.nome) || n.vendedor_nome);
   Local.prototype.rotaLinhas = function () {
     const d = this.ler(), emp = new Map(d.empresas.map(e => [e.id, e])), nts = new Map((d.notas || []).map(n => [n.id, n])), us = new Map(d.usuarios.map(u => [u.user_id, u]));
     return lsLe('crm_entregas', []).map(x => {
       const n = nts.get(x.nota_id) || {}, e = emp.get(x.empresa_id || n.empresa_id), u = us.get(n.vendedor_id);
       const c = d.contatos.filter(k => e && k.empresa_id === e.id).sort((a, b) => (b.principal ? 1 : 0) - (a.principal ? 1 : 0))[0];
       return Object.assign({}, x, { numero: n.numero, cliente: (e && e.nome) || n.cliente_nome, endereco: enderecoLocal(e), bairro: e && e.bairro, cidade: (e && e.cidade) || n.cidade,
-        valor: n.valor_total, vendedor: (u && u.nome) || n.vendedor_nome, contato: c && c.nome,
+        valor: n.valor_total, vendedor: vendedorRota(n, u), contato: c && c.nome,
         telefone: (c && (c.celular || c.whatsapp || c.telefone)) || (e && (e.whatsapp || e.telefone)) || '' });
     });
   };
@@ -1506,7 +1507,7 @@
       .sort((a, b) => String(b.emitida_em).localeCompare(String(a.emitida_em))).map(n => {
         const e = emp.get(n.empresa_id), u = us.get(n.vendedor_id);
         return { nota_id: n.id, numero: n.numero, emitida_em: n.emitida_em, empresa_id: n.empresa_id || null, cliente: (e && e.nome) || n.cliente_nome, endereco: enderecoLocal(e),
-          bairro: e && e.bairro, cidade: (e && e.cidade) || n.cidade, valor: n.valor_total, vendedor: (u && u.nome) || n.vendedor_nome };
+          bairro: e && e.bairro, cidade: (e && e.cidade) || n.cidade, valor: n.valor_total, vendedor: vendedorRota(n, u) };
       });
   };
   Local.prototype.rotaDia = async function (dia) { return this.rotaLinhas().filter(x => x.dia === dia); };

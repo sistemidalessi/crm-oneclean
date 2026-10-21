@@ -1646,6 +1646,9 @@ Configurações → Equipe.
   (`textoProximo`); resposta em texto à mensagem da entrega vira tarefa + `textoRepasse`.
   Configurações → Integrações → **Agradecimento da entrega**: criar o modelo (`criar_modelo_entrega`), ligar/desligar e a
   lista de CNPJs.
+  A foto de exemplo que a Meta pede para aprovar o modelo é `assets/exemplo-canhoto.jpg` (canhoto fictício), buscada no site
+  pela função (segredo `EXEMPLO_CANHOTO_URL` troca o endereço). Antes ia embutida em base64 e a cópia na publicação corrompeu a
+  imagem (v16); v17 conferida por md5 com o arquivo local.
 - **Banco** (`crm_rotas_motorista`, `crm_rotas_venda_direta`, `crm_rotas_numero_inteiro`): `crm_entregas` (uma por nota,
   RLS: lê gestão/logística/o motorista da linha; grava e muda só gestão/logística; apaga só pendente), `crm_eh_motorista()`,
   `crm_endereco_texto(empresa)`, as quatro funções acima; papel `motorista` no check de `crm_usuarios`;
