@@ -1617,6 +1617,50 @@ preços de custo as vendedoras não enxergam)".
   custo. `revoke` de `public, anon` em `crm_pedido_saida`, `crm_pedidos_ler`, `crm_pedidos_situacoes` e `crm_produtos_eans` rodados
   pelo Anderson no SQL Editor e conferidos (anônimo sem acesso, logado com acesso).
 
+## Rotas de entrega e o celular do motorista (21/10/2026, simulação aprovada pelo Anderson)
+Simulação: https://claude.ai/artifact/EBJG8G9kkZUY9i9W8p2ZmQ. Decisões dele ao aprovar: o mapa abre no **Waze ou no Google
+Maps** (dois botões); **sem** "Avaliar a entrega" (quem recebe não é quem compra) — no lugar, **"Agendar próximo pedido"**;
+**sem volumes** no painel da logística por enquanto (o cesto às vezes não comporta tudo); **sem PDF de rota** (o app
+substitui o papel); **crio só os níveis de acesso** (Logística e Motorista) — os usuários o Anderson cria em
+Configurações → Equipe.
+- **Logística (aba `rotas`, grupo "Logística"; também gestora e administrador):** escolhe o dia, marca as notas emitidas
+  nos últimos 10 dias ainda sem entrega (`crm_rota_candidatas`), escolhe o motorista e "Pôr na rota" (entra na ordem por
+  cidade/bairro/endereço); ↑↓ e "Ordenar por bairro" acertam a ordem; troca de motorista por linha; "tirar" devolve a nota
+  à lista (só pendente). **"Mandar a rota aos motoristas"** libera (`liberada`): só então aparece no celular. A tela se
+  atualiza sozinha a cada minuto: situação, hora, observação, **ver canhoto** (link assinado de 10 min) e o selo do
+  agradecimento (aguardando, enviado/entregue/lido, "quer agendar o próximo pedido", não chegou, sem agradecimento + motivo).
+  Venda direta aparece como "Venda direta" (não com o nome do administrador).
+- **Motorista (papel novo `motorista`; vê só a aba `rota`, "Minha rota", feita para o celular):** progresso do dia, cartões
+  das paradas na ordem com a **próxima** destacada, Waze, Google Maps, Ligar (contato principal do cliente) e "Cheguei:
+  confirmar a entrega" → **foto do canhoto obrigatória** (câmera do celular; vai reduzida a 1600 px JPEG para o bucket
+  privado `crm-canhotos`, caminho `canhotos/<dia>/<id>-<ts>.jpg`), "Tudo certo" ou "Teve problema" (observação
+  obrigatória) e "Confirmar a entrega" (`crm_entrega_confirmar`, que recusa sem foto e problema sem observação).
+- **Agradecimento ao cliente:** confirmada a entrega, o app chama `crm-whatsapp` `{acao:'entrega'}`: com o modelo
+  **`entrega_cliente`** aprovado (cabeçalho com a foto do canhoto; "Olá, {{1}}! Seu pedido acaba de ser entregue: {{2}},
+  recebido {{3}}…" com o nome do(a) vendedor(a); botões "Falar com quem me atende" → `crm-pdf?e=<id>` abre o WhatsApp
+  do(a) vendedor(a), e "Agendar próximo pedido"). **Não manda:** venda direta (DIRETO ou vendedor admin), clientes da lista
+  `crm_config.dados.entrega_sem_agradecimento` (CNPJ ou raiz de 8 números — a **Uniserv** 03.641.257/0001-10 já está),
+  `agradecer_entrega = false`, sem celular, modelo não aprovado. O motivo fica em `cli_status = 'não manda'` + `cli_erro`.
+  O retorno (`crm-whatsapp-retorno`) grava entregue/lido em `crm_entregas.cli_status`; "Agendar próximo pedido"
+  (payload `proximo:<id>`) grava `cli_proximo_em`, cria tarefa para o(a) vendedor(a) da nota e responde ao cliente
+  (`textoProximo`); resposta em texto à mensagem da entrega vira tarefa + `textoRepasse`.
+  Configurações → Integrações → **Agradecimento da entrega**: criar o modelo (`criar_modelo_entrega`), ligar/desligar e a
+  lista de CNPJs.
+- **Banco** (`crm_rotas_motorista`, `crm_rotas_venda_direta`, `crm_rotas_numero_inteiro`): `crm_entregas` (uma por nota,
+  RLS: lê gestão/logística/o motorista da linha; grava e muda só gestão/logística; apaga só pendente), `crm_eh_motorista()`,
+  `crm_endereco_texto(empresa)`, as quatro funções acima; papel `motorista` no check de `crm_usuarios`;
+  `crm_proximo_vendedor` pula comprador/logística/motorista. `crm-usuarios` aceita `logistica` (antes não dava para criar!)
+  e `motorista`, sem receber leads. `crm_notas.numero` é bigint: as funções devolvem `numero::integer`.
+- **Conferido em 21/10:** no navegador (modo local, logística → motorista no celular → logística vendo o canhoto; sem
+  erros) e no banco por papel, numa transação desfeita: o motorista lê só a própria entrega (0 empresas, notas e títulos),
+  não abre a rota do dia nem as candidatas, não altera direto, é recusado sem foto e com problema sem observação e consegue
+  subir o canhoto; a vendedora não lê nem grava entrega nem canhoto; a gestora vê a rota e as candidatas; o anônimo nada.
+  **Falta o Anderson:** rodar no SQL Editor os `revoke` das seis funções novas (`crm_eh_motorista`, `crm_endereco_texto`,
+  `crm_rota_candidatas`, `crm_rota_dia`, `crm_minha_rota`, `crm_entrega_confirmar` — `from public, anon`), criar os usuários
+  Logística e Motorista, criar o modelo da entrega e esperar a Meta aprovar (pode reclassificar como marketing).
+- Modo local: `crm_entregas`/`crm_canhotos` no navegador e `crm_local_eu` (entrar como outro usuário da base) — para a
+  demonstração e as telas dos manuais. Regras puras (`CRMRotas`) em `testes/rotas.test.js`.
+
 ## NF-e emitida pelo CRM — Fase 4 da saída do FKN (16/10/2026, pedido do Anderson)
 
 **Caminho:** navegador → Edge Function `crm-fiscal` (login de quem clicou; emite: admin, gestora e logística; cancela:

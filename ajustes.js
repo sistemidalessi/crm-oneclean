@@ -952,12 +952,25 @@
       '<p>Modelo "boleto_cliente" (PDF anexo, em nome do(a) vendedor(a), aviso cordial do cartório, botões "Falar comigo" e "Já paguei"): ' +
       (ms ? CRM.selo(ms[0], ms[1]) + (m.category && m.category !== 'UTILITY' ? ' ' + CRM.selo('a Meta mudou para ' + m.category, 'ambar') : '') + (m.rejected_reason && m.rejected_reason !== 'NONE' ? ' <small>' + esc(m.rejected_reason) + '</small>' : '') : CRM.selo('ainda não criado', 'ambar')) +
       (!m || m.status === 'REJECTED' ? ' <button type="button" class="btn sec" data-acao="wa-criar-modelo-cliente">Criar o modelo do cliente</button>' : '') + '</p>' +
+      waEntrega(w) +
       '<h3>Retorno da Meta (entregue, lido, "Já paguei", respostas)</h3>' +
       '<p>Segredos ' + (r.segredos ? CRM.selo('guardados', 'verde') : CRM.selo('faltam WHATSAPP_APP_SECRET e WHATSAPP_VERIFY_TOKEN nos segredos do Supabase', 'ambar')) +
       ' · conta ligada ao app ' + (r.assinado ? CRM.selo('sim', 'verde') : r.assinado === false ? CRM.selo('não', 'ambar') + ' <button type="button" class="btn sec" data-acao="wa-assinar-retorno">Ligar o retorno</button>' : CRM.selo('não consegui ver', 'cinza')) + '</p>' +
       '<p>Endereço de retorno (no app da Meta → WhatsApp → Configuração → Webhook, campo "messages"): <code>' + esc(r.endereco || '') + '</code></p>' +
       (msgs.length ? '<details><summary>Últimas mensagens recebidas (' + msgs.length + ')</summary><ul>' + msgs.map(x => '<li>' + esc(R.dataHoraBR(x.criado_em)) + ' · ' + esc(x.de || '') + ' · ' + esc(x.texto || x.payload || '') + '</li>').join('') + '</ul></details>' : '') +
       '<p class="dica">O passo a passo está em sistemi-dalessi/docs/meta-whatsapp-passo-a-passo.md (parte "Retorno"). Os segredos vão só no Supabase, nunca no chat.</p>';
+  }
+  // 21/10/2026: agradecimento da entrega ao cliente (modelo entrega_cliente: foto do canhoto, "Falar com quem me atende" e
+  // "Agendar próximo pedido"); não vai à venda direta nem a quem está na lista (CNPJ ou raiz do CNPJ).
+  function waEntrega(w) {
+    const m = w.modelo_entrega, ms = m ? (STATUS_META[m.status] || [m.status, 'cinza']) : null, d = (CRM.estado.D.config[0] || {}).dados || {};
+    const lista = (String(d.entrega_sem_agradecimento || '').match(/\d[\d.\/-]{6,}\d/g) || []).length;
+    return '<h3>Agradecimento da entrega</h3>' +
+      '<p>Modelo "entrega_cliente" (foto do canhoto, agradecimento em nome do(a) vendedor(a), botões "Falar com quem me atende" e "Agendar próximo pedido"): ' +
+      (ms ? CRM.selo(ms[0], ms[1]) + (m.category && m.category !== 'UTILITY' ? ' ' + CRM.selo('a Meta mudou para ' + m.category, 'ambar') : '') + (m.rejected_reason && m.rejected_reason !== 'NONE' ? ' <small>' + esc(m.rejected_reason) + '</small>' : '') : CRM.selo('ainda não criado', 'ambar')) +
+      (!m || m.status === 'REJECTED' ? ' <button type="button" class="btn sec" data-acao="wa-criar-modelo-entrega">Criar o modelo da entrega</button>' : '') + '</p>' +
+      '<p>Envio: ' + (d.agradecer_entrega === false ? CRM.selo('desligado', 'cinza') : CRM.selo('ligado', 'verde')) + ' · fora do agradecimento: venda direta e ' + lista + ' CNPJ(s) da lista ' +
+      '<button type="button" class="mini" data-acao="wa-entrega-ajustar">ajustar</button></p>';
   }
   const AGILITE_ESPELHO = 'https://sistema.agiliteservice.com.br/api/caixa/espelho';
   function espelhoAgilite(url, quando) {
@@ -1148,6 +1161,20 @@
     },
     'wa-criar-modelo-cliente': async () => {
       try { await CRM.store().whatsapp({ acao: 'criar_modelo_cliente' }); CRM.toast('Modelo do cliente enviado para a Meta aprovar (de minutos a 1 dia).'); integ = null; CRM.render(); } catch (e) { CRM.falhou(e); }
+    },
+    'wa-criar-modelo-entrega': async () => {
+      try { await CRM.store().whatsapp({ acao: 'criar_modelo_entrega' }); CRM.toast('Modelo da entrega enviado para a Meta aprovar (de minutos a 1 dia).'); integ = null; CRM.render(); } catch (e) { CRM.falhou(e); }
+    },
+    'wa-entrega-ajustar': () => {
+      const d = (CRM.estado.D.config[0] || {}).dados || {};
+      CRM.abrirForm({
+        titulo: 'Agradecimento da entrega',
+        intro: 'Quando o motorista confirma a entrega, o cliente recebe a foto do canhoto e um agradecimento pelo WhatsApp da empresa. A venda direta nunca recebe.',
+        campos: [{ nome: 'ligado', rotulo: 'Mandar o agradecimento aos clientes', tipo: 'checkbox', largo: true },
+          { nome: 'lista', rotulo: 'Clientes que não recebem (um CNPJ por linha; 8 primeiros números = todas as filiais)', tipo: 'textarea', largo: true }],
+        valores: { ligado: d.agradecer_entrega !== false, lista: d.entrega_sem_agradecimento || '' },
+        aoSalvar: async v => { await CRM.salvarConfig({ agradecer_entrega: !!v.ligado, entrega_sem_agradecimento: v.lista || '' }); CRM.toast('Agradecimento da entrega ajustado.'); }
+      });
     },
     'wa-assinar-retorno': async () => {
       try { await CRM.store().whatsapp({ acao: 'assinar_retorno' }); CRM.toast('Conta do WhatsApp ligada ao app: o retorno da Meta passa a chegar.'); integ = null; CRM.render(); } catch (e) { CRM.falhou(e); }

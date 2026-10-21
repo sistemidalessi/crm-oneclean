@@ -27,7 +27,7 @@ create table if not exists public.crm_usuarios (
   user_id      uuid primary key references auth.users(id) on delete cascade,
   nome         text not null check (length(btrim(nome)) > 0),
   email        text,
-  papel        text not null default 'vendedor' check (papel in ('admin','gestor','vendedor','comprador','logistica')),
+  papel        text not null default 'vendedor' check (papel in ('admin','gestor','vendedor','comprador','logistica','motorista')),
   equipe       text,
   ativo        boolean not null default true,
   recebe_leads boolean not null default true,
@@ -65,7 +65,7 @@ returns boolean language sql stable security definer set search_path = public as
 $$;
 -- Instalação antiga: a trava de papel nasceu sem o comprador (e sem a logística, Fase 3 de 16/10/2026).
 alter table public.crm_usuarios drop constraint if exists crm_usuarios_papel_check;
-alter table public.crm_usuarios add constraint crm_usuarios_papel_check check (papel in ('admin','gestor','vendedor','comprador','logistica'));
+alter table public.crm_usuarios add constraint crm_usuarios_papel_check check (papel in ('admin','gestor','vendedor','comprador','logistica','motorista'));
 
 create or replace function public.crm_toca_atualizado_em()
 returns trigger language plpgsql set search_path = public as $$
@@ -562,7 +562,7 @@ create or replace function public.crm_proximo_vendedor()
 returns uuid language sql stable security definer set search_path = public as $$
   select u.user_id
     from public.crm_usuarios u
-   where public.crm_eh_membro() and u.ativo and u.recebe_leads and u.papel not in ('comprador', 'logistica')
+   where public.crm_eh_membro() and u.ativo and u.recebe_leads and u.papel not in ('comprador', 'logistica', 'motorista')
    order by (select count(*) from public.crm_empresas e
               where e.responsavel_id = u.user_id and e.criado_em > now() - interval '30 days'),
             u.nome
@@ -3738,3 +3738,148 @@ begin
 end $$;
 revoke all on function public.crm_minha_tela_inicial(text) from public, anon;
 grant execute on function public.crm_minha_tela_inicial(text) to authenticated;
+
+-- ============================================================ rotas de entrega e motorista (21/10/2026)
+-- Pedido do Anderson: a logística monta a rota do dia pelas notas emitidas e o motorista (papel novo) vê só a rota dele no
+-- celular: confirma cada entrega com a FOTO DO CANHOTO (obrigatória), "tudo certo" ou "teve problema" (com observação), e o
+-- cliente recebe o agradecimento pelo WhatsApp da empresa (menos os da lista e a venda direta). Sem PDF de rota.
+alter table public.crm_usuarios drop constraint if exists crm_usuarios_papel_check;
+alter table public.crm_usuarios add constraint crm_usuarios_papel_check check (papel in ('admin','gestor','vendedor','comprador','logistica','motorista'));
+create or replace function public.crm_eh_motorista()
+returns boolean language sql stable security definer set search_path = public as $$
+  select coalesce(public.crm_papel() = 'motorista', false);
+$$;
+revoke all on function public.crm_eh_motorista() from public, anon;
+grant execute on function public.crm_eh_motorista() to authenticated;
+
+create table if not exists public.crm_entregas (
+  id            uuid primary key default gen_random_uuid(),
+  dia           date not null,
+  nota_id       uuid not null unique references public.crm_notas(id) on delete cascade,
+  empresa_id    uuid references public.crm_empresas(id) on delete set null,
+  motorista_id  uuid references public.crm_usuarios(user_id) on delete set null,
+  ordem         integer not null default 0,
+  liberada      boolean not null default false,   -- "Mandar a rota aos motoristas": só então aparece no celular
+  situacao      text not null default 'pendente' check (situacao in ('pendente','entregue','problema')),
+  obs           text,
+  canhoto       text,                             -- caminho no bucket crm-canhotos
+  entregue_em   timestamptz,
+  entregue_por  uuid,
+  cli_msg       text, cli_status text, cli_em timestamptz, cli_erro text, cli_tel text,
+  cli_proximo_em timestamptz,                     -- o cliente tocou em "Agendar próximo pedido"
+  criado_em     timestamptz not null default now(),
+  atualizado_em timestamptz not null default now(),
+  criado_por    uuid default auth.uid()
+);
+create index if not exists crm_entregas_dia on public.crm_entregas (dia, motorista_id, ordem);
+create index if not exists crm_entregas_msg on public.crm_entregas (cli_msg) where cli_msg is not null;
+drop trigger if exists crm_entregas_atualizado_em on public.crm_entregas;
+create trigger crm_entregas_atualizado_em before update on public.crm_entregas for each row execute function public.crm_toca_atualizado_em();
+alter table public.crm_entregas enable row level security;
+drop policy if exists ler on public.crm_entregas;
+create policy ler on public.crm_entregas for select to authenticated
+  using ((select public.crm_eh_gestor()) or (select public.crm_eh_logistica()) or motorista_id = (select auth.uid()));
+drop policy if exists grava on public.crm_entregas;
+create policy grava on public.crm_entregas for insert to authenticated with check ((select public.crm_eh_gestor()) or (select public.crm_eh_logistica()));
+drop policy if exists muda on public.crm_entregas;
+create policy muda on public.crm_entregas for update to authenticated
+  using ((select public.crm_eh_gestor()) or (select public.crm_eh_logistica())) with check ((select public.crm_eh_gestor()) or (select public.crm_eh_logistica()));
+drop policy if exists tira on public.crm_entregas;
+create policy tira on public.crm_entregas for delete to authenticated using (((select public.crm_eh_gestor()) or (select public.crm_eh_logistica())) and situacao = 'pendente');
+
+-- fotos dos canhotos: bucket privado; quem entrega sobe, a equipe da logística e a gestão leem
+insert into storage.buckets (id, name, public) values ('crm-canhotos', 'crm-canhotos', false) on conflict (id) do nothing;
+drop policy if exists "crm canhotos le" on storage.objects;
+create policy "crm canhotos le" on storage.objects for select to authenticated
+  using (bucket_id = 'crm-canhotos' and ((select public.crm_eh_gestor()) or (select public.crm_eh_logistica()) or (select public.crm_eh_motorista())));
+drop policy if exists "crm canhotos grava" on storage.objects;
+create policy "crm canhotos grava" on storage.objects for insert to authenticated
+  with check (bucket_id = 'crm-canhotos' and ((select public.crm_eh_gestor()) or (select public.crm_eh_logistica()) or (select public.crm_eh_motorista())));
+
+-- endereço de uma linha da empresa, numa linha só (para a rota e para os mapas)
+create or replace function public.crm_endereco_texto(e public.crm_empresas) returns text language sql immutable as $$
+  select nullif(concat_ws(' · ', nullif(concat_ws(', ', nullif(btrim(coalesce(e.logradouro, '')), ''), nullif(btrim(coalesce(e.numero, '')), '')), ''),
+    nullif(btrim(coalesce(e.complemento, '')), ''), nullif(btrim(coalesce(e.bairro, '')), ''),
+    nullif(concat_ws('/', nullif(btrim(coalesce(e.cidade, '')), ''), nullif(btrim(coalesce(e.uf, '')), '')), ''),
+    nullif(btrim(coalesce(e.cep, '')), '')), '');
+$$;
+
+-- notas de venda ainda sem entrega (dos últimos dias), para a logística pôr na rota
+create or replace function public.crm_rota_candidatas(p_desde date)
+returns table (nota_id uuid, numero integer, emitida_em timestamptz, empresa_id uuid, cliente text, endereco text, bairro text, cidade text,
+  valor numeric, vendedor text)
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if not (public.crm_eh_gestor() or public.crm_eh_logistica()) then raise exception 'só a logística'; end if;
+  return query
+    select n.id, n.numero::integer, n.emitida_em, n.empresa_id, coalesce(e.nome, n.cliente_nome), public.crm_endereco_texto(e), e.bairro, coalesce(e.cidade, n.cidade),
+      n.valor_total, case when upper(n.vendedor_nome) = 'DIRETO' then 'Venda direta' else coalesce(u.nome, n.vendedor_nome) end
+      from public.crm_notas n
+      left join public.crm_empresas e on e.id = n.empresa_id
+      left join public.crm_usuarios u on u.user_id = n.vendedor_id
+     where not n.cancelada and n.emitida_em >= p_desde::timestamptz
+       and not exists (select 1 from public.crm_entregas x where x.nota_id = n.id)
+     order by n.emitida_em desc
+     limit 300;
+end $$;
+
+-- a rota de um dia, com tudo o que a tela da logística mostra
+create or replace function public.crm_rota_dia(p_dia date)
+returns table (id uuid, nota_id uuid, numero integer, empresa_id uuid, cliente text, endereco text, bairro text, cidade text, valor numeric, vendedor text,
+  motorista_id uuid, ordem integer, liberada boolean, situacao text, obs text, canhoto text, entregue_em timestamptz, cli_status text, cli_erro text, cli_em timestamptz, cli_proximo_em timestamptz)
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if not (public.crm_eh_gestor() or public.crm_eh_logistica()) then raise exception 'só a logística'; end if;
+  return query
+    select x.id, x.nota_id, n.numero::integer, x.empresa_id, coalesce(e.nome, n.cliente_nome), public.crm_endereco_texto(e), e.bairro, coalesce(e.cidade, n.cidade), n.valor_total,
+      case when upper(n.vendedor_nome) = 'DIRETO' then 'Venda direta' else coalesce(u.nome, n.vendedor_nome) end, x.motorista_id, x.ordem, x.liberada, x.situacao, x.obs, x.canhoto, x.entregue_em, x.cli_status, x.cli_erro, x.cli_em, x.cli_proximo_em
+      from public.crm_entregas x
+      join public.crm_notas n on n.id = x.nota_id
+      left join public.crm_empresas e on e.id = x.empresa_id
+      left join public.crm_usuarios u on u.user_id = n.vendedor_id
+     where x.dia = p_dia
+     order by x.motorista_id nulls last, x.ordem, n.numero;
+end $$;
+
+-- o celular do motorista: só as entregas liberadas dele, com o endereço e um telefone para ligar
+create or replace function public.crm_minha_rota(p_dia date)
+returns table (id uuid, numero integer, cliente text, endereco text, telefone text, contato text, ordem integer, situacao text, obs text, entregue_em timestamptz, canhoto text)
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if not public.crm_eh_ativo() then raise exception 'sem acesso'; end if;
+  return query
+    select x.id, n.numero::integer, coalesce(e.nome, n.cliente_nome), public.crm_endereco_texto(e),
+      coalesce(nullif(c.celular, ''), nullif(c.whatsapp, ''), nullif(c.telefone, ''), nullif(e.whatsapp, ''), nullif(e.telefone, '')), c.nome,
+      x.ordem, x.situacao, x.obs, x.entregue_em, x.canhoto
+      from public.crm_entregas x
+      join public.crm_notas n on n.id = x.nota_id
+      left join public.crm_empresas e on e.id = x.empresa_id
+      left join lateral (select ct.nome, ct.celular, ct.whatsapp, ct.telefone from public.crm_contatos ct where ct.empresa_id = x.empresa_id
+        order by ct.principal desc, ct.criado_em limit 1) c on true
+     where x.dia = p_dia and x.liberada and x.motorista_id = auth.uid()
+     order by x.ordem, n.numero;
+end $$;
+
+-- o motorista confirma a entrega dele: foto do canhoto obrigatória; "teve problema" pede a observação
+create or replace function public.crm_entrega_confirmar(p_id uuid, p_situacao text, p_obs text, p_canhoto text)
+returns public.crm_entregas language plpgsql security definer set search_path = public as $$
+declare r public.crm_entregas;
+begin
+  select * into r from public.crm_entregas where id = p_id;
+  if not found then raise exception 'entrega não encontrada'; end if;
+  if not (r.motorista_id = auth.uid() or public.crm_eh_gestor() or public.crm_eh_logistica()) then raise exception 'esta entrega não é sua'; end if;
+  if p_situacao not in ('entregue', 'problema') then raise exception 'situação inválida'; end if;
+  if coalesce(btrim(p_canhoto), '') = '' or p_canhoto not like 'canhotos/%' then raise exception 'falta a foto do canhoto'; end if;
+  if p_situacao = 'problema' and coalesce(btrim(p_obs), '') = '' then raise exception 'conte o que aconteceu na observação'; end if;
+  update public.crm_entregas set situacao = p_situacao, obs = nullif(btrim(coalesce(p_obs, '')), ''), canhoto = p_canhoto,
+    entregue_em = coalesce(entregue_em, now()), entregue_por = auth.uid()
+   where id = p_id returning * into r;
+  return r;
+end $$;
+revoke all on function public.crm_endereco_texto(public.crm_empresas) from public, anon;
+revoke all on function public.crm_rota_candidatas(date) from public, anon;
+revoke all on function public.crm_rota_dia(date) from public, anon;
+revoke all on function public.crm_minha_rota(date) from public, anon;
+revoke all on function public.crm_entrega_confirmar(uuid, text, text, text) from public, anon;
+grant execute on function public.crm_rota_candidatas(date), public.crm_rota_dia(date), public.crm_minha_rota(date), public.crm_entrega_confirmar(uuid, text, text, text) to authenticated;
+grant execute on function public.crm_endereco_texto(public.crm_empresas) to authenticated;

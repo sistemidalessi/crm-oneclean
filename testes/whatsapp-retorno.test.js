@@ -57,3 +57,11 @@ test('respostas automáticas cordiais', () => {
   assert.strictEqual(L.textoPagou('Maria', 'Renata'), 'Obrigado pelo aviso, Maria! O financeiro vai conferir o pagamento no banco e, se precisar de algo, Renata fala com você. Tenha um ótimo dia!');
   assert.match(L.textoRepasse('Renata', '5511987654321'), /Repassei para Renata.*https:\/\/wa\.me\/5511987654321/);
 });
+
+test('agradecimento da entrega: botão "Agendar próximo pedido"', () => {
+  assert.strictEqual(L.entregaDoPayload('proximo:0b1c2d3e-0000-4000-8000-000000000001'), '0b1c2d3e-0000-4000-8000-000000000001');
+  assert.strictEqual(L.entregaDoPayload('pagou:0b1c2d3e-0000-4000-8000-000000000001'), '');
+  assert.strictEqual(L.entregaDoPayload('proximo:abc'), '');
+  assert.strictEqual(L.textoProximo('Padaria Pão Quente', 'Renata'), 'Que ótimo, Padaria Pão Quente! Renata vai falar com você para combinarmos o próximo pedido. Obrigado pela preferência!');
+  assert.match(L.textoProximo('', ''), /^Que ótimo! Quem te atende vai falar/);
+});

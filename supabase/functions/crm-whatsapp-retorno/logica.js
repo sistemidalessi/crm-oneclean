@@ -71,3 +71,10 @@ export function textoRepasse(vendedora, telVendedora) {
   return 'Obrigado pela mensagem! Repassei para ' + (vendedora || 'quem te atende') + ', que vai te responder pelo WhatsApp.' +
     (telVendedora ? ' Se preferir, fale direto: https://wa.me/' + telVendedora : '');
 }
+
+// agradecimento da entrega (21/10/2026): o botão "Agendar próximo pedido" (payload proximo:<id da entrega>)
+export const entregaDoPayload = p => { const m = /^proximo:([0-9a-f-]{36})$/.exec(String(p || '')); return m ? m[1] : ''; };
+export function textoProximo(nomeCliente, vendedora) {
+  return 'Que ótimo' + (nomeCliente ? ', ' + nomeCliente : '') + '! ' + (vendedora || 'Quem te atende') +
+    ' vai falar com você para combinarmos o próximo pedido. Obrigado pela preferência!';
+}

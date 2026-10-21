@@ -9,7 +9,14 @@
 //                                               sobe para a Meta antes (desde 20/10) e vai anexo; também serve para reenviar
 //   POST { acao: 'criar_modelo_cliente' }     → cria o modelo "boleto_cliente" (PDF, botões "Falar comigo" e "Já paguei")
 //   POST { acao: 'assinar_retorno' }          → liga a conta da Meta ao app, para o retorno (crm-whatsapp-retorno) chegar
-//   POST { acao: 'pronto' }                   → { cliente } (qualquer pessoa da equipe: o envio ao cliente está liberado?)
+//   POST { acao: 'pronto' }                   → { cliente, entrega } (qualquer pessoa da equipe: os envios ao cliente estão liberados?)
+//   POST { acao: 'criar_modelo_entrega' }     → cria o modelo "entrega_cliente" (foto do canhoto, "Falar com quem me atende" e
+//                                               "Agendar próximo pedido") — 21/10/2026, rotas de entrega
+//   POST { acao: 'entrega', entrega }         → 21/10/2026, pedido do Anderson: quando o motorista confirma a entrega, o cliente
+//                                               recebe pelo número da empresa a foto do canhoto e o agradecimento, em nome do(a)
+//                                               vendedor(a) da nota. Não vai à venda direta, aos clientes da lista
+//                                               (crm_config.dados.entrega_sem_agradecimento) nem sem celular no cadastro.
+//                                               O motorista da entrega, a logística, a gestora ou o admin.
 //   POST { acao: 'cliente', boletos, telefone } → 20/10/2026, pedido do Anderson: o boleto vai ao CLIENTE pelo número da
 //                                               OneClean, com o PDF anexo, em nome do(a) vendedor(a) da carteira, com o aviso
 //                                               cordial do prazo do cartório. Vendedor(a) da carteira, gestor(a) ou admin.
@@ -17,6 +24,7 @@
 // usuário do sistema do portfólio OneClean); os IDs do número, da conta e do app também ficam lá (não são segredo).
 // Deploy: verify_jwt ligado (o padrão).
 import { createClient } from 'npm:@supabase/supabase-js@2.116.0';
+import { CANHOTO_EXEMPLO } from './exemplo-canhoto.ts';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -27,6 +35,8 @@ const resposta = (status: number, corpo: unknown) => new Response(JSON.stringify
 const GRAPH = 'https://graph.facebook.com/v25.0';
 const MODELO = 'boleto_vendedora';
 const MODELO_CLIENTE = 'boleto_cliente';
+const MODELO_ENTREGA = 'entrega_cliente';
+const BUCKET_CANHOTOS = 'crm-canhotos';
 const EMPRESA = Deno.env.get('CRM_EMPRESA_NOME') ?? 'OneClean';
 const PRAZO_PADRAO = 5; // dias úteis até o cartório, se a instalação não disser outro (crm_config.dados.cobranca_prazo_cartorio)
 const BUCKET = 'crm-boletos';
@@ -88,6 +98,32 @@ const CORPO_CLIENTE = 'Olá, {{1}}! Aqui é {{2}}, da ' + EMPRESA + '.\n\n' +
   'Se já tiver pago, por favor desconsidere e toque em "Já paguei". Qualquer dúvida, fale comigo pelo botão abaixo. Agradecemos a parceria!';
 const BOTAO_FALAR = 'Falar comigo'; // serve a qualquer pessoa da equipe (casa com o "fale comigo pelo botão abaixo")
 const BOTAO_PAGUEI = 'Já paguei';
+
+// agradecimento da entrega (pt_BR, utilidade). {{1}} cliente · {{2}} nota · {{3}} hora e dia da entrega · {{4}} vendedor(a).
+// Texto da simulação aprovada pelo Anderson em 21/10/2026 (sem "Avaliar": quem recebe não é quem compra).
+const CORPO_ENTREGA = 'Olá, {{1}}! Seu pedido acaba de ser entregue: {{2}}, recebido {{3}}. A foto do canhoto está acima, para o seu controle.\n\n' +
+  'Muito obrigado pela confiança! Foi um prazer atender vocês. Qualquer coisa, é só falar com {{4}}: estamos sempre à disposição.';
+const BOTAO_FALAR_ENTREGA = 'Falar com quem me atende';
+const BOTAO_PROXIMO = 'Agendar próximo pedido';
+const b64 = (s: string) => Uint8Array.from(atob(s), ch => ch.charCodeAt(0));
+async function exemploImagemHandle(token: string, appId: string) {
+  const img = b64(CANHOTO_EXEMPLO);
+  const sessao = await graph(token, '/' + appId + '/uploads?file_name=canhoto.jpg&file_length=' + img.length + '&file_type=image/jpeg', { method: 'POST' });
+  const up = await fetch(GRAPH + '/' + sessao.id, { method: 'POST', headers: { Authorization: 'OAuth ' + token, file_offset: '0' }, body: img });
+  const uj = await up.json();
+  if (!up.ok || !uj.h) throw new Error('não consegui enviar a imagem de exemplo à Meta: ' + JSON.stringify(uj).slice(0, 200));
+  return String(uj.h);
+}
+async function sobeImagem(token: string, phoneId: string, img: ArrayBuffer, tipo: string) {
+  const fd = new FormData();
+  fd.append('messaging_product', 'whatsapp');
+  fd.append('type', tipo);
+  fd.append('file', new Blob([img], { type: tipo }), 'canhoto.' + (tipo === 'image/png' ? 'png' : 'jpg'));
+  const media = await graph(token, '/' + phoneId + '/media', { method: 'POST', body: fd });
+  if (!media.id) throw new Error('a Meta não devolveu o id da foto');
+  return String(media.id);
+}
+const celularBR = (t: string) => /^55\d{2}9\d{8}$/.test(t);
 
 async function sobePdf(token: string, phoneId: string, pdf: Uint8Array<ArrayBuffer> | ArrayBuffer, nome: string) {
   const fd = new FormData();
@@ -152,16 +188,79 @@ Deno.serve(async (req) => {
   const phoneId = Deno.env.get('WHATSAPP_PHONE_ID') ?? '';
   const wabaId = Deno.env.get('WHATSAPP_WABA_ID') ?? '';
   const appId = Deno.env.get('WHATSAPP_APP_ID') ?? '';
-  let c: { acao?: string; boletos?: string[]; pin?: string; telefone?: string };
+  let c: { acao?: string; boletos?: string[]; pin?: string; telefone?: string; entrega?: string };
   try { c = await req.json(); } catch { return resposta(400, { erro: 'corpo inválido' }); }
   const faltam = [!token && 'WHATSAPP_TOKEN', !phoneId && 'WHATSAPP_PHONE_ID', !wabaId && 'WHATSAPP_WABA_ID'].filter(Boolean);
 
   try {
     // ---- qualquer pessoa da equipe: o envio ao cliente está liberado? (modelo aprovado)
     if (c.acao === 'pronto') {
-      if (faltam.length) return resposta(200, { cliente: false });
-      const m = await modeloInfo(token, wabaId, MODELO_CLIENTE);
-      return resposta(200, { cliente: !!(m && m.status === 'APPROVED') });
+      if (faltam.length) return resposta(200, { cliente: false, entrega: false });
+      const [m, me] = await Promise.all([modeloInfo(token, wabaId, MODELO_CLIENTE), modeloInfo(token, wabaId, MODELO_ENTREGA)]);
+      return resposta(200, { cliente: !!(m && m.status === 'APPROVED'), entrega: !!(me && me.status === 'APPROVED') });
+    }
+    // ---- motorista da entrega, logística, gestora ou admin: o agradecimento ao cliente com a foto do canhoto
+    if (c.acao === 'entrega') {
+      const id = String(c.entrega || '');
+      if (!/^[0-9a-f-]{36}$/.test(id)) return resposta(400, { erro: 'entrega inválida' });
+      const { data: x } = await db.from('crm_entregas').select('id, nota_id, empresa_id, motorista_id, situacao, canhoto, entregue_em, cli_em, cli_status').eq('id', id).maybeSingle();
+      if (!x) return resposta(404, { erro: 'entrega não encontrada' });
+      if (x.motorista_id !== quem.user.id && !['admin', 'gestor', 'logistica'].includes(eu.papel)) return resposta(403, { erro: 'esta entrega não é sua' });
+      if (x.situacao === 'pendente' || !x.canhoto) return resposta(400, { erro: 'a entrega ainda não foi confirmada com o canhoto' });
+      if (x.cli_em) return resposta(200, { ok: true, ja: true, status: x.cli_status });
+      const pula = async (motivo: string) => {
+        await db.from('crm_entregas').update({ cli_status: 'não manda', cli_erro: motivo, cli_em: new Date().toISOString() }).eq('id', id);
+        return resposta(200, { ok: true, mandou: false, motivo });
+      };
+      const { data: cfg } = await db.from('crm_config').select('dados').eq('id', 1).maybeSingle();
+      const dados = ((cfg && cfg.dados) || {}) as Record<string, unknown>;
+      if (dados.agradecer_entrega === false) return pula('agradecimento desligado nas Configurações');
+      const { data: n } = await db.from('crm_notas').select('numero, vendedor_nome, vendedor_id').eq('id', x.nota_id).maybeSingle();
+      if (!n) return pula('nota não encontrada');
+      const { data: e } = x.empresa_id ? await db.from('crm_empresas').select('id, nome, razao_social, cnpj, telefone, whatsapp, responsavel_id').eq('id', x.empresa_id).maybeSingle() : { data: null };
+      if (!e) return pula('cliente sem cadastro no CRM');
+      // lista de quem não recebe (CNPJ ou raiz do CNPJ; ex.: a Uniserv) e a venda direta
+      const lista = String(dados.entrega_sem_agradecimento || '').match(/\d[\d.\/-]{6,}\d/g) || [];
+      const doc = digitos(e.cnpj);
+      if (doc && lista.some(t => { const d = digitos(t); return d === doc || (d.length >= 8 && doc.slice(0, 8) === d.slice(0, 8)); })) return pula('cliente da lista sem agradecimento');
+      if (/^\s*direto\b/i.test(String(n.vendedor_nome || ''))) return pula('venda direta');
+      const vendId = n.vendedor_id || e.responsavel_id;
+      const { data: vend } = vendId ? await db.from('crm_usuarios').select('nome, telefone, papel').eq('user_id', vendId).maybeSingle() : { data: null };
+      if (!vend || vend.papel === 'admin') return pula('venda direta');
+      if (faltam.length) return pula('o WhatsApp da Meta ainda não está ligado');
+      const me = await modeloInfo(token, wabaId, MODELO_ENTREGA);
+      if (!me || me.status !== 'APPROVED') return pula('o modelo do agradecimento ainda não foi aprovado pela Meta');
+      // celular do cliente: o contato principal primeiro, depois os outros contatos e o da empresa
+      const { data: cts } = await db.from('crm_contatos').select('nome, telefone, celular, whatsapp, principal, criado_em').eq('empresa_id', e.id).order('principal', { ascending: false }).order('criado_em');
+      let para = '', nomeContato = '';
+      for (const ct of cts || []) for (const t of [ct.whatsapp, ct.celular, ct.telefone]) if (!para && celularBR(telefoneWa(t))) { para = telefoneWa(t); nomeContato = ct.nome || ''; }
+      for (const t of [e.whatsapp, e.telefone]) if (!para && celularBR(telefoneWa(t))) para = telefoneWa(t);
+      if (!para) return pula('cliente sem celular no cadastro');
+      const { data: foto, error: e1 } = await db.storage.from(BUCKET_CANHOTOS).download(x.canhoto);
+      if (e1 || !foto) throw new Error('não consegui ler a foto do canhoto');
+      const tipo = /\.png$/i.test(x.canhoto) ? 'image/png' : 'image/jpeg';
+      const media = await sobeImagem(token, phoneId, await foto.arrayBuffer(), tipo);
+      const quando = new Date(x.entregue_em || Date.now());
+      const sp = (o: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat('pt-BR', Object.assign({ timeZone: 'America/Sao_Paulo' }, o)).format(quando);
+      const p1 = String(nomeContato || '').trim().split(/\s+/)[0] || e.nome || e.razao_social || 'tudo bem';
+      const primeiroV = String(vend.nome || '').trim().split(/\s+/)[0];
+      let wamid = '';
+      try {
+        const r = await graph(token, '/' + phoneId + '/messages', jsonPost({
+          messaging_product: 'whatsapp', to: para, type: 'template',
+          template: { name: MODELO_ENTREGA, language: { code: 'pt_BR' }, components: [
+            { type: 'header', parameters: [{ type: 'image', image: { id: media } }] },
+            { type: 'body', parameters: [p1, 'NF ' + n.numero, 'às ' + sp({ hour: '2-digit', minute: '2-digit' }) + ' de ' + sp({ day: '2-digit', month: '2-digit' }), primeiroV].map(param) },
+            { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: id }] },
+            { type: 'button', sub_type: 'quick_reply', index: '1', parameters: [{ type: 'payload', payload: 'proximo:' + id }] }] }
+        }));
+        wamid = (((r.messages as { id: string }[] | undefined) || [])[0] || { id: '' }).id;
+      } catch (err) {
+        await db.from('crm_entregas').update({ cli_status: 'falhou', cli_erro: String((err as Error).message).slice(0, 300), cli_em: new Date().toISOString(), cli_tel: para }).eq('id', id);
+        throw err;
+      }
+      await db.from('crm_entregas').update({ cli_msg: wamid, cli_status: 'enviado', cli_em: new Date().toISOString(), cli_erro: null, cli_tel: para }).eq('id', id);
+      return resposta(200, { ok: true, mandou: true, id: wamid, para });
     }
     // ---- vendedor(a) da carteira, gestor(a) ou admin: o boleto ao cliente pelo número da empresa
     if (c.acao === 'cliente') {
@@ -241,7 +340,7 @@ Deno.serve(async (req) => {
         } catch (e3) { diag.conta = String((e3 as Error).message); }
         return resposta(200, { ligado: false, erro: diag.erro, diagnostico: diag });
       }
-      const [modelo, modelo_cliente] = await Promise.all([modeloInfo(token, wabaId, MODELO), modeloInfo(token, wabaId, MODELO_CLIENTE)]);
+      const [modelo, modelo_cliente, modelo_entrega] = await Promise.all([modeloInfo(token, wabaId, MODELO), modeloInfo(token, wabaId, MODELO_CLIENTE), modeloInfo(token, wabaId, MODELO_ENTREGA)]);
       // retorno (webhook): o app está ligado à conta? e o que chegou por último
       let assinado: boolean | null = null;
       try { const sa = await graph(token, '/' + wabaId + '/subscribed_apps'); assinado = ((sa.data as Record<string, unknown>[]) || []).length > 0; } catch { /* sem permissão: fica null */ }
@@ -250,7 +349,7 @@ Deno.serve(async (req) => {
         assinado, segredos: !!Deno.env.get('WHATSAPP_APP_SECRET') && !!Deno.env.get('WHATSAPP_VERIFY_TOKEN'),
         endereco: url + '/functions/v1/crm-whatsapp-retorno', ultimos: ult || []
       };
-      return resposta(200, { ligado: true, numero, modelo, modelo_cliente, retorno });
+      return resposta(200, { ligado: true, numero, modelo, modelo_cliente, modelo_entrega, retorno });
     }
     if (faltam.length) return resposta(503, { erro: 'o WhatsApp da Meta ainda não está ligado: falta ' + faltam.join(', ') + ' nos segredos do Supabase' });
 
@@ -280,6 +379,22 @@ Deno.serve(async (req) => {
           { type: 'BUTTONS', buttons: [
             { type: 'URL', text: BOTAO_FALAR, url: url + '/functions/v1/crm-pdf?f={{1}}', example: [url + '/functions/v1/crm-pdf?f=00000000-0000-4000-8000-000000000000'] },
             { type: 'QUICK_REPLY', text: BOTAO_PAGUEI }] }]
+      }));
+      return resposta(200, { ok: true, modelo: r });
+    }
+
+    if (c.acao === 'criar_modelo_entrega') {
+      if (!appId) return resposta(503, { erro: 'falta WHATSAPP_APP_ID (o ID do app CRM OneClean) nos segredos do Supabase' });
+      const h = await exemploImagemHandle(token, appId);
+      const r = await graph(token, '/' + wabaId + '/message_templates', jsonPost({
+        name: MODELO_ENTREGA, language: 'pt_BR', category: 'UTILITY',
+        components: [
+          { type: 'HEADER', format: 'IMAGE', example: { header_handle: [h] } },
+          { type: 'BODY', text: CORPO_ENTREGA, example: { body_text: [['Paulo', 'NF 2706', 'às 10:32 de 22/10', 'Silmara']] } },
+          { type: 'FOOTER', text: EMPRESA + ' · entregas' },
+          { type: 'BUTTONS', buttons: [
+            { type: 'URL', text: BOTAO_FALAR_ENTREGA, url: url + '/functions/v1/crm-pdf?e={{1}}', example: [url + '/functions/v1/crm-pdf?e=00000000-0000-4000-8000-000000000000'] },
+            { type: 'QUICK_REPLY', text: BOTAO_PROXIMO }] }]
       }));
       return resposta(200, { ok: true, modelo: r });
     }

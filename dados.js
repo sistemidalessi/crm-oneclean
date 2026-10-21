@@ -118,7 +118,11 @@
   };
   Local.prototype.carregarFin = function () { return Promise.resolve(finVazio(this.ler())); };
 
-  Local.prototype.usuarioAtual = function () { return Promise.resolve(this.ler().usuarios.find(u => u.user_id === LOCAL_ADMIN) || this.ler().usuarios[0]); };
+  // crm_local_eu: no modo local (demonstração e telas dos manuais) dá para entrar como outro usuário da base
+  Local.prototype.usuarioAtual = function () {
+    const us = this.ler().usuarios, eu = lsLe('crm_local_eu', null);
+    return Promise.resolve((eu && us.find(u => u.user_id === eu)) || us.find(u => u.user_id === LOCAL_ADMIN) || us[0]);
+  };
 
   Local.prototype.novo = function (d, t, obj) {
     const agora = new Date().toISOString();
@@ -1458,6 +1462,75 @@
     return [...m.values()].map(c => Object.assign(c, { notas: c.notas.size })).sort((a, b) => String(b.ultima).localeCompare(String(a.ultima))).slice(0, limite || 8);
   };
   Local.prototype.sugestaoMarcar = async function (codigo, situacao) { const s = lsObj('crm_produto_sugestoes'); if (s[codigo]) s[codigo].situacao = situacao; lsGrava('crm_produto_sugestoes', s); };
+
+  // ------------------------------------------------------------ rotas de entrega e motorista (21/10/2026)
+  // A logística lê a rota e as notas sem entrega por funções do banco (só logística e gestão); o motorista, só as
+  // entregas liberadas dele (crm_minha_rota); a confirmação exige a foto do canhoto (bucket privado crm-canhotos).
+  Supa.prototype.rotaCandidatas = async function (desde) { return unwrap(await this.sb.rpc('crm_rota_candidatas', { p_desde: desde })) || []; };
+  Supa.prototype.rotaDia = async function (dia) { return unwrap(await this.sb.rpc('crm_rota_dia', { p_dia: dia })) || []; };
+  Supa.prototype.minhaRota = async function (dia) { return unwrap(await this.sb.rpc('crm_minha_rota', { p_dia: dia })) || []; };
+  Supa.prototype.entregasCriar = async function (linhas) { return unwrap(await this.sb.from('crm_entregas').insert(linhas).select('id')); };
+  Supa.prototype.entregaAtualizar = async function (id, patch) { return unwrap(await this.sb.from('crm_entregas').update(patch).eq('id', id).select('id').single()); };
+  Supa.prototype.entregaApagar = async function (id) { unwrap(await this.sb.from('crm_entregas').delete().eq('id', id).eq('situacao', 'pendente')); };
+  Supa.prototype.rotaLiberar = async function (dia) { return unwrap(await this.sb.from('crm_entregas').update({ liberada: true }).eq('dia', dia).eq('liberada', false).not('motorista_id', 'is', null).select('id')); };
+  Supa.prototype.canhotoSubir = async function (blob, entregaId, dia) {
+    const caminho = 'canhotos/' + dia + '/' + entregaId + '-' + Date.now().toString(36) + '.jpg';
+    const r = await this.sb.storage.from('crm-canhotos').upload(caminho, blob, { contentType: blob.type || 'image/jpeg', upsert: false });
+    if (r.error) throw new Error('não consegui guardar a foto do canhoto: ' + r.error.message);
+    return caminho;
+  };
+  Supa.prototype.canhotoUrl = async function (caminho) {
+    const r = await this.sb.storage.from('crm-canhotos').createSignedUrl(caminho, 600);
+    if (r.error) throw new Error(r.error.message);
+    return r.data.signedUrl;
+  };
+  Supa.prototype.entregaConfirmar = async function (id, situacao, obs, canhoto) {
+    return unwrap(await this.sb.rpc('crm_entrega_confirmar', { p_id: id, p_situacao: situacao, p_obs: obs || null, p_canhoto: canhoto }));
+  };
+  // Modo local: as entregas ficam no navegador (crm_entregas) e a foto como data: (crm_canhotos).
+  const enderecoLocal = e => (e ? [[e.logradouro, e.numero].filter(Boolean).join(', '), e.complemento, e.bairro, [e.cidade, e.uf].filter(Boolean).join('/'), e.cep]
+    .map(x => String(x || '').trim()).filter(Boolean).join(' · ') : '');
+  Local.prototype.rotaLinhas = function () {
+    const d = this.ler(), emp = new Map(d.empresas.map(e => [e.id, e])), nts = new Map((d.notas || []).map(n => [n.id, n])), us = new Map(d.usuarios.map(u => [u.user_id, u]));
+    return lsLe('crm_entregas', []).map(x => {
+      const n = nts.get(x.nota_id) || {}, e = emp.get(x.empresa_id || n.empresa_id), u = us.get(n.vendedor_id);
+      const c = d.contatos.filter(k => e && k.empresa_id === e.id).sort((a, b) => (b.principal ? 1 : 0) - (a.principal ? 1 : 0))[0];
+      return Object.assign({}, x, { numero: n.numero, cliente: (e && e.nome) || n.cliente_nome, endereco: enderecoLocal(e), bairro: e && e.bairro, cidade: (e && e.cidade) || n.cidade,
+        valor: n.valor_total, vendedor: (u && u.nome) || n.vendedor_nome, contato: c && c.nome,
+        telefone: (c && (c.celular || c.whatsapp || c.telefone)) || (e && (e.whatsapp || e.telefone)) || '' });
+    });
+  };
+  Local.prototype.rotaCandidatas = async function (desde) {
+    const d = this.ler(), usadas = new Set(lsLe('crm_entregas', []).map(x => x.nota_id)), emp = new Map(d.empresas.map(e => [e.id, e])), us = new Map(d.usuarios.map(u => [u.user_id, u]));
+    return (d.notas || []).filter(n => !n.cancelada && String(n.emitida_em || '').slice(0, 10) >= desde && !usadas.has(n.id))
+      .sort((a, b) => String(b.emitida_em).localeCompare(String(a.emitida_em))).map(n => {
+        const e = emp.get(n.empresa_id), u = us.get(n.vendedor_id);
+        return { nota_id: n.id, numero: n.numero, emitida_em: n.emitida_em, empresa_id: n.empresa_id || null, cliente: (e && e.nome) || n.cliente_nome, endereco: enderecoLocal(e),
+          bairro: e && e.bairro, cidade: (e && e.cidade) || n.cidade, valor: n.valor_total, vendedor: (u && u.nome) || n.vendedor_nome };
+      });
+  };
+  Local.prototype.rotaDia = async function (dia) { return this.rotaLinhas().filter(x => x.dia === dia); };
+  Local.prototype.minhaRota = async function (dia) { const eu = await this.usuarioAtual(); return this.rotaLinhas().filter(x => x.dia === dia && x.liberada && x.motorista_id === eu.user_id).sort((a, b) => a.ordem - b.ordem); };
+  Local.prototype.entregaMuda = function (fn) { const l = lsLe('crm_entregas', []); const r = fn(l); lsGrava('crm_entregas', l); return r; };
+  Local.prototype.entregasCriar = async function (linhas) {
+    return this.entregaMuda(l => linhas.map(x => { const r = Object.assign({ id: uuid(), ordem: 0, liberada: false, situacao: 'pendente', criado_em: new Date().toISOString() }, x); l.push(r); return { id: r.id }; }));
+  };
+  Local.prototype.entregaAtualizar = async function (id, patch) { return this.entregaMuda(l => { const x = l.find(y => y.id === id); if (x) Object.assign(x, patch); return x; }); };
+  Local.prototype.entregaApagar = async function (id) { this.entregaMuda(l => { const i = l.findIndex(y => y.id === id && y.situacao === 'pendente'); if (i >= 0) l.splice(i, 1); }); };
+  Local.prototype.rotaLiberar = async function (dia) { return this.entregaMuda(l => l.filter(x => x.dia === dia && x.motorista_id && !x.liberada).map(x => { x.liberada = true; return { id: x.id }; })); };
+  Local.prototype.canhotoSubir = async function (blob, entregaId, dia) {
+    const dataUrl = await new Promise((ok, erro) => { const f = new FileReader(); f.onload = () => ok(f.result); f.onerror = erro; f.readAsDataURL(blob); });
+    const caminho = 'canhotos/' + dia + '/' + entregaId + '-' + Date.now().toString(36) + '.jpg', a = lsObj('crm_canhotos');
+    a[caminho] = dataUrl; lsGrava('crm_canhotos', a);
+    return caminho;
+  };
+  Local.prototype.canhotoUrl = async function (caminho) { return lsObj('crm_canhotos')[caminho] || ''; };
+  Local.prototype.entregaConfirmar = async function (id, situacao, obs, canhoto) {
+    if (!canhoto) throw new Error('falta a foto do canhoto');
+    if (situacao === 'problema' && !String(obs || '').trim()) throw new Error('conte o que aconteceu na observação');
+    return this.entregaMuda(l => { const x = l.find(y => y.id === id); if (!x) throw new Error('entrega não encontrada');
+      Object.assign(x, { situacao, obs: String(obs || '').trim() || null, canhoto, entregue_em: x.entregue_em || new Date().toISOString() }); return x; });
+  };
 
   raiz.CRMDados = { TABELAS, INTEIRAS, PARCIAIS, aplicaMudancas, marcaRecarga, chave, Local, Supa, uuid, vazio, LOCAL_ADMIN, cascataMemoria, situacaoVigia, PARADO_MIN, lembreteFkn };
   if (typeof module !== 'undefined' && module.exports) module.exports = raiz.CRMDados;

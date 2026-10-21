@@ -18,7 +18,7 @@
   // tela ao entrar da pessoa (telaInicial, logo abaixo).
   // Tela que abre ao entrar no CRM (20/10/2026, pedido do Anderson): a escolhida para a pessoa (crm_usuarios.tela_inicial)
   // ou o padrão do papel — administrador na Gestão, vendedor na Fila do dia, comprador em Compras, logística em Pedidos.
-  const TELA_INICIAL_PADRAO = { admin: 'gestao', gestor: 'inicio', vendedor: 'fila', comprador: 'compras', logistica: 'pedidos' };
+  const TELA_INICIAL_PADRAO = { admin: 'gestao', gestor: 'inicio', vendedor: 'fila', comprador: 'compras', logistica: 'rotas', motorista: 'rota' };
   const telaInicial = u => (u && u.tela_inicial) || TELA_INICIAL_PADRAO[u && u.papel] || 'inicio';
   function abaDaSessao() { try { return sessionStorage.getItem('sd-crm-aba') || ''; } catch (e) { return ''; } }
   function gravaAbaDaSessao(a) { try { sessionStorage.setItem('sd-crm-aba', a); } catch (e) { /* ok */ } }
@@ -44,8 +44,9 @@
   CRM.ehGestor = () => ['admin', 'gestor'].indexOf(CRM.papel()) !== -1;
   CRM.ehComprador = () => CRM.papel() === 'comprador';
   CRM.ehLogistica = () => CRM.papel() === 'logistica';
+  CRM.ehMotorista = () => CRM.papel() === 'motorista';
   // comprador e logística: fora da equipe de vendas (sem busca, sino, "+ novo", leads)
-  CRM.foraDeVendas = () => CRM.ehComprador() || CRM.ehLogistica();
+  CRM.foraDeVendas = () => CRM.ehComprador() || CRM.ehLogistica() || CRM.ehMotorista();
   CRM.ehAdmin = () => CRM.papel() === 'admin';
   CRM.meuId = () => (E.eu ? E.eu.user_id : null);
   CRM.podeEditarEmpresa = e => !!e && (CRM.ehGestor() || e.responsavel_id === CRM.meuId());
@@ -75,7 +76,7 @@
     return nomes.sort((a, b) => qtd.get(b) - qtd.get(a) || a.localeCompare(b, 'pt-BR'));
   };
   CRM.etapas = funil => E.D.etapas.filter(e => !funil || (e.funil || 'Vendas') === funil).sort((a, b) => a.ordem - b.ordem);
-  CRM.usuariosAtivos = () => E.D.usuarios.filter(u => u.ativo !== false && u.papel !== 'comprador' && u.papel !== 'logistica').sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+  CRM.usuariosAtivos = () => E.D.usuarios.filter(u => u.ativo !== false && u.papel !== 'comprador' && u.papel !== 'logistica' && u.papel !== 'motorista').sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
   CRM.opcoesUsuarios = vazio => (vazio ? [['', vazio]] : []).concat(CRM.usuariosAtivos().map(u => [u.user_id, u.nome]));
   CRM.todasTags = () => [...new Set([].concat(...E.D.empresas.map(e => e.tags || []), ...E.D.contatos.map(c => c.tags || [])))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
   CRM.lista = (lista, vazio) => (vazio !== undefined ? [['', vazio]] : []).concat(lista.map(x => [x, x]));
@@ -331,7 +332,7 @@
   // ------------------------------------------------------------ render
   const ABAS = [
     ['inicio', 'Início', '⌂'], ['fila', 'Fila do dia', '▶'], ['funil', 'Funil', '▥'], ['empresas', 'Empresas', '▦'], ['pessoas', 'Pessoas', '☺'],
-    ['negocios', 'Negócios', '$'], ['pedidos', 'Pedidos', '☰'], ['agenda', 'Atividades', '▣'], ['relatorios', 'Relatórios', '▲'], ['ajustes', 'Configurações', '⚙'], ['compras', 'Compras', '▤'], ['estoque', 'Estoque', '▦'], ['gestao', 'Gestão', '◆'], ['caixa', 'Caixa', '◈'], ['emails', 'E-mails', '✉'], ['ofertas', 'Ofertas', '✦'], ['fiscal', 'Fiscal', '§'], ['concorrentes', 'Concorrentes', '⚖'], ['produtos', 'Produtos', '▦'], ['pedcompra', 'Pedidos ao fornecedor', '⇢']
+    ['negocios', 'Negócios', '$'], ['pedidos', 'Pedidos', '☰'], ['agenda', 'Atividades', '▣'], ['relatorios', 'Relatórios', '▲'], ['ajustes', 'Configurações', '⚙'], ['compras', 'Compras', '▤'], ['estoque', 'Estoque', '▦'], ['gestao', 'Gestão', '◆'], ['caixa', 'Caixa', '◈'], ['emails', 'E-mails', '✉'], ['ofertas', 'Ofertas', '✦'], ['fiscal', 'Fiscal', '§'], ['concorrentes', 'Concorrentes', '⚖'], ['produtos', 'Produtos', '▦'], ['pedcompra', 'Pedidos ao fornecedor', '⇢'], ['rotas', 'Rotas', '⛟'], ['rota', 'Minha rota', '⛟']
   ];
   CRM.ABAS = ABAS;
   // Os grupos do menu de cima (cada tela num grupo só; a ordem é a do menu). Produtos (20/10/2026) fica em Vendas para
@@ -340,6 +341,8 @@
     { id: 'inicio', nome: 'Início', telas: ['inicio'] },
     { id: 'vendas', nome: 'Vendas', telas: ['fila', 'funil', 'negocios', 'empresas', 'pessoas', 'produtos', 'agenda'] },
     { id: 'pedidos', nome: 'Pedidos', telas: ['pedidos'] },
+    { id: 'logistica', nome: 'Logística', telas: ['rotas'] },
+    { id: 'rota', nome: 'Minha rota', telas: ['rota'] },
     { id: 'compras', nome: 'Compras e estoque', telas: ['compras', 'pedcompra', 'estoque', 'produtos', 'concorrentes'] },
     { id: 'financeiro', nome: 'Financeiro', telas: ['caixa', 'gestao', 'fiscal'] },
     { id: 'marketing', nome: 'Marketing', telas: ['emails', 'ofertas'] },
@@ -407,8 +410,9 @@
     if (window.scrollY !== l.jy || window.scrollX !== l.jx) window.scrollTo(l.jx, l.jy);
   }
 
-  CRM.abasPermitidas = () => CRM.ehLogistica() ? ABAS.filter(a => a[0] === 'pedidos') : CRM.ehComprador() ? ABAS.filter(a => a[0] === 'compras' || a[0] === 'pedcompra' || a[0] === 'estoque' || a[0] === 'produtos' || a[0] === 'pedidos' || a[0] === 'concorrentes')
-    : ABAS.filter(a => (a[0] !== 'ajustes' || CRM.ehGestor()) && ((a[0] !== 'gestao' && a[0] !== 'compras' && a[0] !== 'pedcompra' && a[0] !== 'estoque' && a[0] !== 'caixa' && a[0] !== 'fiscal' && a[0] !== 'concorrentes') || CRM.ehAdmin()));
+  // Rotas (21/10/2026): a logística monta a rota (e a gestão acompanha); o motorista vê só a dele, no celular.
+  CRM.abasPermitidas = () => CRM.ehMotorista() ? ABAS.filter(a => a[0] === 'rota') : CRM.ehLogistica() ? ABAS.filter(a => a[0] === 'pedidos' || a[0] === 'rotas') : CRM.ehComprador() ? ABAS.filter(a => a[0] === 'compras' || a[0] === 'pedcompra' || a[0] === 'estoque' || a[0] === 'produtos' || a[0] === 'pedidos' || a[0] === 'concorrentes')
+    : ABAS.filter(a => a[0] !== 'rota' && (a[0] !== 'rotas' || CRM.ehGestor()) && (a[0] !== 'ajustes' || CRM.ehGestor()) && ((a[0] !== 'gestao' && a[0] !== 'compras' && a[0] !== 'pedcompra' && a[0] !== 'estoque' && a[0] !== 'caixa' && a[0] !== 'fiscal' && a[0] !== 'concorrentes') || CRM.ehAdmin()));
 
   function renderAgora() {
     if (!E.eu) return;

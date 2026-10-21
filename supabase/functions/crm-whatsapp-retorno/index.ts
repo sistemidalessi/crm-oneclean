@@ -7,10 +7,12 @@
 //       e uma resposta de agradecimento ao cliente
 //     · outra resposta do cliente → tarefa para o(a) vendedor(a) com o texto, e o cliente fica sabendo que foi repassado
 //       (uma vez a cada 12 h)
+//     · agradecimento da entrega (21/10/2026): status → crm_entregas.cli_status; "Agendar próximo pedido" → cli_proximo_em,
+//       tarefa para o(a) vendedor(a) da nota e um obrigado ao cliente; resposta escrita ao agradecimento → tarefa
 //   Tudo fica em crm_whatsapp_eventos (só o administrador lê). Sem os dois segredos, nada é aceito.
 // Deploy: verify_jwt DESLIGADO (quem chama é a Meta; a assinatura é a senha).
 import { createClient } from 'npm:@supabase/supabase-js@2.116.0';
-import { eventosDoCorpo, statusCRM, novoStatus, ehPagou, idDoPayload, variantesBR, textoPagou, textoRepasse } from './logica.js';
+import { eventosDoCorpo, statusCRM, novoStatus, ehPagou, idDoPayload, variantesBR, textoPagou, textoRepasse, entregaDoPayload, textoProximo } from './logica.js';
 
 const GRAPH = 'https://graph.facebook.com/v25.0';
 const texto = (status: number, t: string) => new Response(t, { status, headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' } });
@@ -77,12 +79,44 @@ Deno.serve(async (req) => {
           const s = novoStatus(b.cli_status, novo);
           if (s) await db.from('crm_boletos').update(Object.assign({ cli_status: s }, s === 'falhou' ? { cli_erro: ev.erro || 'a Meta não entregou' } : {})).eq('id', b.id);
         }
+        const { data: ent } = await db.from('crm_entregas').select('id, cli_status').eq('cli_msg', ev.wamid);
+        for (const x of ent || []) {
+          const s = novoStatus(x.cli_status, novo);
+          if (s) await db.from('crm_entregas').update(Object.assign({ cli_status: s }, s === 'falhou' ? { cli_erro: ev.erro || 'a Meta não entregou' } : {})).eq('id', x.id);
+        }
         const { data: ven } = await db.from('crm_boletos').select('id, wa_entrega').eq('wa_msg', ev.wamid);
         for (const b of ven || []) {
           const s = novoStatus(b.wa_entrega, novo);
           if (s) await db.from('crm_boletos').update(Object.assign({ wa_entrega: s }, s === 'falhou' ? { wa_erro: ev.erro || 'a Meta não entregou' } : {})).eq('id', b.id);
         }
         continue;
+      }
+      // resposta ao agradecimento da entrega: pelo botão (proximo:<id>) ou pela mensagem respondida
+      {
+        const eid = entregaDoPayload(ev.payload);
+        let x = null;
+        if (eid) x = (await db.from('crm_entregas').select('id, nota_id, empresa_id, cli_proximo_em').eq('id', eid).maybeSingle()).data;
+        else if (ev.contexto) x = (await db.from('crm_entregas').select('id, nota_id, empresa_id, cli_proximo_em').eq('cli_msg', ev.contexto).maybeSingle()).data;
+        if (x) {
+          const { data: n } = await db.from('crm_notas').select('numero, vendedor_id').eq('id', x.nota_id).maybeSingle();
+          const { data: e } = x.empresa_id ? await db.from('crm_empresas').select('nome, responsavel_id').eq('id', x.empresa_id).maybeSingle() : { data: null };
+          const vid = (n && n.vendedor_id) || (e && e.responsavel_id) || null;
+          const { data: u } = vid ? await db.from('crm_usuarios').select('nome, telefone').eq('user_id', vid).maybeSingle() : { data: null };
+          const nf = n ? 'NF ' + n.numero : 'a entrega';
+          if (eid) {
+            if (x.cli_proximo_em) continue; // tocou de novo
+            await db.from('crm_entregas').update({ cli_proximo_em: new Date().toISOString() }).eq('id', x.id);
+            if (x.empresa_id) await tarefa(x.empresa_id, vid, 'O cliente tocou em "Agendar próximo pedido" no agradecimento da entrega (' + nf + '). Fale com ele para combinar o próximo pedido.');
+            await responde(String(ev.de), textoProximo(primeiro(ev.nome), primeiro(u && u.nome)));
+            continue;
+          }
+          if (!ev.texto || /^\[reação/.test(ev.texto)) continue;
+          if (x.empresa_id) await tarefa(x.empresa_id, vid, 'O cliente respondeu ao agradecimento da entrega (' + nf + '): "' + ev.texto.slice(0, 500) + '". Responda pelo seu WhatsApp.');
+          const desde = new Date(Date.now() - 12 * 3600e3).toISOString();
+          const { count } = await db.from('crm_whatsapp_eventos').select('id', { count: 'exact', head: true }).eq('tipo', 'resposta').in('de', variantesBR(ev.de)).gte('criado_em', desde);
+          if (!count) await responde(String(ev.de), textoRepasse(primeiro(u && u.nome), telWa(u && u.telefone)));
+          continue;
+        }
       }
       // mensagem recebida: de qual boleto? pela mensagem respondida, pelo id do botão ou pelo último boleto mandado a esse número
       const campos = 'id, empresa_id, nota_numero, duplicata, valor, cli_msg, cli_status, cli_pagou_em, cli_tel';

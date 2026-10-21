@@ -7,6 +7,8 @@
 // GET ?f=<id do boleto> (20/10/2026): botão "Falar comigo" da mensagem que o cliente recebe pelo número da empresa
 // (modelo boleto_cliente) → abre o WhatsApp do(a) vendedor(a) da carteira com a mensagem pronta ("Olá, Renata! Recebi
 // o boleto atualizado da NF 2428.") e anota o clique (cli_falou_em). Vale 90 dias.
+// GET ?e=<id da entrega> (21/10/2026): botão "Falar com quem me atende" do agradecimento da entrega (modelo entrega_cliente)
+// → abre o WhatsApp do(a) vendedor(a) da nota com "Olá, Silmara! Recebi a entrega da NF 2706." Vale 90 dias.
 // Deploy: verify_jwt DESLIGADO (o cliente não tem login).
 import { createClient } from 'npm:@supabase/supabase-js@2.116.0';
 
@@ -21,6 +23,23 @@ Deno.serve(async (req) => {
   const q = new URL(req.url).searchParams;
   const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
   const db = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } });
+  const ent = q.get('e') || '';
+  if (ent) {
+    if (!UUID.test(ent)) return pagina(404, 'Link inválido.');
+    const { data: x } = await db.from('crm_entregas').select('id, nota_id, empresa_id, cli_msg, criado_em').eq('id', ent).maybeSingle();
+    if (!x) return pagina(404, 'Não achei esta entrega. Responda a mensagem que recebeu e retornamos.');
+    if (Date.now() - Date.parse(x.criado_em) > 90 * 864e5) return pagina(410, 'Este link expirou. Responda a mensagem que recebeu e retornamos.');
+    const { data: n } = await db.from('crm_notas').select('numero, vendedor_id').eq('id', x.nota_id).maybeSingle();
+    const { data: e } = x.empresa_id ? await db.from('crm_empresas').select('responsavel_id').eq('id', x.empresa_id).maybeSingle() : { data: null };
+    const vid = (n && n.vendedor_id) || (e && e.responsavel_id);
+    const { data: u } = vid ? await db.from('crm_usuarios').select('nome, telefone').eq('user_id', vid).maybeSingle() : { data: null };
+    let tel = String((u && u.telefone) || '').replace(/\D/g, '');
+    if (tel.length === 10 || tel.length === 11) tel = '55' + tel;
+    if (tel.length < 12) return pagina(404, 'Não achei o contato de quem te atende. Responda a mensagem que recebeu e retornamos.');
+    const texto = 'Olá, ' + String((u && u.nome) || '').trim().split(/\s+/)[0] + '! Recebi a entrega' + (n ? ' da NF ' + n.numero : '') + '.';
+    if (req.method === 'GET') await db.from('crm_whatsapp_eventos').insert({ tipo: 'clique', wamid: x.cli_msg, payload: 'falar_entrega:' + x.id, texto: 'Falar com quem me atende' });
+    return new Response(null, { status: 302, headers: { Location: 'https://wa.me/' + tel + '?text=' + encodeURIComponent(texto), 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex' } });
+  }
   const f = q.get('f') || '';
   if (f) {
     if (!UUID.test(f)) return pagina(404, 'Link inválido.');
