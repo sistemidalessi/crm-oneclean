@@ -4,7 +4,7 @@
    DANFE, código de barras CODE-128C da chave, destinatário, fatura/duplicatas, cálculo do imposto,
    transportador, produtos (continua em quantas folhas precisar) e dados adicionais.
    - ler(xml): o XML (nfeProc) -> dados da DANFE (puro);
-   - code128c(digitos): larguras das barras (puro);
+   - code128c(digitos) / code128(chave, que pode ter letra com o CNPJ alfanumérico): larguras das barras (puro);
    - desenha(pdf, dados, op): desenha num jsPDF (unidade mm, A4 retrato) a partir da folha atual.
    Desenho em vetor (texto e barras de verdade, não imagem): fica nítido e leve.
    Testes: testes/danfe.test.js. */
@@ -91,7 +91,7 @@
     };
   }
 
-  // ------------------------------------------------------------ código de barras CODE-128 (conjunto C)
+  // ------------------------------------------------------------ código de barras CODE-128 (conjuntos C e B)
   // Cada símbolo: 6 larguras (barra, espaço, barra…) somando 11 módulos; a parada tem 7 (13 módulos).
   const PADROES = ('212222 222122 222221 121223 121322 131222 122213 122312 132212 221213 221312 231212 112232 122132 122231 113222 ' +
     '123122 123221 223211 221132 221231 213212 223112 312131 311222 321122 321221 312212 322112 322211 212123 212321 232121 111323 131123 ' +
@@ -105,9 +105,38 @@
     if (!d || d.length % 2) throw new Error('CODE-128C precisa de número par de dígitos');
     const vals = [105];
     for (let i = 0; i < d.length; i += 2) vals.push(Number(d.slice(i, i + 2)));
+    return barrasDe(vals);
+  }
+  function barrasDe(vals) {
     const soma = vals.reduce((s, v, i) => s + v * (i || 1), 0);
-    vals.push(soma % 103);
+    vals = vals.concat(soma % 103);
     return (vals.map(v => PADROES[v]).join('') + PARADA).split('').map(Number);
+  }
+  // Chave com letra (CNPJ alfanumérico do emitente, NT 2026.004, produção desde 01/07/2026): o conjunto C só
+  // tem pares de dígitos, então o trecho com letra vai no conjunto B (cada caractere = ASCII − 32) e os trechos
+  // de 4 ou mais dígitos continuam no C, para o código não ficar o dobro da largura. Chave só com números:
+  // o mesmo CODE-128C de sempre.
+  function code128(texto) {
+    const t = String(texto || '').toUpperCase().replace(/[^0-9A-Z]/g, '');
+    if (!t) throw new Error('chave vazia');
+    if (/^\d+$/.test(t) && t.length % 2 === 0) return code128c(t);
+    const corrida = i => { let j = i; while (j < t.length && t[j] >= '0' && t[j] <= '9') j++; return j - i; };
+    const vals = [];
+    let modo = null, i = 0;
+    while (i < t.length) {
+      const n = corrida(i);
+      if (n >= 4 && n % 2 === 0) {
+        if (modo !== 'C') { vals.push(modo === null ? 105 : 99); modo = 'C'; }
+        for (let k = 0; k < n; k += 2) vals.push(Number(t.slice(i + k, i + k + 2)));
+        i += n;
+      } else {
+        // letra, trecho curto de dígitos ou o dígito ímpar antes de um trecho par: um caractere no B
+        if (modo !== 'B') { vals.push(modo === null ? 104 : 100); modo = 'B'; }
+        vals.push(t.charCodeAt(i) - 32);
+        i++;
+      }
+    }
+    return barrasDe(vals);
   }
 
   // ------------------------------------------------------------ formatação
@@ -135,7 +164,7 @@
   // "2026-10-07T09:12:33-03:00" -> "07/10/2026" e "09:12:33" (a hora como está no XML, sem converter fuso)
   const dia = v => (/^(\d{4})-(\d{2})-(\d{2})/.test(v || '') ? v.slice(8, 10) + '/' + v.slice(5, 7) + '/' + v.slice(0, 4) : '');
   const hora = v => (/T(\d{2}:\d{2}:\d{2})/.exec(v || '') || [])[1] || '';
-  const chaveFmt = v => so(v).replace(/(\d{4})(?=\d)/g, '$1 ');
+  const chaveFmt = v => String(v == null ? '' : v).toUpperCase().replace(/[^0-9A-Z]/g, '').replace(/(.{4})(?=.)/g, '$1 ');
   const numeroNF = v => { const d = so(v).padStart(9, '0'); return d.slice(0, 3) + '.' + d.slice(3, 6) + '.' + d.slice(6); };
   const FRETE = { 0: '0-Por conta do Rem', 1: '1-Por conta do Dest', 2: '2-Por conta de Terceiros', 3: '3-Próprio por conta do Rem', 4: '4-Próprio por conta do Dest', 9: '9-Sem Transporte' };
   const FORMA = { '01': 'Dinheiro', '02': 'Cheque', '03': 'Cartão de crédito', '04': 'Cartão de débito', '05': 'Crédito loja', '10': 'Vale alimentação', '11': 'Vale refeição',
@@ -269,7 +298,7 @@
       // código de barras e chave
       const xc = xd + wd, wc = W - 82 - wd;
       caixa(xc, y, wc, 14);
-      const barras = code128c(d.chave), mods = barras.reduce((s, v) => s + v, 0);
+      const barras = code128(d.chave), mods = barras.reduce((s, v) => s + v, 0);
       const mod = Math.min(0.3, (wc - 6) / mods), wb = mod * mods;
       let xb = xc + (wc - wb) / 2;
       pdf.setFillColor(0);
@@ -407,7 +436,7 @@
     return total;
   }
 
-  const D = { ler, code128c, desenha, chaveFmt, numeroNF, doc };
+  const D = { ler, code128c, code128, desenha, chaveFmt, numeroNF, doc };
   raiz.CRMDanfe = D;
   if (typeof module !== 'undefined') module.exports = D;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -1765,6 +1765,8 @@ Sefaz por um serviço fiscal na VPS da Agilité; notas de compra pelo DF-e; bole
   Usam o normalizador: ficha, duplicados, busca, notas (`nfe.js`, chave de 44 posições com letras), FKN (`fkn.js`),
   orçamento, cobrança, caixa, planilha, fiscal e o `crm_doc` do banco; a IA do Caixa (`crm-caixa-ler` v12) devolve o
   documento com letras. Nunca mais tratar CNPJ com `digitos()`/`\D`. Testes em `testes/cnpj.test.js`.
+  DANFE (21/10): código de barras da chave com letra em CODE-128 B nos trechos com letra e C nos números (`danfe.js
+  code128`; chave só com números = o CODE-128C de sempre) e a chave impressa (`chaveFmt`) mantém as letras.
 - **Vigia da legislação fiscal** (tarefa agendada da conta do Anderson, como o "Vigia da legislação (DP
   Agilité)"): lê `docs/legislacao/monitoramento.md` (o que o sistema usa) e `docs/legislacao/registro.md` (o que
   já foi avisado), pesquisa as fontes oficiais e grava achado novo **só** no `registro.md` (commit no main).

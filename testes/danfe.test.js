@@ -59,6 +59,34 @@ test('código de barras CODE-128C da chave', () => {
   assert.throws(() => D.code128c('123'));
 });
 
+test('código de barras da chave com letra (CNPJ alfanumérico): conjunto B nas letras, C nos números', () => {
+  // decodifica as larguras de volta (pela tabela do próprio CODE-128) para conferir o conteúdo
+  const PAD = {};
+  for (let v = 0; v <= 99; v++) PAD[D.code128c(String(v).padStart(2, '0')).slice(6, 12).join('')] = v;
+  Object.assign(PAD, { '113141': 99, '114131': 100, '211214': 104, '211232': 105 });
+  const decodifica = barras => {
+    const s = barras.join(''), vals = [];
+    for (let i = 0; i + 6 <= s.length - 7; i += 6) vals.push(PAD[s.slice(i, i + 6)]);
+    const chk = vals.pop();
+    assert.equal(chk, vals.reduce((t, v, i) => t + v * (i || 1), 0) % 103, 'verificador do código');
+    let modo = vals[0] === 105 ? 'C' : 'B', out = '';
+    vals.slice(1).forEach(v => {
+      if (modo === 'C' && v === 100) modo = 'B';
+      else if (modo === 'B' && v === 99) modo = 'C';
+      else out += modo === 'C' ? String(v).padStart(2, '0') : String.fromCharCode(v + 32);
+    });
+    return out;
+  };
+  const chaveA = '352609AB1CD2EF00017055001000000123100000001' + '7'; // CNPJ fictício AB1CD2EF000170
+  assert.equal(chaveA.length, 44);
+  assert.equal(decodifica(D.code128(chaveA)), chaveA);
+  assert.equal(decodifica(D.code128(CHAVE)), CHAVE);
+  assert.deepEqual(D.code128(CHAVE), D.code128c(CHAVE), 'chave só com números: o mesmo CODE-128C de sempre');
+  assert.ok(D.code128(chaveA).length / 6 < 36, 'C nos trechos de números: bem mais estreito que tudo no B');
+  assert.equal(D.chaveFmt(chaveA), '3526 09AB 1CD2 EF00 0170 5500 1000 0001 2310 0000 0017', 'a chave impressa mantém as letras');
+  assert.equal(D.chaveFmt(CHAVE).split(' ').length, 11);
+});
+
 test('desenha: uma folha para nota pequena, mais folhas quando passa', () => {
   const folhas = (n, op) => { const pdf = new jsPDF({ unit: 'mm', format: 'a4' }); const t = D.desenha(pdf, D.ler(xml(n, op))); assert.equal(pdf.getNumberOfPages(), t); return t; };
   assert.equal(folhas(5, { dups: 3 }), 1);
