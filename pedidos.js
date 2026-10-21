@@ -204,7 +204,7 @@
   const CRM = raiz.CRM, P = raiz.CRMPedidos, R = raiz.CRMRegras;
   if (!CRM || !CRM.telas) return;
   // papel novo da Fase 3 (fica aqui, e não em regras.js, para não mexer no motor da crm-notas)
-  if (R.PAPEIS && !R.PAPEIS.some(x => x[0] === 'logistica')) R.PAPEIS.push(['logistica', 'Logística (só a separação dos pedidos)']);
+  if (R.PAPEIS && !R.PAPEIS.some(x => x[0] === 'logistica')) R.PAPEIS.push(['logistica', 'Logística (separação, estoque sem custo, NF-e e rotas)']);
   const esc = CRM.esc, E = () => CRM.estado;
   const num = v => (v == null || v === '' ? 0 : Number(v) || 0);
   const qtd = v => (v == null ? '—' : Number(v).toLocaleString('pt-BR', { maximumFractionDigits: 3 }));

@@ -1665,6 +1665,19 @@ Configurações → Equipe.
 - Modo local: `crm_entregas`/`crm_canhotos` no navegador e `crm_local_eu` (entrar como outro usuário da base) — para a
   demonstração e as telas dos manuais. Regras puras (`CRMRotas`) em `testes/rotas.test.js`.
 
+## Estoque operacional da logística (21/10/2026, decisão do Anderson)
+A logística faz **contagem e ajuste**, dá **entrada de mercadoria** (nota de compra) e vê os **movimentos** do produto, **sem
+custo** (custo e margem continuam só administrador, gestora e comprador). As tabelas do estoque e das compras seguem só do
+administrador e do comprador (têm custo e valor da nota); a logística lê por funções que devolvem só quantidades —
+`crm_estoque_saldo_op`, `crm_estoque_movs_op`, `crm_compras_op`, `crm_compra_itens_op(uuid[])`, `crm_compra_vinculos_op`,
+`crm_estoque_unidades_op` (todas checam `crm_eh_estoque_op()` = admin, comprador ou logística) — e grava pelas mesmas funções de
+sempre, agora abertas a ela: `crm_estoque_contagem`, `crm_compra_lancar` (o custo médio é calculado no banco, ela não vê) e
+`crm_compras_itens_produto`. Tela: aba **Estoque** no menu da logística (Compras e estoque → Estoque), com saldo (sem "FKN agora",
+diferença e custo médio), movimentos, contagem/ajuste e "Notas de compra para dar entrada" (sem valor, sem "Não é mercadoria",
+sem subir XML, sem Sefaz). Conferido no banco (transação desfeita): direto nas tabelas 0 linhas; pelas funções 1.713 produtos,
+itens e vínculos; contagem ok; vendedora bloqueada. Navegador: nenhuma chamada às leituras com custo e nenhum "R$" na tela.
+**Falta o Anderson:** os `revoke` das 7 funções novas (`schema.sql`, fim do arquivo).
+
 ## NF-e emitida pelo CRM — Fase 4 da saída do FKN (16/10/2026, pedido do Anderson)
 
 **Caminho:** navegador → Edge Function `crm-fiscal` (login de quem clicou; emite: admin, gestora e logística; cancela:

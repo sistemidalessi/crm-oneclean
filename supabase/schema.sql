@@ -3883,3 +3883,132 @@ revoke all on function public.crm_minha_rota(date) from public, anon;
 revoke all on function public.crm_entrega_confirmar(uuid, text, text, text) from public, anon;
 grant execute on function public.crm_rota_candidatas(date), public.crm_rota_dia(date), public.crm_minha_rota(date), public.crm_entrega_confirmar(uuid, text, text, text) to authenticated;
 grant execute on function public.crm_endereco_texto(public.crm_empresas) to authenticated;
+
+-- ============================================================ estoque operacional da logística (21/10/2026)
+-- Pedido do Anderson: a logística faz contagem e ajuste, dá entrada de mercadoria (nota de compra) e vê os movimentos do
+-- produto, SEM ver custo (custo e margem só administrador, gestora e comprador). As tabelas do estoque e das compras
+-- continuam só do administrador e do comprador (têm custo e valor da nota); a logística lê por estas funções, que
+-- devolvem só quantidades, e grava pelas mesmas funções de sempre (contagem e entrada), agora abertas a ela.
+create or replace function public.crm_eh_estoque_op()
+returns boolean language sql stable security definer set search_path = public as $$
+  select public.crm_eh_admin() or public.crm_eh_comprador() or public.crm_eh_logistica();
+$$;
+create or replace function public.crm_estoque_saldo_op()
+returns table (codigo text, descricao text, unidade text, saldo numeric, inicio timestamptz, ult_mov timestamptz)
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if not public.crm_eh_estoque_op() then raise exception 'sem acesso ao estoque'; end if;
+  return query select s.codigo, s.descricao, s.unidade, s.saldo, s.inicio, s.ult_mov from public.crm_estoque_saldo s order by s.codigo;
+end $$;
+create or replace function public.crm_estoque_movs_op(p_codigo text, p_limite integer)
+returns table (quando timestamptz, tipo text, quantidade numeric, qtd_doc numeric, unidade_doc text, fator numeric, conferir boolean, motivo text)
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if not public.crm_eh_estoque_op() then raise exception 'sem acesso ao estoque'; end if;
+  return query select m.quando, m.tipo, m.quantidade, m.qtd_doc, m.unidade_doc, m.fator, m.conferir, m.motivo
+    from public.crm_estoque_mov m where m.codigo = p_codigo order by m.quando desc limit least(coalesce(p_limite, 200), 500);
+end $$;
+create or replace function public.crm_compras_op(p_limite integer)
+returns table (id uuid, chave text, numero bigint, serie text, emitida_em timestamptz, fornecedor_doc text, fornecedor_nome text, situacao text, lancada_em timestamptz, obs text)
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if not public.crm_eh_estoque_op() then raise exception 'sem acesso ao estoque'; end if;
+  return query select c.id, c.chave, c.numero, c.serie, c.emitida_em, c.fornecedor_doc, c.fornecedor_nome, c.situacao, c.lancada_em, c.obs
+    from public.crm_compras c order by c.emitida_em desc nulls last limit least(coalesce(p_limite, 200), 500);
+end $$;
+create or replace function public.crm_compra_itens_op(p_compras uuid[])
+returns table (id uuid, compra_id uuid, ordem integer, cod_fornecedor text, descricao text, ean text, ncm text, cfop text, unidade text, quantidade numeric, codigo text, fator numeric)
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if not public.crm_eh_estoque_op() then raise exception 'sem acesso ao estoque'; end if;
+  return query select i.id, i.compra_id, i.ordem, i.cod_fornecedor, i.descricao, i.ean, i.ncm, i.cfop, i.unidade, i.quantidade, i.codigo, i.fator
+    from public.crm_compra_itens i where i.compra_id = any(p_compras) order by i.compra_id, i.ordem;
+end $$;
+create or replace function public.crm_compra_vinculos_op()
+returns table (fornecedor_doc text, cod_fornecedor text, codigo text, fator numeric)
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if not public.crm_eh_estoque_op() then raise exception 'sem acesso ao estoque'; end if;
+  return query select v.fornecedor_doc, v.cod_fornecedor, v.codigo, v.fator from public.crm_compra_vinculos v;
+end $$;
+create or replace function public.crm_estoque_unidades_op()
+returns table (codigo text, unidade text, fator numeric)
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if not public.crm_eh_estoque_op() then raise exception 'sem acesso ao estoque'; end if;
+  return query select u.codigo, u.unidade, u.fator from public.crm_estoque_unidades u;
+end $$;
+-- contagem/ajuste e entrada da nota de compra: as mesmas funções, agora também para a logística
+create or replace function public.crm_estoque_contagem(lote jsonb, p_tipo text, p_motivo text) returns integer language plpgsql security definer set search_path = public as $$
+declare x jsonb; s record; n integer := 0; d numeric;
+begin
+  if not public.crm_eh_estoque_op() then raise exception 'só o administrador, o comprador ou a logística'; end if;
+  if p_tipo not in ('ajuste', 'inventario') then raise exception 'tipo inválido'; end if;
+  if coalesce(btrim(p_motivo), '') = '' then raise exception 'diga o motivo'; end if;
+  for x in select * from jsonb_array_elements(coalesce(lote, '[]'::jsonb)) loop
+    select codigo, saldo into s from public.crm_estoque_saldo where codigo = x->>'codigo' for update;
+    if s.codigo is null then raise exception 'produto % não está no estoque do CRM', x->>'codigo'; end if;
+    d := round((x->>'contado')::numeric - s.saldo, 3);
+    if d = 0 then continue; end if;
+    insert into public.crm_estoque_mov (codigo, quando, tipo, quantidade, motivo) values (s.codigo, now(), p_tipo, d, left(btrim(p_motivo), 300));
+    n := n + 1;
+  end loop;
+  return n;
+end;
+$$;
+create or replace function public.crm_compra_lancar(p_compra uuid, p_itens jsonb) returns jsonb language plpgsql security definer set search_path = public as $$
+declare c record; it record; x jsonb; cod text; f numeric; q numeric; custo numeric; n integer := 0; ign integer := 0; agora timestamptz := now();
+begin
+  if not public.crm_eh_estoque_op() then raise exception 'só o administrador, o comprador ou a logística'; end if;
+  select * into c from public.crm_compras where id = p_compra for update;
+  if c.id is null then raise exception 'nota de compra não encontrada'; end if;
+  if c.situacao <> 'pendente' then raise exception 'esta nota já foi %', case c.situacao when 'lancada' then 'lançada' else 'deixada de lado' end; end if;
+  if not exists (select 1 from public.crm_estoque_saldo) then raise exception 'comece o estoque do CRM antes de dar entrada nas compras'; end if;
+  for it in select * from public.crm_compra_itens where compra_id = c.id order by ordem loop
+    x := null;
+    select e.value into x from jsonb_array_elements(coalesce(p_itens, '[]'::jsonb)) e where e.value->>'id' = it.id::text limit 1;
+    if x is null then raise exception 'falta dizer o produto do item % (%)', it.ordem, it.descricao; end if;
+    if coalesce((x->>'ignorar')::boolean, false) then ign := ign + 1; continue; end if;
+    cod := nullif(btrim(x->>'codigo'), ''); f := nullif(x->>'fator', '')::numeric;
+    if cod is null or f is null or f <= 0 then raise exception 'item % (%): diga o produto e o fator', it.ordem, it.descricao; end if;
+    q := round(it.quantidade * f, 3);
+    if q <= 0 then raise exception 'item % (%): quantidade zerada', it.ordem, it.descricao; end if;
+    custo := round((it.valor_total + it.ipi + it.st + it.frete + it.outras) / q, 4);
+    insert into public.crm_estoque_saldo (codigo, descricao, unidade, inicio)
+      select cod, coalesce(e.descricao, it.descricao), public.crm_un(coalesce(e.unidade, it.unidade)), agora - interval '1 second'
+      from (select 1) u left join public.crm_estoque e on e.codigo = cod
+      on conflict (codigo) do nothing;
+    insert into public.crm_estoque_mov (codigo, quando, tipo, quantidade, custo_unit, qtd_doc, unidade_doc, fator, compra_item_id, motivo)
+      values (cod, agora, 'entrada', q, custo, it.quantidade, public.crm_un(it.unidade), f, it.id,
+        left('NF ' || coalesce(c.numero::text, '?') || ' ' || coalesce(c.fornecedor_nome, ''), 200));
+    update public.crm_compra_itens set codigo = cod, fator = f where id = it.id;
+    if c.fornecedor_doc is not null and it.cod_fornecedor is not null then
+      insert into public.crm_compra_vinculos (fornecedor_doc, cod_fornecedor, codigo, fator) values (c.fornecedor_doc, it.cod_fornecedor, cod, f)
+        on conflict (fornecedor_doc, cod_fornecedor) do update set codigo = excluded.codigo, fator = excluded.fator, atualizado_em = now();
+    end if;
+    n := n + 1;
+  end loop;
+  update public.crm_compras set situacao = 'lancada', lancada_em = agora, lancada_por = auth.uid(), atualizado_em = agora where id = c.id;
+  return jsonb_build_object('itens', n, 'ignorados', ign);
+end;
+$$;
+create or replace function public.crm_compras_itens_produto()
+returns table (compra_id uuid, ordem integer, codigo text, como text)
+language sql stable security definer set search_path = public as $$
+  select i.compra_id, i.ordem, regexp_replace(coalesce(i.codigo, v.codigo, g.codigo), '\.\d+$', ''),
+    case when i.codigo is not null then 'item' when v.codigo is not null then 'vinculo' else 'ean' end
+  from crm_compras c join crm_compra_itens i on i.compra_id = c.id
+  left join crm_compra_vinculos v on v.fornecedor_doc = c.fornecedor_doc and v.cod_fornecedor = i.cod_fornecedor
+  left join lateral (select p.codigo from crm_fiscal_produtos p where i.ean ~ '^\d{8,14}$' and p.gtin = i.ean order by p.codigo limit 1) g on true
+  where c.situacao = 'pendente' and coalesce(i.codigo, v.codigo, g.codigo) is not null
+    and (select public.crm_eh_estoque_op())
+$$;
+grant execute on function public.crm_eh_estoque_op(), public.crm_estoque_saldo_op(), public.crm_estoque_movs_op(text, integer), public.crm_compras_op(integer),
+  public.crm_compra_itens_op(uuid[]), public.crm_compra_vinculos_op(), public.crm_estoque_unidades_op() to authenticated;
+revoke all on function public.crm_eh_estoque_op() from public, anon;
+revoke all on function public.crm_estoque_saldo_op() from public, anon;
+revoke all on function public.crm_estoque_movs_op(text, integer) from public, anon;
+revoke all on function public.crm_compras_op(integer) from public, anon;
+revoke all on function public.crm_compra_itens_op(uuid[]) from public, anon;
+revoke all on function public.crm_compra_vinculos_op() from public, anon;
+revoke all on function public.crm_estoque_unidades_op() from public, anon;

@@ -630,6 +630,20 @@
   Local.prototype.estoqueFotos = async function () { return []; };
   Local.prototype.estoqueDifs = async function () { return []; };
   Local.prototype.estoqueUnidades = async function () { return []; };
+  // Estoque operacional da logística (21/10/2026): as mesmas leituras, sem custo e sem valor da nota (funções do banco).
+  Supa.prototype.estoqueSaldoOp = async function () { return paginado((de, ate) => this.sb.rpc('crm_estoque_saldo_op').range(de, ate)); };
+  Supa.prototype.estoqueMovsOp = async function (codigo, limite) { return unwrap(await this.sb.rpc('crm_estoque_movs_op', { p_codigo: codigo, p_limite: limite || 200 })) || []; };
+  Supa.prototype.comprasOp = async function (limite) { return unwrap(await this.sb.rpc('crm_compras_op', { p_limite: limite || 200 })) || []; };
+  Supa.prototype.compraItensOp = async function (ids) { return ids && ids.length ? unwrap(await this.sb.rpc('crm_compra_itens_op', { p_compras: ids })) || [] : []; };
+  Supa.prototype.compraVinculosOp = async function () { return paginado((de, ate) => this.sb.rpc('crm_compra_vinculos_op').range(de, ate)); };
+  Supa.prototype.estoqueUnidadesOp = async function () { return paginado((de, ate) => this.sb.rpc('crm_estoque_unidades_op').range(de, ate)); };
+  const semCusto = l => (l || []).map(x => { const y = Object.assign({}, x); ['custo_medio', 'custo_unit', 'valor_total', 'valor_produtos', 'ipi', 'st', 'frete', 'outras', 'parcelas'].forEach(k => delete y[k]); return y; });
+  Local.prototype.estoqueSaldoOp = async function () { return semCusto(await this.estoqueSaldo()); };
+  Local.prototype.estoqueMovsOp = async function (c, l) { return semCusto(await this.estoqueMovs(c, l)); };
+  Local.prototype.comprasOp = async function (l) { return semCusto(await this.compras(l)); };
+  Local.prototype.compraItensOp = async function (ids) { return semCusto(await this.compraItensDe(ids)); };
+  Local.prototype.compraVinculosOp = async function () { return this.compraVinculos(); };
+  Local.prototype.estoqueUnidadesOp = async function () { return this.estoqueUnidades(); };
   Local.prototype.estoqueUnidadeSalvar = async function () { throw new Error('o estoque do CRM só funciona ligado ao banco'); };
 
   // Contas a receber (listagem do FKN): retrato novo a cada importação — grava por duplicata,

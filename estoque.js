@@ -245,13 +245,24 @@
 
   let saldo = null, fkn = [], fotos = [], difs = [], fotoVista = null, carregando = false, compras = [], lendoCompras = '';
   const filtro = { ver: 'saldo', busca: '', soDif: false };
-  let dfe = [], dfeEst = null, buscouDfe = false, buscandoDfe = '', fornDocs = [], fornCad = [], itensProd = [], itensPend = [];
+  let dfe = [], dfeEst = null, buscouDfe = false, buscandoDfe = '', fornDocs = [], fornCad = [], itensProd = [], itensPend = [], nomesOp = [];
+  // Logística (21/10/2026, pedido do Anderson): contagem e ajuste, entrada da nota de compra e movimentos, SEM custo nem
+  // valor da nota (custo só administrador, gestora e comprador). Lê pelas funções "…_op" do banco, que só trazem quantidades.
+  const op = () => CRM.ehLogistica();
 
   async function carrega() {
     if (carregando) return;
     carregando = true;
     try {
       const st = CRM.store();
+      if (op()) {
+        [saldo, compras, nomesOp] = await Promise.all([st.estoqueSaldoOp(), st.comprasOp(200).catch(() => []), st.estoqueDisponivel ? st.estoqueDisponivel().catch(() => []) : []]);
+        fkn = []; fotos = []; difs = []; dfe = []; dfeEst = null; fornDocs = []; fornCad = [];
+        const idsOp = compras.filter(c => c.situacao === 'pendente').map(c => c.id);
+        itensProd = idsOp.length ? await st.comprasItensProduto().catch(() => []) : [];
+        itensPend = idsOp.length ? await st.compraItensOp(idsOp).catch(() => []) : [];
+        carregando = false; CRM.render(); return;
+      }
       [saldo, fkn, fotos, compras, dfe, dfeEst] = await Promise.all([st.estoqueSaldo(), st.estoque(), st.estoqueFotos(60), st.compras ? st.compras(200).catch(() => []) : [],
         st.dfe ? st.dfe().catch(() => []) : [], st.dfeEstado ? st.dfeEstado().catch(() => null) : null]);
       [fornDocs, fornCad, itensProd] = await Promise.all([st.fornecedorDocs ? st.fornecedorDocs().catch(() => []) : [], st.fornecedores ? st.fornecedores().catch(() => []) : [],
@@ -288,6 +299,10 @@
     const ult = fotos.find(f => f.conferida_em);
     const r = (ult && ult.resumo) || {};
     const kpi = (t, v, s, cls, ver) => '<button type="button" class="kpi clicavel ' + (cls || '') + (filtro.ver === ver ? ' ativo' : '') + '" data-acao="es-ver" data-id="' + ver + '"><span>' + esc(t) + '</span><strong>' + v + '</strong><small>' + esc(s) + '</small></button>';
+    if (op()) return '<div class="kpis">' +
+      kpi('Produtos no estoque do CRM', (saldo || []).length, 'saldo de cada produto e os movimentos (☰)', '', 'saldo') +
+      kpi('Notas de compra', compras.filter(c => c.situacao === 'pendente').length + ' pendente(s)', 'conferir o que chegou e dar entrada', compras.some(c => c.situacao === 'pendente') ? 'ambar' : '', 'compras') +
+      kpi('Contagem e ajuste', '✎', 'inventário por contagem ou acerto de um produto', '', 'contagem') + '</div>';
     return '<div class="kpis">' +
       kpi('Produtos no estoque do CRM', (saldo || []).length, 'valor a custo médio: ' + R.moeda(S.valor(linhas)), '', 'saldo') +
       kpi('Última conferência com o FKN', ult ? (r.diferentes || 0) + ' diferença(s)' : '—', ult ? 'listagem de ' + quando(ult.gerado_em) + ' · ' + (r.sem_explicacao || 0) + ' sem explicação' : 'chega com a próxima listagem',
@@ -302,6 +317,15 @@
     const q = R.normaliza(filtro.busca);
     const l = linhas.filter(x => (!q || R.normaliza(x.descricao + ' ' + x.codigo + ' ' + (x.fornecedor || '')).indexOf(q) !== -1) && (!filtro.soDif || (x.dif != null && Math.abs(x.dif) >= 0.0005)))
       .sort((a, b) => String(a.descricao).localeCompare(String(b.descricao), 'pt-BR'));
+    if (op()) return '<section class="cartao"><h2>Saldo por produto <small>' + l.length + ' produto(s)</small></h2>' +
+      '<p class="dica">O saldo do CRM: cada nota de venda dá a saída, cada entrada de nota de compra soma e cada contagem acerta. ☰ mostra os movimentos; ✎ acerta o saldo de um produto.</p>' +
+      '<p class="acoes"><input type="search" placeholder="Procurar produto ou código" value="' + esc(filtro.busca) + '" data-es-busca class="of-busca"></p>' +
+      (l.length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Produto</th><th class="num">Saldo</th><th>Último movimento</th><th></th></tr></thead><tbody>' +
+        l.slice(0, 300).map(x => '<tr><td><strong>' + esc(R.nomeDeItem(x.descricao || x.codigo)) + '</strong><small>' + esc(x.codigo) + (x.unidade ? ' · ' + esc(x.unidade) : '') + '</small></td>' +
+          '<td class="num">' + qtd(x.saldo) + '</td><td>' + esc(quando(x.ultMov)) + '</td>' +
+          '<td class="num">' + (x.saldo != null ? '<button type="button" class="mini" data-acao="es-movs" data-id="' + esc(x.codigo) + '" title="Movimentos">☰</button>' +
+            '<button type="button" class="mini" data-acao="es-ajustar" data-id="' + esc(x.codigo) + '" title="Acertar o saldo">✎</button>' : '') + '</td></tr>').join('') +
+        '</tbody></table></div>' + (l.length > 300 ? '<p class="dica">Mostrando 300 de ' + l.length + '; use a busca.</p>' : '') : '<p class="vazio">Nada aqui.</p>') + '</section>';
     return '<section class="cartao"><h2>Saldo por produto <small>' + l.length + ' produto(s)</small></h2>' +
       '<p class="dica">"FKN agora" é o "atual" da última listagem; a diferença daqui pode ser só uma nota emitida depois dela. A conferência de verdade, na mesma hora, está em "Última conferência".</p>' +
       '<p class="acoes"><input type="search" placeholder="Procurar produto, código ou fornecedor" value="' + esc(filtro.busca) + '" data-es-busca class="of-busca"> ' +
@@ -347,7 +371,22 @@
   }
   const ORDEM_CHEGADA = { chegou: 0, provavel: 1, aguardando: 2, sem_dado: 3 };
   const HISTORICO = 'antes do início do estoque do CRM';
+  // Notas de compra para a logística: só fornecedor, número, data e situação (sem valor); dá entrada no que chegou.
+  function telaComprasOp() {
+    const pend = compras.filter(c => c.situacao === 'pendente').sort((a, b) => String(b.emitida_em).localeCompare(String(a.emitida_em))),
+      lancadas = compras.filter(c => c.situacao === 'lancada').slice(0, 30);
+    const linha = c => '<tr><td><strong>' + esc(c.fornecedor_nome || '?') + '</strong><small>NF ' + esc(c.numero) + ' · ' + esc(quando(c.emitida_em)) + '</small></td><td>' +
+      (c.situacao === 'pendente' ? CRM.selo('pendente', 'ambar') : CRM.selo('entrada ' + quando(c.lancada_em), 'verde')) + '</td><td class="num">' +
+      (c.situacao === 'pendente' ? '<button type="button" class="btn" data-acao="es-compra" data-id="' + esc(c.id) + '">Conferir e dar entrada</button>'
+        : '<button type="button" class="mini" data-acao="es-compra" data-id="' + esc(c.id) + '" title="Ver os itens">☰</button>') + '</td></tr>';
+    const tabela = l => '<div class="tabela-rolagem"><table class="tabela"><tbody>' + l.map(linha).join('') + '</tbody></table></div>';
+    return '<section class="cartao"><h2>Notas de compra para dar entrada <small>' + pend.length + '</small></h2>' +
+      (pend.length ? '<p class="dica">As mais novas em cima. Quando a mercadoria chegar, abra a nota, confira cada item com o que veio e dê a entrada: ' +
+        'soma no estoque do CRM. Nota que não é mercadoria (combustível, serviço) fica com o comprador.</p>' + tabela(pend) : '<p class="vazio">Nenhuma nota esperando entrada.</p>') +
+      (lancadas.length ? '<details data-chave="es-compras-lancadas"><summary>Entradas dadas (' + lancadas.length + ')</summary>' + tabela(lancadas) + '</details>' : '') + '</section>';
+  }
   function telaCompras() {
+    if (op()) return telaComprasOp();
     const ch = S.chegadaCompras({ compras: compras.filter(c => c.situacao === 'pendente'), itensProd, fkn, fknForn: fknFornecedores() });
     const listagem = (fkn || []).reduce((m, x) => (x.atualizado_em && x.atualizado_em > m ? x.atualizado_em : m), '');
     const despesa = new Map();
@@ -549,12 +588,12 @@
   CRM.telas.estoque = {
     turmaSub: () => filtro.ver,
     render() {
-      if (!(CRM.ehAdmin() || CRM.ehComprador())) return '<div class="cartao"><p class="vazio">Esta tela é do administrador e do comprador.</p></div>';
+      if (!(CRM.ehAdmin() || CRM.ehComprador() || op())) return '<div class="cartao"><p class="vazio">Esta tela é do administrador, do comprador e da logística.</p></div>';
       if (saldo === null) { setTimeout(carrega, 0); return cabecalho() + '<div class="cartao"><p class="vazio">Carregando…</p></div>'; }
       if (!saldo.length) return cabecalho() + (filtro.ver === 'fotos' && CRM.produtos ? CRM.produtos.telaFotos() : naoComecado());
       const linhas = S.junta(saldo, fkn);
       return cabecalho() + quadros(linhas) +
-        (filtro.ver === 'conferencia' ? telaConferencia() : filtro.ver === 'contagem' ? telaContagem() : filtro.ver === 'compras' ? telaCompras()
+        (filtro.ver === 'conferencia' && !op() ? telaConferencia() : filtro.ver === 'contagem' ? telaContagem() : filtro.ver === 'compras' ? telaCompras()
           : filtro.ver === 'fotos' && CRM.produtos ? CRM.produtos.telaFotos() : telaSaldo(linhas));
     },
     depois(c) {
@@ -586,7 +625,7 @@
     },
     'es-movs': async cod => {
       try {
-        const l = await CRM.store().estoqueMovs(cod, 200);
+        const l = op() ? await CRM.store().estoqueMovsOp(cod, 200) : await CRM.store().estoqueMovs(cod, 200);
         const s = (saldo || []).find(x => x.codigo === cod) || {};
         CRM.abrirForm({
           titulo: 'Movimentos: ' + R.nomeDeItem(s.descricao || cod), largura: 'largo', campos: [], salvarTexto: 'Fechar', aoSalvar: async () => {},
@@ -671,8 +710,9 @@
       const c = compras.find(x => x.id === id); if (!c) return;
       try {
         const st = CRM.store();
-        const [itens, vinc, unis] = await Promise.all([st.compraItens(id), st.compraVinculos().catch(() => []), st.estoqueUnidades().catch(() => [])]);
-        const base = (fkn || []).filter(e => !S.ehCaixa(e.codigo));
+        const [itens, vinc, unis] = op() ? await Promise.all([st.compraItensOp([id]), st.compraVinculosOp().catch(() => []), st.estoqueUnidadesOp().catch(() => [])])
+          : await Promise.all([st.compraItens(id), st.compraVinculos().catch(() => []), st.estoqueUnidades().catch(() => [])]);
+        const base = (op() ? nomesOp : fkn || []).filter(e => !S.ehCaixa(e.codigo));
         const nomeDe = new Map(base.map(e => [e.codigo, e.descricao])), unDe = new Map(base.map(e => [e.codigo, e.unidade]));
         (saldo || []).forEach(x => { if (!nomeDe.has(x.codigo)) { nomeDe.set(x.codigo, x.descricao); unDe.set(x.codigo, x.unidade); } });
         const ctx = { vinculos: new Map(vinc.map(v => [v.fornecedor_doc + '|' + v.cod_fornecedor, v])), produtos: base, unidades: new Map(unis.map(u => [u.codigo + '|' + u.unidade, Number(u.fator)])) };
@@ -680,7 +720,7 @@
         const sug = new Map(itens.map(it => [it.id, pend ? S.sugere(it, c.fornecedor_doc, ctx) : { codigo: it.codigo, fator: it.fator, como: '' }]));
         const linhaI = it => {
           const g = sug.get(it.id) || {};
-          return '<tr><td><strong>' + esc(it.descricao) + '</strong><small>' + esc(it.cod_fornecedor || '') + ' · ' + qtd(it.quantidade) + ' ' + esc(it.unidade || '') + ' · ' + R.moeda(Number(it.valor_total) + Number(it.ipi) + Number(it.st) + Number(it.frete) + Number(it.outras)) +
+          return '<tr><td><strong>' + esc(it.descricao) + '</strong><small>' + esc(it.cod_fornecedor || '') + ' · ' + qtd(it.quantidade) + ' ' + esc(it.unidade || '') + (op() ? '' : ' · ' + R.moeda(Number(it.valor_total) + Number(it.ipi) + Number(it.st) + Number(it.frete) + Number(it.outras))) +
             (g.como ? ' · ' + esc(g.como) : '') + '</small></td>' +
             '<td><input name="c_' + esc(it.id) + '" list="esProdutos" value="' + esc(g.codigo || '') + '" placeholder="código do produto"' + (pend ? '' : ' disabled') + ' class="es-cod"><small data-nome="' + esc(it.id) + '">' + esc(nomeDe.get(g.codigo) || '') + '</small></td>' +
             '<td><input name="f_' + esc(it.id) + '" type="number" step="any" min="0" value="' + esc(g.fator == null ? '' : g.fator) + '"' + (pend ? '' : ' disabled') + ' class="es-fator"><small data-q="' + esc(it.id) + '"></small></td>' +
@@ -698,7 +738,7 @@
               const cod = form.elements['c_' + it.id].value.trim(), fat = Number(form.elements['f_' + it.id].value) || 0;
               const nome = form.querySelector('[data-nome="' + it.id + '"]'), q = form.querySelector('[data-q="' + it.id + '"]');
               if (nome) nome.textContent = nomeDe.get(cod) || (cod ? 'código que o estoque não tem' : '');
-              if (q) q.textContent = fat ? '= ' + qtd(Number(it.quantidade) * fat) + ' ' + (unDe.get(cod) || '') + ' · ' + R.moeda(S.custoItem(it, fat)) + ' cada' : '';
+              if (q) q.textContent = fat ? '= ' + qtd(Number(it.quantidade) * fat) + ' ' + (unDe.get(cod) || '') + (op() ? '' : ' · ' + R.moeda(S.custoItem(it, fat)) + ' cada') : '';
             };
             itens.forEach(it => { atualiza(it); ['c_', 'f_'].forEach(p => form.elements[p + it.id].addEventListener('input', () => atualiza(it))); });
           },
