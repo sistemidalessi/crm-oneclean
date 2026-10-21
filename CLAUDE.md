@@ -1540,9 +1540,13 @@ preços de custo as vendedoras não enxergam)".
   Prime) está ligada ao cadastro **"Neilor Instituto TEA"** (TEA Clínica, outro CNPJ), por isso a lista de títulos (que usa o
   nome do cadastro) não a mostrava no "D". O boleto do dia era o mesmo de 20/10 (mesma linha digitável: a 2ª via mantém a
   linha) e veio em "não mandar". Corrigido na tela (`cobranca.js`): a lista mostra "[na nota: …]" quando o nome da nota é
-  outro e põe primeiro os títulos do mesmo CNPJ ou da mesma raiz. **Pendente, esperando o Anderson:** passar a NF 2428, o
-  título e o boleto para o cadastro da Fisio Med Prime (`c77daf7f…`, mesma vendedora Renata) com backup, e ver por que a nota
-  caiu no cadastro do TEA.
+  outro e põe primeiro os títulos do mesmo CNPJ ou da mesma raiz. **Feito no mesmo dia, autorizado pelo Anderson:** NF 2428,
+  título, boleto, 3 tarefas da cobrança e o negócio "2164 - Neilor Fisiomed ABA" (ganho de R$ 1.703,98 = a nota) com as 3
+  tarefas dele passaram para a Fisio Med Prime (`c77daf7f…`); backup `crm_backup.mover_nf2428_20261021`; registro "sistema"
+  nos dois cadastros. Causa: "Neilor" é o contato que compra pelo Instituto TEA e pela Fisiomed ABA; no Agendor era um cadastro
+  só, e a mescla de 01/10 juntou nele a "TEA CLINICA" e a "DFISIO MED PRIME" criadas pelas notas. Ficaram no TEA, à espera de
+  decisão: os negócios "Neilor Fisiomed ABA" perdidos (263, 266, 2162, 2321) e o orçamento 22496 (ganho R$ 533,38, cuja NF 2699
+  já está na Fisio Med Prime).
 - **21/10 — fotos e fichas (pergunta do Anderson):** as pré-marcadas (459) têm foto confiável, **não** ficha completa: 203 com
   ficha técnica, 110 com FISPQ, 76 com as duas, 222 só a foto (não marcadas: 247 / 116 / 63 / 786). Agora cada sugestão tem
   selos (📄 Ficha técnica, ⚠ FISPQ, cinza "sem …"), filtro "Ficha técnica e FISPQ" (todas, as duas, com ficha, com FISPQ, só a
