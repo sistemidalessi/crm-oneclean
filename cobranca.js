@@ -880,7 +880,9 @@
     // WhatsApp oficial da Meta: um clique, todas os(as) vendedores(as) recebem sozinhas (com o PDF completo anexo)
     'cob-meta-reenviar': (id, el) => CRM.acoes['cob-meta'](id, el, paraReenviar()),
     'cob-meta': (id, el, outra) => {
-      const lista = outra || paraAvisar();
+      // 21/10/2026: o clique passa o evento como 3º parâmetro (app.js); só uma lista de boletos conta (o "reenviar"). Antes o
+      // evento era tomado pela lista, que parecia vazia, e o botão não fazia nada.
+      const lista = Array.isArray(outra) ? outra : paraAvisar();
       if (!lista.length) return;
       if (el) el.disabled = true;
       (async () => {
