@@ -539,9 +539,10 @@
       ['Ativar lembretes na tela', pedirNotificacao],
       ['Atalhos do teclado', mostraAtalhos],
       ['Tela ao entrar no CRM', formTelaInicial],
+      jaInstalado() ? null : ['Instalar no celular ou no computador', instalarApp],
       store.modo === 'supabase' ? ['Alterar minha senha', formMinhaSenha] : ['Carregar dados de exemplo', () => CRM.ajustes.carregarExemplos()],
       store.modo === 'supabase' ? ['Sair', () => sb.auth.signOut()] : ['Apagar tudo deste navegador', () => CRM.ajustes.apagarTudoLocal()]
-    ]),
+    ].filter(Boolean)),
     sino: () => CRM.irPara(Number(($('#sino') || {}).dataset && $('#sino').dataset.boletos) > 0 ? 'fila' : 'inicio')
   };
 
@@ -642,6 +643,37 @@
     setTimeout(() => location.reload(), 1500);
   }
   CRM.versao = { minha: () => minhaVersao, confere: () => { ultimaConsulta = 0; return confereVersao(); } };
+
+  // ------------------------------------------------------------ app no celular (21/10/2026)
+  // O CRM vira app na tela inicial (manifest.webmanifest + sw.js, sem cache). Android e computador (Chrome/Edge): o
+  // navegador oferece "Instalar"; iPhone: só pelo Safari, em Compartilhar → "Adicionar à Tela de Início".
+  let pedidoInstalar = null;
+  window.addEventListener('beforeinstallprompt', ev => { ev.preventDefault(); pedidoInstalar = ev; });
+  window.addEventListener('appinstalled', () => { pedidoInstalar = null; CRM.toast('Pronto: o CRM está na tela inicial.'); });
+  const jaInstalado = () => (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+  if ('serviceWorker' in navigator && window.isSecureContext) navigator.serviceWorker.register('sw.js').catch(e => console.warn('sw', e));
+  async function instalarApp() {
+    if (pedidoInstalar) {
+      const p = pedidoInstalar; pedidoInstalar = null;
+      p.prompt();
+      try { await p.userChoice; } catch (e) { /* fechou */ }
+      return;
+    }
+    const iphone = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const passos = iphone
+      ? ['Abra o CRM no <strong>Safari</strong> (no iPhone, só o Safari instala).', 'Toque em <strong>Compartilhar</strong> (o quadrado com a seta para cima, embaixo da tela).',
+        'Desça e toque em <strong>"Adicionar à Tela de Início"</strong> e depois em <strong>Adicionar</strong>.']
+      : ['No celular Android, abra o CRM no <strong>Chrome</strong>; no computador, no Chrome ou no Edge.',
+        'Toque no menu <strong>⋮</strong> (no alto, à direita) e em <strong>"Instalar app"</strong> ou <strong>"Adicionar à tela inicial"</strong>.',
+        'Confirme em <strong>Instalar</strong>. O ícone aparece junto com os outros apps.'];
+    CRM.abrirForm({
+      titulo: 'Instalar o CRM', campos: [], salvarTexto: 'Entendi',
+      htmlAntes: '<p>O CRM fica com ícone próprio na tela inicial e abre em tela cheia, sem a barra do navegador. Não precisa de loja de apps, e as atualizações chegam sozinhas.</p>' +
+        '<ol class="passos-instalar">' + passos.map(x => '<li>' + x + '</li>').join('') + '</ol>' +
+        '<p class="dica">Depois de instalado, é só tocar no ícone. O login e as permissões são os mesmos do navegador.</p>',
+      aoSalvar: () => true
+    });
+  }
 
   function mostraAtalhos() {
     CRM.abrirForm({
