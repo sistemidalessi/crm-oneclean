@@ -1684,6 +1684,9 @@ itens e vínculos; contagem ok; vendedora bloqueada. Navegador: nenhuma chamada 
 "Desfazer faturado"; só do admin: fechamento do mês para o contador e configuração fiscal. Vendedora segue barrada
 (conferido no banco). Manual da logística atualizado (mesma URL).
 
+**Retomar em 22/10: boleto pelo BB (Fase 5).** Modelo `entrega_cliente` aguardando análise da Meta. O que o Anderson
+levanta no BB (convênio, carteira, API de Cobrança ou CNAB 240/400) está em `sistemi-dalessi/docs/plano-sair-do-fkn.md`, Fase 5.
+
 ## NF-e emitida pelo CRM — Fase 4 da saída do FKN (16/10/2026, pedido do Anderson)
 
 **Caminho:** navegador → Edge Function `crm-fiscal` (login de quem clicou; emite: admin, gestora e logística; cancela e
