@@ -512,7 +512,12 @@
   let lendo = null; // { feitos, total }
   const TIPOS = /^(application\/pdf|image\/(png|jpeg|webp))$/;
   const vencidosACobrar = () => titulosAdmin().filter(t => t.vencimento < hoje() && !t.cartorio_em && t.empresa_id);
-  const rotuloTitulo = t => CRM.nomeEmpresa(t.empresa_id) + ' · ' + nomeNF(t) + ' (' + t.duplicata + ') · ' + R.moeda(t.valor) + ' · venceu ' + dm(t.vencimento);
+  // 21/10/2026: o nome que veio na nota aparece junto quando é diferente do cadastro (a NF 2428 da DFISIO estava ligada a
+  // outro cadastro e não se achava pelo nome na lista)
+  const rotuloTitulo = t => {
+    const cad = CRM.nomeEmpresa(t.empresa_id), nf = String(t.cliente_nome || '').trim();
+    return cad + (nf && R.normaliza(nf) !== R.normaliza(cad) ? ' [na nota: ' + nf + ']' : '') + ' · ' + nomeNF(t) + ' (' + t.duplicata + ') · ' + R.moeda(t.valor) + ' · venceu ' + dm(t.vencimento);
+  };
 
   async function lerArquivos(files) {
     const lista = [].slice.call(files || []).filter(f => TIPOS.test(f.type));
@@ -551,10 +556,12 @@
     const campos = itens.map((x, i) => {
       // sem título achado fica "escolha o título" (não deixa mandar sem escolher); já mandado vem "não mandar"
       valores['b' + i] = x.ja ? 'nao' : x.casa.titulo ? x.casa.titulo.duplicata : '';
-      const docB = doc(x.b.documento);
+      // primeiro os candidatos e os do mesmo CNPJ (do cadastro ou da nota; a raiz basta: matriz e filiais)
+      const docB = doc(x.b.documento), raizB = docB.length === 14 ? docB.slice(0, 8) : docB;
+      const doMesmo = t => { const ds = [doc((CRM.empresa(t.empresa_id) || {}).cnpj), doc(t.cliente_doc)]; return !!raizB && ds.some(d => d && (d === docB || (d.length === 14 && d.slice(0, 8) === raizB))); };
       const ordem = venc.slice().sort((a, b) => {
-        const pa = (x.casa.candidatos || []).indexOf(a) !== -1 || doc((CRM.empresa(a.empresa_id) || {}).cnpj) === docB ? 0 : 1;
-        const pb = (x.casa.candidatos || []).indexOf(b) !== -1 || doc((CRM.empresa(b.empresa_id) || {}).cnpj) === docB ? 0 : 1;
+        const pa = (x.casa.candidatos || []).indexOf(a) !== -1 || doMesmo(a) ? 0 : 1;
+        const pb = (x.casa.candidatos || []).indexOf(b) !== -1 || doMesmo(b) ? 0 : 1;
         return pa - pb || CRM.nomeEmpresa(a.empresa_id).localeCompare(CRM.nomeEmpresa(b.empresa_id));
       });
       return { nome: 'b' + i, tipo: 'select', largo: true,
