@@ -1660,8 +1660,8 @@ Configurações → Equipe.
   subir o canhoto; a vendedora não lê nem grava entrega nem canhoto; a gestora vê a rota e as candidatas; o anônimo nada.
   `revoke` das seis funções novas (`crm_eh_motorista`, `crm_endereco_texto`, `crm_rota_candidatas`, `crm_rota_dia`,
   `crm_minha_rota`, `crm_entrega_confirmar`) rodados pelo Anderson em 21/10 e conferidos (anônimo sem acesso, logado com
-  acesso). **Falta o Anderson:** criar os usuários
-  Logística e Motorista, criar o modelo da entrega e esperar a Meta aprovar (pode reclassificar como marketing).
+  acesso). Usuários criados pelo Anderson em 21/10 (2 de logística, 2 motoristas) e conferidos por papel no banco. **Falta o Anderson:**
+  criar o modelo da entrega e esperar a Meta aprovar (pode reclassificar como marketing).
 - Modo local: `crm_entregas`/`crm_canhotos` no navegador e `crm_local_eu` (entrar como outro usuário da base) — para a
   demonstração e as telas dos manuais. Regras puras (`CRMRotas`) em `testes/rotas.test.js`.
 
