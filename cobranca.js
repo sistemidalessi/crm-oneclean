@@ -464,16 +464,61 @@
       valores: { tel: tels[0].tel },
       salvarTexto: 'Mandar',
       aoSalvar: async v => {
-        const r = await CRM.store().whatsapp({ acao: 'cliente', boletos: lista.map(b => b.id), telefone: v.tel });
-        const agora = new Date().toISOString(), ids = new Set(lista.map(b => b.id));
-        E().boletos = (E().boletos || []).map(b => (ids.has(b.id) ? Object.assign({}, b, { cli_msg: r.id, cli_status: 'enviado', cli_em: agora, cli_erro: null, cli_tel: r.para, cli_prazo: r.prazo,
-          cobrado_em: b.cobrado_em || agora, cobrado_por: b.cobrado_por || CRM.meuId() }) : b));
-        const sel = tels.find(x => x.tel === v.tel), c = sel && sel.contatoId ? CRM.contato(sel.contatoId) : null;
-        await CRM.fichas.registraAuto(e, c, 'whatsapp', 'Boleto atualizado enviado ao cliente pelo WhatsApp da ' + CRM.nomeInstalacao() + ' (' + telBR(r.para) + '), com o PDF anexo: ' +
-          lista.map(b => nomeNF(b) + ' ' + R.moeda(b.valor)).join('; ') + '. Na mensagem, o cartório depois de ' + R.dataBR(r.prazo) + '.');
-        await concluiTarefas(e.id);
+        const r = await mandaAoCliente(e, lista, tels.find(x => x.tel === v.tel) || { tel: v.tel });
         CRM.render();
         CRM.toast('Mandado a ' + telBR(r.para) + ' com o PDF anexo. Se o cliente tocar em "Já paguei" ou responder, vira tarefa.');
+      }
+    });
+  }
+  // manda os boletos de um cliente pelo número da empresa (modelo boleto_cliente) e tira da cobrança do(a) vendedor(a)
+  async function mandaAoCliente(e, lista, sel) {
+    const r = await CRM.store().whatsapp({ acao: 'cliente', boletos: lista.map(b => b.id), telefone: sel.tel });
+    const agora = new Date().toISOString(), ids = new Set(lista.map(b => b.id));
+    E().boletos = (E().boletos || []).map(b => (ids.has(b.id) ? Object.assign({}, b, { cli_msg: r.id, cli_status: 'enviado', cli_em: agora, cli_erro: null, cli_tel: r.para, cli_prazo: r.prazo,
+      cobrado_em: b.cobrado_em || agora, cobrado_por: b.cobrado_por || CRM.meuId() }) : b));
+    const c = sel.contatoId ? CRM.contato(sel.contatoId) : null;
+    await CRM.fichas.registraAuto(e, c, 'whatsapp', 'Boleto atualizado enviado ao cliente pelo WhatsApp da ' + CRM.nomeInstalacao() + ' (' + telBR(r.para) + '), com o PDF anexo: ' +
+      lista.map(b => nomeNF(b) + ' ' + R.moeda(b.valor)).join('; ') + '. Na mensagem, o cartório depois de ' + R.dataBR(r.prazo) + '.');
+    await concluiTarefas(e.id);
+    return r;
+  }
+
+  // ---- 21/10/2026 (Anderson: "gostaria de mandar direto para o cliente; mandar para a vendedora e para o cliente fica ruim,
+  // o cliente vai receber duas vezes; para elas só tem que aparecer que está em atraso"): com o modelo do cliente aprovado na
+  // Meta, a cobrança vai DIRETO ao cliente pelo número da empresa, sem tarefa nem mensagem para o(a) vendedor(a), que fica só
+  // com o selo de título em atraso. Mandar às vendedoras continua como reserva (cliente sem celular no cadastro, por exemplo).
+  const paraClientes = () => pendentes().filter(b => b.arquivo && !b.cli_em);
+  function porCliente(lista) {
+    const g = new Map();
+    lista.forEach(b => { if (b.empresa_id) { if (!g.has(b.empresa_id)) g.set(b.empresa_id, []); g.get(b.empresa_id).push(b); } });
+    return [...g.entries()].map(([id, l]) => {
+      const e = CRM.empresa(id);
+      return { e, l, tel: e ? telefonesCliente(e, CRM.doEmpresa('contatos', e.id)).find(x => x.celular) || null : null };
+    }).filter(x => x.e).sort((a, b) => CRM.nomeEmpresa(a.e.id).localeCompare(CRM.nomeEmpresa(b.e.id)));
+  }
+  function formDiretoClientes(lista) {
+    const grupos = porCliente(lista || paraClientes()), comTel = grupos.filter(x => x.tel), semTel = grupos.filter(x => !x.tel);
+    if (!grupos.length) return;
+    const dias = Number((E().cfg || {}).cobranca_prazo_cartorio) || 5;
+    CRM.abrirForm({
+      titulo: 'Enviar direto aos clientes', largura: 'largo',
+      intro: 'Cada cliente recebe do WhatsApp da ' + CRM.nomeInstalacao() + ', em nome do(a) vendedor(a) da carteira: o PDF completo anexo (resumo, nota fiscal e boleto), o valor atualizado, ' +
+        'a linha digitável e o aviso cordial de que, se não for pago em ' + dias + ' dias úteis, o título segue para o cartório. "Já paguei" e as respostas viram tarefa.\n' +
+        'Os(as) vendedores(as) não recebem nada: veem só o selo de título em atraso (para não venderem de novo sem acertar).',
+      htmlAntes: '<ul class="cob-lista">' + comTel.map(x => '<li><strong>' + esc(CRM.nomeEmpresa(x.e.id)) + '</strong> · ' + esc(x.l.map(b => nomeNF(b) + ' ' + R.moeda(b.valor)).join(', ')) +
+          ' → ' + esc(x.tel.rotulo) + ' ' + esc(telBR(x.tel.tel)) + '</li>').join('') + '</ul>' +
+        (semTel.length ? '<p class="neg">Sem celular no cadastro (não vão): ' + esc(semTel.map(x => CRM.nomeEmpresa(x.e.id)).join(', ')) + '. Cadastre o celular do financeiro na ficha, ou mande pelo(a) vendedor(a).</p>' : ''),
+      campos: [], salvarTexto: 'Enviar direto aos clientes (' + comTel.length + ')',
+      rodape: '<button type="button" class="btn sec" data-acao="cob-para-vendedoras">ou mandar às vendedoras</button>',
+      aoSalvar: async () => {
+        if (!comTel.length) throw new Error('Nenhum cliente com celular no cadastro.');
+        const ok = [], falhas = [];
+        for (const x of comTel) {
+          try { await mandaAoCliente(x.e, x.l, x.tel); ok.push(x); } catch (e) { falhas.push(CRM.nomeEmpresa(x.e.id) + ' (' + (e.message || e) + ')'); }
+        }
+        CRM.render();
+        CRM.toast(ok.length + ' cliente(s) receberam o boleto com o PDF pelo WhatsApp da ' + CRM.nomeInstalacao() + '.' + (falhas.length ? ' Falharam: ' + falhas.join('; ') + '.' : '') +
+          (semTel.length ? ' ' + semTel.length + ' sem celular ficaram na Cobrança.' : ''), !!falhas.length);
       }
     });
   }
@@ -542,6 +587,7 @@
     conferir(lidos, avisos);
   }
   function conferir(lidos, avisos) {
+    cliLido = 0; cliSituacao(); // confere de novo se o modelo do cliente está aprovado (decide para onde vai depois)
     const venc = vencidosACobrar(), empresas = E().D.empresas || [], usados = new Set();
     const itens = lidos.map(x => {
       const conf = confereBoleto(x.b, hoje());
@@ -619,14 +665,15 @@
           gravados.push(r);
           n++;
         }
-        await criaTarefas(gravados);
+        const direto = cliOk; // 21/10/2026: com o modelo do cliente aprovado, vai direto ao cliente (sem tarefa para a vendedora)
+        if (!direto) await criaTarefas(gravados);
         const pc = await comporPdfs(gravados);
         CRM.render();
         const naoMandados = itens.length - n;
-        CRM.toast(n + ' boleto(s) gravado(s), com a tarefa de cobrar para cada vendedor(a)' + (naoMandados ? ' · ' + naoMandados + ' não mandado(s), como marcado' : '') + (semPdf ? ' · ' + semPdf + ' sem o PDF (não consegui separar a página): vão só com a linha digitável' : '') +
+        CRM.toast(n + ' boleto(s) gravado(s)' + (direto ? '' : ', com a tarefa de cobrar para cada vendedor(a)') + (naoMandados ? ' · ' + naoMandados + ' não mandado(s), como marcado' : '') + (semPdf ? ' · ' + semPdf + ' sem o PDF (não consegui separar a página): vão só com a linha digitável' : '') +
           (pc.clientes ? ' · PDF completo (resumo, nota fiscal e boleto) de ' + (pc.clientes - pc.falhas) + ' cliente(s)' : '') +
           (pc.falhas ? ', ' + pc.falhas + ' ficaram só com o boleto do banco' : '') + (pc.semNota ? ' · ' + pc.semNota + ' nota(s) sem o XML guardado: vão sem a DANFE' : '') + '.', !!pc.falhas);
-        setTimeout(formAvisar, 0); // agora: mandar no WhatsApp de cada vendedor(a)
+        setTimeout(() => (direto ? formDiretoClientes(gravados.map(b => boleto(b.id) || b)) : formAvisar()), 0); // agora: direto aos clientes (ou às vendedoras)
       }
     });
   }
@@ -760,7 +807,10 @@
         '<p>Gere no Banco do Brasil a 2ª via atualizada (com juros) dos vencidos e <strong>arraste os PDFs aqui</strong> — vários de uma vez, ou um PDF com vários boletos. ' +
         'O CRM lê cada um (valor, vencimento, linha digitável), acha o título e você confere antes de mandar aos(às) vendedores(as).</p>' +
         '<label class="btn sec arquivo">Escolher arquivos<input type="file" id="cobArq" multiple accept="application/pdf,image/png,image/jpeg,image/webp"></label>') + '</section>' +
-      (avisar.length ? '<section class="cartao cob-aviso"><h2>Mandar no WhatsApp dos(as) vendedores(as) <small>' + avisar.reduce((t, x) => t + x[1].length, 0) + ' boleto(s) ainda não foram</small></h2>' +
+      (cliOk && paraClientes().length ? '<section class="cartao cob-aviso"><h2>Enviar direto aos clientes <small>' + paraClientes().length + ' boleto(s)</small></h2>' +
+        '<p>O cliente recebe do WhatsApp da ' + esc(CRM.nomeInstalacao()) + ', em nome do(a) vendedor(a), com o PDF completo anexo. Os(as) vendedores(as) veem só o selo de título em atraso.</p>' +
+        '<p><button type="button" class="btn ouro" data-acao="cob-direto">📲 Enviar direto aos clientes (' + porCliente(paraClientes()).length + ' cliente(s))</button></p></section>' : '') +
+      (avisar.length ? '<section class="cartao cob-aviso"><h2>' + (cliOk ? 'Ou mandar no WhatsApp dos(as) vendedores(as)' : 'Mandar no WhatsApp dos(as) vendedores(as)') + ' <small>' + avisar.reduce((t, x) => t + x[1].length, 0) + ' boleto(s) ainda não foram</small></h2>' +
         '<p>' + (podeCompartilhar() ? 'Um clique por vendedor(a): o PDF completo de cada cliente vai como arquivo (escolha o WhatsApp e o(a) vendedor(a) na janela de compartilhar), com a mensagem pronta copiada.'
           : 'Um clique por vendedor(a): abre o seu WhatsApp na conversa com ele(a), com tudo pronto (valor, PDF, telefone do cliente e a mensagem para ele(a) copiar).') + '</p>' +
         botaoMeta(avisar.reduce((t, x) => t + x[1].length, 0)) + '<div class="cob-avisar">' + avisar.map(([u, l]) => botaoAvisar(u, l)).join('') + '</div></section>' : '') +
@@ -807,6 +857,12 @@
       if (link.indexOf('https://wa.me/?') === 0) CRM.toast('Cliente sem celular no CRM: escolha o contato no WhatsApp. Depois cadastre o celular do financeiro na ficha.');
       // 20/10/2026: o PDF vai como link na mensagem (o cliente abre no celular); não baixa mais o arquivo para anexar à mão
       (async () => { await marcaCobrado(e, lista, c, texto, true); })().catch(CRM.falhou);
+    },
+    'cob-direto': () => formDiretoClientes(),
+    'cob-para-vendedoras': () => {
+      const l = paraAvisar();
+      fechaForm();
+      (async () => { await criaTarefas(l); setTimeout(formAvisar, 0); })().catch(CRM.falhou);
     },
     'cob-cliente': id => {
       const e = CRM.empresa(id), lista = pendentesDe(id);

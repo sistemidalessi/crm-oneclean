@@ -1560,6 +1560,14 @@ preços de custo as vendedoras não enxergam)".
 - **21/10 — "Enviar a todas pelo WhatsApp da OneClean" não fazia nada:** `ligarEventos` passa o evento do clique como 3º
   parâmetro e a ação `cob-meta` o tomava pela lista de boletos (`outra || paraAvisar()`), via `.length` vazio e saía calada.
   Agora só aceita `Array.isArray(outra)`. Era a única ação com 3º parâmetro que não fosse o evento (conferido com grep).
+- **21/10 — cobrança direto ao cliente** (Anderson: "gostaria de mandar direto para o cliente; mandar para a vendedora e para
+  o cliente fica ruim, o cliente recebe duas vezes; para elas só tem que aparecer que está em atraso"): com o modelo
+  `boleto_cliente` aprovado (`cliOk`), "Mandar aos(às) vendedores(as)" (depois de conferir) **não cria tarefa** e abre
+  **"Enviar direto aos clientes"** (`formDiretoClientes`: 1º celular do cadastro, contatos antes da empresa; quem não tem celular
+  fica de fora e é listado); na Cobrança, seção "Enviar direto aos clientes (N cliente(s))" acima da das vendedoras, que virou
+  "Ou mandar…" (reserva; `cob-para-vendedoras` cria as tarefas e abre a janela antiga). Envio por `mandaAoCliente` (o mesmo
+  do botão de um cliente): marca `cli_*` e `cobrado_em`, registra no histórico e conclui a tarefa. Testado no navegador com
+  o envio simulado.
 - **21/10 — Andi no login do celular** ("cadê eu?"): abaixo de 760 px o corpo inteiro some e entra o rosto no círculo
   (`<anfitriao>-rosto.webp`, 88 px) com o balão ao lado, em cima do cartão; no computador nada mudou.
 - **21/10 — fotos e fichas (pergunta do Anderson):** as pré-marcadas (459) têm foto confiável, **não** ficha completa: 203 com
