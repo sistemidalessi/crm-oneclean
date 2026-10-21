@@ -1536,6 +1536,23 @@ preços de custo as vendedoras não enxergam)".
   → "Tela ao entrar no CRM" (função `crm_minha_tela_inicial`, SECURITY DEFINER, só a própria linha e só essa coluna;
   anônimo e valor inválido barrados, testado). A tela em uso fica no `sessionStorage` da aba: recarregar (inclusive a
   versão nova) continua onde estava; abrir o CRM de novo começa na tela ao entrar. `revoke` da função rodado pelo Anderson e conferido.
+- **21/10 — boleto da DFISIO "sumido" da lista:** a NF 2428 (DFISIO MED PRIME, CNPJ 15.314.723/0002-13, filial da Fisio Med
+  Prime) está ligada ao cadastro **"Neilor Instituto TEA"** (TEA Clínica, outro CNPJ), por isso a lista de títulos (que usa o
+  nome do cadastro) não a mostrava no "D". O boleto do dia era o mesmo de 20/10 (mesma linha digitável: a 2ª via mantém a
+  linha) e veio em "não mandar". Corrigido na tela (`cobranca.js`): a lista mostra "[na nota: …]" quando o nome da nota é
+  outro e põe primeiro os títulos do mesmo CNPJ ou da mesma raiz. **Pendente, esperando o Anderson:** passar a NF 2428, o
+  título e o boleto para o cadastro da Fisio Med Prime (`c77daf7f…`, mesma vendedora Renata) com backup, e ver por que a nota
+  caiu no cadastro do TEA.
+- **21/10 — fotos e fichas (pergunta do Anderson):** as pré-marcadas (459) têm foto confiável, **não** ficha completa: 203 com
+  ficha técnica, 110 com FISPQ, 76 com as duas, 222 só a foto (não marcadas: 247 / 116 / 63 / 786). Agora cada sugestão tem
+  selos (📄 Ficha técnica, ⚠ FISPQ, cinza "sem …"), filtro "Ficha técnica e FISPQ" (todas, as duas, com ficha, com FISPQ, só a
+  foto) e "Aprovar as marcadas" aprova só as marcadas **que estão na tela** (antes aprovava também as que passavam das 120
+  mostradas, sem ninguém ver). `X.docsDe`/`X.filtraDocs` em `produtos.js`, testados.
+- **21/10 — CRM no celular como app:** `manifest.webmanifest` (OneClean CRM, #175b6d), ícones `assets/app-*.png` (do
+  `oneclean-icone.png` em fundo branco; maskable com margem), `sw.js` **sem cache** (só deixa instalar e mostra "Sem internet"
+  na abertura sem rede; dados e scripts vão direto à rede, a versão nova continua chegando sozinha) e "Instalar no celular ou
+  no computador" no menu do nome (Android/Chrome/Edge: o pedido do navegador; iPhone: passo a passo do Safari). Conferido no
+  Chrome: manifest sem erro e instalável. O `crm/` do sistemi-dalessi tem o mesmo, com nome "CRM" e o ícone da Sistemi Dalessi.
 - **Compras a caminho / Pedidos ao fornecedor (20/10, noite; simulação https://claude.ai/artifact/UQyuCaNcT19jEN98kmAnyX,
   opção A aprovada):** o comprador registra o pedido em Compras → "Pedido por fornecedor" → **Registrar pedido** (itens da
   sugestão, quantidade editável, previsão = hoje + prazo do fornecedor, editável); "Exportar para o FKN" continua para lançar
