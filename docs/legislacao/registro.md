@@ -6,6 +6,22 @@ urgência. O vigia só escreve aqui; quem muda o sistema é a sessão de desenvo
 
 <!-- novas entradas abaixo desta linha -->
 
+## 21/10/2026 — SP: IBS e CBS entram na base de cálculo do ICMS a partir de 2027 (entendimento da Sefaz-SP)
+- **O que mudou:** a Sefaz-SP respondeu (Resposta à Consulta nº 32931, de 22/01/2026) que, quando o IBS e a CBS forem
+  efetivamente cobrados, o valor deles **compõe a base de cálculo do ICMS** (art. 13 da LC 87/1996: a base é o valor da
+  operação, com os tributos cobrados do comprador). Em **2026 não entram**: o ano é de teste (CBS 0,9%, IBS 0,1%) e o
+  PIS/COFINS continuam integrais. Há uma segunda resposta no mesmo sentido citada por blogs (RC 33.083/2026, não conferida).
+  Resposta a consulta vale para quem consultou, mas mostra como a Sefaz-SP vai fiscalizar.
+- **Norma e link:** Resposta à Consulta 32931/2026 — portal de consultas da Sefaz-SP
+  (https://www.fazenda.sp.gov.br/eCT/); cópia: https://www.legisweb.com.br/legislacao/?id=490049 ; resumo:
+  https://www.contabeis.com.br/noticias/75029/sefaz-sp-confirma-ibs-e-cbs-no-calculo-do-icms-a-partir-de-2027/
+- **Desde quando:** a partir de 01/01/2027 (quando a CBS passa a ser cobrada de verdade). Texto oficial não lido (a rede
+  da sessão barra o site da Sefaz-SP).
+- **O que muda no sistema:** o cálculo do ICMS da emissão (`servico-fiscal/nfe.js`: hoje base = produto + frete −
+  desconto) precisa, em 2027, incluir CBS (e o IBS, se a regra valer para ele) na base do ICMS, sem mexer em 2026.
+  Combinar com o contador antes de virar o ano e acompanhar se o CONFAZ/NT da NF-e trazem campo ou regra de validação para isso.
+- **Urgência:** **média** — nada muda em 2026, mas é cálculo de imposto da emissão direta e precisa estar pronto em 01/01/2027.
+
 ## 19/10/2026 — Papelaria e papel fora da ST em SP desde 01/07/2026 (Portaria SRE 9/2026)
 - **O que mudou:** a Portaria SRE nº 9/2026 (assinada em 17/03, DOE 18/03/2026) revogou anexos da Portaria CAT 68/2019 —
   entre eles o de **papelaria e papel** (revogação integral), além de materiais de construção, bebidas frias/água e
