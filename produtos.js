@@ -475,7 +475,11 @@
     const i = o.foto != null ? o.foto : (fl.escolha[cod] != null ? fl.escolha[cod] : 0), c = (sg.candidatos || [])[i];
     if (c && i >= 0) await guardaFoto(cod, await s.fotoBaixar(c.caminho), c.site || c.tipo || 'IA', c.pagina || c.url);
     const inf = Object.assign({}, sg.info || {}, o.info || {});
-    const copia = async (arq, nomeArq) => (arq && arq.caminho ? s.fotoSubir('fichas', cod + '-' + nomeArq, await s.fotoBaixar(arq.caminho), 'pdf') : null);
+    // PDF que não copia não derruba a aprovação: fica o link do site (21/10/2026)
+    const copia = async (arq, nomeArq) => {
+      if (!arq || !arq.caminho) return null;
+      try { return await s.fotoSubir('fichas', cod + '-' + nomeArq, await s.fotoBaixar(arq.caminho), 'pdf'); } catch (e) { console.warn('pdf', cod, e); return null; }
+    };
     const usaFicha = o.ficha !== false && inf.ficha, usaFispq = o.fispq !== false && inf.fispq;
     if (inf.descricao || (inf.especificacoes || []).length || inf.marca || usaFicha || usaFispq) {
       const atual = (prod(cod) || {}).info || {};
@@ -490,6 +494,29 @@
     sg.situacao = 'aprovada'; fl.marcados.delete(cod);
   }
 
+  // 21/10/2026 (Anderson: "todos que você achou já suba para o cadastro e já apareça para os vendedores; não tem como olhar
+  // um por um"): aprovar todas de uma vez (a 1ª foto, que já vem a melhor, e a ficha e a FISPQ que a IA achou) e, na busca em
+  // lote, aprovar sozinho o que a IA achar. Trocar depois é pelo produto (Ficha → foto, PDFs).
+  let aprovando = null;
+  async function aprovarTodas(cods) {
+    if (aprovando || !cods.length) return;
+    aprovando = { total: cods.length, feitos: 0, erros: 0 };
+    CRM.render();
+    const fila = cods.slice();
+    const trabalha = async () => {
+      while (fila.length) {
+        const c = fila.shift();
+        try { await aprovar(c, (prod(c) || {}).foto ? { foto: -1 } : {}); } catch (e) { aprovando.erros++; console.error('aprovar', c, e); }
+        aprovando.feitos++;
+        if (aprovando.feitos % 10 === 0 || !fila.length) CRM.render();
+      }
+    };
+    await Promise.all([1, 2, 3, 4].map(trabalha));
+    const r = aprovando; aprovando = null;
+    CRM.toast((r.feitos - r.erros) + ' aprovada(s): já estão no cadastro e as vendedoras veem.' + (r.erros ? ' ' + r.erros + ' deram erro e continuam em "Para aprovar" (é só clicar de novo).' : ''), !!r.erros);
+    CRM.render();
+  }
+
   async function rodaLote(codigos) {
     lote = { total: codigos.length, feitos: 0, achou: 0, erros: 0, custo: 0, parar: false, inicio: Date.now(), seguidos: 0 };
     // 20/10/2026: erros seguidos = a chave da IA bateu o limite (ou a API caiu); para em vez de marcar o resto como erro
@@ -502,6 +529,7 @@
         try {
           const r = await buscarUm(cod); lote.custo += num(r.custo_usd);
           if (r.situacao === 'erro') errou(r.erro); else { lote.seguidos = 0; if (r.situacao === 'sugerida') lote.achou++; }
+          if (r.situacao === 'sugerida') { try { await aprovar(cod, (prod(cod) || {}).foto ? { foto: -1 } : {}); } catch (e) { console.error('aprovar', cod, e); } }
         } catch (e) { errou(e.message); if (/503|chave|ligada/i.test(e.message || '')) { lote.parar = true; CRM.toast(e.message, true); } }
         lote.feitos++;
         CRM.render();
@@ -510,7 +538,7 @@
     await Promise.all([1, 2, 3, 4, 5].map(trabalha)); // cinco de cada vez (o que der erro, como limite da API, volta no próximo lote)
     const r = lote; lote = null;
     ia = await st().produtoBuscar({ acao: 'situacao' }).catch(() => ia);
-    CRM.toast('Busca terminada: ' + r.feitos + ' produto(s), ' + r.achou + ' com sugestão para aprovar, custo ' + usd(r.custo) + '.');
+    CRM.toast('Busca terminada: ' + r.feitos + ' produto(s), ' + r.achou + ' achado(s) e já no cadastro, custo ' + usd(r.custo) + '.');
     CRM.render();
   }
 
@@ -531,7 +559,7 @@
         kpi('Sem ficha', semFicha) + kpi('Para aprovar', aprovar.length, aprovar.length ? 'ambar' : '') + '</div>' +
       '<section class="cartao pf-lote"><div><h2>Buscar fotos e fichas em lote</h2>' +
         '<p>A IA procura cada produto pelo nome, pela marca e pelo código de barras, de preferência no site do fabricante: a foto, a descrição, as especificações, a ficha técnica e a FISPQ. ' +
-        '<strong>Nada aparece para as vendedoras antes de você aprovar.</strong></p>' +
+        '<strong>O que a IA achar já entra no cadastro e as vendedoras veem</strong>; para trocar uma foto ou ficha, abra o produto.</p>' +
         '<p class="dica">IA no mês: ' + (ia ? usd(ia.custo_mes) + ' (fotos e fichas: ' + usd(ia.custo_fotos_mes) + ')' : '—') + ' · o limite é o da chave no console da Anthropic · ' +
           (est.medido ? 'custo médio medido: ' + usd(est.medio) + ' por produto (' + est.medido + ' busca(s))' : 'custo por produto ainda não medido (estimativa ' + usd(est.medio) + '): comece pelo teste de 5') + '</p></div>' +
         (lote ? '<div class="pf-andamento" role="status"><strong>Buscando ' + lote.feitos + ' de ' + lote.total + '…</strong> ' + lote.achou + ' com sugestão · ' + usd(lote.custo) + ' até agora' +
@@ -546,7 +574,10 @@
       '<section class="cartao"><div class="chips">' + [['aprovar', 'Para aprovar (' + aprovar.length + ')'], ['aprovada', 'Aprovadas (' + porSit('aprovada').length + ')'],
           ['sem', 'Sem foto achada (' + (porSit('sem').length + porSit('recusada').length) + ')'], ['erro', 'Com erro (' + porSit('erro').length + ')']]
           .map(c => '<button type="button" class="chip-filtro' + (fl.ver === c[0] ? ' ativo' : '') + '" data-acao="pf-ver" data-id="' + c[0] + '">' + esc(c[1]) + '</button>').join('') +
-        (fl.ver === 'aprovar' && marcadasNaTela() ? '<span class="flex"></span><button type="button" class="btn verde" data-acao="pf-aprovar-marcadas">Aprovar as marcadas (' + marcadasNaTela() + ')</button>' : '') + '</div>' +
+        (fl.ver === 'aprovar' && aprovar.length ? '<span class="flex"></span>' + (aprovando
+          ? '<span class="pf-andamento" role="status"><strong>Aprovando ' + aprovando.feitos + ' de ' + aprovando.total + '…</strong> deixe esta tela aberta</span>'
+          : (marcadasNaTela() ? '<button type="button" class="btn sec" data-acao="pf-aprovar-marcadas">Aprovar só as marcadas (' + marcadasNaTela() + ')</button> ' : '') +
+            '<button type="button" class="btn verde" data-acao="pf-aprovar-todas">✓ Aprovar todas (' + aprovar.length + ')</button>') : '') + '</div>' +
         (base.length ? '<div class="chips pf-docs"><span class="dica">Ficha técnica e FISPQ:</span>' + [['', 'Todas', base.length], ['completo', '📄 Ficha e ⚠ FISPQ', X.filtraDocs(base, 'completo').length],
             ['ficha', 'Com ficha técnica', X.filtraDocs(base, 'ficha').length], ['fispq', 'Com FISPQ', X.filtraDocs(base, 'fispq').length], ['so-foto', 'Só a foto', X.filtraDocs(base, 'so-foto').length]]
           .map(c => '<button type="button" class="chip-filtro' + (fl.docs === c[0] ? ' ativo' : '') + '" data-acao="pf-docs" data-id="' + c[0] + '">' + esc(c[1]) + ' (' + c[2] + ')</button>').join('') + '</div>' : '') +
@@ -712,6 +743,11 @@
     'pf-lote-parar': () => { if (lote) { lote.parar = true; CRM.render(); } },
     'pf-ver': id => { fl.ver = id; CRM.render(); },
     'pf-docs': id => { fl.docs = id || ''; CRM.render(); },
+    'pf-aprovar-todas': () => {
+      const cods = sugs.filter(x => x.situacao === 'sugerida' && prod(x.codigo)).map(x => x.codigo);
+      if (!cods.length || !confirm('Aprovar as ' + cods.length + ' sugestões de uma vez?\n\nA foto (a 1ª de cada uma), a descrição, a ficha técnica e a FISPQ que a IA achou vão para o cadastro e as vendedoras já veem. Dá para trocar depois, em cada produto.\n\nLeva alguns minutos: deixe esta tela aberta.')) return;
+      aprovarTodas(cods);
+    },
     'pf-cand': id => { const [cod, i] = id.split('|'); fl.escolha[cod] = Number(i); CRM.render(); },
     'pf-revisar': id => revisar(id),
     'pf-recusar': async id => { try { await st().sugestaoMarcar(id, 'recusada'); const s = sugs.find(x => x.codigo === id); if (s) s.situacao = 'recusada'; fl.marcados.delete(id); CRM.render(); } catch (e) { CRM.falhou(e); } },

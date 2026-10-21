@@ -1552,6 +1552,11 @@ preços de custo as vendedoras não enxergam)".
   tinha entrado pelo Chrome às 07:15 e o Android divide o login entre os dois): `jaInstalado() && !abaDaSessao()` em `iniciar`
   (`app.js`) → saída local e tela de login, sem aviso de "Novo dia" quando já entrou hoje. Recarregar (versão nova) não pede,
   porque a tela em uso fica no `sessionStorage`. No navegador continua a 1ª vez do dia.
+- **21/10 — fotos e fichas sem conferir uma por uma** (Anderson: "todos que você achou já suba para o cadastro e já apareça
+  para os vendedores; não tem como olhar um por um"): botão **"✓ Aprovar todas (N)"** em Estoque → Fotos e fichas (a 1ª foto,
+  descrição, ficha técnica e FISPQ; quatro de cada vez; produto que já tem foto mantém a dele), "Aprovar só as marcadas" ficou
+  como 2ª opção, e a **busca em lote aprova sozinha** o que a IA achar. PDF que falha ao copiar não derruba mais a aprovação
+  (fica o link do site). Trocar depois: pelo produto (Ficha → foto, PDFs).
 - **21/10 — Andi no login do celular** ("cadê eu?"): abaixo de 760 px o corpo inteiro some e entra o rosto no círculo
   (`<anfitriao>-rosto.webp`, 88 px) com o balão ao lado, em cima do cartão; no computador nada mudou.
 - **21/10 — fotos e fichas (pergunta do Anderson):** as pré-marcadas (459) têm foto confiável, **não** ficha completa: 203 com
