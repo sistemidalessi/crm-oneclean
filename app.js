@@ -740,8 +740,11 @@
   function anfitriao() {
     const t = window.CRM_CONFIG && window.CRM_CONFIG.turma;
     if (!t || !t.anfitriao) return '';
+    const arq = fim => (t.pasta || 'assets/turma/') + t.anfitriao + fim + '.webp' + (t.versao ? '?v=' + encodeURIComponent(t.versao) : '');
     return '<div class="entrada-anfitriao" aria-hidden="true"><p class="turma-balao fixo">' + esc(t.boasVindas || 'Olá! Entre com o seu e-mail e a sua senha.') + '</p>' +
-      '<img src="' + esc((t.pasta || 'assets/turma/') + t.anfitriao + '.webp' + (t.versao ? '?v=' + encodeURIComponent(t.versao) : '')) + '" alt=""></div>';
+      '<img class="anfitriao-corpo" src="' + esc(arq('')) + '" alt="">' +
+      // no celular (abaixo de 760 px) o corpo inteiro não cabe: entra o rosto no círculo, ao lado do balão (21/10/2026)
+      '<img class="anfitriao-rosto" src="' + esc(arq('-rosto')) + '" alt=""></div>';
   }
   function telaEntrada(html, comAnfitriao) {
     $('#app').hidden = true;
