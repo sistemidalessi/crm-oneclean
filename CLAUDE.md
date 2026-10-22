@@ -1785,6 +1785,23 @@ o serviço na VPS da Agilité (não no servidor do escritório).
   **SSH da VPS só no computador do escritório** (de casa: tudo do CRM funciona, mas `git pull` na VPS espera o escritório).
   Atualizar o serviço: `cd /opt/oneclean-fiscal && git pull -q && systemctl restart oneclean-fiscal`.
 - Depois (Fase 4b): devolução, bonificação, troca, entrega futura e outro estado (hoje bloqueados: saem pelo FKN).
+- **Reforma a partir de 2027 no cálculo da NF-e (22/10/2026, achado do vigia da legislação: RC Sefaz-SP 32931/2026).**
+  Decide pela **data de emissão** da nota (`nfe.js regraReforma`), nunca pela de hoje. **Nota de 2026: sai idêntica** (36
+  combinações comparadas com a versão anterior; a configuração de 2027 é ignorada). **Nota de 2027 em diante**, com
+  `crm_config.dados.fiscal.reforma2027` = `{ pCBS, pIBSUF?, pIBSMun?, icmsComIbsCbs?, cobrarPorFora? }` (a `crm-fiscal` já manda o
+  `dados.fiscal` inteiro; ainda **sem campo na tela**): sem `pCBS` a nota não sai (a alíquota de referência do Senado não foi
+  publicada; LC 214/2025: CBS de 2027 = referência − 0,1 ponto); IBS 0,05% UF + 0,05% municipal por padrão; PIS/COFINS com alíquota
+  recusado (acabam em 2027; as 1.190 regras fiscais ainda trazem CST 01 e terão de ser refeitas com o contador); ICMS continua fora
+  da base do IBS/CBS (até 2032); `<vNFTot>` (depois do `IBSCBSTot`) = vNF + IBS + CBS; `vNF` não muda. **IBS/CBS na base do ICMS**
+  (`icmsComIbsCbs`, **desligado**): base do ICMS = produto + frete − desconto + IBS + CBS, base do IBS/CBS = mesma operação − ICMS;
+  a conta é circular e se resolve por repetição com os valores arredondados (bate com a fórmula fechada a·V·(1+t)/(1+a·t)).
+  `cobrarPorFora` (**desligado**): parcelas e pagamento fecham com o vNFTot (senão com o vNF). Prévia (`emissao.js`) e DANFE
+  (`danfe.js`) mostram IBS, CBS e o total com eles quando a nota tem `vNFTot`. Testes em `testes/nfe-servico.test.js` (2026 igual,
+  2027 sem e com a base nova, os dois no XSD). **À espera do contador:** (1) se o IBS/CBS entra na base do ICMS (Sefaz-SP diz que
+  sim; liminar de Santos diz que não) e se entram os dois ou só a CBS; (2) alíquota da CBS de 2027; (3) se o cliente paga o total com
+  o IBS/CBS (preço) e se a NT exige `vNFTot`/`vItem` (por item, não emitido) ou muda alguma validação; (4) CST/cClassTrib e o grupo de
+  PIS/COFINS em 2027. NT da NF-e de 2027 não lida (a rede da sessão barra o portal); conferir antes de virar o ano. Depois do "de
+  acordo": gravar a `reforma2027` e atualizar a VPS (`cd /opt/oneclean-fiscal && git pull -q && systemctl restart oneclean-fiscal`).
 
 ## Fiscal — Fase 1 da saída do FKN (15/10/2026, pedido do Anderson)
 

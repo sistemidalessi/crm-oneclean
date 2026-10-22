@@ -310,7 +310,10 @@
     const ib = t.ibscbs;
     const tot = r.bloqueado ? '' : '<dl class="dados grade"><dt>Produtos</dt><dd>' + moeda(t.vProd) + '</dd><dt>Frete</dt><dd>' + moeda(t.vFrete) + '</dd><dt>Desconto</dt><dd>' + moeda(t.vDesc) + '</dd>' +
       '<dt>ICMS</dt><dd>' + moeda(t.vICMS) + ' (base ' + moeda(t.vBC) + ')</dd><dt>PIS / COFINS</dt><dd>' + moeda(t.vPIS) + ' / ' + moeda(t.vCOFINS) + '</dd>' +
-      (ib ? '<dt>CBS / IBS (informativo em 2026)</dt><dd>' + moeda(ib.vCBS) + ' / ' + moeda(ib.vIBS) + '</dd>' : '') + '<dt>Total da nota</dt><dd><strong>' + moeda(t.vNF) + '</strong></dd></dl>';
+      // 2026: IBS/CBS só informativo; 2027 em diante (vNFTot): cobrado por fora, com o total que o inclui
+      (ib ? '<dt>CBS / IBS' + (t.vNFTot == null ? ' (informativo em 2026)' : '') + '</dt><dd>' + moeda(ib.vCBS) + ' / ' + moeda(ib.vIBS) + '</dd>' : '') +
+      '<dt>Total da nota' + (t.vNFTot == null ? '' : ' (sem IBS/CBS)') + '</dt><dd><strong>' + moeda(t.vNF) + '</strong></dd>' +
+      (t.vNFTot == null ? '' : '<dt>Total com IBS/CBS</dt><dd><strong>' + moeda(t.vNFTot) + '</strong></dd>') + '</dl>';
     const its = (nota.itens || []).length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Código</th><th>Produto</th><th>NCM</th><th>CFOP</th><th>CST</th><th class="num">Qtde</th><th class="num">Total</th></tr></thead><tbody>' +
       nota.itens.map(i => '<tr><td>' + esc(i.codigo) + '</td><td>' + esc(i.descricao) + '</td><td>' + esc(i.ncm) + '</td><td>' + esc(i.cfop) + '</td><td>' + esc(i.icms.cst) + ' · ' + esc(i.pis.cst) + '</td><td class="num">' +
         esc(Number(i.quantidade).toLocaleString('pt-BR')) + ' ' + esc(i.unidade) + '</td><td class="num">' + moeda(i.quantidade * i.valorUnitario - (i.desconto || 0)) + '</td></tr>').join('') + '</tbody></table></div>' : '';

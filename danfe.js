@@ -68,6 +68,9 @@
       pagamentos: blocos(bloco(c, 'pag'), 'detPag').map(p => ({ forma: valor(p.corpo, 'tPag'), valor: num(valor(p.corpo, 'vPag')) })),
       totais: ['vBC', 'vICMS', 'vBCST', 'vST', 'vII', 'vICMSUFRemet', 'vFCPUFDest', 'vPIS', 'vProd', 'vFrete', 'vSeg', 'vDesc', 'vOutro', 'vIPI', 'vICMSUFDest', 'vTotTrib', 'vCOFINS', 'vNF']
         .reduce((o, k) => { o[k] = num(valor(tot, k)); return o; }, {}),
+      // 2027 em diante: IBS/CBS cobrados por fora e o total com eles (<vNFTot>, fora do ICMSTot); em 2026 não vem
+      reforma: valor(bloco(c, 'total'), 'vNFTot') ? { vIBS: num(valor(bloco(bloco(bloco(c, 'total'), 'IBSCBSTot'), 'gIBS'), 'vIBS')),
+        vCBS: num(valor(bloco(bloco(bloco(c, 'total'), 'IBSCBSTot'), 'gCBS'), 'vCBS')), vNFTot: num(valor(bloco(c, 'total'), 'vNFTot')) } : null,
       transporte: {
         modalidade: valor(transp, 'modFrete'), nome: valor(transporta, 'xNome'), doc: valor(transporta, 'CNPJ') || valor(transporta, 'CPF'),
         ie: valor(transporta, 'IE'), endereco: valor(transporta, 'xEnder'), municipio: valor(transporta, 'xMun'), uf: valor(transporta, 'UF'),
@@ -411,6 +414,8 @@
         y = fila(y, [['VALOR DO FRETE', 'vFrete'], ['VALOR DO SEGURO', 'vSeg'], ['DESCONTO', 'vDesc'], ['OUTRAS DESPESAS', 'vOutro'], ['VALOR TOTAL IPI', 'vIPI'],
           ['V. ICMS UF DEST.', 'vICMSUFDest'], ['V. TOT. TRIB.', 'vTotTrib'], ['VALOR DA COFINS', 'vCOFINS'], ['V. TOTAL DA NOTA', 'vNF']]
           .map(c => [w9, c[0], n2(t[c[1]]), c[1] === 'vNF' ? { alinha: 'right', negrito: true } : R]));
+        if (d.reforma) y = fila(y, [[W / 3, 'VALOR DO IBS', n2(d.reforma.vIBS), R], [W / 3, 'VALOR DA CBS', n2(d.reforma.vCBS), R],
+          [W / 3, 'V. TOTAL DA NOTA COM IBS/CBS', n2(d.reforma.vNFTot), { alinha: 'right', negrito: true }]]);
         // transportador
         y = titulo(y, 'TRANSPORTADOR / VOLUMES TRANSPORTADOS');
         y = fila(y, [[60, 'NOME / RAZÃO SOCIAL', tr.nome], [34, 'FRETE POR CONTA', FRETE[tr.modalidade] || tr.modalidade], [22, 'CÓDIGO ANTT', tr.antt], [22, 'PLACA DO VEÍCULO', tr.placa],

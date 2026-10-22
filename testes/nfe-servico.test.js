@@ -242,3 +242,100 @@ test('ICMS-ST retido (CST 60): o valor por unidade aprendido do FKN vezes a quan
   assert.ok(sem.avisos.conferir.some(x => /250011: sem o ICMS-ST retido \(CX\)/.test(x)));
   assert.strictEqual(sem.nota.itens[1].icms.stRet, null);
 });
+
+// ---------------------------------------------------------------- Reforma: 2027 em diante (22/10/2026)
+// Vale a data de EMISSÃO da nota. 2026 = como sempre; 2027 = CBS cobrada (alíquota da configuração), PIS/COFINS extintos,
+// vNFTot com o IBS/CBS por fora e, só se ligado, IBS/CBS na base do ICMS (RC Sefaz-SP 32931/2026).
+const EM27 = '2027-01-04T09:00:00-03:00';
+const REF27 = { pCBS: 8.8 };   // alíquota de exemplo: a de verdade vem do Senado e do contador
+const item27 = (extra) => Object.assign({ codigo: '010043', descricao: 'DETERGENTE NEUTRO 5L', ncm: '34022000', cfop: '5102', unidade: 'GL', quantidade: 1, valorUnitario: 135.68, origem: 0,
+  icms: { cst: '00', aliquota: 18 }, pis: { cst: '06' }, cofins: { cst: '06' } }, extra || {});
+const nota27 = (ref, extra) => nota(Object.assign({ emissao: EM27, reforma: ref, itens: [item27(), item27({ codigo: '300005', descricao: 'PAPEL HIGIENICO ROLAO', ncm: '48181000',
+  cfop: '5405', quantidade: 3, valorUnitario: 3.2, icms: { cst: '60' } })], cobranca: null }, extra || {}));
+
+test('2026: a configuração de 2027 não muda nada (mesmo XML, sem vNFTot, IBS/CBS de teste)', () => {
+  const hoje = N.monta(nota()), comCfg = N.monta(nota({ reforma: { pCBS: 8.8, icmsComIbsCbs: true, cobrarPorFora: true } }));
+  assert.strictEqual(comCfg.infNFe, hoje.infNFe);
+  assert.ok(!/vNFTot/.test(hoje.infNFe));
+  const fim = N.calcula(nota({ emissao: '2026-12-31T23:59:59-03:00' }));   // último dia de 2026 ainda é 2026
+  assert.deepStrictEqual([fim.reforma.de2027, fim.itens[0].icms.vBC, fim.itens[0].icms.v, fim.itens[0].ibscbs.pCBS, fim.totais.vNFTot], [false, 135.68, 24.42, 0.9, undefined]);
+});
+
+test('2027 sem a regra configurada: a nota não sai; PIS/COFINS com alíquota também não', () => {
+  assert.throws(() => N.calcula(nota27(undefined)), /2027: a alíquota da CBS/);
+  assert.throws(() => N.calcula(nota27({ pIBSUF: 0.05 })), /2027: a alíquota da CBS/);
+  assert.throws(() => N.calcula(nota({ emissao: EM27, reforma: REF27 })), /PIS com alíquota em nota de 2027/);
+});
+
+test('2027, IBS/CBS fora da base do ICMS (padrão): CBS da configuração, IBS 0,05 + 0,05, vNFTot por fora', () => {
+  const c = N.calcula(nota27(REF27)), i = c.itens[0];
+  assert.deepStrictEqual([i.icms.vBC, i.icms.v], [135.68, 24.42]);                       // ICMS como em 2026
+  assert.deepStrictEqual([i.ibscbs.vBC, i.ibscbs.pIBSUF, i.ibscbs.pIBSMun, i.ibscbs.vIBS, i.ibscbs.pCBS, i.ibscbs.vCBS], [111.26, 0.05, 0.05, 0.12, 8.8, 9.79]);   // ICMS fora da base do IBS/CBS
+  assert.strictEqual(c.totais.vNF, 145.28);                                              // vNF continua sem o IBS/CBS
+  assert.strictEqual(c.totais.vNFTot, r2(145.28 + c.totais.ibscbs.vIBS + c.totais.ibscbs.vCBS));
+  assert.strictEqual(c.totais.vCobrar, c.totais.vNF);                                    // cobrar por fora: desligado
+  assert.ok(/<\/IBSCBSTot><vNFTot>/.test(N.monta(nota27(REF27)).infNFe));
+});
+
+test('2027, IBS/CBS na base do ICMS (ligado): conta circular resolvida, bate com a fórmula fechada', () => {
+  const c = N.calcula(nota27(Object.assign({ icmsComIbsCbs: true }, REF27))), i = c.itens[0];
+  // base ICMS = V + IBS + CBS; base IBS/CBS = V − ICMS → ICMS = a·V·(1+t)/(1+a·t) = 26,1766 com V 135,68, a 18%, t 8,9%
+  assert.deepStrictEqual([i.icms.vBC, i.icms.v, i.ibscbs.vBC, i.ibscbs.vIBS, i.ibscbs.vCBS], [145.42, 26.18, 109.5, 0.1, 9.64]);
+  assert.strictEqual(i.icms.vBC, r2(135.68 + i.ibscbs.vIBS + i.ibscbs.vCBS));
+  assert.strictEqual(i.ibscbs.vBC, r2(135.68 - i.icms.v));
+  assert.strictEqual(i.icms.v, r2(i.icms.vBC * 0.18));
+  assert.deepStrictEqual(c.itens[1].icms, { cst: '60', vBC: 0, p: 0, v: 0, stRet: null }); // CST 60 continua sem destaque
+  // com frete e desconto rateados
+  const f = N.calcula(nota27(Object.assign({ icmsComIbsCbs: true }, REF27), { frete: { modFrete: 0, valor: 12.5 } }));
+  f.itens.filter(x => x.icms.cst === '00').forEach(x => {
+    const V = r2(x.vProd + x.vFrete - x.vDesc);
+    assert.strictEqual(x.icms.vBC, r2(V + x.ibscbs.vIBS + x.ibscbs.vCBS));
+    assert.strictEqual(x.ibscbs.vBC, r2(V - x.icms.v));
+  });
+});
+
+test('2027 cobrando por fora: parcelas fecham com o vNFTot; pedido → nota bloqueia sem a regra e avisa o que conferir', () => {
+  const ref = Object.assign({ icmsComIbsCbs: true, cobrarPorFora: true }, REF27);
+  const c = N.calcula(nota27(ref));
+  assert.throws(() => N.monta(nota27(ref, { cobranca: { duplicatas: [{ vencimento: '2027-02-03', valor: c.totais.vNF }] } })), /não fecham/);
+  const m = N.monta(nota27(ref, { cobranca: { duplicatas: [{ vencimento: '2027-02-03', valor: c.totais.vNFTot }] } }));
+  assert.match(m.infNFe, new RegExp('<vOrig>' + c.totais.vNFTot.toFixed(2) + '</vOrig>'));
+  const regras27 = { '010043': regraVenda('5102', '00', '06'), '250011': regraVenda('5405', '60', '06') };
+  const base = { pedido, empresa: cliente, emitente, ambiente: 'homologacao', serie: 2, numero: 31, emissao: EM27 };
+  assert.ok(PD.notaDoPedido(Object.assign({ regras: regras27 }, base)).avisos.bloqueia.some(x => /falta configurar a alíquota da CBS/.test(x)));
+  assert.ok(PD.notaDoPedido(Object.assign({ regras, cfg: { reforma2027: REF27 } }, base)).avisos.bloqueia.some(x => /PIS e a COFINS acabam em 2027/.test(x)));
+  const r = PD.notaDoPedido(Object.assign({ regras: regras27, cfg: { reforma2027: ref } }, base));
+  assert.deepStrictEqual(r.avisos.bloqueia, []);
+  assert.ok(r.avisos.conferir.some(x => /32931\/2026\): confirmado com o contador/.test(x)));
+  const mm = N.monta(r.nota);
+  assert.strictEqual(r.cobrar, mm.totais.vNFTot);
+  assert.strictEqual(r.nota.cobranca.duplicatas.reduce((s, d) => s + d.valor, 0).toFixed(2), mm.totais.vNFTot.toFixed(2));
+  assert.strictEqual(r.nota.pagamento[0].valor, mm.totais.vNFTot);
+  const desl = PD.notaDoPedido(Object.assign({ regras: regras27, cfg: { reforma2027: REF27 } }, base));
+  assert.strictEqual(desl.cobrar, desl.total);
+  assert.ok(desl.avisos.conferir.some(x => /fora da base do ICMS: a Sefaz-SP entende/.test(x)));
+});
+
+test('XML de 2027 (com e sem IBS/CBS na base do ICMS) passa no esquema oficial; a DANFE mostra o total com IBS/CBS', { skip: !temFerramentas && 'sem xmllint/openssl' }, () => {
+  const A = require('../servico-fiscal/assinatura.js'), D = require('../danfe.js');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nfe-teste-'));
+  try {
+    execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', path.join(dir, 'k.pem'), '-out', path.join(dir, 'c.pem'), '-days', '2', '-subj', '/CN=TESTE'], { stdio: 'pipe' });
+    const keyPem = fs.readFileSync(path.join(dir, 'k.pem'), 'utf8'), certPem = fs.readFileSync(path.join(dir, 'c.pem'), 'utf8');
+    for (const ref of [REF27, Object.assign({ icmsComIbsCbs: true, cobrarPorFora: true }, REF27)]) {
+      const c = N.calcula(nota27(ref, { frete: { modFrete: 0, valor: 12.5 } }));
+      const m = N.monta(nota27(ref, { ambiente: 'producao', frete: { modFrete: 0, valor: 12.5 }, cobranca: { duplicatas: [{ vencimento: '2027-02-03', valor: c.totais.vCobrar }] } }));
+      const nfe = N.nfeCompleta(m.infNFe, A.assinaElemento(m.infNFe, m.id, certPem, keyPem));
+      const f = path.join(dir, 'n.xml'); fs.writeFileSync(f, nfe);
+      const r = spawnSync('xmllint', ['--noout', '--schema', path.join(ESQ, 'nfe_v4.00.xsd'), f]);
+      assert.strictEqual(r.status, 0, String(r.stderr));
+      const d = D.ler(nfe);
+      assert.deepStrictEqual(d.reforma, { vIBS: m.totais.ibscbs.vIBS, vCBS: m.totais.ibscbs.vCBS, vNFTot: m.totais.vNFTot });
+      assert.strictEqual(d.totais.vNF, m.totais.vNF);
+      assert.strictEqual(d.totais.vBC, m.totais.vBC);
+      const { jsPDF } = require('../vendor/jspdf.umd.min.js');
+      assert.strictEqual(D.desenha(new jsPDF({ unit: 'mm', format: 'a4' }), d), 1);   // a linha do IBS/CBS cabe na folha
+    }
+    assert.strictEqual(D.ler(N.nfeCompleta(N.monta(nota()).infNFe, '')).reforma, null);   // 2026: sem a linha nova
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

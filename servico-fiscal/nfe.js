@@ -59,6 +59,31 @@ function rateia(total, pesos) {
 }
 const PIS_ALIQ = ['01', '02'], PIS_NT = ['04', '05', '06', '07', '08', '09'];
 const IBSCBS_2026 = { cst: '000', cClassTrib: '000001', pIBSUF: 0.1, pIBSMun: 0, pCBS: 0.9 };
+// Reforma a partir de 2027 (22/10/2026). Vale a DATA DE EMISSÃO da nota, nunca a de hoje.
+// - CBS cobrada de verdade: a alíquota é a de referência fixada pelo Senado − 0,1 ponto (LC 214/2025); ainda não publicada,
+//   então NÃO tem padrão: sem `reforma.pCBS` na configuração, nota de 2027 não sai. IBS de 2027/2028: 0,05% estadual e 0,05%
+//   municipal (LC 214/2025, transição), padrão abaixo, trocável pela configuração.
+// - PIS e COFINS acabam em 2027 (EC 132/2023): item com alíquota de PIS/COFINS em nota de 2027 é recusado.
+// - ICMS sai da base do IBS/CBS de 2026 a 2032 (LC 214/2025, art. 12, § 2º, V) — isso continua.
+// - IBS/CBS na base do ICMS: a Sefaz-SP diz que entram a partir de 2027 (Resposta à Consulta 32931/2026; art. 13 da LC 87/1996);
+//   há liminar contra (Santos) e o contador ainda não deu o "de acordo": fica DESLIGADO até `reforma.icmsComIbsCbs = true`.
+//   Ligado, a conta é circular (base do ICMS = operação + IBS + CBS; base do IBS/CBS = operação − ICMS) e se resolve por
+//   repetição com os valores já arredondados, até parar de mudar (a ICMS × IBS/CBS ≈ 0,02: para em 2–3 voltas).
+// - IBS/CBS "por fora": o total com eles vai em <vNFTot> (campo do PL_010); <vNF> continua sem eles. Quanto se cobra do cliente
+//   (vNF ou vNFTot) é decisão comercial + contador: `reforma.cobrarPorFora` (padrão desligado) faz as parcelas fecharem com o vNFTot.
+const REFORMA_2027 = { pIBSUF: 0.05, pIBSMun: 0.05, icmsComIbsCbs: false, cobrarPorFora: false };
+const anoDe = emissao => Number(String(emissao || '').slice(0, 4)) || 0;
+// Regra de IBS/CBS da nota pela data de emissão. nota.reforma = a configuração de 2027 (dados.fiscal.reforma2027).
+function regraReforma(nota) {
+  const ano = anoDe(nota.emissao);
+  if (!ano) throw new Error('nota sem data de emissão');
+  if (ano <= 2026) return { ano, de2027: false, aliq: IBSCBS_2026, icmsComIbsCbs: false, cobrarPorFora: false };
+  const cfg = Object.assign({}, REFORMA_2027, nota.reforma || {});
+  if (!nota.reforma || nota.reforma.pCBS == null || nota.reforma.pCBS === '' || !(num(nota.reforma.pCBS) > 0))
+    throw new Error('nota de ' + ano + ': a alíquota da CBS e a regra da Reforma ainda não foram configuradas (falar com o contador)');
+  return { ano, de2027: true, aliq: { cst: IBSCBS_2026.cst, cClassTrib: IBSCBS_2026.cClassTrib, pIBSUF: num(cfg.pIBSUF), pIBSMun: num(cfg.pIBSMun), pCBS: num(cfg.pCBS) },
+    icmsComIbsCbs: cfg.icmsComIbsCbs === true, cobrarPorFora: cfg.cobrarPorFora === true };
+}
 
 // nota.itens: [{ codigo, descricao, ncm, cest, cfop, unidade, quantidade, valorUnitario, desconto (R$), gtin, origem,
 //   icms: { cst: '00'|'60', aliquota, stRet?: { vBCSTRet, pST, vICMSSubstituto, vICMSSTRet } },
@@ -66,6 +91,7 @@ const IBSCBS_2026 = { cst: '000', cClassTrib: '000001', pIBSUF: 0.1, pIBSMun: 0,
 function calcula(nota) {
   const itens = nota.itens || [];
   if (!itens.length) throw new Error('a nota não tem itens');
+  const reg = regraReforma(nota);
   const brutos = itens.map(it => r2(num(it.quantidade) * num(it.valorUnitario)));
   const fretes = rateia(num(nota.frete && nota.frete.valor), brutos);
   const out = itens.map((it, i) => {
@@ -73,36 +99,59 @@ function calcula(nota) {
     if (!(num(it.quantidade) > 0)) throw new Error('item ' + (i + 1) + ': quantidade zerada');
     if (vDesc > vProd) throw new Error('item ' + (i + 1) + ': desconto maior que o valor');
     const icms = it.icms || {}, cstI = String(icms.cst || '');
-    let vBC = 0, vICMS = 0;
-    if (cstI === '00') { vBC = r2(vProd + vFrete - vDesc); vICMS = r2(vBC * num(icms.aliquota) / 100); }
-    else if (cstI !== '60') throw new Error('item ' + (i + 1) + ': ICMS CST ' + (cstI || '?') + ' ainda não é emitido pelo CRM (só 00 e 60)');
-    const baseFed = r2(vProd + vFrete - vDesc - vICMS);   // ICMS fora da base do PIS/COFINS, como o FKN
-    const fed = (g, nome) => {
+    if (cstI !== '00' && cstI !== '60') throw new Error('item ' + (i + 1) + ': ICMS CST ' + (cstI || '?') + ' ainda não é emitido pelo CRM (só 00 e 60)');
+    const V = r2(vProd + vFrete - vDesc);
+    const fed = (g, nome, baseFed) => {
       const cst = String((g || {}).cst || '');
-      if (PIS_ALIQ.indexOf(cst) !== -1) return { cst, grupo: 'Aliq', vBC: baseFed, p: num(g.aliquota), v: r2(baseFed * num(g.aliquota) / 100) };
+      if (PIS_ALIQ.indexOf(cst) !== -1) {
+        if (reg.de2027 && num(g.aliquota) > 0) throw new Error('item ' + (i + 1) + ': ' + nome + ' com alíquota em nota de ' + reg.ano + ' (o PIS e a COFINS acabam em 2027)');
+        return { cst, grupo: 'Aliq', vBC: baseFed, p: num(g.aliquota), v: r2(baseFed * num(g.aliquota) / 100) };
+      }
       if (PIS_NT.indexOf(cst) !== -1) return { cst, grupo: 'NT', vBC: 0, p: 0, v: 0 };
       if (cst === '49' || cst === '99') return { cst, grupo: 'Outr', vBC: 0, p: 0, v: 0 };
       throw new Error('item ' + (i + 1) + ': ' + nome + ' CST ' + (cst || '?') + ' não conhecido');
     };
-    const pis = fed(it.pis, 'PIS'), cofins = fed(it.cofins, 'COFINS');
-    let ibscbs = null;
-    if (it.ibscbs !== false && nota.ibscbs !== false) {
-      const g = Object.assign({}, IBSCBS_2026, nota.ibscbs || {}, it.ibscbs || {});
-      const vBCIBS = r2(vProd + vFrete - vDesc - vICMS - pis.v - cofins.v);
-      const vIBSUF = r2(vBCIBS * num(g.pIBSUF) / 100), vIBSMun = r2(vBCIBS * num(g.pIBSMun) / 100), vCBS = r2(vBCIBS * num(g.pCBS) / 100);
-      ibscbs = { cst: g.cst, cClassTrib: g.cClassTrib, vBC: vBCIBS, pIBSUF: num(g.pIBSUF), vIBSUF, pIBSMun: num(g.pIBSMun), vIBSMun, vIBS: r2(vIBSUF + vIBSMun), pCBS: num(g.pCBS), vCBS };
+    const temIbs = it.ibscbs !== false && nota.ibscbs !== false;
+    const g = temIbs ? Object.assign({}, reg.aliq, reg.de2027 ? {} : (nota.ibscbs || {}), it.ibscbs || {}) : null;
+    // Uma volta da conta: dado o ICMS, o PIS/COFINS e o IBS/CBS (o ICMS fica fora das duas bases, como o FKN e a LC 214/2025).
+    const volta = vICMS => {
+      const baseFed = r2(V - vICMS);
+      const pis = fed(it.pis, 'PIS', baseFed), cofins = fed(it.cofins, 'COFINS', baseFed);
+      let ib = null;
+      if (g) {
+        const vBCIBS = r2(V - vICMS - pis.v - cofins.v);
+        const vIBSUF = r2(vBCIBS * num(g.pIBSUF) / 100), vIBSMun = r2(vBCIBS * num(g.pIBSMun) / 100), vCBS = r2(vBCIBS * num(g.pCBS) / 100);
+        ib = { cst: g.cst, cClassTrib: g.cClassTrib, vBC: vBCIBS, pIBSUF: num(g.pIBSUF), vIBSUF, pIBSMun: num(g.pIBSMun), vIBSMun, vIBS: r2(vIBSUF + vIBSMun), pCBS: num(g.pCBS), vCBS };
+      }
+      return { pis, cofins, ibscbs: ib };
+    };
+    let vBC = 0, vICMS = 0, x = volta(0);
+    if (cstI === '00') {
+      const p = num(icms.aliquota);
+      vBC = V; vICMS = r2(vBC * p / 100); x = volta(vICMS);
+      if (reg.icmsComIbsCbs && x.ibscbs) {
+        for (let k = 0; k < 20; k++) {
+          const nBC = r2(V + x.ibscbs.vIBS + x.ibscbs.vCBS), nICMS = r2(nBC * p / 100);
+          if (nBC === vBC && nICMS === vICMS) break;
+          vBC = nBC; vICMS = nICMS; x = volta(vICMS);
+        }
+      }
     }
+    const { pis, cofins, ibscbs } = x;
     return { vProd, vDesc, vFrete, icms: { cst: cstI, vBC, p: num(icms.aliquota), v: vICMS, stRet: icms.stRet || null }, pis, cofins, ibscbs };
   });
   const soma = k => r2(out.reduce((s, x) => s + k(x), 0));
   const t = { vBC: soma(x => x.icms.vBC), vICMS: soma(x => x.icms.v), vProd: soma(x => x.vProd), vFrete: soma(x => x.vFrete), vDesc: soma(x => x.vDesc),
     vPIS: soma(x => x.pis.v), vCOFINS: soma(x => x.cofins.v) };
-  t.vNF = r2(t.vProd + t.vFrete - t.vDesc);                          // em 2026 o IBS/CBS não soma no total da nota
+  t.vNF = r2(t.vProd + t.vFrete - t.vDesc);                          // o IBS/CBS (por fora) nunca soma no vNF
   const comIbs = out.filter(x => x.ibscbs);
   t.ibscbs = comIbs.length ? { vBC: soma(x => (x.ibscbs ? x.ibscbs.vBC : 0)), vIBSUF: soma(x => (x.ibscbs ? x.ibscbs.vIBSUF : 0)),
     vIBSMun: soma(x => (x.ibscbs ? x.ibscbs.vIBSMun : 0)), vCBS: soma(x => (x.ibscbs ? x.ibscbs.vCBS : 0)) } : null;
   if (t.ibscbs) t.ibscbs.vIBS = r2(t.ibscbs.vIBSUF + t.ibscbs.vIBSMun);
-  return { itens: out, totais: t };
+  // 2027 em diante: total com os impostos por fora (<vNFTot>) e o que se cobra do cliente. Em 2026 nada disso existe.
+  if (reg.de2027) t.vNFTot = r2(t.vNF + (t.ibscbs ? t.ibscbs.vIBS + t.ibscbs.vCBS : 0));
+  t.vCobrar = reg.de2027 && reg.cobrarPorFora ? t.vNFTot : t.vNF;
+  return { itens: out, totais: t, reforma: { ano: reg.ano, de2027: reg.de2027, icmsComIbsCbs: reg.icmsComIbsCbs, cobrarPorFora: reg.cobrarPorFora } };
 }
 
 // ---------------------------------------------------------------- XML
@@ -194,17 +243,17 @@ function monta(nota, opc) {
     (vol && num(vol.qVol) > 0 ? '<vol>' + tag('qVol', String(Math.round(num(vol.qVol)))) + tag('esp', txt(vol.esp || 'VOLUMES')) + '</vol>' : '') + '</transp>';
   const cb = nota.cobranca, dups = (cb && cb.duplicatas) || [];
   const somaDup = r2(dups.reduce((s, d) => s + num(d.valor), 0));
-  if (dups.length && Math.abs(somaDup - t.vNF) > 0.009) throw new Error('as parcelas (' + d2(somaDup) + ') não fecham com o total da nota (' + d2(t.vNF) + ')');
-  const cobr = dups.length ? '<cobr><fat>' + tag('nFat', txt(cb.numero || String(nota.numero))) + tag('vOrig', d2(t.vNF)) + '<vDesc>0.00</vDesc>' + tag('vLiq', d2(t.vNF)) + '</fat>' +
+  if (dups.length && Math.abs(somaDup - t.vCobrar) > 0.009) throw new Error('as parcelas (' + d2(somaDup) + ') não fecham com o total da nota (' + d2(t.vCobrar) + ')');
+  const cobr = dups.length ? '<cobr><fat>' + tag('nFat', txt(cb.numero || String(nota.numero))) + tag('vOrig', d2(t.vCobrar)) + '<vDesc>0.00</vDesc>' + tag('vLiq', d2(t.vCobrar)) + '</fat>' +
     dups.map((d, i) => '<dup>' + tag('nDup', String(i + 1).padStart(3, '0')) + tag('dVenc', d.vencimento) + tag('vDup', d2(d.valor)) + '</dup>').join('') + '</cobr>' : '';
-  const pags = (nota.pagamento && nota.pagamento.length) ? nota.pagamento : [{ tPag: dups.length ? '15' : '90', indPag: dups.length ? 1 : null, valor: dups.length ? t.vNF : 0 }];
+  const pags = (nota.pagamento && nota.pagamento.length) ? nota.pagamento : [{ tPag: dups.length ? '15' : '90', indPag: dups.length ? 1 : null, valor: dups.length ? t.vCobrar : 0 }];
   const pag = '<pag>' + pags.map(p => '<detPag>' + (p.indPag != null ? tag('indPag', String(p.indPag)) : '') + tag('tPag', String(p.tPag).padStart(2, '0')) +
     (String(p.tPag) === '99' ? tag('xPag', txt(p.descricao || 'OUTROS')) : '') + tag('vPag', d2(p.valor)) + '</detPag>').join('') + '</pag>';
   const infAdic = nota.infCpl || nota.infAdFisco ? '<infAdic>' + tag('infAdFisco', txt(nota.infAdFisco)) + tag('infCpl', txt(nota.infCpl)) + '</infAdic>' : '';
   const rt = nota.respTec;
   const resp = rt && rt.cnpj ? '<infRespTec>' + tag('CNPJ', docLimpo(rt.cnpj)) + tag('xContato', txt(rt.contato)) + tag('email', txt(rt.email)) + tag('fone', dig(rt.fone)) + '</infRespTec>' : '';
   const id = 'NFe' + chave;
-  const infNFe = '<infNFe Id="' + id + '" versao="4.00">' + ide + emit + dest + det + '<total>' + icmsTot + ibsTot + '</total>' + transp + cobr + pag + infAdic + resp + '</infNFe>';
+  const infNFe = '<infNFe Id="' + id + '" versao="4.00">' + ide + emit + dest + det + '<total>' + icmsTot + ibsTot + (t.vNFTot != null ? tag('vNFTot', d2(t.vNFTot)) : '') + '</total>' + transp + cobr + pag + infAdic + resp + '</infNFe>';
   return { chave, id, cNF, infNFe, calculo: c, totais: t };
 }
 
@@ -214,4 +263,4 @@ const loteEnvio = (nfeXml, idLote) => '<enviNFe xmlns="' + NS + '" versao="4.00"
 // O <nfeProc> (nota + protocolo) é o arquivo que vale: vai para o cliente, para a contabilidade e para o CRM.
 const nfeProc = (nfeXml, protNFeXml) => '<?xml version="1.0" encoding="UTF-8"?><nfeProc xmlns="' + NS + '" versao="4.00">' + nfeXml + protNFeXml + '</nfeProc>';
 
-module.exports = { NS, HOMOLOGACAO_NOME, dvChave, chaveAcesso, codigoNumerico, rateia, calcula, monta, nfeCompleta, loteEnvio, nfeProc, txt, IBSCBS_2026 };
+module.exports = { NS, HOMOLOGACAO_NOME, dvChave, chaveAcesso, codigoNumerico, rateia, calcula, monta, nfeCompleta, loteEnvio, nfeProc, txt, IBSCBS_2026, REFORMA_2027, regraReforma };

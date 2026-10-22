@@ -8,6 +8,7 @@ const r2 = v => Math.round((Number(v) + Number.EPSILON) * 100) / 100;
 const num = v => (v == null || v === '' ? 0 : Number(v) || 0);
 const dig = v => String(v == null ? '' : v).replace(/\D/g, '');
 const base = c => String(c || '').replace(/\.\d+$/, '');
+const N = require('./nfe');
 
 // "28 DIAS BOLETO", "30/60/90 DIAS BOLETO", "A VISTA PIX", "A VISTA TRANSFERENCIA" → prazos em dias e a forma (tPag).
 function lePagamento(texto) {
@@ -26,7 +27,8 @@ function parcelas(total, dias, emissao) {
 }
 
 // o: { pedido, empresa, regras (obj código → linha de crm_fiscal_produtos), emitente, ambiente, serie, numero, emissao,
-//      vendedorNome, cfg (dados.fiscal: indFinal, indPres, natOp, respTec, ibscbs) }
+//      vendedorNome, cfg (dados.fiscal: indFinal, indPres, natOp, respTec, ibscbs, reforma2027: { pCBS, pIBSUF, pIBSMun,
+//      icmsComIbsCbs, cobrarPorFora } — só vale para nota emitida em 2027 ou depois; ver nfe.js REFORMA_2027) }
 function notaDoPedido(o) {
   const p = o.pedido || {}, e = o.empresa || {}, d = p.dados || {}, cfg = o.cfg || {};
   const bloqueia = [], conferir = [];
@@ -65,8 +67,26 @@ function notaDoPedido(o) {
   const pg = lePagamento(d.pagamento);
   if (pg.forma === '99') conferir.push('forma de pagamento não reconhecida ("' + (d.pagamento || '') + '"): sai como "outros"');
   const emissao = o.emissao;
+  // Reforma (2027 em diante, pela data de emissão): sem a alíquota da CBS configurada a nota não sai; o que o contador ainda
+  // não confirmou aparece para conferir. Em 2026 nada disso entra.
+  const ano = Number(String(emissao || '').slice(0, 4)) || 0, ref = cfg.reforma2027 || null;
+  let cobrar = total;
+  if (ano >= 2027) {
+    if (!ref || !(num(ref.pCBS) > 0)) bloqueia.push('nota de ' + ano + ': falta configurar a alíquota da CBS e a regra da Reforma (configuração fiscal, reforma2027; combinar com o contador)');
+    else {
+      if (itens.some(it => (['01', '02'].indexOf(it.pis.cst) !== -1 && it.pis.aliquota > 0) || (['01', '02'].indexOf(it.cofins.cst) !== -1 && it.cofins.aliquota > 0)))
+        bloqueia.push('o PIS e a COFINS acabam em 2027: as regras fiscais dos produtos ainda trazem alíquota (refazer com o contador)');
+      conferir.push(ref.icmsComIbsCbs === true ? 'IBS e CBS na base do ICMS (Resposta à Consulta Sefaz-SP 32931/2026): confirmado com o contador?'
+        : 'IBS e CBS fora da base do ICMS: a Sefaz-SP entende que entram a partir de 2027 (RC 32931/2026); ligar quando o contador confirmar');
+      conferir.push('alíquotas de ' + ano + ': CBS ' + num(ref.pCBS) + '%, IBS UF ' + (ref.pIBSUF == null ? N.REFORMA_2027.pIBSUF : num(ref.pIBSUF)) + '%, IBS municipal ' +
+        (ref.pIBSMun == null ? N.REFORMA_2027.pIBSMun : num(ref.pIBSMun)) + '%' + (ref.cobrarPorFora === true ? '; o cliente paga o total com o IBS/CBS' : '; o cliente paga o total sem o IBS/CBS'));
+      if (ref.cobrarPorFora === true && !bloqueia.length) {
+        try { cobrar = N.calcula({ emissao, itens, frete: { valor: num(p.frete) }, reforma: ref, ibscbs: cfg.ibscbs }).totais.vCobrar; } catch (e) { bloqueia.push(e.message); }
+      }
+    }
+  }
   const aPrazo = pg.forma === '15';   // boleto: sempre com parcela (à vista vence no dia)
-  const duplicatas = aPrazo ? parcelas(total, pg.dias, emissao) : [];
+  const duplicatas = aPrazo ? parcelas(cobrar, pg.dias, emissao) : [];
   const vendedor = String(o.vendedorNome || '').trim().toUpperCase();
   const entregaTxt = d.entrega && d.entrega.endereco && dig(d.entrega.cep) !== dig(e.cep) ? 'LOCAL DE ENTREGA: ' + [d.entrega.endereco, d.entrega.numero, d.entrega.compl, d.entrega.bairro, d.entrega.cidade, d.entrega.uf].filter(Boolean).join(', ') : '';
   // Do jeito do FKN (XML reais de 15/10/2026): "PORTADOR: BOLETO PRAZO: 28 DIAS;LOCAL DE ENTREGA: …;VENDEDOR: SILMARA;…",
@@ -106,10 +126,10 @@ function notaDoPedido(o) {
     itens, frete: { modFrete: Number(d.frete_conta == null || d.frete_conta === '' ? 0 : d.frete_conta), valor: num(p.frete),
       transportadora: /^PROPRI/i.test(transp) ? null : { nome: transp }, volumes: num(d.volumes) > 0 ? { qVol: num(d.volumes) } : null },
     cobranca: duplicatas.length ? { numero: String(o.numero), duplicatas } : null,
-    pagamento: [{ tPag: aPrazo ? '15' : pg.forma, indPag: aPrazo ? 1 : 0, valor: total, descricao: pg.forma === '99' ? (d.pagamento || 'OUTROS') : null }],
-    infCpl, infAdFisco, respTec: cfg.respTec || null, ibscbs: cfg.ibscbs == null ? undefined : cfg.ibscbs
+    pagamento: [{ tPag: aPrazo ? '15' : pg.forma, indPag: aPrazo ? 1 : 0, valor: cobrar, descricao: pg.forma === '99' ? (d.pagamento || 'OUTROS') : null }],
+    infCpl, infAdFisco, respTec: cfg.respTec || null, ibscbs: cfg.ibscbs == null ? undefined : cfg.ibscbs, reforma: ref || undefined
   };
-  return { nota, avisos: { bloqueia: [...new Set(bloqueia)], conferir: [...new Set(conferir)] }, total };
+  return { nota, avisos: { bloqueia: [...new Set(bloqueia)], conferir: [...new Set(conferir)] }, total, cobrar };
 }
 
 module.exports = { lePagamento, parcelas, notaDoPedido };
