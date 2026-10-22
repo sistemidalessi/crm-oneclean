@@ -28,16 +28,18 @@ function parcelas(total, dias, emissao) {
 
 // Operações que saem do pedido além da venda (Fase 4b, 22/10/2026). Cada uma troca o CFOP, a natureza e a cobrança; o ICMS e
 // o PIS/COFINS de cada uma estão com a fonte em docs/fase4b-regras.md.
-//   bonificacao       5910/6910, sem cobrança; ICMS como na venda (00 tributado, 60 com o ST já retido)
+//   bonificacao       5910/6910, sem cobrança; ICMS como na venda (DN CAT 4/2000: 00 tributado, 60 com o ST já retido);
+//                      PIS/COFINS 49 (doação não é receita: SC Cosit 46/2023 e 313/2023)
 //   faturamento_futuro 5922/6922 (simples faturamento da venda para entrega futura): cobra (parcelas), sem ICMS (CST 90 sem
 //                      destaque, RICMS/SP art. 129), PIS/COFINS como na venda; não mexe no estoque
-//   remessa_futura    5117/6117 (a entrega): ICMS como na venda, PIS/COFINS 49 (a receita foi no faturamento), sem cobrança,
+//   remessa_futura    5117/6117 (a entrega, natureza "Remessa - Entrega Futura", Portaria SRE 41/2023, Anexo I, art. 2º):
+//                      ICMS como na venda, PIS/COFINS 49 (a receita foi no faturamento: SC Cosit 131/2024), sem cobrança,
 //                      referencia a nota de faturamento (o.ref: { chave, numero, emissao })
 const OPERACOES = {
   venda: null,
-  bonificacao: { cfop: f => (f ? '6910' : '5910'), natOp: 'BONIFICACAO', cobra: false, icms: 'regra', pis: 'regra' },
+  bonificacao: { cfop: f => (f ? '6910' : '5910'), natOp: 'REMESSA EM BONIFICACAO', cobra: false, icms: 'regra', pis: '49' },
   faturamento_futuro: { cfop: f => (f ? '6922' : '5922'), natOp: 'SIMPLES FATURAMENTO VENDA ENTREGA FUTURA', cobra: true, icms: 'sem', pis: 'regra' },
-  remessa_futura: { cfop: f => (f ? '6117' : '5117'), natOp: 'VENDA ORIGINADA DE ENCOMENDA PARA ENTREGA FUTURA', cobra: false, icms: 'regra', pis: '49' }
+  remessa_futura: { cfop: f => (f ? '6117' : '5117'), natOp: 'REMESSA - ENTREGA FUTURA', cobra: false, icms: 'regra', pis: '49' }
 };
 
 // o: { pedido, empresa, regras (obj código → linha de crm_fiscal_produtos), emitente, ambiente, serie, numero, emissao,

@@ -102,7 +102,7 @@ function calcula(nota) {
   const brutos = itens.map(it => r2(num(it.quantidade) * num(it.valorUnitario)));
   const fretes = rateia(num(nota.frete && nota.frete.valor), brutos);
   const out = itens.map((it, i) => {
-    const vProd = brutos[i], vDesc = r2(num(it.desconto)), vFrete = fretes[i];
+    const vProd = brutos[i], vDesc = r2(num(it.desconto)), vFrete = fretes[i], vOutro = r2(num(it.outro));   // outro: outras despesas (o ST da devolução ao substituto)
     if (!(num(it.quantidade) > 0)) throw new Error('item ' + (i + 1) + ': quantidade zerada');
     if (vDesc > vProd) throw new Error('item ' + (i + 1) + ': desconto maior que o valor');
     const icms = it.icms || {}, cstI = String(icms.cst || '');
@@ -159,13 +159,13 @@ function calcula(nota) {
       const vICMSST = q.vICMSST != null ? r2(q.vICMSST) : Math.max(0, r2(vBCST * num(q.pICMSST) / 100 - vICMS));
       st = { modBCST: q.modBCST == null ? (q.pMVAST != null ? 4 : 0) : q.modBCST, pMVAST: q.pMVAST, pICMSST: num(q.pICMSST), vBCST, vICMSST };
     } else if (cstI === '10') throw new Error('item ' + (i + 1) + ': ICMS CST 10 sem os dados do ST');
-    return { vProd, vDesc, vFrete, icms: Object.assign({ cst: cstI, vBC, p: num(icms.aliquota), v: vICMS, stRet: icms.stRet || null }, st ? { st } : {}), ipiDevol: r2(num(it.ipiDevol)), pis, cofins, ibscbs };
+    return { vProd, vDesc, vFrete, vOutro, icms: Object.assign({ cst: cstI, vBC, p: num(icms.aliquota), v: vICMS, stRet: icms.stRet || null }, st ? { st } : {}), ipiDevol: r2(num(it.ipiDevol)), pis, cofins, ibscbs };
   });
   const soma = k => r2(out.reduce((s, x) => s + k(x), 0));
   const t = { vBC: soma(x => x.icms.vBC), vICMS: soma(x => x.icms.v), vProd: soma(x => x.vProd), vFrete: soma(x => x.vFrete), vDesc: soma(x => x.vDesc),
     vPIS: soma(x => x.pis.v), vCOFINS: soma(x => x.cofins.v), vBCST: soma(x => (x.icms.st ? x.icms.st.vBCST : 0)), vST: soma(x => (x.icms.st ? x.icms.st.vICMSST : 0)),
-    vIPIDevol: soma(x => x.ipiDevol) };
-  t.vNF = r2(t.vProd + t.vFrete - t.vDesc + t.vST + t.vIPIDevol);   // o IBS/CBS (por fora) nunca soma no vNF
+    vIPIDevol: soma(x => x.ipiDevol), vOutro: soma(x => x.vOutro) };
+  t.vNF = r2(t.vProd + t.vFrete - t.vDesc + t.vST + t.vIPIDevol + t.vOutro);   // o IBS/CBS (por fora) nunca soma no vNF
   const comIbs = out.filter(x => x.ibscbs);
   t.ibscbs = comIbs.length ? { vBC: soma(x => (x.ibscbs ? x.ibscbs.vBC : 0)), vIBSUF: soma(x => (x.ibscbs ? x.ibscbs.vIBSUF : 0)),
     vIBSMun: soma(x => (x.ibscbs ? x.ibscbs.vIBSMun : 0)), vCBS: soma(x => (x.ibscbs ? x.ibscbs.vCBS : 0)) } : null;
@@ -253,7 +253,7 @@ function monta(nota, opc) {
     const prod = '<prod>' + tag('cProd', txt(it.codigo || String(i + 1))) + tag('cEAN', ean) + tag('xProd', txt(it.descricao)) + tag('NCM', dig(it.ncm)) +
       (it.cest ? tag('CEST', dig(it.cest)) : '') + tag('CFOP', dig(it.cfop)) + tag('uCom', txt(it.unidade || 'UN')) + tag('qCom', d4(it.quantidade)) +
       tag('vUnCom', d4(it.valorUnitario)) + tag('vProd', d2(ci.vProd)) + tag('cEANTrib', ean) + tag('uTrib', txt(it.unidade || 'UN')) + tag('qTrib', d4(it.quantidade)) +
-      tag('vUnTrib', d4(it.valorUnitario)) + (ci.vFrete ? tag('vFrete', d2(ci.vFrete)) : '') + (ci.vDesc ? tag('vDesc', d2(ci.vDesc)) : '') + '<indTot>1</indTot>' +
+      tag('vUnTrib', d4(it.valorUnitario)) + (ci.vFrete ? tag('vFrete', d2(ci.vFrete)) : '') + (ci.vDesc ? tag('vDesc', d2(ci.vDesc)) : '') + (ci.vOutro ? tag('vOutro', d2(ci.vOutro)) : '') + '<indTot>1</indTot>' +
       (it.pedidoCliente ? tag('xPed', txt(it.pedidoCliente)) : '') + '</prod>';
     const imp = '<imposto>' + (it.vTotTrib != null ? tag('vTotTrib', d2(it.vTotTrib)) : '') + grupoIcms(ci, it) + grupoFed('PIS', ci.pis) + grupoFed('COFINS', ci.cofins) + grupoIbsCbs(ci.ibscbs) + '</imposto>';
     const devol = ci.ipiDevol > 0 ? '<impostoDevol><pDevol>100.00</pDevol><IPI>' + tag('vIPIDevol', d2(ci.ipiDevol)) + '</IPI></impostoDevol>' : '';
@@ -265,7 +265,7 @@ function monta(nota, opc) {
   const totTrib = comTrib.length ? r2(comTrib.reduce((s, it) => s + num(it.vTotTrib), 0)) : null;
   const icmsTot = '<ICMSTot>' + tag('vBC', d2(t.vBC)) + tag('vICMS', d2(t.vICMS)) + '<vICMSDeson>0.00</vICMSDeson><vFCP>0.00</vFCP>' + tag('vBCST', d2(t.vBCST)) + tag('vST', d2(t.vST)) + '<vFCPST>0.00</vFCPST><vFCPSTRet>0.00</vFCPSTRet>' +
     tag('vProd', d2(t.vProd)) + tag('vFrete', d2(t.vFrete)) + '<vSeg>0.00</vSeg>' + tag('vDesc', d2(t.vDesc)) + '<vII>0.00</vII><vIPI>0.00</vIPI>' + tag('vIPIDevol', d2(t.vIPIDevol)) +
-    tag('vPIS', d2(t.vPIS)) + tag('vCOFINS', d2(t.vCOFINS)) + '<vOutro>0.00</vOutro>' + tag('vNF', d2(t.vNF)) +
+    tag('vPIS', d2(t.vPIS)) + tag('vCOFINS', d2(t.vCOFINS)) + tag('vOutro', d2(t.vOutro)) + tag('vNF', d2(t.vNF)) +
     (totTrib != null ? tag('vTotTrib', d2(totTrib)) : '') + '</ICMSTot>';
   const ib = t.ibscbs;
   const ibsTot = ib ? '<IBSCBSTot>' + tag('vBCIBSCBS', d2(ib.vBC)) + '<gIBS><gIBSUF><vDif>0.00</vDif><vDevTrib>0.00</vDevTrib>' + tag('vIBSUF', d2(ib.vIBSUF)) + '</gIBSUF>' +

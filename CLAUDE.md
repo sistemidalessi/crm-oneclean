@@ -1741,6 +1741,28 @@ levanta no BB (convênio, carteira, API de Cobrança ou CNAB 240/400) está em `
   `crm-notas` **v35** publicada e conferida por md5 (o download mostra o BOM da linha 59 como caractere; com o escape, igual).
 - Testado com a chave ligada numa transação desfeita (1 conta certa; sem a chave, nenhuma; reentrada não repete).
 
+## Fase 4b — notas que não são venda (22/10/2026, virada)
+Regras com as fontes (pesquisa de 22/10, Sefaz-SP, Receita, Confaz) em `docs/fase4b-regras.md`; o que ficou incerto vai ao
+contador, com a escolha do CRM anotada na tabela do topo do documento.
+- **Serviço fiscal:** `nfe.js` aceita `tpNF`, `finNFe`, `refs` (NFref), ICMS 10/40/41/50/90, IPI devolvido (`impostoDevol`) e
+  `vOutro` por item (somam no vNF). `outras.js` lê o XML da nota original e monta a **devolução** (a fornecedor: 5202/5411 ou
+  6202/6411, CST da compra; fornecedor substituto = CST 90 com o ST em `vOutro` + `infAdFisco`; de cliente **não
+  contribuinte**: entrada 1202/1411, crédito do ICMS e PIS/COFINS 50, aviso depois de 45 dias; contribuinte é recusado).
+  `pedido.js` ganhou `operacao`: **bonificação** 5910 (PIS/COFINS 49, sem cobrança), **faturamento** da entrega futura 5922
+  (ICMS 90 sem base, cobra) e **remessa** 5117 ("Remessa - Entrega Futura", NFref da 5922, PIS/COFINS 49). Rotas
+  `/previa-outra` e `/emitir-outra`; versão `2026-10-22`. Testes: `nfe-4b.test.js` e `nfe-outras.test.js` (XSD oficial).
+- **Banco:** `crm_nfe_outras` (rascunho: tipo, chave de origem, itens, motivo), `crm_nfe.outra_id` e `tipo`,
+  `crm_nfe_reservar_outra` (mesmo número ao tentar de novo; remessa e bonificação fecham o pedido), `crm_nfe_outra_origem`
+  (itens só com quantidades e o já devolvido), `crm_nfe_outra_efeitos` (devoluções: estoque + contas a pagar/títulos, uma vez
+  só; testado numa transação desfeita) e `crm_pedidos_casar_int` sem casar a 5922.
+- **crm-fiscal:** ações `outra_previa` e `outra_emitir` (XML da compra do bucket `crm-compras-xml`; da venda, `crm_nfe.proc_xml`
+  ou `crm-notas-xml/nfe/<chave>.xml`).
+- **Tela:** Pedidos → NF-e → "Outras notas" (Devolução a fornecedor…, Devolução de cliente…) e, no pedido, "Outra operação…"
+  (bonificação, faturamento, remessa). Testado no navegador (prévia, limite pelo já devolvido).
+- **Falta:** atualizar o serviço fiscal na VPS (escritório) e testar em homologação; `revoke` das 3 funções; dar entrada na
+  nota de devolução que o **cliente contribuinte** emite (hoje ela chegaria como nota de compra); notas de crédito/débito
+  do Ajuste SINIEF 49/2025 (obrigatórias em 2027).
+
 ## Baixa do contas a receber pelo Caixa (22/10/2026, virada)
 - Gatilho `crm_fin_lanc_baixa_titulo` (`crm_titulo_baixa_caixa`) em `crm_fin_lancamentos`: com a chave ligada, o "Recebi"
   (entrada paga com `titulo_duplicata`, por qualquer caminho: botão, frase, lote, previsão ligada) tira o título de

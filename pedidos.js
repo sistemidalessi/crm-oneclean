@@ -441,6 +441,7 @@
     if (ehOp() && p.situacao === 'separacao') botoes.push('<button type="button" class="btn verde" data-acao="pd-separado" data-id="' + esc(p.id) + '">Separado ✓</button>');
     if (ehOp() && (p.situacao === 'separacao' || p.situacao === 'separado')) botoes.push('<button type="button" class="btn sec" data-acao="pd-voltar-aberto" data-id="' + esc(p.id) + '">Voltar ao aberto</button>');
     if (CRM.nfe && CRM.nfe.podeEmitir(p)) botoes.push('<button type="button" class="btn' + (p.situacao === 'separado' ? ' verde' : '') + '" data-acao="nf-emitir" data-id="' + esc(p.id) + '">Emitir NF-e</button>');
+    if (CRM.nfe && CRM.nfe.podeEmitir(p) && CRM.nfe.outraDoPedido) botoes.push('<button type="button" class="btn sec" data-acao="nf-outra-pedido" data-id="' + esc(p.id) + '" title="bonificação ou entrega futura">Outra operação…</button>');
     if (ehOp() && ['aberto', 'separacao', 'separado'].indexOf(p.situacao) !== -1) botoes.push('<button type="button" class="btn sec" data-acao="pd-faturar" data-id="' + esc(p.id) + '" title="ligar a nota que o FKN emitiu">Faturar (nota do FKN)…</button>');
     if (CRM.ehGestor() && p.situacao === 'faturado') botoes.push('<button type="button" class="btn sec" data-acao="pd-desfaturar" data-id="' + esc(p.id) + '">Desfazer faturado</button>');
     if ((p.situacao === 'aberto' && ehVenda()) || (ehOp() && ['separacao', 'separado'].indexOf(p.situacao) !== -1)) botoes.push('<button type="button" class="btn perigo" data-acao="pd-cancelar" data-id="' + esc(p.id) + '">Cancelar pedido</button>');

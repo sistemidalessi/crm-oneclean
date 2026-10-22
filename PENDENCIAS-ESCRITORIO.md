@@ -6,8 +6,9 @@ A mesma lista resumida está no `PENDENCIAS-ESCRITORIO.md` do `agilite-sistema-g
 ## Só dá pra fazer estando no escritório (SSH da VPS)
 
 - [ ] **Atualizar o serviço fiscal na VPS** (traz a busca das notas de compra na Sefaz, de 17/10, as respostas definitivas
-      — confirmar, desconhecer, não realizada —, de 19/10, e a regra da Reforma para as notas de 2027, de 22/10; as notas
-      de 2026 continuam saindo iguais). No terminal do escritório,
+      — confirmar, desconhecer, não realizada —, de 19/10, a regra da Reforma para as notas de 2027, de 22/10, e as **outras
+      notas da virada** — devolução a fornecedor e de cliente, bonificação, entrega futura —, também de 22/10; as notas
+      de venda de 2026 continuam saindo iguais). No terminal do escritório,
       entrar na VPS e rodar:
       `cd /opt/oneclean-fiscal && git pull -q && systemctl restart oneclean-fiscal && systemctl is-active oneclean-fiscal`
       Tem que responder `active`.

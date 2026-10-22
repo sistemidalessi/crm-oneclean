@@ -72,8 +72,15 @@ function notaDevolucao(o) {
   // a nota de compra foi emitida PARA a empresa; a de venda, PELA empresa
   if (tipo === 'devolucao_fornecedor' && dig((orig.dest || {}).doc) !== doc) bloqueia.push('esta nota de compra não foi emitida para a empresa');
   if (tipo === 'devolucao_cliente' && dig((orig.emit || {}).doc) !== doc) bloqueia.push('esta nota de venda não foi emitida pela empresa');
+  // Cliente contribuinte do ICMS devolve com a nota DELE (RICMS/SP art. 125, I; RC 26680/2022); a empresa só emite a nota de
+  // entrada para quem não é contribuinte (art. 136, I, "a"; art. 452; Portaria SRE 41/2023, Anexo IV).
+  if (tipo === 'devolucao_cliente' && orig.dest && String(orig.dest.indIEDest) === '1' && !o.recusaNaEntrega)
+    bloqueia.push('o cliente é contribuinte do ICMS: a nota de devolução é dele (peça a nota e dê entrada por ela)');
+  // crédito do ICMS na devolução de não contribuinte: até 45 dias da saída ou no prazo da garantia, com prova (Anexo IV, art. 2º § 1º)
+  if (tipo === 'devolucao_cliente' && orig.emissao && o.emissao && (new Date(o.emissao) - new Date(orig.emissao)) / 864e5 > 45)
+    conferir.push('passaram mais de 45 dias da venda: o crédito do ICMS só vale no prazo da garantia, com prova (Portaria SRE 41/2023, Anexo IV); senão, o contador escritura sem crédito');
   const outra = tipo === 'devolucao_fornecedor' ? orig.emit : orig.dest;   // quem recebe a devolução (fornecedor) ou quem devolve (cliente)
-  let freteTot = 0;
+  let freteTot = 0; const stTxt = [];
   const itens = (o.itens || []).filter(x => num(x.quantidade) > 0).map(x => {
     const it = orig.itens.find(i => i.nItem === Number(x.nItem));
     if (!it) { bloqueia.push('item ' + x.nItem + ' não existe na nota original'); return null; }
@@ -82,16 +89,25 @@ function notaDevolucao(o) {
     const f = q / num(it.quantidade), ic = it.icms;
     const cst = String(ic.cst || '');
     let icms;
-    if (num(ic.vICMSST) > 0) icms = { cst: '10', aliquota: ic.pICMS, vBC: prop(ic.vBC, f), st: { modBCST: ic.modBCST == null ? 4 : Number(ic.modBCST), pMVAST: ic.pMVAST, pICMSST: ic.pICMSST, vBCST: prop(ic.vBCST, f), vICMSST: prop(ic.vICMSST, f) } };
+    // Fornecedor substituto (compra com o ST destacado): o substituído não destaca ST. O ICMS próprio do fornecedor vai nos
+    // campos normais (CST 90, mesma base e alíquota) e o ST, proporcional, em "outras despesas" (vOutro) e no texto ao fisco
+    // (RICMS/SP art. 127 § 5º e art. 274 § 3º; RC 29407/2024, RC 24732/2021, RC 34023/2026; DN CAT 4/2010).
+    let st = null;
+    if (num(ic.vICMSST) > 0) { st = { vBCST: prop(ic.vBCST, f), vICMSST: prop(ic.vICMSST, f) }; icms = { cst: '90', aliquota: ic.pICMS, vBC: prop(ic.vBC, f) }; }
     else if (num(ic.vICMS) > 0) icms = { cst: '00', aliquota: ic.pICMS, vBC: prop(ic.vBC, f) };
     else if (cst === '60' || cst === '500') icms = { cst: '60', stRet: ic.vICMSSTRet != null ? { vBCSTRet: prop(ic.vBCSTRet, f), pST: ic.pST, vICMSSubstituto: ic.vICMSSubstituto == null ? null : prop(ic.vICMSSubstituto, f), vICMSSTRet: prop(ic.vICMSSTRet, f) } : null };
     else icms = { cst: '90' };
     if (icms.cst === '00' && Math.abs(prop(ic.vBC, f) - r2(q * num(it.vUnCom) - prop(it.vDesc, f) + prop(it.vFrete, f))) > 0.05) conferir.push('item ' + x.nItem + ': a base do ICMS da nota original não é o valor do item (redução ou outras despesas); vai a mesma proporção');
     freteTot += prop(it.vFrete, f);
+    if (st) stTxt.push('ITEM ' + x.nItem + ': BC ICMS-ST R$ ' + st.vBCST.toFixed(2) + ' ICMS-ST R$ ' + st.vICMSST.toFixed(2));
+    // PIS/COFINS: devolução de compra = 49 (o crédito da compra se estorna na escrita). Devolução de venda = crédito
+    // (Leis 10.637/10.833, art. 3º, VIII): CST 50 com a alíquota da venda; vendido com alíquota zero/isento = 98.
+    const credita = c => (['01', '02'].indexOf(String(c.cst)) !== -1 && num(c.p) > 0);
+    const fed = c => (tipo === 'devolucao_fornecedor' ? { cst: '49' } : credita(c) ? { cst: '50', aliquota: c.p } : { cst: '98' });
     return { codigo: (o.codigos && o.codigos[x.nItem]) || it.codigo, descricao: it.descricao, ncm: it.ncm, cest: it.cest, gtin: it.gtin, origem: ic.orig == null ? 0 : Number(ic.orig),
       cfop: cfopDevolucao(it.cfop, tipo), unidade: it.unidade, quantidade: q, valorUnitario: r4(it.vUnCom), desconto: prop(it.vDesc, f), icms,
-      ipiDevol: tipo === 'devolucao_fornecedor' ? prop(it.ipi.vIPI, f) : 0,
-      pis: { cst: tipo === 'devolucao_fornecedor' ? '49' : '98' }, cofins: { cst: tipo === 'devolucao_fornecedor' ? '49' : '98' },
+      ipiDevol: tipo === 'devolucao_fornecedor' ? prop(it.ipi.vIPI, f) : 0, outro: st ? st.vICMSST : 0,
+      pis: fed(it.pis), cofins: fed(it.cofins),
       infAdProd: 'Devolucao de ' + q + ' ' + (it.unidade || '') + ' do item ' + x.nItem + ' da NF ' + orig.numero };
   }).filter(Boolean);
   if (!itens.length && !bloqueia.length) bloqueia.push('nenhum item com quantidade para devolver');
@@ -105,6 +121,7 @@ function notaDevolucao(o) {
     indFinal: ehForn ? 0 : (String((outra || {}).indIEDest) === '1' ? 0 : 1), indPres: 9,
     dest: outra ? { doc: outra.doc, nome: outra.nome, ie: outra.ie, indIEDest: ehForn ? (outra.ie ? 1 : 9) : (outra.indIEDest || (outra.ie ? 1 : 9)), email: outra.email, endereco: outra.endereco } : null,
     itens, frete: { modFrete: 9, valor: r2(freteTot) }, cobranca: null, pagamento: [{ tPag: '90', valor: 0 }],
+    infAdFisco: stTxt.length ? 'ICMS-ST DA NF DE ORIGEM, DEVOLVIDO EM OUTRAS DESPESAS (RICMS/SP ART. 274 PAR. 3): ' + stTxt.join('; ') + ';' : null,
     infCpl: ['DEVOLUCAO ' + (ehForn ? 'DE COMPRA' : 'DE VENDA') + ' REF. NF ' + orig.numero + ' SERIE ' + orig.serie + ' DE ' + String(orig.emissao || '').slice(0, 10).split('-').reverse().join('/') +
       ' CHAVE ' + (orig.chave || ''), o.motivo ? 'MOTIVO: ' + o.motivo : ''].filter(Boolean).join(';') + ';',
     respTec: o.respTec || null, ibscbs: o.ibscbs, reforma: o.reforma

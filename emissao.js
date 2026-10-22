@@ -296,10 +296,12 @@
       b.push('<button type="button" class="mini" data-acao="nf-cce" data-id="' + esc(n.id) + '">Carta de correção</button>');
       if (ehOp()) b.push('<button type="button" class="mini perigo" data-acao="nf-cancelar" data-id="' + esc(n.id) + '">Cancelar</button>');
     }
-    if ((s === 'rejeitada' || s === 'bloqueada') && n.pedido_id) b.push('<button type="button" class="mini" data-acao="nf-emitir" data-id="' + esc(n.pedido_id) + '">Emitir de novo</button>');
+    if ((s === 'rejeitada' || s === 'bloqueada') && n.outra_id) b.push('<button type="button" class="mini" data-acao="nf-outra-emitir" data-id="' + esc(n.outra_id) + '">Emitir de novo</button>');
+    else if ((s === 'rejeitada' || s === 'bloqueada') && n.pedido_id) b.push('<button type="button" class="mini" data-acao="nf-emitir" data-id="' + esc(n.pedido_id) + '">Emitir de novo</button>');
     const evs = (n.eventos || []).filter(e => e.protocolo).map(e => (e.tipo === 'cancelar' ? 'cancelada ' : 'CC-e ' + e.seq + ' ') + quando(e.quando)).join(' · ');
     const avisos = (n.avisos && n.avisos.bloqueia) || [];
-    return '<tr><td><strong>' + esc(n.serie + '-' + n.numero) + '</strong>' + (n.ambiente === 'homologacao' ? '<small>homologação</small>' : '') + '</td>' +
+    return '<tr><td><strong>' + esc(n.serie + '-' + n.numero) + '</strong>' + (n.ambiente === 'homologacao' ? '<small>homologação</small>' : '') +
+      (n.tipo && n.tipo !== 'venda' ? '<small>' + esc(TIPOS[n.tipo] || n.tipo) + '</small>' : '') + '</td>' +
       '<td>' + esc(CRM.nomeEmpresa(n.empresa_id)) + (pn ? ' <button type="button" class="mini" data-acao="nf-pedido" data-id="' + esc(n.pedido_id) + '">pedido ' + esc(pn) + '</button>' : '') + '</td>' +
       '<td class="num">' + (n.valor != null ? moeda(n.valor) : '—') + '</td><td>' + seloNfe(n) +
       (['rejeitada', 'denegada', 'pendente', 'bloqueada'].indexOf(s) !== -1 && n.motivo ? '<small>' + esc((n.cstat ? n.cstat + ' — ' : '') + n.motivo) + '</small>' : '') + (avisos.length ? '<small>' + esc(avisos.join(' · ')) + '</small>' : '') +
@@ -319,6 +321,12 @@
       (CRM.ehAdmin() ? '<section class="cartao"><h2>Fechamento do mês para o contador</h2>' +
         '<p>ZIP com os XML de saída emitidos pelo CRM (produção), os eventos de cancelamento e de correção, as inutilizações e a relação de canceladas e inutilizadas. As notas da série 1 o FKN continua mandando como sempre.</p>' +
         '<p class="acoes"><input type="month" value="' + esc(f.mes) + '" data-nf-mes> <button type="button" class="btn" data-acao="nf-fechamento">Baixar o ZIP do mês</button></p></section>' : '') +
+      (ehOp() ? '<section class="cartao"><h2>Outras notas</h2>' +
+        '<p>Devoluções saem da nota original (os valores e os impostos vêm dela, na proporção do que volta). Bonificação e entrega futura saem do pedido: botão "Outra operação…" no pedido. ' +
+        'Regras e fontes: <code>docs/fase4b-regras.md</code>.</p>' +
+        '<p class="acoes"><button type="button" class="btn sec" data-acao="nf-devolucao" data-id="devolucao_fornecedor">Devolução a fornecedor…</button> ' +
+        '<button type="button" class="btn sec" data-acao="nf-devolucao" data-id="devolucao_cliente">Devolução de cliente…</button></p>' +
+        '<p class="dica">Cliente com inscrição estadual (contribuinte) devolve com a nota dele: o CRM só emite a nota de entrada para quem não é contribuinte (condomínio, escola, pessoa física).</p></section>' : '') +
       (ehOp() ? '<section class="cartao"><h2>Inutilizar numeração</h2><p class="dica">Para números que pularam e não vão ser usados (uma nota rejeitada de pedido que não sai, um salto na numeração). Nota autorizada não se inutiliza: cancela-se.</p>' +
         (inuts.length ? '<ul class="lista">' + inuts.slice(0, 20).map(i => '<li>' + esc('Série ' + i.serie + ', ' + (i.de === i.ate ? 'nº ' + i.de : 'nº ' + i.de + ' a ' + i.ate) + ' · ' + (i.ambiente === 'producao' ? 'produção' : 'homologação') + ' · ' + quando(i.criado_em) + ' · ' + (i.cstat || '') + ' ' + (i.motivo || '')) + '</li>').join('') + '</ul>' : '') +
         '<p class="acoes"><button type="button" class="btn sec" data-acao="nf-inutilizar">Inutilizar números…</button></p></section>' : '');
@@ -340,7 +348,9 @@
     const t = r.totais || {}, nota = r.nota || {}, av = r.avisos || {};
     const ib = t.ibscbs;
     const tot = r.bloqueado ? '' : '<dl class="dados grade"><dt>Produtos</dt><dd>' + moeda(t.vProd) + '</dd><dt>Frete</dt><dd>' + moeda(t.vFrete) + '</dd><dt>Desconto</dt><dd>' + moeda(t.vDesc) + '</dd>' +
-      '<dt>ICMS</dt><dd>' + moeda(t.vICMS) + ' (base ' + moeda(t.vBC) + ')</dd><dt>PIS / COFINS</dt><dd>' + moeda(t.vPIS) + ' / ' + moeda(t.vCOFINS) + '</dd>' +
+      '<dt>ICMS</dt><dd>' + moeda(t.vICMS) + ' (base ' + moeda(t.vBC) + ')</dd>' +
+      (t.vOutro ? '<dt>Outras despesas</dt><dd>' + moeda(t.vOutro) + ' (ICMS-ST da nota de origem)</dd>' : '') +
+      (t.vIPIDevol ? '<dt>IPI devolvido</dt><dd>' + moeda(t.vIPIDevol) + '</dd>' : '') + '<dt>PIS / COFINS</dt><dd>' + moeda(t.vPIS) + ' / ' + moeda(t.vCOFINS) + '</dd>' +
       // 2026: IBS/CBS só informativo; 2027 em diante (vNFTot): cobrado por fora, com o total que o inclui
       (ib ? '<dt>CBS / IBS' + (t.vNFTot == null ? ' (informativo em 2026)' : '') + '</dt><dd>' + moeda(ib.vCBS) + ' / ' + moeda(ib.vIBS) + '</dd>' : '') +
       '<dt>Total da nota' + (t.vNFTot == null ? '' : ' (sem IBS/CBS)') + '</dt><dd><strong>' + moeda(t.vNF) + '</strong></dd>' +
@@ -527,7 +537,80 @@
     });
   }
 
+  // ------------------------------------------------ outras notas (Fase 4b)
+  const TIPOS = { devolucao_fornecedor: 'devolução a fornecedor', devolucao_cliente: 'devolução de cliente', bonificacao: 'bonificação',
+    faturamento_futuro: 'entrega futura: faturamento', remessa_futura: 'entrega futura: remessa' };
+  async function outraEmitir(outraId, titulo) {
+    CRM.toast('Montando a prévia da nota…');
+    let r;
+    try { r = await chama({ acao: 'outra_previa', outra_id: outraId }); } catch (e) { CRM.falhou(e); return; }
+    const amb = r.ambiente || ambiente();
+    CRM.abrirForm({
+      titulo, largura: 'largo',
+      intro: r.bloqueado ? 'A nota não pode sair: veja abaixo.' : (amb === 'producao' ? 'PRODUÇÃO: a nota vale de verdade. Confira e clique em "Emitir".' : 'HOMOLOGAÇÃO: nota de teste, sem valor fiscal; estoque e financeiro não mudam.') + ' Série ' + (r.serie || serie()) + '.',
+      campos: [], htmlDepois: previaHtml(r), salvarTexto: r.bloqueado ? 'Fechar' : 'Emitir a NF-e',
+      aoSalvar: async () => {
+        if (r.bloqueado) return;
+        const n = (await chama({ acao: 'outra_emitir', outra_id: outraId })).nfe || {};
+        await recarrega();
+        if (CRM.pedidos && CRM.pedidos.recarregar) await CRM.pedidos.recarregar();
+        if (n.situacao === 'autorizada') { CRM.toast('NF ' + n.serie + '-' + n.numero + ' autorizada' + (n.ambiente === 'homologacao' ? ' (homologação)' : '') + '.'); setTimeout(() => { if (confirm('Baixar a DANFE agora?')) danfe(n.id); }, 200); return; }
+        if (n.situacao === 'pendente') throw new Error('a Sefaz não respondeu a tempo: em Pedidos → NF-e, clique em "Consultar" (não emita outra).');
+        if (n.situacao === 'bloqueada') throw new Error('a nota não saiu: ' + ((n.avisos && n.avisos.bloqueia) || []).join('; '));
+        throw new Error('a Sefaz rejeitou: ' + (n.cstat || '') + ' — ' + (n.motivo || '') + '. Corrija e emita de novo (mesmo número).');
+      }
+    });
+  }
+  // Devolução: o número da nota original → os itens (só quantidades) → quanto volta de cada um e o motivo.
+  function devolucao(tipo) {
+    const forn = tipo === 'devolucao_fornecedor';
+    CRM.abrirForm({ titulo: forn ? 'Devolução a fornecedor' : 'Devolução de cliente', campos: [{ nome: 'numero', rotulo: forn ? 'Número da nota de compra' : 'Número da nossa nota de venda', tipo: 'numero', passo: '1', obrigatorio: true }],
+      salvarTexto: 'Buscar a nota', aoSalvar: async v => {
+        const l = await CRM.store().outraOrigem(tipo, Math.round(v.numero));
+        if (!l.length) throw new Error('não achei a nota ' + v.numero + (forn ? ' entre as notas de compra' : ' entre as notas de venda'));
+        if (l.length === 1) { setTimeout(() => devolucaoItens(tipo, l[0]), 0); return; }
+        setTimeout(() => CRM.abrirForm({ titulo: 'Qual nota ' + v.numero + '?', campos: [{ nome: 'i', rotulo: 'Nota', tipo: 'select', obrigatorio: true,
+          opcoes: l.map((x, i) => [String(i), (x.nome || '') + ' · ' + String(x.emitida_em || '').slice(0, 10).split('-').reverse().join('/')]) }],
+          salvarTexto: 'Continuar', aoSalvar: w => { setTimeout(() => devolucaoItens(tipo, l[Number(w.i)]), 0); } }), 0);
+      } });
+  }
+  function devolucaoItens(tipo, o) {
+    const forn = tipo === 'devolucao_fornecedor', q = x => Number(x || 0);
+    if (!forn && o.contribuinte) { alert('O cliente é contribuinte do ICMS: a nota de devolução é dele. Peça a nota e dê a entrada por ela.'); return; }
+    if (!forn && o.cancelada) { alert('Esta nota foi cancelada.'); return; }
+    const itens = (o.itens || []).map(i => Object.assign({}, i, { resta: Math.max(0, q(i.quantidade) - q(i.devolvido)) }));
+    CRM.abrirForm({ titulo: 'Devolução · NF ' + o.numero + ' · ' + (o.nome || ''), largura: 'largo',
+      intro: 'Diga quanto volta de cada item (na unidade da nota). Os valores e os impostos saem da nota original, na proporção.' + (forn && o.situacao !== 'lancada' ? ' Atenção: esta compra ainda não teve entrada no estoque; a devolução não mexe no estoque.' : ''),
+      campos: itens.map(i => ({ nome: 'q_' + i.nItem, rotulo: i.nItem + '. ' + (i.descricao || i.codigo) + ' — ' + Number(i.quantidade).toLocaleString('pt-BR') + ' ' + (i.unidade || '') +
+        (q(i.devolvido) ? ' (já devolvido ' + Number(i.devolvido).toLocaleString('pt-BR') + ')' : ''), tipo: 'numero', passo: 'any', max: i.resta, desabilitado: !i.resta }))
+        .concat([{ nome: 'motivo', rotulo: 'Motivo (vai na nota)', tipo: 'textarea', obrigatorio: true, dica: 'ex.: avaria no transporte; produto errado; fora da validade' }]),
+      salvarTexto: 'Ver a prévia', aoSalvar: async v => {
+        const sel = itens.filter(i => q(v['q_' + i.nItem]) > 0).map(i => ({ nItem: i.nItem, quantidade: q(v['q_' + i.nItem]) }));
+        if (!sel.length) throw new Error('diga a quantidade de pelo menos um item');
+        const r = await CRM.store().outraCriar({ tipo, ref_chave: o.chave, compra_id: o.compra_id || null, nota_id: o.nota_id || null, empresa_id: o.empresa_id || null,
+          itens: sel, motivo: String(v.motivo || '').trim().slice(0, 300) });
+        setTimeout(() => outraEmitir(r.id, (forn ? 'Devolução a fornecedor' : 'Devolução de cliente') + ' · NF ' + o.numero), 0);
+      } });
+  }
+  // Do pedido: bonificação, faturamento ou remessa da entrega futura.
+  function outraDoPedido(pedidoId) {
+    const p = CRM.pedidos && CRM.pedidos.pedido ? CRM.pedidos.pedido(pedidoId) : null;
+    if (!p) return;
+    const temFat = (nfes || []).some(n => n.tipo === 'faturamento_futuro' && n.situacao === 'autorizada' && n.empresa_id === p.empresa_id);
+    CRM.abrirForm({ titulo: 'Outra operação · pedido ' + p.numero, campos: [{ nome: 'tipo', rotulo: 'Nota', tipo: 'select', obrigatorio: true, opcoes: [
+        ['bonificacao', 'Bonificação (5910): sem cobrança, ICMS como na venda'],
+        ['faturamento_futuro', 'Entrega futura — faturamento (5922): cobra agora, sem ICMS, não mexe no estoque'],
+        ['remessa_futura', 'Entrega futura — remessa (5117): na entrega, com ICMS, baixa o estoque' + (temFat ? '' : ' (emita antes o faturamento)')]] }],
+      salvarTexto: 'Ver a prévia', aoSalvar: async v => {
+        const r = await CRM.store().outraCriar({ tipo: v.tipo, pedido_id: p.id, empresa_id: p.empresa_id, itens: [] });
+        setTimeout(() => outraEmitir(r.id, TIPOS[v.tipo].replace(/^./, c => c.toUpperCase()) + ' · pedido ' + p.numero), 0);
+      } });
+  }
+
   Object.assign(CRM.acoes, {
+    'nf-devolucao': id => devolucao(id),
+    'nf-outra-emitir': id => outraEmitir(id, 'Emitir de novo'),
+    'nf-outra-pedido': id => outraDoPedido(id),
     'ir-nfe': () => { if (CRM.pedidos && CRM.pedidos.verNfe) CRM.pedidos.verNfe(); },
     'nf-amb': id => { f.amb = id; CRM.render(); },
     'nf-pedido': id => { if (CRM.pedidos && CRM.pedidos.abrir) CRM.pedidos.abrir(id); },
@@ -653,7 +736,7 @@
     }
   });
 
-  CRM.nfe = { tela, secaoFiscal, doPedido, podeEmitir, emitir, carrega: recarrega, marcado: id => marcados.has(id),
+  CRM.nfe = { tela, secaoFiscal, doPedido, podeEmitir, emitir, outraDoPedido, carrega: recarrega, marcado: id => marcados.has(id),
     depois(c) {
       const m = c.querySelector('[data-nf-mes]'); if (m) m.addEventListener('change', () => { f.mes = m.value; });
       c.querySelectorAll('[data-nf-marca]').forEach(el => el.addEventListener('change', () => { if (el.checked) marcados.add(el.dataset.nfMarca); else marcados.delete(el.dataset.nfMarca); CRM.render(); }));

@@ -1202,7 +1202,7 @@
 
   // NF-e emitida pelo CRM (Fase 4): a Edge Function crm-fiscal faz tudo que fala com a Sefaz (pelo serviço fiscal da VPS);
   // a leitura é direta (administrador, gestora e logística, pela RLS). Os XML vêm só quando pedidos (DANFE, fechamento).
-  const NFE_COLUNAS = 'id,ambiente,serie,numero,pedido_id,empresa_id,chave,situacao,cstat,motivo,protocolo,autorizada_em,valor,totais,avisos,nota_id,eventos,tentativas,inutilizada_em,criado_por,criado_em,atualizado_em';
+  const NFE_COLUNAS = 'id,ambiente,serie,numero,pedido_id,empresa_id,chave,situacao,cstat,motivo,protocolo,autorizada_em,valor,totais,avisos,nota_id,eventos,tentativas,inutilizada_em,criado_por,criado_em,atualizado_em,outra_id,tipo';
   Supa.prototype.fiscal = async function (corpo) {
     const r = await this.sb.functions.invoke('crm-fiscal', { body: corpo });
     if (r.error) throw await erroDaFuncao(r);
@@ -1222,6 +1222,10 @@
       if (l.length < 200) return out;
     }
   };
+  // Notas que não são venda (Fase 4b): o rascunho (tipo, nota de origem, itens) e as notas de origem só com as quantidades.
+  Supa.prototype.outraOrigem = async function (tipo, numero) { return unwrap(await this.sb.rpc('crm_nfe_outra_origem', { p_tipo: tipo, p_numero: numero })) || []; };
+  Supa.prototype.outraCriar = async function (linha) { return unwrap(await this.sb.from('crm_nfe_outras').insert(linha).select().single()); };
+  Supa.prototype.outras = async function () { return unwrap(await this.sb.from('crm_nfe_outras').select('*').order('criado_em', { ascending: false }).limit(300)); };
   Supa.prototype.nfeInutilizacoes = async function () { return unwrap(await this.sb.from('crm_nfe_inutilizacoes').select('*').order('criado_em', { ascending: false }).limit(200)); };
 
   // Tabela do IBPT (tributos aproximados): o administrador carrega o CSV; a crm-fiscal lê pelo NCM.
@@ -1330,6 +1334,9 @@
   Local.prototype.nfes = async function () { return this._nfeL().slice().sort((a, b) => String(b.criado_em).localeCompare(String(a.criado_em))).map(n => Object.assign({}, n)); };
   Local.prototype.nfeXml = async function (id) { const n = this._nfeL().find(x => x.id === id); return { chave: n && n.chave, proc_xml: null, nfe_xml: null }; };
   Local.prototype.nfesDoMes = async function () { return []; };
+  Local.prototype.outraOrigem = async function () { return []; };
+  Local.prototype.outraCriar = async function () { throw new Error('as outras notas só funcionam ligadas ao banco'); };
+  Local.prototype.outras = async function () { return []; };
   Local.prototype.nfeInutilizacoes = async function () { return (this._inuts || []).slice(); };
 
   // ---------------------------------------------------------------- fotos e fichas técnicas dos produtos (19/10/2026)

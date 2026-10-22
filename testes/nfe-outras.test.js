@@ -31,9 +31,9 @@ function notaDeCompra() {
   return { xml: '<nfeProc>' + x + '<protNFe><nProt>135260000000001</nProt></protNFe></nfeProc>', chave: m.chave };
 }
 // nota de venda nossa para um cliente
-function notaDeVenda() {
+function notaDeVenda(contribuinte) {
   const m = N.monta({ ambiente: 'producao', emitente: nos, serie: 2, numero: 88, emissao: '2026-10-15T09:00:00-03:00', cNF: '33334444',
-    dest: { doc: '22333444000172', nome: 'CLIENTE LTDA', ie: '222333444555', indIEDest: 1, endereco: end('3550308', 'SP') },
+    dest: { doc: '22333444000172', nome: 'CONDOMINIO EXEMPLO', indIEDest: contribuinte ? 1 : 9, ie: contribuinte ? '222333444555' : null, endereco: end('3550308', 'SP') },
     itens: [{ codigo: '010043', descricao: 'DETERGENTE 5L', ncm: '34022000', cfop: '5102', unidade: 'GL', quantidade: 6, valorUnitario: 30, origem: 0,
       icms: { cst: '00', aliquota: 18 }, pis: { cst: '01', aliquota: 1.65 }, cofins: { cst: '01', aliquota: 7.6 } },
     { codigo: '300005', descricao: 'PAPEL HIGIENICO', ncm: '48181000', cfop: '5405', unidade: 'FD', quantidade: 3, valorUnitario: 50, origem: 0,
@@ -50,22 +50,25 @@ test('lê o XML: chave, itens, ICMS com ST e IPI', () => {
   assert.strictEqual(l.emit.doc, forn.cnpj);
 });
 
-test('devolução a fornecedor: 5411 com o ST proporcional, 5202 comum, IPI devolvido, nota de compra referenciada', () => {
+test('devolução a fornecedor: 5411 com o ICMS próprio em CST 90 e o ST em outras despesas (RICMS/SP 274 § 3º), 5202 comum, IPI devolvido', () => {
   const c = notaDeCompra();
   const r = O.notaDevolucao(Object.assign({ tipo: 'devolucao_fornecedor', xml: c.xml, itens: [{ nItem: 1, quantidade: 5 }, { nItem: 2, quantidade: 4 }], motivo: 'AVARIA' }, comum));
   assert.deepStrictEqual(r.avisos.bloqueia, []);
   const [a, b] = r.nota.itens;
-  assert.deepStrictEqual([a.cfop, a.icms.cst, a.icms.vBC, a.icms.st.vBCST, a.icms.st.vICMSST, a.ipiDevol], ['5411', '10', 200, 280, 14.4, 10]);
+  assert.deepStrictEqual([a.cfop, a.icms.cst, a.icms.vBC, a.icms.st, a.outro, a.ipiDevol], ['5411', '90', 200, undefined, 14.4, 10]);
+  assert.deepStrictEqual([a.pis.cst, b.cofins.cst], ['49', '49']);
+  assert.ok(/ITEM 1: BC ICMS-ST R\$ 280.00 ICMS-ST R\$ 14.40/.test(r.nota.infAdFisco));
   assert.deepStrictEqual([b.cfop, b.icms.cst, b.icms.vBC, b.ipiDevol], ['5202', '00', 100, 5]);
   assert.deepStrictEqual(r.nota.refs, [c.chave]);
   assert.strictEqual(r.nota.dest.doc, forn.cnpj);
   const m = N.monta(r.nota);
-  // 200 + 100 de produtos, 14,40 de ST (metade dos 28,80 da compra), 15 de IPI devolvido
-  assert.deepStrictEqual([m.totais.vICMS, m.totais.vST, m.totais.vIPIDevol, m.totais.vNF], [54, 14.4, 15, 329.4]);
+  // 200 + 100 de produtos, 14,40 de ST (metade dos 28,80 da compra) em outras despesas, 15 de IPI devolvido
+  assert.deepStrictEqual([m.totais.vICMS, m.totais.vST, m.totais.vOutro, m.totais.vIPIDevol, m.totais.vNF], [54, 0, 14.4, 15, 329.4]);
+  assert.ok(m.infNFe.indexOf('<vOutro>14.40</vOutro><indTot>1</indTot>') !== -1);
   assert.ok(/DEVOLUCAO DE COMPRA REF\. NF 777/.test(r.nota.infCpl));
 });
 
-test('devolução de cliente: entrada 1202 e 1411, crédito do ICMS da venda, nota de venda referenciada', () => {
+test('devolução de cliente não contribuinte: entrada 1202 e 1411, crédito do ICMS e do PIS/COFINS (50; 98 no de alíquota zero)', () => {
   const v = notaDeVenda();
   const r = O.notaDevolucao(Object.assign({ tipo: 'devolucao_cliente', xml: v.xml, itens: [{ nItem: 1, quantidade: 2 }, { nItem: 2, quantidade: 3 }] }, comum));
   assert.deepStrictEqual(r.avisos.bloqueia, []);
@@ -73,6 +76,10 @@ test('devolução de cliente: entrada 1202 e 1411, crédito do ICMS da venda, no
   assert.deepStrictEqual([a.cfop, a.icms.cst, a.icms.vBC, b.cfop, b.icms.cst, b.icms.stRet.vICMSSTRet], ['1202', '00', 60, '1411', '60', 12.4]);
   assert.strictEqual(r.nota.tpNF, 0);
   assert.strictEqual(r.nota.dest.doc, '22333444000172');
+  assert.deepStrictEqual([a.pis.cst, a.pis.aliquota, b.pis.cst], ['50', 1.65, '98']);
+  // cliente contribuinte: a nota de devolução é dele
+  const c = O.notaDevolucao(Object.assign({ tipo: 'devolucao_cliente', xml: notaDeVenda(true).xml, itens: [{ nItem: 1, quantidade: 1 }] }, comum));
+  assert.ok(c.avisos.bloqueia.some(t => /contribuinte do ICMS/.test(t)));
 });
 
 test('recusas: quantidade maior que a da nota, nota que não é da empresa', () => {

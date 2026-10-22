@@ -2538,6 +2538,7 @@ begin
           from jsonb_array_elements(p.itens) i) s
      where nt.emitida_em > now() - interval '20 days' and not nt.cancelada
        and not exists (select 1 from public.crm_pedidos x where x.nota_id = nt.id)
+       and exists (select 1 from public.crm_nota_itens ni where ni.nota_id = nt.id and coalesce(ni.cfop, '') not in ('5922', '6922'))
        and s.sc >= 0.6
      order by nt.id, s.sc desc, p.criado_em
   loop
@@ -4469,3 +4470,180 @@ revoke all on function public.crm_titulo_baixa_caixa() from public, anon, authen
 drop trigger if exists crm_fin_lanc_baixa_titulo on public.crm_fin_lancamentos;
 create trigger crm_fin_lanc_baixa_titulo after insert or update of situacao, titulo_duplicata, valor or delete on public.crm_fin_lancamentos
   for each row execute function public.crm_titulo_baixa_caixa();
+
+-- ============================================================================================================
+-- Fase 4b (22/10/2026, virada): notas que não são venda. Regras e fontes em docs/fase4b-regras.md.
+-- Rascunho de cada nota (tipo, nota de origem, itens, motivo); a emissão reserva o número ligado ao rascunho e, autorizada
+-- em produção, os efeitos das devoluções rodam uma vez só (crm_nfe_outra_efeitos).
+create table if not exists public.crm_nfe_outras (
+  id            uuid primary key default gen_random_uuid(),
+  tipo          text not null check (tipo in ('devolucao_fornecedor', 'devolucao_cliente', 'bonificacao', 'faturamento_futuro', 'remessa_futura')),
+  ref_chave     text check (ref_chave is null or ref_chave ~ '^\d{44}$'),
+  compra_id     uuid references public.crm_compras(id) on delete set null,
+  nota_id       uuid references public.crm_notas(id) on delete set null,
+  pedido_id     uuid references public.crm_pedidos(id) on delete set null,
+  empresa_id    uuid references public.crm_empresas(id) on delete set null,
+  itens         jsonb not null default '[]'::jsonb,
+  motivo        text,
+  situacao      text not null default 'rascunho' check (situacao in ('rascunho', 'emitida', 'cancelada')),
+  nfe_id        uuid references public.crm_nfe(id) on delete set null,
+  efeitos_em    timestamptz,
+  efeitos       jsonb,
+  criado_por    uuid default auth.uid(),
+  criado_em     timestamptz not null default now(),
+  atualizado_em timestamptz not null default now()
+);
+create index if not exists crm_nfe_outras_ref on public.crm_nfe_outras (ref_chave);
+alter table public.crm_nfe_outras enable row level security;
+drop policy if exists ler on public.crm_nfe_outras;
+create policy ler on public.crm_nfe_outras for select to authenticated using ((select public.crm_eh_gestor()) or (select public.crm_eh_logistica()) or (select public.crm_eh_comprador()));
+drop policy if exists grava on public.crm_nfe_outras;
+create policy grava on public.crm_nfe_outras for insert to authenticated with check (((select public.crm_eh_gestor()) or (select public.crm_eh_logistica()) or (select public.crm_eh_comprador())) and situacao = 'rascunho');
+drop policy if exists muda on public.crm_nfe_outras;
+create policy muda on public.crm_nfe_outras for update to authenticated using (((select public.crm_eh_gestor()) or (select public.crm_eh_logistica()) or (select public.crm_eh_comprador())) and situacao = 'rascunho')
+  with check (situacao = 'rascunho');
+drop trigger if exists crm_nfe_outras_atualizado_em on public.crm_nfe_outras;
+create trigger crm_nfe_outras_atualizado_em before update on public.crm_nfe_outras for each row execute function public.crm_toca_atualizado_em();
+alter table public.crm_nfe add column if not exists outra_id uuid references public.crm_nfe_outras(id) on delete set null;
+alter table public.crm_nfe add column if not exists tipo text not null default 'venda';
+
+-- Reserva do número para a nota que não é venda (rejeitada ou bloqueada tenta de novo no mesmo número). A remessa da entrega
+-- futura e a bonificação fecham o pedido (pedido_id); o faturamento não.
+create or replace function public.crm_nfe_reservar_outra(p_ambiente text, p_serie integer, p_outra uuid) returns public.crm_nfe
+language plpgsql security definer set search_path = public as $$
+declare r public.crm_nfe; o public.crm_nfe_outras; n integer;
+begin
+  if coalesce(auth.role(), '') <> 'service_role' then raise exception 'só o serviço fiscal reserva número'; end if;
+  if p_ambiente not in ('homologacao', 'producao') then raise exception 'ambiente inválido'; end if;
+  select * into o from public.crm_nfe_outras where id = p_outra;
+  if o.id is null then raise exception 'rascunho da nota não encontrado'; end if;
+  perform pg_advisory_xact_lock(hashtext('crm_nfe:' || p_ambiente || ':' || p_serie));
+  select * into r from public.crm_nfe where outra_id = p_outra and ambiente = p_ambiente and situacao in ('autorizada', 'pendente', 'reservada', 'rejeitada', 'bloqueada')
+     and inutilizada_em is null and (p_ambiente = 'producao' or situacao <> 'autorizada')
+   order by criado_em desc limit 1;
+  if r.id is not null then
+    if r.situacao = 'autorizada' then raise exception 'esta nota já foi autorizada (NF %)', r.numero; end if;
+    if r.situacao = 'pendente' then raise exception 'a NF % ficou sem resposta da Sefaz: consulte antes de emitir de novo', r.numero; end if;
+    update public.crm_nfe set tentativas = tentativas + 1, atualizado_em = now() where id = r.id returning * into r;
+    return r;
+  end if;
+  insert into public.crm_nfe_numeracao (ambiente, serie) values (p_ambiente, p_serie) on conflict do nothing;
+  update public.crm_nfe_numeracao set proximo = proximo + 1 where ambiente = p_ambiente and serie = p_serie returning proximo - 1 into n;
+  insert into public.crm_nfe (ambiente, serie, numero, outra_id, tipo, pedido_id, empresa_id, situacao, tentativas)
+  values (p_ambiente, p_serie, n, p_outra, o.tipo, case when o.tipo in ('remessa_futura', 'bonificacao') then o.pedido_id end, o.empresa_id, 'reservada', 1) returning * into r;
+  return r;
+end;
+$$;
+revoke all on function public.crm_nfe_reservar_outra(text, integer, uuid) from public, anon, authenticated;
+grant execute on function public.crm_nfe_reservar_outra(text, integer, uuid) to service_role;
+
+-- Efeitos da devolução autorizada em produção (uma vez só). Bonificação, faturamento e remessa entram como as notas de venda.
+--   a fornecedor: saída do estoque (quantidade × fator do item da compra) e abatimento no contas a pagar daquela compra (da
+--                 última parcela aberta para a primeira); a sobra vira "a receber do fornecedor".
+--   de cliente:   entrada no estoque ao custo médio do momento e abatimento nos títulos da venda (o zerado fica com abono); a
+--                 sobra vira "devolver ao cliente" no Caixa.
+create or replace function public.crm_nfe_outra_efeitos(p_nfe uuid) returns jsonb language plpgsql security definer set search_path = public as $$
+declare n public.crm_nfe; o public.crm_nfe_outras; c public.crm_compras; x jsonb; ci record; it jsonb; l record; t record;
+  q numeric; f numeric; un text; cod text; resto numeric; nmov int := 0; abat numeric := 0; vnota record; r jsonb;
+begin
+  if coalesce(auth.role(), '') <> 'service_role' and not public.crm_eh_admin() then raise exception 'só o serviço fiscal'; end if;
+  select * into n from public.crm_nfe where id = p_nfe;
+  if n.id is null or n.outra_id is null then return jsonb_build_object('ok', false, 'motivo', 'não é nota de outra operação'); end if;
+  if n.ambiente <> 'producao' or n.situacao <> 'autorizada' then return jsonb_build_object('ok', false, 'motivo', 'só nota autorizada em produção'); end if;
+  select * into o from public.crm_nfe_outras where id = n.outra_id for update;
+  if o.efeitos_em is not null then return jsonb_build_object('ok', true, 'ja', true); end if;
+  resto := coalesce(n.valor, 0);
+  if o.tipo = 'devolucao_fornecedor' then
+    select * into c from public.crm_compras where chave = o.ref_chave;
+    for x in select value from jsonb_array_elements(o.itens) loop
+      select * into ci from public.crm_compra_itens where compra_id = c.id and ordem = (x->>'nItem')::int;
+      if ci.id is null or ci.codigo is null or c.situacao <> 'lancada' then continue; end if;   -- sem entrada no estoque, nada a tirar
+      q := round((x->>'quantidade')::numeric * coalesce(ci.fator, 1), 3);
+      insert into public.crm_estoque_mov (codigo, quando, tipo, quantidade, qtd_doc, unidade_doc, fator, motivo, criado_por)
+      values (ci.codigo, now(), 'saida', -q, (x->>'quantidade')::numeric, public.crm_un(ci.unidade), coalesce(ci.fator, 1),
+        left('Devolução ao fornecedor NF ' || n.numero || ' (compra ' || coalesce(c.numero::text, '?') || ')', 200), n.criado_por);
+      nmov := nmov + 1;
+    end loop;
+    for l in select id, valor from public.crm_fin_lancamentos where compra_id = c.id and situacao = 'aberto' and tipo = 'saida' order by vencimento desc loop
+      exit when resto <= 0;
+      if l.valor <= resto then
+        update public.crm_fin_lancamentos set situacao = 'pago', pago_em = current_date, baixa = 'fora', baixado_em = now(),
+          observacoes = concat_ws(' ', observacoes, 'Abatido pela devolução NF ' || n.numero || '.') where id = l.id;
+        abat := abat + l.valor; resto := round(resto - l.valor, 2);
+      else
+        update public.crm_fin_lancamentos set valor = round(valor - resto, 2), observacoes = concat_ws(' ', observacoes, 'R$ ' || resto || ' abatidos pela devolução NF ' || n.numero || '.') where id = l.id;
+        abat := abat + resto; resto := 0;
+      end if;
+    end loop;
+    if resto > 0 then
+      insert into public.crm_fin_lancamentos (tipo, descricao, fornecedor, categoria, valor, vencimento, origem, observacoes)
+      values ('entrada', 'A receber do fornecedor: devolução NF ' || n.numero, c.fornecedor_nome, 'Outras entradas', resto, current_date + 30, 'tela',
+        'Devolução da compra ' || coalesce(c.numero::text, '?') || ' sem conta aberta para abater: combinar com o fornecedor (crédito ou depósito).');
+    end if;
+  elsif o.tipo = 'devolucao_cliente' then
+    for it in select value from jsonb_array_elements(coalesce(n.nota->'itens', '[]'::jsonb)) loop
+      cod := regexp_replace(coalesce(it->>'codigo', ''), '\.\d+$', '');
+      if cod = '' or not exists (select 1 from public.crm_estoque_saldo where codigo = cod) then continue; end if;
+      un := public.crm_un(it->>'unidade');
+      select u.fator into f from public.crm_estoque_unidades u where u.codigo = cod and u.unidade = un;
+      q := round((it->>'quantidade')::numeric * coalesce(f, 1), 3);
+      insert into public.crm_estoque_mov (codigo, quando, tipo, quantidade, custo_unit, qtd_doc, unidade_doc, fator, motivo, criado_por)
+      select cod, now(), 'entrada', q, s.custo_medio, (it->>'quantidade')::numeric, un, coalesce(f, 1),
+        left('Devolução do cliente NF ' || n.numero, 200), n.criado_por from public.crm_estoque_saldo s where s.codigo = cod;
+      nmov := nmov + 1;
+    end loop;
+    select numero into vnota from public.crm_notas where chave = o.ref_chave;
+    for t in select id, valor from public.crm_titulos where nota_numero = vnota.numero and not abono order by vencimento desc loop
+      exit when resto <= 0;
+      if t.valor <= resto then
+        update public.crm_titulos set abono = true where id = t.id;
+        abat := abat + t.valor; resto := round(resto - t.valor, 2);
+      else
+        update public.crm_titulos set valor = round(valor - resto, 2) where id = t.id;
+        abat := abat + resto; resto := 0;
+      end if;
+    end loop;
+    if resto > 0 then
+      insert into public.crm_fin_lancamentos (tipo, descricao, categoria, valor, vencimento, origem, observacoes)
+      values ('saida', 'Devolver ao cliente: devolução NF ' || n.numero, 'Outras saídas', resto, current_date + 7, 'tela',
+        'O cliente já tinha pago a venda: devolver o dinheiro ou deixar de crédito. Se ficar de crédito, exclua este lançamento.');
+    end if;
+  end if;
+  r := jsonb_build_object('estoque', nmov, 'abatido', abat, 'sobra', resto);
+  update public.crm_nfe_outras set efeitos_em = now(), efeitos = r where id = o.id;
+  return r;
+end;
+$$;
+revoke all on function public.crm_nfe_outra_efeitos(uuid) from public, anon, authenticated;
+grant execute on function public.crm_nfe_outra_efeitos(uuid) to service_role;
+
+-- Para montar a devolução: as notas com aquele número e os itens SÓ com as quantidades (a logística não vê custo), e quanto de
+-- cada item já foi devolvido em nota emitida.
+create or replace function public.crm_nfe_outra_origem(p_tipo text, p_numero bigint) returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare r jsonb;
+begin
+  if not (public.crm_eh_gestor() or public.crm_eh_logistica() or public.crm_eh_comprador()) then raise exception 'sem acesso'; end if;
+  if p_tipo = 'devolucao_fornecedor' then
+    select coalesce(jsonb_agg(jsonb_build_object('chave', c.chave, 'numero', c.numero, 'serie', c.serie, 'emitida_em', c.emitida_em, 'nome', c.fornecedor_nome,
+      'doc', c.fornecedor_doc, 'situacao', c.situacao, 'compra_id', c.id,
+      'itens', (select coalesce(jsonb_agg(jsonb_build_object('nItem', i.ordem, 'codigo', coalesce(i.codigo, i.cod_fornecedor), 'descricao', i.descricao, 'unidade', i.unidade,
+          'quantidade', i.quantidade, 'devolvido', (select coalesce(sum((x->>'quantidade')::numeric), 0) from public.crm_nfe_outras o, jsonb_array_elements(o.itens) x
+             where o.ref_chave = c.chave and o.situacao = 'emitida' and (x->>'nItem')::int = i.ordem)) order by i.ordem), '[]'::jsonb)
+        from public.crm_compra_itens i where i.compra_id = c.id)) order by c.emitida_em desc), '[]'::jsonb) into r
+    from public.crm_compras c where c.numero = p_numero;
+  elsif p_tipo = 'devolucao_cliente' then
+    select coalesce(jsonb_agg(jsonb_build_object('chave', n.chave, 'numero', n.numero, 'serie', n.serie, 'emitida_em', n.emitida_em, 'nome', n.cliente_nome,
+      'doc', n.cliente_doc, 'empresa_id', n.empresa_id, 'nota_id', n.id, 'contribuinte', coalesce(n.dest_ind_ie, '') = '1', 'cancelada', n.cancelada,
+      'itens', (select coalesce(jsonb_agg(jsonb_build_object('nItem', i.ordem, 'codigo', i.codigo, 'descricao', i.descricao, 'unidade', i.unidade, 'quantidade', i.quantidade,
+          'devolvido', (select coalesce(sum((x->>'quantidade')::numeric), 0) from public.crm_nfe_outras o, jsonb_array_elements(o.itens) x
+             where o.ref_chave = n.chave and o.situacao = 'emitida' and (x->>'nItem')::int = i.ordem)) order by i.ordem), '[]'::jsonb)
+        from public.crm_nota_itens i where i.nota_id = n.id)) order by n.emitida_em desc), '[]'::jsonb) into r
+    from public.crm_notas n where n.numero = p_numero;
+  else raise exception 'tipo inválido'; end if;
+  return r;
+end;
+$$;
+revoke all on function public.crm_nfe_outra_origem(text, bigint) from public, anon;
+grant execute on function public.crm_nfe_outra_origem(text, bigint) to authenticated;
+-- crm_pedidos_casar_int (acima, Fase 3) ganhou em 22/10: a nota de simples faturamento (5922/6922) não fatura o pedido:
+--   and exists (select 1 from public.crm_nota_itens ni where ni.nota_id = nt.id and coalesce(ni.cfop, '') not in ('5922', '6922'))
