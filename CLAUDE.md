@@ -1757,6 +1757,7 @@ contador, com a escolha do CRM anotada na tabela do topo do documento.
   só; testado numa transação desfeita) e `crm_pedidos_casar_int` sem casar a 5922.
 - **crm-fiscal:** ações `outra_previa` e `outra_emitir` (XML da compra do bucket `crm-compras-xml`; da venda, `crm_nfe.proc_xml`
   ou `crm-notas-xml/nfe/<chave>.xml`).
+  **Publicada a v12** em 22/10 (verify_jwt ligado, como antes; md5 `46d013df…` igual ao do repositório).
 - **Tela:** Pedidos → NF-e → "Outras notas" (Devolução a fornecedor…, Devolução de cliente…) e, no pedido, "Outra operação…"
   (bonificação, faturamento, remessa). Testado no navegador (prévia, limite pelo já devolvido).
 - **Falta:** atualizar o serviço fiscal na VPS (escritório) e testar em homologação; `revoke` das 3 funções; dar entrada na
