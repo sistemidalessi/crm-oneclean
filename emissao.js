@@ -190,7 +190,7 @@
 
   // estado da tela
   let nfes = null, inuts = [], carregando = false, saude = null, sefaz = null, testando = '';
-  const f = { mes: M.mesSP(new Date().toISOString()), amb: '' };
+  const f = { mes: M.mesSP(new Date().toISOString()), amb: null };
 
   async function carrega() {
     if (carregando) return;
@@ -309,7 +309,10 @@
   }
   function tela() {
     if (nfes === null) { setTimeout(carrega, 0); return '<div class="cartao"><p class="vazio">Carregando as notas…</p></div>'; }
-    const amb = ambiente(), l = nfes.filter(n => !f.amb || n.ambiente === f.amb);
+    const amb = ambiente();
+    // em produção a lista abre só nas notas que valem (as de teste da homologação ficam no filtro "Homologação")
+    if (f.amb == null) f.amb = amb === 'producao' ? 'producao' : '';
+    const l = nfes.filter(n => !f.amb || n.ambiente === f.amb);
     const pend = nfes.filter(n => n.situacao === 'pendente' && !n.inutilizada_em);
     const chip = (v, t) => '<button type="button" class="chip-filtro' + (f.amb === v ? ' ativo' : '') + '" data-acao="nf-amb" data-id="' + v + '">' + esc(t) + '</button>';
     return '<section class="cartao"><h2>NF-e emitidas pelo CRM <small>série ' + serie() + ' · últimos 90 dias</small></h2>' +

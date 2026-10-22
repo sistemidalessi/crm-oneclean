@@ -1781,6 +1781,9 @@ contador, com a escolha do CRM anotada na tabela do topo do documento.
   135260009500277) e **remessa autorizada** (NF 2-8: 5117, "Remessa - Entrega Futura", NFref da 2-7, ICMS 00 18% = 3,86,
   PIS/COFINS 49, sem cobrança; protocolo 135260009500290). **Os cinco tipos da Fase 4b passaram em homologação em 22/10.**
 - Pedidos de teste 4 e 5 (Agilité) criados para os testes e **cancelados** no fim ("teste de homologação da Fase 4b").
+- **Virada de uma vez (decisão do Anderson, 22/10):** orçamento, pedido e NF-e de produção só a partir de ter 03/11. As notas
+  de teste (homologação, NF 2-1 a 2-8) ficam: não valem e não se cancelam; a numeração de produção é separada (começa na 2-1).
+  Em produção, a lista de NF-e abre filtrada em "Produção" (`emissao.js`, `f.amb` nulo até a 1ª abertura).
 - **Falta:** `revoke` das 3 funções; dar entrada na
   nota de devolução que o **cliente contribuinte** emite (hoje ela chegaria como nota de compra); notas de crédito/débito
   do Ajuste SINIEF 49/2025 (obrigatórias em 2027).
