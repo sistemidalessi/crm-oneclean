@@ -180,7 +180,7 @@
     return l.map((x, i) => [x, i]).sort((a, b) => (b[0].celular - a[0].celular) || (b[0].principal - a[0].principal) || a[1] - b[1]).map(x => x[0]);
   }
 
-  const C = { telefonesCliente, lerLinha, linhaDeCodigo, formataLinha, dataDoFator, confereBoleto, casaBoleto, boletosPendentes, boletoAtual, mensagemBoleto, linksPdf, textoBoletos, MODELO_BOLETO };
+  const C = { telefonesCliente, lerLinha, linhaDeCodigo, formataLinha, dataDoFator, mod10, mod11, confereBoleto, casaBoleto, boletosPendentes, boletoAtual, mensagemBoleto, linksPdf, textoBoletos, MODELO_BOLETO };
   raiz.CRMCobranca = C;
   if (typeof module !== 'undefined') module.exports = C;
 

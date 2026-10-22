@@ -1687,6 +1687,27 @@ itens e vínculos; contagem ok; vendedora bloqueada. Navegador: nenhuma chamada 
 **Retomar em 22/10: boleto pelo BB (Fase 5).** Modelo `entrega_cliente` aguardando análise da Meta. O que o Anderson
 levanta no BB (convênio, carteira, API de Cobrança ou CNAB 240/400) está em `sistemi-dalessi/docs/plano-sair-do-fkn.md`, Fase 5.
 
+## Boleto do Banco do Brasil pelo CRM — Fase 5, preparação (22/10/2026, pedido do Anderson)
+Vale para os dois caminhos (API de Cobrança do BB ou arquivo de remessa CNAB), que dependem da resposta do gerente.
+- **`boleto.js`** (puro + desenho + tela): fator de vencimento (base 22/02/2025 = 1000), nosso número do BB com convênio de
+  7 dígitos (convênio + 10 do CRM = 17), campo livre (`000000` + nosso número + carteira), código de barras (44), linha
+  digitável (a mesma conferência do `cobranca.js`, que agora exporta `mod10`/`mod11`), barras ITF 2 de 5, instruções
+  (multa e juros em reais, protesto, texto livre) e `desenha(pdf, d)` (recibo do pagador + ficha de compensação, jsPDF mm).
+  **Conferido com um boleto real do BB** (convênio 3804880, carteira 17, 19/10/2026, R$ 1.703,98: mesma linha digitável) e
+  o código de barras desenhado foi lido de volta por leitor (zxing). Testes: `testes/boleto.test.js`.
+- **Simulação:** "Ver um boleto de exemplo" (Configurações → Integrações, só admin) usa um título real em aberto, sai com
+  a marca SIMULAÇÃO e com o **dígito geral trocado de propósito** (app de banco e leitor recusam) e nunca é registrado.
+- **Banco:** `crm_boletos_bb` (nosso número único, parcela da nota sem chave estrangeira — o `crm_titulos` é apagado pela
+  listagem do FKN —, situação preparado/registrado/pago/baixado/cancelado/erro, caminho api/remessa, retorno), RLS só leitura
+  para admin, gestora e logística; `crm_boleto_numeracao` (sem política); `crm_boleto_reservar(convenio)` só com o JWT de
+  `service_role` **e** `crm_config.dados.boleto.ligado = true`, começando em `boleto.inicio_numeracao`. Testado (transação
+  desfeita): desligado recusa; ligado dá 2000000001 e 2000000002; convênio diferente recusa; logística lê e não grava;
+  vendedora não vê. Configuração em `crm_config.dados.boleto` (convênio, carteira, variação, agência, conta, multa, juros,
+  protesto, primeiro número, instrução) — nada de segredo; as chaves da API vão só nos Secrets.
+- **Falta (depende do BB):** a Edge Function do caminho escolhido (registrar, consultar liquidados/webhook, baixar), o
+  boleto no PDF completo junto da DANFE e o "Boletos da nota" na aba NF-e (aparecem só com `boleto.ligado`). A faixa do
+  nosso número do CRM tem que ser livre no convênio (o site do BB usou 1000001399 em out/2026): confirmar com o gerente.
+
 ## NF-e emitida pelo CRM — Fase 4 da saída do FKN (16/10/2026, pedido do Anderson)
 
 **Caminho:** navegador → Edge Function `crm-fiscal` (login de quem clicou; emite: admin, gestora e logística; cancela e

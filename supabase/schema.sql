@@ -4012,3 +4012,59 @@ revoke all on function public.crm_compras_op(integer) from public, anon;
 revoke all on function public.crm_compra_itens_op(uuid[]) from public, anon;
 revoke all on function public.crm_compra_vinculos_op() from public, anon;
 revoke all on function public.crm_estoque_unidades_op() from public, anon;
+-- ============================================================================================================
+-- Boleto do Banco do Brasil emitido pelo CRM (22/10/2026, Fase 5 da saída do FKN). Preparação: a tabela dos
+-- boletos e a numeração do nosso número. Quem grava é só o serviço (Edge Function com a chave de serviço, quando o
+-- caminho for decidido: API de Cobrança do BB ou arquivo de remessa); a tela só lê. Enquanto boleto.ligado não for
+-- true no crm_config, a reserva de número recusa — nada muda para a equipe.
+create table if not exists public.crm_boletos_bb (
+  id uuid primary key default gen_random_uuid(),
+  convenio text not null,
+  seq bigint not null check (seq between 1 and 9999999999),
+  nosso_numero text not null unique check (nosso_numero ~ '^[0-9]{17}$'),
+  -- de onde vem: a parcela da nota (o crm_titulos pode ser apagado pela listagem do FKN; por isso sem chave estrangeira)
+  titulo_id uuid, nfe_id uuid, nota_numero integer, parcela integer, empresa_id uuid,
+  valor numeric(14,2) not null check (valor > 0),
+  vencimento date not null,
+  emissao date not null default current_date,
+  linha_digitavel text check (linha_digitavel is null or linha_digitavel ~ '^[0-9]{47}$'),
+  codigo_barras text check (codigo_barras is null or codigo_barras ~ '^[0-9]{44}$'),
+  situacao text not null default 'preparado' check (situacao in ('preparado', 'registrado', 'pago', 'baixado', 'cancelado', 'erro')),
+  caminho text check (caminho in ('api', 'remessa')),
+  registrado_em timestamptz, pago_em date, valor_pago numeric(14,2), retorno jsonb, erro text,
+  criado_por uuid default auth.uid(), criado_em timestamptz not null default now(), atualizado_em timestamptz not null default now(),
+  unique (convenio, seq)
+);
+create index if not exists crm_boletos_bb_nota on public.crm_boletos_bb (nota_numero, parcela);
+create index if not exists crm_boletos_bb_empresa on public.crm_boletos_bb (empresa_id);
+create index if not exists crm_boletos_bb_aberto on public.crm_boletos_bb (vencimento) where situacao in ('preparado', 'registrado');
+alter table public.crm_boletos_bb enable row level security;
+drop policy if exists ler on public.crm_boletos_bb;
+-- lê: administrador, gestora e logística (quem emite a nota imprime o boleto junto); escreve: só o serviço
+create policy ler on public.crm_boletos_bb for select to authenticated using ((select public.crm_eh_gestor()) or (select public.crm_eh_logistica()));
+
+create table if not exists public.crm_boleto_numeracao (
+  convenio text primary key check (convenio ~ '^[0-9]{7}$'),
+  proximo bigint not null check (proximo between 1 and 9999999999),
+  atualizado_em timestamptz not null default now()
+);
+alter table public.crm_boleto_numeracao enable row level security;  -- sem política: só o serviço
+
+-- Reserva o próximo nosso número do convênio (só o serviço; só com o boleto ligado). O primeiro vem de
+-- boleto.inicio_numeracao (faixa que o site do BB não usa, confirmada com o gerente).
+create or replace function public.crm_boleto_reservar(p_convenio text) returns bigint language plpgsql security definer set search_path = public as $$
+declare cfg jsonb; n bigint;
+begin
+  if coalesce(auth.jwt() ->> 'role', '') <> 'service_role' then raise exception 'só o serviço do boleto reserva número'; end if;
+  select dados -> 'boleto' into cfg from public.crm_config where id = 1;
+  if coalesce((cfg ->> 'ligado')::boolean, false) is not true then raise exception 'o boleto pelo BB ainda não está ligado'; end if;
+  if p_convenio !~ '^[0-9]{7}$' or p_convenio <> coalesce(cfg ->> 'convenio', '') then raise exception 'convênio diferente do configurado'; end if;
+  if not exists (select 1 from public.crm_boleto_numeracao where convenio = p_convenio) then
+    n := nullif(regexp_replace(coalesce(cfg ->> 'inicio_numeracao', ''), '\D', '', 'g'), '')::bigint;
+    if n is null then raise exception 'defina o primeiro número do CRM (boleto.inicio_numeracao)'; end if;
+    insert into public.crm_boleto_numeracao (convenio, proximo) values (p_convenio, n) on conflict (convenio) do nothing;
+  end if;
+  update public.crm_boleto_numeracao set proximo = proximo + 1, atualizado_em = now() where convenio = p_convenio returning proximo - 1 into n;
+  return n;
+end;
+$$;
