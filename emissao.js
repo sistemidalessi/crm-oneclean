@@ -322,11 +322,10 @@
       (l.length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>NF</th><th>Cliente</th><th class="num">Valor</th><th>Situação</th><th>Quando</th><th></th></tr></thead><tbody>' +
         l.map(linhaNfe).join('') + '</tbody></table></div>' : '<p class="vazio">Nenhuma nota emitida pelo CRM ainda. A nota sai do pedido: abra o pedido separado e clique em "Emitir NF-e".</p>') + '</section>' +
       (CRM.ehAdmin() ? '<section class="cartao"><h2>Fechamento do mês para o contador</h2>' +
-        '<p>ZIP com os XML de saída emitidos pelo CRM (produção), os eventos de cancelamento e de correção, as inutilizações e a relação de canceladas e inutilizadas. As notas da série 1 o FKN continua mandando como sempre.</p>' +
+        '<p>ZIP com os XML de saída emitidos pelo CRM (produção), os eventos de cancelamento e de correção, as inutilizações e a relação de canceladas e inutilizadas.' + (CRM.fknDesligado && CRM.fknDesligado() ? '' : ' As notas da série 1 o FKN continua mandando como sempre.') + '</p>' +
         '<p class="acoes"><input type="month" value="' + esc(f.mes) + '" data-nf-mes> <button type="button" class="btn" data-acao="nf-fechamento">Baixar o ZIP do mês</button></p></section>' : '') +
       (ehOp() ? '<section class="cartao"><h2>Outras notas</h2>' +
-        '<p>Devoluções saem da nota original (os valores e os impostos vêm dela, na proporção do que volta). Bonificação e entrega futura saem do pedido: botão "Outra operação…" no pedido. ' +
-        'Regras e fontes: <code>docs/fase4b-regras.md</code>.</p>' +
+        '<p>Devoluções saem da nota original (os valores e os impostos vêm dela, na proporção do que volta). Bonificação e entrega futura saem do pedido: botão "Outra operação…" no pedido.</p>' +
         '<p class="acoes"><button type="button" class="btn sec" data-acao="nf-devolucao" data-id="devolucao_fornecedor">Devolução a fornecedor…</button> ' +
         '<button type="button" class="btn sec" data-acao="nf-devolucao" data-id="devolucao_cliente">Devolução de cliente…</button></p>' +
         '<p class="dica">Cliente com inscrição estadual (contribuinte) devolve com a nota dele: o CRM só emite a nota de entrada para quem não é contribuinte (condomínio, escola, pessoa física).</p></section>' : '') +

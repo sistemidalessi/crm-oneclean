@@ -791,7 +791,7 @@
               const cod = form.elements['c_' + it.id].value.trim(), fat = Number(form.elements['f_' + it.id].value) || 0;
               const nome = form.querySelector('[data-nome="' + it.id + '"]'), q = form.querySelector('[data-q="' + it.id + '"]');
               if (nome) nome.textContent = nomeDe.get(cod) || (cod ? 'código que o estoque não tem' : '');
-              if (q) q.textContent = fat ? '= ' + qtd(Number(it.quantidade) * fat) + ' ' + (unDe.get(cod) || '') + (op() ? '' : ' · ' + R.moeda(S.custoItem(it, fat)) + ' cada') : '';
+              if (q) q.textContent = fat ? '= ' + qtd(Number(it.quantidade) * fat) + ' ' + (unDe.get(cod) || '') + (dv ? ' · volta pelo custo médio' : op() ? '' : ' · ' + R.moeda(S.custoItem(it, fat)) + ' cada') : '';
             };
             itens.forEach(it => { atualiza(it); ['c_', 'f_'].forEach(p => form.elements[p + it.id].addEventListener('input', () => atualiza(it))); });
           },

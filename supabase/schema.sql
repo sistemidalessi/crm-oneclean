@@ -710,9 +710,13 @@ create policy le on public.crm_negocios for select to authenticated
   using ((select public.crm_eh_gestor()) or ((select public.crm_eh_membro()) and responsavel_id = (select auth.uid())) or empresa_id in (select public.crm_empresas_minhas()));
 create policy grava on public.crm_negocios for insert to authenticated
   with check ((select public.crm_eh_gestor()) or ((select public.crm_eh_membro()) and responsavel_id = (select auth.uid()) and public.crm_ve_empresa(empresa_id)));
+-- Ao alterar, a empresa do negócio tem de ser uma que a vendedora já vê (a mesma regra do insert): sem isso ela
+-- trocava o empresa_id do próprio negócio para o cliente de outra carteira e, pelo crm_empresas_minhas() (que conta
+-- as empresas dos negócios dela), passava a ver e editar a ficha, os contatos, os boletos e as notas dele
+-- (auditoria de segurança de 22/10/2026, item 1). Gestora e administrador continuam livres (crm_eh_gestor).
 create policy altera on public.crm_negocios for update to authenticated
   using ((select public.crm_eh_gestor()) or ((select public.crm_eh_membro()) and responsavel_id = (select auth.uid())))
-  with check ((select public.crm_eh_gestor()) or ((select public.crm_eh_membro()) and responsavel_id = (select auth.uid())));
+  with check ((select public.crm_eh_gestor()) or ((select public.crm_eh_membro()) and responsavel_id = (select auth.uid()) and public.crm_ve_empresa(empresa_id)));
 create policy apaga on public.crm_negocios for delete to authenticated using ((select public.crm_eh_gestor()));
 
 -- itens e propostas: acompanham o negócio.
