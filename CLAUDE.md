@@ -2477,6 +2477,35 @@ e WhatsApp. Valor real do parado em 15/10: **R$ 79 mil em 271 produtos** (depois
 - Cadastro público do Auth **desligado** no painel (não dá por SQL).
 - Token do Agendor nunca entra no repositório; o extrator lê da linha de comando.
 
+### Regras fiscais revistas para a virada (22/10/2026)
+
+A pesquisa por NCM, com fonte, está em `sistemi-dalessi/docs/oneclean/fiscal/regras-ncm-2026-11.md`; o backup ficou em
+`crm_backup.fiscal_produtos_20261022`.
+
+**Aplicado em `crm_fiscal_produtos`:**
+- 88 produtos saíram da ST para `5102/00/18%` (copos, sacos de lixo, álcool, dispensers, café, açúcar, chá…). As
+  compras desde agosto vêm sem ST.
+- 6 produtos que tinham a regra de outra operação (6108, 5117) foram para `5102`.
+- 17 saneantes e inseticidas 3808 passaram de PIS/COFINS 06 para 01. O zero é só dos defensivos agropecuários, e o
+  FKN dava zero: levar ao contador.
+- 18 alimentos ficaram com PIS/COFINS zero (CST 06): café, açúcar, margarina e leite.
+
+**Não aplicado (a confirmar):** monofásico CST 04 da perfumaria e do álcool, cesta básica de 7% e bebidas frias. Nesses
+o CRM paga o imposto cheio. Também ficam os NCM errados no cadastro, que o comprador corrige.
+
+**No código:**
+- `fiscal.js`: `ehVenda` aceita só 5101–5106 e 5401–5405; sem venda interna no histórico, a proposta vira a venda
+  interna equivalente.
+- `servico-fiscal/pedido.js`: bloqueia a venda cuja regra tem CFOP de outra operação. Vale na VPS só depois do
+  `git pull` e do restart, feitos do escritório.
+
+**IBPT pela API:**
+- `crm-fiscal/ibpt.js` e a ação `ibpt_atualizar`, com o botão "Atualizar pelo IBPT agora" (só o administrador).
+- Atualiza sozinha na 1ª prévia depois que a tabela vence, uma tentativa por dia.
+- A situação fica em `crm_sistema.ibpt`.
+- Precisa do token `IBPT_TOKEN` nos Secrets (cadastro gratuito no De Olho no Imposto).
+- `crm-fiscal` v14, conferida por md5.
+
 ### Auditoria de 22/10/2026 (20 itens) — fechada
 
 Relatório da skill de segurança do Anderson (`REPORT.md` + `FINDINGS-DETAIL.md`, commit `4dbf94b`, fora do Git). Tudo
