@@ -33,6 +33,7 @@ A mesma lista resumida está no `PENDENCIAS-ESCRITORIO.md` do `agilite-sistema-g
       é só o "fiquei sabendo" à Sefaz, não confirma nem recusa a compra.)
 - [ ] **Especialista no alto das telas** (18/10): conferir se ficou do jeito que você queria.
 - [ ] **Primeira pergunta real à IA** (clicar no Clean e perguntar): conferir se responde certo.
-- [ ] **Certificado A1:** um certificado vence em **29/10/2026** e o do serviço fiscal vale até 23/12/2026 — conferir qual o
-      FKN usa e renovar o que vence.
+- [ ] **Certificado A1:** o da VPS (que emite pelo CRM) vale até **23/12/2026** — renovar e instalar na VPS na 1ª quinzena de
+      dezembro. O que vence em **29/10/2026** é outro (provavelmente o do FKN/UniNFe): se for, para o FKN seguir de reserva até
+      30/11, apontar o FKN para o mesmo certificado da VPS; se não precisar da reserva, nada a fazer.
 - [ ] **Tabela do IBPT** (tributos aproximados na nota) está vencida desde 30/09: subir a nova pela aba Fiscal.
