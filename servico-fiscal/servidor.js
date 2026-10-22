@@ -22,9 +22,10 @@ const N = require('./nfe');
 const A = require('./assinatura');
 const S = require('./sefaz');
 const PD = require('./pedido');
+const O = require('./outras');
 const D = require('./dfe');
 
-const VERSAO = '2026-10-19';
+const VERSAO = '2026-10-22';
 const env = process.env;
 let cert = null;   // { certPem, keyPem, dados }
 
@@ -71,6 +72,8 @@ function finaliza(r, chave, nfeXml, totais) {
   return out;
 }
 
+const notaOutra = b => (/^devolucao_/.test(String(b.tipo || '')) ? O.notaDevolucao(b) : PD.notaDoPedido(Object.assign({}, b, { operacao: b.tipo })));
+
 const ROTAS = {
   'GET /saude': async () => ({ ok: true, versao: VERSAO, certificado: cert ? cert.dados : null }),
   'POST /status': async b => S.status(cfgSefaz(b.ambiente)),
@@ -86,6 +89,19 @@ const ROTAS = {
   },
   'POST /emitir-pedido': async b => {
     const r = PD.notaDoPedido(Object.assign({}, b, { emissao: agoraSP() }));
+    if (r.avisos.bloqueia.length) return { situacao: 'bloqueada', avisos: r.avisos };
+    return Object.assign(await emitir(r.nota), { avisos: r.avisos, nota: r.nota });
+  },
+  // Notas que não são venda (Fase 4b): devolução (do XML da nota original) ou bonificação / entrega futura (do pedido,
+  // com b.operacao). Mesma regra do pedido: aviso que bloqueia não monta nem envia.
+  'POST /previa-outra': async b => {
+    const r = notaOutra(Object.assign({}, b, { emissao: agoraSP(), numero: b.numero || 1 }));
+    if (r.avisos.bloqueia.length) return { avisos: r.avisos, bloqueado: true };
+    const m = N.monta(r.nota);
+    return { avisos: r.avisos, bloqueado: false, totais: m.totais, calculo: m.calculo, nota: r.nota };
+  },
+  'POST /emitir-outra': async b => {
+    const r = notaOutra(Object.assign({}, b, { emissao: agoraSP() }));
     if (r.avisos.bloqueia.length) return { situacao: 'bloqueada', avisos: r.avisos };
     return Object.assign(await emitir(r.nota), { avisos: r.avisos, nota: r.nota });
   },

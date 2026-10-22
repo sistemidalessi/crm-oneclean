@@ -68,6 +68,39 @@ async function dadosDoPedido(db: ReturnType<typeof createClient>, pedidoId: stri
   return { pedido: p, empresa: empresa as Linha, regras, fiscal, vendedorNome, ibpt };
 }
 
+// Dados para a nota que não é venda: a devolução vai com o XML da nota original (compra: bucket crm-compras-xml; venda: a
+// nota emitida pelo CRM ou o XML guardado em crm-notas-xml); bonificação e entrega futura vão como o pedido.
+async function dadosDaOutra(db: ReturnType<typeof createClient>, o: Linha, fiscal: Linha, amb: string, serie: number) {
+  if (!fiscal.emitente) throw new Error('falta configurar o emitente (aba Fiscal → Emissão)');
+  const base = { tipo: o.tipo, emitente: fiscal.emitente, ambiente: amb, serie, motivo: o.motivo || null, respTec: fiscal.respTec || null, ibscbs: fiscal.ibscbs, reforma: fiscal.reforma2027 || undefined };
+  if (String(o.tipo).startsWith('devolucao_')) {
+    const ch = String(o.ref_chave || '');
+    if (!/^\d{44}$/.test(ch)) throw new Error('falta a chave da nota original');
+    let xml = '';
+    if (o.tipo === 'devolucao_fornecedor') {
+      const { data: f } = await db.storage.from('crm-compras-xml').download(ch + '.xml');
+      xml = f ? await f.text() : '';
+    } else {
+      const { data: e } = await db.from('crm_nfe').select('proc_xml').eq('chave', ch).eq('ambiente', 'producao').maybeSingle();
+      xml = e && (e as Linha).proc_xml ? String((e as Linha).proc_xml) : '';
+      if (!xml) { const { data: f } = await db.storage.from('crm-notas-xml').download('nfe/' + ch + '.xml'); xml = f ? await f.text() : ''; }
+    }
+    if (!xml) throw new Error('não achei o XML da nota original (' + ch + ')');
+    return Object.assign(base, { xml, itens: o.itens || [] });
+  }
+  if (!o.pedido_id) throw new Error('a ' + (o.tipo === 'bonificacao' ? 'bonificação' : 'entrega futura') + ' sai de um pedido');
+  const d = await dadosDoPedido(db, String(o.pedido_id));
+  let ref = null;
+  if (o.tipo === 'remessa_futura') {
+    const { data: fats } = await db.from('crm_nfe_outras').select('id').eq('pedido_id', o.pedido_id).eq('tipo', 'faturamento_futuro');
+    const ids = ((fats || []) as Linha[]).map(x => String(x.id));
+    const { data: fat } = ids.length ? await db.from('crm_nfe').select('chave, numero, autorizada_em').in('outra_id', ids).eq('ambiente', amb).eq('situacao', 'autorizada')
+      .order('autorizada_em', { ascending: false }).limit(1).maybeSingle() : { data: null };
+    if (fat) ref = { chave: (fat as Linha).chave, numero: (fat as Linha).numero, emissao: (fat as Linha).autorizada_em };
+  }
+  return Object.assign(base, { pedido: d.pedido, empresa: d.empresa, regras: d.regras, vendedorNome: d.vendedorNome, cfg: d.fiscal, ibpt: d.ibpt, ref });
+}
+
 // ICMS-ST retido (CST 60) como o FKN informa: da nota mais recente de cada produto com CST 60, o valor POR UNIDADE
 // vendida (vBCSTRet, pST, vICMSSubstituto, vICMSSTRet ÷ qCom), separado pela unidade (UN, CX…), em
 // crm_fiscal_produtos.regra.st_ret. A nota do CRM multiplica pela quantidade (servico-fiscal/pedido.js).
@@ -266,6 +299,28 @@ Deno.serve(async (req) => {
       try { r = await servico('/emitir-pedido', Object.assign(corpo, { numero: nfe.numero })); }
       catch (e) { await db.from('crm_nfe').update({ situacao: 'pendente', motivo: 'sem resposta do serviço fiscal: ' + (e as Error).message }).eq('id', nfe.id); throw e; }
       return resposta(200, { nfe: semXml(await gravaResultado(db, String(nfe.id), r, quem.user.id)) });
+    }
+
+    // Notas que não são venda (Fase 4b, 22/10/2026): o rascunho em crm_nfe_outras diz o tipo, a nota de origem e os itens.
+    if (acao === 'outra_previa' || acao === 'outra_emitir') {
+      const { data: oRow } = await db.from('crm_nfe_outras').select('*').eq('id', String(b.outra_id || '')).maybeSingle();
+      const o = oRow as Linha | null;
+      if (!o) throw new Error('rascunho da nota não encontrado');
+      if (o.situacao !== 'rascunho' && acao === 'outra_emitir') throw new Error('esta nota já foi ' + o.situacao);
+      const corpo = await dadosDaOutra(db, o, fiscal, amb, serie);
+      if (acao === 'outra_previa') return resposta(200, Object.assign(await servico('/previa-outra', corpo), { ambiente: amb, serie }));
+      const { data: res, error } = await db.rpc('crm_nfe_reservar_outra', { p_ambiente: amb, p_serie: serie, p_outra: o.id });
+      if (error) throw new Error(error.message);
+      const nfe = res as Linha;
+      await db.from('crm_nfe').update({ criado_por: quem.user.id }).eq('id', nfe.id).is('criado_por', null);
+      let r: Linha;
+      try { r = await servico('/emitir-outra', Object.assign(corpo, { numero: nfe.numero })); }
+      catch (e) { await db.from('crm_nfe').update({ situacao: 'pendente', motivo: 'sem resposta do serviço fiscal: ' + (e as Error).message }).eq('id', nfe.id); throw e; }
+      const g = await gravaResultado(db, String(nfe.id), r, quem.user.id);
+      if (g && g.situacao === 'autorizada') await db.from('crm_nfe_outras').update({ situacao: 'emitida', nfe_id: g.id }).eq('id', o.id);
+      // estoque e financeiro das devoluções (só produção; uma vez só)
+      if (g && g.situacao === 'autorizada' && g.ambiente === 'producao') await db.rpc('crm_nfe_outra_efeitos', { p_nfe: g.id });
+      return resposta(200, { nfe: semXml(g) });
     }
 
     const { data: nfeRow } = b.nfe_id ? await db.from('crm_nfe').select('*').eq('id', b.nfe_id).maybeSingle() : { data: null };
