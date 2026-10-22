@@ -2505,6 +2505,7 @@ corrigido e em produção em 22/10 (commits `04ad3b9`, `a4d8049`, `a948a67`; ban
 - **16** envio de e-mail pela API grava `criado_em = now()`. **18** rascunho de nota 4b não se altera pela API.
 - **20** gatilho `crm_titulos_guarda`: não admin só insere título com origem `nota` e só muda `empresa_id`.
 - **19 aceito** (decisão de desenho): o bloqueio por margem deixa a vendedora estimar o custo tentando preços.
+- `revoke` das duas funções novas (`crm_ia_reservar`, `crm_interno.doc_de_outro`) rodado pelo Anderson e conferido em 22/10.
 
 Não reabrir sem motivo novo. Se a busca de fotos passar a voltar sempre "sem nada", conferir primeiro o DNS do item 12
 nos logs da `crm-produto-buscar`.
