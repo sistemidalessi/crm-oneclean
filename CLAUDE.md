@@ -1828,6 +1828,7 @@ contador, com a escolha do CRM anotada na tabela do topo do documento.
   do mês, equipe, metas) e em `apuraComissao` (tira a comissão da venda na proporção do valor devolvido, no máximo a venda
   inteira, mesmo com o mês da venda fechado). Não contam como nota nem como cliente; recompra, ritmo e cadência continuam só
   com compras. Relatórios mostra "R$ X devolvido(s) já descontado(s)"; as listas mostram "↩ dev. 99 (NF 2733)".
+  `crm-notas` **v38** (fixada no commit `fd96311`; a v37 tem o mesmo conteúdo). `revoke` de `crm_devolucoes_venda`: para o Anderson.
 - **Série na duplicata:** `prefixoDup(numero, serie)` em `nfe.js` — série 1 como antes ("002564/01"); fora dela, "2-000012/01".
   Motivo: o FKN deixou títulos abertos com número baixo ("000012/01", "000025/01", "000120/01", "000121/01") e a nota 2-12 do CRM
   perderia o título (`on conflict do nothing`). Cancelamento tira pelo mesmo prefixo (série lida da chave). `crm-notas` **v36**
