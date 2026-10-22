@@ -1747,8 +1747,10 @@ levanta no BB (convênio, carteira, API de Cobrança ou CNAB 240/400) está em `
   `crm_titulos` (valor igual ou maior) ou deixa só o que falta (valor menor). Cópia em `crm_titulos_recebidos` (só admin
   lê); "Desfazer a baixa" ou excluir o lançamento devolve o título. Antes da chave, nada muda (a listagem do FKN dá a baixa).
 - **Rodar no SQL Editor** (tem `delete`, o conector trava): `docs/oneclean/sql/2026-10-22-baixa-do-receber.sql` no
-  repositório `sistemi-dalessi` (com os `revoke` das funções novas de 22/10). Depois de rodado: testar com a chave numa
-  transação desfeita.
+  repositório `sistemi-dalessi` (com os `revoke` das funções novas de 22/10). **Rodado pelo Anderson em 22/10 e conferido:**
+  gatilho e tabela no lugar, RLS ligada, anônimo sem acesso, `revoke` das 5 funções certos; teste com a chave numa
+  transação desfeita (antes da virada o título fica; inteiro sai sem ir para "baixados"; desfazer devolve; parcial deixa o
+  que falta e o desfazer volta ao valor original).
 
 ## Boleto do Banco do Brasil pelo CRM — Fase 5, preparação (22/10/2026, pedido do Anderson)
 Vale para os dois caminhos (API de Cobrança do BB ou arquivo de remessa CNAB), que dependem da resposta do gerente.
