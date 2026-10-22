@@ -1810,6 +1810,24 @@ contador, com a escolha do CRM anotada na tabela do topo do documento.
 - **Na virada:** pedido feito no FKN e ainda não faturado em 30/10 não reserva nada no CRM (a reserva passa a ser só dos
   pedidos do CRM): faturar no FKN até 30/10 ou lançar de novo no CRM em 03/11.
 
+## Devolução emitida pelo cliente e série na duplicata (22/10/2026, virada)
+- **Devolução do cliente contribuinte:** a nota que ele emite (OneClean como destinatária) chega pela Sefaz junto com as compras.
+  `compraDoXml` (`estoque.js`) a reconhece (`finNFe` 4 ou todos os itens em CFOP x201/x202/x410/x411) e grava `crm_compras.devolucao`
+  e `ref_chave` (a 1ª chave referenciada, NFref ou `DFeReferenciado`, emitida por nós), **sem parcelas**. Na tela: selo azul
+  "↩ devolução do cliente · venda NF n", a sugestão usa o nosso código que o cliente copiou da nota, "Dar entrada da devolução".
+- `crm_compra_lancar`: na devolução, entra pelo **custo médio** (não pelo preço da nota), motivo "Devolução do cliente NF …", e
+  abate os títulos da venda (os de vencimento mais distante primeiro; título inteiro = `abono`, parte = valor menor); o que sobra
+  (cliente já pagou) vira "Devolver ao cliente" no Caixa (saída em 7 dias, Outras saídas). Sem a venda no CRM: `efeitos.sem_nota`
+  e o aviso para abater à mão. `crm_compra_pagar` não lança conta a pagar de devolução. `crm_compras_devolucoes()` (logística,
+  comprador, admin; `efeitos` só admin/comprador) alimenta o selo. Testado numa transação desfeita (venda 2733: R$ 1.527,73 abatidos
+  em 2 títulos, sem conta a pagar, custo = médio; venda paga: "Devolver ao cliente" R$ 50; sem nota: aviso) e no navegador.
+- **Comissão e faturamento** ainda não descontam devolução (nem a de cliente não contribuinte que o CRM emite): decisão do Anderson.
+- **Série na duplicata:** `prefixoDup(numero, serie)` em `nfe.js` — série 1 como antes ("002564/01"); fora dela, "2-000012/01".
+  Motivo: o FKN deixou títulos abertos com número baixo ("000012/01", "000025/01", "000120/01", "000121/01") e a nota 2-12 do CRM
+  perderia o título (`on conflict do nothing`). Cancelamento tira pelo mesmo prefixo (série lida da chave). `crm-notas` **v36**
+  fixada no commit `b70b211` e conferida. Ainda há buscas por `nota_numero` sozinho (boletos, cobrança, Rotas): quando a série 2
+  chegar aos números de 2026 do FKN (~1.900, uns 15 meses), revisar.
+
 ## Baixa do contas a receber pelo Caixa (22/10/2026, virada)
 - Gatilho `crm_fin_lanc_baixa_titulo` (`crm_titulo_baixa_caixa`) em `crm_fin_lancamentos`: com a chave ligada, o "Recebi"
   (entrada paga com `titulo_duplicata`, por qualquer caminho: botão, frase, lote, previsão ligada) tira o título de
