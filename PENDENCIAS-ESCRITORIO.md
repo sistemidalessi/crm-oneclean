@@ -1,12 +1,13 @@
 # O que fazer no escritório — CRM OneClean
 
-Atualizado em 18/10/2026. Quando um item for resolvido, apague a linha (ou peça ao Claude).
+Atualizado em 22/10/2026. Quando um item for resolvido, apague a linha (ou peça ao Claude).
 A mesma lista resumida está no `PENDENCIAS-ESCRITORIO.md` do `agilite-sistema-gestao` (a sessão do escritório abre lá).
 
 ## Só dá pra fazer estando no escritório (SSH da VPS)
 
-- [ ] **Atualizar o serviço fiscal na VPS** (traz a busca das notas de compra na Sefaz, de 17/10, e as respostas definitivas
-      — confirmar, desconhecer, não realizada —, de 19/10). No terminal do escritório,
+- [ ] **Atualizar o serviço fiscal na VPS** (traz a busca das notas de compra na Sefaz, de 17/10, as respostas definitivas
+      — confirmar, desconhecer, não realizada —, de 19/10, e a regra da Reforma para as notas de 2027, de 22/10; as notas
+      de 2026 continuam saindo iguais). No terminal do escritório,
       entrar na VPS e rodar:
       `cd /opt/oneclean-fiscal && git pull -q && systemctl restart oneclean-fiscal && systemctl is-active oneclean-fiscal`
       Tem que responder `active`.
@@ -23,6 +24,10 @@ A mesma lista resumida está no `PENDENCIAS-ESCRITORIO.md` do `agilite-sistema-g
 - [ ] **Contador:** (1) concorda que o CRM dê ciência em todas as notas recebidas? (2) para a OneClean, alguma nota de compra
       exige resposta definitiva (confirmação ou desconhecimento)? Em que prazo (o CRM usa 90 dias da emissão)? Se todas
       precisarem, ligar `dfe_lembrete_todas` (o Claude liga).
+- [ ] **Contador — Reforma em 2027** (antes de 01/01/2027): (1) o IBS e a CBS entram na base do ICMS? A Sefaz-SP diz que
+      sim (Resposta à Consulta 32931/2026); há decisão de primeira instância contra. Entram os dois ou só a CBS?
+      (2) Qual a alíquota da CBS de 2027? (3) O cliente paga o total com o IBS e a CBS? (4) Como ficam o PIS/COFINS e o
+      cClassTrib na nota de 2027? Com as respostas, preencher em Fiscal → 4. Emissão → "Configurar a regra de 2027".
 - [ ] **Ciência automática:** o CRM pode dar a ciência sozinho em toda nota nova que a Sefaz mostrar? (Hoje está desligada;
       é só o "fiquei sabendo" à Sefaz, não confirma nem recusa a compra.)
 - [ ] **Especialista no alto das telas** (18/10): conferir se ficou do jeito que você queria.
