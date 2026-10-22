@@ -411,7 +411,7 @@
   }
 
   // Rotas (21/10/2026): a logística monta a rota (e a gestão acompanha); o motorista vê só a dele, no celular.
-  CRM.abasPermitidas = () => CRM.ehMotorista() ? ABAS.filter(a => a[0] === 'rota') : CRM.ehLogistica() ? ABAS.filter(a => a[0] === 'pedidos' || a[0] === 'estoque' || a[0] === 'rotas') : CRM.ehComprador() ? ABAS.filter(a => a[0] === 'compras' || a[0] === 'pedcompra' || a[0] === 'estoque' || a[0] === 'produtos' || a[0] === 'pedidos' || a[0] === 'concorrentes')
+  CRM.abasPermitidas = () => CRM.ehMotorista() ? ABAS.filter(a => a[0] === 'rota') : CRM.ehLogistica() ? ABAS.filter(a => a[0] === 'pedidos' || a[0] === 'estoque' || a[0] === 'produtos' || a[0] === 'rotas') : CRM.ehComprador() ? ABAS.filter(a => a[0] === 'compras' || a[0] === 'pedcompra' || a[0] === 'estoque' || a[0] === 'produtos' || a[0] === 'pedidos' || a[0] === 'concorrentes')
     : ABAS.filter(a => a[0] !== 'rota' && (a[0] !== 'rotas' || CRM.ehGestor()) && (a[0] !== 'ajustes' || CRM.ehGestor()) && ((a[0] !== 'gestao' && a[0] !== 'compras' && a[0] !== 'pedcompra' && a[0] !== 'estoque' && a[0] !== 'caixa' && a[0] !== 'fiscal' && a[0] !== 'concorrentes') || CRM.ehAdmin()));
 
   function renderAgora() {

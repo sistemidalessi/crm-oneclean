@@ -1687,6 +1687,28 @@ itens e vínculos; contagem ok; vendedora bloqueada. Navegador: nenhuma chamada 
 **Retomar em 22/10: boleto pelo BB (Fase 5).** Modelo `entrega_cliente` aguardando análise da Meta. O que o Anderson
 levanta no BB (convênio, carteira, API de Cobrança ou CNAB 240/400) está em `sistemi-dalessi/docs/plano-sair-do-fkn.md`, Fase 5.
 
+## Cadastro de produto no CRM (22/10/2026, virada para só o CRM)
+- **Chave "o CRM é o dono do cadastro"** em `crm_sistema` (chave `produtos_dono` = `crm`), **fora do `crm_config`** de
+  propósito: o `crm_config` é regravado inteiro por quem salva Configurações (tela aberta antes desligaria a chave). Liga só
+  o administrador (`crm_produtos_passar_ao_crm`, botão "Passar o cadastro para o CRM" em Produtos); sem volta pela tela.
+- Com a chave ligada, o gatilho `crm_estoque_guarda` ignora tudo o que não vem de `crm_produto_gravar` (GUC
+  `crm.cadastro`): a listagem do FKN pelo `crm-notas` não cria, não muda e não apaga produto; `crm_estoque_foto` deixa de
+  conferir CRM × FKN.
+- **Quem cadastra:** administrador, comprador e **logística** (decisão do Anderson); custo (`custo_unit`, `custo_compra`) só
+  administrador e comprador. `crm_produto_gravar(codigo, dados)` (novo com `novo: true`; NCM obrigatório; regra fiscal
+  **copiada de um produto modelo** com a mesma tributação; saldo 0 no livro do estoque; `crm_fiscal_produtos` com
+  situação "proposta"), `crm_produto_ler` (sem custo para a logística), `crm_produto_proximo_codigo` (maior código numérico
+  + 1; hoje 740001) e `crm_produto_embalagem` (CX/FD com o fator). Toda alteração em `crm_produto_hist` (antes/depois,
+  quem, quando; leitura admin e comprador).
+- Tela Produtos (também no menu da logística): "+ Novo produto" e "Editar o cadastro" (só com a chave ligada), aviso até a
+  virada, "+ Embalagem" para a logística. Testado no banco (transação desfeita: antes da chave recusa; logística não liga a
+  chave nem mexe em custo; vendedora barrada e vê o produto novo no disponível; listagem do FKN não muda preço nem cria) e no
+  navegador (o formulário manda o que deve). **Lição:** o conector do Supabase trava qualquer SQL com `drop`/`delete`
+  (pede confirmação que não chega): migrações novas sem `drop ... if exists`; os `revoke` vão para o Anderson.
+- **`revoke` pendentes (Anderson, SQL Editor):** `crm_produtos_do_crm()`, `crm_produtos_passar_ao_crm()`,
+  `crm_produto_gravar(text, jsonb)`, `crm_produto_ler(text)`, `crm_produto_proximo_codigo()`,
+  `crm_produto_embalagem(text, text, numeric)` — `from public, anon`.
+
 ## Boleto do Banco do Brasil pelo CRM — Fase 5, preparação (22/10/2026, pedido do Anderson)
 Vale para os dois caminhos (API de Cobrança do BB ou arquivo de remessa CNAB), que dependem da resposta do gerente.
 - **`boleto.js`** (puro + desenho + tela): fator de vencimento (base 22/02/2025 = 1000), nosso número do BB com convênio de

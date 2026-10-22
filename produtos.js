@@ -247,6 +247,9 @@
   const nome = x => R.nomeDeItem(x.descricao || x.codigo);
 
   let lista = null, carregando = false, sugs = [], ia = null, lote = null, fornLista = [];
+  let dono = null; // o cadastro é do CRM? (crm_sistema.produtos_dono; até a virada vem da listagem do FKN)
+  const podeCad = () => CRM.ehAdmin() || CRM.ehComprador() || CRM.ehLogistica(); // cadastra produto (decisão do Anderson, 22/10/2026)
+  const custoCad = () => CRM.ehAdmin() || CRM.ehComprador();
   let fotos = null; // Map(codigo → linha de crm_produto_fotos), carregado também sozinho (miniaturas no pedido e no estoque)
   const f = { busca: '', linha: '', soEstoque: true, ordem: 'vendidos', limite: 60 };
   const fl = { ver: 'aprovar', busca: '', quantos: '5', marcados: new Set(), escolha: {}, docs: '' };
@@ -263,6 +266,7 @@
         s.produtosVendidos(90).catch(vazio), s.produtosEans ? s.produtosEans().catch(vazio) : [],
         cuidaJa ? s.estoque().catch(vazio) : [], cuidaJa ? s.produtoForn().catch(vazio) : [], cuidaJa ? s.fornecedores().catch(vazio) : [],
         CRM.ehAdmin() ? s.fiscalProdutos().catch(() => null) : null]);
+      if (podeCad() && s.produtosDono) dono = await s.produtosDono().catch(() => false);
       const cm = CRM.aCaminho ? await CRM.aCaminho.garante() : null;
       fotos = new Map(fs.map(x => [x.codigo, x]));
       fornLista = fornecedores;
@@ -839,6 +843,7 @@
           ' · ' + esc(emb(x)) + (x.linha ? ' · ' + esc(R.nomeDeItem(x.linha)) : '') + (inf.marca ? ' · marca ' + esc(inf.marca) : '') + '</p>' +
           '<p class="acoes">' + (!CRM.foraDeVendas() && CRM.pedidos && CRM.pedidos.incluirItem ? '<button type="button" class="btn" data-acao="pf-pedido" data-id="' + esc(x.codigo) + '">+ Pedido</button> ' : '') +
             (!CRM.foraDeVendas() ? '<a class="btn sec" href="' + esc('https://wa.me/?text=' + encodeURIComponent(X.textoWhats(Object.assign({ nome: nome(x) }, x), u, inf.ficha_caminho ? st().fotoUrl(inf.ficha_caminho) : inf.ficha_url || ''))) + '" target="_blank" rel="noopener noreferrer">📲 Mandar foto e preço pelo WhatsApp</a> ' : '') +
+            (podeCad() && dono ? '<button type="button" class="btn sec" data-acao="pc-editar" data-id="' + esc(x.codigo) + '">Editar o cadastro</button> ' : '') +
             (podeFotos() ? '<button type="button" class="btn sec" data-acao="pf-info-editar" data-id="' + esc(x.codigo) + '">Editar a ficha</button>' : '') + '</p></div>' +
         '<div class="kpis pc-kpis"><div class="kpi' + (x.disponivel > 0 ? '' : ' alerta') + '"><span>Disponível</span><strong>' + qtd(Math.floor(x.disponivel * 1000) / 1000) + '</strong><small>' + esc(x.unidade || '') + '</small></div>' +
           (caminhoQtd(x) > 0 ? '<div class="kpi' + (x.caminho && x.caminho.atrasado ? ' alerta' : '') + '"><span>A caminho</span><strong>' + qtd(caminhoQtd(x)) + '</strong><small>' + esc(caminhoTexto(x)) + '</small></div>' : '') +
@@ -855,11 +860,12 @@
         ['Marca', inf.marca], ['Fabricante', inf.fabricante], ['Código de barras', (x.eans || []).join(', ')], cuida ? ['Localização no galpão', (x.cad && x.cad.localizacao) || x.localizacao] : null]) + '</div>' +
       '<div><h3>Embalagens</h3><div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Embalagem</th><th class="num">Contém</th><th>Código</th><th class="num">Preço A</th></tr></thead><tbody>' +
         es.map(e => '<tr><td>' + esc(e.unidade) + '</td><td class="num">' + (e.fator ? qtd(e.fator) + ' ' + esc(x.unidade || '') : '—') + '</td><td>' + esc(e.codigo || (e.origem === 'manual' ? 'acertada no CRM' : 'das notas de compra')) + '</td><td class="num">' + (e.preco ? 'R$ ' + preco(e.preco) : '—') + '</td></tr>').join('') +
-        '</tbody></table></div>' + (cuida ? '<p class="acoes"><button type="button" class="mini" data-acao="pc-emb" data-id="' + esc(x.codigo) + '">+ Embalagem</button></p>' : '') +
+        '</tbody></table></div>' + (cuida || podeCad() ? '<p class="acoes"><button type="button" class="mini" data-acao="pc-emb" data-id="' + esc(x.codigo) + '">+ Embalagem</button></p>' : '') +
         (x.caixa ? '<p class="dica">No FKN a caixa é outro código (' + esc(x.caixa.codigo) + '); aqui fica no mesmo produto, e o estoque é um só.</p>' : '') + '</div>' +
       '<div><h3>Para a vendedora</h3>' + (inf.descricao ? '<p class="pf-descricao">' + esc(inf.descricao) + '</p>' : '<p class="vazio">Sem descrição ainda' + (cuida ? ': vem da ficha aprovada em Fotos e fichas, ou em "Editar a ficha".' : '.') + '</p>') +
         ((inf.especificacoes || []).length ? '<table class="tabela pf-specs"><tbody>' + inf.especificacoes.map(z => '<tr><th>' + esc(z.nome) + '</th><td>' + esc(z.valor) + '</td></tr>').join('') + '</tbody></table>' : '') + '</div></div>' +
-      '<p class="dica">Descrição, unidade, linha, preço e mínimo vêm da listagem do FKN e mudam lá enquanto ele for o cadastro principal.' + (cuida ? ' No CRM: a ficha (foto, descrição, especificações, PDFs), o fornecedor e as embalagens.' : '') + '</p>';
+      (dono ? '<p class="dica">O cadastro é do CRM: descrição, unidade, preço, mínimo, NCM e fornecedor mudam em "Editar o cadastro" (cada alteração fica guardada com quem fez e quando).</p>'
+        : '<p class="dica">Descrição, unidade, linha, preço e mínimo vêm da listagem do FKN e mudam lá enquanto ele for o cadastro principal.' + (cuida ? ' No CRM: a ficha (foto, descrição, especificações, PDFs), o fornecedor e as embalagens.' : '') + '</p>');
   }
   function abaPrecos(x, d) {
     const tab = P ? P.tabelaDe(CRM.estado.cfg) : null, vc = veCusto() && x.custo != null, mmin = P ? P.margemMinima(CRM.estado.cfg) : 23;
@@ -952,8 +958,12 @@
       if (x) return pagina(x);
       const semFoto = podeFotos() ? lista.filter(z => !z.foto && z.disponivel > 0).length : 0;
       return '<div class="cabecalho"><div><h1>Produtos</h1><p class="sub">pesquise pelo código, pela descrição ou pelo código de barras; clique para ver tudo do produto</p></div>' +
-        '<div class="acoes">' + (podeFotos() ? '<button type="button" class="btn sec" data-acao="pf-ir-fotos">Fotos e fichas' + (semFoto ? ' (' + semFoto + ' sem foto)' : '') + '</button>' : '') +
+        '<div class="acoes">' + (podeCad() && dono ? '<button type="button" class="btn" data-acao="pc-novo">+ Novo produto</button>' : '') +
+          (CRM.ehAdmin() && dono === false ? '<button type="button" class="btn sec" data-acao="pc-dono">Passar o cadastro para o CRM</button>' : '') +
+          (podeFotos() ? '<button type="button" class="btn sec" data-acao="pf-ir-fotos">Fotos e fichas' + (semFoto ? ' (' + semFoto + ' sem foto)' : '') + '</button>' : '') +
         '<button type="button" class="btn sec" data-acao="pf-recarregar"' + (carregando ? ' disabled' : '') + '>Atualizar</button></div></div>' +
+        (podeCad() && dono === false ? '<p class="aviso-notas">Até a virada, o cadastro de produto (descrição, preço, mínimo) vem do FKN. Quando o FKN parar de emitir, ' +
+          (CRM.ehAdmin() ? 'clique em <strong>Passar o cadastro para o CRM</strong>: daí em diante produto novo e preço se cadastram aqui.' : 'o administrador passa o cadastro para o CRM e ele se faz aqui.') + '</p>' : '') +
         '<section class="cartao pc-busca">' + barra() + '</section><div data-pc-lista>' + resultado() + '</div>';
     },
     depois(c) {
@@ -988,9 +998,64 @@
     CRM.abrirForm({ titulo: 'Embalagem de ' + nome(x), intro: 'Quantas unidades (' + (x.unidade || 'UN') + ') vêm em cada embalagem. Vale para as notas de compra e para a conversão do estoque.',
       campos: [{ nome: 'unidade', rotulo: 'Embalagem (ex.: CX, FD, PCT)', obrigatorio: true }, { nome: 'fator', rotulo: 'Contém quantas ' + (x.unidade || 'unidades'), tipo: 'number', obrigatorio: true }],
       valores: { unidade: 'CX', fator: '' },
-      aoSalvar: async v => { const u = String(v.unidade).trim().toUpperCase(), f = Number(v.fator); if (!u || !(f > 0)) throw new Error('diga a embalagem e quanto ela contém'); await st().estoqueUnidadeSalvar(cod, u, f); det.delete(cod); CRM.toast('Embalagem guardada.'); CRM.render(); } });
+      aoSalvar: async v => { const u = String(v.unidade).trim().toUpperCase(), f = Number(v.fator); if (!u || !(f > 0)) throw new Error('diga a embalagem e quanto ela contém'); await st().produtoEmbalagem(cod, u, f); det.delete(cod); CRM.toast('Embalagem guardada.'); CRM.render(); } });
+  }
+  // Cadastro de produto (novo ou alterado) no CRM: o banco confere tudo (crm_produto_gravar) e guarda o histórico.
+  const ORIGENS = [['0', '0 – Nacional'], ['1', '1 – Estrangeira (importação direta)'], ['2', '2 – Estrangeira (adquirida no mercado interno)'], ['3', '3 – Nacional, mais de 40% importado'],
+    ['4', '4 – Nacional (processos básicos)'], ['5', '5 – Nacional, até 40% importado'], ['6', '6 – Estrangeira sem similar (CAMEX), importação direta'], ['7', '7 – Estrangeira sem similar (CAMEX), mercado interno'], ['8', '8 – Nacional, mais de 70% importado']];
+  async function formCadastro(cod) {
+    const novo = !cod, s = st();
+    let v0;
+    try { v0 = novo ? { codigo: await s.produtoProximoCodigo(), unidade: 'UN', situacao: 'ATIVO', origem: '0' } : await s.produtoLer(cod); } catch (e) { CRM.falhou(e); return; }
+    if (!v0) { CRM.toast('Produto não encontrado.', true); return; }
+    const linhas0 = R.ordemAlfa(X.linhas(lista || []).map(l => l.nome));
+    const temForn = (fornLista || []).length > 0, comCusto = custoCad();
+    const campos = [{ tipo: 'secao', rotulo: 'Produto' }]
+      .concat(novo ? [{ nome: 'codigo', rotulo: 'Código', obrigatorio: true, dica: 'sugestão: o próximo número livre' }] : [])
+      .concat([{ nome: 'descricao', rotulo: 'Descrição (sai na nota)', obrigatorio: true, largo: true },
+        { nome: 'unidade', rotulo: 'Unidade de venda (UN, CX, FD, GL, PCT…)', obrigatorio: true },
+        { nome: 'situacao', rotulo: 'Situação', tipo: 'select', opcoes: [['ATIVO', 'Ativo'], ['INATIVO', 'Inativo (não aparece para vender)']] },
+        { nome: 'linha', rotulo: 'Linha', sugestoes: linhas0 }, { nome: 'familia', rotulo: 'Família' },
+        { nome: 'localizacao', rotulo: 'Localização no galpão' },
+        { tipo: 'secao', rotulo: 'Preço e estoque' },
+        { nome: 'preco_venda', rotulo: 'Preço de venda (tabela A), R$', tipo: 'numero', obrigatorio: true, vazioNulo: true },
+        { nome: 'estoque_min', rotulo: 'Estoque mínimo', tipo: 'numero', passo: '1', vazioNulo: true },
+        { nome: 'estoque_max', rotulo: 'Estoque máximo', tipo: 'numero', passo: '1', vazioNulo: true }])
+      .concat(comCusto ? [{ nome: 'custo_unit', rotulo: 'Custo (reposição), R$', tipo: 'numero', vazioNulo: true }] : [])
+      .concat(temForn ? [{ nome: 'fornecedor_cod', rotulo: 'Fornecedor', tipo: 'select', alfa: true, opcoes: [['', '—']].concat(fornLista.filter(z => z.ativo !== false || String(z.codigo) === String(v0.fornecedor_cod)).map(z => [String(z.codigo), R.nomeDeItem(z.nome)])) }] : [])
+      .concat([{ tipo: 'secao', rotulo: 'Fiscal' },
+        { nome: 'ncm', rotulo: 'NCM (8 números)', obrigatorio: true }, { nome: 'cest', rotulo: 'CEST (se tiver)' }, { nome: 'gtin', rotulo: 'Código de barras (EAN)' },
+        { nome: 'origem', rotulo: 'Origem', tipo: 'select', opcoes: ORIGENS }])
+      .concat(novo ? [{ nome: 'modelo', rotulo: 'Mesma tributação que o produto (código)', obrigatorio: true, largo: true, dica: 'um produto parecido já vendido: o CRM copia dele CFOP, CST e ICMS-ST' },
+        { tipo: 'secao', rotulo: 'Embalagem de compra (se vier em caixa ou fardo)' },
+        { nome: 'emb_unidade', rotulo: 'Embalagem (CX, FD, PCT)' }, { nome: 'emb_fator', rotulo: 'Quantas unidades vêm nela', tipo: 'numero', passo: '1', vazioNulo: true }] : []);
+    const valores = Object.assign({}, v0, { ncm: v0.ncm ? String(v0.ncm).replace(/^(\d{4})(\d{2})(\d{2})$/, '$1.$2.$3') : '', fornecedor_cod: v0.fornecedor_cod ? String(v0.fornecedor_cod) : '' });
+    CRM.abrirForm({
+      titulo: novo ? 'Novo produto' : 'Cadastro de ' + R.nomeDeItem(v0.descricao || cod),
+      intro: novo ? 'O produto entra no estoque com saldo zero; a primeira entrada de nota de compra soma. Fica guardado quem cadastrou e quando.'
+        : 'Cada alteração fica guardada com quem fez e quando.' + (comCusto ? '' : ' O custo, só o administrador e o comprador mudam.'),
+      campos, valores,
+      aoSalvar: async v => {
+        const d = {};
+        ['descricao', 'unidade', 'situacao', 'linha', 'familia', 'localizacao', 'preco_venda', 'estoque_min', 'estoque_max', 'ncm', 'cest', 'gtin', 'origem'].forEach(k => { d[k] = v[k] == null ? '' : v[k]; });
+        if (comCusto) d.custo_unit = v.custo_unit == null ? '' : v.custo_unit;
+        if (temForn) d.fornecedor_cod = v.fornecedor_cod || '';
+        if (novo) { d.novo = true; d.modelo = String(v.modelo || '').trim(); }
+        const codigo = novo ? String(v.codigo || '').trim().toUpperCase() : cod;
+        await s.produtoGravar(codigo, d);
+        if (novo && v.emb_unidade && v.emb_fator > 0) await s.produtoEmbalagem(codigo, String(v.emb_unidade).trim().toUpperCase(), v.emb_fator);
+        CRM.toast(novo ? 'Produto ' + codigo + ' cadastrado.' : 'Cadastro salvo.');
+        lista = null; det.delete(codigo); pc.aberto = codigo; carrega();
+      }
+    });
   }
   Object.assign(CRM.acoes, {
+    'pc-novo': () => formCadastro(null),
+    'pc-editar': id => formCadastro(id),
+    'pc-dono': async () => {
+      if (!confirm('Passar o cadastro de produtos para o CRM?\n\nDaí em diante a listagem de produtos do FKN não muda mais nada no CRM (nem preço, nem produto novo, nem a conferência do estoque) e o cadastro passa a ser feito só aqui, pelo comprador, pela logística e pelo administrador.\n\nFaça isso quando o FKN parar de emitir nota. Não tem volta pela tela.')) return;
+      try { await st().produtosPassarAoCrm(); dono = true; CRM.toast('O cadastro de produtos agora é do CRM.'); CRM.render(); } catch (e) { CRM.falhou(e); }
+    },
     'pf-abrir': id => { pc.aberto = base(id); CRM.estado.aba = 'produtos'; CRM.render(); raiz.scrollTo && raiz.scrollTo(0, 0); },
     'pc-voltar': () => { pc.aberto = null; CRM.render(); },
     'pc-aba': id => { pc.aba = id; CRM.render(); },

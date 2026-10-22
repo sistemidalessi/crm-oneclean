@@ -472,6 +472,17 @@
     return unwrap(await this.sb.from('crm_fornecedores').upsert(Object.assign({}, f, { atualizado_em: new Date().toISOString() }), { onConflict: 'codigo' }).select().single());
   };
   // fornecedor null = volta ao do FKN
+  // Cadastro de produto no CRM (22/10/2026, virada): a chave "o CRM é o dono do cadastro" (crm_sistema) e a gravação
+  // pelas funções do banco (comprador, logística e administrador; custo só administrador e comprador).
+  Supa.prototype.produtosDono = async function () {
+    const r = unwrap(await this.sb.from('crm_sistema').select('valor').eq('chave', 'produtos_dono').maybeSingle());
+    return !!(r && r.valor === 'crm');
+  };
+  Supa.prototype.produtosPassarAoCrm = async function () { return unwrap(await this.sb.rpc('crm_produtos_passar_ao_crm')); };
+  Supa.prototype.produtoLer = async function (codigo) { return unwrap(await this.sb.rpc('crm_produto_ler', { p_codigo: codigo })); };
+  Supa.prototype.produtoGravar = async function (codigo, dados) { return unwrap(await this.sb.rpc('crm_produto_gravar', { p_codigo: codigo, p_dados: dados })); };
+  Supa.prototype.produtoProximoCodigo = async function () { return unwrap(await this.sb.rpc('crm_produto_proximo_codigo')); };
+  Supa.prototype.produtoEmbalagem = async function (codigo, unidade, fator) { return unwrap(await this.sb.rpc('crm_produto_embalagem', { p_codigo: codigo, p_unidade: unidade, p_fator: fator })); };
   Supa.prototype.trocarFornecedor = async function (codigo, fornecedor) {
     return unwrap(await this.sb.from('crm_produto_fornecedor').upsert({ codigo, fornecedor: fornecedor || null, atualizado_em: new Date().toISOString() }, { onConflict: 'codigo' }));
   };
@@ -507,6 +518,13 @@
     const l = lsLe('crm_fornecedores', []).filter(x => x.codigo !== f.codigo).concat(Object.assign({ prazo_dias: 7, dias_pedido: [] }, f));
     lsGrava('crm_fornecedores', l); return f;
   };
+  // modo local (demonstração): o cadastro continua o da base, sem a chave
+  Local.prototype.produtosDono = async function () { return false; };
+  Local.prototype.produtosPassarAoCrm = async function () { throw new Error('o cadastro de produto só funciona ligado ao banco'); };
+  Local.prototype.produtoLer = async function () { return null; };
+  Local.prototype.produtoGravar = async function () { throw new Error('o cadastro de produto só funciona ligado ao banco'); };
+  Local.prototype.produtoProximoCodigo = async function () { return ''; };
+  Local.prototype.produtoEmbalagem = async function () { throw new Error('o cadastro de produto só funciona ligado ao banco'); };
   Local.prototype.trocarFornecedor = async function (codigo, fornecedor) {
     lsGrava('crm_produto_fornecedor', lsLe('crm_produto_fornecedor', []).filter(x => x.codigo !== codigo).concat({ codigo, fornecedor: fornecedor || null }));
   };

@@ -4068,3 +4068,211 @@ begin
   return n;
 end;
 $$;
+-- ============================================================================================================
+-- Cadastro de produto no CRM (22/10/2026, virada: só o CRM a partir de 03/11). Até a chave ser ligada, quem manda no
+-- cadastro é a listagem do FKN (crm-notas grava e apaga o que não veio). Ligada (crm_sistema.produtos_dono = 'crm',
+-- só o administrador, por crm_produtos_passar_ao_crm), a listagem do FKN deixa de mexer nos produtos (gatilho abaixo) e
+-- de conferir o estoque, e o cadastro passa a ser feito aqui: comprador, logística e administrador (decisão do
+-- Anderson); o custo só o administrador e o comprador. Toda alteração fica em crm_produto_hist (quem, quando, antes, depois).
+-- Chaves do sistema fora do crm_config (o crm_config é regravado inteiro por quem salva Configurações; uma tela aberta
+-- antes desligaria a chave). Escreve só por função do administrador; lê quem está logado.
+create table if not exists public.crm_sistema (chave text primary key, valor text, quem uuid default auth.uid(), quando timestamptz not null default now());
+alter table public.crm_sistema enable row level security;
+drop policy if exists ler on public.crm_sistema;
+create policy ler on public.crm_sistema for select to authenticated using ((select public.crm_eh_ativo()));
+create or replace function public.crm_produtos_do_crm() returns boolean language sql stable security definer set search_path = public as $$
+  select coalesce((select valor from public.crm_sistema where chave = 'produtos_dono'), '') = 'crm';
+$$;
+grant execute on function public.crm_produtos_do_crm() to authenticated;
+
+create table if not exists public.crm_produto_hist (
+  id bigint generated always as identity primary key,
+  codigo text not null,
+  acao text not null check (acao in ('novo', 'alterado', 'dono')),
+  antes jsonb, depois jsonb,
+  quem uuid default auth.uid(), quando timestamptz not null default now()
+);
+create index if not exists crm_produto_hist_cod on public.crm_produto_hist (codigo, quando desc);
+alter table public.crm_produto_hist enable row level security;
+drop policy if exists ler on public.crm_produto_hist;
+create policy ler on public.crm_produto_hist for select to authenticated using ((select public.crm_eh_admin()) or (select public.crm_eh_comprador()));
+
+-- Com o CRM dono do cadastro, o que não vem de crm_produto_gravar (a listagem do FKN pelo crm-notas) não mexe em crm_estoque.
+create or replace function public.crm_estoque_guarda() returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if public.crm_produtos_do_crm() and coalesce(current_setting('crm.cadastro', true), '') <> '1' then
+    return null; -- ignora a linha (insert, update ou delete)
+  end if;
+  return case when tg_op = 'DELETE' then old else new end;
+end;
+$$;
+drop trigger if exists crm_estoque_guarda on public.crm_estoque;
+create trigger crm_estoque_guarda before insert or update or delete on public.crm_estoque for each row execute function public.crm_estoque_guarda();
+
+-- A conferência CRM × FKN da listagem perde o sentido com o CRM dono (o FKN para de ser atualizado).
+create or replace function public.crm_estoque_foto(p_gerado timestamp with time zone, p_linhas integer) returns jsonb language plpgsql security definer set search_path = public as $$
+declare fid bigint; r jsonb;
+begin
+  if not (public.crm_eh_admin() or public.crm_eh_comprador() or coalesce(auth.role(), '') = 'service_role') then raise exception 'só o administrador ou o comprador'; end if;
+  if public.crm_produtos_do_crm() then return jsonb_build_object('foto', null, 'conferencia', null, 'ignorada', 'o cadastro e o estoque são do CRM'); end if;
+  insert into public.crm_estoque_fotos (gerado_em, linhas) values (coalesce(p_gerado, now()), p_linhas) returning id into fid;
+  perform public.crm_estoque_fatores();
+  r := public.crm_estoque_conferir(fid);
+  return jsonb_build_object('foto', fid, 'conferencia', r);
+end;
+$$;
+
+-- Liga a chave (só o administrador). Não tem volta pela tela: é a virada.
+create or replace function public.crm_produtos_passar_ao_crm() returns jsonb language plpgsql security definer set search_path = public as $$
+begin
+  if not public.crm_eh_admin() then raise exception 'só o administrador passa o cadastro para o CRM'; end if;
+  if public.crm_produtos_do_crm() then return jsonb_build_object('ok', true, 'ja', true); end if;
+  insert into public.crm_sistema (chave, valor) values ('produtos_dono', 'crm') on conflict (chave) do update set valor = 'crm', quem = auth.uid(), quando = now();
+  insert into public.crm_produto_hist (codigo, acao, depois) values ('*', 'dono', jsonb_build_object('produtos_dono', 'crm'));
+  return jsonb_build_object('ok', true);
+end;
+$$;
+grant execute on function public.crm_produtos_passar_ao_crm() to authenticated;
+
+-- Grava um produto (novo ou alterado). p_dados: descricao, unidade, situacao (ATIVO/INATIVO), linha, familia,
+-- fornecedor_cod, estoque_min, estoque_max, preco_venda, localizacao, custo_unit e custo_compra (só administrador e
+-- comprador), ncm, cest, gtin, origem, modelo (código de um produto com a mesma tributação: a regra fiscal é copiada
+-- dele) e novo = true para cadastrar.
+create or replace function public.crm_produto_gravar(p_codigo text, p_dados jsonb) returns jsonb language plpgsql security definer set search_path = public as $$
+declare cod text := upper(btrim(coalesce(p_codigo, ''))); d jsonb := coalesce(p_dados, '{}'::jsonb);
+  novo boolean := coalesce((d ->> 'novo')::boolean, false); custo boolean := public.crm_eh_admin() or public.crm_eh_comprador();
+  e public.crm_estoque; antes jsonb; modelo_f public.crm_fiscal_produtos; fn text; v text; n numeric;
+begin
+  if not (custo or public.crm_eh_logistica()) then raise exception 'só o administrador, o comprador e a logística cadastram produto'; end if;
+  if not public.crm_produtos_do_crm() then raise exception 'o cadastro ainda é do FKN: o administrador passa para o CRM em Produtos ("Passar o cadastro para o CRM")'; end if;
+  if cod = '' or cod !~ '^[A-Z0-9][A-Z0-9.\-]{0,19}$' then raise exception 'código inválido (letras, números, ponto ou traço; até 20)'; end if;
+  if (custo is false) and (d ? 'custo_unit' or d ? 'custo_compra') then raise exception 'o custo só o administrador e o comprador mudam'; end if;
+  select * into e from public.crm_estoque where codigo = cod;
+  if novo and e.codigo is not null then raise exception 'já existe um produto com o código %', cod; end if;
+  if not novo and e.codigo is null then raise exception 'produto % não encontrado', cod; end if;
+  if novo and exists (select 1 from public.crm_estoque_saldo where codigo = cod) then raise exception 'o código % já foi usado no estoque', cod; end if;
+  antes := case when novo then null else to_jsonb(e) end;
+  -- validações
+  if novo or d ? 'descricao' then
+    v := btrim(coalesce(d ->> 'descricao', ''));
+    if length(v) < 3 or length(v) > 120 then raise exception 'descrição com 3 a 120 letras'; end if;
+  end if;
+  if novo or d ? 'unidade' then
+    v := upper(btrim(coalesce(d ->> 'unidade', '')));
+    if v !~ '^[A-Z0-9]{1,6}$' then raise exception 'unidade inválida (ex.: UN, CX, FD, GL, PCT)'; end if;
+  end if;
+  if d ? 'situacao' and coalesce(d ->> 'situacao', '') not in ('ATIVO', 'INATIVO') then raise exception 'situação: ATIVO ou INATIVO'; end if;
+  foreach v in array array['preco_venda', 'estoque_min', 'estoque_max', 'custo_unit', 'custo_compra'] loop
+    if d ? v and nullif(d ->> v, '') is not null then
+      begin n := (d ->> v)::numeric; exception when others then raise exception '% inválido', v; end;
+      if n < 0 then raise exception '% não pode ser negativo', v; end if;
+    end if;
+  end loop;
+  if novo and coalesce(nullif(d ->> 'preco_venda', '')::numeric, 0) <= 0 then raise exception 'diga o preço de venda (tabela A)'; end if;
+  if (novo or d ? 'ncm') and regexp_replace(coalesce(d ->> 'ncm', ''), '\D', '', 'g') !~ '^\d{8}$' then raise exception 'NCM com 8 números'; end if;
+  if d ? 'cest' and nullif(regexp_replace(coalesce(d ->> 'cest', ''), '\D', '', 'g'), '') is not null and regexp_replace(d ->> 'cest', '\D', '', 'g') !~ '^\d{7}$' then raise exception 'CEST com 7 números'; end if;
+  if d ? 'gtin' and nullif(regexp_replace(coalesce(d ->> 'gtin', ''), '\D', '', 'g'), '') is not null and regexp_replace(d ->> 'gtin', '\D', '', 'g') !~ '^(\d{8}|\d{12,14})$' then raise exception 'código de barras com 8, 12, 13 ou 14 números'; end if;
+  if d ? 'origem' and coalesce(d ->> 'origem', '') !~ '^[0-8]$' then raise exception 'origem de 0 a 8'; end if;
+  if d ? 'fornecedor_cod' and nullif(d ->> 'fornecedor_cod', '') is not null then
+    select nome into fn from public.crm_fornecedores where codigo = d ->> 'fornecedor_cod';
+    if fn is null then raise exception 'fornecedor % não cadastrado', d ->> 'fornecedor_cod'; end if;
+  end if;
+  if novo then
+    select * into modelo_f from public.crm_fiscal_produtos where codigo = upper(btrim(coalesce(d ->> 'modelo', '')));
+    if modelo_f.codigo is null then raise exception 'diga um produto com a mesma tributação (a regra fiscal é copiada dele)'; end if;
+  end if;
+
+  perform set_config('crm.cadastro', '1', true);
+  if novo then
+    insert into public.crm_estoque (codigo, descricao, unidade, situacao, linha, familia, fornecedor_cod, fornecedor, estoque_min, estoque_max,
+        preco_venda, localizacao, custo_unit, custo_compra, quantidade, estoque_atual, custo_total, atualizado_em)
+      values (cod, btrim(d ->> 'descricao'), upper(btrim(d ->> 'unidade')), coalesce(d ->> 'situacao', 'ATIVO'), nullif(btrim(coalesce(d ->> 'linha', '')), ''),
+        nullif(btrim(coalesce(d ->> 'familia', '')), ''), nullif(d ->> 'fornecedor_cod', ''), fn, nullif(d ->> 'estoque_min', '')::numeric, nullif(d ->> 'estoque_max', '')::numeric,
+        (d ->> 'preco_venda')::numeric, nullif(btrim(coalesce(d ->> 'localizacao', '')), ''), case when custo then nullif(d ->> 'custo_unit', '')::numeric end,
+        case when custo then nullif(d ->> 'custo_compra', '')::numeric end, 0, 0, 0, now());
+    insert into public.crm_estoque_saldo (codigo, descricao, unidade, saldo, custo_medio, inicio, atualizado_em)
+      values (cod, btrim(d ->> 'descricao'), upper(btrim(d ->> 'unidade')), 0, case when custo then nullif(d ->> 'custo_unit', '')::numeric end, now(), now())
+      on conflict (codigo) do nothing;
+    insert into public.crm_fiscal_produtos (codigo, descricao, unidade, ncm, cest, gtin, origem, regra, alertas, situacao, criado_em, atualizado_em)
+      values (cod, btrim(d ->> 'descricao'), upper(btrim(d ->> 'unidade')), regexp_replace(d ->> 'ncm', '\D', '', 'g'),
+        coalesce(nullif(regexp_replace(coalesce(d ->> 'cest', ''), '\D', '', 'g'), ''), modelo_f.cest), nullif(regexp_replace(coalesce(d ->> 'gtin', ''), '\D', '', 'g'), ''),
+        coalesce(nullif(d ->> 'origem', ''), modelo_f.origem, '0'), modelo_f.regra, '[]'::jsonb, 'proposta', now(), now())
+      on conflict (codigo) do nothing;
+  else
+    update public.crm_estoque set
+      descricao = case when d ? 'descricao' then btrim(d ->> 'descricao') else descricao end,
+      unidade = case when d ? 'unidade' then upper(btrim(d ->> 'unidade')) else unidade end,
+      situacao = case when d ? 'situacao' then d ->> 'situacao' else situacao end,
+      linha = case when d ? 'linha' then nullif(btrim(coalesce(d ->> 'linha', '')), '') else linha end,
+      familia = case when d ? 'familia' then nullif(btrim(coalesce(d ->> 'familia', '')), '') else familia end,
+      fornecedor_cod = case when d ? 'fornecedor_cod' then nullif(d ->> 'fornecedor_cod', '') else fornecedor_cod end,
+      fornecedor = case when d ? 'fornecedor_cod' then fn else fornecedor end,
+      estoque_min = case when d ? 'estoque_min' then nullif(d ->> 'estoque_min', '')::numeric else estoque_min end,
+      estoque_max = case when d ? 'estoque_max' then nullif(d ->> 'estoque_max', '')::numeric else estoque_max end,
+      preco_venda = case when d ? 'preco_venda' then nullif(d ->> 'preco_venda', '')::numeric else preco_venda end,
+      localizacao = case when d ? 'localizacao' then nullif(btrim(coalesce(d ->> 'localizacao', '')), '') else localizacao end,
+      custo_unit = case when custo and d ? 'custo_unit' then nullif(d ->> 'custo_unit', '')::numeric else custo_unit end,
+      custo_compra = case when custo and d ? 'custo_compra' then nullif(d ->> 'custo_compra', '')::numeric else custo_compra end,
+      atualizado_em = now()
+     where codigo = cod;
+    update public.crm_estoque_saldo set descricao = coalesce(case when d ? 'descricao' then btrim(d ->> 'descricao') end, descricao),
+      unidade = coalesce(case when d ? 'unidade' then upper(btrim(d ->> 'unidade')) end, unidade) where codigo = cod;
+    if d ? 'ncm' or d ? 'cest' or d ? 'gtin' or d ? 'origem' or d ? 'descricao' then
+      update public.crm_fiscal_produtos set
+        ncm = case when d ? 'ncm' then regexp_replace(d ->> 'ncm', '\D', '', 'g') else ncm end,
+        cest = case when d ? 'cest' then nullif(regexp_replace(coalesce(d ->> 'cest', ''), '\D', '', 'g'), '') else cest end,
+        gtin = case when d ? 'gtin' then nullif(regexp_replace(coalesce(d ->> 'gtin', ''), '\D', '', 'g'), '') else gtin end,
+        origem = case when d ? 'origem' then d ->> 'origem' else origem end,
+        descricao = case when d ? 'descricao' then btrim(d ->> 'descricao') else descricao end,
+        atualizado_em = now()
+       where codigo = cod;
+    end if;
+  end if;
+  perform set_config('crm.cadastro', '', true);
+  select * into e from public.crm_estoque where codigo = cod;
+  insert into public.crm_produto_hist (codigo, acao, antes, depois) values (cod, case when novo then 'novo' else 'alterado' end, antes, to_jsonb(e));
+  return jsonb_build_object('ok', true, 'codigo', cod, 'novo', novo);
+end;
+$$;
+grant execute on function public.crm_produto_gravar(text, jsonb) to authenticated;
+
+-- O que o formulário de edição mostra (a logística não lê crm_estoque, que tem custo): os campos do cadastro, com o custo
+-- só para o administrador e o comprador.
+create or replace function public.crm_produto_ler(p_codigo text) returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare custo boolean := public.crm_eh_admin() or public.crm_eh_comprador(); e public.crm_estoque; f public.crm_fiscal_produtos;
+begin
+  if not (custo or public.crm_eh_logistica()) then raise exception 'só o administrador, o comprador e a logística'; end if;
+  select * into e from public.crm_estoque where codigo = upper(btrim(coalesce(p_codigo, '')));
+  if e.codigo is null then return null; end if;
+  select * into f from public.crm_fiscal_produtos where codigo = e.codigo;
+  return jsonb_build_object('codigo', e.codigo, 'descricao', e.descricao, 'unidade', e.unidade, 'situacao', e.situacao, 'linha', e.linha, 'familia', e.familia,
+    'fornecedor_cod', e.fornecedor_cod, 'fornecedor', e.fornecedor, 'estoque_min', e.estoque_min, 'estoque_max', e.estoque_max, 'preco_venda', e.preco_venda,
+    'localizacao', e.localizacao, 'ncm', f.ncm, 'cest', f.cest, 'gtin', f.gtin, 'origem', f.origem, 'tem_regra', f.regra is not null,
+    'custo_unit', case when custo then e.custo_unit end, 'custo_compra', case when custo then e.custo_compra end, 'dono_crm', public.crm_produtos_do_crm());
+end;
+$$;
+grant execute on function public.crm_produto_ler(text) to authenticated;
+
+-- Sugestão de código para o produto novo: o maior código só de números + 1 (os do FKN são assim).
+create or replace function public.crm_produto_proximo_codigo() returns text language sql stable security definer set search_path = public as $$
+  select (coalesce(max(codigo::bigint), 0) + 1)::text from public.crm_estoque where codigo ~ '^\d{1,12}$' and (public.crm_eh_admin() or public.crm_eh_comprador() or public.crm_eh_logistica());
+$$;
+grant execute on function public.crm_produto_proximo_codigo() to authenticated;
+
+-- Embalagem do produto (quantas unidades vêm na caixa, no fardo…): administrador, comprador e logística (a tabela só deixa
+-- administrador e comprador gravarem direto).
+create or replace function public.crm_produto_embalagem(p_codigo text, p_unidade text, p_fator numeric) returns jsonb language plpgsql security definer set search_path = public as $$
+declare cod text := upper(btrim(coalesce(p_codigo, ''))); un text := upper(btrim(coalesce(p_unidade, '')));
+begin
+  if not (public.crm_eh_admin() or public.crm_eh_comprador() or public.crm_eh_logistica()) then raise exception 'só o administrador, o comprador e a logística'; end if;
+  if un !~ '^[A-Z0-9]{1,6}$' then raise exception 'embalagem inválida (ex.: CX, FD, PCT)'; end if;
+  if not (coalesce(p_fator, 0) > 0) then raise exception 'diga quantas unidades vêm na embalagem'; end if;
+  if not exists (select 1 from public.crm_estoque where codigo = cod) then raise exception 'produto % não encontrado', cod; end if;
+  insert into public.crm_estoque_unidades (codigo, unidade, fator, origem, atualizado_em) values (cod, un, p_fator, 'manual', now())
+    on conflict (codigo, unidade) do update set fator = excluded.fator, origem = 'manual', atualizado_em = now();
+  insert into public.crm_produto_hist (codigo, acao, depois) values (cod, 'alterado', jsonb_build_object('embalagem', un, 'fator', p_fator));
+  return jsonb_build_object('ok', true);
+end;
+$$;
+revoke all on function public.crm_produto_embalagem(text, text, numeric) from public, anon;
+grant execute on function public.crm_produto_embalagem(text, text, numeric) to authenticated;
