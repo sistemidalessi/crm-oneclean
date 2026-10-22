@@ -1821,7 +1821,13 @@ contador, com a escolha do CRM anotada na tabela do topo do documento.
   e o aviso para abater à mão. `crm_compra_pagar` não lança conta a pagar de devolução. `crm_compras_devolucoes()` (logística,
   comprador, admin; `efeitos` só admin/comprador) alimenta o selo. Testado numa transação desfeita (venda 2733: R$ 1.527,73 abatidos
   em 2 títulos, sem conta a pagar, custo = médio; venda paga: "Devolver ao cliente" R$ 50; sem nota: aviso) e no navegador.
-- **Comissão e faturamento** ainda não descontam devolução (nem a de cliente não contribuinte que o CRM emite): decisão do Anderson.
+- **Devolução desconta do faturamento e da comissão** (decisão do Anderson, 22/10: "devolveu é meio que não houve venda"):
+  `crm_devolucoes_venda()` junta as duas origens (a nota do cliente contribuinte e a de entrada que o CRM emite; só produção
+  autorizada) com quem vê a venda; `regras.js` `devolucoesComoNotas` as transforma em notas negativas **no mês da devolução**, na
+  vendedora e no cliente da venda. Entram no `faturamento` (Relatórios, Gestão anual), em `gestao.js` `vendas(..., true)` (quadros
+  do mês, equipe, metas) e em `apuraComissao` (tira a comissão da venda na proporção do valor devolvido, no máximo a venda
+  inteira, mesmo com o mês da venda fechado). Não contam como nota nem como cliente; recompra, ritmo e cadência continuam só
+  com compras. Relatórios mostra "R$ X devolvido(s) já descontado(s)"; as listas mostram "↩ dev. 99 (NF 2733)".
 - **Série na duplicata:** `prefixoDup(numero, serie)` em `nfe.js` — série 1 como antes ("002564/01"); fora dela, "2-000012/01".
   Motivo: o FKN deixou títulos abertos com número baixo ("000012/01", "000025/01", "000120/01", "000121/01") e a nota 2-12 do CRM
   perderia o título (`on conflict do nothing`). Cancelamento tira pelo mesmo prefixo (série lida da chave). `crm-notas` **v36**

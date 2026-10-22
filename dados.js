@@ -286,10 +286,14 @@
     }
   }
 
+  // Devoluções de venda (crm_devolucoes_venda, 22/10/2026): descontam do faturamento e da comissão (regras.js,
+  // devolucoesComoNotas). Poucas linhas: vêm inteiras na carga e em cada recarga leve.
+  const devolucoes = sb => comTentativas(() => sb.rpc('crm_devolucoes_venda')).then(r => (r.error ? [] : r.data || []));
   Supa.prototype.carregar = async function () {
-    const res = await Promise.all(TABELAS.map(t => tudo(this.sb, t)));
+    const [res, dev] = await Promise.all([Promise.all(TABELAS.map(t => tudo(this.sb, t))), devolucoes(this.sb)]);
     const d = vazio();
     TABELAS.forEach((t, i) => { d[t] = res[i]; });
+    d.devolucoes = dev;
     return d;
   };
 
@@ -319,12 +323,13 @@
   }
   // → { inteiras: { t: linhas }, mudadas: { t: linhas }, existentes: { t: [chaves] } | null }
   Supa.prototype.carregarMudancas = async function (desde, conferirApagados) {
-    const [a, b, c] = await Promise.all([
+    const [a, b, c, dev] = await Promise.all([
       Promise.all(INTEIRAS.map(t => tudo(this.sb, t))),
       Promise.all(PARCIAIS.map(t => mudadas(this.sb, t, desde))),
-      conferirApagados ? Promise.all(PARCIAIS.map(t => chaves(this.sb, t))) : null
+      conferirApagados ? Promise.all(PARCIAIS.map(t => chaves(this.sb, t))) : null,
+      devolucoes(this.sb)
     ]);
-    const r = { inteiras: {}, mudadas: {}, existentes: conferirApagados ? {} : null };
+    const r = { inteiras: { devolucoes: dev }, mudadas: {}, existentes: conferirApagados ? {} : null };
     INTEIRAS.forEach((t, i) => { r.inteiras[t] = a[i]; });
     PARCIAIS.forEach((t, i) => { r.mudadas[t] = b[i]; if (c) r.existentes[t] = c[i]; });
     return r;

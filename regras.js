@@ -498,30 +498,49 @@
   }
 
   // Relatório de faturamento pelas notas: total, clientes, top clientes, segmentos, produtos, por mês e vendedor.
+  // Devoluções de venda (22/10/2026, decisão do Anderson: "devolveu é meio que não houve venda"): D.devolucoes
+  // (crm_devolucoes_venda: a nota que o cliente contribuinte emite e a de entrada que o CRM emite) viram "notas" negativas no
+  // mês da devolução, com o vendedor e o cliente da venda devolvida. Só para o faturamento e a comissão: recompra, ritmo e
+  // cadência continuam olhando só as compras.
+  function devolucoesComoNotas(D) {
+    const venda = new Map((D.notas || []).map(n => [n.id, n]));
+    return (D.devolucoes || []).map(d => {
+      const v = venda.get(d.venda_id);
+      if (!v || v.cancelada) return null;
+      return { id: 'dev:' + d.id, devolucao: true, venda_id: v.id, venda_numero: v.numero, numero: d.numero, emitida_em: d.quando,
+        empresa_id: v.empresa_id, cliente_doc: v.cliente_doc, cliente_nome: v.cliente_nome, cidade: v.cidade, uf: v.uf,
+        vendedor_id: v.vendedor_id, vendedor_nome: v.vendedor_nome, valor_total: -num(d.valor), cancelada: false,
+        itens: (d.itens || []).map(it => Object.assign({}, it, { quantidade: -num(it.quantidade), valor_total: -num(it.valor_total) })) };
+    }).filter(Boolean);
+  }
+
   function faturamento(D, ix, hoje, filtro) {
     const p = filtro.periodo;
     const resp = filtro.responsavel_id || null;
     const empresa = id => (id && ix.porId.empresas.get(id)) || null;
-    const itensDe = n => ix.porNota.get(n.id) || [];
+    const itensDe = n => n.itens || ix.porNota.get(n.id) || [];
     // Quem vendeu: o vendedor escrito na nota (DIRETO, externos…); sem ele, a carteira do cliente.
     // Nota com vendedor escrito mas sem usuário = ex-vendedor: conta no total, não vai para ninguém.
     const dono = n => { if (n.vendedor_id) return n.vendedor_id; if (n.vendedor_nome) return null; const e = empresa(n.empresa_id); return e ? e.responsavel_id || null : null; };
     const nomeVendedor = n => { const u = dono(n), us = u && ix.porId.usuarios.get(u); return us ? us.nome : !n.vendedor_id && n.vendedor_nome ? n.vendedor_nome + ' (ex-vendedor)' : '(sem responsável)'; };
     const chaveCliente = n => n.empresa_id || (n.cliente_doc ? 'doc:' + doc(n.cliente_doc) : 'nome:' + normaliza(n.cliente_nome));
     const nomeCliente = n => { const e = empresa(n.empresa_id); return e ? e.nome : n.cliente_nome || '(sem nome)'; };
-    const todas = (D.notas || []).filter(n => notaDeVenda(n, itensDe(n)) && (!resp || dono(n) === resp));
+    const todas = (D.notas || []).filter(n => notaDeVenda(n, itensDe(n)) && (!resp || dono(n) === resp))
+      .concat(devolucoesComoNotas(D).filter(n => !resp || dono(n) === resp));
     const doPeriodo = todas.filter(n => noPeriodo(diaLocal(n.emitida_em), p));
     const soma = l => l.reduce((s2, n) => s2 + num(n.valor_total), 0);
     const total = soma(doPeriodo);
+    const conta = n => (n.devolucao ? 0 : 1); // a devolução tira valor, não conta como nota
+    const notasDoPeriodo = doPeriodo.filter(n => !n.devolucao).length;
 
     const primeira = new Map();
-    todas.forEach(n => { const k = chaveCliente(n), d = diaLocal(n.emitida_em); if (!primeira.has(k) || d < primeira.get(k)) primeira.set(k, d); });
+    todas.filter(n => !n.devolucao).forEach(n => { const k = chaveCliente(n), d = diaLocal(n.emitida_em); if (!primeira.has(k) || d < primeira.get(k)) primeira.set(k, d); });
 
     const clientes = new Map();
     doPeriodo.forEach(n => {
       const k = chaveCliente(n);
       const c = clientes.get(k) || { chave: k, nome: nomeCliente(n), empresa_id: n.empresa_id || null, notas: 0, valor: 0, ultima: null, novo: false };
-      c.notas++; c.valor += num(n.valor_total);
+      c.notas += conta(n); c.valor += num(n.valor_total);
       const d = diaLocal(n.emitida_em); if (!c.ultima || d > c.ultima) c.ultima = d;
       c.novo = noPeriodo(primeira.get(k), p);
       clientes.set(k, c);
@@ -533,7 +552,7 @@
       doPeriodo.forEach(n => {
         const k = chave(n) || '(não informado)';
         const g = m.get(k) || { nome: k, notas: 0, valor: 0, clientes: new Set() };
-        g.notas++; g.valor += num(n.valor_total); g.clientes.add(chaveCliente(n));
+        g.notas += conta(n); g.valor += num(n.valor_total); g.clientes.add(chaveCliente(n));
         m.set(k, g);
       });
       return [...m.values()].map(g => Object.assign(g, { clientes: g.clientes.size })).sort((a, b) => b.valor - a.valor);
@@ -546,17 +565,17 @@
       doPeriodo.forEach(n => {
         if (nomeVendedor(n) !== g.nome) return;
         const k = n.vendedor_nome || '(carteira)';
-        const x = m.get(k) || { nome: k, notas: 0, valor: 0 }; x.notas++; x.valor += num(n.valor_total); m.set(k, x);
+        const x = m.get(k) || { nome: k, notas: 0, valor: 0 }; x.notas += conta(n); x.valor += num(n.valor_total); m.set(k, x);
       });
       g.nomesNota = [...m.values()].sort((a, b) => b.valor - a.valor);
     });
     const porCidade = agrupa(n => n.cidade ? n.cidade + (n.uf ? '/' + n.uf : '') : null);
 
     const produtos = new Map();
-    doPeriodo.forEach(n => itensDe(n).filter(it => cfopDeVenda(it.cfop)).forEach(it => {
+    doPeriodo.forEach(n => itensDe(n).filter(it => n.devolucao || cfopDeVenda(it.cfop)).forEach(it => {
       const k = it.produto_id || (it.codigo ? 'c:' + normaliza(it.codigo) : 'd:' + normaliza(it.descricao));
       const g = produtos.get(k) || { descricao: it.descricao, codigo: it.codigo || '', unidade: it.unidade || '', quantidade: 0, valor: 0, notas: new Set(), clientes: new Set() };
-      g.quantidade += num(it.quantidade); g.valor += num(it.valor_total); g.notas.add(n.id); g.clientes.add(chaveCliente(n));
+      g.quantidade += num(it.quantidade); g.valor += num(it.valor_total); if (!n.devolucao) { g.notas.add(n.id); g.clientes.add(chaveCliente(n)); }
       produtos.set(k, g);
     }));
     const listaProdutos = [...produtos.values()].map(g => Object.assign(g, { notas: g.notas.size, clientes: g.clientes.size }));
@@ -566,12 +585,13 @@
     for (let i = 11; i >= 0; i--) {
       const m = somaMeses(fimMes, -i).slice(0, 7);
       const l = todas.filter(n => (diaLocal(n.emitida_em) || '').slice(0, 7) === m);
-      porMes.push({ mes: m + '-01', qtd: l.length, valor: soma(l) });
+      porMes.push({ mes: m + '-01', qtd: l.filter(n => !n.devolucao).length, valor: soma(l) });
     }
     const novos = listaClientes.filter(c => c.novo);
     return {
       existe: (D.notas || []).length > 0,
-      total, notas: doPeriodo.length, ticket: doPeriodo.length ? total / doPeriodo.length : 0,
+      total, notas: notasDoPeriodo, ticket: notasDoPeriodo ? total / notasDoPeriodo : 0,
+      devolucoes: doPeriodo.filter(n => n.devolucao), valorDevolvido: Math.abs(soma(doPeriodo.filter(n => n.devolucao))),
       clientes: listaClientes.length, clientesNovos: novos.length, valorClientesNovos: novos.reduce((s2, c) => s2 + c.valor, 0),
       topClientes: listaClientes, porSegmento, porVendedor, porCidade, porMes,
       topProdutosValor: listaProdutos.slice().sort((a, b) => b.valor - a.valor),
@@ -986,7 +1006,7 @@
     primeiroNome, aplicaModelo, linkGoogleAgenda, totalItem, totalItens, indexa, probabilidade,
     situacaoEfetiva, situacaoTarefa, alertas, ultimoMovimento, ritmoCompra, cicloRecompra, itensHabituais, nomeDeItem, textoItens, dashboard, duplicadosEmpresas, duplicadosContatos, mesclaCampos,
     buscaGlobal, csvParse, csvGera, numeroBR, dataPlanilha,
-    cfopDeVenda, notaDeVenda, sugereSegmento, NOMES_SEGMENTO, faturamento, chaveDoc, chaveTelefone, chaveEmail, achaDuplicados, motivoDuplicado, nomesCompativeis, mesmoCliente
+    cfopDeVenda, notaDeVenda, devolucoesComoNotas, sugereSegmento, NOMES_SEGMENTO, faturamento, chaveDoc, chaveTelefone, chaveEmail, achaDuplicados, motivoDuplicado, nomesCompativeis, mesmoCliente
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

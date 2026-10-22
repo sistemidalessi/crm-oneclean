@@ -665,7 +665,7 @@
         '<section class="kpis">' +
         // Mesmos nomes do painel do Agendor, que a equipe já conhece.
         k('Total vendido', R.moeda(d.realizadas.valor), d.realizadas.qtd + ' negócio(s) ganho(s)' + (resp ? ' · ' + CRM.nomeUsuario(resp) : ' · equipe toda'), 'verde', 'ganhos') +
-        (fat.existe ? k('Faturado (notas fiscais)', R.moeda(fat.total), fat.notas + ' nota(s) · ' + fat.clientes + ' cliente(s)', 'verde', 'notas') : '') +
+        (fat.existe ? k('Faturado (notas fiscais)', R.moeda(fat.total), fat.notas + ' nota(s) · ' + fat.clientes + ' cliente(s)' + (fat.valorDevolvido ? ' · ' + R.moeda(fat.valorDevolvido) + ' devolvido(s) já descontado(s)' : ''), 'verde', 'notas') : '') +
         k('Negócios ganhos', String(d.realizadas.qtd), 'ticket médio ' + R.moeda(d.ticket), '', 'ganhos') +
         k('Negócios iniciados', String(d.iniciados.qtd), R.moeda(d.iniciados.valor), '', 'iniciados') +
         k('Negócios perdidos', String(d.perdidas.qtd), R.moeda(d.perdidas.valor), d.perdidas.qtd ? 'alerta' : '', 'perdidos') +
@@ -740,7 +740,7 @@
     const pctTotal = v => fat.total ? R.pct(v / fat.total * 100) : '—';
     const todos = t => '<button type="button" class="mini" data-acao="fat-exportar" data-id="' + t + '" title="Baixar a lista completa (não só o top 10)">todos</button>';
     const nomeCli = c => c.empresa_id ? '<button type="button" class="link" data-acao="abrir-empresa" data-id="' + esc(c.empresa_id) + '">' + esc(c.nome) + '</button>' : esc(c.nome);
-    return '<h2 class="titulo-secao">Faturamento <small>pelas notas fiscais do período' + (fat.canceladas ? ' · ' + fat.canceladas + ' cancelada(s) fora da conta' : '') + '</small></h2>' +
+    return '<h2 class="titulo-secao">Faturamento <small>pelas notas fiscais do período' + (fat.canceladas ? ' · ' + fat.canceladas + ' cancelada(s) fora da conta' : '') + (fat.valorDevolvido ? ' · devoluções descontadas: ' + esc(R.moeda(fat.valorDevolvido)) : '') + '</small></h2>' +
       '<section class="kpis">' +
       '<div class="kpi verde"><span>Faturado</span><strong>' + esc(R.moeda(fat.total)) + '</strong><small>' + fat.notas + ' nota(s) de venda</small></div>' +
       '<div class="kpi"><span>Clientes que compraram</span><strong>' + fat.clientes + '</strong><small>' + fat.clientesNovos + ' pela 1ª vez · ' + esc(R.moeda(fat.valorClientesNovos)) + '</small></div>' +

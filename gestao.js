@@ -12,20 +12,20 @@
   const variacao = (a, b) => (b ? (a - b) / b * 100 : null);
 
   // Notas de venda (sem cancelada, com CFOP de venda) de um período, com o dono (carteira) do cliente.
-  function vendas(D, ix, de, ate) {
-    return (D.notas || []).filter(n => {
-      const d = R.diaLocal(n.emitida_em);
-      return d && d >= de && d <= ate && R.notaDeVenda(n, ix.porNota.get(n.id));
-    });
+  // comDevolucoes: as devoluções do período entram como notas negativas (faturamento; 22/10/2026).
+  function vendas(D, ix, de, ate, comDevolucoes) {
+    const noPeriodo = n => { const d = R.diaLocal(n.emitida_em); return d && d >= de && d <= ate; };
+    const l = (D.notas || []).filter(n => noPeriodo(n) && R.notaDeVenda(n, ix.porNota.get(n.id)));
+    return comDevolucoes && R.devolucoesComoNotas ? l.concat(R.devolucoesComoNotas(D).filter(noPeriodo)) : l;
   }
   // Quem vendeu: o vendedor escrito na nota; sem ele, a carteira do cliente.
   const donoDe = (ix, n) => { if (n.vendedor_id) return n.vendedor_id; if (n.vendedor_nome) return null; /* ex-vendedor */ const e = n.empresa_id && ix.porId.empresas.get(n.empresa_id); return e ? e.responsavel_id || null : null; };
 
   function resumoPeriodo(D, ix, de, ate) {
-    const l = vendas(D, ix, de, ate);
-    const clientes = new Set(l.map(n => n.empresa_id || n.cliente_doc || n.cliente_nome));
+    const l = vendas(D, ix, de, ate, true), reais = l.filter(n => !n.devolucao);
+    const clientes = new Set(reais.map(n => n.empresa_id || n.cliente_doc || n.cliente_nome));
     const valor = somaValor(l);
-    return { valor, notas: l.length, clientes: clientes.size, ticket: l.length ? valor / l.length : 0, lista: l };
+    return { valor, notas: reais.length, clientes: clientes.size, ticket: reais.length ? valor / reais.length : 0, lista: l, devolvido: Math.abs(somaValor(l.filter(n => n.devolucao))) };
   }
 
   // ------------------------------------------------------------ painel
@@ -69,7 +69,7 @@
       const meta = metas.filter(m => m.usuario_id === u.user_id).reduce((s, m) => s + num(m.valor), 0);
       const valorMes = somaValor(doMes);
       const direto = ehDireto(u);
-      return { user_id: u.user_id, nome: direto ? 'Direto' : u.nome, papel: u.papel, direto, valorMes, notasMes: doMes.length, valorAno: somaValor(doAno), meta, pctMeta: meta ? valorMes / meta * 100 : null,
+      return { user_id: u.user_id, nome: direto ? 'Direto' : u.nome, papel: u.papel, direto, valorMes, notasMes: doMes.filter(n => !n.devolucao).length, valorAno: somaValor(doAno), meta, pctMeta: meta ? valorMes / meta * 100 : null,
         contatos, contatosHoje, atrasadas, clientesAtivos: (D.empresas || []).filter(e => e.responsavel_id === u.user_id && compraram90.has(e.id)).length };
     }).filter(u => !u.direto || u.valorAno > 0)
       .sort((a, b) => (a.direto ? 1 : 0) - (b.direto ? 1 : 0) || b.valorMes - a.valorMes || b.valorAno - a.valorAno);
@@ -103,7 +103,7 @@
       mes: { de: mes, ate: fimMes, atual, anterior, anteriorMesmoDia, variacao: variacao(atual.valor, anteriorMesmoDia.valor),
         variacaoTicket: anterior.notas ? variacao(atual.ticket, anterior.ticket) : null,
         projecao: diaDoMes ? atual.valor / diaDoMes * diasNoMes : 0, novos: novosMes,
-        equipe: { valor: somaValor(eqAtual), notas: eqAtual.length, lista: eqAtual, anteriorMesmoDia: somaValor(eqAntes), anterior: somaValor(eqMesPassado),
+        equipe: { valor: somaValor(eqAtual), notas: eqAtual.filter(n => !n.devolucao).length, lista: eqAtual, anteriorMesmoDia: somaValor(eqAntes), anterior: somaValor(eqMesPassado),
           variacao: variacao(somaValor(eqAtual), somaValor(eqAntes)) } },
       ano, porMes: fat12.porMes, equipe, equipeTotal, funil, funilVendas,
       base: { clientes: (D.empresas || []).filter(e => e.situacao === 'cliente').length, ativos: compraram90.size,

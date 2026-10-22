@@ -136,6 +136,38 @@ test('apuração: o preço de tabela do pedido do CRM (foto do dia) vale sobre o
   assert.deepStrictEqual(Object.keys(r[0].porFaixa), ['F']); // 2,00 sobre 1,60 = +25% → F (com o preço de hoje seria abaixo)
 });
 
+test('apuração: devolução tira a comissão da venda no mês da devolução, na proporção do valor (22/10/2026)', () => {
+  const R = require('../regras.js');
+  const venda = { id: 'n1', numero: 2733, emitida_em: '2026-10-20T13:00:00Z', vendedor_id: 'v', cliente_nome: 'CLIENTE X', valor_total: 400 };
+  const D = { notas: [venda], devolucoes: [{ id: 'd1', origem: 'cliente', numero: 99, quando: '2026-11-04T12:00:00Z', venda_id: 'n1', valor: 100, itens: [] }] };
+  const base = { notas: D.notas, devolucoes: R.devolucoesComoNotas(D), itensPorNota: new Map([['n1', [{ codigo: 'P1', unidade: 'PT', valor_unitario: 2, valor_total: 400, cfop: '5102' }]]]),
+    precos: new Map([['P1', 2]]), cfg: {}, usuarios: [{ user_id: 'v', nome: 'V', papel: 'vendedor' }] };
+  const out = P.apuraComissao(Object.assign({ mes: '2026-10' }, base)), nov = P.apuraComissao(Object.assign({ mes: '2026-11' }, base));
+  assert.deepStrictEqual([out[0].base, out[0].comissao], [400, 14], 'outubro: a venda inteira (faixa A, 3,5%)');
+  assert.deepStrictEqual([nov[0].base, nov[0].comissao, nov[0].notas.length], [-100, -3.5, 1], 'novembro: −1/4 da venda');
+  assert.deepStrictEqual([nov[0].notas[0].devolucao, nov[0].notas[0].venda, nov[0].porFaixa.A.comissao], [true, 2733, -3.5]);
+  // devolução maior que a venda não tira mais que a venda
+  D.devolucoes[0].valor = 900;
+  assert.strictEqual(P.apuraComissao(Object.assign({ mes: '2026-11' }, base, { devolucoes: R.devolucoesComoNotas(D) }))[0].comissao, -14);
+});
+
+test('faturamento: devolução entra negativa no mês dela, na vendedora e no cliente da venda, sem contar como nota', () => {
+  const R = require('../regras.js');
+  const D = { empresas: [{ id: 'c1', nome: 'CLIENTE X', responsavel_id: 'v' }], usuarios: [{ user_id: 'v', nome: 'Vera', papel: 'vendedor' }],
+    notas: [{ id: 'n1', numero: 2733, emitida_em: '2026-10-20T13:00:00Z', empresa_id: 'c1', vendedor_id: 'v', valor_total: 400 }],
+    nota_itens: [{ id: 'i1', nota_id: 'n1', codigo: 'P1', descricao: 'PAPEL', quantidade: 4, valor_total: 400, cfop: '5102' }],
+    devolucoes: [{ id: 'd1', numero: 99, quando: '2026-11-04T12:00:00Z', venda_id: 'n1', valor: 100, itens: [{ codigo: 'P1', descricao: 'PAPEL', quantidade: 1, valor_total: 100 }] }] };
+  const ix = R.indexa(D);
+  const out = R.faturamento(D, ix, '2026-11-10', { periodo: R.periodo('mes', '2026-10-15') });
+  const nov = R.faturamento(D, ix, '2026-11-10', { periodo: R.periodo('mes', '2026-11-10') });
+  assert.deepStrictEqual([out.total, out.notas, out.valorDevolvido], [400, 1, 0]);
+  assert.deepStrictEqual([nov.total, nov.notas, nov.valorDevolvido, nov.porVendedor[0].nome, nov.porVendedor[0].valor, nov.topClientes[0].notas], [-100, 0, 100, 'Vera', -100, 0]);
+  assert.deepStrictEqual([nov.topProdutosValor[0].quantidade, nov.topProdutosValor[0].valor], [-1, -100]);
+  const ano = R.faturamento(D, ix, '2026-11-10', { periodo: R.periodo('ano', '2026-11-10') });
+  assert.deepStrictEqual([ano.total, ano.notas, ano.ticket], [300, 1, 300]);
+  assert.strictEqual(R.faturamento(D, ix, '2026-11-10', { periodo: R.periodo('ano', '2026-11-10'), responsavel_id: 'outra' }).total, 0);
+});
+
 test('repetir pedido: do pedido do CRM ou da nota (com os preços dela, sem bonificação)', () => {
   assert.deepStrictEqual(P.itensParaRepetir({ itens: [{ codigo: 'A', descricao: 'X', unidade: 'GL', quantidade: 2, preco: 5, desconto: 1, base: 'A' }] }),
     [{ codigo: 'A', descricao: 'X', unidade: 'GL', quantidade: 2, preco: 5, desconto: 1 }]);

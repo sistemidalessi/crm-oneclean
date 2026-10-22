@@ -4874,3 +4874,32 @@ begin
     from public.crm_compras c left join public.crm_notas n on n.chave = c.ref_chave where c.devolucao order by c.emitida_em desc limit 200;
 end;
 $$;
+
+-- ============================================================ Devoluções de venda no faturamento e na comissão (22/10/2026)
+-- Decisão do Anderson: "devolveu é meio que não houve venda". As devoluções (a nota que o cliente contribuinte emite e a de
+-- entrada que o CRM emite para o não contribuinte) descontam do faturamento e da comissão no mês da devolução, na vendedora e
+-- no cliente da venda devolvida (regras.js, devolucoesComoNotas; pedidos.js, apuraComissao). Quem vê: quem vê a venda (o mesmo
+-- filtro da política "le" de crm_notas).
+create or replace function public.crm_devolucoes_venda() returns table (id uuid, origem text, numero bigint, quando timestamptz, venda_id uuid, valor numeric, itens jsonb)
+language plpgsql stable security definer set search_path = public as $$
+declare todos boolean := public.crm_eh_gestor() or public.crm_eh_comprador(); eu uuid := auth.uid(); membro boolean := public.crm_eh_membro();
+begin
+  if not public.crm_eh_ativo() then return; end if;
+  return query
+  with dv as (
+    select c.id, 'cliente'::text origem, c.numero::bigint numero, c.emitida_em quando, c.ref_chave, c.valor_total valor,
+      (select coalesce(jsonb_agg(jsonb_build_object('codigo', coalesce(i.codigo, i.cod_fornecedor), 'descricao', i.descricao, 'unidade', i.unidade,
+         'quantidade', i.quantidade, 'valor_total', i.valor_total) order by i.ordem), '[]'::jsonb) from public.crm_compra_itens i where i.compra_id = c.id) itens
+      from public.crm_compras c where c.devolucao and c.situacao <> 'ignorada' and c.ref_chave is not null
+    union all
+    select n.id, 'crm', n.numero::bigint, coalesce(n.autorizada_em, n.criado_em), o.ref_chave, n.valor,
+      (select coalesce(jsonb_agg(jsonb_build_object('codigo', x->>'codigo', 'descricao', x->>'descricao', 'unidade', x->>'unidade', 'quantidade', (x->>'quantidade')::numeric,
+         'valor_total', round(coalesce((x->>'quantidade')::numeric, 0) * coalesce((x->>'valorUnitario')::numeric, 0) - coalesce((x->>'desconto')::numeric, 0), 2))), '[]'::jsonb)
+         from jsonb_array_elements(coalesce(n.nota->'itens', '[]'::jsonb)) x) itens
+      from public.crm_nfe n join public.crm_nfe_outras o on o.id = n.outra_id
+     where o.tipo = 'devolucao_cliente' and n.ambiente = 'producao' and n.situacao = 'autorizada')
+  select dv.id, dv.origem, dv.numero, dv.quando, v.id, dv.valor, dv.itens
+    from dv join public.crm_notas v on v.chave = dv.ref_chave
+   where todos or v.empresa_id in (select public.crm_empresas_minhas()) or (membro and v.vendedor_id = eu);
+end;
+$$;

@@ -47,8 +47,9 @@
     },
     notas: {
       cab: () => ['Data', 'NF', 'Cliente', 'Vendedor', ['Valor', 1]],
-      linha: (n, o) => [esc(R.dataBR(R.diaLocal(n.emitida_em))), esc(n.numero || ''), esc(o.cliente ? o.cliente(n) : nomeEmp(n.empresa_id)), esc(o.vendedor ? o.vendedor(n) : n.vendedor_nome || ''), esc(R.moeda(n.valor_total))],
-      csv: (n, o) => [R.dataBR(R.diaLocal(n.emitida_em)), n.numero || '', o.cliente ? o.cliente(n) : nomeEmp(n.empresa_id), o.vendedor ? o.vendedor(n) : n.vendedor_nome || '', R.num(n.valor_total)],
+      // devolução (22/10/2026) entra negativa: "↩ dev. 99 (NF 2733)"
+      linha: (n, o) => [esc(R.dataBR(R.diaLocal(n.emitida_em))), n.devolucao ? '↩ dev. ' + esc(n.numero || '') + ' <small>(NF ' + esc(n.venda_numero || '?') + ')</small>' : esc(n.numero || ''), esc(o.cliente ? o.cliente(n) : nomeEmp(n.empresa_id)), esc(o.vendedor ? o.vendedor(n) : n.vendedor_nome || ''), esc(R.moeda(n.valor_total))],
+      csv: (n, o) => [R.dataBR(R.diaLocal(n.emitida_em)), n.devolucao ? 'devolução ' + (n.numero || '') + ' (NF ' + (n.venda_numero || '?') + ')' : n.numero || '', o.cliente ? o.cliente(n) : nomeEmp(n.empresa_id), o.vendedor ? o.vendedor(n) : n.vendedor_nome || '', R.num(n.valor_total)],
       abrir: n => (n.empresa_id ? ['abrir-empresa', n.empresa_id] : null),
       ordem: (a, b) => String(b.emitida_em || '').localeCompare(String(a.emitida_em || '')),
       total: l => R.moeda(l.reduce((s, n) => s + R.num(n.valor_total), 0))

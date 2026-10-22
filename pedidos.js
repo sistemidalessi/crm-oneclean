@@ -151,32 +151,59 @@
   //   o: { notas, itensPorNota (Map), mes 'AAAA-MM', dia(nota) → 'AAAA-MM-DD', precos (Map código → preço "ven"),
   //        precoCaixa (Map código → preço da caixa), pedidoDaNota (Map nota_id → pedido), cfg, usuarios [{user_id, nome, papel}] }
   const ehVendaCfop = c => !c || /^[56][14]/.test(String(c));
+  // Devolução (22/10/2026, decisão do Anderson: "devolveu é meio que não houve venda"): o.devolucoes (R.devolucoesComoNotas)
+  // do mês tiram a comissão da venda devolvida, na proporção do valor devolvido, de quem vendeu — no mês da devolução (o mês da
+  // venda pode já estar fechado). A comissão da venda é apurada de novo pelas mesmas regras.
   function apuraComissao(o) {
     const tabela = tabelaDe(o.cfg), dia = o.dia || (n => String(n.emitida_em).slice(0, 10));
     const us = new Map((o.usuarios || []).map(u => [u.user_id, u])), por = new Map();
-    (o.notas || []).forEach(n => {
-      if (n.cancelada || !n.vendedor_id || dia(n).slice(0, 7) !== o.mes) return;
+    const grupo = n => {
       const u = us.get(n.vendedor_id) || { user_id: n.vendedor_id, nome: n.vendedor_nome || '?' };
       const plano = planoDoUsuario(o.cfg, u.user_id, u.papel);
-      if (!plano) return;
+      if (!plano) return null;
       if (!por.has(u.user_id)) por.set(u.user_id, { user_id: u.user_id, nome: u.nome, plano: plano.id, planoNome: plano.nome, base: 0, comissao: 0, porFaixa: {}, notas: [], semTabela: 0, itens: 0 });
-      const g = por.get(u.user_id), ped = o.pedidoDaNota && o.pedidoDaNota.get(n.id);
+      return { g: por.get(u.user_id), plano };
+    };
+    // a comissão de uma nota, item a item: { bn, cn, faixas: { A: { base, comissao, pct } }, semTabela, itens }
+    const daNota = (n, plano) => {
+      const ped = o.pedidoDaNota && o.pedidoDaNota.get(n.id), r = { bn: 0, cn: 0, faixas: {}, semTabela: 0, itens: 0 };
       const doPedido = new Map(((ped && ped.itens) || []).filter(i => i.codigo && i.preco_tab != null).map(i => [String(i.codigo).replace(/\.\d+$/, '') + '|' + (i.unidade || ''), num(i.preco_tab)]));
-      let bn = 0, cn = 0;
       (o.itensPorNota.get(n.id) || []).forEach(it => {
         if (!ehVendaCfop(it.cfop)) return;
         const cod = String(it.codigo || ''), un = String(it.unidade || '').toUpperCase();
         let tab = doPedido.get(cod.replace(/\.\d+$/, '') + '|' + un);
         if (tab == null) tab = un === 'CX' && o.precoCaixa && o.precoCaixa.has(cod) ? o.precoCaixa.get(cod) : o.precos && o.precos.get(cod);
         let fx = faixaDoPreco(num(it.valor_unitario), tab, tabela);
-        if (!fx) { fx = 'A'; g.semTabela++; }
+        if (!fx) { fx = 'A'; r.semTabela++; }
         const pctc = num(plano.faixas[fx]), v = num(it.valor_total), c = r2(v * pctc / 100);
-        const pf = g.porFaixa[fx] = g.porFaixa[fx] || { base: 0, comissao: 0, pct: pctc };
-        pf.base = r2(pf.base + v); pf.comissao = r2(pf.comissao + c);
-        bn += v; cn += c; g.itens++;
+        const pf = r.faixas[fx] = r.faixas[fx] || { base: 0, comissao: 0, pct: pctc };
+        pf.base += v; pf.comissao += c;
+        r.bn += v; r.cn += c; r.itens++;
       });
-      g.base = r2(g.base + bn); g.comissao = r2(g.comissao + cn);
-      g.notas.push({ id: n.id, numero: n.numero, data: dia(n), cliente: n.cliente_nome || '', base: r2(bn), comissao: r2(cn) });
+      return r;
+    };
+    const soma = (g, r, k) => {
+      Object.keys(r.faixas).forEach(fx => {
+        const pf = g.porFaixa[fx] = g.porFaixa[fx] || { base: 0, comissao: 0, pct: r.faixas[fx].pct };
+        pf.base = r2(pf.base + r.faixas[fx].base * k); pf.comissao = r2(pf.comissao + r.faixas[fx].comissao * k);
+      });
+      g.base = r2(g.base + r.bn * k); g.comissao = r2(g.comissao + r.cn * k);
+    };
+    (o.notas || []).forEach(n => {
+      if (n.cancelada || !n.vendedor_id || dia(n).slice(0, 7) !== o.mes) return;
+      const x = grupo(n); if (!x) return;
+      const r = daNota(n, x.plano);
+      soma(x.g, r, 1); x.g.semTabela += r.semTabela; x.g.itens += r.itens;
+      x.g.notas.push({ id: n.id, numero: n.numero, data: dia(n), cliente: n.cliente_nome || '', base: r2(r.bn), comissao: r2(r.cn) });
+    });
+    const vendaPorId = new Map((o.notas || []).map(n => [n.id, n]));
+    (o.devolucoes || []).forEach(d => {
+      const v = vendaPorId.get(d.venda_id);
+      if (!v || v.cancelada || !v.vendedor_id || dia(d).slice(0, 7) !== o.mes || !(num(v.valor_total) > 0)) return;
+      const x = grupo(v); if (!x) return;
+      const r = daNota(v, x.plano), k = -Math.min(1, Math.abs(num(d.valor_total)) / num(v.valor_total));
+      soma(x.g, r, k);
+      x.g.notas.push({ id: d.id, numero: d.numero, data: dia(d), cliente: v.cliente_nome || '', base: r2(r.bn * k), comissao: r2(r.cn * k), devolucao: true, venda: v.numero });
     });
     return [...por.values()].sort((a, b) => b.base - a.base);
   }
@@ -706,7 +733,7 @@
     const precos = new Map(), caixa = new Map();
     disp.forEach(d => { if (/\.\d+$/.test(d.codigo)) { if (!caixa.has(d.base) && d.preco_venda) caixa.set(d.base, num(d.preco_venda)); } else if (d.preco_venda) precos.set(d.codigo, num(d.preco_venda)); });
     const pedidoDaNota = new Map((peds || []).filter(p => p.nota_id).map(p => [p.nota_id, p]));
-    const r = P.apuraComissao({ notas: E().D.notas || [], itensPorNota: E().ix.porNota, mes: m, dia: n => R.diaLocal(n.emitida_em), precos, precoCaixa: caixa, pedidoDaNota, cfg: E().cfg, usuarios: E().D.usuarios || [] });
+    const r = P.apuraComissao({ notas: E().D.notas || [], devolucoes: R.devolucoesComoNotas ? R.devolucoesComoNotas(E().D) : [], itensPorNota: E().ix.porNota, mes: m, dia: n => R.diaLocal(n.emitida_em), precos, precoCaixa: caixa, pedidoDaNota, cfg: E().cfg, usuarios: E().D.usuarios || [] });
     return CRM.ehAdmin() ? r : r.filter(g => g.user_id === CRM.meuId());
   }
   const linhaFx = pf => Object.keys(pf || {}).sort((a, b) => P.FAIXAS.concat(['ABAIXO']).indexOf(a) - P.FAIXAS.concat(['ABAIXO']).indexOf(b))
@@ -735,11 +762,11 @@
           l.map(g => { const aj = ajustesDe(com.mes, g.user_id), ab = com.abertos.has(g.user_id);
             return '<tr><td><button type="button" class="link" data-acao="pd-com-abrir" data-id="' + esc(g.user_id) + '"><strong>' + (ab ? '▾ ' : '▸ ') + esc(g.nome) + '</strong></button><small>' + esc(linhaFx(g.porFaixa)) +
               (g.semTabela ? ' · ' + g.semTabela + ' item(ns) sem preço de tabela (contados como A)' : '') + '</small></td>' +
-              '<td>' + esc(g.planoNome) + '</td><td class="num">' + g.notas.length + '</td><td class="num">' + R.moeda(g.base) + '</td><td class="num">' + R.moeda(g.comissao) + '</td>' +
+              '<td>' + esc(g.planoNome) + '</td><td class="num">' + g.notas.filter(n => !n.devolucao).length + '</td><td class="num">' + R.moeda(g.base) + '</td><td class="num">' + R.moeda(g.comissao) + '</td>' +
               (adm ? '<td><small>' + esc(aj.map(a => R.moeda(a.valor) + ' ' + a.motivo).join(' · ')) + '</small> <button type="button" class="mini" data-acao="pd-com-ajuste" data-id="' + esc(g.user_id) + '">+ ajuste</button>' +
                 (aj.length ? '<button type="button" class="mini" data-acao="pd-com-ajuste-limpa" data-id="' + esc(g.user_id) + '" title="Tirar os ajustes">×</button>' : '') + '</td><td class="num"><strong>' + R.moeda(P.totalComAjustes(g.comissao, aj)) + '</strong></td>' : '') + '</tr>' +
               (ab ? '<tr><td colspan="' + (adm ? 7 : 5) + '"><table class="tabela"><thead><tr><th>NF</th><th>Data</th><th>Cliente</th><th class="num">Faturado</th><th class="num">Comissão</th></tr></thead><tbody>' +
-                g.notas.map(n => '<tr><td>' + esc(n.numero) + '</td><td>' + esc(R.dataBR(n.data)) + '</td><td>' + esc(n.cliente) + '</td><td class="num">' + R.moeda(n.base) + '</td><td class="num">' + R.moeda(n.comissao) + '</td></tr>').join('') + '</tbody></table></td></tr>' : '');
+                g.notas.map(n => '<tr' + (n.devolucao ? ' class="neg"' : '') + '><td>' + (n.devolucao ? '↩ devolução ' + esc(n.numero) + ' <small>(venda NF ' + esc(n.venda) + ')</small>' : esc(n.numero)) + '</td><td>' + esc(R.dataBR(n.data)) + '</td><td>' + esc(n.cliente) + '</td><td class="num">' + R.moeda(n.base) + '</td><td class="num">' + R.moeda(n.comissao) + '</td></tr>').join('') + '</tbody></table></td></tr>' : '');
           }).join('') + '</tbody>' + (adm ? '<tfoot><tr><td colspan="6">Total</td><td class="num"><strong>' + R.moeda(tot) + '</strong></td></tr></tfoot>' : '') + '</table></div>'
           : '<p class="vazio">Nenhuma nota com vendedor(a) neste mês.</p>') +
         (adm && com.mes < mesAtual() && l.length ? '<p class="acoes"><button type="button" class="btn verde" data-acao="pd-com-fechar">Fechar ' + esc(nomeMes(com.mes)) + '</button></p>' : '');
@@ -944,7 +971,7 @@
       const tot = l.reduce((s2, g) => s2 + P.totalComAjustes(g.comissao, ajustesDe(com.mes, g.user_id)), 0);
       if (!confirm('Fechar as comissões de ' + nomeMes(com.mes) + '? ' + l.length + ' vendedor(es)(as), total a pagar ' + R.moeda(tot) + '.\nDepois de fechado, os valores não mudam (só reabrindo).')) return;
       const n = await CRM.store().comissaoFechar(com.mes + '-01', l.map(g => ({ user_id: g.user_id, plano: g.plano, base: g.base, comissao: g.comissao, ajustes: ajustesDe(com.mes, g.user_id),
-        detalhe: { porFaixa: g.porFaixa, semTabela: g.semTabela, itens: g.itens, notas: g.notas.map(x => ({ numero: x.numero, data: x.data, cliente: x.cliente, base: x.base, comissao: x.comissao })) } })));
+        detalhe: { porFaixa: g.porFaixa, semTabela: g.semTabela, itens: g.itens, notas: g.notas.map(x => Object.assign({ numero: x.numero, data: x.data, cliente: x.cliente, base: x.base, comissao: x.comissao }, x.devolucao ? { devolucao: true, venda: x.venda } : {})) } })));
       CRM.toast(nomeMes(com.mes) + ' fechado: ' + n + ' vendedor(es)(as).'); com.mesCarregado = null; CRM.render();
     }),
     'pd-com-reabrir': vivo(async () => {
