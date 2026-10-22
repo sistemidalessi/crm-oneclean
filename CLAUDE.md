@@ -1796,8 +1796,8 @@ contador, com a escolha do CRM anotada na tabela do topo do documento.
   em caixas (÷ fator, sem fração). Na entrada de compra: `custo_compra` = custo da nota (o "custo que subiu" continua pelo gatilho
   `crm_estoque_custo`), `custo_unit` = custo médio, `ult_entrada`, e o `pend_fornecedor` que veio do FKN baixa pelo que entrou.
   Na saída: `ult_saida`.
-- Peças: `crm_estoque_espelhar(codigo | null)` (só copia o que está no banco; `revoke` para o Anderson em
-  `sistemi-dalessi/docs/oneclean/sql/2026-10-22-estoque-espelho-revoke.sql`), gatilhos `crm_estoque_mov_zespelho` (depois do
+- Peças: `crm_estoque_espelhar(codigo | null)` (só copia o que está no banco; `revoke` rodado pelo Anderson em 22/10 e
+  conferido: só postgres e service_role; logado barrado na chamada direta, e o "Passar o cadastro" continua espelhando), gatilhos `crm_estoque_mov_zespelho` (depois do
   `crm_estoque_mov_saldo`, por ordem alfabética) e `crm_pedidos_zespelho`, e `crm_produtos_passar_ao_crm` espelhando tudo de
   uma vez ao ligar a chave. Antes da chave, nada muda. O GUC `crm.cadastro` é ligado e devolvido ao valor anterior.
 - Testado numa transação desfeita com a chave ligada: 197 produtos acertados pelo saldo do CRM; entrada de 10 com custo +20%
