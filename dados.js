@@ -1368,7 +1368,7 @@
     return r.data;
   };
   // Arquivo do bucket como Blob (a foto sugerida, para reduzir antes de guardar; a ficha em PDF, para copiar): pela API
-  // (política "crm fotos le", só administrador e comprador), que não depende do CORS do endereço público.
+  // (política "crm fotos le": administrador, comprador e logística), que não depende do CORS do endereço público.
   Supa.prototype.fotoBaixar = async function (caminho) {
     const r = await this.sb.storage.from(FOTOS).download(caminho);
     if (r.error) throw new Error('não consegui baixar o arquivo (' + (r.error.message || r.error) + ')');

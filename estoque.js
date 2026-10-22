@@ -305,7 +305,8 @@
     if (op()) return '<div class="kpis">' +
       kpi('Produtos no estoque do CRM', (saldo || []).length, 'saldo de cada produto e os movimentos (☰)', '', 'saldo') +
       kpi('Notas de compra', compras.filter(c => c.situacao === 'pendente').length + ' pendente(s)', 'conferir o que chegou e dar entrada', compras.some(c => c.situacao === 'pendente') ? 'ambar' : '', 'compras') +
-      kpi('Contagem e ajuste', '✎', 'inventário por contagem ou acerto de um produto', '', 'contagem') + '</div>';
+      kpi('Contagem e ajuste', '✎', 'inventário por contagem ou acerto de um produto', '', 'contagem') +
+      (CRM.produtos ? kpi('Fotos e fichas', '📷', 'aprovar o que a IA achou e completar foto, ficha técnica e FISPQ', '', 'fotos') : '') + '</div>';
     return '<div class="kpis">' +
       kpi('Produtos no estoque do CRM', (saldo || []).length, 'valor a custo médio: ' + R.moeda(S.valor(linhas)), '', 'saldo') +
       kpi('Última conferência com o FKN', ult ? (r.diferentes || 0) + ' diferença(s)' : '—', ult ? 'listagem de ' + quando(ult.gerado_em) + ' · ' + (r.sem_explicacao || 0) + ' sem explicação' : 'chega com a próxima listagem',

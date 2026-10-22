@@ -243,6 +243,8 @@
   const usd = v => 'US$ ' + Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const quando = iso => (iso ? new Date(iso).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' }) : '');
   const podeFotos = () => CRM.ehAdmin() || CRM.ehComprador();
+  // fotos e fichas (aprovar, completar): também a logística (22/10/2026); custo, fornecedor e a busca em lote ficam com podeFotos
+  const cuidaFotos = () => podeFotos() || CRM.ehLogistica();
   const st = () => CRM.store();
   const nome = x => R.nomeDeItem(x.descricao || x.codigo);
 
@@ -272,7 +274,7 @@
       fornLista = fornecedores;
       lista = X.cadastro(X.catalogo({ disp, fotos: fs, infos, vendidos }), { eans, estoque, forn, fornecedores, fiscal });
       lista.forEach(x => { x.caminho = (cm && cm.get(x.codigo)) || null; });
-      if (podeFotos()) {
+      if (cuidaFotos()) {
         [sugs, ia] = await Promise.all([s.produtoSugestoes().catch(() => []), s.produtoBuscar({ acao: 'situacao' }).catch(() => null)]);
         sugs.filter(x => x.situacao === 'sugerida' && !fl.marcados.has(x.codigo) && X.confiavel((x.candidatos || [])[0], (x.info || {}).eans) && !(lista.find(p => p.codigo === x.codigo) || {}).foto).forEach(x => fl.marcados.add(x.codigo));
       }
@@ -359,7 +361,7 @@
     const sg = sugs.find(s => s.codigo === x.codigo);
     return '<div class="pf-ficha">' +
       '<section class="pf-ficha-foto">' + (u ? '<img src="' + esc(u) + '" alt="' + esc(nome(x)) + '">' : '<span class="pf-sem">sem foto ainda</span>') +
-        (podeFotos() ? '<div class="pf-ficha-comprador"><small>Só o comprador vê: ' + (x.foto ? 'foto de ' + esc(quando(x.foto.atualizado_em)) + (x.foto.fonte ? ' · ' + esc(x.foto.fonte) : '') : 'sem foto') +
+        (cuidaFotos() ? '<div class="pf-ficha-comprador"><small>Só quem cuida do cadastro vê: ' + (x.foto ? 'foto de ' + esc(quando(x.foto.atualizado_em)) + (x.foto.fonte ? ' · ' + esc(x.foto.fonte) : '') : 'sem foto') +
           (sg && sg.situacao === 'sugerida' ? ' · há sugestão da IA para aprovar' : '') + '</small>' +
           '<p class="acoes"><button type="button" class="btn sec" data-acao="pf-buscar-um" data-id="' + esc(x.codigo) + '">Buscar foto e ficha (IA)</button> ' +
           '<button type="button" class="btn sec" data-acao="pf-subir" data-id="' + esc(x.codigo) + '">Subir foto</button> ' +
@@ -561,6 +563,11 @@
     const kpi = (t, v, cls) => '<div class="kpi ' + (cls || '') + '"><span>' + esc(t) + '</span><strong>' + v + '</strong></div>';
     return '<div class="kpis">' + kpi('Com foto', com) + kpi('Sem foto', ativos.length - com) + kpi('Mais vendidos sem foto', maisSem, maisSem ? 'vermelho' : 'verde') +
         kpi('Sem ficha', semFicha) + kpi('Para aprovar', aprovar.length, aprovar.length ? 'ambar' : '') + '</div>' +
+      (!podeFotos() ? '<section class="cartao pf-lote"><div><h2>Buscar a foto e a ficha de um produto</h2>' +
+          '<p>Digite o código ou o nome. A IA procura no site do fabricante a foto, a descrição, as especificações, a ficha técnica e a FISPQ; ' +
+          'confira em <strong>Para aprovar</strong> antes de a equipe ver. Pela ficha do produto dá também para subir ou tirar a foto e editar a ficha.</p></div>' +
+          '<div class="pf-um"><input type="search" class="of-busca" data-pf-um value="' + esc(fl.busca) + '" placeholder="Um produto só: código ou nome" autocomplete="off" aria-label="Procurar um produto">' +
+          '<div data-pf-um-lista>' + umLista() + '</div></div></section>' :
       '<section class="cartao pf-lote"><div><h2>Buscar fotos e fichas em lote</h2>' +
         '<p>A IA procura cada produto pelo nome, pela marca e pelo código de barras, de preferência no site do fabricante: a foto, a descrição, as especificações, a ficha técnica e a FISPQ. ' +
         '<strong>O que a IA achar já entra no cadastro e as vendedoras veem</strong>; para trocar uma foto ou ficha, abra o produto.</p>' +
@@ -574,7 +581,7 @@
             '<button type="button" class="btn" data-acao="pf-lote"' + (n && ia && ia.ligado ? '' : ' disabled') + '>Buscar ' + n + ' produto(s) · custo estimado ' + usd(est.total) + '</button>' +
             (ia && !ia.ligado ? '<small class="neg">a IA não está ligada (falta a chave nos segredos do Supabase)</small>' : '') + '</div>') +
         '<div class="pf-um"><input type="search" class="of-busca" data-pf-um value="' + esc(fl.busca) + '" placeholder="Um produto só: código ou nome" autocomplete="off" aria-label="Procurar um produto">' +
-          '<div data-pf-um-lista>' + umLista() + '</div></div></section>' +
+          '<div data-pf-um-lista>' + umLista() + '</div></div></section>') +
       '<section class="cartao"><div class="chips">' + [['aprovar', 'Para aprovar (' + aprovar.length + ')'], ['aprovada', 'Aprovadas (' + porSit('aprovada').length + ')'],
           ['sem', 'Sem foto achada (' + (porSit('sem').length + porSit('recusada').length) + ')'], ['erro', 'Com erro (' + porSit('erro').length + ')']]
           .map(c => '<button type="button" class="chip-filtro' + (fl.ver === c[0] ? ' ativo' : '') + '" data-acao="pf-ver" data-id="' + c[0] + '">' + esc(c[1]) + '</button>').join('') +
@@ -734,8 +741,9 @@
       try {
         const r = await buscarUm(id);
         ia = await st().produtoBuscar({ acao: 'situacao' }).catch(() => ia);
-        if (r.situacao === 'sugerida') { CRM.toast('Achou: confira e aprove (custo ' + usd(r.custo_usd) + ').'); fl.ver = 'aprovar'; CRM.render(); revisar(id); }
-        else { CRM.toast(r.situacao === 'erro' ? 'Não deu: ' + (r.erro || 'erro') : 'A IA não achou foto nem ficha deste produto (custo ' + usd(r.custo_usd) + ').', r.situacao === 'erro'); CRM.render(); }
+        const custo = podeFotos() ? ' (custo ' + usd(r.custo_usd) + ')' : '';
+        if (r.situacao === 'sugerida') { CRM.toast('Achou: confira e aprove' + custo + '.'); fl.ver = 'aprovar'; CRM.render(); revisar(id); }
+        else { CRM.toast(r.situacao === 'erro' ? 'Não deu: ' + (r.erro || 'erro') : 'A IA não achou foto nem ficha deste produto' + custo + '.', r.situacao === 'erro'); CRM.render(); }
       } catch (e) { CRM.falhou(e); }
     },
     'pf-lote': () => {
@@ -838,13 +846,13 @@
         (viz.prox ? '<button type="button" class="link" data-acao="pf-abrir" data-id="' + esc(viz.prox.codigo) + '">' + esc(viz.prox.codigo) + ' ' + esc(nome(viz.prox)) + ' ›</button>' : '') + '</div>' +
       '<section class="cartao pc-topo"><div class="pc-foto">' + (u ? '<img src="' + esc(u) + '" alt="' + esc(nome(x)) + '">' : '<span class="pf-sem">sem foto ainda</span>') + '</div>' +
         '<div class="pc-titulo"><div class="chips">' + CRM.selo(x.situacao === 'INATIVO' ? 'inativo' : 'ativo', x.situacao === 'INATIVO' ? '' : 'verde') + (x.maisVendido ? ' ' + CRM.selo('mais vendido', 'azul') : '') +
-          (podeFotos() && sg ? ' ' + CRM.selo('foto da IA para aprovar', 'azul') : '') + ' ' + selos(x) + '</div>' +
+          (cuidaFotos() && sg ? ' ' + CRM.selo('foto da IA para aprovar', 'azul') : '') + ' ' + selos(x) + '</div>' +
           '<h1>' + esc(nome(x)) + '</h1><p class="sub">Código <strong>' + esc(x.codigo) + '</strong>' + ((x.eans || []).length ? ' · código de barras <strong>' + esc(x.eans[0]) + '</strong>' : '') +
           ' · ' + esc(emb(x)) + (x.linha ? ' · ' + esc(R.nomeDeItem(x.linha)) : '') + (inf.marca ? ' · marca ' + esc(inf.marca) : '') + '</p>' +
           '<p class="acoes">' + (!CRM.foraDeVendas() && CRM.pedidos && CRM.pedidos.incluirItem ? '<button type="button" class="btn" data-acao="pf-pedido" data-id="' + esc(x.codigo) + '">+ Pedido</button> ' : '') +
             (!CRM.foraDeVendas() ? '<a class="btn sec" href="' + esc('https://wa.me/?text=' + encodeURIComponent(X.textoWhats(Object.assign({ nome: nome(x) }, x), u, inf.ficha_caminho ? st().fotoUrl(inf.ficha_caminho) : inf.ficha_url || ''))) + '" target="_blank" rel="noopener noreferrer">📲 Mandar foto e preço pelo WhatsApp</a> ' : '') +
             (podeCad() && dono ? '<button type="button" class="btn sec" data-acao="pc-editar" data-id="' + esc(x.codigo) + '">Editar o cadastro</button> ' : '') +
-            (podeFotos() ? '<button type="button" class="btn sec" data-acao="pf-info-editar" data-id="' + esc(x.codigo) + '">Editar a ficha</button>' : '') + '</p></div>' +
+            (cuidaFotos() ? '<button type="button" class="btn sec" data-acao="pf-info-editar" data-id="' + esc(x.codigo) + '">Editar a ficha</button>' : '') + '</p></div>' +
         '<div class="kpis pc-kpis"><div class="kpi' + (x.disponivel > 0 ? '' : ' alerta') + '"><span>Disponível</span><strong>' + qtd(Math.floor(x.disponivel * 1000) / 1000) + '</strong><small>' + esc(x.unidade || '') + '</small></div>' +
           (caminhoQtd(x) > 0 ? '<div class="kpi' + (x.caminho && x.caminho.atrasado ? ' alerta' : '') + '"><span>A caminho</span><strong>' + qtd(caminhoQtd(x)) + '</strong><small>' + esc(caminhoTexto(x)) + '</small></div>' : '') +
           '<div class="kpi verde"><span>Preço A</span><strong>' + (x.preco ? 'R$ ' + preco(x.preco) : '—') + '</strong><small>tabela Padrão</small></div>' +
@@ -935,10 +943,10 @@
     const u = x.foto ? st().fotoUrl(x.foto.caminho) : '', inf = x.info || {}, sg = sugs.find(z => z.codigo === x.codigo && z.situacao === 'sugerida');
     const pdf = (cam, url, rot) => cam || url ? '<a class="btn sec" href="' + esc(cam ? st().fotoUrl(cam) : url) + '" target="_blank" rel="noopener noreferrer">📄 ' + rot + '</a>' : '';
     return '<div class="pc-colunas"><div class="pc-foto grande">' + (u ? '<img src="' + esc(u) + '" alt="' + esc(nome(x)) + '">' : '<span class="pf-sem">sem foto ainda</span>') + '</div><div>' +
-      (podeFotos() && sg ? '<p class="aviso-notas">A IA achou uma sugestão para este produto. Confira antes de aprovar. <button type="button" class="btn" data-acao="pf-revisar" data-id="' + esc(x.codigo) + '">Conferir a sugestão</button></p>' : '') +
-      (podeFotos() && x.foto ? '<p class="dica">Foto de ' + esc(quando(x.foto.atualizado_em)) + (x.foto.fonte ? ' · ' + esc(x.foto.fonte) : '') + '</p>' : '') +
+      (cuidaFotos() && sg ? '<p class="aviso-notas">A IA achou uma sugestão para este produto. Confira antes de aprovar. <button type="button" class="btn" data-acao="pf-revisar" data-id="' + esc(x.codigo) + '">Conferir a sugestão</button></p>' : '') +
+      (cuidaFotos() && x.foto ? '<p class="dica">Foto de ' + esc(quando(x.foto.atualizado_em)) + (x.foto.fonte ? ' · ' + esc(x.foto.fonte) : '') + '</p>' : '') +
       (pdf(inf.ficha_caminho, inf.ficha_url, 'Ficha técnica') || pdf(inf.fispq_caminho, inf.fispq_url, 'FISPQ') ? '<p class="acoes">' + pdf(inf.ficha_caminho, inf.ficha_url, 'Ficha técnica') + ' ' + pdf(inf.fispq_caminho, inf.fispq_url, 'FISPQ (segurança)') + '</p>' : '<p class="vazio">Sem ficha técnica nem FISPQ ainda.</p>') +
-      (podeFotos() ? '<p class="acoes"><button type="button" class="btn sec" data-acao="pf-buscar-um" data-id="' + esc(x.codigo) + '">Buscar foto e ficha (IA)</button> <button type="button" class="btn sec" data-acao="pf-subir" data-id="' + esc(x.codigo) + '">Subir foto</button> ' +
+      (cuidaFotos() ? '<p class="acoes"><button type="button" class="btn sec" data-acao="pf-buscar-um" data-id="' + esc(x.codigo) + '">Buscar foto e ficha (IA)</button> <button type="button" class="btn sec" data-acao="pf-subir" data-id="' + esc(x.codigo) + '">Subir foto</button> ' +
         '<button type="button" class="btn sec" data-acao="pf-camera" data-id="' + esc(x.codigo) + '">Tirar foto</button> <button type="button" class="btn sec" data-acao="pf-info-editar" data-id="' + esc(x.codigo) + '">Editar a ficha</button>' +
         (x.foto ? ' <button type="button" class="mini" data-acao="pf-foto-tirar" data-id="' + esc(x.codigo) + '">tirar a foto</button>' : '') + '</p>' : '') + '</div></div>';
   }
@@ -956,11 +964,11 @@
       if (lista === null) { setTimeout(carrega, 0); return '<div class="cabecalho"><div><h1>Produtos</h1></div></div><div class="cartao"><p class="vazio">Carregando…</p></div>'; }
       const x = pc.aberto ? prod(pc.aberto) : null;
       if (x) return pagina(x);
-      const semFoto = podeFotos() ? lista.filter(z => !z.foto && z.disponivel > 0).length : 0;
+      const semFoto = cuidaFotos() ? lista.filter(z => !z.foto && z.disponivel > 0).length : 0;
       return '<div class="cabecalho"><div><h1>Produtos</h1><p class="sub">pesquise pelo código, pela descrição ou pelo código de barras; clique para ver tudo do produto</p></div>' +
         '<div class="acoes">' + (podeCad() && dono ? '<button type="button" class="btn" data-acao="pc-novo">+ Novo produto</button>' : '') +
           (CRM.ehAdmin() && dono === false ? '<button type="button" class="btn sec" data-acao="pc-dono">Passar o cadastro para o CRM</button>' : '') +
-          (podeFotos() ? '<button type="button" class="btn sec" data-acao="pf-ir-fotos">Fotos e fichas' + (semFoto ? ' (' + semFoto + ' sem foto)' : '') + '</button>' : '') +
+          (cuidaFotos() ? '<button type="button" class="btn sec" data-acao="pf-ir-fotos">Fotos e fichas' + (semFoto ? ' (' + semFoto + ' sem foto)' : '') + '</button>' : '') +
         '<button type="button" class="btn sec" data-acao="pf-recarregar"' + (carregando ? ' disabled' : '') + '>Atualizar</button></div></div>' +
         (podeCad() && dono === false ? '<p class="aviso-notas">Até a virada, o cadastro de produto (descrição, preço, mínimo) vem do FKN. Quando o FKN parar de emitir, ' +
           (CRM.ehAdmin() ? 'clique em <strong>Passar o cadastro para o CRM</strong>: daí em diante produto novo e preço se cadastram aqui.' : 'o administrador passa o cadastro para o CRM e ele se faz aqui.') + '</p>' : '') +

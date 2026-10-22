@@ -193,7 +193,8 @@
       '<section class="cartao mt-passo"><h2>2. Como foi a entrega?</h2><div class="mt-como">' +
         '<button type="button" class="btn ' + (ok ? 'verde' : 'sec') + '" data-acao="mt-como" data-id="entregue" aria-pressed="' + ok + '">Tudo certo</button>' +
         '<button type="button" class="btn ' + (!ok ? 'vermelho' : 'sec') + '" data-acao="mt-como" data-id="problema" aria-pressed="' + !ok + '">Teve problema</button></div>' +
-        '<label class="campo"><span>Observação ' + (ok ? '(se quiser)' : '(obrigatória: o que aconteceu?)') + '</span><textarea rows="3" data-mt-obs placeholder="ex.: deixei na portaria com o Sr. Paulo; faltou 1 caixa de luva">' + esc(m.obs) + '</textarea></label></section>' +
+        '<label class="campo"><span>Observação ' + (ok ? '(se quiser)' : '(obrigatória: o que aconteceu?)') + '</span><textarea rows="3" data-mt-obs placeholder="ex.: deixei na portaria com o Sr. Paulo; faltou 1 caixa de luva">' + esc(m.obs) + '</textarea></label>' +
+        (ok ? '' : '<p class="dica">A logística e o(a) vendedor(a) do cliente recebem o aviso para resolver.</p>') + '</section>' +
       '<button type="button" class="btn largo" data-acao="mt-confirmar"' + (m.enviando ? ' disabled' : '') + '>' + (m.enviando ? 'Enviando…' : 'Confirmar a entrega') + '</button></div>';
   }
   // a foto vai reduzida (até 1600 px, JPEG): sobe rápido pelo celular e ainda dá para ler o canhoto

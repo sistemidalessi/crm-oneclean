@@ -8,7 +8,7 @@
 // (og:image, JSON-LD do produto) e os PDFs (ficha técnica, FISPQ), baixa e guarda em sugestoes/<codigo>/ no bucket
 // crm-produtos-fotos. NADA vai para a equipe aqui: o comprador (ou o administrador) escolhe e aprova na tela
 // (estoque.js), e só aí a foto e a ficha entram em crm_produto_fotos e crm_produto_info.
-// Só administrador e comprador. A chave da Anthropic fica SÓ nos segredos do Supabase (ANTHROPIC_API_KEY). O custo de
+// Administrador, comprador e logística (a logística desde 22/10/2026, sem ver o gasto da IA). A chave da Anthropic fica SÓ nos segredos do Supabase (ANTHROPIC_API_KEY). O custo de
 // cada busca vai para crm_assistente_uso (tela 'fotos'), junto com o resto da IA, para o total do mês.
 // Deploy: verify_jwt ligado (o padrão).
 import { createClient } from 'npm:@supabase/supabase-js@2.116.0';
@@ -123,7 +123,7 @@ Deno.serve(async (req) => {
   if (!quem?.user) return resposta(401, { erro: 'faça login de novo' });
   const db = createClient(url, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } });
   const { data: eu } = await db.from('crm_usuarios').select('papel, ativo').eq('user_id', quem.user.id).maybeSingle();
-  if (!eu || !eu.ativo || !['admin', 'comprador'].includes(eu.papel)) return resposta(403, { erro: 'só o administrador e o comprador buscam fotos e fichas' });
+  if (!eu || !eu.ativo || !['admin', 'comprador', 'logistica'].includes(eu.papel)) return resposta(403, { erro: 'só o administrador, o comprador e a logística buscam fotos e fichas' });
   const chave = Deno.env.get('ANTHROPIC_API_KEY') ?? '';
   let c: { acao?: string; codigo?: string; busca?: string };
   try { c = await req.json(); } catch { return resposta(400, { erro: 'corpo inválido' }); }
@@ -132,6 +132,7 @@ Deno.serve(async (req) => {
     // somado no banco (20/10/2026: somar aqui lia só as 1.000 primeiras linhas e o mês aparecia pela metade)
     const { data } = await db.rpc('crm_ia_custo_mes', { p_desde: hojeSP().slice(0, 7) + '-01T03:00:00Z' });
     const m = (data && data[0]) || { total: 0, fotos: 0 }, r2 = (v: unknown) => Math.round(Number(v || 0) * 100) / 100;
+    if (eu.papel === 'logistica') return resposta(200, { ligado: !!chave });
     return resposta(200, { ligado: !!chave, custo_mes: r2(m.total), custo_fotos_mes: r2(m.fotos) });
   }
   if (c.acao !== 'buscar') return resposta(400, { erro: 'ação desconhecida' });

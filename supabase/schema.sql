@@ -4316,3 +4316,49 @@ end;
 $$;
 revoke all on function public.crm_compras_chegadas() from public, anon;
 grant execute on function public.crm_compras_chegadas() to authenticated;
+
+-- Fotos e fichas também pela logística (22/10/2026, virada: decisão do Anderson): aprovar o que a IA achou, buscar um
+-- produto, subir ou tirar a foto e editar a ficha. Essas tabelas e o bucket não têm custo; a busca em lote e o gasto da IA
+-- continuam só com o administrador e o comprador (tela e crm-produto-buscar).
+create or replace function public.crm_cuida_fotos() returns boolean language sql stable security definer set search_path = public as $$
+  select public.crm_eh_admin() or public.crm_eh_comprador() or public.crm_eh_logistica();
+$$;
+grant execute on function public.crm_cuida_fotos() to authenticated;
+alter policy grava on public.crm_produto_fotos with check ((select public.crm_cuida_fotos()));
+alter policy muda on public.crm_produto_fotos using ((select public.crm_cuida_fotos())) with check ((select public.crm_cuida_fotos()));
+alter policy tira on public.crm_produto_fotos using ((select public.crm_cuida_fotos()));
+alter policy tudo on public.crm_produto_fotos_sugestoes using ((select public.crm_cuida_fotos())) with check ((select public.crm_cuida_fotos()));
+alter policy grava on public.crm_produto_info with check ((select public.crm_cuida_fotos()));
+alter policy muda on public.crm_produto_info using ((select public.crm_cuida_fotos())) with check ((select public.crm_cuida_fotos()));
+alter policy "crm fotos grava" on storage.objects with check (bucket_id = 'crm-produtos-fotos' and (select public.crm_cuida_fotos()));
+alter policy "crm fotos muda" on storage.objects using (bucket_id = 'crm-produtos-fotos' and (select public.crm_cuida_fotos()));
+alter policy "crm fotos tira" on storage.objects using (bucket_id = 'crm-produtos-fotos' and (select public.crm_cuida_fotos()));
+alter policy "crm fotos le" on storage.objects using (bucket_id = 'crm-produtos-fotos' and (select public.crm_cuida_fotos()));
+
+-- "Teve problema" na entrega (22/10/2026, virada): além da logística, a vendedora da nota (ou a dona da carteira) recebe uma
+-- tarefa para falar com o cliente. Só na primeira vez que a entrega vira "problema" (confirmar de novo não repete a tarefa).
+create or replace function public.crm_entrega_confirmar(p_id uuid, p_situacao text, p_obs text, p_canhoto text)
+returns public.crm_entregas language plpgsql security definer set search_path = public as $$
+declare r public.crm_entregas; antes text; quem uuid; nf integer; cli text;
+begin
+  select * into r from public.crm_entregas where id = p_id;
+  if not found then raise exception 'entrega não encontrada'; end if;
+  if not (r.motorista_id = auth.uid() or public.crm_eh_gestor() or public.crm_eh_logistica()) then raise exception 'esta entrega não é sua'; end if;
+  if p_situacao not in ('entregue', 'problema') then raise exception 'situação inválida'; end if;
+  if coalesce(btrim(p_canhoto), '') = '' or p_canhoto not like 'canhotos/%' then raise exception 'falta a foto do canhoto'; end if;
+  if p_situacao = 'problema' and coalesce(btrim(p_obs), '') = '' then raise exception 'conte o que aconteceu na observação'; end if;
+  antes := r.situacao;
+  update public.crm_entregas set situacao = p_situacao, obs = nullif(btrim(coalesce(p_obs, '')), ''), canhoto = p_canhoto,
+    entregue_em = coalesce(entregue_em, now()), entregue_por = auth.uid()
+   where id = p_id returning * into r;
+  if p_situacao = 'problema' and antes is distinct from 'problema' then
+    select coalesce(n.vendedor_id, e.responsavel_id), n.numero, e.nome into quem, nf, cli
+      from public.crm_notas n left join public.crm_empresas e on e.id = coalesce(r.empresa_id, n.empresa_id) where n.id = r.nota_id;
+    if quem is not null then
+      insert into public.crm_atividades (empresa_id, responsavel_id, tipo, descricao, data_hora, automatica, criado_por)
+      values (r.empresa_id, quem, 'tarefa', 'Entrega com problema' || coalesce(' (NF ' || nf || ')', '') || ': ' || r.obs ||
+        '. Fale com o cliente' || coalesce(' ' || cli, '') || ' e combine com a logística.', now(), true, auth.uid());
+    end if;
+  end if;
+  return r;
+end $$;

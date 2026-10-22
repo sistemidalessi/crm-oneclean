@@ -1716,6 +1716,21 @@ levanta no BB (convênio, carteira, API de Cobrança ou CNAB 240/400) está em `
 - Testado no banco com o login de cada papel (vendedora barrada; logística marca e desfaz; comprador vê com a observação)
   e no navegador (sem R$ na tela da logística). `revoke` das 2 funções: passados ao Anderson em 22/10.
 
+## Logística em Fotos e fichas (22/10/2026, virada)
+- A logística **aprova** o que a IA achou, **busca um produto** pela IA, sobe ou tira a foto e edita a ficha (quadro "Fotos e
+  fichas" no Estoque dela e botão em Produtos). A **busca em lote** e o **gasto da IA** ficam só com admin e comprador
+  (a `crm-produto-buscar` responde `situacao` sem o custo para a logística; o toast da busca não mostra o custo).
+- Banco: `crm_cuida_fotos()` (admin, comprador, logística) nas políticas de `crm_produto_fotos`, `crm_produto_info`,
+  `crm_produto_fotos_sugestoes` e do bucket `crm-produtos-fotos` (`alter policy`, sem `drop`). Na tela, `cuidaFotos()` para
+  foto e ficha; `podeFotos()` continua para custo, fornecedor, "Quem compra" e o lote.
+- Testado no banco (logística lê e muda sugestões e grava ficha; vendedora barrada) e no navegador (sem lote, sem US$, sem R$).
+
+## "Teve problema" na entrega vira tarefa da vendedora (22/10/2026, virada)
+- `crm_entrega_confirmar` cria em `crm_atividades` (automática) a tarefa "Entrega com problema (NF n): <observação>. Fale com
+  o cliente … e combine com a logística." para o vendedor da nota (sem vendedor, a dona da carteira). Só na 1ª vez que a
+  entrega vira "problema". Testado com uma entrega de mentira desfeita (1 tarefa, para o vendedor certo, sem repetir).
+  O celular do motorista avisa que a logística e o(a) vendedor(a) recebem o aviso.
+
 ## Boleto do Banco do Brasil pelo CRM — Fase 5, preparação (22/10/2026, pedido do Anderson)
 Vale para os dois caminhos (API de Cobrança do BB ou arquivo de remessa CNAB), que dependem da resposta do gerente.
 - **`boleto.js`** (puro + desenho + tela): fator de vencimento (base 22/02/2025 = 1000), nosso número do BB com convênio de
