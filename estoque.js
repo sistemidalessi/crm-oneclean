@@ -246,6 +246,7 @@
   let saldo = null, fkn = [], fotos = [], difs = [], fotoVista = null, carregando = false, compras = [], lendoCompras = '';
   const filtro = { ver: 'saldo', busca: '', soDif: false };
   let dfe = [], dfeEst = null, buscouDfe = false, buscandoDfe = '', fornDocs = [], fornCad = [], itensProd = [], itensPend = [], nomesOp = [];
+  let chegadas = new Map(); // compra.id → { chegou_em, chegou_nome, chegou_obs }: o "Chegou" da logística (22/10/2026)
   // Logística (21/10/2026, pedido do Anderson): contagem e ajuste, entrada da nota de compra e movimentos, SEM custo nem
   // valor da nota (custo só administrador, gestora e comprador). Lê pelas funções "…_op" do banco, que só trazem quantidades.
   const op = () => CRM.ehLogistica();
@@ -261,6 +262,7 @@
         const idsOp = compras.filter(c => c.situacao === 'pendente').map(c => c.id);
         itensProd = idsOp.length ? await st.comprasItensProduto().catch(() => []) : [];
         itensPend = idsOp.length ? await st.compraItensOp(idsOp).catch(() => []) : [];
+        chegadas = new Map(((st.comprasChegadas && idsOp.length ? await st.comprasChegadas().catch(() => []) : [])).map(x => [x.id, x]));
         carregando = false; CRM.render(); return;
       }
       [saldo, fkn, fotos, compras, dfe, dfeEst] = await Promise.all([st.estoqueSaldo(), st.estoque(), st.estoqueFotos(60), st.compras ? st.compras(200).catch(() => []) : [],
@@ -269,6 +271,7 @@
         st.comprasItensProduto && compras.some(c => c.situacao === 'pendente') ? st.comprasItensProduto().catch(() => []) : []]);
       const idsPend = compras.filter(c => c.situacao === 'pendente').map(c => c.id);
       itensPend = idsPend.length && st.compraItensDe ? await st.compraItensDe(idsPend).catch(() => []) : [];
+      chegadas = new Map(((st.comprasChegadas && idsPend.length ? await st.comprasChegadas().catch(() => []) : [])).map(x => [x.id, x]));
       if (st.modo === 'supabase' && podeSefaz() && !buscouDfe && (!dfeEst || !dfeEst.proxima_em || Date.parse(dfeEst.proxima_em) < Date.now())) { buscouDfe = true; setTimeout(() => buscaSefaz(true), 50); }
       const conferida = fotos.find(f => f.conferida_em);
       fotoVista = fotoVista || (conferida && conferida.id) || null;
@@ -369,6 +372,10 @@
     if (ch.estado === 'aguardando') return CRM.selo('⏳ aguardando chegada', 'cinza', 'sem entrada no FKN depois da emissão' + base);
     return CRM.selo('? sem como saber', 'cinza', 'nenhum item ligado e fornecedor não achado na listagem do FKN: confira com o recebimento');
   }
+  // o "Chegou" marcado no galpão vale mais que o palpite pela listagem do FKN
+  const hora = iso => (iso ? new Date(iso).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '');
+  const seloGalpao = g => CRM.selo('✓ chegou no galpão ' + hora(g.chegou_em) + (g.chegou_nome ? ' (' + R.nomeDeItem(g.chegou_nome).split(' ')[0] + ')' : ''), g.chegou_obs ? 'ambar' : 'verde',
+    g.chegou_obs ? 'anotado na conferência: ' + g.chegou_obs : 'conferido pela logística') + (g.chegou_obs ? ' <small class="neg">⚠ ' + esc(g.chegou_obs) + '</small>' : '');
   const ORDEM_CHEGADA = { chegou: 0, provavel: 1, aguardando: 2, sem_dado: 3 };
   const HISTORICO = 'antes do início do estoque do CRM';
   // Notas de compra para a logística: só fornecedor, número, data e situação (sem valor); dá entrada no que chegou.
@@ -376,13 +383,15 @@
     const pend = compras.filter(c => c.situacao === 'pendente').sort((a, b) => String(b.emitida_em).localeCompare(String(a.emitida_em))),
       lancadas = compras.filter(c => c.situacao === 'lancada').slice(0, 30);
     const linha = c => '<tr><td><strong>' + esc(c.fornecedor_nome || '?') + '</strong><small>NF ' + esc(c.numero) + ' · ' + esc(quando(c.emitida_em)) + '</small></td><td>' +
-      (c.situacao === 'pendente' ? CRM.selo('pendente', 'ambar') : CRM.selo('entrada ' + quando(c.lancada_em), 'verde')) + '</td><td class="num">' +
-      (c.situacao === 'pendente' ? '<button type="button" class="btn" data-acao="es-compra" data-id="' + esc(c.id) + '">Conferir e dar entrada</button>'
+      (c.situacao === 'pendente' ? (chegadas.has(c.id) ? seloGalpao(chegadas.get(c.id)) + ' ' + CRM.selo('falta a entrada do comprador', 'cinza') : CRM.selo('esperando chegar', 'ambar')) : CRM.selo('entrada ' + quando(c.lancada_em), 'verde')) + '</td><td class="num">' +
+      (c.situacao === 'pendente' ? (chegadas.has(c.id) ? '<button type="button" class="mini" data-acao="es-chegou-desfazer" data-id="' + esc(c.id) + '" title="Marquei por engano">desfazer</button> '
+          : '<button type="button" class="btn verde" data-acao="es-chegou" data-id="' + esc(c.id) + '">✓ Chegou</button> ') +
+        '<button type="button" class="btn sec" data-acao="es-compra" data-id="' + esc(c.id) + '">Ver os itens</button>'
         : '<button type="button" class="mini" data-acao="es-compra" data-id="' + esc(c.id) + '" title="Ver os itens">☰</button>') + '</td></tr>';
     const tabela = l => '<div class="tabela-rolagem"><table class="tabela"><tbody>' + l.map(linha).join('') + '</tbody></table></div>';
     return '<section class="cartao"><h2>Notas de compra para dar entrada <small>' + pend.length + '</small></h2>' +
-      (pend.length ? '<p class="dica">As mais novas em cima. Quando a mercadoria chegar, abra a nota, confira cada item com o que veio e dê a entrada: ' +
-        'soma no estoque do CRM. Nota que não é mercadoria (combustível, serviço) fica com o comprador.</p>' + tabela(pend) : '<p class="vazio">Nenhuma nota esperando entrada.</p>') +
+      (pend.length ? '<p class="dica">As mais novas em cima. Quando a mercadoria chegar no galpão, confira com a nota (<strong>Ver os itens</strong>) e clique em <strong>✓ Chegou</strong>; ' +
+        'se faltou ou veio a mais, anote ali. O comprador vê o aviso e dá a entrada pelo XML, que soma no estoque. Nota que não é mercadoria (combustível, serviço) fica com o comprador.</p>' + tabela(pend) : '<p class="vazio">Nenhuma nota esperando entrada.</p>') +
       (lancadas.length ? '<details data-chave="es-compras-lancadas"><summary>Entradas dadas (' + lancadas.length + ')</summary>' + tabela(lancadas) + '</details>' : '') + '</section>';
   }
   function telaCompras() {
@@ -391,17 +400,17 @@
     const listagem = (fkn || []).reduce((m, x) => (x.atualizado_em && x.atualizado_em > m ? x.atualizado_em : m), '');
     const despesa = new Map();
     compras.filter(c => c.situacao === 'pendente').forEach(c => { const m = S.pareceDespesa(itensPend.filter(i => i.compra_id === c.id)); if (m) despesa.set(c.id, m); });
-    const ordem = c => (despesa.has(c.id) ? -1 : ch.has(c.id) ? ORDEM_CHEGADA[ch.get(c.id).estado] : 9);
+    const ordem = c => (despesa.has(c.id) ? -1 : chegadas.has(c.id) ? 0 : ch.has(c.id) ? ORDEM_CHEGADA[ch.get(c.id).estado] : 9);
     // as mais novas em cima (pedido do Anderson, 19/10); dentro do mesmo dia, as que chegaram primeiro
     const pend = compras.filter(c => c.situacao === 'pendente').sort((a, b) => String(b.emitida_em).slice(0, 10).localeCompare(String(a.emitida_em).slice(0, 10)) || ordem(a) - ordem(b)),
       lancadas = compras.filter(c => c.situacao === 'lancada').slice(0, 30),
       deixadas = compras.filter(c => c.situacao === 'ignorada' && !String(c.obs || '').startsWith(HISTORICO)).slice(0, 30),
       historico = compras.filter(c => c.situacao === 'ignorada' && String(c.obs || '').startsWith(HISTORICO)).length;
     const chegaram = pend.filter(c => !despesa.has(c.id) && ordem(c) >= 0 && ordem(c) <= 1).length;
-    const linhaC = c => { const x = ch.get(c.id), desp = despesa.get(c.id), veio = !desp && x && (x.estado === 'chegou' || x.estado === 'provavel');
+    const linhaC = c => { const x = ch.get(c.id), g = chegadas.get(c.id), desp = despesa.get(c.id), veio = !desp && (g || (x && (x.estado === 'chegou' || x.estado === 'provavel')));
       return '<tr><td><strong>' + esc(c.fornecedor_nome || '?') + '</strong><small>NF ' + esc(c.numero) + ' · ' + esc(quando(c.emitida_em)) + '</small></td>' +
       '<td class="num">' + R.moeda(c.valor_total) + '</td><td>' + (c.situacao === 'pendente'
-        ? (desp ? CRM.selo('💡 parece despesa (' + desp + '): não é mercadoria', 'azul', 'não entra no estoque; a despesa vai no Caixa') : CRM.selo('pendente', 'ambar') + ' ' + seloChegada(x, listagem))
+        ? (desp ? CRM.selo('💡 parece despesa (' + desp + '): não é mercadoria', 'azul', 'não entra no estoque; a despesa vai no Caixa') : CRM.selo('pendente', 'ambar') + ' ' + (g ? seloGalpao(g) : seloChegada(x, listagem)))
         : c.situacao === 'lancada' ? CRM.selo('entrada ' + quando(c.lancada_em), 'verde') : CRM.selo('deixada de lado', 'cinza') + (c.obs ? ' <small>' + esc(c.obs) + '</small>' : '')) + '</td>' +
       '<td class="num">' + (c.situacao === 'pendente'
         ? (desp ? '<button type="button" class="btn" data-acao="es-compra-ignorar" data-id="' + esc(c.id) + '">Não é mercadoria</button> <button type="button" class="mini" data-acao="es-compra" data-id="' + esc(c.id) + '" title="Ver os itens e dar entrada assim mesmo">☰</button>'
@@ -755,6 +764,20 @@
           }
         });
       } catch (e) { CRM.falhou(e); }
+    },
+    'es-chegou': id => {
+      const c = compras.find(x => x.id === id); if (!c) return;
+      CRM.abrirForm({
+        titulo: 'Chegou: NF ' + c.numero + ' · ' + (c.fornecedor_nome || ''),
+        intro: 'Confira a mercadoria com a nota (quantidades e produtos). O comprador recebe o aviso e dá a entrada no estoque pelo XML.',
+        campos: [{ nome: 'obs', rotulo: 'Faltou, veio a mais ou com avaria? (deixe vazio se veio tudo certo)', tipo: 'textarea', largo: true, dica: 'ex.: faltaram 2 caixas do papel toalha; 1 galão amassado' }],
+        valores: { obs: '' }, salvarTexto: '✓ Chegou',
+        aoSalvar: async v => { await CRM.store().compraChegou(id, v.obs || '', false); CRM.toast(v.obs ? 'Marcado: chegou, com a observação para o comprador.' : 'Marcado: chegou tudo certo.'); carrega(); }
+      });
+    },
+    'es-chegou-desfazer': async id => {
+      if (!confirm('Desfazer o "Chegou" desta nota?')) return;
+      try { await CRM.store().compraChegou(id, '', true); carrega(); } catch (e) { CRM.falhou(e); }
     },
     'es-compra-ignorar': async id => {
       const c = compras.find(x => x.id === id); if (!c) return;

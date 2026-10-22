@@ -1707,6 +1707,15 @@ levanta no BB (convênio, carteira, API de Cobrança ou CNAB 240/400) está em `
   (pede confirmação que não chega): migrações novas sem `drop ... if exists`; os `revoke` vão para o Anderson.
 - `revoke` das 6 funções novas rodados pelo Anderson e conferidos em 22/10 (anônimo sem acesso; só `authenticated`).
 
+## "Chegou" da logística na nota de compra (22/10/2026, virada)
+- Estoque → Notas de compra (logística): **"✓ Chegou"** em cada nota pendente, com observação opcional (faltou, veio a mais,
+  avaria); "desfazer" se marcou por engano. Grava em `crm_compras.chegou_em/chegou_por/chegou_obs` por `crm_compra_chegou`
+  (logística, comprador, admin; só nota pendente). `crm_compras_chegadas()` lista as chegadas com o nome de quem marcou.
+- O comprador vê o selo "✓ chegou no galpão (hora, quem)" (âmbar com a observação) e as chegadas sobem na lista; o Clean
+  avisa "N notas de compra chegaram no galpão: dar entrada" (`crm_turma_resumo`, bloco `compras_galpao`).
+- Testado no banco com o login de cada papel (vendedora barrada; logística marca e desfaz; comprador vê com a observação)
+  e no navegador (sem R$ na tela da logística). `revoke` das 2 funções: passados ao Anderson em 22/10.
+
 ## Boleto do Banco do Brasil pelo CRM — Fase 5, preparação (22/10/2026, pedido do Anderson)
 Vale para os dois caminhos (API de Cobrança do BB ou arquivo de remessa CNAB), que dependem da resposta do gerente.
 - **`boleto.js`** (puro + desenho + tela): fator de vencimento (base 22/02/2025 = 1000), nosso número do BB com convênio de

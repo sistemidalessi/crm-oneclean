@@ -3019,9 +3019,10 @@ begin
     r := r || jsonb_build_object('nfe', x);
   exception when others then null; end;
   begin
-    select jsonb_build_object('abaixo_minimo', count(*)) into x from public.crm_estoque
-     where codigo !~ '\.\d+$' and coalesce(situacao, '') <> 'INATIVO' and coalesce(estoque_min, 0) > 0
-       and coalesce(estoque_atual, quantidade, 0) < estoque_min;
+    -- 22/10/2026: o saldo é o do livro do estoque do CRM (o da listagem do FKN para de mudar na virada)
+    select jsonb_build_object('abaixo_minimo', count(*)) into x from public.crm_estoque e left join public.crm_estoque_saldo s on s.codigo = e.codigo
+     where e.codigo !~ '\.\d+$' and coalesce(e.situacao, '') <> 'INATIVO' and coalesce(e.estoque_min, 0) > 0
+       and coalesce(s.saldo, e.estoque_atual, e.quantidade, 0) < e.estoque_min;
     r := r || jsonb_build_object('estoque', x);
     select jsonb_build_object('sem_explicacao', coalesce((resumo->>'sem_explicacao')::int, 0), 'gerado_em', gerado_em) into x
       from public.crm_estoque_fotos where resumo is not null order by gerado_em desc limit 1;
@@ -3050,6 +3051,11 @@ begin
          and (exists (select 1 from public.crm_fornecedor_docs f where f.doc = d.emitente_doc and f.situacao = 'desconhecido') or public.crm_dfe_lembrete_todas())))
       into x;
     r := r || jsonb_build_object('compras_sefaz', x);
+  exception when others then null; end;
+  -- 22/10/2026: notas de compra no galpão ("Chegou" da logística) esperando a entrada do comprador
+  begin
+    select jsonb_build_object('chegaram', count(*)) into x from public.crm_compras_chegadas();
+    r := r || jsonb_build_object('compras_galpao', x);
   exception when others then null; end;
   return r;
 end;
@@ -4276,3 +4282,37 @@ end;
 $$;
 revoke all on function public.crm_produto_embalagem(text, text, numeric) from public, anon;
 grant execute on function public.crm_produto_embalagem(text, text, numeric) to authenticated;
+
+-- "Chegou" da logística (22/10/2026, virada): a mercadoria da nota de compra chegou no galpão, conferida com a nota; a
+-- observação (faltou, veio a mais, avaria) vai para o comprador, que dá a entrada pelo XML. Só enquanto a nota está pendente.
+-- O guia do Clean conta as chegadas para o comprador (crm_turma_resumo, bloco compras_galpao).
+alter table public.crm_compras add column if not exists chegou_em timestamptz;
+alter table public.crm_compras add column if not exists chegou_por uuid;
+alter table public.crm_compras add column if not exists chegou_obs text;
+create or replace function public.crm_compra_chegou(p_id uuid, p_obs text, p_desfazer boolean) returns jsonb language plpgsql security definer set search_path = public as $$
+declare c public.crm_compras;
+begin
+  if not public.crm_eh_estoque_op() then raise exception 'só a logística, o comprador e o administrador'; end if;
+  select * into c from public.crm_compras where id = p_id for update;
+  if c.id is null then raise exception 'nota de compra não encontrada'; end if;
+  if c.situacao <> 'pendente' then raise exception 'a nota já não está esperando entrada'; end if;
+  if coalesce(p_desfazer, false) then
+    update public.crm_compras set chegou_em = null, chegou_por = null, chegou_obs = null, atualizado_em = now() where id = p_id;
+  else
+    update public.crm_compras set chegou_em = now(), chegou_por = auth.uid(), chegou_obs = nullif(btrim(coalesce(p_obs, '')), ''), atualizado_em = now() where id = p_id;
+  end if;
+  return jsonb_build_object('ok', true);
+end;
+$$;
+revoke all on function public.crm_compra_chegou(uuid, text, boolean) from public, anon;
+grant execute on function public.crm_compra_chegou(uuid, text, boolean) to authenticated;
+create or replace function public.crm_compras_chegadas() returns table(id uuid, chegou_em timestamptz, chegou_nome text, chegou_obs text)
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if not public.crm_eh_estoque_op() then raise exception 'sem acesso ao estoque'; end if;
+  return query select c.id, c.chegou_em, u.nome, c.chegou_obs from public.crm_compras c left join public.crm_usuarios u on u.user_id = c.chegou_por
+    where c.chegou_em is not null and c.situacao = 'pendente';
+end;
+$$;
+revoke all on function public.crm_compras_chegadas() from public, anon;
+grant execute on function public.crm_compras_chegadas() to authenticated;

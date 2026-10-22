@@ -64,6 +64,8 @@
       const cs = r.compras_sefaz || {};
       if (cs.desconhecidos) poe('dfe-desc', 'urgente', plural(cs.desconhecidos, 'fornecedor que nunca vendeu para a empresa apareceu nas notas da Sefaz', 'fornecedores que nunca venderam para a empresa apareceram nas notas da Sefaz'), 'estoque', 'compras', 'auditoria');
       if (cs.prazo) poe('dfe-prazo', 'urgente', plural(cs.prazo, 'nota de compra perto do prazo da resposta à Sefaz', 'notas de compra perto do prazo da resposta à Sefaz'), 'estoque', 'compras', 'auditoria');
+      const cg = r.compras_galpao || {};
+      if (cg.chegaram) poe('compras-chegou', 'atencao', plural(cg.chegaram, 'nota de compra chegou no galpão: dar entrada', 'notas de compra chegaram no galpão: dar entrada'), 'estoque', 'compras');
     }
     if (c.analise) {
       if (c.analise.pronta) poe('ia-compras', 'atencao', 'Análise de compras de hoje pronta: o que pedir e de quem', 'compras', null, 'compras-setor-interno');

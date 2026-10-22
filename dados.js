@@ -474,6 +474,9 @@
   // fornecedor null = volta ao do FKN
   // Cadastro de produto no CRM (22/10/2026, virada): a chave "o CRM é o dono do cadastro" (crm_sistema) e a gravação
   // pelas funções do banco (comprador, logística e administrador; custo só administrador e comprador).
+  // "Chegou" da nota de compra, marcado pela logística (22/10/2026)
+  Supa.prototype.compraChegou = async function (id, obs, desfazer) { return unwrap(await this.sb.rpc('crm_compra_chegou', { p_id: id, p_obs: obs || '', p_desfazer: !!desfazer })); };
+  Supa.prototype.comprasChegadas = async function () { return unwrap(await this.sb.rpc('crm_compras_chegadas')); };
   Supa.prototype.produtosDono = async function () {
     const r = unwrap(await this.sb.from('crm_sistema').select('valor').eq('chave', 'produtos_dono').maybeSingle());
     return !!(r && r.valor === 'crm');
@@ -519,6 +522,8 @@
     lsGrava('crm_fornecedores', l); return f;
   };
   // modo local (demonstração): o cadastro continua o da base, sem a chave
+  Local.prototype.compraChegou = async function () { throw new Error('as notas de compra só funcionam ligadas ao banco'); };
+  Local.prototype.comprasChegadas = async function () { return []; };
   Local.prototype.produtosDono = async function () { return false; };
   Local.prototype.produtosPassarAoCrm = async function () { throw new Error('o cadastro de produto só funciona ligado ao banco'); };
   Local.prototype.produtoLer = async function () { return null; };
