@@ -1772,7 +1772,13 @@ contador, com a escolha do CRM anotada na tabela do topo do documento.
   **Devolução de cliente autorizada em homologação às 13:55** na 1ª tentativa (NF 2-5, entrada da NF 2741 da Escola Quintal
   Sol da Vila, não contribuinte: tpNF 0, finNFe 4, 1202, ICMS 00 com 1/8 da base da venda = 65,03 × 18% = 11,71, PIS 50 sobre
   53,32, item referenciado; protocolo 135260009498995).
-- **Falta:** testar em homologação a bonificação e a entrega futura (faturamento + remessa); `revoke` das 3 funções; dar entrada na
+  **Bonificação autorizada às ~14:10** (NF 2-6, pedido de teste 4: 5910, ICMS 00 18% = 3,86, PIS/COFINS 49, tPag 90, sem cobrança).
+  Faturamento da entrega futura (NF 2-7) rejeitado com **930** (CST sem destaque sem o código de benefício): em SP o cBenef é
+  obrigatório desde 06/04/2026 (Portaria SRE 70/2025) e, sem benefício e com a lei mandando sair sem destaque, vai
+  **SP099999** com a fundamentação no texto (RICMS/SP art. 129; Portaria SRE 41/2023, Anexo I). Agora o item da 5922 (e da
+  devolução sem destaque) leva `cBenef` (campo novo em `nfe.js`). Serviço fiscal `2026-10-22d`.
+- **Pedidos de teste 4 e 5** (Agilité, "TESTE EM HOMOLOGAÇÃO … NÃO SEPARAR") criados em 22/10 para os testes: cancelar ao fim.
+- **Falta:** VPS em `2026-10-22d`, emitir de novo o faturamento (NF 2-7) e a remessa no mesmo pedido; `revoke` das 3 funções; dar entrada na
   nota de devolução que o **cliente contribuinte** emite (hoje ela chegaria como nota de compra); notas de crédito/débito
   do Ajuste SINIEF 49/2025 (obrigatórias em 2027).
 

@@ -140,11 +140,29 @@ test('bonificação: 5910, ICMS como na venda, sem cobrança', () => {
   assert.strictEqual(N.monta(n).totais.vICMS, 18);
 });
 
+test('faturamento e remessa da entrega futura e bonificação passam no esquema oficial', { skip: !temXmllint && 'sem xmllint' }, () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nfe-ped-'));
+  const sig = id => '<Signature xmlns="http://www.w3.org/2000/09/xmldsig#"><SignedInfo><CanonicalizationMethod Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"/><SignatureMethod Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1"/><Reference URI="#' + id + '"><Transforms><Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"/><Transform Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"/></Transforms><DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"/><DigestValue>AAAA</DigestValue></Reference></SignedInfo><SignatureValue>AAAA</SignatureValue><KeyInfo><X509Data><X509Certificate>AAAA</X509Certificate></X509Data></KeyInfo></Signature>';
+  try {
+    const ref = { chave: '35261011222333000181550020000000501234567891', numero: 50, emissao: '2026-10-22T11:00:00-03:00' };
+    for (const [op, extra] of [['bonificacao'], ['faturamento_futuro'], ['remessa_futura', { ref }]]) {
+      const m = N.monta(doPedido(op, extra).nota);
+      const f = path.join(dir, 'n.xml'); fs.writeFileSync(f, N.nfeCompleta(m.infNFe, sig(m.id)));
+      const x = spawnSync('xmllint', ['--noout', '--schema', path.join(ESQ, 'nfe_v4.00.xsd'), f]);
+      assert.strictEqual(x.status, 0, op + ': ' + String(x.stderr));
+    }
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('entrega futura: faturamento 5922 sem ICMS e com as parcelas; remessa 5117 com ICMS, PIS 49 e a nota de faturamento referenciada', () => {
   const f = doPedido('faturamento_futuro').nota;
   assert.deepStrictEqual(f.itens.map(i => [i.cfop, i.icms.cst, i.pis.cst]), [['5922', '90', '01'], ['5922', '90', '06']]);
   assert.strictEqual(f.cobranca.duplicatas.length, 1);
   assert.strictEqual(N.monta(f).totais.vICMS, 0);
+  // SP: sem destaque pede o cBenef (rejeição 930) e a fundamentação no texto
+  assert.ok(f.itens.every(i => i.cBenef === 'SP099999'));
+  assert.ok(N.monta(f).infNFe.indexOf('<CEST>') === -1 && N.monta(f).infNFe.indexOf('<NCM>34022000</NCM><cBenef>SP099999</cBenef><CFOP>5922</CFOP>') !== -1);
+  assert.ok(/RICMS\/SP ART\. 129/.test(f.infCpl));
   const sem = doPedido('remessa_futura');
   assert.ok(sem.avisos.bloqueia.some(t => /simples faturamento/.test(t)));
   const ch = '35261011222333000181550020000000501234567891';

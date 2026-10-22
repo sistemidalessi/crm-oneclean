@@ -10,7 +10,7 @@
 | Devolução a fornecedor substituto (compra com ST destacado) | 5411/6411, ICMS próprio do fornecedor em **CST 90** com base e valor, ST proporcional em `vOutro` + `infAdFisco` | CST 90 (o 10 exigiria os campos de ST, que o substituído não pode usar) |
 | Devolução a fornecedor substituído (compra CST 60) | 5411/6411, CST 60 repetindo o ST retido da compra | — |
 | Bonificação | 5910/6910, ICMS como na venda (00 a 18% ou 60), PIS/COFINS 49, sem cobrança | nota própria (5910), não desconto de 100% na venda |
-| Entrega futura — faturamento | 5922/6922, ICMS **CST 90 sem base**, PIS/COFINS como na venda (01), com as parcelas; não mexe no estoque | 90 em vez de 41; finNFe 6 só a partir de 2027 |
+| Entrega futura — faturamento | 5922/6922, ICMS **CST 90 sem base** com **cBenef SP099999** (rejeição 930 sem ele; Portaria SRE 70/2025) e a fundamentação no texto, PIS/COFINS como na venda (01), com as parcelas; não mexe no estoque | 90 em vez de 41; finNFe 6 só a partir de 2027 |
 | Entrega futura — remessa | 5117/6117, "Remessa - Entrega Futura", NFref da 5922, ICMS como na venda, PIS/COFINS 49, sem cobrança; baixa o estoque | — |
 | Devolução de cliente **não contribuinte** | entrada (tpNF 0), 1202/1411, finNFe 4, NFref da venda, CST 00 com a base da venda (crédito), PIS/COFINS 50 com a alíquota da venda (98 no de alíquota zero) | aviso quando passou de 45 dias |
 | Devolução de cliente **contribuinte** | **não emite**: a nota é do cliente (o CRM recusa e explica) | dar entrada pela nota dele (a fazer) |

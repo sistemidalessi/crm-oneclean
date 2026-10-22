@@ -92,6 +92,9 @@ function regraReforma(nota) {
 //           st?: { modBCST, pMVAST, pICMSST, vBCST, vICMSST } },
 //   ipiDevol?: R$ do IPI devolvido (devolução de compra: impostoDevol), pis: { cst, aliquota }, cofins: { cst, aliquota },
 //   ibscbs?: { cst, cClassTrib, pIBSUF, pIBSMun, pCBS } | false }]
+// cBenef (item): código de benefício fiscal da UF, obrigatório em SP desde 06/04/2026 (Portaria SRE 70/2025) nos CST sem destaque
+// (rejeição 930 sem ele). SP099999 = "operações, sem benefício fiscal, para as quais a legislação determine a emissão da NF sem
+// destaque de ICMS" (tabela cBenef da Sefaz-SP; a nota cita a fundamentação legal nas informações complementares).
 // Fase 4b (22/10/2026, devoluções, bonificação, entrega futura): além de 00 e 60, ICMS 10 (com o ST destacado: valores do
 // item quando vêm prontos — devolução copia a proporção da nota de compra — ou MVA + alíquota interna), 40/41/50 (sem
 // ICMS) e 90 (outros, com ou sem base). O ST e o IPI devolvido somam no total da nota (vNF), como manda o leiaute.
@@ -255,7 +258,7 @@ function monta(nota, opc) {
     const ci = c.itens[i], gtin = dig(it.gtin);
     const ean = gtin && [8, 12, 13, 14].indexOf(gtin.length) !== -1 ? gtin : 'SEM GTIN';
     const prod = '<prod>' + tag('cProd', txt(it.codigo || String(i + 1))) + tag('cEAN', ean) + tag('xProd', txt(it.descricao)) + tag('NCM', dig(it.ncm)) +
-      (it.cest ? tag('CEST', dig(it.cest)) : '') + tag('CFOP', dig(it.cfop)) + tag('uCom', txt(it.unidade || 'UN')) + tag('qCom', d4(it.quantidade)) +
+      (it.cest ? tag('CEST', dig(it.cest)) : '') + (it.cBenef ? tag('cBenef', txt(it.cBenef)) : '') + tag('CFOP', dig(it.cfop)) + tag('uCom', txt(it.unidade || 'UN')) + tag('qCom', d4(it.quantidade)) +
       tag('vUnCom', d4(it.valorUnitario)) + tag('vProd', d2(ci.vProd)) + tag('cEANTrib', ean) + tag('uTrib', txt(it.unidade || 'UN')) + tag('qTrib', d4(it.quantidade)) +
       tag('vUnTrib', d4(it.valorUnitario)) + (ci.vFrete ? tag('vFrete', d2(ci.vFrete)) : '') + (ci.vDesc ? tag('vDesc', d2(ci.vDesc)) : '') + (ci.vOutro ? tag('vOutro', d2(ci.vOutro)) : '') + '<indTot>1</indTot>' +
       (it.pedidoCliente ? tag('xPed', txt(it.pedidoCliente)) : '') + '</prod>';

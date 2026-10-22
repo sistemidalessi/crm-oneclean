@@ -81,7 +81,8 @@ function notaDevolucao(o) {
   if (tipo === 'devolucao_cliente' && orig.emissao && o.emissao && (new Date(o.emissao) - new Date(orig.emissao)) / 864e5 > 45)
     conferir.push('passaram mais de 45 dias da venda: o crédito do ICMS só vale no prazo da garantia, com prova (Portaria SRE 41/2023, Anexo IV); senão, o contador escritura sem crédito');
   const outra = tipo === 'devolucao_fornecedor' ? orig.emit : orig.dest;   // quem recebe a devolução (fornecedor) ou quem devolve (cliente)
-  let freteTot = 0; const stTxt = [];
+  let freteTot = 0, semDestaque = false; const stTxt = [];
+  const ufEmit = String((((o.emitente || {}).endereco) || {}).uf || 'SP').toUpperCase();
   const itens = (o.itens || []).filter(x => num(x.quantidade) > 0).map(x => {
     const it = orig.itens.find(i => i.nItem === Number(x.nItem));
     if (!it) { bloqueia.push('item ' + x.nItem + ' não existe na nota original'); return null; }
@@ -103,7 +104,7 @@ function notaDevolucao(o) {
       conferir.push('item ' + x.nItem + ': fornecedor do Simples Nacional (CSOSN ' + cst + '); a devolução estorna o crédito de ' + num(ic.pCredSN) + '% que veio na compra');
     }
     else if (cst === '60' || cst === '500') icms = { cst: '60', stRet: ic.vICMSSTRet != null ? { vBCSTRet: prop(ic.vBCSTRet, f), pST: ic.pST, vICMSSubstituto: ic.vICMSSubstituto == null ? null : prop(ic.vICMSSubstituto, f), vICMSSTRet: prop(ic.vICMSSTRet, f) } : null };
-    else { icms = { cst: '90' }; conferir.push('item ' + x.nItem + ': a compra veio sem ICMS (CST/CSOSN ' + (cst || '?') + '): a devolução sai sem destaque'); }
+    else { icms = { cst: '90' }; semDestaque = true; conferir.push('item ' + x.nItem + ': a nota de origem veio sem ICMS (CST/CSOSN ' + (cst || '?') + '): a devolução sai sem destaque'); }
     if (icms.cst === '00' && Math.abs(prop(ic.vBC, f) - r2(q * num(it.vUnCom) - prop(it.vDesc, f) + prop(it.vFrete, f))) > 0.05) conferir.push('item ' + x.nItem + ': a base do ICMS da nota original não é o valor do item (redução ou outras despesas); vai a mesma proporção');
     freteTot += prop(it.vFrete, f);
     if (st) stTxt.push('ITEM ' + x.nItem + ': BC ICMS-ST R$ ' + st.vBCST.toFixed(2) + ' ICMS-ST R$ ' + st.vICMSST.toFixed(2));
@@ -116,7 +117,8 @@ function notaDevolucao(o) {
       ipiDevol: tipo === 'devolucao_fornecedor' ? prop(it.ipi.vIPI, f) : 0, outro: st ? st.vICMSST : 0,
       pis: fed(it.pis), cofins: fed(it.cofins),
       infAdProd: 'Devolucao de ' + q + ' ' + (it.unidade || '') + ' do item ' + x.nItem + ' da NF ' + orig.numero,
-      ref: orig.chave ? { chave: orig.chave, nItem: x.nItem } : null };
+      ref: orig.chave ? { chave: orig.chave, nItem: x.nItem } : null,
+      cBenef: icms.cst === '90' && !(num(icms.aliquota) > 0) && ufEmit === 'SP' ? 'SP099999' : null };
   }).filter(Boolean);
   if (!itens.length && !bloqueia.length) bloqueia.push('nenhum item com quantidade para devolver');
   if (tipo === 'devolucao_cliente' && itens.some(i => i.ipiDevol)) conferir.push('IPI na devolução de cliente: conferir');
@@ -131,7 +133,8 @@ function notaDevolucao(o) {
     itens, frete: { modFrete: 9, valor: r2(freteTot) }, cobranca: null, pagamento: [{ tPag: '90', valor: 0 }],
     infAdFisco: stTxt.length ? 'ICMS-ST DA NF DE ORIGEM, DEVOLVIDO EM OUTRAS DESPESAS (RICMS/SP ART. 274 PAR. 3): ' + stTxt.join('; ') + ';' : null,
     infCpl: ['DEVOLUCAO ' + (ehForn ? 'DE COMPRA' : 'DE VENDA') + ' REF. NF ' + orig.numero + ' SERIE ' + orig.serie + ' DE ' + String(orig.emissao || '').slice(0, 10).split('-').reverse().join('/') +
-      ' CHAVE ' + (orig.chave || ''), o.motivo ? 'MOTIVO: ' + o.motivo : ''].filter(Boolean).join(';') + ';',
+      ' CHAVE ' + (orig.chave || ''), o.motivo ? 'MOTIVO: ' + o.motivo : '',
+      semDestaque ? 'ITEM SEM DESTAQUE DO ICMS: A NF DE ORIGEM NAO DESTACOU O IMPOSTO (RICMS/SP ART. 4, IV: A DEVOLUCAO ANULA A OPERACAO ANTERIOR)' : ''].filter(Boolean).join(';') + ';',
     respTec: o.respTec || null, ibscbs: o.ibscbs, reforma: o.reforma
   };
   if (!nota.dest) bloqueia.push('a nota original não tem o ' + (ehForn ? 'emitente' : 'destinatário'));

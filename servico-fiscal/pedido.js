@@ -49,6 +49,7 @@ function notaDoPedido(o) {
   const p = o.pedido || {}, e = o.empresa || {}, d = p.dados || {}, cfg = o.cfg || {};
   const bloqueia = [], conferir = [];
   const opNome = o.operacao || 'venda', op = OPERACOES[opNome];
+  const ufEmit = String((o.emitente && o.emitente.endereco && o.emitente.endereco.uf) || 'SP').toUpperCase();
   if (op === undefined) throw new Error('operação desconhecida: ' + opNome);
   if (opNome === 'remessa_futura' && !(o.ref && o.ref.chave)) bloqueia.push('a remessa da entrega futura precisa da nota de simples faturamento');
   const docCli = String(e.cnpj || d.cliente_doc || '').toUpperCase().replace(/[^0-9A-Z]/g, '');
@@ -78,11 +79,13 @@ function notaDoPedido(o) {
     }
     const foraUF = /^6/.test(String(v.cfop));
     const icms = op && op.icms === 'sem' ? { cst: '90' } : { cst: String(v.cst_icms), aliquota: num(v.aliq_icms), stRet };
+    // simples faturamento sem destaque: em SP vai o cBenef SP099999 (sem benefício, legislação manda sair sem destaque)
+    const cBenef = op && op.icms === 'sem' && ufEmit === 'SP' ? 'SP099999' : null;
     const pis = op && op.pis === '49' ? { cst: '49' } : { cst: String(v.cst_pis || '01'), aliquota: num(v.aliq_pis) };
     const cofins = op && op.pis === '49' ? { cst: '49' } : { cst: String(v.cst_cofins || '01'), aliquota: num(v.aliq_cofins) };
     return { codigo: cod, descricao: it.descricao, ncm: r.ncm, cest: r.cest || null, gtin: r.gtin || null, origem: r.origem == null ? 0 : r.origem,
       cfop: op ? op.cfop(foraUF) : v.cfop, unidade: unid, quantidade: q, valorUnitario: pu, desconto: r2(q * pu * num(it.desconto) / 100),
-      icms, pis, cofins, pedidoCliente: d.seu_pedido || null };
+      icms, pis, cofins, cBenef, pedidoCliente: d.seu_pedido || null };
   }).filter(Boolean);
   if (!itens.length && !bloqueia.length) bloqueia.push('o pedido não tem itens');
   const total = r2(itens.reduce((s, it) => s + r2(it.quantidade * it.valorUnitario) - it.desconto, 0) + num(p.frete));
@@ -116,8 +119,9 @@ function notaDoPedido(o) {
   // separado por ";" (o vigia e a comissão leem o "VENDEDOR:" daqui).
   const PORTADOR = { '15': 'BOLETO', '17': 'PIX', '18': 'TRANSFERENCIA', '01': 'DINHEIRO', '03': 'CARTAO', '04': 'CARTAO' };
   const prazo = pg.aVista ? 'A VISTA' : pg.dias.join('/') + ' DIAS';
+  const fatTxt = opNome === 'faturamento_futuro' ? 'SIMPLES FATURAMENTO DE VENDA PARA ENTREGA FUTURA, SEM DESTAQUE DO ICMS (RICMS/SP ART. 129; PORTARIA SRE 41/2023, ANEXO I, ART. 1)' : '';
   const refTxt = opNome === 'remessa_futura' && o.ref ? 'REMESSA REF. NF DE SIMPLES FATURAMENTO ' + (o.ref.numero || '') + ' DE ' + String(o.ref.emissao || '').slice(0, 10).split('-').reverse().join('/') : '';
-  const infCpl = [refTxt, cobra && PORTADOR[pg.forma] ? 'PORTADOR: ' + PORTADOR[pg.forma] + ' PRAZO: ' + prazo : '', entregaTxt, vendedor ? 'VENDEDOR: ' + vendedor : '', 'PEDIDO CRM: ' + (p.numero || ''),
+  const infCpl = [fatTxt, refTxt, cobra && PORTADOR[pg.forma] ? 'PORTADOR: ' + PORTADOR[pg.forma] + ' PRAZO: ' + prazo : '', entregaTxt, vendedor ? 'VENDEDOR: ' + vendedor : '', 'PEDIDO CRM: ' + (p.numero || ''),
     d.seu_pedido ? 'SEU PEDIDO: ' + d.seu_pedido : '', d.texto_nota || ''].filter(Boolean).map(x => String(x).replace(/;/g, ',')).join(';') + ';';
   // LC 224/2025 (redução dos benefícios federais): item com PIS/COFINS de alíquota zero (06) ou isento (07) continua com o
   // mesmo CST, e a nota leva este aviso nas informações de interesse do fisco (Receita, Perguntas e Respostas 34.1; o FKN põe)
