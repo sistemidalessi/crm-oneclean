@@ -182,7 +182,7 @@ test('listagem de produtos do FKN: fornecedor, mínimo, pedido e a caixa fechada
   const gc = G.compras(D, R.indexa(D), R.config({}), HOJE, 30, neg, { aCaminho: [{ codigo: '010001', falta: 10 }] }).produtos.find(x => x.codigo === '010001');
   assert.deepEqual([gc.pedidoCrm, gc.pedido], [10, 10]);
   assert.equal(gc.comprar, Math.max(0, gn.comprar - 6), 'os 10 do CRM no lugar dos 4 do FKN: compra 6 a menos');
-  assert.deepEqual(c.pedidoPorFornecedor.map(f => [f.nome, f.itens.length, f.custo]), [['Sem fornecedor no FKN', 1, 48]]);
+  assert.deepEqual(c.pedidoPorFornecedor.map(f => [f.nome, f.itens.length, f.custo]), [['Sem fornecedor', 1, 48]]);
   assert.deepEqual(c.listas.fornecedores, ['FORNECEDOR DOIS LTDA', 'FORNECEDOR UM LTDA']);
   assert.ok(!c.parado.some(x => x.codigo === '010001.1'), 'a caixa não aparece como parada separada');
 });

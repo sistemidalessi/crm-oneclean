@@ -281,8 +281,11 @@
     CRM.render();
   }
 
+  // Desde a virada (chave "o CRM é o dono do cadastro"), a listagem do FKN não chega mais: sem conferência nem palpite de chegada
+  const dono = () => !!(CRM.fknDesligado && CRM.fknDesligado());
   function cabecalho() {
-    return '<div class="cabecalho"><div><h1>Estoque</h1><p class="sub">o estoque do CRM, em paralelo com o FKN: saldo, movimentos, contagem e a conferência com cada listagem do FKN · Fase 2 da saída do FKN</p></div>' +
+    return '<div class="cabecalho"><div><h1>Estoque</h1><p class="sub">' + (dono() ? 'o estoque da empresa, só no CRM: saldo, movimentos, contagem e a entrada das notas de compra'
+      : 'o estoque do CRM, em paralelo com o FKN: saldo, movimentos, contagem e a conferência com cada listagem do FKN · Fase 2 da saída do FKN') + '</p></div>' +
       '<div class="acoes"><button type="button" class="btn sec" data-acao="es-recarregar"' + (carregando ? ' disabled' : '') + '>Atualizar</button></div></div>';
   }
 
@@ -307,6 +310,13 @@
       kpi('Notas de compra', compras.filter(c => c.situacao === 'pendente').length + ' pendente(s)', 'conferir o que chegou e dar entrada', compras.some(c => c.situacao === 'pendente') ? 'ambar' : '', 'compras') +
       kpi('Contagem e ajuste', '✎', 'inventário por contagem ou acerto de um produto', '', 'contagem') +
       (CRM.produtos ? kpi('Fotos e fichas', '📷', 'aprovar o que a IA achou e completar foto, ficha técnica e FISPQ', '', 'fotos') : '') + '</div>';
+    const negativos = (saldo || []).filter(x => +x.saldo < 0).length;
+    if (dono()) return '<div class="kpis">' +
+      kpi('Produtos no estoque', (saldo || []).length, 'valor a custo médio: ' + R.moeda(S.valor(linhas)), '', 'saldo') +
+      kpi('Saldo negativo', negativos, negativos ? 'vendido sem entrada: conferir a compra ou contar' : 'nenhum produto abaixo de zero', negativos ? 'vermelho' : 'verde', 'saldo') +
+      kpi('Notas de compra', compras.filter(c => c.situacao === 'pendente').length + ' pendente(s)', 'dar entrada no que chegou (soma no estoque e lança no contas a pagar)', compras.some(c => c.situacao === 'pendente') ? 'ambar' : '', 'compras') +
+      kpi('Contagem e ajuste', '✎', 'inventário por contagem ou acerto de um produto', '', 'contagem') +
+      (CRM.produtos ? kpi('Fotos e fichas', '📷', 'foto, ficha técnica e FISPQ de cada produto (a IA procura, você aprova)', '', 'fotos') : '') + '</div>';
     return '<div class="kpis">' +
       kpi('Produtos no estoque do CRM', (saldo || []).length, 'valor a custo médio: ' + R.moeda(S.valor(linhas)), '', 'saldo') +
       kpi('Última conferência com o FKN', ult ? (r.diferentes || 0) + ' diferença(s)' : '—', ult ? 'listagem de ' + quando(ult.gerado_em) + ' · ' + (r.sem_explicacao || 0) + ' sem explicação' : 'chega com a próxima listagem',
@@ -319,7 +329,7 @@
 
   function telaSaldo(linhas) {
     const q = R.normaliza(filtro.busca);
-    const l = linhas.filter(x => (!q || R.normaliza(x.descricao + ' ' + x.codigo + ' ' + (x.fornecedor || '')).indexOf(q) !== -1) && (!filtro.soDif || (x.dif != null && Math.abs(x.dif) >= 0.0005)))
+    const l = linhas.filter(x => (!q || R.normaliza(x.descricao + ' ' + x.codigo + ' ' + (x.fornecedor || '')).indexOf(q) !== -1) && (!filtro.soDif || dono() || (x.dif != null && Math.abs(x.dif) >= 0.0005)))
       .sort((a, b) => String(a.descricao).localeCompare(String(b.descricao), 'pt-BR'));
     if (op()) return '<section class="cartao"><h2>Saldo por produto <small>' + l.length + ' produto(s)</small></h2>' +
       '<p class="dica">O saldo do CRM: cada nota de venda dá a saída, cada entrada de nota de compra soma e cada contagem acerta. ☰ mostra os movimentos; ✎ acerta o saldo de um produto.</p>' +
@@ -330,14 +340,15 @@
           '<td class="num">' + (x.saldo != null ? '<button type="button" class="mini" data-acao="es-movs" data-id="' + esc(x.codigo) + '" title="Movimentos">☰</button>' +
             '<button type="button" class="mini" data-acao="es-ajustar" data-id="' + esc(x.codigo) + '" title="Acertar o saldo">✎</button>' : '') + '</td></tr>').join('') +
         '</tbody></table></div>' + (l.length > 300 ? '<p class="dica">Mostrando 300 de ' + l.length + '; use a busca.</p>' : '') : '<p class="vazio">Nada aqui.</p>') + '</section>';
+    const d = dono();
     return '<section class="cartao"><h2>Saldo por produto <small>' + l.length + ' produto(s)</small></h2>' +
-      '<p class="dica">"FKN agora" é o "atual" da última listagem; a diferença daqui pode ser só uma nota emitida depois dela. A conferência de verdade, na mesma hora, está em "Última conferência".</p>' +
+      (d ? '<p class="dica">O saldo de cada produto: cada nota de venda dá a saída, cada entrada de nota de compra soma (e refaz o custo médio) e cada contagem acerta. ☰ mostra os movimentos; ✎ acerta o saldo.</p>' : '<p class="dica">"FKN agora" é o "atual" da última listagem; a diferença daqui pode ser só uma nota emitida depois dela. A conferência de verdade, na mesma hora, está em "Última conferência".</p>') +
       '<p class="acoes"><input type="search" placeholder="Procurar produto, código ou fornecedor" value="' + esc(filtro.busca) + '" data-es-busca class="of-busca"> ' +
-      '<label class="filtro-inline"><input type="checkbox" data-es-sodif' + (filtro.soDif ? ' checked' : '') + '> só com diferença</label></p>' +
-      (l.length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Produto</th><th class="num">Saldo CRM</th><th class="num">FKN agora</th><th class="num">Diferença</th><th class="num">Custo médio</th><th>Último movimento</th><th></th></tr></thead><tbody>' +
+      (d ? '' : '<label class="filtro-inline"><input type="checkbox" data-es-sodif' + (filtro.soDif ? ' checked' : '') + '> só com diferença</label>') + '</p>' +
+      (l.length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Produto</th><th class="num">' + (d ? 'Saldo' : 'Saldo CRM</th><th class="num">FKN agora</th><th class="num">Diferença') + '</th><th class="num">Custo médio</th><th>Último movimento</th><th></th></tr></thead><tbody>' +
         l.slice(0, 300).map(x => '<tr><td>' + (CRM.produtos ? '<button type="button" class="pd-info-foto" data-acao="pf-ficha" data-id="' + esc(x.codigo) + '" title="Ficha e foto">' + CRM.produtos.miniatura(x.codigo) + '</button>' : '') + '<strong>' + esc(R.nomeDeItem(x.descricao || x.codigo)) + '</strong><small>' + esc(x.codigo) + (x.unidade ? ' · ' + esc(x.unidade) : '') + (x.fornecedor ? ' · ' + esc(x.fornecedor) : '') + '</small></td>' +
-          '<td class="num">' + qtd(x.saldo) + '</td><td class="num">' + qtd(x.fkn) + '</td>' +
-          '<td class="num">' + (x.dif == null ? '—' : Math.abs(x.dif) < 0.0005 ? '✓' : '<strong>' + qtd(x.dif) + '</strong>') + '</td>' +
+          '<td class="num' + (d && +x.saldo < 0 ? ' neg' : '') + '">' + qtd(x.saldo) + '</td>' + (d ? '' : '<td class="num">' + qtd(x.fkn) + '</td>' +
+          '<td class="num">' + (x.dif == null ? '—' : Math.abs(x.dif) < 0.0005 ? '✓' : '<strong>' + qtd(x.dif) + '</strong>') + '</td>') +
           '<td class="num">' + (x.custo == null ? '—' : R.moeda(x.custo)) + '</td><td>' + esc(quando(x.ultMov)) + '</td>' +
           '<td class="num">' + (x.saldo != null ? '<button type="button" class="mini" data-acao="es-movs" data-id="' + esc(x.codigo) + '" title="Movimentos">☰</button>' +
             '<button type="button" class="mini" data-acao="es-ajustar" data-id="' + esc(x.codigo) + '" title="Acertar o saldo">✎</button>' : '') + '</td></tr>').join('') +
@@ -397,7 +408,7 @@
   }
   function telaCompras() {
     if (op()) return telaComprasOp();
-    const ch = S.chegadaCompras({ compras: compras.filter(c => c.situacao === 'pendente'), itensProd, fkn, fknForn: fknFornecedores() });
+    const ch = dono() ? new Map() : S.chegadaCompras({ compras: compras.filter(c => c.situacao === 'pendente'), itensProd, fkn, fknForn: fknFornecedores() });
     const listagem = (fkn || []).reduce((m, x) => (x.atualizado_em && x.atualizado_em > m ? x.atualizado_em : m), '');
     const despesa = new Map();
     compras.filter(c => c.situacao === 'pendente').forEach(c => { const m = S.pareceDespesa(itensPend.filter(i => i.compra_id === c.id)); if (m) despesa.set(c.id, m); });
@@ -411,7 +422,7 @@
     const linhaC = c => { const x = ch.get(c.id), g = chegadas.get(c.id), desp = despesa.get(c.id), veio = !desp && (g || (x && (x.estado === 'chegou' || x.estado === 'provavel')));
       return '<tr><td><strong>' + esc(c.fornecedor_nome || '?') + '</strong><small>NF ' + esc(c.numero) + ' · ' + esc(quando(c.emitida_em)) + '</small></td>' +
       '<td class="num">' + R.moeda(c.valor_total) + '</td><td>' + (c.situacao === 'pendente'
-        ? (desp ? CRM.selo('💡 parece despesa (' + desp + '): não é mercadoria', 'azul', 'não entra no estoque; a despesa vai no Caixa') : CRM.selo('pendente', 'ambar') + ' ' + (g ? seloGalpao(g) : seloChegada(x, listagem)))
+        ? (desp ? CRM.selo('💡 parece despesa (' + desp + '): não é mercadoria', 'azul', 'não entra no estoque; a despesa vai no Caixa') : CRM.selo('pendente', 'ambar') + ' ' + (g ? seloGalpao(g) : dono() ? CRM.selo('esperando a logística marcar ✓ Chegou', 'cinza') : seloChegada(x, listagem)))
         : c.situacao === 'lancada' ? CRM.selo('entrada ' + quando(c.lancada_em), 'verde') : CRM.selo('deixada de lado', 'cinza') + (c.obs ? ' <small>' + esc(c.obs) + '</small>' : '')) + '</td>' +
       '<td class="num">' + (c.situacao === 'pendente'
         ? (desp ? '<button type="button" class="btn" data-acao="es-compra-ignorar" data-id="' + esc(c.id) + '">Não é mercadoria</button> <button type="button" class="mini" data-acao="es-compra" data-id="' + esc(c.id) + '" title="Ver os itens e dar entrada assim mesmo">☰</button>'
@@ -419,8 +430,10 @@
         : '<button type="button" class="mini" data-acao="es-compra" data-id="' + esc(c.id) + '" title="Ver os itens">☰</button>') + '</td></tr>'; };
     const tabela = l => '<div class="tabela-rolagem"><table class="tabela"><tbody>' + l.map(linhaC).join('') + '</tbody></table></div>';
     return '<section class="cartao"><h2>Notas de compra para dar entrada <small>' + pend.length + (chegaram ? ' · ' + chegaram + (chegaram === 1 ? ' já chegou' : ' já chegaram') : '') + '</small></h2>' +
-      (pend.length ? '<p class="dica">As mais novas em cima. Só dê entrada no que chegou: enquanto o FKN roda junto, o selo verde aparece quando a listagem do FKN mostra entrada dos produtos da nota' +
-        (listagem ? ' (última listagem: ' + esc(quando(listagem)) + ')' : '') + '. <strong>Dar entrada</strong> soma no estoque do CRM e <strong>não</strong> lança nada no contas a pagar (o FKN já lança). ' +
+      (pend.length ? '<p class="dica">As mais novas em cima. Só dê entrada no que chegou' + (dono()
+        ? ': o selo verde aparece quando a logística marca <strong>✓ Chegou</strong> no galpão. <strong>Dar entrada</strong> soma no estoque, refaz o custo médio e lança as parcelas da nota no contas a pagar do Caixa. '
+        : ': enquanto o FKN roda junto, o selo verde aparece quando a listagem do FKN mostra entrada dos produtos da nota' +
+        (listagem ? ' (última listagem: ' + esc(quando(listagem)) + ')' : '') + '. <strong>Dar entrada</strong> soma no estoque do CRM e <strong>não</strong> lança nada no contas a pagar (o FKN já lança). ') +
         '<strong>Não é mercadoria</strong> (combustível, serviço, material de uso, nota repetida): sai da lista sem mexer no estoque; a despesa fica no Caixa.</p>' + tabela(pend)
         : '<p class="vazio">Nenhuma nota esperando entrada.</p>') +
       '<details data-chave="es-compras-como"><summary>Subir XML à mão e como a entrada funciona</summary>' +

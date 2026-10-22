@@ -4647,3 +4647,114 @@ revoke all on function public.crm_nfe_outra_origem(text, bigint) from public, an
 grant execute on function public.crm_nfe_outra_origem(text, bigint) to authenticated;
 -- crm_pedidos_casar_int (acima, Fase 3) ganhou em 22/10: a nota de simples faturamento (5922/6922) não fatura o pedido:
 --   and exists (select 1 from public.crm_nota_itens ni where ni.nota_id = nt.id and coalesce(ni.cfop, '') not in ('5922', '6922'))
+
+-- ============================================================ CRM dono do estoque (22/10/2026, virada)
+-- Com a chave produtos_dono = crm, a listagem do FKN para de chegar e o saldo de crm_estoque (o que a Gestão, as Compras, as
+-- Ofertas e a IA do comprador leem) ficaria parado. Cada movimento do livro (venda, compra, contagem, estorno) e cada pedido
+-- que muda espelham o estoque do CRM em crm_estoque, como o FKN mostrava: estoque_atual = físico (saldo do livro),
+-- pend_cliente = reservado (pedidos do CRM em aberto, separação ou separados), quantidade = físico − reservado, custo_total =
+-- quantidade × custo médio; a caixa fechada (código .1, .2…) recebe o mesmo em caixas (÷ fator, sem fração). Na entrada de
+-- compra: custo_compra = custo da nota (o "custo que subiu" segue pelo gatilho crm_estoque_custo), custo_unit = custo médio,
+-- ult_entrada, e o pedido pendente que veio do FKN baixa pelo que entrou (os pedidos novos ficam em Pedidos ao fornecedor).
+-- Na saída: ult_saida. Antes da chave, nada muda. crm_estoque_espelhar só copia o que já está no banco (nada vem de quem chama).
+create or replace function public.crm_estoque_espelhar(p_codigo text) returns integer language plpgsql security definer set search_path = public as $$
+declare ant text := current_setting('crm.cadastro', true); n integer := 0;
+begin
+  if not public.crm_produtos_do_crm() then return 0; end if;
+  perform set_config('crm.cadastro', '1', true);
+  with res as (
+    select i->>'base' bs, sum((i->>'qtd_est')::numeric) q
+      from public.crm_pedidos p cross join lateral jsonb_array_elements(p.itens) i
+     where p.situacao in ('aberto', 'separacao', 'separado') and coalesce(i->>'base', '') <> ''
+       and (p_codigo is null or i->>'base' = p_codigo) group by 1),
+  alvo as (
+    select s.codigo, s.saldo fis, coalesce(r.q, 0) rs, s.custo_medio cm
+      from public.crm_estoque_saldo s left join res r on r.bs = s.codigo
+     where p_codigo is null or s.codigo = p_codigo)
+  update public.crm_estoque e set
+    estoque_atual = a.fis, pend_cliente = a.rs, quantidade = a.fis - a.rs,
+    custo_total = round(greatest(a.fis - a.rs, 0) * coalesce(a.cm, e.custo_unit, 0), 2), atualizado_em = now()
+    from alvo a
+   where a.codigo = e.codigo
+     and (e.estoque_atual is distinct from a.fis or e.quantidade is distinct from a.fis - a.rs or e.pend_cliente is distinct from a.rs
+          or e.custo_total is distinct from round(greatest(a.fis - a.rs, 0) * coalesce(a.cm, e.custo_unit, 0), 2));
+  get diagnostics n = row_count;
+  -- a caixa fechada: o mesmo estoque em caixas (÷ fator, sem fração)
+  with res as (
+    select i->>'base' bs, sum((i->>'qtd_est')::numeric) q
+      from public.crm_pedidos p cross join lateral jsonb_array_elements(p.itens) i
+     where p.situacao in ('aberto', 'separacao', 'separado') and coalesce(i->>'base', '') <> ''
+       and (p_codigo is null or i->>'base' = p_codigo) group by 1)
+  update public.crm_estoque c set
+    estoque_atual = trunc(s.saldo / u.fator), pend_cliente = trunc(coalesce(r.q, 0) / u.fator),
+    quantidade = trunc((s.saldo - coalesce(r.q, 0)) / u.fator),
+    custo_total = round(greatest(s.saldo - coalesce(r.q, 0), 0) * coalesce(s.custo_medio, 0), 2), atualizado_em = now()
+    from public.crm_estoque_saldo s join public.crm_estoque_unidades u on u.codigo = s.codigo and u.unidade = 'CX'
+    left join res r on r.bs = s.codigo
+   where c.codigo ~ '\.\d+$' and s.codigo = regexp_replace(c.codigo, '\.\d+$', '') and coalesce(u.fator, 0) > 0
+     and (p_codigo is null or s.codigo = p_codigo)
+     and (c.quantidade is distinct from trunc((s.saldo - coalesce(r.q, 0)) / u.fator) or c.estoque_atual is distinct from trunc(s.saldo / u.fator));
+  perform set_config('crm.cadastro', coalesce(ant, ''), true);
+  return n;
+end;
+$$;
+
+-- No gatilho, o que depende do movimento: entrada de compra (custo da nota, custo médio, última entrada, pedido do FKN baixado)
+-- e saída (última saída).
+create or replace function public.crm_estoque_mov_espelho() returns trigger language plpgsql security definer set search_path = public as $$
+declare ant text; dia date := (new.quando at time zone 'America/Sao_Paulo')::date;
+begin
+  if not public.crm_produtos_do_crm() then return null; end if;
+  perform public.crm_estoque_espelhar(new.codigo);
+  if (new.tipo = 'entrada' and new.quantidade > 0) or new.tipo = 'saida' then
+    ant := current_setting('crm.cadastro', true);
+    perform set_config('crm.cadastro', '1', true);
+    if new.tipo = 'entrada' then
+      update public.crm_estoque e set
+        custo_compra = case when coalesce(new.custo_unit, 0) > 0 then round(new.custo_unit, 4) else e.custo_compra end,
+        custo_unit = coalesce(nullif(s.custo_medio, 0), e.custo_unit),
+        pend_fornecedor = greatest(coalesce(e.pend_fornecedor, 0) - new.quantidade, 0),
+        ult_entrada = greatest(coalesce(e.ult_entrada, dia), dia), atualizado_em = now()
+        from public.crm_estoque_saldo s where s.codigo = e.codigo and e.codigo = new.codigo;
+    else
+      update public.crm_estoque e set ult_saida = greatest(coalesce(e.ult_saida, dia), dia), atualizado_em = now() where e.codigo = new.codigo;
+    end if;
+    perform set_config('crm.cadastro', coalesce(ant, ''), true);
+  end if;
+  return null;
+end;
+$$;
+-- o nome vem depois de crm_estoque_mov_saldo (os gatilhos rodam em ordem alfabética): o saldo já está atualizado
+create or replace trigger crm_estoque_mov_zespelho after insert on public.crm_estoque_mov for each row execute function public.crm_estoque_mov_espelho();
+
+create or replace function public.crm_pedidos_espelho() returns trigger language plpgsql security definer set search_path = public as $$
+declare b text;
+begin
+  if not public.crm_produtos_do_crm() then return null; end if;
+  if tg_op = 'UPDATE' and new.situacao is not distinct from old.situacao and new.itens is not distinct from old.itens then return null; end if;
+  for b in
+    select distinct x from (
+      select i->>'base' x from jsonb_array_elements(coalesce(new.itens, '[]'::jsonb)) i
+      union all
+      select i->>'base' from jsonb_array_elements(case when tg_op = 'UPDATE' then coalesce(old.itens, '[]'::jsonb) else '[]'::jsonb end) i) t
+     where coalesce(x, '') <> ''
+  loop
+    perform public.crm_estoque_espelhar(b);
+  end loop;
+  return null;
+end;
+$$;
+create or replace trigger crm_pedidos_zespelho after insert or update on public.crm_pedidos for each row execute function public.crm_pedidos_espelho();
+
+-- Ao passar o cadastro para o CRM, o espelho de todos os produtos de uma vez (o saldo do livro passa a valer na Gestão).
+create or replace function public.crm_produtos_passar_ao_crm() returns jsonb language plpgsql security definer set search_path = public as $$
+declare n integer;
+begin
+  if not public.crm_eh_admin() then raise exception 'só o administrador passa o cadastro para o CRM'; end if;
+  if public.crm_produtos_do_crm() then return jsonb_build_object('ok', true, 'ja', true); end if;
+  insert into public.crm_sistema (chave, valor) values ('produtos_dono', 'crm') on conflict (chave) do update set valor = 'crm', quem = auth.uid(), quando = now();
+  insert into public.crm_produto_hist (codigo, acao, depois) values ('*', 'dono', jsonb_build_object('produtos_dono', 'crm'));
+  n := public.crm_estoque_espelhar(null);
+  return jsonb_build_object('ok', true, 'espelhados', n);
+end;
+$$;

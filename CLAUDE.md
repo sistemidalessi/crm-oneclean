@@ -1788,6 +1788,28 @@ contador, com a escolha do CRM anotada na tabela do topo do documento.
   nota de devolução que o **cliente contribuinte** emite (hoje ela chegaria como nota de compra); notas de crédito/débito
   do Ajuste SINIEF 49/2025 (obrigatórias em 2027).
 
+## CRM dono do estoque (22/10/2026, virada)
+- Com a chave `produtos_dono = crm`, a listagem do FKN não chega mais, e `crm_estoque` (o que a Gestão, as Compras, as Ofertas,
+  os Concorrentes e a IA do comprador leem) ficaria parado. Agora o banco **espelha o estoque do CRM em `crm_estoque`**, como o
+  FKN mostrava: `estoque_atual` = físico (saldo do livro), `pend_cliente` = reservado nos pedidos do CRM (aberto, separação,
+  separado), `quantidade` = físico − reservado, `custo_total` = quantidade × custo médio; a caixa fechada (.1, .2…) recebe o mesmo
+  em caixas (÷ fator, sem fração). Na entrada de compra: `custo_compra` = custo da nota (o "custo que subiu" continua pelo gatilho
+  `crm_estoque_custo`), `custo_unit` = custo médio, `ult_entrada`, e o `pend_fornecedor` que veio do FKN baixa pelo que entrou.
+  Na saída: `ult_saida`.
+- Peças: `crm_estoque_espelhar(codigo | null)` (só copia o que está no banco; `revoke` para o Anderson em
+  `sistemi-dalessi/docs/oneclean/sql/2026-10-22-estoque-espelho-revoke.sql`), gatilhos `crm_estoque_mov_zespelho` (depois do
+  `crm_estoque_mov_saldo`, por ordem alfabética) e `crm_pedidos_zespelho`, e `crm_produtos_passar_ao_crm` espelhando tudo de
+  uma vez ao ligar a chave. Antes da chave, nada muda. O GUC `crm.cadastro` é ligado e devolvido ao valor anterior.
+- Testado numa transação desfeita com a chave ligada: 197 produtos acertados pelo saldo do CRM; entrada de 10 com custo +20%
+  refez custo médio, custo de compra (+1 no histórico), pedido do FKN (10 → 0) e a caixa (47 ÷ 2 = 23); pedido reaberto
+  reservou 1 e o cancelado devolveu; a listagem do FKN continuou ignorada; 2ª passada espelhou 0.
+- Telas com a chave (`CRM.fknDesligado()`): Estoque sem a conferência com o FKN (quadro de saldo negativo no lugar, sem as
+  colunas "FKN agora"/"Diferença", selo de chegada só pelo "✓ Chegou" da logística, dica da entrada que lança no contas a
+  pagar); Compras sem o botão da listagem, "Estoque do CRM, atualizado a cada nota…", "Baixar planilha" no lugar de "Exportar
+  para o FKN", "+ Fornecedor novo". Nomes que valem antes e depois: "Mínimo", "Sem fornecedor", "inativo".
+- **Na virada:** pedido feito no FKN e ainda não faturado em 30/10 não reserva nada no CRM (a reserva passa a ser só dos
+  pedidos do CRM): faturar no FKN até 30/10 ou lançar de novo no CRM em 03/11.
+
 ## Baixa do contas a receber pelo Caixa (22/10/2026, virada)
 - Gatilho `crm_fin_lanc_baixa_titulo` (`crm_titulo_baixa_caixa`) em `crm_fin_lancamentos`: com a chave ligada, o "Recebi"
   (entrada paga com `titulo_duplicata`, por qualquer caminho: botão, frase, lote, previsão ligada) tira o título de
