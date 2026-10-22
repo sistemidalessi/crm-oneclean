@@ -58,6 +58,8 @@ function rateia(total, pesos) {
   return out;
 }
 const PIS_ALIQ = ['01', '02'], PIS_NT = ['04', '05', '06', '07', '08', '09'];
+const CST_ICMS = ['00', '10', '40', '41', '50', '60', '90'];
+// finalidade (finNFe): 1 normal, 2 complementar, 3 ajuste, 4 devolução; tpNF: 0 entrada, 1 saída
 const IBSCBS_2026 = { cst: '000', cClassTrib: '000001', pIBSUF: 0.1, pIBSMun: 0, pCBS: 0.9 };
 // Reforma a partir de 2027 (22/10/2026). Vale a DATA DE EMISSÃO da nota, nunca a de hoje.
 // - CBS cobrada de verdade: a alíquota é a de referência fixada pelo Senado − 0,1 ponto (LC 214/2025); ainda não publicada,
@@ -86,8 +88,13 @@ function regraReforma(nota) {
 }
 
 // nota.itens: [{ codigo, descricao, ncm, cest, cfop, unidade, quantidade, valorUnitario, desconto (R$), gtin, origem,
-//   icms: { cst: '00'|'60', aliquota, stRet?: { vBCSTRet, pST, vICMSSubstituto, vICMSSTRet } },
-//   pis: { cst, aliquota }, cofins: { cst, aliquota }, ibscbs?: { cst, cClassTrib, pIBSUF, pIBSMun, pCBS } | false }]
+//   icms: { cst: '00'|'10'|'40'|'41'|'50'|'60'|'90', aliquota, vBC?, stRet?: { vBCSTRet, pST, vICMSSubstituto, vICMSSTRet },
+//           st?: { modBCST, pMVAST, pICMSST, vBCST, vICMSST } },
+//   ipiDevol?: R$ do IPI devolvido (devolução de compra: impostoDevol), pis: { cst, aliquota }, cofins: { cst, aliquota },
+//   ibscbs?: { cst, cClassTrib, pIBSUF, pIBSMun, pCBS } | false }]
+// Fase 4b (22/10/2026, devoluções, bonificação, entrega futura): além de 00 e 60, ICMS 10 (com o ST destacado: valores do
+// item quando vêm prontos — devolução copia a proporção da nota de compra — ou MVA + alíquota interna), 40/41/50 (sem
+// ICMS) e 90 (outros, com ou sem base). O ST e o IPI devolvido somam no total da nota (vNF), como manda o leiaute.
 function calcula(nota) {
   const itens = nota.itens || [];
   if (!itens.length) throw new Error('a nota não tem itens');
@@ -99,7 +106,7 @@ function calcula(nota) {
     if (!(num(it.quantidade) > 0)) throw new Error('item ' + (i + 1) + ': quantidade zerada');
     if (vDesc > vProd) throw new Error('item ' + (i + 1) + ': desconto maior que o valor');
     const icms = it.icms || {}, cstI = String(icms.cst || '');
-    if (cstI !== '00' && cstI !== '60') throw new Error('item ' + (i + 1) + ': ICMS CST ' + (cstI || '?') + ' ainda não é emitido pelo CRM (só 00 e 60)');
+    if (CST_ICMS.indexOf(cstI) === -1) throw new Error('item ' + (i + 1) + ': ICMS CST ' + (cstI || '?') + ' ainda não é emitido pelo CRM (' + CST_ICMS.join(', ') + ')');
     const V = r2(vProd + vFrete - vDesc);
     const fed = (g, nome, baseFed) => {
       const cst = String((g || {}).cst || '');
@@ -108,7 +115,12 @@ function calcula(nota) {
         return { cst, grupo: 'Aliq', vBC: baseFed, p: num(g.aliquota), v: r2(baseFed * num(g.aliquota) / 100) };
       }
       if (PIS_NT.indexOf(cst) !== -1) return { cst, grupo: 'NT', vBC: 0, p: 0, v: 0 };
-      if (cst === '49' || cst === '99') return { cst, grupo: 'Outr', vBC: 0, p: 0, v: 0 };
+      // 49 (outras saídas), 50–56 (entrada com crédito: devolução de venda), 70–75, 98, 99: grupo "Outr", com base se houver alíquota
+      if (/^(49|5[0-6]|6[0-7]|7[0-5]|98|99)$/.test(cst)) {
+        if (reg.de2027 && num((g || {}).aliquota) > 0) throw new Error('item ' + (i + 1) + ': ' + nome + ' com alíquota em nota de ' + reg.ano + ' (o PIS e a COFINS acabam em 2027)');
+        const p = num((g || {}).aliquota);
+        return p > 0 ? { cst, grupo: 'Outr', vBC: baseFed, p, v: r2(baseFed * p / 100) } : { cst, grupo: 'Outr', vBC: 0, p: 0, v: 0 };
+      }
       throw new Error('item ' + (i + 1) + ': ' + nome + ' CST ' + (cst || '?') + ' não conhecido');
     };
     const temIbs = it.ibscbs !== false && nota.ibscbs !== false;
@@ -126,9 +138,10 @@ function calcula(nota) {
       return { pis, cofins, ibscbs: ib };
     };
     let vBC = 0, vICMS = 0, x = volta(0);
-    if (cstI === '00') {
+    const comBase = cstI === '00' || cstI === '10' || (cstI === '90' && num(icms.aliquota) > 0);
+    if (comBase) {
       const p = num(icms.aliquota);
-      vBC = V; vICMS = r2(vBC * p / 100); x = volta(vICMS);
+      vBC = icms.vBC != null && cstI !== '00' ? r2(icms.vBC) : V; vICMS = r2(vBC * p / 100); x = volta(vICMS);
       if (reg.icmsComIbsCbs && x.ibscbs) {
         for (let k = 0; k < 20; k++) {
           const nBC = r2(V + x.ibscbs.vIBS + x.ibscbs.vCBS), nICMS = r2(nBC * p / 100);
@@ -138,12 +151,21 @@ function calcula(nota) {
       }
     }
     const { pis, cofins, ibscbs } = x;
-    return { vProd, vDesc, vFrete, icms: { cst: cstI, vBC, p: num(icms.aliquota), v: vICMS, stRet: icms.stRet || null }, pis, cofins, ibscbs };
+    // ICMS-ST destacado (CST 10 e, se vier, 90): valores prontos ou MVA sobre (operação + IPI) e alíquota interna − ICMS próprio
+    let st = null;
+    if ((cstI === '10' || cstI === '90') && icms.st) {
+      const q = icms.st, vIPIDev = r2(num(it.ipiDevol));
+      const vBCST = q.vBCST != null ? r2(q.vBCST) : r2((V + vIPIDev) * (1 + num(q.pMVAST) / 100));
+      const vICMSST = q.vICMSST != null ? r2(q.vICMSST) : Math.max(0, r2(vBCST * num(q.pICMSST) / 100 - vICMS));
+      st = { modBCST: q.modBCST == null ? (q.pMVAST != null ? 4 : 0) : q.modBCST, pMVAST: q.pMVAST, pICMSST: num(q.pICMSST), vBCST, vICMSST };
+    } else if (cstI === '10') throw new Error('item ' + (i + 1) + ': ICMS CST 10 sem os dados do ST');
+    return { vProd, vDesc, vFrete, icms: Object.assign({ cst: cstI, vBC, p: num(icms.aliquota), v: vICMS, stRet: icms.stRet || null }, st ? { st } : {}), ipiDevol: r2(num(it.ipiDevol)), pis, cofins, ibscbs };
   });
   const soma = k => r2(out.reduce((s, x) => s + k(x), 0));
   const t = { vBC: soma(x => x.icms.vBC), vICMS: soma(x => x.icms.v), vProd: soma(x => x.vProd), vFrete: soma(x => x.vFrete), vDesc: soma(x => x.vDesc),
-    vPIS: soma(x => x.pis.v), vCOFINS: soma(x => x.cofins.v) };
-  t.vNF = r2(t.vProd + t.vFrete - t.vDesc);                          // o IBS/CBS (por fora) nunca soma no vNF
+    vPIS: soma(x => x.pis.v), vCOFINS: soma(x => x.cofins.v), vBCST: soma(x => (x.icms.st ? x.icms.st.vBCST : 0)), vST: soma(x => (x.icms.st ? x.icms.st.vICMSST : 0)),
+    vIPIDevol: soma(x => x.ipiDevol) };
+  t.vNF = r2(t.vProd + t.vFrete - t.vDesc + t.vST + t.vIPIDevol);   // o IBS/CBS (por fora) nunca soma no vNF
   const comIbs = out.filter(x => x.ibscbs);
   t.ibscbs = comIbs.length ? { vBC: soma(x => (x.ibscbs ? x.ibscbs.vBC : 0)), vIBSUF: soma(x => (x.ibscbs ? x.ibscbs.vIBSUF : 0)),
     vIBSMun: soma(x => (x.ibscbs ? x.ibscbs.vIBSMun : 0)), vCBS: soma(x => (x.ibscbs ? x.ibscbs.vCBS : 0)) } : null;
@@ -160,8 +182,15 @@ const enderecoXml = (nome, e, emitente) => '<' + nome + '>' + tag('xLgr', txt(e.
   tag('cPais', '1058') + tag('xPais', 'BRASIL') + tag('fone', dig(e.fone)) + '</' + nome + '>' + (emitente ? '' : '');
 const docXml = d => { const x = docLimpo(d); return x.length === 11 ? tag('CPF', x) : tag('CNPJ', x); };
 
+const grupoSt = st => (st ? tag('modBCST', String(st.modBCST)) + (st.pMVAST != null ? tag('pMVAST', pct(st.pMVAST)) : '') + tag('vBCST', d2(st.vBCST)) +
+  tag('pICMSST', pct(st.pICMSST)) + tag('vICMSST', d2(st.vICMSST)) : '');
 function grupoIcms(c, it) {
-  const o = txt(it.origem == null ? '0' : it.origem);
+  const o = txt(it.origem == null ? '0' : it.origem), k = c.icms.cst;
+  if (k === '10') return '<ICMS><ICMS10>' + tag('orig', o) + '<CST>10</CST><modBC>3</modBC>' + tag('vBC', d2(c.icms.vBC)) + tag('pICMS', pct(c.icms.p)) + tag('vICMS', d2(c.icms.v)) +
+    grupoSt(c.icms.st) + '</ICMS10></ICMS>';
+  if (k === '40' || k === '41' || k === '50') return '<ICMS><ICMS40>' + tag('orig', o) + tag('CST', k) + '</ICMS40></ICMS>';
+  if (k === '90') return '<ICMS><ICMS90>' + tag('orig', o) + '<CST>90</CST>' +
+    (c.icms.vBC > 0 ? '<modBC>3</modBC>' + tag('vBC', d2(c.icms.vBC)) + tag('pICMS', pct(c.icms.p)) + tag('vICMS', d2(c.icms.v)) : '') + grupoSt(c.icms.st) + '</ICMS90></ICMS>';
   if (c.icms.cst === '00') return '<ICMS><ICMS00>' + tag('orig', o) + '<CST>00</CST><modBC>3</modBC>' + tag('vBC', d2(c.icms.vBC)) + tag('pICMS', pct(c.icms.p)) + tag('vICMS', d2(c.icms.v)) + '</ICMS00></ICMS>';
   const s = c.icms.stRet;
   return '<ICMS><ICMS60>' + tag('orig', o) + '<CST>60</CST>' + (s && s.vBCSTRet != null ? tag('vBCSTRet', d2(s.vBCSTRet)) + tag('pST', pct(s.pST)) +
@@ -170,7 +199,7 @@ function grupoIcms(c, it) {
 function grupoFed(nome, g) {
   if (g.grupo === 'Aliq') return '<' + nome + '><' + nome + 'Aliq>' + tag('CST', g.cst) + tag('vBC', d2(g.vBC)) + tag('p' + nome, pct(g.p)) + tag('v' + nome, d2(g.v)) + '</' + nome + 'Aliq></' + nome + '>';
   if (g.grupo === 'NT') return '<' + nome + '><' + nome + 'NT>' + tag('CST', g.cst) + '</' + nome + 'NT></' + nome + '>';
-  return '<' + nome + '><' + nome + 'Outr>' + tag('CST', g.cst) + '<vBC>0.00</vBC><p' + nome + '>0.00</p' + nome + '><v' + nome + '>0.00</v' + nome + '></' + nome + 'Outr></' + nome + '>';
+  return '<' + nome + '><' + nome + 'Outr>' + tag('CST', g.cst) + tag('vBC', d2(g.vBC)) + tag('p' + nome, pct(g.p)) + tag('v' + nome, d2(g.v)) + '</' + nome + 'Outr></' + nome + '>';
 }
 function grupoIbsCbs(g) {
   if (!g) return '';
@@ -198,14 +227,19 @@ function monta(nota, opc) {
   const ufDest = String((de.endereco || {}).uf || '').toUpperCase();
   const idDest = ufDest && ufDest !== String(e.uf || 'SP').toUpperCase() ? '2' : '1';
   const indPres = nota.indPres == null ? 9 : nota.indPres;
+  const tpNF = String(nota.tpNF == null ? 1 : nota.tpNF), fin = String(nota.finNFe == null ? 1 : nota.finNFe);
+  if (['0', '1'].indexOf(tpNF) === -1 || ['1', '2', '3', '4'].indexOf(fin) === -1) throw new Error('tipo ou finalidade da nota inválidos');
+  const refs = (nota.refs || []).map(dig).filter(Boolean);
+  if (refs.some(k => k.length !== 44)) throw new Error('chave da nota referenciada com tamanho errado (são 44 dígitos)');
+  if (fin === '4' && !refs.length) throw new Error('nota de devolução precisa da chave da nota devolvida');
   const ide = '<ide>' + tag('cUF', cUF) + tag('cNF', cNF) + tag('natOp', txt(nota.natOp || 'VENDA NO ESTADO')) + '<mod>55</mod>' + tag('serie', String(Number(nota.serie))) +
-    tag('nNF', String(Number(nota.numero))) + tag('dhEmi', nota.emissao) + (nota.saida ? tag('dhSaiEnt', nota.saida) : '') + '<tpNF>1</tpNF>' + tag('idDest', idDest) +
-    tag('cMunFG', dig(e.cMun)) + '<tpImp>1</tpImp><tpEmis>1</tpEmis>' + tag('cDV', chave.slice(-1)) + tag('tpAmb', homolog ? '2' : '1') + '<finNFe>1</finNFe>' +
+    tag('nNF', String(Number(nota.numero))) + tag('dhEmi', nota.emissao) + (nota.saida ? tag('dhSaiEnt', nota.saida) : '') + tag('tpNF', tpNF) + tag('idDest', idDest) +
+    tag('cMunFG', dig(e.cMun)) + '<tpImp>1</tpImp><tpEmis>1</tpEmis>' + tag('cDV', chave.slice(-1)) + tag('tpAmb', homolog ? '2' : '1') + tag('finNFe', fin) +
     tag('indFinal', String(nota.indFinal == null ? 1 : nota.indFinal)) + tag('indPres', String(indPres)) +
     // intermediador (NT 2020.006): obrigatório quando a venda não é presencial (2, 3, 4 e 9; rejeição 434) e proibido
     // nos outros (435). 0 = sem intermediador (venda direta, sem marketplace)
     ([2, 3, 4, 9].indexOf(Number(indPres)) !== -1 ? tag('indIntermed', String(nota.indIntermed == null ? 0 : nota.indIntermed)) : '') +
-    '<procEmi>0</procEmi>' + tag('verProc', txt(nota.verProc || 'CRM Sistemi 1.0')) + '</ide>';
+    '<procEmi>0</procEmi>' + tag('verProc', txt(nota.verProc || 'CRM Sistemi 1.0')) + refs.map(k => '<NFref>' + tag('refNFe', k) + '</NFref>').join('') + '</ide>';
   const emit = '<emit>' + docXml(em.cnpj) + tag('xNome', txt(em.razao)) + tag('xFant', txt(em.fantasia)) +
     enderecoXml('enderEmit', { logradouro: e.logradouro, numero: e.numero, complemento: e.complemento, bairro: e.bairro, cMun: e.cMun, municipio: e.municipio, uf: e.uf, cep: e.cep, fone: e.fone }, true) +
     tag('IE', dig(em.ie)) + tag('CRT', String(em.crt || 3)) + '</emit>';
@@ -222,14 +256,15 @@ function monta(nota, opc) {
       tag('vUnTrib', d4(it.valorUnitario)) + (ci.vFrete ? tag('vFrete', d2(ci.vFrete)) : '') + (ci.vDesc ? tag('vDesc', d2(ci.vDesc)) : '') + '<indTot>1</indTot>' +
       (it.pedidoCliente ? tag('xPed', txt(it.pedidoCliente)) : '') + '</prod>';
     const imp = '<imposto>' + (it.vTotTrib != null ? tag('vTotTrib', d2(it.vTotTrib)) : '') + grupoIcms(ci, it) + grupoFed('PIS', ci.pis) + grupoFed('COFINS', ci.cofins) + grupoIbsCbs(ci.ibscbs) + '</imposto>';
-    return '<det nItem="' + (i + 1) + '">' + prod + imp + (it.infAdProd ? tag('infAdProd', txt(it.infAdProd)) : '') + '</det>';
+    const devol = ci.ipiDevol > 0 ? '<impostoDevol><pDevol>100.00</pDevol><IPI>' + tag('vIPIDevol', d2(ci.ipiDevol)) + '</IPI></impostoDevol>' : '';
+    return '<det nItem="' + (i + 1) + '">' + prod + imp + devol + (it.infAdProd ? tag('infAdProd', txt(it.infAdProd)) : '') + '</det>';
   }).join('');
   const t = c.totais;
   // tributos aproximados (Lei 12.741/2012, tabela do IBPT): por item e o total
   const comTrib = (nota.itens || []).filter(it => it.vTotTrib != null);
   const totTrib = comTrib.length ? r2(comTrib.reduce((s, it) => s + num(it.vTotTrib), 0)) : null;
-  const icmsTot = '<ICMSTot>' + tag('vBC', d2(t.vBC)) + tag('vICMS', d2(t.vICMS)) + '<vICMSDeson>0.00</vICMSDeson><vFCP>0.00</vFCP><vBCST>0.00</vBCST><vST>0.00</vST><vFCPST>0.00</vFCPST><vFCPSTRet>0.00</vFCPSTRet>' +
-    tag('vProd', d2(t.vProd)) + tag('vFrete', d2(t.vFrete)) + '<vSeg>0.00</vSeg>' + tag('vDesc', d2(t.vDesc)) + '<vII>0.00</vII><vIPI>0.00</vIPI><vIPIDevol>0.00</vIPIDevol>' +
+  const icmsTot = '<ICMSTot>' + tag('vBC', d2(t.vBC)) + tag('vICMS', d2(t.vICMS)) + '<vICMSDeson>0.00</vICMSDeson><vFCP>0.00</vFCP>' + tag('vBCST', d2(t.vBCST)) + tag('vST', d2(t.vST)) + '<vFCPST>0.00</vFCPST><vFCPSTRet>0.00</vFCPSTRet>' +
+    tag('vProd', d2(t.vProd)) + tag('vFrete', d2(t.vFrete)) + '<vSeg>0.00</vSeg>' + tag('vDesc', d2(t.vDesc)) + '<vII>0.00</vII><vIPI>0.00</vIPI>' + tag('vIPIDevol', d2(t.vIPIDevol)) +
     tag('vPIS', d2(t.vPIS)) + tag('vCOFINS', d2(t.vCOFINS)) + '<vOutro>0.00</vOutro>' + tag('vNF', d2(t.vNF)) +
     (totTrib != null ? tag('vTotTrib', d2(totTrib)) : '') + '</ICMSTot>';
   const ib = t.ibscbs;
