@@ -738,8 +738,8 @@
         };
         CRM.abrirForm({
           titulo: 'NF ' + c.numero + ' · ' + (c.fornecedor_nome || ''), largura: 'extra', campos: [], valores: {},
-          intro: (pend ? 'Ligue cada item a um produto nosso e diga o fator (quantas unidades do nosso estoque vêm em 1 unidade da nota). "Não é estoque": frete, brinde, material de uso. Dar entrada soma no estoque do CRM; não lança nada no contas a pagar.'
-            : 'Entrada dada em ' + quando(c.lancada_em) + '.') + (c.parcelas && c.parcelas.length ? ' Parcelas da nota: ' + c.parcelas.map(p => R.dataBR(p.vencimento) + ' ' + R.moeda(p.valor)).join(', ') + ' (não vão para o contas a pagar enquanto o FKN roda junto).' : ''),
+          intro: (pend ? 'Ligue cada item a um produto nosso e diga o fator (quantas unidades do nosso estoque vêm em 1 unidade da nota). "Não é estoque": frete, brinde, material de uso. Dar entrada soma no estoque do CRM e, depois da virada (CRM dono do cadastro), lança as parcelas no contas a pagar do Caixa.'
+            : 'Entrada dada em ' + quando(c.lancada_em) + '.') + (c.parcelas && c.parcelas.length ? ' Parcelas da nota: ' + c.parcelas.map(p => R.dataBR(p.vencimento) + ' ' + R.moeda(p.valor)).join(', ') + ' (depois da virada entram no contas a pagar do Caixa com a entrada; antes, vêm do FKN).' : ''),
           htmlDepois: '<datalist id="esProdutos">' + R.ordemAlfa([...nomeDe.entries()], x => x[1] || x[0]).map(([k, v]) => '<option value="' + esc(k) + '">' + esc(v || '') + '</option>').join('') + '</datalist>' +
             '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Item da nota</th><th>Produto nosso</th><th>Fator</th><th></th></tr></thead><tbody>' + itens.map(linhaI).join('') + '</tbody></table></div>',
           salvarTexto: pend ? 'Dar entrada no estoque' : 'Fechar',

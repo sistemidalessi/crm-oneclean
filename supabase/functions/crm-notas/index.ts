@@ -85,6 +85,14 @@ async function arquivoFkn(db: any, integ: { id: string }, f: { nome?: string; ba
     return resposta(422, { erro: texto });
   };
 
+  // Virada (22/10/2026): com o CRM dono do cadastro (crm_sistema.produtos_dono), o FKN não manda mais em nada — nem no
+  // estoque, nem nos títulos (a listagem tiraria os que nasceram das notas do CRM), nem no contas a pagar. Fica registrado.
+  const { data: doCrm } = await db.rpc('crm_produtos_do_crm');
+  if (doCrm === true) {
+    await registra('Relatório do FKN ignorado: desde a virada quem manda é o CRM', 0, 0);
+    return resposta(200, { ok: true, ignorado: 'desde a virada quem manda é o CRM' });
+  }
+
   if (K.ehListagemProdutos(txt)) {
     const conf = K.conferirListagemProdutos(txt);
     if (conf.recusa.length) return recusa('produtos', conf.recusa);

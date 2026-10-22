@@ -1731,6 +1731,24 @@ levanta no BB (convênio, carteira, API de Cobrança ou CNAB 240/400) está em `
   entrega vira "problema". Testado com uma entrega de mentira desfeita (1 tarefa, para o vendedor certo, sem repetir).
   O celular do motorista avisa que a logística e o(a) vendedor(a) recebem o aviso.
 
+## Compras → contas a pagar e o FKN desligado (22/10/2026, virada)
+- Gatilho `crm_compras_pagar` (`crm_compra_pagar`): com a chave `produtos_dono = crm`, a entrada da nota de compra (quem
+  for: comprador, logística, admin) cria uma conta aberta por parcela no Caixa ("FORNECEDOR · nota-NN", Fornecedores,
+  `compra_id` + `parcela`, índice único; nota sem parcelas = 1 conta com o total para conferir). Antes da chave, nada (as
+  contas vêm do Sifn083). `origem` fica `tela` (ampliar o check pediria `drop constraint`).
+- FKN desligado com a chave: `crm-notas` ignora todo relatório do FKN (registra "ignorado"; o de receber apagaria os títulos
+  nascidos das notas do CRM) e `crm_fkn_situacao.desligado` some com o lembrete e as recusas (`CRM.fknDesligado()`).
+- Testado com a chave ligada numa transação desfeita (1 conta certa; sem a chave, nenhuma; reentrada não repete).
+
+## Baixa do contas a receber pelo Caixa (22/10/2026, virada)
+- Gatilho `crm_fin_lanc_baixa_titulo` (`crm_titulo_baixa_caixa`) em `crm_fin_lancamentos`: com a chave ligada, o "Recebi"
+  (entrada paga com `titulo_duplicata`, por qualquer caminho: botão, frase, lote, previsão ligada) tira o título de
+  `crm_titulos` (valor igual ou maior) ou deixa só o que falta (valor menor). Cópia em `crm_titulos_recebidos` (só admin
+  lê); "Desfazer a baixa" ou excluir o lançamento devolve o título. Antes da chave, nada muda (a listagem do FKN dá a baixa).
+- **Rodar no SQL Editor** (tem `delete`, o conector trava): `docs/oneclean/sql/2026-10-22-baixa-do-receber.sql` no
+  repositório `sistemi-dalessi` (com os `revoke` das funções novas de 22/10). Depois de rodado: testar com a chave numa
+  transação desfeita.
+
 ## Boleto do Banco do Brasil pelo CRM — Fase 5, preparação (22/10/2026, pedido do Anderson)
 Vale para os dois caminhos (API de Cobrança do BB ou arquivo de remessa CNAB), que dependem da resposta do gerente.
 - **`boleto.js`** (puro + desenho + tela): fator de vencimento (base 22/02/2025 = 1000), nosso número do BB com convênio de

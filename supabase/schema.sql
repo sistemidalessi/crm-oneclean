@@ -4362,3 +4362,110 @@ begin
   end if;
   return r;
 end $$;
+
+-- Compras → contas a pagar (22/10/2026, virada). Com o CRM dono (crm_sistema.produtos_dono = 'crm'), ao dar a entrada na
+-- nota de compra, cada parcela da nota (duplicatas do XML) vira uma conta aberta no Caixa, no mesmo formato das que vinham do
+-- FKN ("FORNECEDOR · nota-parcela", categoria Fornecedores). Antes da virada não faz nada: as contas vêm do Sifn083.
+-- Nota sem parcelas: uma conta só com o total e vencimento na emissão, marcada para conferir. (origem 'tela': ampliar o
+-- check de origem pediria drop constraint; a ligação é compra_id.)
+alter table public.crm_fin_lancamentos add column if not exists compra_id uuid references public.crm_compras(id) on delete set null;
+create unique index if not exists crm_fin_lanc_compra_uq on public.crm_fin_lancamentos (compra_id, parcela) where compra_id is not null;
+create or replace function public.crm_compra_pagar() returns trigger language plpgsql security definer set search_path = public as $$
+declare p jsonb; k int; i int := 0; forn text; num text;
+begin
+  if not public.crm_produtos_do_crm() then return new; end if;
+  if new.situacao <> 'lancada' or old.situacao = 'lancada' then return new; end if;
+  if exists (select 1 from public.crm_fin_lancamentos where compra_id = new.id) then return new; end if;
+  forn := coalesce(nullif(btrim(new.fornecedor_nome), ''), 'Fornecedor');
+  num := coalesce(new.numero::text, '?');
+  k := jsonb_array_length(coalesce(new.parcelas, '[]'::jsonb));
+  if k = 0 then
+    insert into public.crm_fin_lancamentos (tipo, descricao, fornecedor, categoria, valor, vencimento, origem, compra_id, parcela, parcelas, titulo_duplicata, observacoes)
+    values ('saida', forn || ' · ' || num, forn, 'Fornecedores', coalesce(new.valor_total, 0), coalesce((new.emitida_em at time zone 'America/Sao_Paulo')::date, current_date),
+      'tela', new.id, 1, 1, num, 'A nota de compra não traz as parcelas: confira o vencimento com o boleto do fornecedor.');
+    return new;
+  end if;
+  for p in select value from jsonb_array_elements(new.parcelas) loop
+    i := i + 1;
+    insert into public.crm_fin_lancamentos (tipo, descricao, fornecedor, categoria, valor, vencimento, origem, compra_id, parcela, parcelas, titulo_duplicata)
+    values ('saida', forn || ' · ' || num || '-' || lpad(coalesce(p->>'n', i::text), 2, '0'), forn, 'Fornecedores', coalesce((p->>'valor')::numeric, 0),
+      coalesce(nullif(p->>'vencimento', '')::date, (new.emitida_em at time zone 'America/Sao_Paulo')::date, current_date),
+      'tela', new.id, i, k, num || '-' || lpad(coalesce(p->>'n', i::text), 2, '0'))
+    on conflict do nothing;
+  end loop;
+  return new;
+end;
+$$;
+drop trigger if exists crm_compras_pagar on public.crm_compras;
+create trigger crm_compras_pagar after update of situacao on public.crm_compras for each row execute function public.crm_compra_pagar();
+-- O FKN desligado na virada: o lembrete de puxar os relatórios some (crm_fkn_situacao.desligado) e a crm-notas ignora os
+-- relatórios do FKN (registra "ignorado").
+create or replace function public.crm_fkn_situacao() returns jsonb language sql stable security definer set search_path = public as $$
+  with u as (select (select max(atualizado_em) from public.crm_estoque) estoque, (select max(atualizado_em) from public.crm_titulos) receber,
+                    greatest((select max(quando) from public.crm_integracao_log where erros = 0 and resumo->>'fkn' like 'Contas a pagar do FKN:%'),
+                             (select max(atualizado_em) from public.crm_fin_lancamentos where chave_fkn is not null)) pagar),
+  r as (select distinct on (resumo->>'fkn_tipo') resumo->>'fkn_tipo' tipo, resumo->>'fkn_recusa' texto, resumo->>'arquivo' arquivo, quando
+          from public.crm_integracao_log where resumo ? 'fkn_recusa' order by resumo->>'fkn_tipo', quando desc)
+  select jsonb_build_object('estoque', u.estoque, 'receber', case when public.crm_eh_admin() then u.receber end,
+    'pagar', case when public.crm_eh_admin() then u.pagar end,
+    'desligado', public.crm_produtos_do_crm(),
+    'recusas', coalesce((select jsonb_agg(jsonb_build_object('tipo', r.tipo, 'texto', r.texto, 'arquivo', r.arquivo, 'quando', r.quando))
+                           from r where r.quando > coalesce(case r.tipo when 'produtos' then u.estoque when 'pagar' then u.pagar else u.receber end, '-infinity'::timestamptz)
+                            and (r.tipo = 'produtos' or public.crm_eh_admin())), '[]'::jsonb))
+    from u where public.crm_eh_admin() or public.crm_eh_comprador();
+$$;
+
+-- Baixa do contas a receber sem o FKN (22/10/2026, virada). Rodado pelo Anderson no SQL Editor (o conector trava delete).
+-- Até a virada, quem tira o título pago de crm_titulos é a listagem do FKN. Com o CRM dono (crm_sistema.produtos_dono = 'crm'),
+-- o "Recebi" do Caixa (lançamento de entrada pago com titulo_duplicata) dá a baixa: valor igual ou maior que o do título
+-- (juros) → o título sai; menor → o título fica com o que falta. Fica uma cópia em crm_titulos_recebidos e o "Desfazer a
+-- baixa" (ou excluir o lançamento) devolve o título. Antes da virada não muda nada.
+create table if not exists public.crm_titulos_recebidos (
+  lancamento_id uuid primary key,
+  duplicata     text not null,
+  dados         jsonb not null,
+  parcial       boolean not null default false,
+  quando        timestamptz not null default now()
+);
+alter table public.crm_titulos_recebidos enable row level security;
+drop policy if exists so_admin on public.crm_titulos_recebidos;
+create policy so_admin on public.crm_titulos_recebidos for select to authenticated using ((select public.crm_eh_admin()));
+revoke all on public.crm_titulos_recebidos from anon, public;
+
+create or replace function public.crm_titulo_baixa_caixa() returns trigger language plpgsql security definer set search_path = public as $$
+declare t public.crm_titulos; c public.crm_titulos_recebidos; pagoAgora boolean; pagoAntes boolean;
+begin
+  pagoAgora := tg_op <> 'DELETE' and new.tipo = 'entrada' and new.situacao = 'pago' and new.titulo_duplicata is not null;
+  pagoAntes := tg_op <> 'INSERT' and old.tipo = 'entrada' and old.situacao = 'pago' and old.titulo_duplicata is not null;
+  -- desfeito (ou excluído): devolve o título como estava
+  if pagoAntes and not (pagoAgora and new.titulo_duplicata = old.titulo_duplicata) then
+    select * into c from public.crm_titulos_recebidos where lancamento_id = old.id;
+    if c.lancamento_id is not null then
+      if c.parcial then
+        update public.crm_titulos set valor = (c.dados->>'valor')::numeric where duplicata = c.duplicata;
+      else
+        insert into public.crm_titulos select * from jsonb_populate_record(null::public.crm_titulos, c.dados) on conflict do nothing;
+      end if;
+      delete from public.crm_titulos_recebidos where lancamento_id = old.id;
+    end if;
+  end if;
+  if pagoAgora and not (pagoAntes and new.titulo_duplicata = old.titulo_duplicata) and public.crm_produtos_do_crm() then
+    select * into t from public.crm_titulos where duplicata = new.titulo_duplicata;
+    if t.id is not null then
+      insert into public.crm_titulos_recebidos (lancamento_id, duplicata, dados, parcial)
+      values (new.id, t.duplicata, to_jsonb(t), new.valor < t.valor - 0.01)
+      on conflict (lancamento_id) do nothing;
+      if new.valor < t.valor - 0.01 then
+        update public.crm_titulos set valor = round(t.valor - new.valor, 2) where id = t.id;
+      else
+        delete from public.crm_titulos where id = t.id;
+      end if;
+    end if;
+  end if;
+  return null;
+end;
+$$;
+revoke all on function public.crm_titulo_baixa_caixa() from public, anon, authenticated;
+drop trigger if exists crm_fin_lanc_baixa_titulo on public.crm_fin_lancamentos;
+create trigger crm_fin_lanc_baixa_titulo after insert or update of situacao, titulo_duplicata, valor or delete on public.crm_fin_lancamentos
+  for each row execute function public.crm_titulo_baixa_caixa();

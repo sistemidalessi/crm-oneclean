@@ -352,13 +352,14 @@
   CRM.GRUPOS = GRUPOS;
   // Relatórios do FKN que estão pendentes neste turno (manhã/tarde): [{ arquivo, ultimo, turno }].
   CRM.lembreteFkn = () => {
-    if (!E.fkn || !(CRM.ehAdmin() || CRM.ehComprador())) return [];
+    if (!E.fkn || E.fkn.desligado || !(CRM.ehAdmin() || CRM.ehComprador())) return []; // desligado: virada, só o CRM
     // O comprador puxa só o estoque; o contas a receber é só do administrador (06/10/2026).
     return [['estoque', 'Listagem cadastral de produtos']].concat(CRM.ehAdmin() ? [['receber', 'Contas a receber por cliente (em aberto)'], ['pagar', 'Contas a pagar por conta/fornecedor (em aberto)']] : [])
       .map(([k, nome]) => { const l = DD.lembreteFkn(E.fkn[k]); return l ? { arquivo: nome, ultimo: E.fkn[k], turno: l.turno } : null; }).filter(Boolean);
   };
   // Último arquivo do FKN recusado (opção esquecida ao puxar), mais novo que a última entrega boa.
-  CRM.recusasFkn = () => ((E.fkn && (CRM.ehAdmin() || CRM.ehComprador()) && E.fkn.recusas) || []).filter(r => CRM.ehAdmin() || r.tipo === 'produtos');
+  CRM.recusasFkn = () => ((E.fkn && !E.fkn.desligado && (CRM.ehAdmin() || CRM.ehComprador()) && E.fkn.recusas) || []).filter(r => CRM.ehAdmin() || r.tipo === 'produtos');
+  CRM.fknDesligado = () => !!(E.fkn && E.fkn.desligado); // virada feita: o CRM é o dono (crm_fkn_situacao)
   CRM.recarregarFkn = async () => { if (store && store.fknAtualizado) { E.fkn = await store.fknAtualizado().catch(() => E.fkn); CRM.render(); } };
 
   let pendente = false;
