@@ -83,16 +83,37 @@
     const l2 = [e.bairro, [e.municipio || e.cidade, e.uf].filter(Boolean).join('/'), e.cep ? 'CEP ' + digitos(e.cep).replace(/^(\d{5})(\d{3})$/, '$1-$2') : ''].filter(Boolean).join(' - ');
     return [l1, l2].filter(Boolean).join(' - ');
   }
-  // Instruções ao caixa: multa e juros calculados em reais (o pagador entende melhor), protesto e o texto livre.
+  // Instruções ao caixa, no texto que o boleto do BB da instalação usa (modelo de 22/10/2026): juros pela taxa mensal
+  // depois do vencimento, multa a partir do dia seguinte, protesto e o texto livre.
+  const diaSeguinte = d => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(d || '')); return m ? new Date(Date.UTC(+m[1], +m[2] - 1, +m[3] + 1)).toISOString().slice(0, 10) : ''; };
   function instrucoes(cfg, valor, vencimento) {
     cfg = cfg || {};
-    const out = [], v = r2(valor);
+    const out = [];
     const multa = Number(cfg.multa_pct) || 0, juros = Number(cfg.juros_mes_pct) || 0, prot = Math.round(Number(cfg.protesto_dias) || 0);
-    if (multa > 0) out.push('Após ' + dataBR(vencimento) + ', cobrar multa de ' + pct(multa) + ' (' + moeda(v * multa / 100) + ').');
-    if (juros > 0) out.push('Juros de mora de ' + moeda(Math.max(0.01, v * juros / 100 / 30)) + ' ao dia (' + pct(juros) + ' ao mês).');
-    if (prot > 0) out.push('Sujeito a protesto ' + prot + ' dias após o vencimento.');
+    if (juros > 0) out.push('JUROS: TAXA MENSAL DE ' + pct(juros) + ' APÓS ' + dataBR(vencimento));
+    if (multa > 0) out.push('MULTA DE ' + pct(multa) + ' A PARTIR DE ' + dataBR(diaSeguinte(vencimento)));
+    if (prot > 0) out.push('SUJEITO A PROTESTO ' + prot + ' DIAS APÓS O VENCIMENTO');
     String(cfg.instrucao || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean).slice(0, 2).forEach(s => out.push(s));
     return out.slice(0, 5);
+  }
+  // Dígito do nosso número que o BB mostra no boleto ("00038048801000001399-5"): módulo 11 com pesos de 9 a 2 da
+  // direita para a esquerda, dígito = resto (10 vira X). Só aparece impresso; o código de barras não usa.
+  function dvNossoNumero(n) {
+    const d = digitos(n);
+    let soma = 0;
+    for (let i = d.length - 1, k = 0; i >= 0; i--, k++) soma += +d[i] * (9 - (k % 8));
+    const r = soma % 11;
+    return r === 10 ? 'X' : String(r);
+  }
+  const nossoImpresso = n => '000' + digitos(n) + '-' + dvNossoNumero('000' + digitos(n));
+  // endereço em duas linhas, como no boleto do BB: "AVENIDA SAO MIGUEL 670" e "CEP: 03620-000, SAO PAULO - SP"
+  function enderecoLinhas(e) {
+    if (!e) return [];
+    if (typeof e === 'string') return [e];
+    const l1 = [e.logradouro, e.numero, e.complemento].filter(Boolean).join(' ');
+    const cep = digitos(e.cep).replace(/^(\d{5})(\d{3})$/, '$1-$2');
+    const l2 = [cep ? 'CEP: ' + cep : '', [e.municipio || e.cidade, e.uf].filter(Boolean).join(' - ')].filter(Boolean).join(', ');
+    return [l1, l2].filter(Boolean).map(x => x.toUpperCase());
   }
   // O que falta no convênio para emitir (a tela mostra; montar() recusa)
   function faltaNoConvenio(cfg, emitente) {
@@ -128,113 +149,132 @@
       banco: '001-9', linha: lin, linhaFmt: C.formataLinha(lin), codigo: cod, nossoNumero: nosso,
       vencimento: t.vencimento, valor: r2(t.valor), documento: String(t.documento || '').slice(0, 15),
       emissao: t.emissao || op.hoje, processamento: op.hoje || t.emissao,
-      carteira: ct + (vr ? '/' + vr.padStart(3, '0') : ''), especie: 'DM', aceite: 'N', moeda: 'R$',
-      localPagamento: cfg.local_pagamento || 'Pagável em qualquer banco até o vencimento. Após, somente no Banco do Brasil.',
-      beneficiario: { nome: String(emitente.razao || emitente.nome || '').toUpperCase(), doc: docFmt(emitente.cnpj), endereco: enderecoTexto(emitente.endereco) },
-      agenciaCodigo: String(cfg.agencia).trim() + ' / ' + String(cfg.conta).trim(),
-      pagador: { nome: String((pagador && pagador.nome) || '').toUpperCase(), doc: docFmt(pagador && pagador.doc), endereco: typeof (pagador && pagador.endereco) === 'string' ? pagador.endereco : enderecoTexto(pagador && pagador.endereco) },
+      carteira: ct, variacao: vr ? vr.padStart(3, '0') : '', especie: 'DM', aceite: 'N', moeda: 'R$',
+      nossoImpresso: nossoImpresso(nosso),
+      localPagamento: cfg.local_pagamento || 'Pagar preferencialmente nos canais de autoatendimento do Banco do Brasil',
+      beneficiario: { nome: String(emitente.razao || emitente.nome || '').toUpperCase(), doc: docFmt(emitente.cnpj), endereco: enderecoLinhas(emitente.endereco) },
+      agenciaCodigo: String(cfg.agencia).trim() + '/' + String(cfg.conta).trim(),
+      pagador: { nome: String((pagador && pagador.nome) || '').toUpperCase(), doc: docFmt(pagador && pagador.doc), endereco: enderecoLinhas(pagador && pagador.endereco) },
+      pix: t.pix || null,
       instrucoes: instrucoes(cfg, t.valor, t.vencimento),
       simulacao: !!op.simulacao
     };
   }
 
-  // ---- desenho: recibo do pagador (em cima) + ficha de compensação (embaixo), A4 retrato, mm
+  // ---- desenho no modelo do boleto do BB (22/10/2026, boleto real mandado pelo Anderson): faixa amarela com o nome do
+  // banco, coluna da direita em cinza com vencimento, agência/código, nosso número e valores; recibo do pagador em cima,
+  // ficha de compensação embaixo, código de barras ITF no pé. A4 retrato, mm, em vetor.
   function desenha(pdf, d, op) {
     op = op || {};
-    const X = 10, W = 190, H = 7.6;
-    const limpa = t => String(t == null ? '' : t).replace(/[–—]/g, '-').replace(/[^\x20-\xFF€]/g, '');
+    const X = 10, W = 190, DIR = 45, ESQ = W - DIR, H = 8;
+    const AMARELO = [252, 239, 0], AZUL = [0, 45, 114], CINZA = 232;
+    const limpa = t => String(t == null ? '' : t).replace(/[\u2013\u2014]/g, '-').replace(/[^\x20-\xFF\u20AC]/g, '');
     const fonte = (tam, negrito) => { pdf.setFont('helvetica', negrito ? 'bold' : 'normal'); pdf.setFontSize(tam); };
     const largura = (t, tam) => pdf.getStringUnitWidth(t) * tam / pdf.internal.scaleFactor;
     function cabe(t, w, tam) { t = limpa(t); let s = tam; while (s > 5 && largura(t, s) > w) s -= 0.25; while (t.length > 1 && largura(t, s) > w) t = t.slice(0, -1); return { t, s }; }
-    function cel(x, y, w, h, rot, v, o) {
+    function escreve(t, x, y, w, tam, o) { o = o || {}; const f = cabe(t, w, tam); fonte(f.s, o.negrito); pdf.text(f.t, o.direita ? x + w : x, y, { align: o.direita ? 'right' : 'left' }); }
+    const rot = (t, x, y) => { fonte(5.2, false); pdf.setTextColor(70); pdf.text(limpa(t), x, y + 2); pdf.setTextColor(0); };
+    // célula: rótulo pequeno em cima, valor em negrito embaixo; linha fina embaixo (sem caixa fechada, como o BB)
+    function cel(x, y, w, h, r, v, o) {
       o = o || {};
-      pdf.setDrawColor(0); pdf.setLineWidth(0.2); pdf.rect(x, y, w, h);
-      if (o.fundo) { pdf.setFillColor(235); pdf.rect(x + 0.1, y + 0.1, w - 0.2, h - 0.2, 'F'); }
-      fonte(5, false); pdf.setTextColor(60); pdf.text(limpa(rot), x + 0.8, y + 0.6, { baseline: 'top' }); pdf.setTextColor(0);
-      if (v == null || v === '') return;
-      const f = cabe(String(v), w - 1.6, o.tam || 8.2);
-      fonte(f.s, o.negrito);
-      const al = o.alinha || 'left', xt = al === 'right' ? x + w - 0.8 : x + 0.8;
-      pdf.text(f.t, xt, y + h - 1, { baseline: 'bottom', align: al });
+      if (o.cinza) { pdf.setFillColor(CINZA); pdf.rect(x, y, w, h, 'F'); }
+      if (o.amarela) { pdf.setFillColor(...AMARELO); pdf.rect(x, y, 0.9, h, 'F'); }
+      pdf.setDrawColor(150); pdf.setLineWidth(0.15); pdf.line(x, y + h, x + w, y + h);
+      if (o.borda !== false) pdf.line(x, y, x, y + h);
+      rot(r, x + 1.2, y);
+      if (v != null && v !== '') escreve(v, x + 1.6, y + h - 1.6, w - 3, o.tam || 7.8, { negrito: true, direita: o.direita });
     }
-    function topo(y, titulo) {
-      fonte(12, true); pdf.text('Banco do Brasil', X, y + 6.2);
-      pdf.setLineWidth(0.5); pdf.line(X + 37, y + 1, X + 37, y + 8); pdf.line(X + 55, y + 1, X + 55, y + 8);
-      fonte(13, true); pdf.text(d.banco, X + 46, y + 6.4, { align: 'center' });
-      const f = cabe(titulo, W - 57, 10.6); fonte(f.s, true); pdf.text(f.t, X + W, y + 6.2, { align: 'right' });
-      pdf.setLineWidth(0.5); pdf.line(X, y + 8, X + W, y + 8);
-      return y + 8;
+    function topo(y) {
+      pdf.setFillColor(...AMARELO); pdf.rect(X, y, 50, 9, 'F');
+      fonte(12.5, true); pdf.setTextColor(...AZUL); pdf.text('BANCO DO BRASIL', X + 2.5, y + 6.4); pdf.setTextColor(0);
+      fonte(13, true); pdf.text(d.banco, X + 52, y + 6.6);
+      pdf.setDrawColor(0); pdf.setLineWidth(0.3); pdf.line(X + 66, y + 1, X + 66, y + 9);
+      escreve(d.linhaFmt, X + 67.5, y + 6.6, W - 68, 10.4);
+      pdf.setLineWidth(0.4); pdf.line(X, y + 9, X + W, y + 9);
+      return y + 9;
     }
-    const DIR = 46, ESQ = W - DIR;
+    // bloco com nome + endereço (até 3 linhas) e o CNPJ à direita
+    function bloco(x, y, w, h, r, nome, doc, linhas) {
+      cel(x, y, w, h, r, '', { borda: false });
+      fonte(5.2, false); pdf.setTextColor(70); pdf.text('CNPJ', x + w - 2, y + 2, { align: 'right' }); pdf.setTextColor(0);
+      escreve(nome, x + 1.6, y + 5.4, w - 40, 7.6, { negrito: true });
+      escreve(doc, x + w - 38, y + 5.4, 36, 7.6, { negrito: true, direita: true });
+      (linhas || []).slice(0, 2).forEach((l, i) => escreve(l, x + 1.6, y + 8.8 + i * 3.3, w - 4, 7, { negrito: true }));
+    }
+    const venc = dataBR(d.vencimento), valor = moeda(d.valor).replace('R$ ', '');
+    // ---------------- QR Code Pix (só quando o banco devolve o Pix do boleto; desenhado por quem chamou)
+    let y = 14;
+    if (d.pix && op.qr) { op.qr(pdf, X, y, 30); fonte(13, true); pdf.setTextColor(60, 90, 220); pdf.text('Pague agora com o seu Pix', X + 36, y + 14); pdf.setTextColor(0);
+      fonte(7, false); pdf.text('Para efetuar o pagamento via Pix, utilize a opção Pix de seu aplicativo', X + 36, y + 19); pdf.text('e aponte a câmera do seu aparelho para o QR code ao lado.', X + 36, y + 22.5); y += 36; }
     // ---------------- recibo do pagador
-    let y = 12;
-    fonte(7, true); pdf.text('RECIBO DO PAGADOR', X + W, y - 2, { align: 'right' });
-    y = topo(y, d.linhaFmt);
-    cel(X, y, 92, H, 'Beneficiário', d.beneficiario.nome);
-    cel(X + 92, y, 52, H, 'Agência / Código do beneficiário', d.agenciaCodigo);
-    cel(X + 144, y, DIR, H, 'Nosso número', d.nossoNumero, { alinha: 'right' }); y += H;
-    cel(X, y, 46, H, 'Número do documento', d.documento);
-    cel(X + 46, y, 46, H, 'CPF/CNPJ do beneficiário', d.beneficiario.doc);
-    cel(X + 92, y, 52, H, 'Vencimento', dataBR(d.vencimento), { negrito: true });
-    cel(X + 144, y, DIR, H, 'Valor do documento', moeda(d.valor), { alinha: 'right', negrito: true }); y += H;
-    cel(X, y, W, H, 'Pagador', [d.pagador.nome, d.pagador.doc].filter(Boolean).join(' - ')); y += H;
-    fonte(6.5, false); pdf.text('Autenticação mecânica', X + W, y + 3.5, { align: 'right' });
+    fonte(7, true); pdf.text('Recibo do Pagador', X + W, y + 3, { align: 'right' });
+    y = topo(y + 5);
+    bloco(X, y, ESQ, 15, 'Nome do Pagador / Endereço', d.pagador.nome, d.pagador.doc, d.pagador.endereco);
+    cel(X + ESQ, y, DIR, 7.5, 'Data de Vencimento', venc, { cinza: true, direita: true });
+    cel(X + ESQ, y + 7.5, DIR, 7.5, 'Agência / Código do Beneficiário', d.agenciaCodigo, { cinza: true, direita: true });
+    y += 15;
+    bloco(X, y, ESQ, 15, 'Nome do Beneficiário / Endereço', d.beneficiario.nome, d.beneficiario.doc, d.beneficiario.endereco);
+    cel(X + ESQ, y, DIR, 7.5, 'Nosso Número', d.nossoImpresso, { cinza: true, direita: true });
+    cel(X + ESQ, y + 7.5, DIR, 7.5, '(=) Valor do Documento', valor, { cinza: true, direita: true });
+    y += 15;
+    [[25, 'Uso do Banco', ''], [38, 'Nr. do Documento', d.documento], [17, 'Espécie Doc.', d.especie], [10, 'Aceite', d.aceite], [ESQ - 90, 'Data Processamento', dataBR(d.processamento)]]
+      .reduce((x, c) => { cel(x, y, c[0], H, c[1], c[2], { amarela: x === X }); return x + c[0]; }, X);
+    cel(X + ESQ, y, DIR, H, '(=) Valor Pago', '', { amarela: true });
+    y += H;
+    fonte(5.6, false); pdf.text('Autenticação Mecânica', X + ESQ + 2, y + 3, { align: 'center' });
     // corte
-    y += 14;
-    pdf.setLineDashPattern([1.2, 1], 0); pdf.setLineWidth(0.2); pdf.line(X, y, X + W, y); pdf.setLineDashPattern([], 0);
-    fonte(5.5, false); pdf.text('Corte na linha pontilhada', X + W, y - 1, { align: 'right' });
+    y += 12;
+    pdf.setDrawColor(0); pdf.setLineDashPattern([1, 0.8], 0); pdf.setLineWidth(0.2); pdf.line(X + 6, y, X + W, y); pdf.setLineDashPattern([], 0);
+    fonte(9, false); pdf.text('X', X + 1, y + 1.2); // tesoura
     // ---------------- ficha de compensação
+    y = topo(y + 6);
+    cel(X, y, ESQ, H, 'Local do Pagamento', d.localPagamento, { amarela: true });
+    cel(X + ESQ, y, DIR, H, 'Data de Vencimento', venc, { cinza: true, direita: true });
+    y += H;
+    cel(X, y, ESQ, H, 'Nome do Beneficiário', d.beneficiario.nome, { amarela: true });
+    fonte(5.2, false); pdf.setTextColor(70); pdf.text('CNPJ', X + ESQ - 2, y + 2, { align: 'right' }); pdf.setTextColor(0);
+    escreve(d.beneficiario.doc, X + ESQ - 40, y + H - 1.6, 38, 7.8, { negrito: true, direita: true });
+    cel(X + ESQ, y, DIR, H, 'Agência / Código do Beneficiário', d.agenciaCodigo, { cinza: true, direita: true });
+    y += H;
+    [[25, 'Data Documento', dataBR(d.emissao)], [38, 'Nr. do Documento', d.documento], [17, 'Espécie Doc.', d.especie], [10, 'Aceite', d.aceite], [ESQ - 90, 'Data Processamento', dataBR(d.processamento)]]
+      .reduce((x, c) => { cel(x, y, c[0], H, c[1], c[2], { amarela: x === X }); return x + c[0]; }, X);
+    cel(X + ESQ, y, DIR, H, 'Nosso Número', d.nossoImpresso, { cinza: true, direita: true });
+    y += H;
+    [[25, 'Uso do Banco', ''], [15, 'Carteira', d.carteira], [23, 'Espécie', d.moeda], [42, 'Quantidade', ''], [ESQ - 105, '(x) Valor', '']]
+      .reduce((x, c) => { cel(x, y, c[0], H, c[1], c[2], { amarela: x === X }); return x + c[0]; }, X);
+    cel(X + ESQ, y, DIR, H, '(=) Valor do Documento', valor, { cinza: true, direita: true });
+    y += H;
+    const yIns = y;
+    rot('Informações de responsabilidade do Beneficiário', X + 1.2, y);
+    d.instrucoes.forEach((t, i) => escreve(t, X + 3, y + 6.5 + i * 3.6, ESQ - 6, 7.4, {}));
+    [['(-) Abatimento', ''], ['(+) Juros / Multa', ''], ['(=) Valor Cobrado', '']].forEach((c, i) => cel(X + ESQ, yIns + i * H, DIR, H, c[0], c[1], { amarela: true, cinza: i === 2 }));
+    y += 3 * H + 8;
+    pdf.setDrawColor(0); pdf.setLineWidth(0.4); pdf.line(X, y, X + W, y);
+    bloco(X, y, ESQ, 15, 'Nome do Pagador / Endereço', d.pagador.nome, d.pagador.doc, d.pagador.endereco);
+    y += 15;
+    rot('Beneficiário Final', X + 1.2, y); fonte(5.2, false); pdf.setTextColor(70); pdf.text('CPF / CNPJ', X + ESQ - 2, y + 2, { align: 'right' }); pdf.setTextColor(0);
     y += 6;
-    y = topo(y, d.linhaFmt);
-    cel(X, y, ESQ, H, 'Local de pagamento', d.localPagamento, { tam: 7.4 });
-    cel(X + ESQ, y, DIR, H, 'Vencimento', dataBR(d.vencimento), { alinha: 'right', negrito: true, fundo: true }); y += H;
-    cel(X, y, ESQ, H + 3, 'Beneficiário', '');
-    fonte(7.6, false); pdf.text(cabe(d.beneficiario.nome + ' - CNPJ ' + d.beneficiario.doc, ESQ - 1.6, 7.6).t, X + 0.8, y + 4.6);
-    fonte(6.2, false); pdf.text(cabe(d.beneficiario.endereco, ESQ - 1.6, 6.2).t, X + 0.8, y + 8.6);
-    cel(X + ESQ, y, DIR, H + 3, 'Agência / Código do beneficiário', d.agenciaCodigo, { alinha: 'right' }); y += H + 3;
-    const w6 = [24, 30, 18, 12, 28, ESQ - 112];
-    [['Data do documento', dataBR(d.emissao)], ['Número do documento', d.documento], ['Espécie doc.', d.especie], ['Aceite', d.aceite], ['Data do processamento', dataBR(d.processamento)]]
-      .reduce((x, c, i) => { cel(x, y, w6[i], H, c[0], c[1]); return x + w6[i]; }, X);
-    cel(X + 112, y, w6[5], H, '', '');
-    cel(X + ESQ, y, DIR, H, 'Nosso número', d.nossoNumero, { alinha: 'right' }); y += H;
-    [['Uso do banco', ''], ['Carteira', d.carteira], ['Espécie', d.moeda], ['Quantidade', ''], ['(x) Valor', '']]
-      .reduce((x, c, i) => { cel(x, y, w6[i], H, c[0], c[1]); return x + w6[i]; }, X);
-    cel(X + 112, y, w6[5], H, '', '');
-    cel(X + ESQ, y, DIR, H, '(=) Valor do documento', moeda(d.valor), { alinha: 'right', negrito: true, fundo: true }); y += H;
-    const yIns = y, hIns = 5 * H;
-    cel(X, y, ESQ, hIns, 'Instruções (texto de responsabilidade do beneficiário)', '');
-    fonte(7.2, false);
-    d.instrucoes.forEach((t, i) => pdf.text(cabe(t, ESQ - 2, 7.2).t, X + 1, yIns + 5.2 + i * 3.7));
-    ['(-) Desconto / Abatimento', '(-) Outras deduções', '(+) Mora / Multa', '(+) Outros acréscimos', '(=) Valor cobrado']
-      .forEach((r, i) => cel(X + ESQ, yIns + i * H, DIR, H, r, ''));
-    y += hIns;
-    cel(X, y, W, 14, 'Pagador', '');
-    fonte(7.8, true); pdf.text(cabe([d.pagador.nome, d.pagador.doc ? (d.pagador.doc.length > 14 ? 'CNPJ ' : 'CPF ') + d.pagador.doc : ''].filter(Boolean).join(' - '), W - 2, 7.8).t, X + 1, y + 5);
-    fonte(6.8, false); pdf.text(cabe(d.pagador.endereco, W - 2, 6.8).t, X + 1, y + 9);
-    fonte(5, false); pdf.setTextColor(60); pdf.text('Sacador / Avalista', X + 1, y + 12.6); pdf.setTextColor(0);
-    y += 14;
-    fonte(6.5, false); pdf.text('Autenticação mecânica - FICHA DE COMPENSAÇÃO', X + W, y + 3.5, { align: 'right' });
-    // código de barras ITF: estreita 0,254 mm (larga 3x) = 102,9 mm por 13 mm, preto no branco, com margem branca
+    pdf.setLineWidth(0.4); pdf.line(X, y, X + W, y);
+    fonte(5.8, false); pdf.text('Autenticação Mecânica - Ficha de Compensação', X + W, y + 3, { align: 'right' });
+    // código de barras ITF: estreita 0,254 mm (larga 3x) = 102,9 mm por 13 mm, com margem branca à esquerda
     const barras = itf(d.codigo), mod = 0.254;
     let xb = X + 1;
     pdf.setFillColor(0);
-    barras.forEach((v, i) => { if (i % 2 === 0) pdf.rect(xb, y + 5.5, v * mod, 13, 'F'); xb += v * mod; });
-    // simulação: marca bem visível nas duas partes (não serve para pagar)
+    barras.forEach((v, i) => { if (i % 2 === 0) pdf.rect(xb, y + 1.5, v * mod, 13, 'F'); xb += v * mod; });
     if (d.simulacao || op.simulacao) {
       // translúcida (os dados continuam legíveis); o código e a linha da simulação já saem com o dígito geral trocado (montar)
       const gs = pdf.GState ? pdf.GState.bind(pdf) : null;
       if (gs) pdf.setGState(new gs({ opacity: 0.4 }));
       fonte(34, true); pdf.setTextColor(215, 60, 60);
-      pdf.text('SIMULAÇÃO - SEM VALOR', 105, 62, { align: 'center', angle: 10 });
-      pdf.text('SIMULAÇÃO - SEM VALOR', 105, 160, { align: 'center', angle: 10 });
+      pdf.text('SIMULAÇÃO - SEM VALOR', 105, 75, { align: 'center', angle: 10 });
+      pdf.text('SIMULAÇÃO - SEM VALOR', 105, 185, { align: 'center', angle: 10 });
       pdf.setTextColor(0);
       if (gs) pdf.setGState(new gs({ opacity: 1 }));
-
     }
-    return y + 20;
+    return y + 16;
   }
 
-  const B = { fatorDe, nossoNumero, campoLivre, codigoBarras, itf, instrucoes, faltaNoConvenio, montar, desenha, docFmt, enderecoTexto };
+  const B = { fatorDe, nossoNumero, campoLivre, codigoBarras, itf, instrucoes, dvNossoNumero, nossoImpresso, faltaNoConvenio, montar, desenha, docFmt, enderecoTexto, enderecoLinhas };
   raiz.CRMBoleto = B;
   if (typeof module !== 'undefined') module.exports = B;
 
@@ -274,7 +314,7 @@
     const e = t.empresa_id ? CRM.empresa(t.empresa_id) : null;
     const d = montar(c, em, {
       valor: t.valor, vencimento: t.vencimento, seq: Number(digitos(c.inicio_numeracao)) || 1,
-      documento: (t.nota_numero ? 'NF ' + t.nota_numero : t.duplicata || '') + (t.parcela ? '/' + t.parcela : ''), emissao: t.emitida_em || h
+      documento: String(t.nota_numero || t.duplicata || '') + ((D.titulos || []).filter(x => x.nota_numero === t.nota_numero).length > 1 ? '/' + t.parcela : ''), emissao: t.emitida_em || h
     }, { nome: (e && (e.razao_social || e.nome)) || t.cliente_nome, doc: (e && e.cnpj) || t.cliente_doc, endereco: e ? { logradouro: e.logradouro, numero: e.numero, complemento: e.complemento, bairro: e.bairro, cidade: e.cidade, uf: e.uf, cep: e.cep } : '' },
     { hoje: h, simulacao: true });
     if (!raiz.jspdf) await new Promise((ok, falha) => {

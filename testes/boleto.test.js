@@ -35,11 +35,17 @@ test('montar: dados do boleto, conferidos pela linha', () => {
     { nome: 'Cliente Exemplo', doc: '98765432000155', endereco: { logradouro: 'Av B', numero: '2', cidade: 'Santo André', uf: 'SP', cep: '09000000' } }, { hoje: '2026-09-19' });
   assert.equal(d.linhaFmt, REAL);
   assert.equal(d.nossoNumero, '38048801000001399');
-  assert.equal(d.carteira, '17/019');
+  assert.equal(d.carteira, '17');
+  assert.equal(d.variacao, '019');
+  assert.equal(d.nossoImpresso, '00038048801000001399-5'); // como no boleto real do BB
+  assert.equal(d.agenciaCodigo, '1234-5/12345-6');
   assert.equal(d.beneficiario.doc, '12.345.678/0001-99');
   assert.equal(d.pagador.nome, 'CLIENTE EXEMPLO');
-  assert.match(d.pagador.endereco, /Santo André\/SP - CEP 09000-000/);
-  assert.deepEqual(d.instrucoes, ['Após 19/10/2026, cobrar multa de 2,00% (R$ 34,08).', 'Juros de mora de R$ 0,57 ao dia (1,00% ao mês).', 'Sujeito a protesto 10 dias após o vencimento.']);
+  assert.deepEqual(d.pagador.endereco, ['AV B 2', 'CEP: 09000-000, SANTO ANDRÉ - SP']);
+  assert.deepEqual(d.instrucoes, ['JUROS: TAXA MENSAL DE 1,00% APÓS 19/10/2026', 'MULTA DE 2,00% A PARTIR DE 20/10/2026', 'SUJEITO A PROTESTO 10 DIAS APÓS O VENCIMENTO']);
+  // virada de mês e de ano na data da multa
+  assert.deepEqual(B.instrucoes({ multa_pct: 5 }, 10, '2026-12-31'), ['MULTA DE 5,00% A PARTIR DE 01/01/2027']);
+  assert.equal(B.dvNossoNumero('00038048801000001399'), '5');
 });
 
 test('montar recusa convênio incompleto, valor e número errados', () => {

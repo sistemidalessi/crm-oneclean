@@ -1695,6 +1695,11 @@ Vale para os dois caminhos (API de Cobrança do BB ou arquivo de remessa CNAB), 
   (multa e juros em reais, protesto, texto livre) e `desenha(pdf, d)` (recibo do pagador + ficha de compensação, jsPDF mm).
   **Conferido com um boleto real do BB** (convênio 3804880, carteira 17, 19/10/2026, R$ 1.703,98: mesma linha digitável) e
   o código de barras desenhado foi lido de volta por leitor (zxing). Testes: `testes/boleto.test.js`.
+- **Desenho no modelo do BB** (boleto real mandado pelo Anderson em 22/10, NF 2428): faixa amarela, coluna cinza à direita,
+  nosso número impresso `000` + 17 + dígito (módulo 11, pesos 9 a 2, resto; "…1399-5" confere), agência/código
+  `0303-4/48730-9`, juros 2% ao mês e multa 5% a partir do dia seguinte, "Pagar preferencialmente nos canais de
+  autoatendimento do Banco do Brasil". O boleto do site do BB traz **QR Code Pix** (boleto híbrido): vem do BB pela API;
+  `desenha` já tem o lugar (`d.pix` + `op.qr`), falta o gerador de QR quando o Pix chegar.
 - **Simulação:** "Ver um boleto de exemplo" (Configurações → Integrações, só admin) usa um título real em aberto, sai com
   a marca SIMULAÇÃO e com o **dígito geral trocado de propósito** (app de banco e leitor recusam) e nunca é registrado.
 - **Banco:** `crm_boletos_bb` (nosso número único, parcela da nota sem chave estrangeira — o `crm_titulos` é apagado pela
