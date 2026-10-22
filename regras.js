@@ -936,13 +936,15 @@
     return linhas;
   }
 
-  // CSV para o Excel brasileiro: ";" e BOM.
+  // CSV para o Excel brasileiro: ";" e BOM. Texto que começa com = + - @ (ou tabulação) ganha um apóstrofo na frente:
+  // sem isso, um nome de cliente como "=HIPERLINK(...)" vira fórmula quando o arquivo abre no Excel. Número negativo fica.
+  function csvCelula(v) {
+    let t = v == null ? '' : Array.isArray(v) ? v.join(', ') : String(v);
+    if (typeof v !== 'number' && /^[=+\-@\t\r]/.test(t) && !/^-?[\d.,]+$/.test(t)) t = "'" + t;
+    return /[;"\n\r]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
+  }
   function csvGera(cabecalho, linhas) {
-    const q = v => {
-      const t = v == null ? '' : Array.isArray(v) ? v.join(', ') : String(v);
-      return /[;"\n\r]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
-    };
-    return '﻿' + [cabecalho].concat(linhas).map(l => l.map(q).join(';')).join('\r\n');
+    return '﻿' + [cabecalho].concat(linhas).map(l => l.map(csvCelula).join(';')).join('\r\n');
   }
 
   // "R$ 1.234,56" -> 1234.56 ; "1234.56" -> 1234.56
@@ -1005,7 +1007,7 @@
     normaliza, digitos, doc, ehCNPJ, ehCPF, chaveNome, linkWhatsApp, linkTelefone, formataCNPJ, cnpjValido, casaBusca, iniciais,
     primeiroNome, aplicaModelo, linkGoogleAgenda, totalItem, totalItens, indexa, probabilidade,
     situacaoEfetiva, situacaoTarefa, alertas, ultimoMovimento, ritmoCompra, cicloRecompra, itensHabituais, nomeDeItem, textoItens, dashboard, duplicadosEmpresas, duplicadosContatos, mesclaCampos,
-    buscaGlobal, csvParse, csvGera, numeroBR, dataPlanilha,
+    buscaGlobal, csvParse, csvGera, csvCelula, numeroBR, dataPlanilha,
     cfopDeVenda, notaDeVenda, devolucoesComoNotas, sugereSegmento, NOMES_SEGMENTO, faturamento, chaveDoc, chaveTelefone, chaveEmail, achaDuplicados, motivoDuplicado, nomesCompativeis, mesmoCliente
   };
 

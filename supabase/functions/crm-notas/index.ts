@@ -202,6 +202,10 @@ Deno.serve(async (req) => {
     return resposta(200, { ok: true, sinal: true });
   }
   if (corpo.fkn) {
+    // a chave derivada do FISCAL_TOKEN (crm-fiscal entrega as notas que o CRM emite) só manda XML de nota: nunca os CSV do
+    // FKN, que regravam o contas a receber, o contas a pagar e o estoque (segurança, 22/10/2026, item 10)
+    const ft = Deno.env.get('FISCAL_TOKEN');
+    if (ft && await sha256(await sha256('crm-notas:' + ft)) === await sha256(chave)) return resposta(403, { erro: 'esta chave só entrega notas' });
     try { return await arquivoFkn(db, integ, corpo.fkn); } catch (e) { return resposta(500, { erro: 'falha no arquivo do FKN: ' + (e instanceof Error ? e.message : String(e)) }); }
   }
   const arquivos = Array.isArray(corpo.arquivos) ? corpo.arquivos : [];
@@ -213,7 +217,8 @@ Deno.serve(async (req) => {
     const docs = lidos.map(l => l.doc).filter(Boolean);
     // XML autorizado guardado (14/10/2026): o CRM monta dele a cópia da DANFE que vai com o boleto
     // atualizado. Já guardado: o Storage recusa (sem sobrescrever) e segue.
-    await Promise.all(lidos.filter(l => l.doc && (l.doc as { tipo: string }).tipo === 'nota' && /<protNFe[\s>]/.test(l.xml)).map(l =>
+    // a chave vira o nome do arquivo: só 44 caracteres válidos (segurança, 22/10/2026)
+    await Promise.all(lidos.filter(l => l.doc && (l.doc as { tipo: string }).tipo === 'nota' && /^[0-9A-Z]{44}$/.test((l.doc as { chave: string }).chave) && /<protNFe[\s>]/.test(l.xml)).map(l =>
       db.storage.from('crm-notas-xml').upload('nfe/' + (l.doc as { chave: string }).chave + '.xml', new Blob([l.xml], { type: 'text/xml' }), { upsert: false, contentType: 'text/xml' })
         .then(() => null, () => null)));
     const chaves = [...new Set(docs.map((d: { chave: string }) => d.chave))];

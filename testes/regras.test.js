@@ -57,6 +57,15 @@ test('CSV: aspas, separador e BOM', () => {
   assert.equal(g, '﻿a;b\r\n"x;y";"z""w"\r\n;t1, t2');
 });
 
+test('segurança: CSV exportado não vira fórmula no Excel', () => {
+  const g = R.csvGera(['Cliente', 'Valor'], [['=HIPERLINK("http://x";"clique")', -12.5], ['+55 11 9999', '-3,50'], ['@SOMA(A1)', '-x'], ['Padaria', 10]]);
+  const l = g.slice(1).split('\r\n');
+  assert.equal(l[1], '"\'=HIPERLINK(""http://x"";""clique"")";-12.5');
+  assert.equal(l[2], "'+55 11 9999;-3,50");
+  assert.equal(l[3], "'@SOMA(A1);'-x");
+  assert.equal(l[4], 'Padaria;10');
+});
+
 test('itens do negócio', () => {
   assert.equal(R.totalItem({ quantidade: 10, preco: 5, desconto: 10 }), 45);
   assert.equal(R.totalItens([{ quantidade: 3, preco: 1.1 }, { quantidade: 1, preco: 10, desconto: 100 }]), 3.3);

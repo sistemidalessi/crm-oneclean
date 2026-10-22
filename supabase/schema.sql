@@ -4907,3 +4907,198 @@ begin
    where todos or v.empresa_id in (select public.crm_empresas_minhas()) or (membro and v.vendedor_id = eu);
 end;
 $$;
+
+-- ============================================================ Segurança: auditoria de 22/10/2026 (itens do banco)
+-- Testado com o login de cada papel numa transação desfeita e aplicado em produção em 22/10. O item 19 (a trava PREÇO serve
+-- de pista do custo para a vendedora) fica aceito: a trava existe por decisão do Anderson e só diz "abaixo da margem".
+-- As travas que olham "current_user = 'authenticated'" valem só para o que chega direto pela API (PostgREST): as funções do
+-- banco (security definer) e as Edge Functions com a chave de serviço continuam fazendo o seu trabalho. Por isso as funções
+-- dos gatilhos são SECURITY INVOKER (com definer, current_user seria sempre o dono). O que precisa ler além do que quem
+-- chama enxerga fica em crm_interno, um schema que a API não expõe.
+create schema if not exists crm_interno;
+grant usage on schema crm_interno to authenticated;
+create or replace function crm_interno.doc_de_outro(p_doc text, p_empresa uuid) returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.crm_notas n where public.crm_doc(n.cliente_doc) = p_doc and n.empresa_id is distinct from p_empresa)
+      or exists (select 1 from public.crm_titulos t where public.crm_doc(t.cliente_doc) = p_doc and t.empresa_id is distinct from p_empresa);
+$$;
+grant execute on function crm_interno.doc_de_outro(text, uuid) to authenticated;
+
+-- Item 4: vendedora grava na própria empresa o CNPJ de cliente de outra carteira e passa a receber as notas dele.
+-- CNPJ já preenchido só a gestora/administrador troca; CNPJ novo não pode ser o de notas ou títulos de outro cadastro.
+create or replace function public.crm_empresa_cnpj_guarda() returns trigger language plpgsql set search_path = public as $$
+declare novo text := public.crm_doc(new.cnpj); velho text;
+begin
+  if current_user <> 'authenticated' or public.crm_eh_gestor() or coalesce(novo, '') = '' then return new; end if;
+  if tg_op = 'UPDATE' then
+    velho := public.crm_doc(old.cnpj);
+    if novo is not distinct from velho then return new; end if;
+    if coalesce(velho, '') <> '' then raise exception 'Só a gestora troca o CNPJ de um cadastro que já tem CNPJ.' using errcode = 'P0001'; end if;
+  end if;
+  if crm_interno.doc_de_outro(novo, new.id) then
+    raise exception 'Este CNPJ já aparece em notas de outro cadastro. Peça à gestora para juntar os cadastros.' using errcode = 'P0001';
+  end if;
+  return new;
+end;
+$$;
+create or replace trigger crm_empresas_cnpj_guarda before insert or update of cnpj on public.crm_empresas for each row execute function public.crm_empresa_cnpj_guarda();
+
+-- Item 5: o canhoto da confirmação tem de ser a foto DESTA entrega, que existe no bucket e foi subida por quem confirma
+-- (ou pela logística/gestão). Item 17: motorista desativado não confirma.
+create or replace function public.crm_entrega_confirmar(p_id uuid, p_situacao text, p_obs text, p_canhoto text)
+returns public.crm_entregas language plpgsql security definer set search_path = public as $$
+declare r public.crm_entregas; antes text; quem uuid; nf integer; cli text; op boolean := public.crm_eh_gestor() or public.crm_eh_logistica();
+begin
+  if not public.crm_eh_ativo() then raise exception 'sem acesso'; end if;
+  select * into r from public.crm_entregas where id = p_id;
+  if not found then raise exception 'entrega não encontrada'; end if;
+  if not (r.motorista_id = auth.uid() or op) then raise exception 'esta entrega não é sua'; end if;
+  if p_situacao not in ('entregue', 'problema') then raise exception 'situação inválida'; end if;
+  if coalesce(btrim(p_canhoto), '') = '' or p_canhoto !~ ('^canhotos/\d{4}-\d{2}-\d{2}/' || r.id::text || '-[a-z0-9]+\.jpg$')
+     or not exists (select 1 from storage.objects o where o.bucket_id = 'crm-canhotos' and o.name = p_canhoto and (op or o.owner = auth.uid())) then
+    raise exception 'falta a foto do canhoto';
+  end if;
+  if p_situacao = 'problema' and coalesce(btrim(p_obs), '') = '' then raise exception 'conte o que aconteceu na observação'; end if;
+  antes := r.situacao;
+  update public.crm_entregas set situacao = p_situacao, obs = nullif(btrim(coalesce(p_obs, '')), ''), canhoto = p_canhoto,
+    entregue_em = coalesce(entregue_em, now()), entregue_por = auth.uid()
+   where id = p_id returning * into r;
+  if p_situacao = 'problema' and antes is distinct from 'problema' then
+    select coalesce(n.vendedor_id, e.responsavel_id), n.numero, e.nome into quem, nf, cli
+      from public.crm_notas n left join public.crm_empresas e on e.id = coalesce(r.empresa_id, n.empresa_id) where n.id = r.nota_id;
+    if quem is not null then
+      insert into public.crm_atividades (empresa_id, responsavel_id, tipo, descricao, data_hora, automatica, criado_por)
+      values (r.empresa_id, quem, 'tarefa', 'Entrega com problema' || coalesce(' (NF ' || nf || ')', '') || ': ' || r.obs ||
+        '. Fale com o cliente' || coalesce(' ' || cli, '') || ' e combine com a logística.', now(), true, auth.uid());
+    end if;
+  end if;
+  return r;
+end $$;
+
+-- Item 17: motorista desativado não lê mais as entregas dele.
+alter policy ler on public.crm_entregas
+  using ((select public.crm_eh_gestor()) or (select public.crm_eh_logistica()) or ((select public.crm_eh_ativo()) and motorista_id = (select auth.uid())));
+
+-- Item 7: o motorista só lê e só sobe a foto das entregas dele (o nome do arquivo leva o id da entrega); a logística e a
+-- gestão leem todas. Endurecimento: bucket só com imagem e até 8 MB.
+alter policy "crm canhotos le" on storage.objects
+  using (bucket_id = 'crm-canhotos' and ((select public.crm_eh_gestor()) or (select public.crm_eh_logistica())
+    or ((select public.crm_eh_motorista()) and exists (select 1 from public.crm_entregas x where x.motorista_id = (select auth.uid())
+          and split_part(name, '/', 3) like x.id::text || '-%'))));
+alter policy "crm canhotos grava" on storage.objects
+  with check (bucket_id = 'crm-canhotos' and ((select public.crm_eh_gestor()) or (select public.crm_eh_logistica())
+    or ((select public.crm_eh_motorista()) and exists (select 1 from public.crm_entregas x where x.motorista_id = (select auth.uid())
+          and split_part(name, '/', 3) like x.id::text || '-%'))));
+update storage.buckets set file_size_limit = 8388608, allowed_mime_types = array['image/jpeg', 'image/png', 'image/webp'] where id = 'crm-canhotos';
+
+-- Item 15: as chaves de configuração que só o administrador mexe (fiscal, boleto, comissão, tabela de preços, margem e trava
+-- de preço) ficam como estavam quando quem grava é a gestora (a tela grava o crm_config inteiro).
+create or replace function public.crm_config_guarda() returns trigger language plpgsql set search_path = public as $$
+declare k text;
+begin
+  if current_user <> 'authenticated' or public.crm_eh_admin() then return new; end if;
+  foreach k in array array['fiscal', 'boleto', 'comissao_planos', 'comissao_usuarios', 'tabela_precos', 'margem_minima', 'pedido_trava_preco'] loop
+    if tg_op = 'UPDATE' and old.dados ? k then new.dados := jsonb_set(coalesce(new.dados, '{}'::jsonb), array[k], old.dados -> k);
+    else new.dados := coalesce(new.dados, '{}'::jsonb) - k; end if;
+  end loop;
+  return new;
+end;
+$$;
+create or replace trigger crm_config_guarda before insert or update on public.crm_config for each row execute function public.crm_config_guarda();
+
+-- Item 16: o "pulado" da cadência que o app grava sai com a hora de agora (data futura tirava o cliente da cadência para sempre).
+create or replace function public.crm_email_envio_agora() returns trigger language plpgsql set search_path = public as $$
+begin
+  if current_user = 'authenticated' then new.criado_em := now(); end if;
+  return new;
+end;
+$$;
+create or replace trigger crm_email_envios_agora before insert on public.crm_email_envios for each row execute function public.crm_email_envio_agora();
+
+-- Item 18: o rascunho de NF-e 4b não se altera pela API depois de criado (a prévia e a emissão leem o mesmo rascunho; só o
+-- serviço fiscal muda a situação, com a chave de serviço).
+alter policy muda on public.crm_nfe_outras using (false) with check (false);
+
+-- Item 20: a gestora, pela API, só cria título nascido de nota e, num título, só troca o cadastro (juntar duplicados);
+-- o resto do contas a receber é do administrador.
+create or replace function public.crm_titulos_guarda() returns trigger language plpgsql set search_path = public as $$
+begin
+  if current_user <> 'authenticated' or public.crm_eh_admin() then return new; end if;
+  if tg_op = 'INSERT' then
+    if new.origem is distinct from 'nota' then raise exception 'só o administrador lança título à mão'; end if;
+  elsif tg_op = 'UPDATE' then
+    if (to_jsonb(new) - array['empresa_id', 'atualizado_em']) is distinct from (to_jsonb(old) - array['empresa_id', 'atualizado_em']) then
+      raise exception 'só o administrador altera o título (a gestora só troca o cadastro)';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+create or replace trigger crm_titulos_guarda before insert or update on public.crm_titulos for each row execute function public.crm_titulos_guarda();
+
+
+-- Itens 6 e 19: produto vendido em outra embalagem do mesmo código (FD, PCT, CX sem variante ".N") — o preço da linha é da
+-- embalagem, então o preço de tabela e o custo também vão na embalagem (× fator). Antes a trava PREÇO comparava o preço do
+-- fardo com o custo da unidade (venda abaixo do custo passava) e a comissão saía na faixa errada.
+create or replace function public.crm_pedido_itens_norm(p_itens jsonb) returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare x jsonb; out jsonb := '[]'::jsonb; cod text; base text; un text; eu text; f numeric; q numeric; pr numeric; d numeric; e record; k int := 0; emb boolean;
+begin
+  if not public.crm_eh_membro() then raise exception 'só a equipe de vendas'; end if;
+  for x in select value from jsonb_array_elements(coalesce(p_itens, '[]'::jsonb)) loop
+    k := k + 1;
+    cod := nullif(upper(btrim(coalesce(x->>'codigo', ''))), '');
+    cod := regexp_replace(coalesce(cod, ''), '\.0+$', ''); if cod = '' then cod := null; end if;
+    q := coalesce(nullif(x->>'quantidade', '')::numeric, 0);
+    pr := coalesce(nullif(x->>'preco', '')::numeric, 0);
+    d := coalesce(nullif(x->>'desconto', '')::numeric, 0);
+    if q <= 0 then raise exception 'item %: quantidade precisa ser maior que zero', k; end if;
+    if pr < 0 or d < 0 or d > 100 then raise exception 'item %: preço ou desconto inválido', k; end if;
+    if coalesce(btrim(x->>'descricao'), '') = '' and cod is null then raise exception 'item %: diga o produto', k; end if;
+    base := null; f := 1;
+    -- caixa com o código da unidade e "CX" (como sai na nota): vale o código da caixa (".1"), com o preço e o custo dela
+    if cod is not null and cod !~ '\.\d+$' and public.crm_un(x->>'unidade') = 'CX'
+       and coalesce(public.crm_un((select unidade from public.crm_estoque where codigo = cod)), 'CX') <> 'CX' then
+      cod := coalesce((select v.codigo from public.crm_estoque v where v.codigo ~ ('^' || cod || '\.\d+$') order by v.codigo limit 1), cod);
+    end if;
+    select codigo, descricao, unidade, preco_venda, custo_unit into e from public.crm_estoque where codigo = cod;
+    if cod is not null then
+      base := regexp_replace(cod, '\.\d+$', '');
+      select unidade into eu from public.crm_estoque where codigo = base;
+      un := public.crm_un(coalesce(nullif(x->>'unidade', ''), e.unidade, case when cod ~ '\.\d+$' then 'CX' end));
+      if cod ~ '\.\d+$' or (un = 'CX' and coalesce(public.crm_un(eu), '') <> 'CX') then
+        select u.fator into f from public.crm_estoque_unidades u where u.codigo = base and u.unidade = 'CX';
+      elsif un is not null and public.crm_un(eu) is not null and un <> public.crm_un(eu) then
+        select u.fator into f from public.crm_estoque_unidades u where u.codigo = base and u.unidade = un;
+      end if;
+      f := coalesce(f, 1);
+      if not exists (select 1 from public.crm_estoque where codigo = base) then base := null; end if; -- produto fora do estoque (serviço, avulso)
+    else
+      un := public.crm_un(x->>'unidade');
+    end if;
+    -- a linha é de uma embalagem do código da unidade (sem a variante ".N", que já tem preço e custo próprios)
+    emb := cod is not null and cod !~ '\.\d+$' and f <> 1;
+    out := out || jsonb_build_object('codigo', cod, 'descricao', coalesce(nullif(btrim(x->>'descricao'), ''), e.descricao, cod), 'unidade', un,
+      'quantidade', q, 'preco', pr, 'desconto', d, 'total', round(q * pr * (1 - d / 100), 2), 'obs', nullif(btrim(coalesce(x->>'obs', '')), ''),
+      'base', base, 'fator', f, 'qtd_est', round(q * f, 3),
+      'preco_tab', case when emb then round(e.preco_venda * f, 4) else e.preco_venda end,
+      'custo', case when emb then round(e.custo_unit * f, 4) else e.custo_unit end, 'separado', false);
+  end loop;
+  return out;
+end;
+$$;
+
+-- Limite diário da IA no servidor (auditoria 22/10/2026, itens 8 e 11): crm-assistente e crm-produto-buscar reservam a
+-- linha em crm_assistente_uso ANTES de chamar a IA (erro 'em andamento'), com trava por usuário; duas chamadas ao mesmo
+-- tempo não passam do limite. Depois a função atualiza a linha com o custo. Só a service role (as funções) chama.
+create or replace function public.crm_ia_reservar(p_user uuid, p_tela text, p_limite integer, p_desde timestamptz) returns bigint
+language plpgsql security definer set search_path = public as $$
+declare n integer; id bigint; fotos boolean := coalesce(p_tela, '') = 'fotos';
+begin
+  if coalesce(auth.role(), '') <> 'service_role' then raise exception 'só a função da IA'; end if;
+  perform pg_advisory_xact_lock(hashtext('crm_ia:' || p_user::text || ':' || fotos::text));
+  select count(*) into n from public.crm_assistente_uso u where u.user_id = p_user and u.criado_em >= p_desde and (coalesce(u.tela, '') = 'fotos') = fotos;
+  if n >= p_limite then return null; end if;
+  insert into public.crm_assistente_uso (user_id, tela, ferramentas, tokens_entrada, tokens_saida, cache_lido, cache_escrito, custo_usd, erro)
+  values (p_user, p_tela, '{}', 0, 0, 0, 0, 0, 'em andamento') returning crm_assistente_uso.id into id;
+  return id;
+end;
+$$;

@@ -70,6 +70,31 @@ async function dadosDoPedido(db: ReturnType<typeof createClient>, pedidoId: stri
 
 // Dados para a nota que não é venda: a devolução vai com o XML da nota original (compra: bucket crm-compras-xml; venda: a
 // nota emitida pelo CRM ou o XML guardado em crm-notas-xml); bonificação e entrega futura vão como o pedido.
+// Devolução não passa do que a nota original tem, somando as devoluções já autorizadas (ou sem resposta) da mesma
+// nota neste ambiente. O serviço fiscal confere item a item só contra a nota original; aqui entra o que já voltou.
+async function limiteDevolucao(db: ReturnType<typeof createClient>, o: Linha, xml: string, amb: string) {
+  const orig: Record<number, { q: number, d: string }> = {};
+  for (const m of xml.matchAll(/<det\b[^>]*nItem="(\d+)"[^>]*>([\s\S]*?)<\/det>/g)) {
+    const q = /<qCom>([^<]*)<\/qCom>/.exec(m[2]), d = /<xProd>([^<]*)<\/xProd>/.exec(m[2]);
+    orig[Number(m[1])] = { q: Number(q ? q[1] : 0), d: d ? d[1] : '' };
+  }
+  const { data: irmas } = await db.from('crm_nfe_outras').select('id, itens').eq('ref_chave', String(o.ref_chave)).eq('tipo', String(o.tipo)).neq('id', String(o.id));
+  const ids = ((irmas || []) as Linha[]).map(x => String(x.id));
+  const { data: valem } = ids.length ? await db.from('crm_nfe').select('outra_id').in('outra_id', ids).eq('ambiente', amb).in('situacao', ['autorizada', 'pendente']) : { data: [] };
+  const ok = new Set(((valem || []) as Linha[]).map(x => String(x.outra_id)));
+  const ja: Record<number, number> = {};
+  ((irmas || []) as Linha[]).filter(x => ok.has(String(x.id))).forEach(x => ((x.itens || []) as Linha[]).forEach(i => {
+    ja[Number(i.nItem)] = (ja[Number(i.nItem)] || 0) + Number(i.quantidade || 0);
+  }));
+  const erros: string[] = [];
+  ((o.itens || []) as Linha[]).filter(i => Number(i.quantidade) > 0).forEach(i => {
+    const n = Number(i.nItem), it = orig[n], antes = ja[n] || 0;
+    if (it && antes > 0 && Number(i.quantidade) + antes > it.q + 1e-9)
+      erros.push('item ' + n + ' (' + it.d + '): a nota tem ' + it.q + ', já foram devolvidos ' + antes + ', sobram ' + Math.max(0, Math.round((it.q - antes) * 1e4) / 1e4));
+  });
+  if (erros.length) throw new Error('devolução acima do que falta devolver — ' + erros.join('; '));
+}
+
 async function dadosDaOutra(db: ReturnType<typeof createClient>, o: Linha, fiscal: Linha, amb: string, serie: number) {
   if (!fiscal.emitente) throw new Error('falta configurar o emitente (aba Fiscal → Emissão)');
   const base = { tipo: o.tipo, emitente: fiscal.emitente, ambiente: amb, serie, motivo: o.motivo || null, respTec: fiscal.respTec || null, ibscbs: fiscal.ibscbs, reforma: fiscal.reforma2027 || undefined };
@@ -86,6 +111,7 @@ async function dadosDaOutra(db: ReturnType<typeof createClient>, o: Linha, fisca
       if (!xml) { const { data: f } = await db.storage.from('crm-notas-xml').download('nfe/' + ch + '.xml'); xml = f ? await f.text() : ''; }
     }
     if (!xml) throw new Error('não achei o XML da nota original (' + ch + ')');
+    await limiteDevolucao(db, o, xml, amb);
     return Object.assign(base, { xml, itens: o.itens || [] });
   }
   if (!o.pedido_id) throw new Error('a ' + (o.tipo === 'bonificacao' ? 'bonificação' : 'entrega futura') + ' sai de um pedido');

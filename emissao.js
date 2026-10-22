@@ -89,7 +89,9 @@
       if (i.xml) arquivos.push({ nome: 'Inut-serie' + i.serie + '-' + i.de + (i.ate !== i.de ? '-a-' + i.ate : '') + '-procInutNFe.xml', conteudo: i.xml });
       linhas.push(['INUTILIZADA', i.serie, i.de === i.ate ? i.de : i.de + ' a ' + i.ate, '', br(diaSP(i.criado_em)), i.protocolo || '', i.justificativa || '']);
     });
-    const cel = v => { const s = String(v == null ? '' : v); return /[;"\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+    // texto que começa com = + - @ ganha apóstrofo (não vira fórmula no Excel do contador), como o R.csvGera
+    const cel = v => { let s = String(v == null ? '' : v); if (typeof v !== 'number' && /^[=+\-@\t\r]/.test(s) && !/^-?[\d.,]+$/.test(s)) s = "'" + s;
+      return /[;"\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
     const csv = '﻿' + [['Tipo', 'Série', 'Número', 'Chave', 'Data', 'Protocolo', 'Justificativa']].concat(linhas).map(l => l.map(cel).join(';')).join('\r\n') + '\r\n';
     arquivos.push({ nome: 'relacao-canceladas-inutilizadas-' + mes + '.csv', conteudo: csv });
     const valor = doMes.filter(n => n.situacao === 'autorizada').reduce((s, n) => s + Number(n.valor || 0), 0);

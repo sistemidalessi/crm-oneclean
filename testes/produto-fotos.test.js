@@ -12,6 +12,14 @@ test('urlSegura: só http(s) de site público', () => {
     'https://user:senha@site.com/', 'http://servidor/x', 'https://site.com:8443/', 'http://[::1]/', 'javascript:alert(1)', 'http://meu.local/x']
     .forEach(u => assert.equal(P.urlSegura(u), null, u));
   assert.equal(P.urlSegura('https://8.8.8.8/x'), 'https://8.8.8.8/x');
+  ['https://192.0.0.5/x', 'https://198.18.0.1/', 'https://198.19.255.1/', 'https://203.0.113.9/'].forEach(u => assert.equal(P.urlSegura(u), null, u));
+});
+
+test('segurança: ipPrivado barra os IPs que o nome do site resolve para a rede interna', () => {
+  ['10.0.0.1', '127.0.0.1', '169.254.169.254', '172.20.1.1', '192.168.0.10', '100.64.0.1', '192.0.0.1', '198.18.3.4', '0.0.0.0', '224.0.0.1',
+    '::1', '::', 'fe80::1', 'fd12::3', 'ff02::1', '::ffff:10.0.0.1', '64:ff9b::192.168.0.1', '2001:db8::5', '', 'lixo', '300.1.1.1']
+    .forEach(ip => assert.equal(P.ipPrivado(ip), true, ip));
+  ['8.8.8.8', '200.147.67.142', '2606:4700::1111', '2804:14c::1', '::ffff:8.8.8.8'].forEach(ip => assert.equal(P.ipPrivado(ip), false, ip));
 });
 
 test('imagensDaPagina: og:image, JSON-LD do produto e a foto principal da loja', () => {

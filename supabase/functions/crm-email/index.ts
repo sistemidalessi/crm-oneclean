@@ -117,6 +117,10 @@ Deno.serve(async (req) => {
   const { data: emp } = await comoUsuario.from('crm_empresas').select('id, nome, email, responsavel_id, email_sair_em').eq('id', String(c.empresa_id ?? '')).maybeSingle();
   if (!emp) return resposta(404, { erro: 'cliente não encontrado (ou fora da sua carteira)' });
   if (emp.email_sair_em) return resposta(409, { erro: 'o cliente pediu para não receber estes e-mails' });
+  // o e-mail sai em nome de quem cuida do cliente: só ela (ou a gestora/o administrador) manda (segurança, 22/10/2026, item 9:
+  // a vendedora que tinha só um negócio no cliente da colega mandava texto livre em nome dela)
+  if (!['admin', 'gestor'].includes(eu.papel) && emp.responsavel_id && emp.responsavel_id !== eu.user_id)
+    return resposta(403, { erro: 'este cliente é da carteira de outra vendedora: só ela ou a gestora mandam e-mail para ele' });
   const { data: pessoas } = await db.from('crm_contatos').select('email, principal').eq('empresa_id', emp.id);
   const doBanco = [...separa(emp.email), ...(pessoas ?? []).sort((a, b) => Number(b.principal) - Number(a.principal)).flatMap(p => separa(p.email))];
   const unicos = [...new Map(doBanco.map(m => [m.toLowerCase(), m])).values()];
@@ -163,7 +167,8 @@ Deno.serve(async (req) => {
   }
   if (!EMAIL.test(String(rem.email ?? ''))) return resposta(400, { erro: 'o(a) vendedor(a) não tem e-mail no cadastro do CRM' });
   const m = (c.marca ?? {}) as Record<string, unknown>;
-  const marca = { nome: String(m.nome ?? '').slice(0, 60) || 'CRM', cor: /^#[0-9a-f]{6}$/i.test(String(m.cor ?? '')) ? String(m.cor) : '#334e68', logo: '' };
+  // o nome da empresa no rodapé vem da configuração (não do pedido), quando houver
+  const marca = { nome: String((cfg?.dados ?? {}).nome_empresa || m.nome || '').slice(0, 60) || 'CRM', cor: /^#[0-9a-f]{6}$/i.test(String(m.cor ?? '')) ? String(m.cor) : '#334e68', logo: '' };
   try { const l = new URL(String(m.logo ?? '')); if (l.origin === sair.origin) marca.logo = l.href; } catch { /* sem logo */ }
   sair.search = '?t=' + emp.id + '.' + await assina('sair:' + emp.id);
   const rodape = 'Este e-mail foi enviado por ' + rem.nome + ' (' + rem.email + '), da ' + marca.nome + '. É só responder para falar com ' + String(rem.nome).split(' ')[0] + '.';

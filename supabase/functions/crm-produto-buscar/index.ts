@@ -13,7 +13,8 @@
 // Deploy: verify_jwt ligado (o padrão).
 import { createClient } from 'npm:@supabase/supabase-js@2.116.0';
 import Anthropic from 'npm:@anthropic-ai/sdk@0.129.0';
-import { urlSegura, imagensDaPagina, pdfsDaPagina, medeImagem, ehPdf, jsonDaResposta, limpaInfo, ordenaCandidatos } from './pagina.js';
+import { lookup as dnsLookup } from 'node:dns/promises';
+import { urlSegura, ipPrivado, imagensDaPagina, pdfsDaPagina, medeImagem, ehPdf, jsonDaResposta, limpaInfo, ordenaCandidatos } from './pagina.js';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -85,11 +86,29 @@ Resposta final: SÓ um objeto JSON, sem texto antes ou depois, neste formato:
 const hojeSP = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
 const r5 = (v: number) => Math.round(v * 100000) / 100000;
 
+// O nome do site precisa resolver só para IPs públicos (sem isso, um site da busca que aponta para a rede interna
+// faria a função baixar de dentro dela). Sem resposta do DNS, não baixa.
+async function hostPublico(u: string) {
+  const h = new URL(u).hostname.replace(/^\[|\]$/g, '');
+  if (/^[\d.]+$/.test(h)) return !ipPrivado(h);
+  const ips: string[] = [];
+  let semDeno = false;
+  for (const t of ['A', 'AAAA'] as const) {
+    try { ips.push(...await Deno.resolveDns(h, t)); } catch (e) { if (!(e instanceof Deno.errors.NotFound)) semDeno = true; }
+  }
+  // o servidor das funções pode não ter o resolvedor do Deno: aí pergunta pelo do Node
+  if (!ips.length && semDeno) {
+    try { (await dnsLookup(h, { all: true })).forEach((a: { address: string }) => ips.push(a.address)); } catch (_) { /* nome não existe */ }
+  }
+  return ips.length > 0 && ips.every(ip => !ipPrivado(ip));
+}
+
 // Baixa um endereço (já conferido por urlSegura) com tempo e tamanho máximos; segue no máximo 3 redirecionamentos,
-// conferindo cada um. → { bytes, tipo, url } ou null.
+// conferindo cada um (endereço e DNS). → { bytes, tipo, url } ou null.
 async function baixa(u: string, maxBytes: number, ms: number, aceita?: string) {
   let atual: string | null = urlSegura(u);
   for (let i = 0; atual && i < 4; i++) {
+    if (!await hostPublico(atual)) return null;
     const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), ms);
     try {
       const r = await fetch(atual, { redirect: 'manual', signal: ctl.signal, headers: { 'User-Agent': AGENTE, 'Accept': aceita || '*/*', 'Accept-Language': 'pt-BR,pt;q=0.9' } });
@@ -159,6 +178,11 @@ Deno.serve(async (req) => {
     (est.fornecedor ? '\nFornecedor de quem compramos: ' + est.fornecedor : '') +
     (c.busca ? '\nO comprador pediu para procurar assim: ' + busca : '');
 
+  // Segurança (auditoria de 22/10/2026, item 11): limite por dia e por papel, reservado no banco antes de chamar a IA
+  // (a busca em lote do administrador passa de mil num dia; a logística busca um produto por vez).
+  const limite = ({ admin: 2500, comprador: 400, logistica: 60 } as Record<string, number>)[eu.papel] ?? 0;
+  const { data: reserva } = await db.rpc('crm_ia_reservar', { p_user: quem.user.id, p_tela: 'fotos', p_limite: limite, p_desde: hojeSP() + 'T03:00:00Z' });
+  if (!reserva) return resposta(429, { erro: 'limite de buscas de fotos de hoje atingido (' + limite + '). Amanhã libera de novo.' });
   const ia = new Anthropic({ apiKey: chave, timeout: 240000, maxRetries: 1 });
   const tok = { entrada: 0, saida: 0, lido: 0, escrito: 0, buscas: 0, usd: 0 };
   let modelo = MODELO;
@@ -198,8 +222,8 @@ Deno.serve(async (req) => {
     console.error('[crm-produto-buscar] ' + erro);
   }
   const custo = r5(tok.usd);
-  await db.from('crm_assistente_uso').insert({ user_id: quem.user.id, tela: 'fotos', mascote: modelo, ferramentas: tok.buscas ? ['web_search x' + tok.buscas] : [],
-    tokens_entrada: tok.entrada, tokens_saida: tok.saida, cache_lido: tok.lido, cache_escrito: tok.escrito, custo_usd: custo, erro });
+  await db.from('crm_assistente_uso').update({ tela: 'fotos', mascote: modelo, ferramentas: tok.buscas ? ['web_search x' + tok.buscas] : [],
+    tokens_entrada: tok.entrada, tokens_saida: tok.saida, cache_lido: tok.lido, cache_escrito: tok.escrito, custo_usd: custo, erro }).eq('id', reserva);
 
   const lido = jsonDaResposta(texto);
   if (erro || !lido) {

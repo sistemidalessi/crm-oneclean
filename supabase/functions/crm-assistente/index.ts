@@ -412,7 +412,7 @@ Deno.serve(async (req) => {
   try { c = await req.json(); } catch { return resposta(400, { erro: 'corpo inválido' }); }
 
   const hoje = hojeSP(), limite = LIMITE_DIA[eu.papel] ?? 30;
-  const { count: usadas } = await db.from('crm_assistente_uso').select('id', { count: 'exact', head: true }).eq('user_id', eu.user_id).is('erro', null).gte('criado_em', hoje + 'T03:00:00Z');
+  const { count: usadas } = await db.from('crm_assistente_uso').select('id', { count: 'exact', head: true }).eq('user_id', eu.user_id).or('tela.is.null,tela.neq.fotos').gte('criado_em', hoje + 'T03:00:00Z');
   if (c.acao === 'situacao') {
     let custoMes = null;
     if (eu.papel === 'admin') {
@@ -447,21 +447,28 @@ Deno.serve(async (req) => {
   mensagens.push({ role: 'user', content: 'Agora: ' + agoraSP() + ' (horário de São Paulo). Quem pergunta: ' + eu.nome + ' (' + eu.papel + ').' + (tela ? ' Tela aberta: ' + tela + '.' : '') +
     ' Quem responde: ' + quemResponde + '.\n\nPergunta: ' + pergunta });
 
+  // Segurança (auditoria de 22/10/2026, item 8): o limite do dia é reservado no banco antes de chamar a IA (chamadas em
+  // paralelo não passam dele, e a que dá erro também conta); o resultado vai na mesma linha.
+  const { data: reserva } = await db.rpc('crm_ia_reservar', { p_user: eu.user_id, p_tela: tela || null, p_limite: limite, p_desde: hoje + 'T03:00:00Z' });
+  if (!reserva) return resposta(429, { erro: 'você já fez ' + limite + ' perguntas hoje (o limite do dia). Amanhã libera de novo.' });
+  // Item 2: a análise do dia lê nomes de fornecedor e de produto que o comprador digita e o texto dela fica para o comprador
+  // ler: roda só com as ferramentas do comprador, mesmo quando quem dispara é o administrador (nada de Caixa nem títulos).
+  const papelF = analise ? 'comprador' : eu.papel;
   const { data: us } = await db.from('crm_usuarios').select('user_id, nome');
-  const ctx: Ctx = { u, papel: eu.papel, meuId: eu.user_id, hoje, usuarios: new Map((us || []).map(x => [x.user_id, x.nome])) };
-  const minhas = Object.entries(FERRAMENTAS).filter(([, f]) => f.papeis.includes(eu.papel));
+  const ctx: Ctx = { u, papel: papelF, meuId: eu.user_id, hoje, usuarios: new Map((us || []).map(x => [x.user_id, x.nome])) };
+  const minhas = Object.entries(FERRAMENTAS).filter(([, f]) => f.papeis.includes(papelF));
   const tools = minhas.map(([, f]) => f.def);
   const comprador = ['admin', 'comprador'].includes(eu.papel) && (analise || ehCompra(tela, m));
   const system = comprador ? [{ type: 'text', text: SISTEMA }, { type: 'text', text: COMPRADOR }] : SISTEMA;
-  const r0 = await roda(new Anthropic({ apiKey: chave, timeout: 120000, maxRetries: 1 }), system, tools, mensagens, ctx, eu.papel);
+  const r0 = await roda(new Anthropic({ apiKey: chave, timeout: 120000, maxRetries: 1 }), system, tools, mensagens, ctx, papelF);
   const { texto, erro, usadasF, tok } = r0;
   // a conversa só guarda turnos completos: se deu erro no meio, não grava o pedaço
   let conversaId = conversa ? conversa.id : null;
   if (analise && !erro && texto) {
     const linha = { dia: hoje, tipo: 'compras', texto, em: new Date().toISOString(), por: eu.user_id, custo_usd: custo(tok) };
     await db.from('crm_ia_analises').upsert(linha, { onConflict: 'dia,tipo' });
-    await db.from('crm_assistente_uso').insert({ user_id: eu.user_id, conversa_id: null, tela, mascote: 'analise', ferramentas: usadasF,
-      tokens_entrada: tok.entrada, tokens_saida: tok.saida, cache_lido: tok.lido, cache_escrito: tok.escrito, custo_usd: custo(tok), erro: null });
+    await db.from('crm_assistente_uso').update({ conversa_id: null, tela, mascote: 'analise', ferramentas: usadasF,
+      tokens_entrada: tok.entrada, tokens_saida: tok.saida, cache_lido: tok.lido, cache_escrito: tok.escrito, custo_usd: custo(tok), erro: null }).eq('id', reserva);
     return resposta(200, { nova: true, dia: hoje, texto, em: linha.em });
   }
   if (!erro && texto) {
@@ -469,8 +476,8 @@ Deno.serve(async (req) => {
     if (conversaId) await db.from('crm_assistente_conversas').update({ mensagens, atualizado_em: new Date().toISOString() }).eq('id', conversaId).eq('user_id', eu.user_id);
     else { const { data } = await db.from('crm_assistente_conversas').insert({ user_id: eu.user_id, titulo, mensagens }).select('id').single(); conversaId = data ? data.id : null; }
   }
-  await db.from('crm_assistente_uso').insert({ user_id: eu.user_id, conversa_id: conversaId, tela: tela || null, mascote: String(m.id || '').slice(0, 40) || null, ferramentas: usadasF,
-    tokens_entrada: tok.entrada, tokens_saida: tok.saida, cache_lido: tok.lido, cache_escrito: tok.escrito, custo_usd: custo(tok), erro });
+  await db.from('crm_assistente_uso').update({ conversa_id: conversaId, tela: tela || null, mascote: String(m.id || '').slice(0, 40) || null, ferramentas: usadasF,
+    tokens_entrada: tok.entrada, tokens_saida: tok.saida, cache_lido: tok.lido, cache_escrito: tok.escrito, custo_usd: custo(tok), erro }).eq('id', reserva);
   if (erro) {
     const st = erro.startsWith('API 401') ? 503 : erro.startsWith('API 429') || erro.startsWith('API 529') ? 429 : 502;
     return resposta(st, { erro: st === 503 ? 'a chave da Anthropic (ANTHROPIC_API_KEY) foi recusada: confira nos segredos do Supabase'

@@ -2,6 +2,26 @@
 // medir a imagem, conferir o endereço e ler a resposta da IA. JavaScript puro, sem Deno: a função importa e os
 // testes do Node (testes/produto-fotos.test.js) também.
 
+// IP que o servidor não pode baixar (rede interna, reservado, documentação, multicast). Vale para o IP escrito no
+// endereço e para os IPs que o nome resolve (a função confere o DNS antes de baixar). Inválido também conta como privado.
+export function ipPrivado(ip) {
+  const s = String(ip || '').trim().toLowerCase().replace(/^\[|\]$/g, '');
+  if (/^[\d.]+$/.test(s)) {
+    const p = s.split('.').map(Number);
+    if (p.length !== 4 || p.some(n => !(Number.isInteger(n) && n >= 0 && n <= 255))) return true;
+    const [a, b, c] = p;
+    return a === 0 || a === 10 || a === 127 || a >= 224 || (a === 100 && b >= 64 && b <= 127) || (a === 169 && b === 254) ||
+      (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 192 && b === 0 && (c === 0 || c === 2)) ||
+      (a === 198 && (b === 18 || b === 19)) || (a === 198 && b === 51 && c === 100) || (a === 203 && b === 0 && c === 113);
+  }
+  if (s.indexOf(':') === -1) return true;
+  const v4 = /^(?:0*:)*(?:::)?(?:ffff:|64:ff9b::)?(\d+\.\d+\.\d+\.\d+)$/.exec(s) || /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(s);
+  if (v4) return ipPrivado(v4[1]);
+  if (s === '::' || s === '::1' || /^0*(:0*)*:0*1?$/.test(s)) return true;
+  const g = parseInt(s.split(':')[0] || '0', 16);
+  return isNaN(g) || (g & 0xfe00) === 0xfc00 || (g & 0xffc0) === 0xfe80 || (g & 0xff00) === 0xff00 || s.startsWith('2001:db8:') || g === 0;
+}
+
 // Endereço que o servidor pode baixar: http(s), sem usuário/senha, sem IP de rede interna e sem nome local.
 export function urlSegura(u, base) {
   let x;
@@ -10,12 +30,7 @@ export function urlSegura(u, base) {
   if (x.username || x.password) return null;
   const h = x.hostname.toLowerCase().replace(/^\[|\]$/g, '');
   if (!h || h === 'localhost' || /\.(local|internal|lan|home|localdomain)$/.test(h) || !/\./.test(h)) return null;
-  if (/^[\d.]+$/.test(h)) {
-    const p = h.split('.').map(Number);
-    if (p.length !== 4 || p.some(n => !(n >= 0 && n <= 255))) return null;
-    if (p[0] === 10 || p[0] === 127 || p[0] === 0 || (p[0] === 169 && p[1] === 254) || (p[0] === 172 && p[1] >= 16 && p[1] <= 31) ||
-      (p[0] === 192 && p[1] === 168) || (p[0] === 100 && p[1] >= 64 && p[1] <= 127) || p[0] >= 224) return null;
-  }
+  if (/^[\d.]+$/.test(h) && ipPrivado(h)) return null;
   if (h.indexOf(':') !== -1) return null; // IPv6 literal: não precisa para site de fabricante
   if (x.port && x.port !== '80' && x.port !== '443') return null;
   x.hash = '';

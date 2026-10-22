@@ -28,7 +28,8 @@ test('regras.js e nfe.js rodam do jeito que a Edge Function carrega (sem module,
   const N = falso.CRMNfe;
   const xml = '<nfeProc><NFe><infNFe Id="NFe' + '3'.repeat(44) + '"><ide><mod>55</mod><nNF>9</nNF><dhEmi>2026-09-10T10:00:00-03:00</dhEmi><tpNF>1</tpNF></ide>' +
     '<emit><CNPJ>11222333000181</CNPJ><xNome>Distribuidora</xNome></emit><dest><CNPJ>44555666000199</CNPJ><xNome>Cliente</xNome></dest>' +
-    '<total><ICMSTot><vNF>10.00</vNF></ICMSTot></total><infAdic><infCpl>PORTADOR: BOLETO;VENDEDOR: ANA;COD. CLIENTE: 01;</infCpl></infAdic></infNFe></NFe></nfeProc>';
+    '<total><ICMSTot><vNF>10.00</vNF></ICMSTot></total><infAdic><infCpl>PORTADOR: BOLETO;VENDEDOR: ANA;COD. CLIENTE: 01;</infCpl></infAdic></infNFe></NFe>' +
+    '<protNFe><infProt><chNFe>' + '3'.repeat(44) + '</chNFe><cStat>100</cStat></infProt></protNFe></nfeProc>';
   const d = N.lerXml(xml);
   assert.equal(d.vendedor, 'ANA');
   const pl = N.planeja({ usuarios: [{ user_id: 'u1', nome: 'Ana Souza', ativo: true }], empresas: [], produtos: [], opcoes: [], notas: [] }, [d], { filtro: 'auto' });

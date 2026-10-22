@@ -72,9 +72,11 @@
     // Evento de cancelamento: procEventoNFe / evento com tpEvento 110111.
     if (!tem(x, 'infNFe') && tem(x, 'infEvento')) {
       if (valor(x, 'tpEvento') !== '110111') return null;
+      // só vale o cancelamento com a resposta da SEFAZ aceitando o evento (segurança, 22/10/2026: um evento sem o retEvento
+      // cancelava nota de verdade no CRM)
       const ret = bloco(x, 'retEvento');
       const st = ret ? valor(bloco(ret, 'infEvento') || ret, 'cStat') : '';
-      if (st && ['135', '136', '155'].indexOf(st) === -1) return null; // evento recusado pela SEFAZ
+      if (['135', '136', '155'].indexOf(st) === -1) return null; // sem resposta ou evento recusado pela SEFAZ
       const chave = valor(bloco(x, 'infEvento'), 'chNFe');
       return /^[0-9A-Z]{44}$/.test(chave) ? { tipo: 'cancelamento', chave } : null;
     }
@@ -109,7 +111,8 @@
       tipo: 'nota', chave, modelo: valor(ide, 'mod'), numero: Number(valor(ide, 'nNF')) || null, serie: valor(ide, 'serie') || null,
       emitida_em: valor(ide, 'dhEmi') || (dia ? dia + 'T12:00:00-03:00' : null),
       natureza: valor(ide, 'natOp') || null, saida: valor(ide, 'tpNF') !== '0', finalidade: valor(ide, 'finNFe') || '1',
-      autorizada: !prot || st === '100' || st === '150', situacao_sefaz: st,
+      // só nota com o protocolo de autorização da SEFAZ (segurança, 22/10/2026: XML sem protNFe virava venda, título e saída)
+      autorizada: st === '100' || st === '150', situacao_sefaz: st || 'sem protocolo',
       emitente: { doc: R.doc(valor(emit, 'CNPJ') || valor(emit, 'CPF')), nome: valor(emit, 'xNome') },
       cliente: {
         doc: R.doc(valor(dest, 'CNPJ') || valor(dest, 'CPF')), nome: valor(dest, 'xNome'), email: valor(dest, 'email'),

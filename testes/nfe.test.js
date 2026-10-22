@@ -29,6 +29,17 @@ const cancelamento = n => '<procEventoNFe versao="1.00" xmlns="http://www.portal
   '<chNFe>' + chave(n) + '</chNFe><tpEvento>110111</tpEvento><detEvento versao="1.00"><descEvento>Cancelamento</descEvento></detEvento></infEvento></evento>' +
   '<retEvento versao="1.00"><infEvento><cStat>135</cStat><chNFe>' + chave(n) + '</chNFe></infEvento></retEvento></procEventoNFe>';
 
+test('segurança: nota sem protocolo da SEFAZ e cancelamento sem a resposta dela não valem', () => {
+  const it = [{ cod: 'DET5', desc: 'Detergente 5L', q: 1, p: 10 }];
+  const semProt = xml({ n: 77, dest: 'X LTDA', cnpjDest: '44555666000199', itens: it }).replace(/<protNFe[\s\S]*<\/protNFe>/, '');
+  const d = N.lerXml(semProt);
+  assert.deepEqual([d.autorizada, d.situacao_sefaz], [false, 'sem protocolo']);
+  assert.equal(N.planeja(base(), [d], {}).criar.notas.length, 0, 'não entra');
+  assert.equal(N.lerXml(cancelamento(77).replace(/<retEvento[\s\S]*<\/retEvento>/, '')), null, 'cancelamento sem retEvento');
+  assert.equal(N.lerXml(cancelamento(77).replace('<cStat>135</cStat>', '<cStat>573</cStat>')), null, 'cancelamento recusado');
+  assert.equal(N.lerXml(cancelamento(77)).tipo, 'cancelamento');
+});
+
 test('lê a NF-e: cabeçalho, cliente, itens com desconto, total e protocolo', () => {
   const d = N.lerXml(xml({ n: 1234, dest: 'ESCOLA MODELO &amp; CIA LTDA', cnpjDest: '44555666000199',
     itens: [{ cod: 'DET5', desc: 'Detergente 5L', q: 10, p: 12.5, desc0: 5 }, { cod: 'PAP', desc: 'Papel toalha', q: 2, p: 30, cfop: '5405' }] }));
