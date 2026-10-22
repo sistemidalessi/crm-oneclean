@@ -138,7 +138,37 @@
     return { linhas, versao: a.versao, chave: a.chave, vig_ini: a.vig_ini, vig_fim: a.vig_fim, fonte: a.fonte };
   }
 
-  const api = { lerIbpt, SITUACAO, situacaoDe, doc, emitenteDoXml, faltasEmitente, confereTexto, horasDesde, mesSP, fechamento, zip, crc32 };
+  // Reforma a partir de 2027 (22/10/2026): a configuração dados.fiscal.reforma2027 que o serviço fiscal lê
+  // (servico-fiscal/nfe.js regraReforma). Os padrões do IBS repetem o REFORMA_2027 de lá (o teste confere que batem).
+  const REFORMA_PADRAO = { pIBSUF: 0.05, pIBSMun: 0.05 };
+  const pctOk = (v, nome) => {
+    if (v == null || v === '') return null;
+    const n = Number(String(v).replace(',', '.'));
+    if (!isFinite(n) || n < 0 || n > 30) throw new Error(nome + ': informe um percentual entre 0 e 30');
+    return Math.round(n * 10000) / 10000;
+  };
+  // Do formulário para o que se grava. CBS vazia = ainda não definida (nota de 2027 fica bloqueada).
+  function reformaDoForm(v) {
+    v = v || {};
+    const pCBS = pctOk(v.pCBS, 'CBS');
+    if (pCBS === 0) throw new Error('CBS: em 2027 a CBS é cobrada; deixe vazio enquanto a alíquota não estiver definida');
+    const pIBSUF = pctOk(v.pIBSUF, 'IBS estadual'), pIBSMun = pctOk(v.pIBSMun, 'IBS municipal');
+    return { pCBS, pIBSUF: pIBSUF == null ? REFORMA_PADRAO.pIBSUF : pIBSUF, pIBSMun: pIBSMun == null ? REFORMA_PADRAO.pIBSMun : pIBSMun,
+      icmsComIbsCbs: v.icmsComIbsCbs === true, cobrarPorFora: v.cobrarPorFora === true };
+  }
+  const pctTxt = n => String(n).replace('.', ',') + '%';
+  // O que a tela mostra: situação e uma linha por regra.
+  function resumoReforma(ref) {
+    const r = ref || {}, pronta = Number(r.pCBS) > 0;
+    const uf = r.pIBSUF == null ? REFORMA_PADRAO.pIBSUF : r.pIBSUF, mun = r.pIBSMun == null ? REFORMA_PADRAO.pIBSMun : r.pIBSMun;
+    return { pronta, linhas: [
+      'CBS: ' + (pronta ? pctTxt(r.pCBS) : 'não definida — nota com emissão em 2027 não sai'),
+      'IBS: ' + pctTxt(uf) + ' estadual + ' + pctTxt(mun) + ' municipal',
+      'IBS e CBS na base do ICMS: ' + (r.icmsComIbsCbs === true ? 'sim (Resposta à Consulta Sefaz-SP 32931/2026)' : 'não (desligado até o contador confirmar)'),
+      'O cliente paga: ' + (r.cobrarPorFora === true ? 'o total com o IBS e a CBS' : 'o total sem o IBS e a CBS (como hoje)')] };
+  }
+
+  const api = { REFORMA_PADRAO, reformaDoForm, resumoReforma, lerIbpt, SITUACAO, situacaoDe, doc, emitenteDoXml, faltasEmitente, confereTexto, horasDesde, mesSP, fechamento, zip, crc32 };
   raiz.CRMEmissao = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);
@@ -226,6 +256,7 @@
           : '<button type="button" class="btn sec" data-acao="nf-homologacao">Voltar para homologação</button>') + '</p>' +
       (amb === 'homologacao' ? '<p class="dica">Para passar para produção: serviço fiscal e certificado conferidos, Sefaz 107, e pelo menos uma nota de teste autorizada em homologação' +
         (nfes ? ' (até agora: ' + homAut + ')' : '') + '. O contador confere a tabela fiscal antes.</p>' : '') +
+      reformaHtml(fc) +
       '<h3>Tabela do IBPT (tributos aproximados na nota, Lei 12.741)</h3>' + ibptHtml() +
       '<h3>ICMS-ST já recolhido (produtos com CST 60)</h3><p class="dica">Na revenda com substituição tributária a nota informa o ICMS-ST que veio na ' +
         '<strong>compra mais recente</strong> do produto (base, alíquota, ICMS próprio do fornecedor e ICMS-ST), proporcional à quantidade vendida. ' +
@@ -418,6 +449,45 @@
     } catch (e) { CRM.falhou(e); }
   }
 
+  // Reforma de 2027: só vale para nota com data de emissão em 2027 ou depois; em 2026 a nota não muda.
+  function reformaHtml(fc) {
+    const r = M.resumoReforma(fc.reforma2027), ano = Number(R.hojeISO().slice(0, 4));
+    return '<h3>Reforma tributária: notas emitidas a partir de 01/01/2027</h3>' +
+      '<p class="dica">Vale pela data de emissão da nota; as notas de ' + (ano <= 2026 ? 'agora (2026)' : '2026') + ' não mudam. ' +
+        'Em 2027 a CBS passa a ser cobrada e o PIS/COFINS acabam. Combine cada item com o contador antes de virar o ano.</p>' +
+      '<ul class="lista">' + r.linhas.map(l => '<li>' + esc(l) + '</li>').join('') + '</ul>' +
+      (r.pronta ? '' : '<p class="' + (ano >= 2027 ? 'alerta' : 'dica') + '">Sem a alíquota da CBS, pedido com nota em 2027 fica bloqueado na emissão.</p>') +
+      '<p class="acoes"><button type="button" class="btn sec" data-acao="nf-reforma">Configurar a regra de 2027</button></p>';
+  }
+  function formReforma() {
+    const r = fiscalCfg().reforma2027 || {};
+    CRM.abrirForm({
+      titulo: 'Reforma tributária: notas a partir de 01/01/2027',
+      intro: 'Só vale para nota emitida em 2027 ou depois. Preencha com o que o contador passar: a alíquota da CBS de 2027 ainda ' +
+        'depende do Senado (referência menos 0,1 ponto, pela LC 214/2025). O ICMS continua fora da base do IBS e da CBS até 2032.',
+      campos: [
+        { nome: 'pCBS', rotulo: 'CBS (%)', tipo: 'numero', passo: '0.01', min: 0, max: 30, vazioNulo: true, ajuda: 'Vazio = ainda não definida: nota de 2027 não sai.' },
+        { nome: 'pIBSUF', rotulo: 'IBS estadual (%)', tipo: 'numero', passo: '0.01', min: 0, max: 30, vazioNulo: true, ajuda: '2027 e 2028: 0,05% (LC 214/2025). Vazio = 0,05.' },
+        { nome: 'pIBSMun', rotulo: 'IBS municipal (%)', tipo: 'numero', passo: '0.01', min: 0, max: 30, vazioNulo: true, ajuda: '2027 e 2028: 0,05% (LC 214/2025). Vazio = 0,05.' },
+        { tipo: 'info', rotulo: 'A Sefaz-SP entende que o IBS e a CBS entram na base do ICMS a partir de 2027 (Resposta à Consulta 32931/2026); ' +
+          'há decisão de primeira instância contra. Ligue só depois do "de acordo" do contador.' },
+        { nome: 'icmsComIbsCbs', rotulo: 'IBS e CBS entram na base do ICMS', tipo: 'checkbox', largo: true },
+        { tipo: 'info', rotulo: 'O IBS e a CBS são cobrados "por fora": a nota mostra o total com eles. Marque se o cliente paga esse total ' +
+          '(as parcelas e o pagamento fecham com ele); senão, as parcelas continuam com o total de hoje.' },
+        { nome: 'cobrarPorFora', rotulo: 'O cliente paga o total com o IBS e a CBS', tipo: 'checkbox', largo: true }],
+      valores: { pCBS: r.pCBS == null ? '' : r.pCBS, pIBSUF: r.pIBSUF == null ? M.REFORMA_PADRAO.pIBSUF : r.pIBSUF,
+        pIBSMun: r.pIBSMun == null ? M.REFORMA_PADRAO.pIBSMun : r.pIBSMun, icmsComIbsCbs: r.icmsComIbsCbs === true, cobrarPorFora: r.cobrarPorFora === true },
+      salvarTexto: 'Salvar',
+      aoSalvar: async v => {
+        const novo = M.reformaDoForm(v);
+        if (novo.icmsComIbsCbs && r.icmsComIbsCbs !== true &&
+          !confirm('Colocar o IBS e a CBS na base do ICMS das notas de 2027 em diante?\n\nO ICMS dessas notas fica maior. Faça isso só com o "de acordo" do contador.')) return false;
+        await salvaFiscal({ reforma2027: novo });
+        CRM.toast('Regra de 2027 salva.'); CRM.render();
+      }
+    });
+  }
+
   const salvaFiscal = async patch => { await CRM.salvarConfig({ fiscal: Object.assign({}, fiscalCfg(), patch) }); };
   function formEmitente(base) {
     const fc = Object.assign({}, fiscalCfg(), base || {}), em = fc.emitente || {}, e = em.endereco || {}, rt = fc.respTec || {};
@@ -496,6 +566,7 @@
       CRM.toast('Não achei o XML de uma nota recente do FKN guardado no CRM. Preencha à mão em "Editar emitente".', true);
     },
     'nf-emitente': () => formEmitente(),
+    'nf-reforma': () => formReforma(),
     'nf-producao': async () => {
       const homAut = (nfes || []).filter(n => n.ambiente === 'homologacao' && (n.situacao === 'autorizada' || n.situacao === 'cancelada')).length;
       if (!homAut) { CRM.toast('Antes de passar para produção, emita pelo menos uma nota de teste em homologação e confira a DANFE.', true); return; }

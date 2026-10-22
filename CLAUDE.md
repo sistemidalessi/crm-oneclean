@@ -1789,7 +1789,8 @@ o serviço na VPS da Agilité (não no servidor do escritório).
   Decide pela **data de emissão** da nota (`nfe.js regraReforma`), nunca pela de hoje. **Nota de 2026: sai idêntica** (36
   combinações comparadas com a versão anterior; a configuração de 2027 é ignorada). **Nota de 2027 em diante**, com
   `crm_config.dados.fiscal.reforma2027` = `{ pCBS, pIBSUF?, pIBSMun?, icmsComIbsCbs?, cobrarPorFora? }` (a `crm-fiscal` já manda o
-  `dados.fiscal` inteiro; ainda **sem campo na tela**): sem `pCBS` a nota não sai (a alíquota de referência do Senado não foi
+  `dados.fiscal` inteiro; tela em **Fiscal → 4. Emissão → "Configurar a regra de 2027"**, `formReforma` em `emissao.js`, com
+  `reformaDoForm`/`resumoReforma` puros e testados em `testes/emissao.test.js`; ligar a base do ICMS pede confirmação): sem `pCBS` a nota não sai (a alíquota de referência do Senado não foi
   publicada; LC 214/2025: CBS de 2027 = referência − 0,1 ponto); IBS 0,05% UF + 0,05% municipal por padrão; PIS/COFINS com alíquota
   recusado (acabam em 2027; as 1.190 regras fiscais ainda trazem CST 01 e terão de ser refeitas com o contador); ICMS continua fora
   da base do IBS/CBS (até 2032); `<vNFTot>` (depois do `IBSCBSTot`) = vNF + IBS + CBS; `vNF` não muda. **IBS/CBS na base do ICMS**

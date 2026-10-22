@@ -72,7 +72,7 @@ function notaDoPedido(o) {
   const ano = Number(String(emissao || '').slice(0, 4)) || 0, ref = cfg.reforma2027 || null;
   let cobrar = total;
   if (ano >= 2027) {
-    if (!ref || !(num(ref.pCBS) > 0)) bloqueia.push('nota de ' + ano + ': falta configurar a alíquota da CBS e a regra da Reforma (configuração fiscal, reforma2027; combinar com o contador)');
+    if (!ref || !(num(ref.pCBS) > 0)) bloqueia.push('nota de ' + ano + ': falta configurar a alíquota da CBS e a regra da Reforma (aba Fiscal → Emissão → Configurar a regra de 2027; combinar com o contador)');
     else {
       if (itens.some(it => (['01', '02'].indexOf(it.pis.cst) !== -1 && it.pis.aliquota > 0) || (['01', '02'].indexOf(it.cofins.cst) !== -1 && it.cofins.aliquota > 0)))
         bloqueia.push('o PIS e a COFINS acabam em 2027: as regras fiscais dos produtos ainda trazem alíquota (refazer com o contador)');

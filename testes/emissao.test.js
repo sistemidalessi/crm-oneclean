@@ -105,3 +105,22 @@ test('tabela do IBPT: só NCM (tipo 0), datas e chave', () => {
     vig_ini: '2026-08-20', vig_fim: '2026-09-30', chave: 'A906AF', versao: '26.2.A', fonte: 'IBPT/empresometro.com.br' });
   assert.throws(() => M.lerIbpt('outra coisa;x'), /não parece a tabela do IBPT/);
 });
+
+test('regra de 2027 (aba Fiscal → Emissão): o formulário grava o que o serviço fiscal lê, com os mesmos padrões', () => {
+  assert.deepStrictEqual(M.REFORMA_PADRAO, { pIBSUF: N.REFORMA_2027.pIBSUF, pIBSMun: N.REFORMA_2027.pIBSMun });
+  // vazio: CBS não definida, IBS no padrão, as duas opções desligadas
+  const vazio = M.reformaDoForm({ pCBS: null, pIBSUF: null, pIBSMun: null });
+  assert.deepStrictEqual(vazio, { pCBS: null, pIBSUF: 0.05, pIBSMun: 0.05, icmsComIbsCbs: false, cobrarPorFora: false });
+  assert.throws(() => N.calcula({ emissao: '2027-01-04T09:00:00-03:00', reforma: vazio, itens: [{ quantidade: 1, valorUnitario: 10, icms: { cst: '60' }, pis: { cst: '06' }, cofins: { cst: '06' } }] }), /alíquota da CBS/);
+  const cheio = M.reformaDoForm({ pCBS: '8,8', pIBSUF: 0.05, pIBSMun: 0.05, icmsComIbsCbs: true, cobrarPorFora: true });
+  assert.deepStrictEqual(cheio, { pCBS: 8.8, pIBSUF: 0.05, pIBSMun: 0.05, icmsComIbsCbs: true, cobrarPorFora: true });
+  const c = N.calcula({ emissao: '2027-01-04T09:00:00-03:00', reforma: cheio, itens: [{ quantidade: 1, valorUnitario: 135.68, icms: { cst: '00', aliquota: 18 }, pis: { cst: '06' }, cofins: { cst: '06' } }] });
+  assert.deepStrictEqual([c.itens[0].icms.v, c.totais.vCobrar], [26.18, c.totais.vNFTot]);   // o serviço entende o que a tela grava
+  assert.throws(() => M.reformaDoForm({ pCBS: 0 }), /deixe vazio/);
+  assert.throws(() => M.reformaDoForm({ pCBS: 45 }), /entre 0 e 30/);
+  assert.throws(() => M.reformaDoForm({ pCBS: 8.8, pIBSUF: -1 }), /IBS estadual/);
+  const r0 = M.resumoReforma(undefined), r1 = M.resumoReforma(cheio);
+  assert.deepStrictEqual([r0.pronta, r1.pronta], [false, true]);
+  assert.match(r0.linhas.join('|'), /não definida.*0,05% estadual \+ 0,05% municipal.*desligado até o contador.*sem o IBS e a CBS/);
+  assert.match(r1.linhas.join('|'), /CBS: 8,8%.*sim \(Resposta à Consulta Sefaz-SP 32931\/2026\).*com o IBS e a CBS/);
+});
