@@ -346,6 +346,21 @@ test('títulos das parcelas da nota (cobr/dup): duplicata "002527/01", não dupl
   assert.deepEqual(pl2.titulosCancelados, ['002527']);
 });
 
+test('títulos da nota da série 2 (CRM, depois da virada): a série vai na duplicata e não colide com o FKN', () => {
+  const COBR = '<cobr><dup><nDup>001</nDup><dDu>x</dDu><dVenc>2026-11-20</dVenc><vDup>100.00</vDup></dup></cobr>';
+  const it = [{ cod: 'DET5', desc: 'Detergente 5L', q: 1, p: 100 }];
+  const s2 = x => x.replace('<serie>1</serie>', '<serie>2</serie>').split(chave(12)).join(chave(12).slice(0, 22) + '002' + chave(12).slice(25));
+  const d = N.lerXml(s2(xml({ n: 12, dest: 'CLIENTE EXEMPLO LTDA', cnpjDest: '44555666000199', itens: it, cobr: COBR })));
+  assert.equal(d.serie, '2');
+  const pl = N.planeja(base(), [d], {});
+  assert.deepEqual(pl.criar.titulos.map(t => [t.duplicata, t.nota_numero]), [['2-000012/01', 12]], 'o "000012/01" antigo do FKN fica intacto');
+  // série 1 (FKN) continua igual
+  assert.equal(N.planeja(base(), [N.lerXml(xml({ n: 12, dest: 'X LTDA', cnpjDest: '44555666000199', itens: it, cobr: COBR }))], {}).criar.titulos[0].duplicata, '000012/01');
+  // cancelamento da 2-12 tira só os títulos dela
+  const D = base(); D.notas = [{ id: 'n1', chave: d.chave }];
+  assert.deepEqual(N.planeja(D, [N.lerXml(s2(cancelamento(12)))], {}).titulosCancelados, ['2-000012']);
+});
+
 test('vendasIguaisNotas: venda do cadastro sem CNPJ = nota de outro cadastro (mesmo valor, até 3 dias)', () => {
   const empresas = [
     { id: 'a', nome: 'ZETA COMERCIAL - FULANO', cnpj: null },

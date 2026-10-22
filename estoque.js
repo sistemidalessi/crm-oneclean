@@ -88,6 +88,20 @@
       return { st_cst: cst || '60', st_base: ou(x, 'vBCSTRet'), st_aliq: ou(x, 'pST'), st_proprio: ou(x, 'vICMSSubstituto'), st_valor: ou(x, 'vICMSSTRet') };
     return { st_cst: cst, st_base: null, st_aliq: null, st_proprio: null, st_valor: null };
   }
+  // Devolução emitida pelo cliente contribuinte (22/10/2026, virada): chega pela Sefaz como as compras, mas é mercadoria
+  // nossa voltando. É devolução a nota com finalidade 4 ou com todos os itens em CFOP de devolução de venda (x201, x202,
+  // x410, x411). A nota devolvida: a 1ª chave referenciada (NFref ou DFeReferenciado) emitida por nós; senão, a 1ª.
+  const CFOP_DEVOLUCAO = /^[56](201|202|410|411)$/;
+  function devolucaoDoXml(d, xml, nossoDoc) {
+    const itens = (d && d.itens) || [];
+    const sim = String(d && d.finalidade) === '4' || (itens.length > 0 && itens.every(it => CFOP_DEVOLUCAO.test(String(it.cfop || ''))));
+    if (!sim) return { devolucao: false, ref_chave: null };
+    const chaves = [], re = /<(?:refNFe|chaveAcesso)>(\d{44})<\/(?:refNFe|chaveAcesso)>/g;
+    let m;
+    while ((m = re.exec(String(xml || '')))) if (chaves.indexOf(m[1]) === -1) chaves.push(m[1]);
+    const nossa = nossoDoc ? chaves.find(c => c.slice(6, 20) === nossoDoc) : null;
+    return { devolucao: true, ref_chave: nossa || chaves[0] || null };
+  }
   // Nota do fornecedor (lerXml de nfe.js + o XML) → { compra, itens } para gravar em crm_compras/crm_compra_itens.
   // nossoDoc: CNPJ da OneClean (a nota tem de ser PARA ela, e não emitida por ela).
   function compraDoXml(d, xml, nossoDoc) {
@@ -95,10 +109,11 @@
     const dest = String((d.cliente || {}).doc || ''), emit = String((d.emitente || {}).doc || '');
     if (nossoDoc && emit === nossoDoc) throw new Error('é nota de saída da própria empresa, não de compra (NF ' + d.numero + ')');
     if (nossoDoc && dest && dest !== nossoDoc) throw new Error('a NF ' + d.numero + ' não é para a nossa empresa (destinatário ' + dest + ')');
-    const ex = extrasDoXml(xml);
+    const ex = extrasDoXml(xml), dv = devolucaoDoXml(d, xml, nossoDoc);
     return {
       compra: { chave: d.chave, numero: d.numero, serie: d.serie, emitida_em: d.emitida_em, fornecedor_doc: emit || null, fornecedor_nome: (d.emitente || {}).nome || null,
-        valor_produtos: r2(d.valor_produtos), valor_total: r2(d.valor_total), parcelas: d.parcelas || [] },
+        valor_produtos: r2(d.valor_produtos), valor_total: r2(d.valor_total), parcelas: dv.devolucao ? [] : d.parcelas || [],
+        devolucao: dv.devolucao, ref_chave: dv.ref_chave },
       itens: (d.itens || []).map(it => {
         const f = it.fiscal || {}, e = ex.get(it.ordem) || {};
         return { ordem: it.ordem, cod_fornecedor: it.codigo, descricao: it.descricao, ean: f.gtin || null, ncm: it.ncm, cfop: it.cfop, unidade: it.unidade,
@@ -115,9 +130,14 @@
   // Produto nosso para um item do fornecedor. ctx: { vinculos: Map('doc|cod' → {codigo, fator}), produtos: [crm_estoque sem as caixas],
   // unidades: Map('codigo|UN' → fator) }. Ordem: ligação já feita antes; descrição parecida (sugestão para conferir).
   // Fator: o da ligação; mesma unidade = 1; a unidade da caixa (crm_estoque_unidades); senão em branco (o comprador diz).
+  // Na devolução de cliente (ctx.devolucao), o cliente costuma copiar o nosso código da nota de venda: vale o mesmo código.
   function sugere(it, fornecedorDoc, ctx) {
     const v = ctx.vinculos && ctx.vinculos.get(fornecedorDoc + '|' + it.cod_fornecedor);
     if (v) return { codigo: v.codigo, fator: num(v.fator), como: 'ligado antes' };
+    if (ctx.devolucao && it.cod_fornecedor) {
+      const cod = String(it.cod_fornecedor).trim().replace(/\.\d+$/, ''), p = (ctx.produtos || []).find(x => x.codigo === cod);
+      if (p) return { codigo: p.codigo, fator: un(p.unidade) === un(it.unidade) ? 1 : (ctx.unidades && ctx.unidades.get(p.codigo + '|' + un(it.unidade))) || null, como: 'mesmo código da nossa nota' };
+    }
     const pi = palavras(it.descricao);
     let melhor = null, nota = 0;
     (ctx.produtos || []).forEach(p => {
@@ -229,7 +249,7 @@
   }
 
   const TIPOS = { inicial: 'saldo inicial (FKN)', saida: 'saída (nota)', entrada: 'entrada (compra)', ajuste: 'ajuste', inventario: 'inventário', estorno: 'estorno' };
-  const api = { junta, valor, sequencia, lerContagem, atualFkn, ehCaixa, TIPOS, extrasDoXml, stDoDet, compraDoXml, custoItem, sugere, avisosDfe, sugereFornecedor, chegadaCompras, pareceDespesa };
+  const api = { junta, valor, sequencia, lerContagem, atualFkn, ehCaixa, TIPOS, extrasDoXml, stDoDet, compraDoXml, devolucaoDoXml, custoItem, sugere, avisosDfe, sugereFornecedor, chegadaCompras, pareceDespesa };
   raiz.CRMEstoque = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);
@@ -247,6 +267,10 @@
   const filtro = { ver: 'saldo', busca: '', soDif: false };
   let dfe = [], dfeEst = null, buscouDfe = false, buscandoDfe = '', fornDocs = [], fornCad = [], itensProd = [], itensPend = [], nomesOp = [];
   let chegadas = new Map(); // compra.id → { chegou_em, chegou_nome, chegou_obs }: o "Chegou" da logística (22/10/2026)
+  let devolucoes = new Map(); // compra.id → { ref_chave, ref_numero, efeitos }: devolução emitida pelo cliente (22/10/2026)
+  const leDevolucoes = async st => new Map(((st.comprasDevolucoes ? await st.comprasDevolucoes().catch(() => []) : [])).map(x => [x.id, x]));
+  const seloDevolucao = c => { const d = devolucoes.get(c.id); return d ? ' ' + CRM.selo('↩ devolução do cliente' + (d.ref_numero ? ' · venda NF ' + d.ref_numero : ''), 'azul',
+    'nota de devolução emitida pelo cliente: volta ao estoque pelo custo médio e abate os títulos da venda (não é conta a pagar)') : ''; };
   // Logística (21/10/2026, pedido do Anderson): contagem e ajuste, entrada da nota de compra e movimentos, SEM custo nem
   // valor da nota (custo só administrador, gestora e comprador). Lê pelas funções "…_op" do banco, que só trazem quantidades.
   const op = () => CRM.ehLogistica();
@@ -263,6 +287,7 @@
         itensProd = idsOp.length ? await st.comprasItensProduto().catch(() => []) : [];
         itensPend = idsOp.length ? await st.compraItensOp(idsOp).catch(() => []) : [];
         chegadas = new Map(((st.comprasChegadas && idsOp.length ? await st.comprasChegadas().catch(() => []) : [])).map(x => [x.id, x]));
+        devolucoes = await leDevolucoes(st);
         carregando = false; CRM.render(); return;
       }
       [saldo, fkn, fotos, compras, dfe, dfeEst] = await Promise.all([st.estoqueSaldo(), st.estoque(), st.estoqueFotos(60), st.compras ? st.compras(200).catch(() => []) : [],
@@ -272,6 +297,7 @@
       const idsPend = compras.filter(c => c.situacao === 'pendente').map(c => c.id);
       itensPend = idsPend.length && st.compraItensDe ? await st.compraItensDe(idsPend).catch(() => []) : [];
       chegadas = new Map(((st.comprasChegadas && idsPend.length ? await st.comprasChegadas().catch(() => []) : [])).map(x => [x.id, x]));
+      devolucoes = await leDevolucoes(st);
       if (st.modo === 'supabase' && podeSefaz() && !buscouDfe && (!dfeEst || !dfeEst.proxima_em || Date.parse(dfeEst.proxima_em) < Date.now())) { buscouDfe = true; setTimeout(() => buscaSefaz(true), 50); }
       const conferida = fotos.find(f => f.conferida_em);
       fotoVista = fotoVista || (conferida && conferida.id) || null;
@@ -394,7 +420,7 @@
   function telaComprasOp() {
     const pend = compras.filter(c => c.situacao === 'pendente').sort((a, b) => String(b.emitida_em).localeCompare(String(a.emitida_em))),
       lancadas = compras.filter(c => c.situacao === 'lancada').slice(0, 30);
-    const linha = c => '<tr><td><strong>' + esc(c.fornecedor_nome || '?') + '</strong><small>NF ' + esc(c.numero) + ' · ' + esc(quando(c.emitida_em)) + '</small></td><td>' +
+    const linha = c => '<tr><td><strong>' + esc(c.fornecedor_nome || '?') + '</strong>' + seloDevolucao(c) + '<small>NF ' + esc(c.numero) + ' · ' + esc(quando(c.emitida_em)) + '</small></td><td>' +
       (c.situacao === 'pendente' ? (chegadas.has(c.id) ? seloGalpao(chegadas.get(c.id)) + ' ' + CRM.selo('falta a entrada do comprador', 'cinza') : CRM.selo('esperando chegar', 'ambar')) : CRM.selo('entrada ' + quando(c.lancada_em), 'verde')) + '</td><td class="num">' +
       (c.situacao === 'pendente' ? (chegadas.has(c.id) ? '<button type="button" class="mini" data-acao="es-chegou-desfazer" data-id="' + esc(c.id) + '" title="Marquei por engano">desfazer</button> '
           : '<button type="button" class="btn verde" data-acao="es-chegou" data-id="' + esc(c.id) + '">✓ Chegou</button> ') +
@@ -411,7 +437,7 @@
     const ch = dono() ? new Map() : S.chegadaCompras({ compras: compras.filter(c => c.situacao === 'pendente'), itensProd, fkn, fknForn: fknFornecedores() });
     const listagem = (fkn || []).reduce((m, x) => (x.atualizado_em && x.atualizado_em > m ? x.atualizado_em : m), '');
     const despesa = new Map();
-    compras.filter(c => c.situacao === 'pendente').forEach(c => { const m = S.pareceDespesa(itensPend.filter(i => i.compra_id === c.id)); if (m) despesa.set(c.id, m); });
+    compras.filter(c => c.situacao === 'pendente' && !devolucoes.has(c.id)).forEach(c => { const m = S.pareceDespesa(itensPend.filter(i => i.compra_id === c.id)); if (m) despesa.set(c.id, m); });
     const ordem = c => (despesa.has(c.id) ? -1 : chegadas.has(c.id) ? 0 : ch.has(c.id) ? ORDEM_CHEGADA[ch.get(c.id).estado] : 9);
     // as mais novas em cima (pedido do Anderson, 19/10); dentro do mesmo dia, as que chegaram primeiro
     const pend = compras.filter(c => c.situacao === 'pendente').sort((a, b) => String(b.emitida_em).slice(0, 10).localeCompare(String(a.emitida_em).slice(0, 10)) || ordem(a) - ordem(b)),
@@ -420,7 +446,7 @@
       historico = compras.filter(c => c.situacao === 'ignorada' && String(c.obs || '').startsWith(HISTORICO)).length;
     const chegaram = pend.filter(c => !despesa.has(c.id) && ordem(c) >= 0 && ordem(c) <= 1).length;
     const linhaC = c => { const x = ch.get(c.id), g = chegadas.get(c.id), desp = despesa.get(c.id), veio = !desp && (g || (x && (x.estado === 'chegou' || x.estado === 'provavel')));
-      return '<tr><td><strong>' + esc(c.fornecedor_nome || '?') + '</strong><small>NF ' + esc(c.numero) + ' · ' + esc(quando(c.emitida_em)) + '</small></td>' +
+      return '<tr><td><strong>' + esc(c.fornecedor_nome || '?') + '</strong>' + seloDevolucao(c) + '<small>NF ' + esc(c.numero) + ' · ' + esc(quando(c.emitida_em)) + '</small></td>' +
       '<td class="num">' + R.moeda(c.valor_total) + '</td><td>' + (c.situacao === 'pendente'
         ? (desp ? CRM.selo('💡 parece despesa (' + desp + '): não é mercadoria', 'azul', 'não entra no estoque; a despesa vai no Caixa') : CRM.selo('pendente', 'ambar') + ' ' + (g ? seloGalpao(g) : dono() ? CRM.selo('esperando a logística marcar ✓ Chegou', 'cinza') : seloChegada(x, listagem)))
         : c.situacao === 'lancada' ? CRM.selo('entrada ' + quando(c.lancada_em), 'verde') : CRM.selo('deixada de lado', 'cinza') + (c.obs ? ' <small>' + esc(c.obs) + '</small>' : '')) + '</td>' +
@@ -738,7 +764,8 @@
         const base = (op() ? nomesOp : fkn || []).filter(e => !S.ehCaixa(e.codigo));
         const nomeDe = new Map(base.map(e => [e.codigo, e.descricao])), unDe = new Map(base.map(e => [e.codigo, e.unidade]));
         (saldo || []).forEach(x => { if (!nomeDe.has(x.codigo)) { nomeDe.set(x.codigo, x.descricao); unDe.set(x.codigo, x.unidade); } });
-        const ctx = { vinculos: new Map(vinc.map(v => [v.fornecedor_doc + '|' + v.cod_fornecedor, v])), produtos: base, unidades: new Map(unis.map(u => [u.codigo + '|' + u.unidade, Number(u.fator)])) };
+        const dv = devolucoes.get(id);
+        const ctx = { vinculos: new Map(vinc.map(v => [v.fornecedor_doc + '|' + v.cod_fornecedor, v])), produtos: base, unidades: new Map(unis.map(u => [u.codigo + '|' + u.unidade, Number(u.fator)])), devolucao: !!dv };
         const pend = c.situacao === 'pendente';
         const sug = new Map(itens.map(it => [it.id, pend ? S.sugere(it, c.fornecedor_doc, ctx) : { codigo: it.codigo, fator: it.fator, como: '' }]));
         const linhaI = it => {
@@ -751,11 +778,14 @@
         };
         CRM.abrirForm({
           titulo: 'NF ' + c.numero + ' · ' + (c.fornecedor_nome || ''), largura: 'extra', campos: [], valores: {},
-          intro: (pend ? 'Ligue cada item a um produto nosso e diga o fator (quantas unidades do nosso estoque vêm em 1 unidade da nota). "Não é estoque": frete, brinde, material de uso. Dar entrada soma no estoque do CRM e, depois da virada (CRM dono do cadastro), lança as parcelas no contas a pagar do Caixa.'
-            : 'Entrada dada em ' + quando(c.lancada_em) + '.') + (c.parcelas && c.parcelas.length ? ' Parcelas da nota: ' + c.parcelas.map(p => R.dataBR(p.vencimento) + ' ' + R.moeda(p.valor)).join(', ') + ' (depois da virada entram no contas a pagar do Caixa com a entrada; antes, vêm do FKN).' : ''),
+          intro: dv ? (pend ? '↩ Devolução emitida pelo cliente' + (dv.ref_numero ? ' (venda NF ' + dv.ref_numero + ')' : ' (a nota não diz qual venda: confira os títulos do cliente depois)') +
+              '. Ligue cada item ao nosso produto (o código da nossa nota já vem) e diga o fator. A entrada devolve ao estoque pelo custo médio, não vira conta a pagar e abate o valor dos títulos da venda; se o cliente já pagou, fica "Devolver ao cliente" no Caixa.'
+              : 'Devolução: entrada dada em ' + quando(c.lancada_em) + '.' + (dv.efeitos && dv.efeitos.abatido != null ? ' Abatido dos títulos: ' + R.moeda(dv.efeitos.abatido) + (Number(dv.efeitos.sobra) > 0 ? ' · a devolver ao cliente: ' + R.moeda(dv.efeitos.sobra) : '') + '.' : ''))
+          : (pend ? 'Ligue cada item a um produto nosso e diga o fator (quantas unidades do nosso estoque vêm em 1 unidade da nota). "Não é estoque": frete, brinde, material de uso. Dar entrada soma no estoque do CRM e, depois da virada (CRM dono do cadastro), lança as parcelas no contas a pagar do Caixa.'
+            : 'Entrada dada em ' + quando(c.lancada_em) + '.') + (!dv && c.parcelas && c.parcelas.length ? ' Parcelas da nota: ' + c.parcelas.map(p => R.dataBR(p.vencimento) + ' ' + R.moeda(p.valor)).join(', ') + ' (depois da virada entram no contas a pagar do Caixa com a entrada; antes, vêm do FKN).' : ''),
           htmlDepois: '<datalist id="esProdutos">' + R.ordemAlfa([...nomeDe.entries()], x => x[1] || x[0]).map(([k, v]) => '<option value="' + esc(k) + '">' + esc(v || '') + '</option>').join('') + '</datalist>' +
             '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Item da nota</th><th>Produto nosso</th><th>Fator</th><th></th></tr></thead><tbody>' + itens.map(linhaI).join('') + '</tbody></table></div>',
-          salvarTexto: pend ? 'Dar entrada no estoque' : 'Fechar',
+          salvarTexto: pend ? (dv ? 'Dar entrada da devolução' : 'Dar entrada no estoque') : 'Fechar',
           extras: form => {
             const atualiza = it => {
               const cod = form.elements['c_' + it.id].value.trim(), fat = Number(form.elements['f_' + it.id].value) || 0;
@@ -773,7 +803,10 @@
             const fora = lista.filter(x => !x.ignorar && !nomeDe.has(x.codigo));
             if (fora.length && !confirm(fora.length + ' código(s) que o estoque não tem (' + fora.map(x => x.codigo).join(', ') + '). Criar no estoque do CRM assim mesmo?')) return false;
             const r = await st.compraLancar(id, lista);
-            CRM.toast('Entrada dada: ' + r.itens + ' item(ns) no estoque' + (r.ignorados ? ', ' + r.ignorados + ' fora do estoque' : '') + '.');
+            const e = r.devolucao;
+            CRM.toast('Entrada dada: ' + r.itens + ' item(ns) no estoque' + (r.ignorados ? ', ' + r.ignorados + ' fora do estoque' : '') + '.' +
+              (e ? (e.sem_nota ? ' A nota não diz qual venda: abata os títulos do cliente à mão.' : ' Abatido dos títulos da venda NF ' + e.venda + ': ' + R.moeda(e.abatido) + '.' +
+                (Number(e.sobra) > 0 ? ' O cliente já tinha pago ' + R.moeda(e.sobra) + ': ficou "Devolver ao cliente" no Caixa.' : '')) : ''));
             saldo = null; carrega();
           }
         });

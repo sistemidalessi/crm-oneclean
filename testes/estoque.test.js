@@ -57,6 +57,32 @@ test('nota de compra do XML: itens com IPI, ST, frete e outras; custo na unidade
   assert.deepEqual(S.sugere({ descricao: 'LUVA NITRILICA', unidade: 'CX' }, 'x', ctx).codigo, null, 'nada parecido: o comprador escolhe');
 });
 
+test('devolução emitida pelo cliente: reconhecida pela finalidade ou pelo CFOP, com a nossa nota referenciada e sem parcelas', () => {
+  const N = require('../nfe.js');
+  const nossa = '35261012345678000199550010000027331000027330', outra = '35260911111111000111550010000001231000001230';
+  const chave = '35261044555666000199550010000000991000000999';
+  const monta = (fin, cfop, ref) => '<nfeProc versao="4.00"><NFe><infNFe versao="4.00" Id="NFe' + chave + '"><ide><mod>55</mod><serie>1</serie><nNF>99</nNF><dhEmi>2026-11-05T09:00:00-03:00</dhEmi><tpNF>1</tpNF><finNFe>' + fin + '</finNFe><natOp>DEVOLUCAO</natOp>' +
+    (ref || '') + '</ide><emit><CNPJ>44555666000199</CNPJ><xNome>CLIENTE EXEMPLO LTDA</xNome></emit><dest><CNPJ>12345678000199</CNPJ><xNome>EMPRESA EXEMPLO</xNome></dest>' +
+    '<det nItem="1"><prod><cProd>010001</cProd><cEAN>SEM GTIN</cEAN><xProd>DETERGENTE NEUTRO 5L</xProd><NCM>34022000</NCM><CFOP>' + cfop + '</CFOP><uCom>GL</uCom><qCom>2</qCom><vUnCom>30</vUnCom><vProd>60.00</vProd></prod><imposto></imposto></det>' +
+    '<total><ICMSTot><vProd>60.00</vProd><vNF>60.00</vNF></ICMSTot></total><cobr><dup><nDup>001</nDup><dVenc>2026-12-05</dVenc><vDup>60.00</vDup></dup></cobr></infNFe></NFe>' +
+    '<protNFe><infProt><chNFe>' + chave + '</chNFe><cStat>100</cStat></infProt></protNFe></nfeProc>';
+  const le = x => S.compraDoXml(N.lerXml(x), x, '12345678000199').compra;
+  // finalidade 4 com NFref de duas notas: vale a NOSSA (CNPJ da chave)
+  const c1 = le(monta('4', '5202', '<NFref><refNFe>' + outra + '</refNFe></NFref><NFref><refNFe>' + nossa + '</refNFe></NFref>'));
+  assert.deepEqual([c1.devolucao, c1.ref_chave, c1.parcelas.length], [true, nossa, 0], 'devolução não vira conta a pagar');
+  // finalidade 1 mas CFOP de devolução e a chave no DFeReferenciado do item
+  const x2 = monta('1', '6411').replace('</prod>', '</prod>').replace('<imposto></imposto>', '<imposto></imposto><DFeReferenciado><chaveAcesso>' + nossa + '</chaveAcesso><nItem>1</nItem></DFeReferenciado>');
+  assert.deepEqual([le(x2).devolucao, le(x2).ref_chave], [true, nossa]);
+  // compra comum
+  const c3 = le(monta('1', '5102'));
+  assert.deepEqual([c3.devolucao, c3.ref_chave, c3.parcelas.length], [false, null, 1]);
+  // a sugestão usa o nosso código que o cliente copiou da nota de venda
+  const produtos = [{ codigo: '010001', descricao: 'DETERGENTE NEUTRO 5 LITROS', unidade: 'GL' }];
+  const it = { cod_fornecedor: '010001', descricao: 'DET NEUTRO', unidade: 'GL' };
+  assert.deepEqual(S.sugere(it, '44555666000199', { vinculos: new Map(), produtos, unidades: new Map(), devolucao: true }), { codigo: '010001', fator: 1, como: 'mesmo código da nossa nota' });
+  assert.equal(S.sugere(it, '44555666000199', { vinculos: new Map(), produtos, unidades: new Map() }).codigo, null, 'de fornecedor, o mesmo código não basta');
+});
+
 test('notas da Sefaz: fornecedor que nunca vendeu e o prazo da resposta definitiva', () => {
   const S = require('../estoque.js');
   const dfe = [

@@ -184,7 +184,10 @@
     return out;
   }
 
-  const prefixoDup = numero => String(numero || 0).padStart(6, '0');
+  // Duplicata = nota/parcela ("002564/01"). As notas do CRM (série 2, desde a virada de 11/2026) recomeçam do 1, e o FKN
+  // deixou títulos com número baixo de outra série (ex.: "000012/01"): fora da série 1, a série vai na frente ("2-000012/01")
+  // para a nota nova não perder o título por número repetido.
+  const prefixoDup = (numero, serie) => { const n = String(numero || 0).padStart(6, '0'), s = String(Number(serie) || 1); return s === '1' ? n : s + '-' + n; };
   const PAGAMENTO = { '01': 'DINHEIRO', '02': 'CHEQUE', '03': 'CARTÃO CRÉDITO', '04': 'CARTÃO DÉBITO', '05': 'CRÉDITO LOJA', '15': 'BOLETO',
     '16': 'DEPÓSITO', '17': 'PIX', '18': 'TRANSFERÊNCIA', '90': 'SEM PAGAMENTO', '99': 'OUTROS' };
 
@@ -223,7 +226,7 @@
       const ex = existentes.get(ch);
       if (ex && !ex.cancelada) { plano.atualizar.push({ tabela: 'notas', id: ex.id, patch: { cancelada: true } }); conta('notas', 'atualizados'); resumo.canceladas++; }
       // Nota cancelada: os títulos que vieram dela saem (prefixo da duplicata; o nNF está na chave).
-      plano.titulosCancelados.push(prefixoDup(Number(ch.slice(25, 34))));
+      plano.titulosCancelados.push(prefixoDup(Number(ch.slice(25, 34)), Number(ch.slice(22, 25))));
     });
 
     // ---- vendedor da nota -> usuário do CRM (nome completo ou primeiro nome, se só um tiver)
@@ -433,7 +436,7 @@
       // confirma depois e tira o que foi pago. Só nota de venda, não cancelada.
       if (!cancelada && (d.parcelas || []).length && d.itens.some(it => R.cfopDeVenda(it.cfop))) {
         d.parcelas.forEach(pc => {
-          plano.criar.titulos.push({ duplicata: prefixoDup(d.numero) + '/' + String(pc.n).padStart(2, '0'), nota_numero: d.numero, parcela: pc.n,
+          plano.criar.titulos.push({ duplicata: prefixoDup(d.numero, d.serie) + '/' + String(pc.n).padStart(2, '0'), nota_numero: d.numero, parcela: pc.n,
             empresa_id: n.empresa_id || null, cliente_doc: d.cliente.doc || null, cliente_nome: texto(d.cliente.nome), vendedor_nome: texto(d.vendedor),
             emitida_em: R.diaLocal(n.emitida_em), vencimento: pc.vencimento, valor: pc.valor, portador: PAGAMENTO[d.forma_pagamento] || null, origem: 'nota' });
           conta('titulos', 'criados');

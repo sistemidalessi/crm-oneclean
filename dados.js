@@ -477,6 +477,8 @@
   // "Chegou" da nota de compra, marcado pela logística (22/10/2026)
   Supa.prototype.compraChegou = async function (id, obs, desfazer) { return unwrap(await this.sb.rpc('crm_compra_chegou', { p_id: id, p_obs: obs || '', p_desfazer: !!desfazer })); };
   Supa.prototype.comprasChegadas = async function () { return unwrap(await this.sb.rpc('crm_compras_chegadas')); };
+  // devoluções emitidas pelo cliente entre as notas de compra (efeitos só para administrador e comprador)
+  Supa.prototype.comprasDevolucoes = async function () { return unwrap(await this.sb.rpc('crm_compras_devolucoes')) || []; };
   Supa.prototype.produtosDono = async function () {
     const r = unwrap(await this.sb.from('crm_sistema').select('valor').eq('chave', 'produtos_dono').maybeSingle());
     return !!(r && r.valor === 'crm');
@@ -524,6 +526,7 @@
   // modo local (demonstração): o cadastro continua o da base, sem a chave
   Local.prototype.compraChegou = async function () { throw new Error('as notas de compra só funcionam ligadas ao banco'); };
   Local.prototype.comprasChegadas = async function () { return []; };
+  Local.prototype.comprasDevolucoes = async function () { return []; };
   Local.prototype.produtosDono = async function () { return false; };
   Local.prototype.produtosPassarAoCrm = async function () { throw new Error('o cadastro de produto só funciona ligado ao banco'); };
   Local.prototype.produtoLer = async function () { return null; };

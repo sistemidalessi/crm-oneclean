@@ -4758,3 +4758,119 @@ begin
   return jsonb_build_object('ok', true, 'espelhados', n);
 end;
 $$;
+
+-- ============================================================ Devolução emitida pelo cliente (22/10/2026, virada)
+-- Devolução emitida pelo cliente contribuinte (22/10/2026, virada): a nota chega pela Sefaz como uma compra (o cliente é o
+-- emitente e a OneClean o destinatário). O CRM a marca (devolucao, ref_chave = a nossa nota de venda) e a entrada é outra:
+-- volta ao estoque pelo CUSTO MÉDIO (não pelo valor da nota), não vira conta a pagar e abate os títulos da venda devolvida
+-- (os mais distantes primeiro; o que sobrar, se o cliente já pagou, vira "Devolver ao cliente" no Caixa). efeitos guarda o que
+-- foi feito.
+alter table public.crm_compras add column if not exists devolucao boolean not null default false;
+alter table public.crm_compras add column if not exists ref_chave text;
+alter table public.crm_compras add column if not exists efeitos jsonb;
+
+create or replace function public.crm_compra_pagar() returns trigger language plpgsql security definer set search_path = public as $$
+declare p jsonb; k int; i int := 0; forn text; num text;
+begin
+  if not public.crm_produtos_do_crm() then return new; end if;
+  if new.situacao <> 'lancada' or old.situacao = 'lancada' then return new; end if;
+  if new.devolucao then return new; end if; -- devolução do cliente: não é conta a pagar (abate os títulos da venda)
+  if exists (select 1 from public.crm_fin_lancamentos where compra_id = new.id) then return new; end if;
+  forn := coalesce(nullif(btrim(new.fornecedor_nome), ''), 'Fornecedor');
+  num := coalesce(new.numero::text, '?');
+  k := jsonb_array_length(coalesce(new.parcelas, '[]'::jsonb));
+  if k = 0 then
+    insert into public.crm_fin_lancamentos (tipo, descricao, fornecedor, categoria, valor, vencimento, origem, compra_id, parcela, parcelas, titulo_duplicata, observacoes)
+    values ('saida', forn || ' · ' || num, forn, 'Fornecedores', coalesce(new.valor_total, 0), coalesce((new.emitida_em at time zone 'America/Sao_Paulo')::date, current_date),
+      'tela', new.id, 1, 1, num, 'A nota de compra não traz as parcelas: confira o vencimento com o boleto do fornecedor.');
+    return new;
+  end if;
+  for p in select value from jsonb_array_elements(new.parcelas) loop
+    i := i + 1;
+    insert into public.crm_fin_lancamentos (tipo, descricao, fornecedor, categoria, valor, vencimento, origem, compra_id, parcela, parcelas, titulo_duplicata)
+    values ('saida', forn || ' · ' || num || '-' || lpad(coalesce(p->>'n', i::text), 2, '0'), forn, 'Fornecedores', coalesce((p->>'valor')::numeric, 0),
+      coalesce(nullif(p->>'vencimento', '')::date, (new.emitida_em at time zone 'America/Sao_Paulo')::date, current_date),
+      'tela', new.id, i, k, num || '-' || lpad(coalesce(p->>'n', i::text), 2, '0'))
+    on conflict do nothing;
+  end loop;
+  return new;
+end;
+$$;
+
+create or replace function public.crm_compra_lancar(p_compra uuid, p_itens jsonb) returns jsonb language plpgsql security definer set search_path = public as $$
+declare c record; it record; x jsonb; cod text; f numeric; q numeric; custo numeric; n integer := 0; ign integer := 0; agora timestamptz := now();
+  v record; pre text; t record; resto numeric; abat numeric := 0; ntit integer := 0; ef jsonb := null;
+begin
+  if not public.crm_eh_estoque_op() then raise exception 'só o administrador, o comprador ou a logística'; end if;
+  select * into c from public.crm_compras where id = p_compra for update;
+  if c.id is null then raise exception 'nota de compra não encontrada'; end if;
+  if c.situacao <> 'pendente' then raise exception 'esta nota já foi %', case c.situacao when 'lancada' then 'lançada' else 'deixada de lado' end; end if;
+  if not exists (select 1 from public.crm_estoque_saldo) then raise exception 'comece o estoque do CRM antes de dar entrada nas compras'; end if;
+  for it in select * from public.crm_compra_itens where compra_id = c.id order by ordem loop
+    x := null;
+    select e.value into x from jsonb_array_elements(coalesce(p_itens, '[]'::jsonb)) e where e.value->>'id' = it.id::text limit 1;
+    if x is null then raise exception 'falta dizer o produto do item % (%)', it.ordem, it.descricao; end if;
+    if coalesce((x->>'ignorar')::boolean, false) then ign := ign + 1; continue; end if;
+    cod := nullif(btrim(x->>'codigo'), ''); f := nullif(x->>'fator', '')::numeric;
+    if cod is null or f is null or f <= 0 then raise exception 'item % (%): diga o produto e o fator', it.ordem, it.descricao; end if;
+    q := round(it.quantidade * f, 3);
+    if q <= 0 then raise exception 'item % (%): quantidade zerada', it.ordem, it.descricao; end if;
+    custo := round((it.valor_total + it.ipi + it.st + it.frete + it.outras) / q, 4);
+    if c.devolucao then -- a mercadoria é nossa: volta pelo custo médio (não refaz o custo pelo preço de venda)
+      custo := coalesce((select s.custo_medio from public.crm_estoque_saldo s where s.codigo = cod), custo);
+    end if;
+    insert into public.crm_estoque_saldo (codigo, descricao, unidade, inicio)
+      select cod, coalesce(e.descricao, it.descricao), public.crm_un(coalesce(e.unidade, it.unidade)), agora - interval '1 second'
+      from (select 1) u left join public.crm_estoque e on e.codigo = cod
+      on conflict (codigo) do nothing;
+    insert into public.crm_estoque_mov (codigo, quando, tipo, quantidade, custo_unit, qtd_doc, unidade_doc, fator, compra_item_id, motivo)
+      values (cod, agora, 'entrada', q, custo, it.quantidade, public.crm_un(it.unidade), f, it.id,
+        left(case when c.devolucao then 'Devolução do cliente NF ' else 'NF ' end || coalesce(c.numero::text, '?') || ' ' || coalesce(c.fornecedor_nome, ''), 200));
+    update public.crm_compra_itens set codigo = cod, fator = f where id = it.id;
+    if c.fornecedor_doc is not null and it.cod_fornecedor is not null then
+      insert into public.crm_compra_vinculos (fornecedor_doc, cod_fornecedor, codigo, fator) values (c.fornecedor_doc, it.cod_fornecedor, cod, f)
+        on conflict (fornecedor_doc, cod_fornecedor) do update set codigo = excluded.codigo, fator = excluded.fator, atualizado_em = now();
+    end if;
+    n := n + 1;
+  end loop;
+  if c.devolucao then
+    resto := coalesce(c.valor_total, 0);
+    select numero, serie into v from public.crm_notas where chave = c.ref_chave;
+    if v.numero is null then
+      ef := jsonb_build_object('sem_nota', true, 'abatido', 0, 'sobra', resto);
+    else
+      -- duplicata da nota (nfe.js: "002564/01"; fora da série 1, "2-000012/01")
+      pre := case when coalesce(nullif(v.serie, '')::int, 1) = 1 then lpad(v.numero::text, 6, '0') else v.serie::int || '-' || lpad(v.numero::text, 6, '0') end;
+      for t in select id, valor from public.crm_titulos where split_part(duplicata, '/', 1) = pre and not abono order by vencimento desc loop
+        exit when resto <= 0;
+        if t.valor <= resto then
+          update public.crm_titulos set abono = true, atualizado_em = now() where id = t.id;
+          abat := abat + t.valor; resto := round(resto - t.valor, 2);
+        else
+          update public.crm_titulos set valor = round(valor - resto, 2), atualizado_em = now() where id = t.id;
+          abat := abat + resto; resto := 0;
+        end if;
+        ntit := ntit + 1;
+      end loop;
+      if resto > 0 then
+        insert into public.crm_fin_lancamentos (tipo, descricao, fornecedor, categoria, valor, vencimento, origem, observacoes)
+        values ('saida', 'Devolver ao cliente: devolução NF ' || coalesce(c.numero::text, '?') || ' (venda NF ' || v.numero || ')', c.fornecedor_nome, 'Outras saídas',
+          resto, current_date + 7, 'tela', 'O cliente já tinha pago a venda: devolver o dinheiro ou deixar de crédito. Se ficar de crédito, exclua este lançamento.');
+      end if;
+      ef := jsonb_build_object('venda', v.numero, 'titulos', ntit, 'abatido', abat, 'sobra', resto);
+    end if;
+  end if;
+  update public.crm_compras set situacao = 'lancada', lancada_em = agora, lancada_por = auth.uid(), atualizado_em = agora, efeitos = coalesce(ef, efeitos) where id = c.id;
+  return jsonb_build_object('itens', n, 'ignorados', ign) || case when ef is null then '{}'::jsonb else jsonb_build_object('devolucao', ef) end;
+end;
+$$;
+
+-- As devoluções de cliente entre as notas de compra (para a tela da logística, que lê as compras por crm_compras_op).
+create or replace function public.crm_compras_devolucoes() returns table (id uuid, ref_chave text, ref_numero bigint, efeitos jsonb)
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if not public.crm_eh_estoque_op() then raise exception 'sem acesso ao estoque'; end if;
+  return query select c.id, c.ref_chave, n.numero::bigint, case when public.crm_eh_admin() or public.crm_eh_comprador() then c.efeitos end
+    from public.crm_compras c left join public.crm_notas n on n.chave = c.ref_chave where c.devolucao order by c.emitida_em desc limit 200;
+end;
+$$;
