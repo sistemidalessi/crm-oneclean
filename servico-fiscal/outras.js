@@ -38,7 +38,8 @@ function leNota(xml) {
       vOutro: num(n(p, 'vOutro')), xPed: desc(pega(p, 'xPed')),
       icms: { orig: pega(ic, 'orig'), cst: pega(ic, 'CST') || pega(ic, 'CSOSN'), vBC: num(n(ic, 'vBC')), pICMS: num(n(ic, 'pICMS')), vICMS: num(n(ic, 'vICMS')),
         modBCST: pega(ic, 'modBCST'), pMVAST: n(ic, 'pMVAST'), vBCST: num(n(ic, 'vBCST')), pICMSST: num(n(ic, 'pICMSST')), vICMSST: num(n(ic, 'vICMSST')),
-        vBCSTRet: n(ic, 'vBCSTRet'), pST: n(ic, 'pST'), vICMSSubstituto: n(ic, 'vICMSSubstituto'), vICMSSTRet: n(ic, 'vICMSSTRet') },
+        vBCSTRet: n(ic, 'vBCSTRet'), pST: n(ic, 'pST'), vICMSSubstituto: n(ic, 'vICMSSubstituto'), vICMSSTRet: n(ic, 'vICMSSTRet'),
+        pCredSN: num(n(ic, 'pCredSN')), vCredICMSSN: num(n(ic, 'vCredICMSSN')) },
       ipi: { cst: pega(ipi, 'CST'), vIPI: num(n(ipi, 'vIPI')) },
       pis: { cst: pega(pis, 'CST'), p: num(n(pis, 'pPIS')), v: num(n(pis, 'vPIS')) }, cofins: { cst: pega(cof, 'CST'), p: num(n(cof, 'pCOFINS')), v: num(n(cof, 'vCOFINS')) } };
   });
@@ -95,8 +96,14 @@ function notaDevolucao(o) {
     let st = null;
     if (num(ic.vICMSST) > 0) { st = { vBCST: prop(ic.vBCST, f), vICMSST: prop(ic.vICMSST, f) }; icms = { cst: '90', aliquota: ic.pICMS, vBC: prop(ic.vBC, f) }; }
     else if (num(ic.vICMS) > 0) icms = { cst: '00', aliquota: ic.pICMS, vBC: prop(ic.vBC, f) };
+    // Fornecedor do Simples Nacional com crédito (CSOSN 101/201/900): a nota dele não destaca ICMS, só o crédito permitido
+    // (pCredSN). A devolução estorna esse crédito: ICMS destacado com a alíquota do crédito sobre o valor devolvido.
+    else if (num(ic.vCredICMSSN) > 0 && num(ic.pCredSN) > 0) {
+      icms = { cst: '90', aliquota: ic.pCredSN, vBC: r2(q * num(it.vUnCom) - prop(it.vDesc, f) + prop(it.vFrete, f)) };
+      conferir.push('item ' + x.nItem + ': fornecedor do Simples Nacional (CSOSN ' + cst + '); a devolução estorna o crédito de ' + num(ic.pCredSN) + '% que veio na compra');
+    }
     else if (cst === '60' || cst === '500') icms = { cst: '60', stRet: ic.vICMSSTRet != null ? { vBCSTRet: prop(ic.vBCSTRet, f), pST: ic.pST, vICMSSubstituto: ic.vICMSSubstituto == null ? null : prop(ic.vICMSSubstituto, f), vICMSSTRet: prop(ic.vICMSSTRet, f) } : null };
-    else icms = { cst: '90' };
+    else { icms = { cst: '90' }; conferir.push('item ' + x.nItem + ': a compra veio sem ICMS (CST/CSOSN ' + (cst || '?') + '): a devolução sai sem destaque'); }
     if (icms.cst === '00' && Math.abs(prop(ic.vBC, f) - r2(q * num(it.vUnCom) - prop(it.vDesc, f) + prop(it.vFrete, f))) > 0.05) conferir.push('item ' + x.nItem + ': a base do ICMS da nota original não é o valor do item (redução ou outras despesas); vai a mesma proporção');
     freteTot += prop(it.vFrete, f);
     if (st) stTxt.push('ITEM ' + x.nItem + ': BC ICMS-ST R$ ' + st.vBCST.toFixed(2) + ' ICMS-ST R$ ' + st.vICMSST.toFixed(2));
@@ -108,7 +115,8 @@ function notaDevolucao(o) {
       cfop: cfopDevolucao(it.cfop, tipo), unidade: it.unidade, quantidade: q, valorUnitario: r4(it.vUnCom), desconto: prop(it.vDesc, f), icms,
       ipiDevol: tipo === 'devolucao_fornecedor' ? prop(it.ipi.vIPI, f) : 0, outro: st ? st.vICMSST : 0,
       pis: fed(it.pis), cofins: fed(it.cofins),
-      infAdProd: 'Devolucao de ' + q + ' ' + (it.unidade || '') + ' do item ' + x.nItem + ' da NF ' + orig.numero };
+      infAdProd: 'Devolucao de ' + q + ' ' + (it.unidade || '') + ' do item ' + x.nItem + ' da NF ' + orig.numero,
+      ref: orig.chave ? { chave: orig.chave, nItem: x.nItem } : null };
   }).filter(Boolean);
   if (!itens.length && !bloqueia.length) bloqueia.push('nenhum item com quantidade para devolver');
   if (tipo === 'devolucao_cliente' && itens.some(i => i.ipiDevol)) conferir.push('IPI na devolução de cliente: conferir');

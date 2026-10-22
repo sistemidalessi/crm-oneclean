@@ -1760,7 +1760,11 @@ contador, com a escolha do CRM anotada na tabela do topo do documento.
   **Publicada a v12** em 22/10 (verify_jwt ligado, como antes; md5 `46d013df…` igual ao do repositório).
 - **Tela:** Pedidos → NF-e → "Outras notas" (Devolução a fornecedor…, Devolução de cliente…) e, no pedido, "Outra operação…"
   (bonificação, faturamento, remessa). Testado no navegador (prévia, limite pelo já devolvido).
-- **Falta:** atualizar o serviço fiscal na VPS (escritório) e testar em homologação; `revoke` das 3 funções; dar entrada na
+- **1º teste em homologação (22/10):** rejeição **321** ("devolução sem documento referenciado por item"): o leiaute de 2026
+  pede, além do NFref, o grupo `DFeReferenciado` (chave + nItem da nota original) em cada item — acrescentado (`it.ref`).
+  Também: fornecedor do **Simples Nacional** (CSOSN 101/201/900, só o crédito `pCredSN`) → a devolução estorna o crédito
+  (CST 90 com a alíquota do crédito); compra sem ICMS sai sem destaque com aviso. Serviço fiscal `2026-10-22b`.
+- **Falta:** atualizar o serviço fiscal na VPS de novo (`2026-10-22b`) e repetir o teste em homologação; `revoke` das 3 funções; dar entrada na
   nota de devolução que o **cliente contribuinte** emite (hoje ela chegaria como nota de compra); notas de crédito/débito
   do Ajuste SINIEF 49/2025 (obrigatórias em 2027).
 

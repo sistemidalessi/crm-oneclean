@@ -257,7 +257,9 @@ function monta(nota, opc) {
       (it.pedidoCliente ? tag('xPed', txt(it.pedidoCliente)) : '') + '</prod>';
     const imp = '<imposto>' + (it.vTotTrib != null ? tag('vTotTrib', d2(it.vTotTrib)) : '') + grupoIcms(ci, it) + grupoFed('PIS', ci.pis) + grupoFed('COFINS', ci.cofins) + grupoIbsCbs(ci.ibscbs) + '</imposto>';
     const devol = ci.ipiDevol > 0 ? '<impostoDevol><pDevol>100.00</pDevol><IPI>' + tag('vIPIDevol', d2(ci.ipiDevol)) + '</IPI></impostoDevol>' : '';
-    return '<det nItem="' + (i + 1) + '">' + prod + imp + devol + (it.infAdProd ? tag('infAdProd', txt(it.infAdProd)) : '') + '</det>';
+    // devolução: cada item aponta o item da nota original (DFeReferenciado, leiaute PL_010; sem ele a Sefaz rejeita com 321)
+    const ref = it.ref && it.ref.chave ? '<DFeReferenciado>' + tag('chaveAcesso', dig(it.ref.chave)) + (it.ref.nItem ? tag('nItem', String(Number(it.ref.nItem))) : '') + '</DFeReferenciado>' : '';
+    return '<det nItem="' + (i + 1) + '">' + prod + imp + devol + (it.infAdProd ? tag('infAdProd', txt(it.infAdProd)) : '') + ref + '</det>';
   }).join('');
   const t = c.totais;
   // tributos aproximados (Lei 12.741/2012, tabela do IBPT): por item e o total

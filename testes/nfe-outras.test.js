@@ -65,6 +65,9 @@ test('devolução a fornecedor: 5411 com o ICMS próprio em CST 90 e o ST em out
   // 200 + 100 de produtos, 14,40 de ST (metade dos 28,80 da compra) em outras despesas, 15 de IPI devolvido
   assert.deepStrictEqual([m.totais.vICMS, m.totais.vST, m.totais.vOutro, m.totais.vIPIDevol, m.totais.vNF], [54, 0, 14.4, 15, 329.4]);
   assert.ok(m.infNFe.indexOf('<vOutro>14.40</vOutro><indTot>1</indTot>') !== -1);
+  // cada item aponta o item da nota de compra (rejeição 321 sem isso)
+  assert.ok(m.infNFe.indexOf('<DFeReferenciado><chaveAcesso>' + c.chave + '</chaveAcesso><nItem>1</nItem></DFeReferenciado></det>') !== -1);
+  assert.ok(m.infNFe.indexOf('<DFeReferenciado><chaveAcesso>' + c.chave + '</chaveAcesso><nItem>2</nItem></DFeReferenciado></det>') !== -1);
   assert.ok(/DEVOLUCAO DE COMPRA REF\. NF 777/.test(r.nota.infCpl));
 });
 
@@ -80,6 +83,16 @@ test('devolução de cliente não contribuinte: entrada 1202 e 1411, crédito do
   // cliente contribuinte: a nota de devolução é dele
   const c = O.notaDevolucao(Object.assign({ tipo: 'devolucao_cliente', xml: notaDeVenda(true).xml, itens: [{ nItem: 1, quantidade: 1 }] }, comum));
   assert.ok(c.avisos.bloqueia.some(t => /contribuinte do ICMS/.test(t)));
+});
+
+test('fornecedor do Simples Nacional (CSOSN 101): a devolução estorna o crédito permitido', () => {
+  const c = notaDeCompra();
+  const xml = c.xml.replace(/<ICMS><ICMS00>[\s\S]*?<\/ICMS00><\/ICMS>/, '<ICMS><ICMSSN101><orig>0</orig><CSOSN>101</CSOSN><pCredSN>3.00</pCredSN><vCredICMSSN>3.00</vCredICMSSN></ICMSSN101></ICMS>');
+  const r = O.notaDevolucao(Object.assign({ tipo: 'devolucao_fornecedor', xml, itens: [{ nItem: 2, quantidade: 2 }] }, comum));
+  const it = r.nota.itens[0];
+  assert.deepStrictEqual([it.cfop, it.icms.cst, it.icms.aliquota, it.icms.vBC], ['5202', '90', 3, 50]);
+  assert.strictEqual(N.monta(r.nota).totais.vICMS, 1.5);
+  assert.ok(r.avisos.conferir.some(t => /Simples Nacional/.test(t)));
 });
 
 test('recusas: quantidade maior que a da nota, nota que não é da empresa', () => {
