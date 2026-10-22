@@ -229,9 +229,13 @@ function monta(nota, opc) {
   const indPres = nota.indPres == null ? 9 : nota.indPres;
   const tpNF = String(nota.tpNF == null ? 1 : nota.tpNF), fin = String(nota.finNFe == null ? 1 : nota.finNFe);
   if (['0', '1'].indexOf(tpNF) === -1 || ['1', '2', '3', '4'].indexOf(fin) === -1) throw new Error('tipo ou finalidade da nota inválidos');
-  const refs = (nota.refs || []).map(dig).filter(Boolean);
-  if (refs.some(k => k.length !== 44)) throw new Error('chave da nota referenciada com tamanho errado (são 44 dígitos)');
-  if (fin === '4' && !refs.length) throw new Error('nota de devolução precisa da chave da nota devolvida');
+  // A nota original vai referenciada OU no cabeçalho (NFref) OU em cada item (DFeReferenciado), nunca nos dois (rejeição 1010).
+  // Na devolução a Sefaz exige por item (rejeição 321): com itens referenciados, o NFref sai.
+  const porItem = (nota.itens || []).some(it => it.ref && it.ref.chave);
+  const refs = porItem ? [] : (nota.refs || []).map(dig).filter(Boolean);
+  if ((nota.refs || []).map(dig).filter(Boolean).some(k => k.length !== 44) || (nota.itens || []).some(it => it.ref && dig(it.ref.chave).length !== 44))
+    throw new Error('chave da nota referenciada com tamanho errado (são 44 dígitos)');
+  if (fin === '4' && !refs.length && !porItem) throw new Error('nota de devolução precisa da chave da nota devolvida');
   const ide = '<ide>' + tag('cUF', cUF) + tag('cNF', cNF) + tag('natOp', txt(nota.natOp || 'VENDA NO ESTADO')) + '<mod>55</mod>' + tag('serie', String(Number(nota.serie))) +
     tag('nNF', String(Number(nota.numero))) + tag('dhEmi', nota.emissao) + (nota.saida ? tag('dhSaiEnt', nota.saida) : '') + tag('tpNF', tpNF) + tag('idDest', idDest) +
     tag('cMunFG', dig(e.cMun)) + '<tpImp>1</tpImp><tpEmis>1</tpEmis>' + tag('cDV', chave.slice(-1)) + tag('tpAmb', homolog ? '2' : '1') + tag('finNFe', fin) +

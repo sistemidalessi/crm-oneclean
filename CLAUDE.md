@@ -1764,7 +1764,9 @@ contador, com a escolha do CRM anotada na tabela do topo do documento.
   pede, além do NFref, o grupo `DFeReferenciado` (chave + nItem da nota original) em cada item — acrescentado (`it.ref`).
   Também: fornecedor do **Simples Nacional** (CSOSN 101/201/900, só o crédito `pCredSN`) → a devolução estorna o crédito
   (CST 90 com a alíquota do crédito); compra sem ICMS sai sem destaque com aviso. Serviço fiscal `2026-10-22b`.
-- **Falta:** atualizar o serviço fiscal na VPS de novo (`2026-10-22b`) e repetir o teste em homologação; `revoke` das 3 funções; dar entrada na
+  2º teste: rejeição **1010** (referência no cabeçalho E por item): com itens referenciados o `NFref` sai — **a devolução
+  referencia só por item**. Serviço fiscal `2026-10-22c`.
+- **Falta:** atualizar o serviço fiscal na VPS (`2026-10-22c`) e repetir o teste em homologação; `revoke` das 3 funções; dar entrada na
   nota de devolução que o **cliente contribuinte** emite (hoje ela chegaria como nota de compra); notas de crédito/débito
   do Ajuste SINIEF 49/2025 (obrigatórias em 2027).
 

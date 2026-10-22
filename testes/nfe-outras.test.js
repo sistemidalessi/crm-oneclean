@@ -60,6 +60,7 @@ test('devolução a fornecedor: 5411 com o ICMS próprio em CST 90 e o ST em out
   assert.ok(/ITEM 1: BC ICMS-ST R\$ 280.00 ICMS-ST R\$ 14.40/.test(r.nota.infAdFisco));
   assert.deepStrictEqual([b.cfop, b.icms.cst, b.icms.vBC, b.ipiDevol], ['5202', '00', 100, 5]);
   assert.deepStrictEqual(r.nota.refs, [c.chave]);
+  // referência só por item: com DFeReferenciado o NFref do cabeçalho sai (rejeição 1010 com os dois)
   assert.strictEqual(r.nota.dest.doc, forn.cnpj);
   const m = N.monta(r.nota);
   // 200 + 100 de produtos, 14,40 de ST (metade dos 28,80 da compra) em outras despesas, 15 de IPI devolvido
@@ -68,6 +69,7 @@ test('devolução a fornecedor: 5411 com o ICMS próprio em CST 90 e o ST em out
   // cada item aponta o item da nota de compra (rejeição 321 sem isso)
   assert.ok(m.infNFe.indexOf('<DFeReferenciado><chaveAcesso>' + c.chave + '</chaveAcesso><nItem>1</nItem></DFeReferenciado></det>') !== -1);
   assert.ok(m.infNFe.indexOf('<DFeReferenciado><chaveAcesso>' + c.chave + '</chaveAcesso><nItem>2</nItem></DFeReferenciado></det>') !== -1);
+  assert.strictEqual(m.infNFe.indexOf('<NFref>'), -1);
   assert.ok(/DEVOLUCAO DE COMPRA REF\. NF 777/.test(r.nota.infCpl));
 });
 

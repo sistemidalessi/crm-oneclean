@@ -6,7 +6,7 @@
 
 | Operação | O CRM emite | Escolha nos pontos incertos |
 |---|---|---|
-| Devolução a fornecedor sem ST | 5202/6202, finNFe 4, tpNF 1, NFref da compra, CST 00 com a base e a alíquota da compra (proporcional), IPI devolvido em `impostoDevol`, PIS/COFINS 49 | — |
+| Devolução a fornecedor sem ST | 5202/6202, finNFe 4, tpNF 1, a compra referenciada **por item** (`DFeReferenciado`: a Sefaz rejeita com 321 sem ele e com 1010 se também houver o NFref no cabeçalho; testado em homologação em 22/10), CST 00 com a base e a alíquota da compra (proporcional), IPI devolvido em `impostoDevol`, PIS/COFINS 49 | — |
 | Devolução a fornecedor substituto (compra com ST destacado) | 5411/6411, ICMS próprio do fornecedor em **CST 90** com base e valor, ST proporcional em `vOutro` + `infAdFisco` | CST 90 (o 10 exigiria os campos de ST, que o substituído não pode usar) |
 | Devolução a fornecedor substituído (compra CST 60) | 5411/6411, CST 60 repetindo o ST retido da compra | — |
 | Bonificação | 5910/6910, ICMS como na venda (00 a 18% ou 60), PIS/COFINS 49, sem cobrança | nota própria (5910), não desconto de 100% na venda |
