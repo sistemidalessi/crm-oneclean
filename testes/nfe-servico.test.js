@@ -209,6 +209,12 @@ test('pedido → nota: o que bloqueia a emissão', () => {
   const prop = PD.notaDoPedido({ pedido, empresa: cliente, regras: { '010043': Object.assign({}, regras['010043'], { situacao: 'proposta' }), '250011': regras['250011'] }, emitente, ambiente: 'homologacao', serie: 2, numero: 1, emissao: '2026-10-20T10:00:00-03:00' });
   assert.deepStrictEqual(prop.avisos.bloqueia, []);
   assert.ok(prop.avisos.conferir.some(x => /proposta/.test(x)));
+  // regra com o CFOP de outra operação (6108 para fora de SP, 5117 entrega futura) não vira venda dentro de SP
+  ['6108', '5117'].forEach(cf => {
+    const r6 = JSON.parse(JSON.stringify(regras['010043'])); r6.regra.venda.cfop = cf;
+    const x = PD.notaDoPedido({ pedido, empresa: cliente, regras: { '010043': r6, '250011': regras['250011'] }, emitente, ambiente: 'homologacao', serie: 2, numero: 1, emissao: '2026-10-20T10:00:00-03:00' });
+    assert.ok(x.avisos.bloqueia.some(t => new RegExp('010043 .*CFOP ' + cf + ', que não é de venda dentro de SP').test(t)), cf);
+  });
 });
 
 test('intermediador: obrigatório na venda não presencial (9), ausente na presencial (1)', () => {

@@ -1240,7 +1240,10 @@
   Supa.prototype.ibptInfo = async function () {
     const um = unwrap(await this.sb.from('crm_ibpt').select('versao, chave, vig_ini, vig_fim, fonte').order('vig_fim', { ascending: false }).limit(1));
     const r = await this.sb.from('crm_ibpt').select('codigo', { count: 'exact', head: true });
-    return Object.assign({}, um[0] || {}, { n: r.count || 0 });
+    // a última atualização pela API do IBPT (crm-fiscal → crm_sistema.ibpt): quando, quantos, falhas ou o erro
+    const s = await this.sb.from('crm_sistema').select('valor, quando').eq('chave', 'ibpt').maybeSingle();
+    let api = null; try { api = s.data && s.data.valor ? JSON.parse(s.data.valor) : null; } catch (e) { api = null; }
+    return Object.assign({}, um[0] || {}, { n: r.count || 0, api });
   };
   Supa.prototype.ibptCarregar = async function (linhas) { return unwrap(await this.sb.rpc('crm_ibpt_carregar', { p_linhas: linhas })); };
   // Turma (turma.js): números do guia do dia, contados pela RLS de quem pergunta.

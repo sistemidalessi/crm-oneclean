@@ -8,6 +8,7 @@
 // (confirmação, desconhecimento, operação não realizada), só o administrador.
 // Deploy: verify_jwt LIGADO.
 import { createClient } from 'npm:@supabase/supabase-js@2.116.0';
+import { ibptUrl, ibptLinha, ibptPrecisa } from './ibpt.js';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -42,6 +43,43 @@ async function entregaAoCrm(db: ReturnType<typeof createClient>, nome: string, x
   const r = await fetch(Deno.env.get('SUPABASE_URL') + '/functions/v1/crm-notas', { method: 'POST',
     headers: { 'x-crm-chave': chave, 'Content-Type': 'application/json' }, body: JSON.stringify({ arquivos: [{ nome, xml }] }) });
   return await r.json().catch(() => ({ erro: 'crm-notas: HTTP ' + r.status }));
+}
+
+// Tabela do IBPT pela API (De Olho no Imposto; token nos Secrets como IBPT_TOKEN). Consulta os NCM dos produtos com regra
+// fiscal: todos (botão "Atualizar pelo IBPT agora") ou só os sem linha e os que vencem em até 7 dias (sozinha, na prévia).
+// O resultado da última tentativa fica em crm_sistema.ibpt (a tela mostra).
+async function ibptAtualizar(db: ReturnType<typeof createClient>, fiscal: Linha, todos: boolean) {
+  const token = Deno.env.get('IBPT_TOKEN') ?? '';
+  const emit = (fiscal.emitente || {}) as Linha, cnpj = String(emit.cnpj || '').replace(/\D/g, ''), uf = String(((emit.endereco || {}) as Linha).uf || 'SP');
+  const grava = async (r: Linha) => { await db.from('crm_sistema').upsert({ chave: 'ibpt', valor: JSON.stringify(r), quem: null, quando: new Date().toISOString() }); return r; };
+  if (!token) return { ok: false, erro: 'falta o token do IBPT (cadastro gratuito no De Olho no Imposto; colar nos Secrets do Supabase como IBPT_TOKEN)' };
+  if (!cnpj) return { ok: false, erro: 'falta o CNPJ do emitente (aba Fiscal → Emissão)' };
+  const { data: regs } = await db.from('crm_fiscal_produtos').select('ncm');
+  const ncms = [...new Set(((regs || []) as Linha[]).map(r => String(r.ncm || '').replace(/\D/g, '')).filter(n => n.length === 8))];
+  const { data: tem } = ncms.length ? await db.from('crm_ibpt').select('codigo, vig_fim').eq('ex', '').in('codigo', ncms) : { data: [] };
+  const fila = todos ? ncms : ibptPrecisa(ncms, (tem || []) as Linha[], new Date(Date.now() - 3 * 36e5).toISOString(), 7);
+  const linhas: Linha[] = [], falhas: string[] = [];
+  let i = 0;
+  const um = async () => {
+    while (i < fila.length) {
+      const n = fila[i++], ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 10000);
+      try {
+        const r = await fetch(ibptUrl(token, cnpj, n, uf), { signal: ctl.signal, headers: { Accept: 'application/json' } });
+        const j = await r.json().catch(() => null);
+        const l = r.ok ? ibptLinha(n, j) : null;
+        if (l) linhas.push(l); else falhas.push(n + ': ' + (r.ok ? 'resposta sem alíquotas' : 'HTTP ' + r.status + (j && (j as Linha).Message ? ' ' + String((j as Linha).Message).slice(0, 80) : '')));
+      } catch (e) { falhas.push(n + ': ' + ((e as Error).name === 'AbortError' ? 'sem resposta em 10 s' : (e as Error).message)); }
+      finally { clearTimeout(t); }
+    }
+  };
+  await Promise.all([um(), um(), um(), um()]);
+  for (let k = 0; k < linhas.length; k += 200) {
+    const { error } = await db.from('crm_ibpt').upsert(linhas.slice(k, k + 200), { onConflict: 'codigo,ex' });
+    if (error) return grava({ ok: false, em: new Date().toISOString(), erro: 'gravar: ' + error.message });
+  }
+  const versao = linhas[0] ? linhas[0].versao : null, vigFim = linhas.map(l => String(l.vig_fim)).sort()[0] || null;
+  return grava({ ok: falhas.length === 0, em: new Date().toISOString(), consultados: fila.length, gravados: linhas.length, falhas: falhas.length,
+    exemplos_falha: falhas.slice(0, 5), versao, vig_fim: vigFim });
 }
 
 async function dadosDoPedido(db: ReturnType<typeof createClient>, pedidoId: string) {
@@ -313,8 +351,27 @@ Deno.serve(async (req) => {
       return resposta(200, await aprenderSt(db));
     }
 
+    if (acao === 'ibpt_atualizar') {
+      if (eu.papel !== 'admin') return resposta(403, { erro: 'só o administrador atualiza a tabela do IBPT' });
+      return resposta(200, await ibptAtualizar(db, fiscal, true));
+    }
     if (acao === 'previa' || acao === 'emitir') {
       const d = await dadosDoPedido(db, String(b.pedido_id));
+      // tabela do IBPT vencida ou sem algum NCM do pedido: atualiza sozinha (uma tentativa por dia), sem segurar a nota
+      if (Deno.env.get('IBPT_TOKEN')) {
+        const hoje = new Date(Date.now() - 3 * 36e5).toISOString().slice(0, 10);
+        const faltam = Object.values(d.regras || {}).map(r => String((r as Linha).ncm || '').replace(/\D/g, '')).filter(n => n.length === 8 && (!d.ibpt[n] || String(d.ibpt[n].vig_fim || '') < hoje));
+        if (faltam.length) {
+          const { data: ult } = await db.from('crm_sistema').select('quando').eq('chave', 'ibpt').maybeSingle();
+          const tentou = ult ? new Date(new Date(String((ult as Linha).quando)).getTime() - 3 * 36e5).toISOString().slice(0, 10) : '';
+          if (tentou !== hoje) {
+            await db.from('crm_sistema').upsert({ chave: 'ibpt', valor: JSON.stringify({ ok: false, em: new Date().toISOString(), erro: 'atualizando…' }), quem: null, quando: new Date().toISOString() });
+            const tarefa = ibptAtualizar(db, fiscal, false).catch(() => null);
+            const rt = (globalThis as unknown as { EdgeRuntime?: { waitUntil: (p: Promise<unknown>) => void } }).EdgeRuntime;
+            if (rt) rt.waitUntil(tarefa); else await tarefa;
+          }
+        }
+      }
       const corpo = { pedido: d.pedido, empresa: d.empresa, regras: d.regras, emitente: d.fiscal.emitente, ambiente: amb, serie, vendedorNome: d.vendedorNome, cfg: d.fiscal, ibpt: d.ibpt };
       if (acao === 'previa') return resposta(200, Object.assign(await servico('/previa-pedido', corpo), { ambiente: amb, serie }));
       const { data: res, error } = await db.rpc('crm_nfe_reservar', { p_ambiente: amb, p_serie: serie, p_pedido: d.pedido.id, p_empresa: d.pedido.empresa_id });

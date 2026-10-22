@@ -66,6 +66,8 @@ function notaDoPedido(o) {
     if (!cod) { bloqueia.push('item ' + (i + 1) + ' (' + it.descricao + ') sem código de produto'); return null; }
     if (!v || !v.cfop || !v.cst_icms) { bloqueia.push('produto ' + cod + ' (' + it.descricao + ') sem regra fiscal: conferir na aba Fiscal'); return null; }
     if (!r.ncm) { bloqueia.push('produto ' + cod + ' sem NCM'); return null; }
+    // a regra é a da venda comum dentro de SP; as outras operações (bonificação, entrega futura) trocam o CFOP pelo OPERACOES
+    if (!/^5(10[1-6]|40[1-5])$/.test(String(v.cfop))) { bloqueia.push('produto ' + cod + ' (' + it.descricao + '): a regra fiscal tem o CFOP ' + v.cfop + ', que não é de venda dentro de SP: conferir na aba Fiscal'); return null; }
     if (r.situacao !== 'conferido') conferir.push('produto ' + cod + ': regra fiscal ainda é proposta (não conferida)');
     (r.alertas || []).forEach(a => conferir.push('produto ' + cod + ': ' + (a.texto || a)));
     const q = num(it.quantidade), pu = num(it.preco), unid = String(it.unidade || r.unidade || 'UN').toUpperCase();

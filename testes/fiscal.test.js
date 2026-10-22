@@ -195,3 +195,21 @@ test('ICMS-ST retido pela compra mais recente (stDasCompras) e alerta de "vendid
   assert.equal(F.alertaEntrada({ venda: st, st_entrada: { situacao: 'com_st' } }), null);
   assert.equal(F.alertaEntrada({ venda: st, st_entrada: { situacao: 'sem_valor', cst: '60', nota: '9' } }).nivel, 'atencao');
 });
+
+test('proposta: só venda comum dentro de SP; entrega futura e venda para fora viram a venda interna', () => {
+  assert.equal(F.ehVenda('5102'), true); assert.equal(F.ehVenda('5405'), true);
+  ['5117', '5922', '5910', '6108', '6102', '5202'].forEach(c => assert.equal(F.ehVenda(c), false, c));
+  // só vendeu para fora de SP (6108, 12%): proposta 5102/00/18 com o mesmo PIS/COFINS
+  let r = F.analisa({ codigo: 'X1', descricao: 'PILHA AA C/8', ncms: { 85061019: { n: 2, ultima: '2026-09-01' } }, cests: [], gtins: [], origens: ['0'],
+    combos: [combo({ cfop: '6108', aliq_icms: 12 })] });
+  assert.deepEqual([r.regra.venda.cfop, r.regra.venda.cst_icms, r.regra.venda.aliq_icms, r.regra.venda.cst_pis], ['5102', '00', 18, '01']);
+  assert.ok(r.alertas.some(a => a.nivel === 'erro' && a.corrigido && /CFOP 6108/.test(a.texto)));
+  // remessa de entrega futura (5117, PIS 49) e um faturamento 5922 com PIS 01: proposta 5102/00/18 com o PIS/COFINS do faturamento
+  r = F.analisa({ codigo: 'X2', descricao: 'PANO MULTIUSO', ncms: { 56039220: { n: 2, ultima: '2026-09-10' } }, cests: [], gtins: [], origens: ['0'],
+    combos: [combo({ cfop: '5117', aliq_icms: 0, cst_pis: '49', aliq_pis: null, cst_cofins: '49', aliq_cofins: null, ultima: '2026-09-10' }), combo({ cfop: '5922', cst_icms: '90', aliq_icms: null, ultima: '2026-08-01' })] });
+  assert.deepEqual([r.regra.venda.cfop, r.regra.venda.cst_icms, r.regra.venda.aliq_icms, r.regra.venda.cst_pis, r.regra.venda.aliq_pis], ['5102', '00', 18, '01', 1.65]);
+  // venda interna existe: ela manda, mesmo havendo uma remessa mais recente
+  r = F.analisa({ codigo: 'X3', descricao: 'DETERGENTE', ncms: { 34022000: { n: 2, ultima: '2026-10-01' } }, cests: [], gtins: [], origens: ['0'],
+    combos: [combo({ cfop: '5117', ultima: '2026-10-10', cst_pis: '49' }), combo({ ultima: '2026-09-01' })] });
+  assert.equal(r.regra.venda.cfop, '5102'); assert.equal(r.regra.venda.cst_pis, '01');
+});

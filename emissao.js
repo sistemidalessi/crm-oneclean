@@ -274,9 +274,29 @@
     const i = ibpt || {}, br = d => (d ? String(d).slice(0, 10).split('-').reverse().join('/') : '');
     const vencida = i.vig_fim && String(i.vig_fim).slice(0, 10) < new Date().toISOString().slice(0, 10);
     return (i.n ? '<p class="' + (vencida ? 'alerta' : 'dica') + '">' + i.n + ' NCMs · versão ' + esc(i.versao || '') + ' (chave ' + esc(i.chave || '') + ') · vale de ' + br(i.vig_ini) + ' a ' + br(i.vig_fim) +
-        (vencida ? ' — <strong>vencida</strong>: baixe a nova (o FKN guarda em \\\\servidor\\sistema\\SIFN\\dados\\TIBPT-SP.csv, ou o site do IBPT) e carregue aqui.' : '.') + '</p>'
+        (vencida ? ' — <strong>vencida</strong>: "Atualizar pelo IBPT agora" (com o token) ou carregar o CSV novo do site do IBPT.' : '.') + '</p>'
       : '<p class="alerta">Ainda não carregada: sem ela a nota sai sem os tributos aproximados.</p>') +
-      '<p class="acoes"><label class="btn sec">Carregar a tabela (TIBPT-SP.csv)<input type="file" accept=".csv,text/csv" data-nf-ibpt hidden></label></p>';
+      apiHtml(i.api, br) +
+      '<p class="acoes"><button class="btn sec" type="button" data-nf-ibpt-api>Atualizar pelo IBPT agora</button> ' +
+      '<label class="btn sec">Carregar a tabela (TIBPT-SP.csv)<input type="file" accept=".csv,text/csv" data-nf-ibpt hidden></label></p>';
+  }
+  // A atualização sozinha (API do IBPT, token nos Secrets como IBPT_TOKEN): a crm-fiscal consulta os NCM dos produtos na 1ª
+  // prévia depois que a tabela vence, uma vez por dia; o botão consulta todos na hora.
+  function apiHtml(a, br) {
+    if (!a) return '<p class="dica">Atualização automática pela API do IBPT: ainda não usada (precisa do token do cadastro gratuito no De Olho no Imposto, colado nos Secrets do Supabase como IBPT_TOKEN).</p>';
+    if (a.erro) return '<p class="alerta">Última tentativa pela API do IBPT' + (a.em ? ' (' + br(String(a.em).slice(0, 10)) + ')' : '') + ': ' + esc(a.erro) + '</p>';
+    return '<p class="' + (a.falhas ? 'alerta' : 'dica') + '">Pela API do IBPT em ' + br(String(a.em || '').slice(0, 10)) + ': ' + (a.gravados || 0) + ' de ' + (a.consultados || 0) + ' NCMs' +
+      (a.versao ? ', versão ' + esc(a.versao) : '') + (a.vig_fim ? ', vale até ' + br(a.vig_fim) : '') +
+      (a.falhas ? ' · ' + a.falhas + ' sem resposta (' + esc((a.exemplos_falha || []).join('; ')) + ')' : '') + '.</p>';
+  }
+  async function ibptPelaApi(b) {
+    b.disabled = true; CRM.toast('Consultando a API do IBPT pelos NCM dos produtos… (pode levar um minuto)');
+    try {
+      const r = await CRM.store().fiscal({ acao: 'ibpt_atualizar' });
+      ibpt = await CRM.store().ibptInfo();
+      CRM.toast(r && r.ok ? 'Tabela do IBPT atualizada: ' + r.gravados + ' NCMs.' : 'IBPT: ' + ((r && (r.erro || (r.falhas + ' NCMs sem resposta'))) || 'sem resposta'));
+      CRM.render();
+    } catch (e) { CRM.falhou(e); } finally { b.disabled = false; }
   }
   async function carregaIbpt(arquivo) {
     try {
@@ -745,5 +765,6 @@
       const m = c.querySelector('[data-nf-mes]'); if (m) m.addEventListener('change', () => { f.mes = m.value; });
       c.querySelectorAll('[data-nf-marca]').forEach(el => el.addEventListener('change', () => { if (el.checked) marcados.add(el.dataset.nfMarca); else marcados.delete(el.dataset.nfMarca); CRM.render(); }));
       const ib = c.querySelector('[data-nf-ibpt]'); if (ib) ib.addEventListener('change', () => { if (ib.files[0]) carregaIbpt(ib.files[0]); });
+      const iba = c.querySelector('[data-nf-ibpt-api]'); if (iba) iba.addEventListener('click', () => ibptPelaApi(iba));
     } };
 })(typeof window !== 'undefined' ? window : globalThis);

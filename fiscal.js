@@ -66,7 +66,9 @@
     return { grupo: null, cestIncoerente: pelaCest || null };
   }
   const n2 = v => (v == null || v === '' ? null : Math.round(Number(v) * 10000) / 10000);
-  const ehVenda = cfop => /^5(1|4)/.test(String(cfop || ''));
+  // Venda comum dentro de SP: 5101 a 5106 (sem ST) e 5401 a 5405 (com ST). Fora: 5117/5922 (entrega futura), 5910
+  // (bonificação), 6xxx (outro estado) — a regra do produto é a da venda interna, as outras operações saem dela.
+  const ehVenda = cfop => /^5(10[1-6]|40[1-5])$/.test(String(cfop || ''));
   const ehST = cfop => /^54/.test(String(cfop || ''));
   // Só o próprio papel: a descrição começa por "PAPEL HIG…"/"PAP. HIG…"/"P.HIG…". Dispenser, suporte e papeleira
   // ("DISP.PAPEL HIG.", "SUP. PAPELEIRA … PAP.HIG") são de plástico/inox e têm outro NCM e PIS/COFINS normal.
@@ -92,6 +94,19 @@
     let ncm = (maisRecente(ncms) || {}).ncm || null;
     const venda = atual ? { cfop: atual.cfop, cst_icms: atual.cst_icms || null, aliq_icms: n2(atual.aliq_icms), red_bc_icms: n2(atual.red_bc_icms),
       cst_pis: atual.cst_pis || null, aliq_pis: n2(atual.aliq_pis), cst_cofins: atual.cst_cofins || null, aliq_cofins: n2(atual.aliq_cofins) } : null;
+    // Sem venda interna no histórico (só para fora de SP, entrega futura, bonificação…): a proposta vira a venda interna
+    // equivalente, com o ICMS de SP; o PIS/COFINS vem de uma operação que tenha receita (49 não é venda).
+    if (venda && !ehVenda(venda.cfop)) {
+      const de = venda.cfop, st = CST_ST.indexOf(String(venda.cst_icms)) !== -1 || /^(54|64)/.test(String(de));
+      Object.assign(venda, st ? { cfop: '5405', cst_icms: '60', aliq_icms: null, red_bc_icms: null } : { cfop: '5102', cst_icms: '00', aliq_icms: ALIQ_ICMS_SP, red_bc_icms: null });
+      if (String(venda.cst_pis) === '49' || String(venda.cst_cofins) === '49') {
+        const comReceita = maisRecente(combos.filter(c => String(c.cst_pis || '') !== '49' && String(c.cst_cofins || '') !== '49'));
+        Object.assign(venda, comReceita ? { cst_pis: comReceita.cst_pis || null, aliq_pis: n2(comReceita.aliq_pis), cst_cofins: comReceita.cst_cofins || null, aliq_cofins: n2(comReceita.aliq_cofins) }
+          : { cst_pis: '01', aliq_pis: 1.65, cst_cofins: '01', aliq_cofins: 7.6 });
+      }
+      alerta('erro', 'As notas deste produto não têm venda comum dentro de SP (a mais recente é CFOP ' + de + '). Proposta corrigida para a venda interna: CFOP ' +
+        venda.cfop + ', CST ' + venda.cst_icms + (venda.aliq_icms != null ? ' e ICMS de ' + venda.aliq_icms + '%' : '') + '; conferir o PIS/COFINS.', true);
+    }
 
     // 1) NCM
     if (!ncm) alerta('erro', 'Sem NCM nas notas: preencher antes de emitir.');
