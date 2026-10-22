@@ -1766,7 +1766,10 @@ contador, com a escolha do CRM anotada na tabela do topo do documento.
   (CST 90 com a alíquota do crédito); compra sem ICMS sai sem destaque com aviso. Serviço fiscal `2026-10-22b`.
   2º teste: rejeição **1010** (referência no cabeçalho E por item): com itens referenciados o `NFref` sai — **a devolução
   referencia só por item**. Serviço fiscal `2026-10-22c`.
-- **Falta:** atualizar o serviço fiscal na VPS (`2026-10-22c`) e repetir o teste em homologação; `revoke` das 3 funções; dar entrada na
+  **Autorizada em homologação às 13:39 de 22/10** (NF 2-4, devolução a fornecedor da compra 23034, Simples Nacional: 5202,
+  finNFe 4, `DFeReferenciado` sem NFref, ICMS 90 com 3,33% = R$ 0,03, protocolo 135260009498766); homologação não mexeu no
+  estoque nem no Caixa (`efeitos_em` vazio), como deve.
+- **Falta:** testar em homologação a devolução de cliente, a bonificação e a entrega futura; `revoke` das 3 funções; dar entrada na
   nota de devolução que o **cliente contribuinte** emite (hoje ela chegaria como nota de compra); notas de crédito/débito
   do Ajuste SINIEF 49/2025 (obrigatórias em 2027).
 
