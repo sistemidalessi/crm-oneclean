@@ -1705,9 +1705,7 @@ levanta no BB (convênio, carteira, API de Cobrança ou CNAB 240/400) está em `
   chave nem mexe em custo; vendedora barrada e vê o produto novo no disponível; listagem do FKN não muda preço nem cria) e no
   navegador (o formulário manda o que deve). **Lição:** o conector do Supabase trava qualquer SQL com `drop`/`delete`
   (pede confirmação que não chega): migrações novas sem `drop ... if exists`; os `revoke` vão para o Anderson.
-- **`revoke` pendentes (Anderson, SQL Editor):** `crm_produtos_do_crm()`, `crm_produtos_passar_ao_crm()`,
-  `crm_produto_gravar(text, jsonb)`, `crm_produto_ler(text)`, `crm_produto_proximo_codigo()`,
-  `crm_produto_embalagem(text, text, numeric)` — `from public, anon`.
+- `revoke` das 6 funções novas rodados pelo Anderson e conferidos em 22/10 (anônimo sem acesso; só `authenticated`).
 
 ## Boleto do Banco do Brasil pelo CRM — Fase 5, preparação (22/10/2026, pedido do Anderson)
 Vale para os dois caminhos (API de Cobrança do BB ou arquivo de remessa CNAB), que dependem da resposta do gerente.
