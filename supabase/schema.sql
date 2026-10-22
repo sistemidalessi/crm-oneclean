@@ -5102,3 +5102,11 @@ begin
   return id;
 end;
 $$;
+
+-- Acesso das funções da auditoria de 22/10 (o Anderson roda no SQL Editor: o conector não aceita revoke)
+revoke execute on function public.crm_ia_reservar(uuid, text, integer, timestamptz) from public, anon, authenticated;
+grant execute on function public.crm_ia_reservar(uuid, text, integer, timestamptz) to service_role;
+revoke execute on function crm_interno.doc_de_outro(text, uuid) from public, anon;
+grant execute on function crm_interno.doc_de_outro(text, uuid) to authenticated, service_role;
+revoke all on schema crm_interno from public, anon;
+grant usage on schema crm_interno to authenticated, service_role;
