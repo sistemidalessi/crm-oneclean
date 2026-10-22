@@ -2477,6 +2477,38 @@ e WhatsApp. Valor real do parado em 15/10: **R$ 79 mil em 271 produtos** (depois
 - Cadastro público do Auth **desligado** no painel (não dá por SQL).
 - Token do Agendor nunca entra no repositório; o extrator lê da linha de comando.
 
+### Auditoria de 22/10/2026 (20 itens) — fechada
+
+Relatório da skill de segurança do Anderson (`REPORT.md` + `FINDINGS-DETAIL.md`, commit `4dbf94b`, fora do Git). Tudo
+corrigido e em produção em 22/10 (commits `04ad3b9`, `a4d8049`, `a948a67`; banco pela migração
+`seguranca_auditoria_2026_10_22_banco` e `crm_ia_reservar`, cada item testado numa transação desfeita), menos o 19:
+
+- **1** `crm_negocios` (update): a empresa nova também precisa ser da carteira da vendedora (`crm_ve_empresa`).
+- **2** análise diária de compras roda com as ferramentas do **comprador**, mesmo quando o admin dispara.
+- **3** `nfe.js`: nota só vale com `protNFe` 100/150; cancelamento só com `retEvento` 135/136/155. Antes da mudança,
+  as 185 notas dos últimos 20 dias tinham XML com protocolo (nenhuma real fica de fora).
+- **4** gatilho `crm_empresas_cnpj_guarda` (não gestor, pela API): CNPJ já gravado não muda e CNPJ novo não pode ser de
+  nota ou título de outro cadastro (`crm_interno.doc_de_outro`). Resta: cliente que ainda não tem nota nenhuma.
+- **5/17** `crm_entrega_confirmar`: usuário ativo, caminho `canhotos/AAAA-MM-DD/<entrega>-x.jpg` e o objeto existe no
+  Storage com dono = quem confirma; política `ler` de `crm_entregas` exige `crm_eh_ativo()`.
+- **6** `crm_pedido_itens_norm`: código de embalagem (sem `.n` e fator ≠ 1) multiplica `preco_tab` e `custo` pelo fator.
+- **7** bucket `crm-canhotos`: motorista só vê os canhotos das próprias entregas; 8 MB, jpeg/png/webp.
+- **8/11** limite diário da IA reservado no banco antes da chamada (`crm_ia_reservar`, trava por usuário, erro conta);
+  busca de fotos com limite por papel (admin 2.500, comprador 400, logística 60 por dia).
+- **9** `crm-email`: só a dona da carteira (ou gestora/admin) manda; nome da empresa vem de `crm_config`.
+- **10** `crm-notas`: a chave derivada do `FISCAL_TOKEN` só entrega XML (403 nos CSV do FKN); chave do arquivo com 44 caracteres.
+- **12** `crm-produto-buscar`: DNS conferido antes de cada download e de cada redirecionamento (`ipPrivado` em `pagina.js`,
+  `Deno.resolveDns` e, sem ele, o `node:dns`); faixas reservadas e de documentação barradas.
+- **13** CSV (`R.csvCelula` e o fechamento do mês): texto que começa com `= + - @` ganha apóstrofo.
+- **14** `crm-fiscal`: devolução não passa do que falta devolver (soma as devoluções autorizadas/pendentes da mesma nota).
+- **15** gatilho `crm_config_guarda`: fiscal, boleto, comissões, tabela de preços, margem mínima e trava de preço só o admin muda.
+- **16** envio de e-mail pela API grava `criado_em = now()`. **18** rascunho de nota 4b não se altera pela API.
+- **20** gatilho `crm_titulos_guarda`: não admin só insere título com origem `nota` e só muda `empresa_id`.
+- **19 aceito** (decisão de desenho): o bloqueio por margem deixa a vendedora estimar o custo tentando preços.
+
+Não reabrir sem motivo novo. Se a busca de fotos passar a voltar sempre "sem nada", conferir primeiro o DNS do item 12
+nos logs da `crm-produto-buscar`.
+
 ## Verificar antes de commitar
 
 ```
