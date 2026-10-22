@@ -1738,6 +1738,7 @@ levanta no BB (convênio, carteira, API de Cobrança ou CNAB 240/400) está em `
   contas vêm do Sifn083). `origem` fica `tela` (ampliar o check pediria `drop constraint`).
 - FKN desligado com a chave: `crm-notas` ignora todo relatório do FKN (registra "ignorado"; o de receber apagaria os títulos
   nascidos das notas do CRM) e `crm_fkn_situacao.desligado` some com o lembrete e as recusas (`CRM.fknDesligado()`).
+  `crm-notas` **v35** publicada e conferida por md5 (o download mostra o BOM da linha 59 como caractere; com o escape, igual).
 - Testado com a chave ligada numa transação desfeita (1 conta certa; sem a chave, nenhuma; reentrada não repete).
 
 ## Baixa do contas a receber pelo Caixa (22/10/2026, virada)
