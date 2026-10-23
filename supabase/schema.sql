@@ -5350,6 +5350,15 @@ begin
   r := r || jsonb_build_object('chave', 'vigia', 'titulo', 'Vigia das notas no servidor', 'n', case when n > 0 then 0 else 1 end,
     'nivel', case when n > 0 then 'ok' else 'aviso' end,
     'dica', case when n > 0 then 'Mandou sinal na última hora: as notas do FKN (plano B) continuam entrando.' else 'Sem sinal há mais de 1 hora: confira o servidor do escritório.' end, 'lista', '[]'::jsonb);
+  -- 13. última conferência CRM × FKN (antes de passar o cadastro: o que o FKN tem e o CRM não, ou sem explicação)
+  select count(*), coalesce(jsonb_agg(jsonb_build_object('codigo', codigo, 'nome', descricao || ' · CRM ' || round(saldo_crm)::text || ' × FKN ' || round(saldo_fkn)::text,
+      'falta', coalesce(nullif(explicacao, ''), 'sem explicação'))) filter (where rn <= 30), '[]') into n, l
+  from (select d2.*, row_number() over (order by abs(d2.diferenca) desc) rn from public.crm_estoque_difs d2
+        where d2.foto_id = (select id from public.crm_estoque_fotos where conferida_em is not null order by gerado_em desc limit 1)
+          and (coalesce(d2.explicacao, '') = '' or d2.explicacao ilike '%sem entrada no CRM%')) y;
+  r := r || jsonb_build_object('chave', 'conferencia_fkn', 'titulo', 'Estoque: diferenças com o FKN sem explicação ou com compra sem entrada no CRM', 'n', n,
+    'nivel', case when n = 0 then 'ok' else 'trava' end,
+    'dica', 'Antes de "Passar o cadastro para o CRM": dar entrada nas notas de compra pendentes e contar o que sobrar; senão o estoque do CRM nasce errado.', 'lista', l);
   return r;
 end;
 $$;

@@ -14,6 +14,15 @@ A mesma lista resumida está no `PENDENCIAS-ESCRITORIO.md` do `agilite-sistema-g
 
 ## Perguntas que só você responde
 
+- [ ] **ANTES DA VIRADA — compras que não chegam pela Sefaz** (achado em 23/10, noite): na conferência CRM × FKN, **36
+      produtos** tiveram entrada no FKN entre 19 e 23/10 sem nota de compra no CRM (ex.: papel interfolha Packpel 290027, 3.000;
+      guardanapo Santepel 250002, 230; papel Thorium 290020, 120). Fornecedores como **Sales** (o maior), Barbarella, André
+      Carillo e Papa & Parra **nunca** apareceram nas 307 notas que a Sefaz entregou ao CRM (só o CNPJ 63.237.702/0001-03).
+      Perguntas ao Wellington: essas compras vêm com NF-e para qual CNPJ (a outra razão social, "BRASIL")? Ou entram sem nota
+      (transferência, acerto, nota em papel)? Se for outro CNPJ, o CRM precisa ler o DF-e dele também (certificado A1 daquele
+      CNPJ) ou a entrada será à mão. **Sem isso, depois de 03/11 o estoque e o contas a pagar dessas compras ficam faltando.**
+      O botão "Conferir a virada" agora mostra essas diferenças como ⛔.
+
 - [ ] **Conferência da virada de 23/10, noite** (Fiscal → 4. Emissão → "Conferir a virada"; dá para fazer de casa):
       (1) confirmar com o Wellington que o "1070048" da NF 1075533 (Severini, DT.LIQ.YPE 500ML NEUTRO, 3 CX24) é o **010078**
       (entrada refeita lá); (2) Priscila Drumond e Silmara fazerem o 1º acesso antes de 03/11; (3) completar o **número do
