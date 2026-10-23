@@ -104,13 +104,6 @@ Deno.serve(async (req) => {
     const semAviso = new Set(((cfg.sem_aviso as string[]) || []).map(String));
     const lista = quemRecebe({ titulos: tit || [], avisos, hoje, dias: diasAtraso, pagos, semAviso });
 
-    if (c.acao === 'situacao') {
-      let modelo: Linha | null = null, erroModelo = '';
-      if (token && wabaId) { try { modelo = await modeloInfo(token, wabaId); } catch (e) { erroModelo = (e as Error).message; } }
-      return resposta(200, { ligado: cfg.ligado === true, dias: diasAtraso, prazo: prazoDias, modelo, erro_modelo: erroModelo, whatsapp: !!(token && phoneId), email: !!brevo,
-        hoje: lista.length, avisos: avisos.slice(0, 200) });
-    }
-
     // montagem de cada aviso: cliente, contato, vendedor(a), canais e texto
     const empIds = lista.map(x => x.empresa_id);
     const { data: emps } = empIds.length ? await db.from('crm_empresas').select('id, nome, responsavel_id, whatsapp, telefone, email').in('id', empIds) : { data: [] };
@@ -133,6 +126,14 @@ Deno.serve(async (req) => {
         email: textoEmail(corpo, p, telV ? telBR(telV) : '') };
     });
 
+    if (c.acao === 'situacao') {
+      let modelo: Linha | null = null, erroModelo = '';
+      if (token && wabaId) { try { modelo = await modeloInfo(token, wabaId); } catch (e) { erroModelo = (e as Error).message; } }
+      // quem chegou ao prazo e ainda não recebeu (sem canal hoje): com celular sai pelo WhatsApp quando a Meta aprovar
+      const esperando = monta.map(m => ({ empresa_id: m.empresa_id, nome: m.empresa.nome, valor: m.valor, dias: m.dias, celular: !!m.celular, email: m.emails.length > 0 }));
+      return resposta(200, { ligado: cfg.ligado === true, dias: diasAtraso, prazo: prazoDias, modelo, erro_modelo: erroModelo, whatsapp: !!(token && phoneId), email: !!brevo,
+        hoje: lista.length, esperando, avisos: avisos.slice(0, 200) });
+    }
     if (c.acao === 'previa') {
       return resposta(200, { ligado: cfg.ligado === true, prazo, lista: monta.map(m => ({ empresa_id: m.empresa_id, nome: m.empresa.nome, valor: m.valor, dias: m.dias,
         titulos: m.titulos.map((t: Linha) => t.duplicata), vendedor: m.vendedor.nome || '', celular: m.celular, emails: m.emails, texto: m.texto })) });
@@ -185,6 +186,35 @@ Deno.serve(async (req) => {
         descricao: 'Aviso de atraso enviado ao cliente (' + canais.join(' e ') + '): ' + docsTexto(m.titulos) + ', ' + moeda(m.valor) +
           '. Prazo antes do cartório: ' + prazo.split('-').reverse().join('/') + '. Se o cliente procurar, negocie e avise o financeiro.' });
       feitos.push({ empresa: m.empresa.nome, enviado: true, canais, erro });
+    }
+
+    // aviso que saiu só por e-mail enquanto o modelo esperava a Meta: com o modelo aprovado, vai também pelo WhatsApp (mesmo
+    // aviso, mesmo prazo), se o prazo ainda não venceu e o cliente não disse que pagou
+    if (modeloOk) {
+      for (const a of avisos.filter(a => !a.whatsapp_para && !a.pagou_em && String(a.prazo) >= hoje && /modelo/.test(String(a.wa_erro || '')))) {
+        const { data: e } = await db.from('crm_empresas').select('id, nome, whatsapp, telefone').eq('id', a.empresa_id).maybeSingle();
+        const { data: cs } = await db.from('crm_contatos').select('nome, whatsapp, celular, telefone').eq('empresa_id', a.empresa_id);
+        const cel = celularesDoCliente(e, cs || [])[0];
+        if (!cel) continue;
+        const contato = ((cs || []) as Linha[]).find(y => celularesDoCliente(null, [y]).length) || null;
+        const { data: v } = a.vendedor_id ? await db.from('crm_usuarios').select('nome').eq('user_id', a.vendedor_id).maybeSingle() : { data: null };
+        const ts = ((tit || []) as Linha[]).filter(t => t.empresa_id === a.empresa_id && ((a.duplicatas as string[]) || []).includes(String(t.duplicata)));
+        if (!ts.length) continue;
+        const p = parametros({ cliente: primeiro(contato && contato.nome) || String((e && e.nome) || ''), vendedora: primeiro(v && v.nome) || 'o financeiro', titulos: ts, valor: a.valor, prazo: a.prazo });
+        const up: Linha = { whatsapp_para: cel };
+        try {
+          const r = await graph(token, '/' + phoneId + '/messages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+            messaging_product: 'whatsapp', to: cel, type: 'template',
+            template: { name: MODELO, language: { code: 'pt_BR' }, components: [
+              { type: 'body', parameters: p.map(param) },
+              { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: String(a.id) }] },
+              { type: 'button', sub_type: 'quick_reply', index: '1', parameters: [{ type: 'payload', payload: 'avisopagou:' + a.id }] }] }
+          }) });
+          up.wa_msg = (((r.messages as Linha[]) || [])[0] || {}).id || null; up.wa_status = 'enviado'; up.wa_erro = null;
+        } catch (err) { up.wa_status = 'falhou'; up.wa_erro = String((err as Error).message).slice(0, 300); }
+        await db.from('crm_cobranca_avisos').update(up).eq('id', a.id);
+        feitos.push({ empresa: e ? e.nome : '', enviado: up.wa_status === 'enviado', canais: ['WhatsApp (complemento)'], erro: up.wa_erro || null });
+      }
     }
 
     // prazo vencido: tarefa para o administrador decidir o cartório (uma vez por aviso)

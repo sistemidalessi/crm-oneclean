@@ -801,7 +801,11 @@
     const m = st.modelo, ms = m ? (MOD_ST[m.status] || [String(m.status || '').toLowerCase(), 'ambar']) : null;
     const lista = (st.avisos || []).slice(0, 60), h = hoje();
     const titAberto = new Set(titulosAdmin().filter(t => !t.cartorio_em).map(t => t.empresa_id + '|' + t.duplicata));
-    return '<section class="cartao cob-aviso-auto"><h2>Aviso automático de atraso <small>' + (ligado ? CRM.selo('ligado: dias úteis, 9h', 'verde') : CRM.selo('desligado', 'cinza')) + '</small></h2>' +
+    const esp = st.esperando || [];
+    const espera = esp.length ? '<p><strong>Chegaram ao prazo e ainda não receberam (' + esp.length + '):</strong></p><ul class="cob-av-espera">' + esp.map(x =>
+      '<li><button type="button" class="link" data-acao="abrir-empresa" data-id="' + esc(x.empresa_id) + '">' + esc(x.nome || '') + '</button> · ' + esc(R.moeda(x.valor)) + ' · ' + x.dias + ' dias — ' +
+        (x.celular ? 'tem celular: sai pelo WhatsApp assim que a Meta aprovar o modelo' : x.email ? 'tem e-mail: sai no próximo envio' : '<strong>sem celular e sem e-mail no cadastro</strong>: complete o cadastro do cliente') + '</li>').join('') + '</ul>' : '';
+    return '<section class="cartao cob-aviso-auto"><h2>Aviso automático de atraso <small>' + (ligado ? CRM.selo('LIGADO — manda sozinho todo dia útil às 9h05', 'verde') : CRM.selo('DESLIGADO — só manda quando você clicar em "Enviar agora"', 'cinza')) + '</small></h2>' +
       '<p>Com <strong>' + dias + ' dias úteis</strong> de atraso o cliente recebe <strong>um aviso</strong>, cordial, em nome do(a) vendedor(a) da carteira: pelo WhatsApp da ' + esc(CRM.nomeInstalacao()) +
         ' e por e-mail. O aviso já diz que, sem o pagamento até <strong>' + prazo + ' dias úteis</strong> depois, o título segue para o cartório. ' +
         'Se o cliente procurar a vendedora, ela negocia; se o prazo vencer sem pagamento, você recebe a tarefa <strong>"Cartório?"</strong> e decide (o CRM nunca manda sozinho). ' +
@@ -810,14 +814,16 @@
           : CRM.selo('modelo ainda não criado', 'ambar') + ' <button type="button" class="mini" data-acao="cob-av-modelo">Criar o modelo na Meta</button>') +
         (ms && m.status !== 'APPROVED' ? ' <small>enquanto isso, vai só por e-mail</small>' : '') +
         ' · E-mail: ' + (st.email ? CRM.selo('ligado', 'verde') : CRM.selo('Brevo não ligado', 'cinza')) + '</p>' +
-      '<p class="acoes"><button type="button" class="btn ' + (ligado ? 'sec' : 'ouro') + '" data-acao="cob-av-ligar">' + (ligado ? 'Desligar o envio automático' : 'Ligar o envio automático') + '</button>' +
+      '<p class="acoes"><button type="button" class="btn ' + (ligado ? 'sec' : 'ouro') + '" data-acao="cob-av-ligar" title="' + (ligado ? 'hoje está ligado; clicar desliga' : 'hoje está desligado; clicar liga') + '">' +
+          (ligado ? 'Parar o envio automático' : 'Ligar o envio automático') + '</button>' +
         '<button type="button" class="btn sec" data-acao="cob-av-previa">Ver quem recebe hoje' + (st.hoje ? ' (' + st.hoje + ')' : '') + '</button>' +
-        '<button type="button" class="btn sec" data-acao="cob-av-atualiza">⟳</button></p>' +
-      (lista.length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Cliente</th><th>Aviso</th><th>Prazo</th><th></th></tr></thead><tbody>' + lista.map(a => {
+        '<button type="button" class="btn sec" data-acao="cob-av-atualiza" title="atualizar">⟳</button></p>' + espera +
+      (lista.length ? '<p><strong>Avisos mandados (' + lista.length + '):</strong></p><div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Cliente</th><th>Aviso</th><th>Prazo</th><th></th></tr></thead><tbody>' + lista.map(a => {
         const aberto = (a.duplicatas || []).some(d => titAberto.has(a.empresa_id + '|' + d)), venceu = a.prazo < h && !a.pagou_em && aberto;
         return '<tr><td><button type="button" class="link" data-acao="abrir-empresa" data-id="' + esc(a.empresa_id) + '">' + esc(CRM.nomeEmpresa(a.empresa_id)) + '</button><small>' + esc(a.notas || '') + ' · ' + esc(R.moeda(a.valor)) + '</small></td>' +
           '<td>' + esc(dm(R.diaLocal(a.enviado_em))) + (a.enviado_por ? '' : ' <small>automático</small>') + '<small>' +
-            [a.wa_status ? 'WhatsApp' : '', a.email_ok ? 'e-mail' : ''].filter(Boolean).join(' + ') + '</small>' +
+            [a.wa_status ? 'WhatsApp' : '', a.email_ok ? 'e-mail' : ''].filter(Boolean).join(' + ') +
+            (!a.wa_status && /modelo/.test(a.wa_erro || '') ? ' · WhatsApp quando a Meta aprovar' : !a.wa_status && /celular/.test(a.wa_erro || '') ? ' · sem celular' : '') + '</small>' +
             (a.wa_status ? ' ' + CRM.selo(a.wa_status, WA_ST[a.wa_status] || 'azul') : '') + '</td>' +
           '<td>' + (!aberto ? CRM.selo('pago / baixado', 'verde') : a.pagou_em ? CRM.selo('disse que pagou ' + dm(R.diaLocal(a.pagou_em)), 'verde')
             : CRM.selo((venceu ? 'venceu ' : 'até ') + dm(a.prazo), venceu ? 'vermelho' : 'ambar')) + (a.respondeu_em ? ' ' + CRM.selo('respondeu', 'azul') : '') + '</td>' +
