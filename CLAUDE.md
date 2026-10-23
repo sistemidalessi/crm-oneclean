@@ -2477,6 +2477,21 @@ e WhatsApp. Valor real do parado em 15/10: **R$ 79 mil em 271 produtos** (depois
 - Cadastro público do Auth **desligado** no painel (não dá por SQL).
 - Token do Agendor nunca entra no repositório; o extrator lê da linha de comando.
 
+### Confirmações fiscais de 23/10/2026
+
+Detalhes em `sistemi-dalessi/docs/oneclean/fiscal/regras-ncm-2026-11.md`, seção "Confirmações de 23/10/2026". O backup
+ficou em `crm_backup.fiscal_produtos_20261023`.
+
+**Aplicado:**
+- bebidas frias 2201.10 e 2202.10: CST 02 com 1,86% e 8,54% (antes era CST 01, que paga a menos);
+- CST 04 (monofásico) no álcool 2207, nos cremes 3304.99 e no lenço umedecido.
+
+**Falta no código:**
+- ICMS CST 20 com o cBenef SP020030, para a cesta básica de SP a 7% (café, açúcar e sal, até 31/12/2026);
+- o campo EXTIPI, para o sabonete em barra com CST 06.
+
+Avisos "NCM provavelmente errado" foram postos em 19 produtos, para o comprador corrigir.
+
 ### DIFAL: venda para consumidor de outro estado (23/10/2026)
 
 Pedido do Anderson: o FKN sai em 30/11, e a BBMD de Porto Alegre (RS) compra cerca de 4 vezes por ano. A OneClean pagava a
