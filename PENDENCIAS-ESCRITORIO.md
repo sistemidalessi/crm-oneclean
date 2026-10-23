@@ -14,6 +14,14 @@ A mesma lista resumida está no `PENDENCIAS-ESCRITORIO.md` do `agilite-sistema-g
 
 ## Perguntas que só você responde
 
+- [ ] **Conferência da virada de 23/10, noite** (Fiscal → 4. Emissão → "Conferir a virada"; dá para fazer de casa):
+      (1) confirmar com o Wellington que o "1070048" da NF 1075533 (Severini, DT.LIQ.YPE 500ML NEUTRO, 3 CX24) é o **010078**
+      (entrada refeita lá); (2) Priscila Drumond e Silmara fazerem o 1º acesso antes de 03/11; (3) completar o **número do
+      endereço** de DCAS, Colégio Cristo Rei e Cei Divina Providência; (4) a vendedora confirmar o endereço de DCAS, Método SMA,
+      SESI 316, SENAI Diadema e ALR (município acertado pelo CEP; as notas do FKN deles saíram com outra cidade); (5) 19
+      produtos INATIVOS com estoque (álcool gel Adata 128 un., desinfetantes Gregorutt…): reativar e dar a regra, ou baixar;
+      (6) nota de compra AJA Química NF 18231 (16/10) sem entrada.
+
 - [ ] **Aviso automático de atraso** (Caixa → Cobrança): modelo `cobranca_atraso` **em análise na Meta desde 23/10** (enquanto
       isso, só e-mail); "Ver quem recebe hoje" (em 23/10 seriam 6:
       Legas Metal 267 dias, Jeniffer Trust 245, Lipos 128, Qualyprint 105, AP+Elettro e Meraki 77 — Lipos e AP+Elettro sem
