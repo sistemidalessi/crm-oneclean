@@ -176,7 +176,17 @@ Deno.serve(async (req) => {
       } else if (!m.emails.length) up.email_erro = 'sem e-mail no cadastro';
       const canais = [up.wa_status === 'enviado' ? 'WhatsApp' : '', up.email_ok ? 'e-mail' : ''].filter(Boolean);
       const erro = [up.wa_erro, up.email_erro].filter(Boolean).join(' · ') || null;
-      if (!canais.length) { feitos.push({ empresa: m.empresa.nome, enviado: false, erro }); continue; }
+      if (!canais.length) {
+        // sem celular e sem e-mail: a vendedora pede o contato do financeiro do cliente (uma tarefa aberta por cliente)
+        if (!m.celular && !m.emails.length && m.vendedor.user_id) {
+          const marca = 'Aviso de atraso sem contato:';
+          const { count } = await db.from('crm_atividades').select('id', { count: 'exact', head: true }).eq('empresa_id', m.empresa_id).eq('concluida', false).like('descricao', marca + '%');
+          if (!count) await db.from('crm_atividades').insert({ empresa_id: m.empresa_id, responsavel_id: m.vendedor.user_id, tipo: 'tarefa', automatica: true, data_hora: new Date().toISOString(),
+            descricao: marca + ' ' + String(m.empresa.nome || 'o cliente') + ' tem ' + docsTexto(m.titulos) + ' (' + moeda(m.valor) + ', ' + m.dias + ' dias) e não tem celular nem e-mail no cadastro. ' +
+              'Peça o celular (WhatsApp) e o e-mail do financeiro e complete o cadastro: o aviso sai no dia útil seguinte.' });
+        }
+        feitos.push({ empresa: m.empresa.nome, enviado: false, erro }); continue;
+      }
       const reg: Linha = { id, empresa_id: m.empresa_id, duplicatas: m.titulos.map((t: Linha) => t.duplicata), notas: docsTexto(m.titulos), valor: m.valor, dias: m.dias,
         prazo, vendedor_id: m.vendedor.user_id || null, texto: m.texto, enviado_por: eu ? eu.user_id : null, ...up };
       const { error: eIns } = await db.from('crm_cobranca_avisos').insert(reg);
