@@ -14,7 +14,8 @@ A mesma lista resumida está no `PENDENCIAS-ESCRITORIO.md` do `agilite-sistema-g
 
 ## Perguntas que só você responde
 
-- [ ] **Aviso automático de atraso** (Caixa → Cobrança): "Criar o modelo na Meta"; "Ver quem recebe hoje" (em 23/10 seriam 6:
+- [ ] **Aviso automático de atraso** (Caixa → Cobrança): modelo `cobranca_atraso` **em análise na Meta desde 23/10** (enquanto
+      isso, só e-mail); "Ver quem recebe hoje" (em 23/10 seriam 6:
       Legas Metal 267 dias, Jeniffer Trust 245, Lipos 128, Qualyprint 105, AP+Elettro e Meraki 77 — Lipos e AP+Elettro sem
       celular nem e-mail no cadastro); "Não avisar este cliente" em quem já negocia; depois "Enviar agora" ou "Ligar o envio automático".
 - [ ] **Contagem física (logística):** água sanitária 5 L 010003 (CRM 105 × FKN 5, sem saída no CRM), aromatizante Coala
