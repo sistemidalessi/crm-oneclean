@@ -296,7 +296,7 @@ motorista, pela logística e como app instalado (PWA).
 - CSV exportado: texto que começa com `= + - @` ganha apóstrofo (`R.csvCelula`).
 - Documentos da empresa (planilhas, manuais em PDF, relatórios) **não são versionados** aqui.
 - **Sessão do vigia da legislação: nunca alterar código nem este arquivo** (grava só em
-  `docs/legislacao/registro.md`; tarefa `trig_01QWhye9ACBaGp8a6jKiA56D`, sempre a mesma sessão).
+  `docs/legislacao/registro.md`; tarefa `trig_017wMNdFUtTta59fmeCNFALB`, sessão nova a cada rodada e aviso no celular do Anderson desde 23/10; a antiga `trig_01QWhye9…` ficou desligada).
 - Auditoria de 22/10/2026 (20 itens) fechada: não reabrir sem motivo novo (detalhes em `docs/historico/2026-10.md`).
 
 ## Verificar antes de commitar
