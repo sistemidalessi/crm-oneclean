@@ -1,28 +1,14 @@
 # O que fazer no escritório — CRM OneClean
 
-Atualizado em 22/10/2026. Quando um item for resolvido, apague a linha (ou peça ao Claude).
+Atualizado em 23/10/2026. Quando um item for resolvido, apague a linha (ou peça ao Claude).
 A mesma lista resumida está no `PENDENCIAS-ESCRITORIO.md` do `agilite-sistema-gestao` (a sessão do escritório abre lá).
 
 ## Só dá pra fazer estando no escritório (SSH da VPS)
 
-- [ ] **Atualizar o serviço fiscal na VPS** (traz a busca das notas de compra na Sefaz, de 17/10, as respostas definitivas
-      — confirmar, desconhecer, não realizada —, de 19/10, a regra da Reforma para as notas de 2027, de 22/10, e as **outras
-      notas da virada** — devolução a fornecedor e de cliente, bonificação, entrega futura —, também de 22/10; as notas
-      de venda de 2026 continuam saindo iguais). No terminal do escritório,
-      entrar na VPS e rodar:
-      `cd /opt/oneclean-fiscal && git pull -q && systemctl restart oneclean-fiscal && systemctl is-active oneclean-fiscal`
-      Tem que responder `active`. **Desde 23/10 a versão é `2026-10-23a`** (aparece em Fiscal → Emissão → "Testar o serviço"):
-      traz a trava do CFOP de outra operação (6108, 5117) e o **DIFAL** (venda para consumidor de outro estado).
-- [ ] **Testar o DIFAL em homologação** (depois de atualizar): um pedido de teste para um cliente do RS sem inscrição
-      estadual (pode ser a BBMD, em homologação não vale nada), "Emitir NF-e". A prévia mostra o valor da guia GNRE; a nota tem
-      que sair autorizada com CFOP 6108. Conferir a alíquota do RS (17%) e marcar como conferida em Fiscal → Emissão → DIFAL.
-- [ ] **Primeira busca na Sefaz:** no CRM, Estoque → Notas de compra → **"Buscar na Sefaz agora"**. Devem aparecer as notas
-      dos fornecedores dos últimos 3 meses (só o resumo: fornecedor, valor, data). Se der erro de certificado do servidor
-      da Sefaz nacional, chamar o Claude: é acrescentar a raiz em `/etc/oneclean-fiscal/cadeia.pem` (nunca desligar a
-      conferência).
-- [ ] **Ciência da Operação:** depois da busca, apertar "Dar ciência e pedir o XML" (até 20 notas por vez). Na consulta
-      seguinte (1 hora depois) chegam os XML completos, e "Trazer N nota(s) para a conferência" leva para o CRM. As de
-      antes do início do estoque do CRM ficam só como histórico de preço.
+- [x] **Serviço fiscal na VPS `2026-10-23a`** — atualizado pelo Anderson em 23/10 (`active`). **DIFAL testado em
+      homologação no mesmo dia:** NF 2-9 para a BBMD (RS) autorizada (cStat 100), CFOP 6108, ICMS 12% e DIFAL de R$ 3,94; o
+      pedido de teste nº 6 foi cancelado. A busca de notas de compra na Sefaz e a ciência já funcionam desde 22/10.
+- [ ] **Alíquota do RS no DIFAL (17%):** conferir e marcar "Conferida" em Fiscal → Emissão → DIFAL.
 
 ## Perguntas que só você responde
 

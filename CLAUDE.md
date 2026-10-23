@@ -2506,7 +2506,7 @@ no dia, só em produção autorizada, uma por nota. **Não usa `chave_fkn`**: o 
 
 **Tela:** Fiscal → Emissão → "Venda para consumidor de outro estado (DIFAL)". RS gravado com 17% e FCP 0, **a conferir**.
 
-**Serviço fiscal `2026-10-23a`:** vale na VPS só depois do `git pull` e do restart, feitos do escritório.
+**Serviço fiscal `2026-10-23a`:** instalado na VPS pelo Anderson em 23/10. **Testado em homologação:** NF 2-9 para a BBMD foi autorizada, com CFOP 6108, ICMS 12% de R$ 9,44 e DIFAL de R$ 3,94 (arredondado item a item). O pedido de teste nº 6 foi cancelado.
 
 ### Regras fiscais revistas para a virada (22/10/2026)
 
