@@ -1687,6 +1687,16 @@ itens e vínculos; contagem ok; vendedora bloqueada. Navegador: nenhuma chamada 
 **Retomar em 22/10: boleto pelo BB (Fase 5).** Modelo `entrega_cliente` aguardando análise da Meta. O que o Anderson
 levanta no BB (convênio, carteira, API de Cobrança ou CNAB 240/400) está em `sistemi-dalessi/docs/plano-sair-do-fkn.md`, Fase 5.
 
+## Configuração gravada por partes (23/10/2026, antes da virada)
+- O app regravava o `crm_config` **inteiro** com a cópia da tela (`CRM.salvarConfig`): uma tela do administrador aberta antes,
+  em outro computador, desfaria o que ele salvou depois — inclusive a **emissão em produção** (`dados.fiscal.ambiente`), que
+  voltaria para homologação. Agora `CRM.salvarConfig` chama `crm_config_mesclar(p)` (security invoker, só gestão): junta só
+  as chaves que vieram sobre a versão do banco, e a chave `fiscal` um nível abaixo (`salvaFiscal` manda só o que mudou). O
+  modo local segue regravando (um navegador só). A gestora não mexe no fiscal: `crm_config_guarda` (auditoria de 22/10)
+  devolve fiscal, boleto e comissão ao valor antigo quando quem grava não é o administrador.
+- SQL do Anderson: `sistemi-dalessi/docs/oneclean/sql/2026-10-23-config-mesclar.sql` (revoke do anônimo e apagar uma trava
+  repetida que criei, `crm_config_guarda_fiscal`).
+
 ## Cadastro de produto no CRM (22/10/2026, virada para só o CRM)
 - **23/10: produto antigo sem regra fiscal.** 532 produtos ativos não tinham regra (não venderam em 2026, então a leitura
   das notas não os viu); 219 deles têm saldo ou venderam no último ano, e a NF-e deles não sairia. O cadastro agora pede

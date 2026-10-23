@@ -566,7 +566,8 @@
     });
   }
 
-  const salvaFiscal = async patch => { await CRM.salvarConfig({ fiscal: Object.assign({}, fiscalCfg(), patch) }); };
+  // só os campos que mudaram: o banco junta sobre o fiscal atual (crm_config_mesclar), sem desfazer o que outra tela salvou
+  const salvaFiscal = async patch => { await CRM.salvarConfig({ fiscal: CRM.store().configMesclar ? patch : Object.assign({}, fiscalCfg(), patch) }); };
   function formEmitente(base) {
     const fc = Object.assign({}, fiscalCfg(), base || {}), em = fc.emitente || {}, e = em.endereco || {}, rt = fc.respTec || {};
     CRM.abrirForm({

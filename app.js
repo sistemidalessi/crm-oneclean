@@ -182,7 +182,10 @@
   CRM.removerVarios = async (t, ids) => { if (!ids.length) return; await store.removerVarios(t, ids); DD.cascataMemoria(E.D, t, ids); reindexa(); CRM.render(); };
   CRM.salvar = (t, id, obj) => (id ? CRM.atualizar(t, id, obj) : CRM.inserir(t, obj));
 
+  // Grava só as chaves que vieram, sobre a versão do banco (23/10/2026): regravar o config inteiro com a cópia da tela deixava
+  // uma tela aberta antes desfazer o que outra salvou depois (a emissão em produção voltaria para homologação).
   CRM.salvarConfig = async patch => {
+    if (store.configMesclar) { const r = await store.configMesclar(patch); troca('config', r); reindexa(); CRM.render(); return; }
     const atual = E.D.config[0] || { id: 1, dados: {} };
     const dados = Object.assign({}, atual.dados, patch);
     if (E.D.config.length) await CRM.atualizar('config', 1, { dados });

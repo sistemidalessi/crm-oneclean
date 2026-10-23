@@ -5127,3 +5127,33 @@ revoke execute on function crm_interno.doc_de_outro(text, uuid) from public, ano
 grant execute on function crm_interno.doc_de_outro(text, uuid) to authenticated, service_role;
 revoke all on schema crm_interno from public, anon;
 grant usage on schema crm_interno to authenticated, service_role;
+
+-- ---------------------------------------------------------------------------------------------------------------------
+-- Configuração gravada por partes (23/10/2026, antes da virada). O app regravava o crm_config inteiro com a cópia que a tela
+-- tinha: uma tela aberta antes (outro computador, a gestora salvando metas) desfazia o que outro tinha salvo depois — e a
+-- emissão em PRODUÇÃO (dados.fiscal.ambiente) voltaria sozinha para homologação. crm_config_mesclar junta só as chaves que
+-- vieram sobre a versão atual do banco; a chave "fiscal" é juntada um nível abaixo (só os campos que vieram). Quem grava
+-- continua sendo quem a política deixa (gestora e administrador); a parte fiscal, só o administrador (crm_config_guarda,
+-- da auditoria de 22/10, devolve o fiscal, o boleto e a comissão ao valor antigo quando não é o administrador).
+create or replace function public.crm_config_mesclar(p jsonb) returns jsonb language plpgsql security invoker set search_path = public as $$
+declare d jsonb; k text; n int; r public.crm_config;
+begin
+  if not public.crm_eh_gestor() then raise exception 'só a gestão muda as configurações'; end if;
+  insert into public.crm_config (id, dados) values (1, '{}'::jsonb) on conflict (id) do nothing;
+  select coalesce(dados, '{}'::jsonb) into d from public.crm_config where id = 1 for update;
+  for k in select jsonb_object_keys(coalesce(p, '{}'::jsonb)) loop
+    if k = 'fiscal' and jsonb_typeof(p -> k) = 'object' and jsonb_typeof(d -> k) = 'object' then
+      d := jsonb_set(d, array[k], (d -> k) || (p -> k));
+    else
+      d := jsonb_set(d, array[k], p -> k, true);
+    end if;
+  end loop;
+  update public.crm_config set dados = d, atualizado_em = now() where id = 1 returning * into r;
+  get diagnostics n = row_count;
+  if n = 0 then raise exception 'configuração não gravada'; end if;
+  return to_jsonb(r);
+end;
+$$;
+grant execute on function public.crm_config_mesclar(jsonb) to authenticated;
+revoke execute on function public.crm_config_mesclar(jsonb) from anon, public;   -- rodado pelo Anderson (docs/oneclean/sql/2026-10-23-config-mesclar.sql)
+

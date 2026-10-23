@@ -489,6 +489,8 @@
     return !!(r && r.valor === 'crm');
   };
   Supa.prototype.produtosPassarAoCrm = async function () { return unwrap(await this.sb.rpc('crm_produtos_passar_ao_crm')); };
+  // Configuração por partes (crm_config_mesclar): só as chaves que vieram; "fiscal" um nível abaixo.
+  Supa.prototype.configMesclar = async function (patch) { return unwrap(await this.sb.rpc('crm_config_mesclar', { p: patch })); };
   Supa.prototype.produtoLer = async function (codigo) { return unwrap(await this.sb.rpc('crm_produto_ler', { p_codigo: codigo })); };
   Supa.prototype.produtoGravar = async function (codigo, dados) { return unwrap(await this.sb.rpc('crm_produto_gravar', { p_codigo: codigo, p_dados: dados })); };
   Supa.prototype.produtoProximoCodigo = async function () { return unwrap(await this.sb.rpc('crm_produto_proximo_codigo')); };
