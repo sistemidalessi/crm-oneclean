@@ -23,6 +23,9 @@ commits em pt-BR. O que o sistema faz, do ponto de vista de quem usa, está no
 - Antes de mexer numa área, procurar nela em `docs/historico/` (ex.: `grep -n "Caixa" docs/historico/*.md`):
   lá estão os detalhes, os casos reais e o porquê de cada regra. Até 23/10/2026 tudo estava aqui e foi
   movido sem mudanças para `2026-09.md` e `2026-10.md`.
+- **Quando o Anderson disser "se atualize no projeto":** primeiro `git fetch` e `git status`. Pasta limpa e
+  atrás do GitHub → `git pull`. Mudanças não commitadas ou conflito → **parar e avisar o Anderson antes de
+  qualquer coisa**. Depois ler o CLAUDE.md e o `git log`.
 - **No computador do escritório: ler e começar por `PENDENCIAS-ESCRITORIO.md`** (o que só dá para fazer
   de lá, como o SSH da VPS, e as perguntas que esperam o Anderson). Item resolvido: apagar a linha e commitar.
 - Planos e documentos da empresa ficam no repositório **privado** `sistemi-dalessi` (`docs/plano-sair-do-fkn.md`,
