@@ -378,3 +378,38 @@ test('DIFAL: venda a não contribuinte do RS (6108, 12%, ICMSUFDest) passa no es
   // nota de outra UF sem o DIFAL não monta
   assert.throws(() => N.monta(Object.assign({}, r.nota, { itens: r.nota.itens.map(x => Object.assign({}, x, { difal: undefined })) })), /sem o DIFAL/);
 });
+
+test('cesta básica de SP (CST 20, base reduzida 61,11%, cBenef SP020030) e Ex da TIPI passam no esquema; sem cBenef bloqueia; fora de SP vira 00', { skip: !temFerramentas && 'sem xmllint/openssl' }, () => {
+  const cafe = { ncm: '09012100', origem: '0', regra: { venda: { cfop: '5102', cst_icms: '20', aliq_icms: 18, red_bc_icms: 61.11, cbenef: 'SP020030', cst_pis: '06', aliq_pis: null, cst_cofins: '06', aliq_cofins: null } } };
+  const sabonete = { ncm: '34011190', origem: '0', regra: { venda: { cfop: '5102', cst_icms: '00', aliq_icms: 18, extipi: '01', cst_pis: '06', aliq_pis: null, cst_cofins: '06', aliq_cofins: null } } };
+  const regras2 = { '700001': cafe, '700002': sabonete };
+  const ped = Object.assign({}, pedido, { itens: [{ codigo: '700001', descricao: 'CAFE TORRADO 500G', unidade: 'PC', quantidade: 10, preco: 20, desconto: 0 },
+    { codigo: '700002', descricao: 'SABONETE EM BARRA', unidade: 'UN', quantidade: 4, preco: 2.5, desconto: 0 }] });
+  const r = PD.notaDoPedido({ pedido: ped, empresa: cliente, regras: regras2, emitente, ambiente: 'homologacao', serie: 2, numero: 50, emissao: '2026-10-23T10:00:00-03:00' });
+  assert.deepStrictEqual(r.avisos.bloqueia, []);
+  const [c, s] = r.nota.itens;
+  assert.deepStrictEqual([c.icms.cst, c.icms.pRedBC, c.cBenef, s.extipi, s.cBenef], ['20', 61.11, 'SP020030', '01', null]);
+  // 10 × 20 = 200: base 200 × (1 − 0,6111) = 77,78; ICMS 18% = 14,00 (carga de 7%)
+  const k = N.calcula(r.nota);
+  assert.deepStrictEqual([k.itens[0].icms.vBC, k.itens[0].icms.v], [77.78, 14]);
+  const m = N.monta(r.nota);
+  assert.ok(/<NCM>09012100<\/NCM><cBenef>SP020030<\/cBenef><CFOP>5102<\/CFOP>/.test(m.infNFe), 'cBenef no produto');
+  assert.ok(/<NCM>34011190<\/NCM><EXTIPI>01<\/EXTIPI><CFOP>5102<\/CFOP>/.test(m.infNFe), 'EXTIPI no produto');
+  assert.ok(/<ICMS20><orig>0<\/orig><CST>20<\/CST><modBC>3<\/modBC><pRedBC>61.11<\/pRedBC><vBC>77.78<\/vBC><pICMS>18.00<\/pICMS><vICMS>14.00<\/vICMS><\/ICMS20>/.test(m.infNFe), 'grupo ICMS20');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nfe-cesta-'));
+  try {
+    const f = path.join(dir, 'n.xml'); fs.writeFileSync(f, N.nfeCompleta(m.infNFe, '<Signature xmlns="http://www.w3.org/2000/09/xmldsig#"><SignedInfo><CanonicalizationMethod Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"/><SignatureMethod Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1"/><Reference URI="#' + m.id + '"><Transforms><Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"/><Transform Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"/></Transforms><DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"/><DigestValue>AAAA</DigestValue></Reference></SignedInfo><SignatureValue>AAAA</SignatureValue><KeyInfo><X509Data><X509Certificate>AAAA</X509Certificate></X509Data></KeyInfo></Signature>'));
+    const v = spawnSync('xmllint', ['--noout', '--schema', path.join(ESQ, 'nfe_v4.00.xsd'), f]);
+    assert.strictEqual(v.status, 0, String(v.stderr));
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  // sem o cBenef na regra: bloqueia
+  const sem = PD.notaDoPedido({ pedido: ped, empresa: cliente, regras: Object.assign({}, regras2, { '700001': { ncm: cafe.ncm, origem: '0', regra: { venda: Object.assign({}, cafe.regra.venda, { cbenef: null }) } } }), emitente, ambiente: 'homologacao', serie: 2, numero: 51, emissao: '2026-10-23T10:00:00-03:00' });
+  assert.ok(sem.avisos.bloqueia.some(x => /700001 .*CST 20.*cBenef/.test(x)));
+  // CST 20 sem a redução não calcula
+  assert.throws(() => N.calcula(Object.assign({}, r.nota, { itens: [Object.assign({}, c, { icms: { cst: '20', aliquota: 18 } })] })), /CST 20 sem o percentual/);
+  // para outro estado (não contribuinte, DIFAL): sai CST 00 com a interestadual, sem o cBenef de SP
+  const rs = Object.assign({}, cliente, { cnpj: '123.456.789-09', ie: '', ind_ie: '9', uf: 'RS', cidade: 'PORTO ALEGRE', codigo_municipio: '4314902', cep: '90010-000' });
+  const fora = PD.notaDoPedido({ pedido: Object.assign({}, ped, { itens: [ped.itens[0]] }), empresa: rs, regras: regras2, emitente, ambiente: 'homologacao', serie: 2, numero: 52, emissao: '2026-10-23T10:00:00-03:00', cfg: { difal: { RS: { aliq: 17, fcp: 0 } } } });
+  assert.deepStrictEqual(fora.avisos.bloqueia, []);
+  assert.deepStrictEqual([fora.nota.itens[0].icms.cst, fora.nota.itens[0].icms.aliquota, fora.nota.itens[0].cBenef, fora.nota.itens[0].cfop], ['00', 12, null, '6108']);
+});

@@ -8,6 +8,8 @@ A mesma lista resumida está no `PENDENCIAS-ESCRITORIO.md` do `agilite-sistema-g
 - [x] **Serviço fiscal na VPS `2026-10-23a`** — atualizado pelo Anderson em 23/10 (`active`). **DIFAL testado em
       homologação no mesmo dia:** NF 2-9 para a BBMD (RS) autorizada (cStat 100), CFOP 6108, ICMS 12% e DIFAL de R$ 3,94; o
       pedido de teste nº 6 foi cancelado. A busca de notas de compra na Sefaz e a ciência já funcionam desde 22/10.
+- [ ] **Serviço fiscal na VPS `2026-10-23b`** (cesta básica com CST 20 + cBenef e o campo EXTIPI): no SSH,
+      `cd /opt/oneclean-fiscal && git pull -q && systemctl restart oneclean-fiscal && systemctl is-active oneclean-fiscal`.
 - [ ] **Alíquota do RS no DIFAL (17%):** conferir e marcar "Conferida" em Fiscal → Emissão → DIFAL.
 
 ## Perguntas que só você responde

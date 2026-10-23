@@ -2486,9 +2486,12 @@ ficou em `crm_backup.fiscal_produtos_20261023`.
 - bebidas frias 2201.10 e 2202.10: CST 02 com 1,86% e 8,54% (antes era CST 01, que paga a menos);
 - CST 04 (monofásico) no álcool 2207, nos cremes 3304.99 e no lenço umedecido.
 
-**Falta no código:**
-- ICMS CST 20 com o cBenef SP020030, para a cesta básica de SP a 7% (café, açúcar e sal, até 31/12/2026);
-- o campo EXTIPI, para o sabonete em barra com CST 06.
+**No código desde 23/10 (serviço fiscal `2026-10-23b`):**
+- ICMS CST 20 (grupo `ICMS20`, base reduzida pelo `red_bc_icms` da regra) com o `cbenef` da regra, para a cesta básica
+  de SP a 7% (café, açúcar e sal: 61,11% de redução, SP020030, até 31/12/2026). Sem o cBenef a nota não sai; para outro
+  estado o CST 20 vira 00 com a interestadual (a redução é só de SP);
+- o campo EXTIPI (`extipi` da regra), para o sabonete em barra com CST 06 (Ex 01 da 3401.11.90).
+A edição da regra na aba Fiscal tem os três campos novos (redução, cBenef, Ex da TIPI).
 
 Avisos "NCM provavelmente errado" foram postos em 19 produtos, para o comprador corrigir.
 

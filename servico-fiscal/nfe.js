@@ -58,7 +58,7 @@ function rateia(total, pesos) {
   return out;
 }
 const PIS_ALIQ = ['01', '02'], PIS_NT = ['04', '05', '06', '07', '08', '09'];
-const CST_ICMS = ['00', '10', '40', '41', '50', '60', '90'];
+const CST_ICMS = ['00', '10', '20', '40', '41', '50', '60', '90'];
 // finalidade (finNFe): 1 normal, 2 complementar, 3 ajuste, 4 devolução; tpNF: 0 entrada, 1 saída
 const IBSCBS_2026 = { cst: '000', cClassTrib: '000001', pIBSUF: 0.1, pIBSMun: 0, pCBS: 0.9 };
 // Reforma a partir de 2027 (22/10/2026). Vale a DATA DE EMISSÃO da nota, nunca a de hoje.
@@ -141,10 +141,13 @@ function calcula(nota) {
       return { pis, cofins, ibscbs: ib };
     };
     let vBC = 0, vICMS = 0, x = volta(0);
-    const comBase = cstI === '00' || cstI === '10' || (cstI === '90' && num(icms.aliquota) > 0);
+    const comBase = cstI === '00' || cstI === '10' || cstI === '20' || (cstI === '90' && num(icms.aliquota) > 0);
+    // CST 20: base reduzida (pRedBC %), como a cesta básica de SP (RICMS/SP, Anexo II, art. 3º: 61,11% → carga de 7%)
+    const pRed = cstI === '20' ? num(icms.pRedBC) : 0;
+    if (cstI === '20' && !(pRed > 0 && pRed < 100)) throw new Error('item ' + (i + 1) + ': ICMS CST 20 sem o percentual de redução da base');
     if (comBase) {
       const p = num(icms.aliquota);
-      vBC = icms.vBC != null && cstI !== '00' ? r2(icms.vBC) : V; vICMS = r2(vBC * p / 100); x = volta(vICMS);
+      vBC = cstI === '20' ? r2(V * (1 - pRed / 100)) : icms.vBC != null && cstI !== '00' ? r2(icms.vBC) : V; vICMS = r2(vBC * p / 100); x = volta(vICMS);
       if (reg.icmsComIbsCbs && x.ibscbs) {
         for (let k = 0; k < 20; k++) {
           const nBC = r2(V + x.ibscbs.vIBS + x.ibscbs.vCBS), nICMS = r2(nBC * p / 100);
@@ -174,7 +177,7 @@ function calcula(nota) {
       const vBCUF = vBC, vDest = Math.max(0, r2(r2(vBCUF * pDest / 100) - vICMS));
       difal = { vBCUFDest: vBCUF, pFCPUFDest: pFcp, pICMSUFDest: pDest, pICMSInter: pInter, vFCPUFDest: pFcp > 0 ? r2(vBCUF * pFcp / 100) : 0, vICMSUFDest: vDest };
     }
-    return { vProd, vDesc, vFrete, vOutro, icms: Object.assign({ cst: cstI, vBC, p: num(icms.aliquota), v: vICMS, stRet: icms.stRet || null }, st ? { st } : {}), ipiDevol: r2(num(it.ipiDevol)), pis, cofins, ibscbs, difal };
+    return { vProd, vDesc, vFrete, vOutro, icms: Object.assign({ cst: cstI, vBC, p: num(icms.aliquota), v: vICMS, stRet: icms.stRet || null }, st ? { st } : {}, pRed ? { pRedBC: pRed } : {}), ipiDevol: r2(num(it.ipiDevol)), pis, cofins, ibscbs, difal };
   });
   const soma = k => r2(out.reduce((s, x) => s + k(x), 0));
   const t = { vBC: soma(x => x.icms.vBC), vICMS: soma(x => x.icms.v), vProd: soma(x => x.vProd), vFrete: soma(x => x.vFrete), vDesc: soma(x => x.vDesc),
@@ -204,6 +207,8 @@ function grupoIcms(c, it) {
   const o = txt(it.origem == null ? '0' : it.origem), k = c.icms.cst;
   if (k === '10') return '<ICMS><ICMS10>' + tag('orig', o) + '<CST>10</CST><modBC>3</modBC>' + tag('vBC', d2(c.icms.vBC)) + tag('pICMS', pct(c.icms.p)) + tag('vICMS', d2(c.icms.v)) +
     grupoSt(c.icms.st) + '</ICMS10></ICMS>';
+  if (k === '20') return '<ICMS><ICMS20>' + tag('orig', o) + '<CST>20</CST><modBC>3</modBC>' + tag('pRedBC', pct(c.icms.pRedBC)) + tag('vBC', d2(c.icms.vBC)) +
+    tag('pICMS', pct(c.icms.p)) + tag('vICMS', d2(c.icms.v)) + '</ICMS20></ICMS>';
   if (k === '40' || k === '41' || k === '50') return '<ICMS><ICMS40>' + tag('orig', o) + tag('CST', k) + '</ICMS40></ICMS>';
   if (k === '90') return '<ICMS><ICMS90>' + tag('orig', o) + '<CST>90</CST>' +
     (c.icms.vBC > 0 ? '<modBC>3</modBC>' + tag('vBC', d2(c.icms.vBC)) + tag('pICMS', pct(c.icms.p)) + tag('vICMS', d2(c.icms.v)) : '') + grupoSt(c.icms.st) + '</ICMS90></ICMS>';
@@ -283,7 +288,7 @@ function monta(nota, opc) {
     const ci = c.itens[i], gtin = dig(it.gtin);
     const ean = gtin && [8, 12, 13, 14].indexOf(gtin.length) !== -1 ? gtin : 'SEM GTIN';
     const prod = '<prod>' + tag('cProd', txt(it.codigo || String(i + 1))) + tag('cEAN', ean) + tag('xProd', txt(it.descricao)) + tag('NCM', dig(it.ncm)) +
-      (it.cest ? tag('CEST', dig(it.cest)) : '') + (it.cBenef ? tag('cBenef', txt(it.cBenef)) : '') + tag('CFOP', dig(it.cfop)) + tag('uCom', txt(it.unidade || 'UN')) + tag('qCom', d4(it.quantidade)) +
+      (it.cest ? tag('CEST', dig(it.cest)) : '') + (it.cBenef ? tag('cBenef', txt(it.cBenef)) : '') + (it.extipi ? tag('EXTIPI', dig(it.extipi)) : '') + tag('CFOP', dig(it.cfop)) + tag('uCom', txt(it.unidade || 'UN')) + tag('qCom', d4(it.quantidade)) +
       tag('vUnCom', d4(it.valorUnitario)) + tag('vProd', d2(ci.vProd)) + tag('cEANTrib', ean) + tag('uTrib', txt(it.unidade || 'UN')) + tag('qTrib', d4(it.quantidade)) +
       tag('vUnTrib', d4(it.valorUnitario)) + (ci.vFrete ? tag('vFrete', d2(ci.vFrete)) : '') + (ci.vDesc ? tag('vDesc', d2(ci.vDesc)) : '') + (ci.vOutro ? tag('vOutro', d2(ci.vOutro)) : '') + '<indTot>1</indTot>' +
       (it.pedidoCliente ? tag('xPed', txt(it.pedidoCliente)) : '') + '</prod>';

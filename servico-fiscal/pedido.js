@@ -97,14 +97,19 @@ function notaDoPedido(o) {
     }
     if (foraUF && ['60', '500'].indexOf(String(v.cst_icms)) !== -1) bloqueia.push('produto ' + cod + ' (' + it.descricao + '): ICMS-ST já retido em SP não vale para outro estado; venda para ' + uf + ' ainda não sai pelo CRM com este produto');
     const inter = foraUF ? aliqInter(ufEmit, uf, r.origem) : null;
-    const icms = op && op.icms === 'sem' ? { cst: '90' } : { cst: String(v.cst_icms), aliquota: foraUF ? inter : num(v.aliq_icms), stRet };
-    // simples faturamento sem destaque: em SP vai o cBenef SP099999 (sem benefício, legislação manda sair sem destaque)
-    const cBenef = op && op.icms === 'sem' && ufEmit === 'SP' ? 'SP099999' : null;
+    // CST 20 (base reduzida, a cesta básica de SP) só vale dentro de SP: para outro estado sai 00 com a alíquota interestadual
+    const cstV = foraUF && String(v.cst_icms) === '20' ? '00' : String(v.cst_icms);
+    const icms = op && op.icms === 'sem' ? { cst: '90' } : Object.assign({ cst: cstV, aliquota: foraUF ? inter : num(v.aliq_icms), stRet },
+      cstV === '20' ? { pRedBC: num(v.red_bc_icms) } : {});
+    // simples faturamento sem destaque: em SP vai o cBenef SP099999 (sem benefício, legislação manda sair sem destaque);
+    // benefício da regra (ex.: SP020030 da cesta básica, obrigatório em SP com o CST 20 desde 06/04/2026)
+    const cBenef = op && op.icms === 'sem' && ufEmit === 'SP' ? 'SP099999' : cstV === '20' ? (v.cbenef || null) : null;
+    if (cstV === '20' && ufEmit === 'SP' && !cBenef) bloqueia.push('produto ' + cod + ' (' + it.descricao + '): ICMS com base reduzida (CST 20) sem o código de benefício (cBenef) na regra fiscal');
     const pis = op && op.pis === '49' ? { cst: '49' } : { cst: String(v.cst_pis || '01'), aliquota: num(v.aliq_pis) };
     const cofins = op && op.pis === '49' ? { cst: '49' } : { cst: String(v.cst_cofins || '01'), aliquota: num(v.aliq_cofins) };
     return { codigo: cod, descricao: it.descricao, ncm: r.ncm, cest: r.cest || null, gtin: r.gtin || null, origem: r.origem == null ? 0 : r.origem,
       cfop: op ? op.cfop(foraUF) : foraUF ? '6108' : v.cfop, unidade: unid, quantidade: q, valorUnitario: pu, desconto: r2(q * pu * num(it.desconto) / 100),
-      icms, pis, cofins, cBenef, pedidoCliente: d.seu_pedido || null,
+      icms, pis, cofins, cBenef, extipi: v.extipi || null, pedidoCliente: d.seu_pedido || null,
       difal: foraUF && dUF ? { pICMSUFDest: num(dUF.aliq), pFCPUFDest: num(dUF.fcp) } : undefined };
   }).filter(Boolean);
   if (!itens.length && !bloqueia.length) bloqueia.push('o pedido não tem itens');

@@ -494,16 +494,22 @@
         intro: (p.alertas || []).map(a => '• ' + a.texto).join(' ') || 'Sem alerta.',
         campos: [{ nome: 'ncm', rotulo: 'NCM (8 números)' }, { nome: 'cest', rotulo: 'CEST' }, { nome: 'gtin', rotulo: 'GTIN (código de barras)' },
           { nome: 'origem', rotulo: 'Origem (0 = nacional)' }, { nome: 'cfop', rotulo: 'CFOP de venda' }, { nome: 'cst_icms', rotulo: 'CST do ICMS' },
-          { nome: 'aliq_icms', rotulo: 'Alíquota do ICMS (%)' }, { nome: 'cst_pis', rotulo: 'CST do PIS' }, { nome: 'aliq_pis', rotulo: 'Alíquota do PIS (%)' },
+          { nome: 'aliq_icms', rotulo: 'Alíquota do ICMS (%)' }, { nome: 'red_bc_icms', rotulo: 'Redução da base do ICMS (%, só no CST 20)' },
+          { nome: 'cbenef', rotulo: 'Código de benefício (cBenef, ex.: SP020030)' }, { nome: 'extipi', rotulo: 'Ex da TIPI (só se o NCM tiver exceção)' }, { nome: 'cst_pis', rotulo: 'CST do PIS' }, { nome: 'aliq_pis', rotulo: 'Alíquota do PIS (%)' },
           { nome: 'cst_cofins', rotulo: 'CST da COFINS' }, { nome: 'aliq_cofins', rotulo: 'Alíquota da COFINS (%)' }],
         valores: { ncm: p.ncm || '', cest: p.cest || '', gtin: p.gtin || '', origem: p.origem == null ? '' : p.origem, cfop: v.cfop || '', cst_icms: v.cst_icms || '',
-          aliq_icms: v.aliq_icms == null ? '' : v.aliq_icms, cst_pis: v.cst_pis || '', aliq_pis: v.aliq_pis == null ? '' : v.aliq_pis, cst_cofins: v.cst_cofins || '', aliq_cofins: v.aliq_cofins == null ? '' : v.aliq_cofins },
+          aliq_icms: v.aliq_icms == null ? '' : v.aliq_icms, red_bc_icms: v.red_bc_icms == null ? '' : v.red_bc_icms, cbenef: v.cbenef || '', extipi: v.extipi || '', cst_pis: v.cst_pis || '', aliq_pis: v.aliq_pis == null ? '' : v.aliq_pis, cst_cofins: v.cst_cofins || '', aliq_cofins: v.aliq_cofins == null ? '' : v.aliq_cofins },
         salvarTexto: 'Salvar e marcar conferido',
         aoSalvar: async x => {
           const ncm = String(x.ncm || '').replace(/\D/g, '');
           if (ncm && ncm.length !== 8) throw new Error('o NCM tem 8 números');
-          const venda = { cfop: String(x.cfop || '').replace(/\D/g, '') || null, cst_icms: x.cst_icms || null, aliq_icms: num(x.aliq_icms), red_bc_icms: v.red_bc_icms == null ? null : v.red_bc_icms,
+          const venda = { cfop: String(x.cfop || '').replace(/\D/g, '') || null, cst_icms: x.cst_icms || null, aliq_icms: num(x.aliq_icms), red_bc_icms: num(x.red_bc_icms),
             cst_pis: x.cst_pis || null, aliq_pis: num(x.aliq_pis), cst_cofins: x.cst_cofins || null, aliq_cofins: num(x.aliq_cofins) };
+          const cbenef = String(x.cbenef || '').trim().toUpperCase(), extipi = String(x.extipi || '').replace(/\D/g, '');
+          if (cbenef) { if (!/^[A-Z]{2}\d{6}$/.test(cbenef)) throw new Error('o cBenef tem 2 letras e 6 números (ex.: SP020030)'); venda.cbenef = cbenef; }
+          if (extipi) { if (extipi.length < 2 || extipi.length > 3) throw new Error('o Ex da TIPI tem 2 ou 3 números'); venda.extipi = extipi; }
+          if (venda.cst_icms === '20' && !(venda.red_bc_icms > 0 && venda.red_bc_icms < 100)) throw new Error('no CST 20 informe a redução da base (ex.: 61,11)');
+          if (venda.cst_icms === '20' && !venda.cbenef) throw new Error('no CST 20 informe o cBenef (em SP é obrigatório)');
           const novo = Object.assign({ codigo: p.codigo, ncm: ncm || null, cest: String(x.cest || '').replace(/\D/g, '') || null, gtin: String(x.gtin || '').replace(/\D/g, '') || null,
             origem: x.origem === '' ? null : String(x.origem), regra: Object.assign({}, p.regra || {}, { venda }) }, quem());
           await CRM.store().fiscalProdutosSalvar([novo]);
