@@ -383,7 +383,7 @@
       { nome: 'numero', rotulo: 'Número', terco: true }, { nome: 'complemento', rotulo: 'Complemento', terco: true }, { nome: 'bairro', rotulo: 'Bairro', terco: true },
       { nome: 'cidade', rotulo: 'Cidade' }, { nome: 'uf', rotulo: 'UF', tipo: 'select', opcoes: CRM.lista(R.UFS, '—') },
       { tipo: 'secao', rotulo: 'Nota fiscal' },
-      { nome: 'ind_ie', rotulo: 'Contribuinte do ICMS?', tipo: 'select', opcoes: CRM.lista(R.IND_IE, '— (falta dizer)'),
+      { nome: 'ind_ie', rotulo: 'Contribuinte do ICMS?', tipo: 'select', opcoes: [['', '— (falta dizer)']].concat(R.IND_IE),
         ajuda: 'Com inscrição estadual = contribuinte. CPF, condomínio e órgão público sem IE = não contribuinte.' },
       { nome: 'ie', rotulo: 'Inscrição estadual', terco: true, ajuda: 'Só os números. Vazio se não tiver.' },
       { nome: 'codigo_municipio', rotulo: 'Código do município (IBGE)', terco: true, ajuda: 'Vem sozinho pelo CEP.' },
