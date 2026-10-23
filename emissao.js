@@ -40,6 +40,45 @@
     };
   }
 
+  // Certificado que assinou a nota (o <X509Certificate> da assinatura): titular, validade e número de série. Serve para
+  // saber qual A1 o FKN usa sem abrir o FKN (23/10/2026: o "vence em 29/10" era de outro certificado que não o da VPS).
+  // Leitura mínima do DER: Certificate → tbsCertificate → [versão], série, algoritmo, emissor, validade, titular.
+  function certificadoDoXml(xml) {
+    const b64 = (pega(xml, 'X509Certificate') || '').replace(/\s+/g, '');
+    if (!b64) return null;
+    let by;
+    try { by = typeof atob === 'function' ? Uint8Array.from(atob(b64), c => c.charCodeAt(0)) : Uint8Array.from(Buffer.from(b64, 'base64')); } catch (e) { return null; }
+    const le = i => {   // { tag, ini (conteúdo), fim }
+      const tag = by[i]; let n = by[i + 1], j = i + 2;
+      if (n & 0x80) { const k = n & 0x7f; n = 0; for (let q = 0; q < k; q++) n = n * 256 + by[j++]; }
+      return { tag, ini: j, fim: j + n };
+    };
+    const filhos = no => { const out = []; for (let i = no.ini; i < no.fim;) { const f = le(i); out.push(f); i = f.fim; } return out; };
+    const txt = no => { let t = ''; for (let i = no.ini; i < no.fim; i++) t += String.fromCharCode(by[i]); return t; };
+    const hora = no => {   // UTCTime (0x17) AAMMDDhhmmssZ ou GeneralizedTime (0x18) AAAAMMDDhhmmssZ
+      const t = txt(no), m = no.tag === 0x17 ? /^(\d\d)(\d\d)(\d\d)(\d\d)(\d\d)(\d\d)/.exec(t) : /^(\d{4})(\d\d)(\d\d)(\d\d)(\d\d)(\d\d)/.exec(t);
+      if (!m) return null;
+      const ano = no.tag === 0x17 ? (Number(m[1]) < 50 ? 2000 : 1900) + Number(m[1]) : Number(m[1]);
+      return new Date(Date.UTC(ano, Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]), Number(m[6]))).toISOString();
+    };
+    const nomeCN = no => {   // procura o OID 2.5.4.3 (CN) dentro do nome
+      for (const rdn of filhos(no)) for (const atv of filhos(rdn)) {
+        const [oid, val] = filhos(atv);
+        if (oid && val && oid.fim - oid.ini === 3 && by[oid.ini] === 0x55 && by[oid.ini + 1] === 0x04 && by[oid.ini + 2] === 0x03) {
+          try { return new TextDecoder().decode(by.subarray(val.ini, val.fim)); } catch (e) { return txt(val); }
+        }
+      }
+      return '';
+    };
+    try {
+      const tbs = filhos(filhos(le(0))[0]);
+      const k = tbs[0].tag === 0xa0 ? 1 : 0;
+      let serie = ''; for (let i = tbs[k].ini; i < tbs[k].fim; i++) serie += by[i].toString(16).padStart(2, '0');
+      const [de, ate] = filhos(tbs[k + 3]);
+      return { titular: nomeCN(tbs[k + 4]), emissor: nomeCN(tbs[k + 2]), validoDe: hora(de), validoAte: hora(ate), serie: serie.replace(/^00/, '').toUpperCase() };
+    } catch (e) { return null; }
+  }
+
   // O que falta no emitente para a nota sair (o serviço fiscal recusa sem isso).
   function faltasEmitente(f) {
     const em = (f && f.emitente) || {}, e = em.endereco || {}, out = [];
@@ -170,7 +209,7 @@
       'O cliente paga: ' + (r.cobrarPorFora === true ? 'o total com o IBS e a CBS' : 'o total sem o IBS e a CBS (como hoje)')] };
   }
 
-  const api = { REFORMA_PADRAO, reformaDoForm, resumoReforma, lerIbpt, SITUACAO, situacaoDe, doc, emitenteDoXml, faltasEmitente, confereTexto, horasDesde, mesSP, fechamento, zip, crc32 };
+  const api = { REFORMA_PADRAO, reformaDoForm, resumoReforma, lerIbpt, SITUACAO, situacaoDe, doc, emitenteDoXml, certificadoDoXml, faltasEmitente, confereTexto, horasDesde, mesSP, fechamento, zip, crc32 };
   raiz.CRMEmissao = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);
@@ -191,7 +230,7 @@
   const seloNfe = n => { const s = M.SITUACAO[M.situacaoDe(n)] || [n.situacao, 'cinza']; return CRM.selo(s[0], s[1]); };
 
   // estado da tela
-  let nfes = null, inuts = [], carregando = false, saude = null, sefaz = null, testando = '';
+  let nfes = null, inuts = [], carregando = false, saude = null, sefaz = null, testando = '', certFkn = null;
   const f = { mes: M.mesSP(new Date().toISOString()), amb: null };
 
   async function carrega() {
@@ -231,6 +270,19 @@
     return '<p class="' + (dias < 30 ? 'alerta' : 'dica') + '">Serviço fiscal ' + esc(saude.versao) + ' no ar · certificado de <strong>' + esc((/CN=([^,\n]+?)(?:\s+E:|,|\n|$)/.exec(c.titular || '') || [])[1] || c.titular || c.cnpj || '') + '</strong> válido até <strong>' +
       esc(new Date(c.validoAte).toLocaleDateString('pt-BR')) + '</strong> (' + (dias < 0 ? 'VENCIDO' : dias + ' dia(s)') + ')' + (dias < 30 ? ' — <strong>renovar o A1</strong> e trocar o arquivo na VPS.' : '.') + '</p>';
   }
+  // Certificado das notas do FKN (lido das últimas notas guardadas) ao lado do da VPS.
+  function certFknTexto() {
+    if (!certFkn) return '';
+    if (!certFkn.length) return '<p class="alerta">Não achei o XML de uma nota recente do FKN guardado no CRM para ler o certificado.</p>';
+    const vps = saude && saude.certificado, serieVps = vps && String(vps.serial || '').toUpperCase().replace(/^0+/, '');
+    const dias = d => Math.floor((new Date(d).getTime() - Date.now()) / 864e5);
+    return '<div class="dica"><p><strong>Certificado que o FKN usa</strong> (lido das últimas notas do FKN):</p><ul>' + certFkn.map(c => {
+      const dd = dias(c.validoAte), igual = serieVps && String(c.serie).replace(/^0+/, '') === serieVps;
+      return '<li>NF ' + esc(c.numero) + ' de ' + esc(R.dataBR(R.diaLocal(c.emitida_em))) + ': <strong>' + esc(c.titular) + '</strong>, válido até <strong>' +
+        esc(new Date(c.validoAte).toLocaleDateString('pt-BR')) + '</strong> (' + (dd < 0 ? 'VENCIDO' : dd + ' dia(s)') + ')' +
+        (vps ? (igual ? ' · <strong>é o mesmo da VPS</strong>' : ' · <strong>não é o da VPS</strong> (o da VPS vale até ' + esc(new Date(vps.validoAte).toLocaleDateString('pt-BR')) + ')') : '') + '</li>';
+    }).join('') + '</ul>' + (vps ? '' : '<p>Clique também em "Conferir o serviço fiscal" para comparar com o certificado da VPS.</p>') + '</div>';
+  }
   function secaoFiscal() {
     const fc = fiscalCfg(), em = fc.emitente, falta = M.faltasEmitente(fc), amb = ambiente();
     const homAut = (nfes || []).filter(n => n.ambiente === 'homologacao' && (n.situacao === 'autorizada' || n.situacao === 'cancelada')).length;
@@ -241,8 +293,9 @@
       '<p class="acoes"><button type="button" class="btn sec" data-acao="nf-saude"' + (testando ? ' disabled' : '') + '>Conferir o serviço fiscal</button>' +
         '<button type="button" class="btn sec" data-acao="nf-sefaz"' + (testando ? ' disabled' : '') + '>Status da Sefaz</button>' +
         (amb === 'homologacao' ? '<button type="button" class="btn sec" data-acao="nf-sefaz-prod"' + (testando ? ' disabled' : '') + ' title="Só consulta: confere o certificado e a ligação com a Sefaz de produção antes da virada; nada é emitido">Testar a Sefaz de produção</button>' : '') +
+        '<button type="button" class="btn sec" data-acao="nf-cert-fkn"' + (testando ? ' disabled' : '') + ' title="Lê o certificado que assinou as últimas notas do FKN">Conferir o certificado do FKN</button>' +
         '<button type="button" class="btn sec" data-acao="ir-nfe">Ver as notas emitidas (Pedidos → NF-e)</button></p>' +
-      (testando ? '<p class="dica">' + esc(testando) + '</p>' : '') + certificadoTexto() +
+      (testando ? '<p class="dica">' + esc(testando) + '</p>' : '') + certificadoTexto() + certFknTexto() +
       (sefaz ? '<p class="' + (Number(sefaz.cStat) === 107 ? 'dica' : 'alerta') + '">Sefaz-SP (' + esc(sefaz.ambiente === 'producao' ? 'produção' : 'homologação') + '): <strong>' + esc(sefaz.cStat) + ' — ' + esc(sefaz.xMotivo || '') + '</strong></p>' : '') +
       '<h3>Emitente</h3>' +
       (em ? '<dl class="dados grade"><dt>Razão social</dt><dd>' + esc(em.razao || '—') + '</dd><dt>CNPJ</dt><dd>' + esc(em.cnpj) + '</dd><dt>IE</dt><dd>' + esc(em.ie || '—') +
@@ -538,6 +591,8 @@
   // DIFAL (23/10/2026): venda a consumidor final não contribuinte de outro estado. A alíquota interna de cada UF de destino
   // (e o FCP, se houver) fica em dados.fiscal.difal[UF]; sem ela a nota para aquela UF não sai. A guia GNRE vira conta no Caixa.
   const UFS = ['AC', 'AL', 'AM', 'AP', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MG', 'MS', 'MT', 'PA', 'PB', 'PE', 'PI', 'PR', 'RJ', 'RN', 'RO', 'RR', 'RS', 'SC', 'SE', 'TO'];
+  // o mesmo que servico-fiscal/pedido.js (DIFAL_NCM), só para mostrar na tela
+  const DIFAL_EXCECAO = { RS: 'perfumaria e cosméticos (NCM 3303, 3304, 3305 e 3307, inclui o aromatizante 3307.49): 25% + FCP 2% (AMPARA)' };
   function difalHtml(fc) {
     const d = fc.difal || {}, ufs = Object.keys(d).sort();
     return '<h3>Venda para consumidor de outro estado (DIFAL)</h3>' +
@@ -545,7 +600,8 @@
         '4% em importado) e o DIFAL do estado do cliente (alíquota interna de lá − interestadual). A guia GNRE é paga antes de a mercadoria sair e ' +
         'entra sozinha no Caixa quando a nota é autorizada. Contribuinte de outro estado ainda não sai pelo CRM.</p>' +
       (ufs.length ? '<table class="tabela"><thead><tr><th>Estado</th><th>Alíquota interna</th><th>FCP</th><th>Conferida</th><th></th></tr></thead><tbody>' +
-        ufs.map(u => '<tr><td>' + esc(u) + '</td><td>' + esc(String(d[u].aliq)) + '%</td><td>' + esc(String(d[u].fcp || 0)) + '%</td><td>' + (d[u].conferido ? '✓' : '<span class="selo">a conferir</span>') +
+        ufs.map(u => '<tr><td>' + esc(u) + '</td><td>' + esc(String(d[u].aliq)) + '%' + (DIFAL_EXCECAO[u] ? '<small>' + esc(DIFAL_EXCECAO[u]) + '</small>' : '') +
+          '</td><td>' + esc(String(d[u].fcp || 0)) + '%</td><td>' + (d[u].conferido ? '✓' + (d[u].fonte ? '<small>' + esc(d[u].fonte) + '</small>' : '') : '<span class="selo">a conferir</span>') +
           '</td><td><button type="button" class="btn sec mini" data-acao="nf-difal" data-id="' + esc(u) + '">Alterar</button></td></tr>').join('') + '</tbody></table>'
         : '<p class="alerta">Nenhum estado configurado: venda para fora de SP fica bloqueada.</p>') +
       '<p class="acoes"><button type="button" class="btn sec" data-acao="nf-difal">Incluir estado</button></p>';
@@ -571,7 +627,7 @@
         else {
           const aliq = Number(String(v.aliq).replace(',', '.')), fcp = Number(String(v.fcp || 0).replace(',', '.'));
           if (!(aliq > 0)) { CRM.toast('Informe a alíquota interna do estado.'); return false; }
-          novo[u] = { aliq, fcp: fcp > 0 ? fcp : 0, conferido: !!v.conferido };
+          novo[u] = Object.assign({}, d[u] || {}, { aliq, fcp: fcp > 0 ? fcp : 0, conferido: !!v.conferido });   // mantém a fonte e as exceções
         }
         await salvaFiscal({ difal: novo });
         CRM.toast('DIFAL ' + u + (v.remover ? ' retirado.' : ' salvo.')); CRM.render();
@@ -728,6 +784,19 @@
         CRM.toast(stUltimo);
       } catch (e) { CRM.falhou(e); }
       testando = ''; CRM.render();
+    },
+    'nf-cert-fkn': async () => {
+      testando = 'Lendo o certificado das últimas notas do FKN…'; CRM.render();
+      const notas = (E().D.notas || []).filter(n => n.chave && !n.cancelada && Number(n.serie || 1) !== serie()).sort((a, b) => String(b.emitida_em).localeCompare(String(a.emitida_em)));
+      const vistos = new Set(), out = [];
+      for (const n of notas.slice(0, 8)) {
+        let xml = null;
+        try { xml = await CRM.store().notaXml(n.chave); } catch (e) { xml = null; }
+        const c = xml && M.certificadoDoXml(xml);
+        if (c && !vistos.has(c.serie)) { vistos.add(c.serie); out.push(Object.assign({ numero: n.numero, emitida_em: n.emitida_em }, c)); }
+        if (out.length && notas.indexOf(n) >= 2) break;
+      }
+      certFkn = out; testando = ''; CRM.render();
     },
     'nf-do-xml': async () => {
       const notas = (E().D.notas || []).filter(n => n.chave && !n.cancelada && Number(n.serie || 1) !== serie()).sort((a, b) => String(b.emitida_em).localeCompare(String(a.emitida_em)));

@@ -12,10 +12,13 @@ A mesma lista resumida está no `PENDENCIAS-ESCRITORIO.md` do `agilite-sistema-g
 - [x] **Serviço fiscal na VPS `2026-10-23d`** (pedido sem forma de pagamento não emite; "PROGRAMADO 15/11/2026" vira o
       vencimento da duplicata; remessa da entrega futura com a chave do faturamento feito no FKN) — atualizado pelo Anderson
       em 23/10 (`active`).
+- [ ] **Serviço fiscal na VPS `2026-10-23e`** (DIFAL do RS: perfumaria 3303/3304/3305/3307 a 25% + FCP 2%): no SSH,
+      `cd /opt/oneclean-fiscal && git pull -q && systemctl restart oneclean-fiscal && systemctl is-active oneclean-fiscal`.
+      Só pesa na venda à BBMD (RS); sem pressa, mas antes da próxima venda para o RS.
 - [ ] **Santa Casa (entrega futura):** ainda há saldo a entregar do faturamento (5922) feito no FKN? As remessas (5117) iam
       duas por mês até 03/08; em setembro e outubro não houve. Se houver, a remessa pelo CRM pede a chave da nota de faturamento
       (Pedido → Outra operação → Entrega futura — remessa).
-- [ ] **Alíquota do RS no DIFAL (17%):** conferir e marcar "Conferida" em Fiscal → Emissão → DIFAL.
+- [x] **Alíquota do RS no DIFAL (17%):** conferida por mim em 23/10 (RICMS/RS, art. 27, X) e marcada no banco; perfumaria a 25%.
 
 ## Perguntas que só você responde
 

@@ -60,6 +60,20 @@ const OPERACOES = {
 //      icmsComIbsCbs, cobrarPorFora } — só vale para nota emitida em 2027 ou depois; ver nfe.js REFORMA_2027) }
 // Alíquota interestadual (Resolução do Senado 22/1989 e 13/2012): 4% para mercadoria importada (origem 1, 2, 3 e 8); do
 // Sul/Sudeste (menos o ES) para Norte, Nordeste, Centro-Oeste e ES, 7%; nos demais casos, 12%.
+// DIFAL: produtos com alíquota interna própria no estado de destino (a da UF em Fiscal → Emissão vale para o resto).
+// Pesquisa de 23/10/2026 (RS, a BBMD): perfumaria e cosméticos das posições 3303, 3304, 3305 e 3307 (inclui o aromatizante
+// de ambiente 3307.49) pagam 25% no RS — RICMS/RS, Livro I, art. 27, I, e Apêndice I, Seção I, item XI; o resto, 17%
+// (art. 27, X). O FCP é o adicional de 2 pontos do AMPARA/RS (art. 27, parágrafo único), previsto até 31/12/2025 e que pode
+// ter sido prorrogado: sem texto oficial que o encerre, entra (na dúvida, paga). A configuração da UF pode trocar a lista
+// (dados.fiscal.difal[UF].excecoes = [{ prefixos: ['3307'], aliq: 25, fcp: 2 }]).
+const DIFAL_NCM = {
+  RS: [{ prefixos: ['3303', '3304', '3305', '3307'], aliq: 25, fcp: 2, base: 'perfumaria e cosméticos: RICMS/RS, Livro I, art. 27, I; FCP do AMPARA/RS' }]
+};
+function difalDoItem(uf, dUF, ncm) {
+  const lista = Array.isArray(dUF && dUF.excecoes) ? dUF.excecoes : DIFAL_NCM[uf] || [];
+  const n = dig(ncm), x = lista.find(e => (e.prefixos || []).some(pf => n.indexOf(dig(pf)) === 0));
+  return x ? { pICMSUFDest: num(x.aliq), pFCPUFDest: num(x.fcp), base: x.base || null } : { pICMSUFDest: num(dUF.aliq), pFCPUFDest: num(dUF.fcp) };
+}
 const SUL_SUDESTE = ['SP', 'RJ', 'MG', 'PR', 'SC', 'RS'];
 function aliqInter(ufOrig, ufDest, origem) {
   if ([1, 2, 3, 8].indexOf(Number(origem)) !== -1) return 4;
@@ -123,7 +137,7 @@ function notaDoPedido(o) {
     return { codigo: cod, descricao: it.descricao, ncm: r.ncm, cest: r.cest || null, gtin: r.gtin || null, origem: r.origem == null ? 0 : r.origem,
       cfop: op ? op.cfop(foraUF) : foraUF ? '6108' : v.cfop, unidade: unid, quantidade: q, valorUnitario: pu, desconto: r2(q * pu * num(it.desconto) / 100),
       icms, pis, cofins, cBenef, extipi: v.extipi || null, pedidoCliente: d.seu_pedido || null,
-      difal: foraUF && dUF ? { pICMSUFDest: num(dUF.aliq), pFCPUFDest: num(dUF.fcp) } : undefined };
+      difal: foraUF && dUF ? (({ pICMSUFDest, pFCPUFDest }) => ({ pICMSUFDest, pFCPUFDest }))(difalDoItem(uf, dUF, r.ncm)) : undefined };
   }).filter(Boolean);
   if (!itens.length && !bloqueia.length) bloqueia.push('o pedido não tem itens');
   const total = r2(itens.reduce((s, it) => s + r2(it.quantidade * it.valorUnitario) - it.desconto, 0) + num(p.frete));
@@ -159,6 +173,10 @@ function notaDoPedido(o) {
       const tt = N.calcula({ emissao, itens, frete: { valor: num(p.frete) }, ibscbs: cfg.ibscbs, reforma: ref || undefined }).totais;
       difal = { uf, valor: r2(num(tt.vICMSUFDest) + num(tt.vFCPUFDest)), icms: num(tt.vICMSUFDest), fcp: num(tt.vFCPUFDest), aliq: num(dUF.aliq) };
       conferir.push('venda a consumidor de ' + uf + ': DIFAL de R$ ' + difal.valor.toFixed(2).replace('.', ',') + ' (' + num(dUF.aliq) + '% do ' + uf + ' − ' + itens[0].icms.aliquota + '% interestadual) a pagar por GNRE ao ' + uf + ' antes da mercadoria sair; a guia acompanha a nota');
+      const outras = itens.filter(it => it.difal && it.difal.pICMSUFDest !== num(dUF.aliq));
+      if (outras.length) conferir.push('DIFAL com alíquota própria do ' + uf + ' em ' + outras.length + ' item(ns): ' +
+        outras.map(it => it.codigo + ' (NCM ' + it.ncm + ', ' + it.difal.pICMSUFDest + '%' + (it.difal.pFCPUFDest ? ' + FCP ' + it.difal.pFCPUFDest + '%' : '') + ')').join(', ') +
+        ' — ' + (difalDoItem(uf, dUF, outras[0].ncm).base || 'exceção da configuração'));
       if (!dUF.conferido) conferir.push('alíquota interna do ' + uf + ' (' + num(dUF.aliq) + '%) ainda não marcada como conferida em Fiscal → Emissão → DIFAL');
     } catch (e2) { bloqueia.push(e2.message); }
   }
@@ -214,4 +232,4 @@ function notaDoPedido(o) {
   return { nota, avisos: { bloqueia: [...new Set(bloqueia)], conferir: [...new Set(conferir)] }, total, cobrar, difal };
 }
 
-module.exports = { lePagamento, parcelas, notaDoPedido, OPERACOES, aliqInter };
+module.exports = { DIFAL_NCM, difalDoItem, lePagamento, parcelas, notaDoPedido, OPERACOES, aliqInter };

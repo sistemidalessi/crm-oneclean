@@ -124,3 +124,23 @@ test('regra de 2027 (aba Fiscal → Emissão): o formulário grava o que o servi
   assert.match(r0.linhas.join('|'), /não definida.*0,05% estadual \+ 0,05% municipal.*desligado até o contador.*sem o IBS e a CBS/);
   assert.match(r1.linhas.join('|'), /CBS: 8,8%.*sim \(Resposta à Consulta Sefaz-SP 32931\/2026\).*com o IBS e a CBS/);
 });
+
+test('certificado da assinatura lido do XML (titular, validade, série) bate com o do Node', { skip: !(() => { try { require('child_process').execFileSync('openssl', ['version'], { stdio: 'pipe' }); return true; } catch (e) { return false; } })() && 'sem openssl' }, () => {
+  const { execFileSync } = require('child_process');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cert-'));
+  try {
+    execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', path.join(dir, 'k.pem'), '-out', path.join(dir, 'c.pem'), '-days', '400',
+      '-subj', '/C=BR/O=ICP-Brasil/CN=EMPRESA DE TESTE LTDA:11222333000181'], { stdio: 'pipe' });
+    const pem = fs.readFileSync(path.join(dir, 'c.pem'), 'utf8');
+    const b64 = pem.replace(/-----[^-]+-----/g, '').replace(/\s+/g, '');
+    const xml = '<nfeProc><NFe><infNFe Id="NFe1"></infNFe><Signature><KeyInfo><X509Data><X509Certificate>' + b64.replace(/(.{64})/g, '$1\n') +
+      '</X509Certificate></X509Data></KeyInfo></Signature></NFe></nfeProc>';
+    const c = M.certificadoDoXml(xml), x = new (require('crypto').X509Certificate)(pem);
+    assert.strictEqual(c.titular, 'EMPRESA DE TESTE LTDA:11222333000181');
+    assert.strictEqual(c.validoAte, new Date(x.validTo).toISOString());
+    assert.strictEqual(c.validoDe, new Date(x.validFrom).toISOString());
+    assert.strictEqual(c.serie.replace(/^0+/, ''), x.serialNumber.toUpperCase().replace(/^0+/, ''));
+    assert.strictEqual(M.certificadoDoXml('<NFe></NFe>'), null);
+    assert.strictEqual(M.certificadoDoXml('<X509Certificate>@@@</X509Certificate>'), null);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

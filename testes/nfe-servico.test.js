@@ -377,6 +377,25 @@ test('DIFAL: venda a não contribuinte do RS (6108, 12%, ICMSUFDest) passa no es
   assert.ok(comSt.avisos.bloqueia.some(x => /250011 .*ICMS-ST já retido em SP/.test(x)));
   // nota de outra UF sem o DIFAL não monta
   assert.throws(() => N.monta(Object.assign({}, r.nota, { itens: r.nota.itens.map(x => Object.assign({}, x, { difal: undefined })) })), /sem o DIFAL/);
+  // perfumaria no RS (aromatizante 3307.49): 25% + FCP 2% do AMPARA, o resto da nota segue os 17% da UF
+  const regrasP = Object.assign({}, regras, { '540001': Object.assign(regraVenda('5102', '00', '01'), { ncm: '33074900' }) });
+  const pedP = Object.assign({}, pedido, { itens: [pedido.itens[0], { codigo: '540001', descricao: 'AROMATIZANTE DE AMBIENTE', unidade: 'UN', quantidade: 1, preco: 100, desconto: 0 }] });
+  const rp = PD.notaDoPedido({ pedido: pedP, empresa: rs, regras: regrasP, emitente, ambiente: 'homologacao', serie: 2, numero: 44, emissao: '2026-10-23T10:00:00-03:00', cfg });
+  assert.deepStrictEqual(rp.avisos.bloqueia, []);
+  assert.deepStrictEqual(rp.nota.itens.map(i => i.difal), [{ pICMSUFDest: 17, pFCPUFDest: 0 }, { pICMSUFDest: 25, pFCPUFDest: 2 }]);
+  // 100 × 25% − 12 = 13 de ICMS e 2 de FCP; mais os 6,79 do detergente
+  assert.deepStrictEqual(rp.difal, { uf: 'RS', valor: 21.79, icms: 19.79, fcp: 2, aliq: 17 });
+  assert.ok(rp.avisos.conferir.some(x => /alíquota própria do RS em 1 item\(ns\): 540001 \(NCM 33074900, 25% \+ FCP 2%\) — perfumaria/.test(x)));
+  const mp = N.monta(rp.nota);
+  assert.ok(/<vBCFCPUFDest>100.00<\/vBCFCPUFDest><pFCPUFDest>2.00<\/pFCPUFDest><pICMSUFDest>25.00<\/pICMSUFDest>/.test(mp.infNFe));
+  const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'nfe-difal-'));
+  try {
+    const f = path.join(dir2, 'n.xml'); fs.writeFileSync(f, N.nfeCompleta(mp.infNFe, '<Signature xmlns="http://www.w3.org/2000/09/xmldsig#"><SignedInfo><CanonicalizationMethod Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"/><SignatureMethod Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1"/><Reference URI="#' + mp.id + '"><Transforms><Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"/><Transform Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"/></Transforms><DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"/><DigestValue>AAAA</DigestValue></Reference></SignedInfo><SignatureValue>AAAA</SignatureValue><KeyInfo><X509Data><X509Certificate>AAAA</X509Certificate></X509Data></KeyInfo></Signature>'));
+    const v = spawnSync('xmllint', ['--noout', '--schema', path.join(ESQ, 'nfe_v4.00.xsd'), f]);
+    assert.strictEqual(v.status, 0, String(v.stderr));
+  } finally { fs.rmSync(dir2, { recursive: true, force: true }); }
+  // a configuração da UF pode trocar a lista
+  assert.deepStrictEqual(PD.difalDoItem('RS', { aliq: 17, fcp: 0, excecoes: [] }, '33074900'), { pICMSUFDest: 17, pFCPUFDest: 0 });
 });
 
 test('cesta básica de SP (CST 20, base reduzida 61,11%, cBenef SP020030) e Ex da TIPI passam no esquema; sem cBenef bloqueia; fora de SP vira 00', { skip: !temFerramentas && 'sem xmllint/openssl' }, () => {

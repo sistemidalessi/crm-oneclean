@@ -2533,6 +2533,17 @@ em dias. Agora:
 - `emissao.js` tem a mesma trava na tela (`faltaPagamento`, no Emitir e no lote), que vale antes do `git pull` na VPS;
 - o pedido novo já vem com o último pagamento usado pelo cliente (pedidos do CRM e orçamentos; "programado" não é copiado).
 
+**DIFAL do RS conferido (23/10, serviço fiscal `2026-10-23e`):** 17% (RICMS/RS, Livro I, art. 27, X), marcado como
+conferido no banco. **Exceção por NCM** (`DIFAL_NCM` em `servico-fiscal/pedido.js`): perfumaria e cosméticos das posições
+3303, 3304, 3305 e 3307 pagam **25%** no RS (art. 27, I; Apêndice I, Seção I, item XI) — a BBMD compra o aromatizante
+3307.49 (540001/540002). FCP de 2% do AMPARA/RS nesses itens: previsto até 31/12/2025, sem texto oficial achado sobre a
+prorrogação; entra (na dúvida, paga). `dados.fiscal.difal[UF].excecoes` troca a lista; a prévia avisa os itens com
+alíquota própria. Café e açúcar ficam nos 17% (sem certeza de redução no destino).
+
+**Certificado do FKN:** botão "Conferir o certificado do FKN" em Fiscal → Emissão lê o `<X509Certificate>` das últimas
+notas do FKN (`certificadoDoXml`, leitura mínima do DER) e compara a série com a do certificado da VPS (Safeweb, válido
+até 23/12/2026).
+
 **Entrega futura começada no FKN (23/10, `crm-fiscal` v17 e serviço fiscal `2026-10-23d`):** a Santa Casa recebia duas
 remessas 5117 por mês (até 03/08/2026), de um faturamento 5922 anterior aos dados do CRM (15/12/2025). A remessa pelo CRM só
 achava faturamento emitido pelo CRM. Agora "Outra operação" no pedido pede a **chave da nota de simples faturamento** quando
