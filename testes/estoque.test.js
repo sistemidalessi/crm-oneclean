@@ -145,3 +145,14 @@ test('nota de compra que parece despesa: combustível, cupom do posto, serviço'
   assert.equal(S.pareceDespesa([{ ncm: '27101921', cfop: '5656' }, { ncm: '34025000', cfop: '5102' }]), null, 'nota misturada não é despesa');
   assert.equal(S.pareceDespesa([]), null);
 });
+
+test('"vem quantas na embalagem" suspeito: igual à quantidade da nota ou ≠ 1 com a mesma unidade do estoque', () => {
+  const itens = [{ id: 'a', descricao: 'ESPONJA', quantidade: 500, unidade: 'PC' }, { id: 'b', descricao: 'PAPEL', quantidade: 15, unidade: 'FD' },
+    { id: 'c', descricao: 'CAIXA DE COPOS', quantidade: 2, unidade: 'CX' }, { id: 'd', descricao: 'DISCO', quantidade: 5, unidade: 'PC' }];
+  const unDe = new Map([['1', 'UN'], ['2', 'FD'], ['3', 'PT'], ['4', 'UN']]);
+  const r = S.fatoresSuspeitos(itens, [{ id: 'a', codigo: '1', fator: 500 }, { id: 'b', codigo: '2', fator: 6 }, { id: 'c', codigo: '3', fator: 25 }, { id: 'd', codigo: '4', fator: 1 }], unDe);
+  assert.strictEqual(r.length, 2);
+  assert.ok(/ESPONJA: 500 PC × 500 = 250000/.test(r[0]));
+  assert.ok(/PAPEL: a nota já vem em FD/.test(r[1]));
+  assert.deepStrictEqual(S.fatoresSuspeitos(itens, [{ id: 'a', codigo: '1', fator: 500, ignorar: true }], unDe), []);
+});

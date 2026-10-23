@@ -249,7 +249,20 @@
   }
 
   const TIPOS = { inicial: 'saldo inicial (FKN)', saida: 'saída (nota)', entrada: 'entrada (compra)', ajuste: 'ajuste', inventario: 'inventário', estorno: 'estorno' };
-  const api = { junta, valor, sequencia, lerContagem, atualFkn, ehCaixa, TIPOS, extrasDoXml, stDoDet, compraDoXml, devolucaoDoXml, custoItem, sugere, avisosDfe, sugereFornecedor, chegadaCompras, pareceDespesa };
+  // "Vem quantas na embalagem?" suspeito (23/10/2026: em 22/10 doze entradas saíram com a quantidade da nota no lugar —
+  // 500 pacotes de esponja × 500 = 250.000): igual à quantidade da nota, ou diferente de 1 com a mesma unidade do estoque.
+  // itens: os da nota; lista: [{ id, codigo, fator, ignorar }]; unDe: Map(codigo → unidade do estoque).
+  function fatoresSuspeitos(itens, lista, unDe) {
+    const porId = new Map((itens || []).map(i => [i.id, i]));
+    return (lista || []).filter(x => !x.ignorar && Number(x.fator) > 0).map(x => {
+      const it = porId.get(x.id), f = Number(x.fator), q = num(it && it.quantidade), uN = un(it && it.unidade), uE = un(unDe && unDe.get(x.codigo));
+      const total = Math.round(q * f * 1000) / 1000;
+      if (f > 1 && Math.abs(f - q) < 1e-9) return (it.descricao || x.codigo) + ': ' + q + ' ' + uN + ' × ' + f + ' = ' + total + ' (o número é igual à quantidade da nota)';
+      if (f !== 1 && uN && uE && uN === uE) return (it.descricao || x.codigo) + ': a nota já vem em ' + uN + ', como o estoque, mas está ' + f + ' por embalagem (= ' + total + ')';
+      return null;
+    }).filter(Boolean);
+  }
+  const api = { fatoresSuspeitos, junta, valor, sequencia, lerContagem, atualFkn, ehCaixa, TIPOS, extrasDoXml, stDoDet, compraDoXml, devolucaoDoXml, custoItem, sugere, avisosDfe, sugereFornecedor, chegadaCompras, pareceDespesa };
   raiz.CRMEstoque = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);
@@ -800,6 +813,9 @@
             const lista = itens.map(it => ({ id: it.id, codigo: form.elements['c_' + it.id].value.trim(), fator: form.elements['f_' + it.id].value, ignorar: form.elements['i_' + it.id].checked }));
             const falta = lista.filter(x => !x.ignorar && (!x.codigo || !(Number(x.fator) > 0)));
             if (falta.length) throw new Error(falta.length + ' item(ns) sem produto ou sem "vem quantas na embalagem" (ou marque "não é estoque")');
+            const susp = S.fatoresSuspeitos(itens, lista, unDe);
+            if (susp.length && !confirm('Confira o "vem quantas na embalagem" de ' + susp.length + ' item(ns):\n\n' + susp.join('\n') +
+              '\n\nSe a nota já vem na mesma unidade do estoque, o certo é 1. Dar entrada assim mesmo?')) return false;
             const fora = lista.filter(x => !x.ignorar && !nomeDe.has(x.codigo));
             if (fora.length && !confirm(fora.length + ' código(s) que o estoque não tem (' + fora.map(x => x.codigo).join(', ') + '). Criar no estoque do CRM assim mesmo?')) return false;
             const r = await st.compraLancar(id, lista);
