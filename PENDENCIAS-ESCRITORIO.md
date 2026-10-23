@@ -11,7 +11,11 @@ A mesma lista resumida está no `PENDENCIAS-ESCRITORIO.md` do `agilite-sistema-g
       de venda de 2026 continuam saindo iguais). No terminal do escritório,
       entrar na VPS e rodar:
       `cd /opt/oneclean-fiscal && git pull -q && systemctl restart oneclean-fiscal && systemctl is-active oneclean-fiscal`
-      Tem que responder `active`.
+      Tem que responder `active`. **Desde 23/10 a versão é `2026-10-23a`** (aparece em Fiscal → Emissão → "Testar o serviço"):
+      traz a trava do CFOP de outra operação (6108, 5117) e o **DIFAL** (venda para consumidor de outro estado).
+- [ ] **Testar o DIFAL em homologação** (depois de atualizar): um pedido de teste para um cliente do RS sem inscrição
+      estadual (pode ser a BBMD, em homologação não vale nada), "Emitir NF-e". A prévia mostra o valor da guia GNRE; a nota tem
+      que sair autorizada com CFOP 6108. Conferir a alíquota do RS (17%) e marcar como conferida em Fiscal → Emissão → DIFAL.
 - [ ] **Primeira busca na Sefaz:** no CRM, Estoque → Notas de compra → **"Buscar na Sefaz agora"**. Devem aparecer as notas
       dos fornecedores dos últimos 3 meses (só o resumo: fornecedor, valor, data). Se der erro de certificado do servidor
       da Sefaz nacional, chamar o Claude: é acrescentar a raiz em `/etc/oneclean-fiscal/cadeia.pem` (nunca desligar a

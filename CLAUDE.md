@@ -2477,6 +2477,37 @@ e WhatsApp. Valor real do parado em 15/10: **R$ 79 mil em 271 produtos** (depois
 - Cadastro público do Auth **desligado** no painel (não dá por SQL).
 - Token do Agendor nunca entra no repositório; o extrator lê da linha de comando.
 
+### DIFAL: venda para consumidor de outro estado (23/10/2026)
+
+Pedido do Anderson: o FKN sai em 30/11, e a BBMD de Porto Alegre (RS) compra cerca de 4 vezes por ano. A OneClean pagava a
+guia GNRE dessas vendas.
+
+**Quem pode:** só cliente de outra UF **sem** inscrição estadual (indIEDest 9) e só a venda. Continuam bloqueados:
+- contribuinte de fora de SP;
+- bonificação e entrega futura para outra UF;
+- produto com ST retida em SP.
+
+**`servico-fiscal/pedido.js`:**
+- CFOP 6108 e natOp "VENDA FORA DO ESTADO";
+- `aliqInter`: 4% para importado (origem 1, 2, 3 e 8); 7% do Sul/Sudeste para N/NE/CO/ES; 12% nos demais casos;
+- a alíquota interna da UF de destino vem de `dados.fiscal.difal[UF] = { aliq, fcp, conferido }`;
+- aviso da GNRE com o valor na prévia, e `difal` no retorno.
+
+**`servico-fiscal/nfe.js`:**
+- grupo `ICMSUFDest` no item: base única = valor da operação; vICMSUFDest = base × interna − ICMS interestadual; partilha
+  100% para o destino; FCP opcional;
+- totais `vFCPUFDest`, `vICMSUFDest` e `vICMSUFRemet` depois de `vICMSDeson`;
+- nota de outra UF exige CFOP 6xxx e, a não contribuinte, o DIFAL;
+- o texto do DIFAL vai no `infCpl`;
+- validado no XSD (teste em `testes/nfe-servico.test.js`).
+
+**`crm-fiscal`:** `lancaGnre` cria a conta "GNRE DIFAL UF - NF série-número (chave)" no Caixa: categoria Impostos, vence
+no dia, só em produção autorizada, uma por nota. **Não usa `chave_fkn`**: o leitor do Sifn083 daria a conta como paga.
+
+**Tela:** Fiscal → Emissão → "Venda para consumidor de outro estado (DIFAL)". RS gravado com 17% e FCP 0, **a conferir**.
+
+**Serviço fiscal `2026-10-23a`:** vale na VPS só depois do `git pull` e do restart, feitos do escritório.
+
 ### Regras fiscais revistas para a virada (22/10/2026)
 
 A pesquisa por NCM, com fonte, está em `sistemi-dalessi/docs/oneclean/fiscal/regras-ncm-2026-11.md`; o backup ficou em
