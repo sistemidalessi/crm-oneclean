@@ -4188,9 +4188,13 @@ begin
     select nome into fn from public.crm_fornecedores where codigo = d ->> 'fornecedor_cod';
     if fn is null then raise exception 'fornecedor % não cadastrado', d ->> 'fornecedor_cod'; end if;
   end if;
-  if novo then
-    select * into modelo_f from public.crm_fiscal_produtos where codigo = upper(btrim(coalesce(d ->> 'modelo', '')));
-    if modelo_f.codigo is null then raise exception 'diga um produto com a mesma tributação (a regra fiscal é copiada dele)'; end if;
+  -- a regra fiscal vem de um produto com a mesma tributação: no produto novo e, desde 23/10/2026, no produto que ainda não
+  -- tem regra (532 ativos sem nota de venda em 2026: sem regra a nota não sai). Copia só a regra de venda: o ICMS-ST retido
+  -- (st_ret, st_entrada) é de cada produto, aprendido das notas, e não serve para outro.
+  if novo or (nullif(btrim(coalesce(d ->> 'modelo', '')), '') is not null
+              and not exists (select 1 from public.crm_fiscal_produtos x where x.codigo = cod and x.regra ? 'venda')) then
+    select * into modelo_f from public.crm_fiscal_produtos where codigo = upper(btrim(coalesce(d ->> 'modelo', ''))) and regra ? 'venda';
+    if modelo_f.codigo is null then raise exception 'diga um produto com a mesma tributação e com regra fiscal (a regra é copiada dele)'; end if;
   end if;
 
   perform set_config('crm.cadastro', '1', true);
@@ -4207,7 +4211,8 @@ begin
     insert into public.crm_fiscal_produtos (codigo, descricao, unidade, ncm, cest, gtin, origem, regra, alertas, situacao, criado_em, atualizado_em)
       values (cod, btrim(d ->> 'descricao'), upper(btrim(d ->> 'unidade')), regexp_replace(d ->> 'ncm', '\D', '', 'g'),
         coalesce(nullif(regexp_replace(coalesce(d ->> 'cest', ''), '\D', '', 'g'), ''), modelo_f.cest), nullif(regexp_replace(coalesce(d ->> 'gtin', ''), '\D', '', 'g'), ''),
-        coalesce(nullif(d ->> 'origem', ''), modelo_f.origem, '0'), modelo_f.regra, '[]'::jsonb, 'proposta', now(), now())
+        coalesce(nullif(d ->> 'origem', ''), modelo_f.origem, '0'), jsonb_build_object('venda', modelo_f.regra -> 'venda', 'revista', current_date::text, 'modelo', modelo_f.codigo),
+        jsonb_build_array(jsonb_build_object('nivel', 'atencao', 'texto', 'Regra de venda copiada do produto ' || modelo_f.codigo || ' (mesma tributação) no cadastro.')), 'proposta', now(), now())
       on conflict (codigo) do nothing;
   else
     update public.crm_estoque set
@@ -4237,6 +4242,18 @@ begin
         descricao = case when d ? 'descricao' then btrim(d ->> 'descricao') else descricao end,
         atualizado_em = now()
        where codigo = cod;
+    end if;
+    if modelo_f.codigo is not null then   -- produto antigo sem regra: ganha a regra de venda do modelo
+      insert into public.crm_fiscal_produtos (codigo, descricao, unidade, ncm, cest, gtin, origem, regra, alertas, situacao, criado_em, atualizado_em)
+        values (cod, coalesce(nullif(btrim(coalesce(d ->> 'descricao', '')), ''), e.descricao), coalesce(nullif(upper(btrim(coalesce(d ->> 'unidade', ''))), ''), e.unidade),
+          nullif(regexp_replace(coalesce(d ->> 'ncm', ''), '\D', '', 'g'), ''), coalesce(nullif(regexp_replace(coalesce(d ->> 'cest', ''), '\D', '', 'g'), ''), modelo_f.cest),
+          nullif(regexp_replace(coalesce(d ->> 'gtin', ''), '\D', '', 'g'), ''), coalesce(nullif(d ->> 'origem', ''), modelo_f.origem, '0'),
+          jsonb_build_object('venda', modelo_f.regra -> 'venda', 'revista', current_date::text, 'modelo', modelo_f.codigo), '[]'::jsonb, 'proposta', now(), now())
+        on conflict (codigo) do update set
+          regra = coalesce(public.crm_fiscal_produtos.regra, '{}'::jsonb) || jsonb_build_object('venda', modelo_f.regra -> 'venda', 'revista', current_date::text, 'modelo', modelo_f.codigo),
+          ncm = coalesce(excluded.ncm, public.crm_fiscal_produtos.ncm), cest = coalesce(public.crm_fiscal_produtos.cest, excluded.cest), atualizado_em = now();
+      update public.crm_fiscal_produtos set alertas = coalesce(alertas, '[]'::jsonb) || jsonb_build_array(jsonb_build_object('nivel', 'atencao',
+          'texto', 'Regra de venda copiada do produto ' || modelo_f.codigo || ' (mesma tributação) no cadastro.')) where codigo = cod;
     end if;
   end if;
   perform set_config('crm.cadastro', '', true);

@@ -1688,6 +1688,12 @@ itens e vínculos; contagem ok; vendedora bloqueada. Navegador: nenhuma chamada 
 levanta no BB (convênio, carteira, API de Cobrança ou CNAB 240/400) está em `sistemi-dalessi/docs/plano-sair-do-fkn.md`, Fase 5.
 
 ## Cadastro de produto no CRM (22/10/2026, virada para só o CRM)
+- **23/10: produto antigo sem regra fiscal.** 532 produtos ativos não tinham regra (não venderam em 2026, então a leitura
+  das notas não os viu); 219 deles têm saldo ou venderam no último ano, e a NF-e deles não sairia. O cadastro agora pede
+  "Mesma tributação que o produto" também no produto que já existe e não tem regra, e copia **só a regra de venda**
+  (`regra.venda`, mais `revista` e `modelo`): o ICMS-ST retido (`st_ret`, `st_entrada`) é de cada produto e não vem junto, nem
+  no produto novo (antes copiava a regra inteira). Produto que já tem regra não muda pelo modelo. Filtro e selo **"Sem regra
+  fiscal"** em Produtos (administrador). Testado numa transação desfeita.
 - **Chave "o CRM é o dono do cadastro"** em `crm_sistema` (chave `produtos_dono` = `crm`), **fora do `crm_config`** de
   propósito: o `crm_config` é regravado inteiro por quem salva Configurações (tela aberta antes desligaria a chave). Liga só
   o administrador (`crm_produtos_passar_ao_crm`, botão "Passar o cadastro para o CRM" em Produtos); sem volta pela tela.

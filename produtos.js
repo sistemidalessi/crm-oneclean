@@ -147,6 +147,9 @@
     });
   }
   const margemDe = (preco, custo) => (num(preco) > 0 && custo != null ? Math.round((num(preco) - num(custo)) / num(preco) * 1000) / 10 : null);
+  // sem a regra de venda a NF-e não sai (23/10/2026: 532 produtos ativos sem venda em 2026 estavam assim); no cadastro,
+  // "Mesma tributação que o produto" copia a regra de um parecido
+  const semRegra = x => !(x.fiscal && x.fiscal.regra && x.fiscal.regra.venda);
   const noMinimo = x => !!(x.cad && x.cad.min > 0 && x.disponivel <= x.cad.min);
   // Os atalhos da pesquisa (com quantos há em cada um). Os de cadastro só para quem cuida dele (`cuida`); o NCM, só
   // para quem tem o fiscal (`fiscal`).
@@ -159,6 +162,7 @@
     ['semfoto', 'Sem foto', x => !x.foto, 'cuida'],
     ['semforn', 'Sem fornecedor', x => !x.forn, 'cuida'],
     ['semncm', 'Sem NCM', x => x.fiscal !== undefined && !x.ncm, 'fiscal'],
+    ['semregra', 'Sem regra fiscal', x => x.fiscal !== undefined && semRegra(x), 'fiscal'],
     ['inativos', 'Inativos', x => x.situacao === 'INATIVO', 'cuida']
   ];
   function atalhos(l, quem) {
@@ -204,6 +208,7 @@
     else if (quem.cuida && noMinimo(x)) l.push(['no mínimo', 'ambar']);
     if (quem.cuida && !x.forn) l.push(['sem fornecedor', 'ambar']);
     if (quem.fiscal && x.fiscal !== undefined && !x.ncm) l.push(['sem NCM', 'vermelho']);
+    else if (quem.fiscal && x.fiscal !== undefined && semRegra(x)) l.push(['sem regra fiscal', 'vermelho']);
     if (quem.cuida && !x.foto) l.push(['sem foto', 'azul']);
     return l;
   }
@@ -1034,7 +1039,9 @@
       .concat([{ tipo: 'secao', rotulo: 'Fiscal' },
         { nome: 'ncm', rotulo: 'NCM (8 números)', obrigatorio: true }, { nome: 'cest', rotulo: 'CEST (se tiver)' }, { nome: 'gtin', rotulo: 'Código de barras (EAN)' },
         { nome: 'origem', rotulo: 'Origem', tipo: 'select', opcoes: ORIGENS }])
-      .concat(novo ? [{ nome: 'modelo', rotulo: 'Mesma tributação que o produto (código)', obrigatorio: true, largo: true, dica: 'um produto parecido já vendido: o CRM copia dele CFOP, CST e ICMS-ST' },
+      .concat(!novo && !v0.tem_regra ? [{ nome: 'modelo', rotulo: 'Mesma tributação que o produto (código)', obrigatorio: true, largo: true,
+        dica: 'este produto ainda não tem regra fiscal (sem ela a nota não sai): diga um parecido já vendido e o CRM copia dele CFOP, CST, PIS e COFINS' }] : [])
+      .concat(novo ? [{ nome: 'modelo', rotulo: 'Mesma tributação que o produto (código)', obrigatorio: true, largo: true, dica: 'um produto parecido já vendido: o CRM copia dele CFOP, CST, PIS e COFINS' },
         { tipo: 'secao', rotulo: 'Embalagem de compra (se vier em caixa ou fardo)' },
         { nome: 'emb_unidade', rotulo: 'Embalagem (CX, FD, PCT)' }, { nome: 'emb_fator', rotulo: 'Quantas unidades vêm nela', tipo: 'numero', passo: '1', vazioNulo: true }] : []);
     const valores = Object.assign({}, v0, { ncm: v0.ncm ? String(v0.ncm).replace(/^(\d{4})(\d{2})(\d{2})$/, '$1.$2.$3') : '', fornecedor_cod: v0.fornecedor_cod ? String(v0.fornecedor_cod) : '' });
@@ -1048,7 +1055,8 @@
         ['descricao', 'unidade', 'situacao', 'linha', 'familia', 'localizacao', 'preco_venda', 'estoque_min', 'estoque_max', 'ncm', 'cest', 'gtin', 'origem'].forEach(k => { d[k] = v[k] == null ? '' : v[k]; });
         if (comCusto) d.custo_unit = v.custo_unit == null ? '' : v.custo_unit;
         if (temForn) d.fornecedor_cod = v.fornecedor_cod || '';
-        if (novo) { d.novo = true; d.modelo = String(v.modelo || '').trim(); }
+        if (novo) d.novo = true;
+        if (novo || !v0.tem_regra) d.modelo = String(v.modelo || '').trim().toUpperCase();
         const codigo = novo ? String(v.codigo || '').trim().toUpperCase() : cod;
         await s.produtoGravar(codigo, d);
         if (novo && v.emb_unidade && v.emb_fator > 0) await s.produtoEmbalagem(codigo, String(v.emb_unidade).trim().toUpperCase(), v.emb_fator);
