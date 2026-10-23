@@ -17,3 +17,10 @@ test('conferência da virada: só o administrador e sem anon', () => {
   assert.ok(sql.slice(i, i + 600).includes("if not public.crm_eh_admin() then raise exception"));
   assert.ok(sql.includes('revoke all on function public.crm_virada_conferir() from public, anon;'));
 });
+
+test('devolução de cliente abate os títulos da venda pela duplicata com a série, não só pelo número', () => {
+  const i = sql.indexOf('create or replace function public.crm_nfe_outra_efeitos');
+  const f = sql.slice(i, sql.indexOf('$$;', i));
+  assert.ok(!/where nota_numero = vnota\.numero/.test(f));
+  assert.ok(f.includes("split_part(duplicata, '/', 1) = (case when coalesce(nullif(vnota.serie, '')::int, 1) = 1"));
+});

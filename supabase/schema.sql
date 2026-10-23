@@ -4613,8 +4613,10 @@ begin
         left('Devolução do cliente NF ' || n.numero, 200), n.criado_por from public.crm_estoque_saldo s where s.codigo = cod;
       nmov := nmov + 1;
     end loop;
-    select numero into vnota from public.crm_notas where chave = o.ref_chave;
-    for t in select id, valor from public.crm_titulos where nota_numero = vnota.numero and not abono order by vencimento desc loop
+    select numero, serie into vnota from public.crm_notas where chave = o.ref_chave;
+    -- os títulos da venda pela duplicata, com a série (23/10/2026: pelo número só, a devolução da nota 2-12 abateria os títulos
+    -- da nota 12 do FKN, de outro cliente)
+    for t in select id, valor from public.crm_titulos where split_part(duplicata, '/', 1) = (case when coalesce(nullif(vnota.serie, '')::int, 1) = 1 then lpad(vnota.numero::text, 6, '0') else vnota.serie::int || '-' || lpad(vnota.numero::text, 6, '0') end) and not abono order by vencimento desc loop
       exit when resto <= 0;
       if t.valor <= resto then
         update public.crm_titulos set abono = true where id = t.id;
