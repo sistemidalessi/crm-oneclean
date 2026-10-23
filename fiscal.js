@@ -384,6 +384,8 @@
       const regra = Object.assign({}, a.regra, guarda);
       const ae = F.alertaEntrada(ja && ja.situacao === 'conferido' ? Object.assign({}, ja.regra, guarda) : regra);
       if (ae) base.alertas = base.alertas.concat([ae]);
+      // regra revista à mão (regra.revista: data da revisão por NCM, docs/oneclean/fiscal) não volta ao que o FKN fazia
+      if (ja && ja.situacao !== 'conferido' && ja.regra && ja.regra.revista) return Object.assign(base, { alertas: ja.alertas || [] });
       return ja && ja.situacao === 'conferido' ? base : Object.assign(base, { ncm: a.ncm, cest: a.cest, gtin: a.gtin, origem: a.origem, regra, situacao: 'proposta' });
     });
     await CRM.store().fiscalProdutosSalvar(linhas);
