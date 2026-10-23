@@ -390,8 +390,18 @@
       (nota.infAdFisco ? '<p class="dica">Informações ao fisco: ' + esc(nota.infAdFisco) + '</p>' : '') +
       (nota.infCpl ? '<p class="dica">Informações complementares: ' + esc(nota.infCpl) + '</p>' : '') + '</div>';
   }
+  // Sem a forma de pagamento a nota sairia à vista: sem duplicata, sem título a receber (23/10/2026). O serviço fiscal também
+  // barra (2026-10-23c); aqui já avisa antes de ir à Sefaz, mesmo com o serviço antigo.
+  const faltaPagamento = p => {
+    const t = String(((p && p.dados) || {}).pagamento || '').trim().toUpperCase();
+    if (!t) return 'o pedido ' + (p ? p.numero : '') + ' está sem a forma de pagamento (ex.: 28 DIAS BOLETO, A VISTA PIX). Abra o pedido e preencha antes de emitir.';
+    if (/PROGRAMAD/.test(t) && !/\d/.test(t)) return 'o pedido ' + p.numero + ' tem pagamento "programado" sem a data: escreva a data (ex.: PROGRAMADO 15/11/2026) ou o prazo (ex.: 28 DIAS).';
+    return '';
+  };
   async function emitir(pedidoId) {
     const p = CRM.pedidos && CRM.pedidos.pedido ? CRM.pedidos.pedido(pedidoId) : null;
+    const fp = faltaPagamento(p);
+    if (fp) { CRM.toast('Antes da nota: ' + fp, true); return; }
     if (p && p.situacao === 'separacao' && (p.itens || []).some(i => !i.separado) && !confirm('O pedido ' + p.numero + ' ainda tem itens sem a caixinha de separado. Emitir a nota assim mesmo?')) return;
     CRM.toast('Montando a prévia da nota…');
     let r;
@@ -433,6 +443,8 @@
     for (let i = 0; i < ids.length; i++) {
       const p = CRM.pedidos.pedido(ids[i]), rot = 'pedido ' + (p ? p.numero : '') + ' · ' + (p ? CRM.nomeEmpresa(p.empresa_id) : '');
       CRM.toast('Emitindo ' + (i + 1) + ' de ' + ids.length + ': ' + rot + '…');
+      const fp = faltaPagamento(p);
+      if (fp) { res.push({ rot, sit: 'bloqueada', txt: fp }); continue; }
       try {
         const pv = await chama({ acao: 'previa', pedido_id: ids[i] });
         if (pv.bloqueado) { res.push({ rot, sit: 'bloqueada', txt: (pv.avisos.bloqueia || []).join('; ') }); continue; }

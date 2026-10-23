@@ -520,12 +520,21 @@
   }
 
   // ------------------------------------------------ editor (orçamento / pedido)
+  // A forma de pagamento que o cliente usou por último (pedidos do CRM e orçamentos), para o pedido novo já vir com ela
+  // (23/10/2026: pedido sem forma de pagamento sairia à vista, sem título a receber).
+  const ultimoPagamento = empresaId => {
+    if (!empresaId) return '';
+    const ok = x => x && x.empresa_id === empresaId && x.situacao !== 'cancelado' && x.dados && String(x.dados.pagamento || '').trim() && !/PROGRAMAD/i.test(x.dados.pagamento); // programado é de uma vez só
+    const l = (peds || []).filter(ok).concat((E().D.propostas || []).filter(ok))
+      .sort((a, b) => String(b.criado_em || b.atualizado_em || '').localeCompare(String(a.criado_em || a.atualizado_em || '')));
+    return l.length ? String(l[0].dados.pagamento).trim() : '';
+  };
   const PAGAMENTOS = ['28 DIAS BOLETO', '30 DIAS BOLETO', '30/60 DIAS BOLETO', '30/60/90 DIAS BOLETO', 'A VISTA BOLETO', 'A VISTA PIX', 'A VISTA TRANSFERENCIA', 'CARTAO DE CREDITO'];
   function novoEd(o) {
     o = o || {};
     const e = o.empresa_id ? CRM.empresa(o.empresa_id) : null;
     return Object.assign({ id: null, numero: null, empresa_id: null, negocio_id: null, proposta_id: null, vendedor_id: (e && e.responsavel_id) || CRM.meuId(), tipo: 'normal', entrega: null, frete: 0,
-      dados: { pagamento: '', transportadora: 'PROPRIO', frete_conta: '0', volumes: '', seu_pedido: '', ac: '', referente: '', validade_dias: 7, prazo_entrega: '', observacoes: '', texto_nota: '', entrega: P.entregaDoCliente(e) },
+      dados: { pagamento: ultimoPagamento(o.empresa_id), transportadora: 'PROPRIO', frete_conta: '0', volumes: '', seu_pedido: '', ac: '', referente: '', validade_dias: 7, prazo_entrega: '', observacoes: '', texto_nota: '', entrega: P.entregaDoCliente(e) },
       itens: [], aba: 'dados', sel: null, seq: 1, linha: { codigo: '', descricao: '', unidade: '', quantidade: '', preco: '', desconto: 0 } }, o);
   }
   function edDePedido(p) {
@@ -871,6 +880,7 @@
         const e = emps.find(x => (x.nome + (x.cnpj ? ' · ' + x.cnpj : '')) === v) || (emps.filter(x => R.normaliza(x.nome) === R.normaliza(v)).length === 1 ? emps.find(x => R.normaliza(x.nome) === R.normaliza(v)) : null);
         if (!e) { CRM.toast('Escolha o cliente na lista (digite parte do nome ou o CNPJ).', true); return; }
         ed.empresa_id = e.id; ed.dados.entrega = P.entregaDoCliente(e);
+        if (!String(ed.dados.pagamento || '').trim()) ed.dados.pagamento = ultimoPagamento(e.id);
         if (!CRM.ehGestor() || !ed.vendedor_id) ed.vendedor_id = CRM.ehGestor() ? e.responsavel_id || CRM.meuId() : CRM.meuId();
         const abertoNeg = CRM.doEmpresa('negocios', e.id).filter(n => n.status === 'aberto' && ((CRM.etapa(n.etapa_id) || {}).funil || 'Vendas') === funilVendas());
         if (!ed.negocio_id && abertoNeg.length === 1) ed.negocio_id = abertoNeg[0].id;

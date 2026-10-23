@@ -413,3 +413,20 @@ test('cesta básica de SP (CST 20, base reduzida 61,11%, cBenef SP020030) e Ex d
   assert.deepStrictEqual(fora.avisos.bloqueia, []);
   assert.deepStrictEqual([fora.nota.itens[0].icms.cst, fora.nota.itens[0].icms.aliquota, fora.nota.itens[0].cBenef, fora.nota.itens[0].cfop], ['00', 12, null, '6108']);
 });
+
+test('pagamento: data escrita vira o prazo; sem forma de pagamento ou programado sem data, a venda não sai', () => {
+  const em = '2026-11-03T10:00:00-03:00';
+  assert.deepStrictEqual(PD.lePagamento('PROGRAMADO 15/11/2026', em).dias, [12]);
+  assert.deepStrictEqual(PD.lePagamento('15/11 E 15/12 BOLETO', em).dias, [12, 42]);
+  assert.deepStrictEqual(PD.lePagamento('28/35 DIAS', em).dias, [28, 35]);   // prazos, não data
+  assert.deepStrictEqual(PD.lePagamento('30/60/90', em).dias, [30, 60, 90]);
+  assert.strictEqual(PD.lePagamento('PROGRAMADO DATA', em).semData, true);
+  const base = { pedido, empresa: cliente, regras, emitente, ambiente: 'homologacao', serie: 2, numero: 60, emissao: em };
+  const sem = PD.notaDoPedido(Object.assign({}, base, { pedido: Object.assign({}, pedido, { dados: Object.assign({}, pedido.dados, { pagamento: '' }) }) }));
+  assert.ok(sem.avisos.bloqueia.some(x => /sem a forma de pagamento/.test(x)));
+  const prog = PD.notaDoPedido(Object.assign({}, base, { pedido: Object.assign({}, pedido, { dados: Object.assign({}, pedido.dados, { pagamento: 'PROGRAMADO DATA' }) }) }));
+  assert.ok(prog.avisos.bloqueia.some(x => /programado sem a data/.test(x)));
+  const data = PD.notaDoPedido(Object.assign({}, base, { pedido: Object.assign({}, pedido, { dados: Object.assign({}, pedido.dados, { pagamento: 'PROGRAMADO 15/11/2026' }) }) }));
+  assert.deepStrictEqual(data.nota.cobranca.duplicatas.map(x => x.vencimento), ['2026-11-15']);
+});
+

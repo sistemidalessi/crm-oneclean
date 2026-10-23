@@ -11,13 +11,26 @@ const base = c => String(c || '').replace(/\.\d+$/, '');
 const N = require('./nfe');
 
 // "28 DIAS BOLETO", "30/60/90 DIAS BOLETO", "A VISTA PIX", "A VISTA TRANSFERENCIA" → prazos em dias e a forma (tPag).
-function lePagamento(texto) {
+// Com a emissão, uma data escrita ("PROGRAMADO 15/11/2026", "15/11") vira o prazo até ela (antes "15/11" virava 15 e 11 dias).
+function lePagamento(texto, emissao) {
   const t = String(texto || '').toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
   const vista = /\bA ?VISTA\b|\bANTECIPAD/.test(t);
-  const dias = vista ? [0] : (t.match(/\d+/g) || []).map(Number).filter(n => n > 0 && n <= 365);
+  const hoje = emissao ? new Date(String(emissao).slice(0, 10) + 'T12:00:00Z') : null, porData = [];
+  const emDias = /\bDIAS?\b|\bDDL?\b/.test(t);   // "28/35 DIAS" são prazos, não data
+  const semDatas = emDias ? t : t.replace(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/g, (m, dd, mm, aa) => {
+    if (Number(mm) < 1 || Number(mm) > 12 || Number(dd) < 1 || Number(dd) > 31) return m;
+    if (!hoje) return ' ';
+    let ano = aa ? Number(aa.length === 2 ? '20' + aa : aa) : hoje.getUTCFullYear();
+    let x = new Date(Date.UTC(ano, Number(mm) - 1, Number(dd), 12));
+    if (!aa && x < hoje) x = new Date(Date.UTC(ano + 1, Number(mm) - 1, Number(dd), 12));
+    const d = Math.round((x - hoje) / 864e5);
+    if (d >= 0 && d <= 365) porData.push(d);
+    return ' ';
+  });
+  const dias = vista ? [0] : porData.length ? porData : (semDatas.match(/\d+/g) || []).map(Number).filter(n => n > 0 && n <= 365);
   const forma = /PIX/.test(t) ? '17' : /TRANSFER|DEPOSIT|\bTED\b|\bDOC\b/.test(t) ? '18' : /DINHEIRO|ESPECIE/.test(t) ? '01' : /CREDITO|CARTAO/.test(t) && !/DEBITO/.test(t) ? '03' :
     /DEBITO/.test(t) ? '04' : /BOLETO|DUPLICATA|\bDIAS\b|\bDDL\b/.test(t) || (!vista && dias.length) ? '15' : '99';
-  return { dias: dias.length ? dias : [0], forma, aVista: vista || (!dias.length), texto: t.trim() };
+  return { dias: dias.length ? dias : [0], forma, aVista: vista || (!dias.length), texto: t.trim(), semData: /PROGRAMAD/.test(t) && !vista && !dias.length };
 }
 const somaDias = (iso, d) => { const x = new Date(String(iso).slice(0, 10) + 'T12:00:00Z'); x.setUTCDate(x.getUTCDate() + d); return x.toISOString().slice(0, 10); };
 // Parcelas iguais; a última fica com a sobra dos centavos.
@@ -114,8 +127,12 @@ function notaDoPedido(o) {
   }).filter(Boolean);
   if (!itens.length && !bloqueia.length) bloqueia.push('o pedido não tem itens');
   const total = r2(itens.reduce((s, it) => s + r2(it.quantidade * it.valorUnitario) - it.desconto, 0) + num(p.frete));
-  const pg = lePagamento(d.pagamento);
-  if (pg.forma === '99') conferir.push('forma de pagamento não reconhecida ("' + (d.pagamento || '') + '"): sai como "outros"');
+  const pg = lePagamento(d.pagamento, o.emissao);
+  const cobraPg = !op || op.cobra;
+  // sem a forma de pagamento a nota sairia à vista: sem duplicata, sem título a receber e sem boleto (23/10/2026)
+  if (cobraPg && !String(d.pagamento || '').trim()) bloqueia.push('o pedido está sem a forma de pagamento (ex.: 28 DIAS BOLETO, 30/60 DIAS, A VISTA PIX): sem ela a nota sairia à vista, sem duplicata nem título a receber');
+  else if (cobraPg && pg.semData) bloqueia.push('pagamento programado sem a data: escreva a data (ex.: PROGRAMADO 15/11/2026) ou o prazo (ex.: 28 DIAS)');
+  else if (pg.forma === '99') conferir.push('forma de pagamento não reconhecida ("' + (d.pagamento || '') + '"): sai como "outros"');
   const emissao = o.emissao;
   // Reforma (2027 em diante, pela data de emissão): sem a alíquota da CBS configurada a nota não sai; o que o contador ainda
   // não confirmou aparece para conferir. Em 2026 nada disso entra.
