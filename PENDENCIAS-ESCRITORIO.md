@@ -5,20 +5,12 @@ A mesma lista resumida está no `PENDENCIAS-ESCRITORIO.md` do `agilite-sistema-g
 
 ## Só dá pra fazer estando no escritório (SSH da VPS)
 
-- [x] **Serviço fiscal na VPS `2026-10-23a`** — atualizado pelo Anderson em 23/10 (`active`). **DIFAL testado em
-      homologação no mesmo dia:** NF 2-9 para a BBMD (RS) autorizada (cStat 100), CFOP 6108, ICMS 12% e DIFAL de R$ 3,94; o
-      pedido de teste nº 6 foi cancelado. A busca de notas de compra na Sefaz e a ciência já funcionam desde 22/10.
-- [x] **Serviço fiscal na VPS `2026-10-23b`** (cesta básica com CST 20 + cBenef e o campo EXTIPI) — atualizado em 23/10 (`active`).
-- [x] **Serviço fiscal na VPS `2026-10-23d`** (pedido sem forma de pagamento não emite; "PROGRAMADO 15/11/2026" vira o
-      vencimento da duplicata; remessa da entrega futura com a chave do faturamento feito no FKN) — atualizado pelo Anderson
-      em 23/10 (`active`).
 - [ ] **Serviço fiscal na VPS `2026-10-23e`** (DIFAL do RS: perfumaria 3303/3304/3305/3307 a 25% + FCP 2%): no SSH,
       `cd /opt/oneclean-fiscal && git pull -q && systemctl restart oneclean-fiscal && systemctl is-active oneclean-fiscal`.
       Só pesa na venda à BBMD (RS); sem pressa, mas antes da próxima venda para o RS.
 - [ ] **Santa Casa (entrega futura):** ainda há saldo a entregar do faturamento (5922) feito no FKN? As remessas (5117) iam
       duas por mês até 03/08; em setembro e outubro não houve. Se houver, a remessa pelo CRM pede a chave da nota de faturamento
       (Pedido → Outra operação → Entrega futura — remessa).
-- [x] **Alíquota do RS no DIFAL (17%):** conferida por mim em 23/10 (RICMS/RS, art. 27, X) e marcada no banco; perfumaria a 25%.
 
 ## Perguntas que só você responde
 
@@ -35,5 +27,6 @@ A mesma lista resumida está no `PENDENCIAS-ESCRITORIO.md` do `agilite-sistema-g
 - [ ] **Primeira pergunta real à IA** (clicar no Clean e perguntar): conferir se responde certo.
 - [ ] **Certificado A1:** o da VPS (que emite pelo CRM) vale até **23/12/2026** — renovar e instalar na VPS na 1ª quinzena de
       dezembro. O que vence em **29/10/2026** é outro (provavelmente o do FKN/UniNFe): se for, para o FKN seguir de reserva até
-      30/11, apontar o FKN para o mesmo certificado da VPS; se não precisar da reserva, nada a fazer.
+      30/11, apontar o FKN para o mesmo certificado da VPS; se não precisar da reserva, nada a fazer. **Para saber:** Fiscal →
+      4. Emissão → "Conferir o serviço fiscal" e depois "Conferir o certificado do FKN" (lê o certificado das notas do FKN).
 - [ ] **Tabela do IBPT** (tributos aproximados na nota) está vencida desde 30/09: subir a nova pela aba Fiscal.
