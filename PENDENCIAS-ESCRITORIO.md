@@ -22,6 +22,10 @@ A mesma lista resumida está no `PENDENCIAS-ESCRITORIO.md` do `agilite-sistema-g
       (transferência, acerto, nota em papel)? Se for outro CNPJ, o CRM precisa ler o DF-e dele também (certificado A1 daquele
       CNPJ) ou a entrada será à mão. **Sem isso, depois de 03/11 o estoque e o contas a pagar dessas compras ficam faltando.**
       O botão "Conferir a virada" agora mostra essas diferenças como ⛔.
+      **Como conferir (combinado em 23/10):** em 3 casos — papel Packpel 290027 (entrada no FKN em 23/10), guardanapo Santepel
+      250002 (21/10) e papel Thorium 290020 (19/10) — o Wellington olha no FKN de qual nota foi a entrada: número, fornecedor e
+      **CNPJ do destinatário**. Com a chave de 44 dígitos, o Claude confere se a nota existe na Sefaz para o CNPJ da OneClean.
+      XML que o fornecedor mandou por e-mail já pode entrar hoje: Estoque → Notas de compra → subir o XML.
 
 - [ ] **Conferência da virada de 23/10, noite** (Fiscal → 4. Emissão → "Conferir a virada"; dá para fazer de casa):
       (1) confirmar com o Wellington que o "1070048" da NF 1075533 (Severini, DT.LIQ.YPE 500ML NEUTRO, 3 CX24) é o **010078**
