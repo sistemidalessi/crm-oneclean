@@ -172,7 +172,8 @@ function notaDoPedido(o) {
   const PORTADOR = { '15': 'BOLETO', '17': 'PIX', '18': 'TRANSFERENCIA', '01': 'DINHEIRO', '03': 'CARTAO', '04': 'CARTAO' };
   const prazo = pg.aVista ? 'A VISTA' : pg.dias.join('/') + ' DIAS';
   const fatTxt = opNome === 'faturamento_futuro' ? 'SIMPLES FATURAMENTO DE VENDA PARA ENTREGA FUTURA, SEM DESTAQUE DO ICMS (RICMS/SP ART. 129; PORTARIA SRE 41/2023, ANEXO I, ART. 1)' : '';
-  const refTxt = opNome === 'remessa_futura' && o.ref ? 'REMESSA REF. NF DE SIMPLES FATURAMENTO ' + (o.ref.numero || '') + ' DE ' + String(o.ref.emissao || '').slice(0, 10).split('-').reverse().join('/') : '';
+  const refTxt = opNome === 'remessa_futura' && o.ref ? 'REMESSA REF. NF DE SIMPLES FATURAMENTO ' + (o.ref.numero || '') +
+    (o.ref.emissao ? ' DE ' + String(o.ref.emissao).slice(0, 10).split('-').reverse().join('/') : '') + (o.ref.chave ? ' CHAVE ' + o.ref.chave : '') : '';
   const infCpl = [fatTxt, refTxt, cobra && PORTADOR[pg.forma] ? 'PORTADOR: ' + PORTADOR[pg.forma] + ' PRAZO: ' + prazo : '', entregaTxt, vendedor ? 'VENDEDOR: ' + vendedor : '', 'PEDIDO CRM: ' + (p.numero || ''),
     d.seu_pedido ? 'SEU PEDIDO: ' + d.seu_pedido : '', d.texto_nota || ''].filter(Boolean).map(x => String(x).replace(/;/g, ',')).join(';') + ';';
   // LC 224/2025 (redução dos benefícios federais): item com PIS/COFINS de alíquota zero (06) ou isento (07) continua com o

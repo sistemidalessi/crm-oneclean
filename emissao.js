@@ -682,9 +682,13 @@
     CRM.abrirForm({ titulo: 'Outra operação · pedido ' + p.numero, campos: [{ nome: 'tipo', rotulo: 'Nota', tipo: 'select', obrigatorio: true, opcoes: [
         ['bonificacao', 'Bonificação (5910): sem cobrança, ICMS como na venda'],
         ['faturamento_futuro', 'Entrega futura — faturamento (5922): cobra agora, sem ICMS, não mexe no estoque'],
-        ['remessa_futura', 'Entrega futura — remessa (5117): na entrega, com ICMS, baixa o estoque' + (temFat ? '' : ' (emita antes o faturamento)')]] }],
+        ['remessa_futura', 'Entrega futura — remessa (5117): na entrega, com ICMS, baixa o estoque' + (temFat ? '' : ' (emita antes o faturamento)')]] }]
+        .concat(temFat ? [] : [{ nome: 'ref_chave', rotulo: 'Faturamento feito no FKN? Chave da nota de simples faturamento (44 números)', tipo: 'texto',
+          ajuda: 'Só para a remessa, quando o faturamento (5922) saiu pelo FKN antes da virada. Está no DANFE da nota de faturamento.' }]),
       salvarTexto: 'Ver a prévia', aoSalvar: async v => {
-        const r = await CRM.store().outraCriar({ tipo: v.tipo, pedido_id: p.id, empresa_id: p.empresa_id, itens: [] });
+        const ch = String(v.ref_chave || '').replace(/\D/g, '');
+        if (v.tipo === 'remessa_futura' && !temFat && ch.length !== 44) throw new Error('falta a chave da nota de simples faturamento (44 números), ou emita antes o faturamento pelo CRM');
+        const r = await CRM.store().outraCriar({ tipo: v.tipo, pedido_id: p.id, empresa_id: p.empresa_id, itens: [], ref_chave: v.tipo === 'remessa_futura' && ch.length === 44 ? ch : null });
         setTimeout(() => outraEmitir(r.id, TIPOS[v.tipo].replace(/^./, c => c.toUpperCase()) + ' · pedido ' + p.numero), 0);
       } });
   }

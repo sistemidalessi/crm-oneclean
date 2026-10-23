@@ -170,6 +170,10 @@ test('entrega futura: faturamento 5922 sem ICMS e com as parcelas; remessa 5117 
   assert.deepStrictEqual(r.itens.map(i => [i.cfop, i.icms.cst, i.pis.cst]), [['5117', '00', '49'], ['5117', '60', '49']]);
   assert.deepStrictEqual(r.refs, [ch]);
   assert.strictEqual(r.cobranca, null);
-  assert.ok(/^REMESSA REF\. NF DE SIMPLES FATURAMENTO 50 DE 22\/10\/2026;/.test(r.infCpl));
+  assert.ok(/^REMESSA REF\. NF DE SIMPLES FATURAMENTO 50 DE 22\/10\/2026 CHAVE 3526\d{40};/.test(r.infCpl));
   assert.strictEqual(N.monta(r).totais.vICMS, 18);
+  // faturamento feito no FKN antes da virada: só a chave informada, sem a data (não inventa o dia)
+  const fkn = doPedido('remessa_futura', { ref: { chave: ch, numero: 50, emissao: null } }).nota;
+  assert.ok(/^REMESSA REF\. NF DE SIMPLES FATURAMENTO 50 CHAVE /.test(fkn.infCpl));
+  assert.deepStrictEqual(fkn.refs, [ch]);
 });

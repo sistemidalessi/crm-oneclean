@@ -2533,6 +2533,12 @@ em dias. Agora:
 - `emissao.js` tem a mesma trava na tela (`faltaPagamento`, no Emitir e no lote), que vale antes do `git pull` na VPS;
 - o pedido novo já vem com o último pagamento usado pelo cliente (pedidos do CRM e orçamentos; "programado" não é copiado).
 
+**Entrega futura começada no FKN (23/10, `crm-fiscal` v17 e serviço fiscal `2026-10-23d`):** a Santa Casa recebia duas
+remessas 5117 por mês (até 03/08/2026), de um faturamento 5922 anterior aos dados do CRM (15/12/2025). A remessa pelo CRM só
+achava faturamento emitido pelo CRM. Agora "Outra operação" no pedido pede a **chave da nota de simples faturamento** quando
+não há faturamento no CRM; a `crm-fiscal` confere que a chave é do CNPJ da empresa, que a nota (se estiver em `crm_notas`) não
+está cancelada e é do mesmo cliente; o texto da nota leva número e chave (a data só quando a nota está no CRM).
+
 Avisos "NCM provavelmente errado" foram postos em 19 produtos, para o comprador corrigir.
 
 ### DIFAL: venda para consumidor de outro estado (23/10/2026)

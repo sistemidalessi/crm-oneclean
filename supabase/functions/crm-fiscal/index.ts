@@ -161,6 +161,18 @@ async function dadosDaOutra(db: ReturnType<typeof createClient>, o: Linha, fisca
     const { data: fat } = ids.length ? await db.from('crm_nfe').select('chave, numero, autorizada_em').in('outra_id', ids).eq('ambiente', amb).eq('situacao', 'autorizada')
       .order('autorizada_em', { ascending: false }).limit(1).maybeSingle() : { data: null };
     if (fat) ref = { chave: (fat as Linha).chave, numero: (fat as Linha).numero, emissao: (fat as Linha).autorizada_em };
+    // Faturamento feito no FKN antes da virada (03/11/2026): a remessa referencia a chave que a pessoa informou.
+    // A chave tem de ser de uma nota da própria empresa; se a nota estiver no CRM, tem de ser do mesmo cliente.
+    const ch = String(o.ref_chave || '');
+    if (!ref && /^\d{44}$/.test(ch)) {
+      const cnpjEmit = String((fiscal.emitente as Linha)?.cnpj || '').replace(/\D/g, '');
+      if (ch.slice(6, 20) !== cnpjEmit) throw new Error('a chave informada não é de uma nota da empresa (CNPJ ' + ch.slice(6, 20) + ')');
+      const { data: nf } = await db.from('crm_notas').select('numero, emitida_em, empresa_id, cancelada').eq('chave', ch).maybeSingle();
+      const n = nf as Linha | null;
+      if (n && n.cancelada) throw new Error('a nota de simples faturamento informada está cancelada');
+      if (n && n.empresa_id && d.empresa && String(n.empresa_id) !== String((d.empresa as Linha).id)) throw new Error('a nota de simples faturamento informada é de outro cliente');
+      ref = { chave: ch, numero: n ? n.numero : Number(ch.slice(25, 34)), emissao: n ? n.emitida_em : null };
+    }
   }
   return Object.assign(base, { pedido: d.pedido, empresa: d.empresa, regras: d.regras, vendedorNome: d.vendedorNome, cfg: d.fiscal, ibpt: d.ibpt, ref });
 }
