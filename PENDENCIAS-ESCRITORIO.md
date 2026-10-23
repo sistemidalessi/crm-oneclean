@@ -9,10 +9,9 @@ A mesma lista resumida está no `PENDENCIAS-ESCRITORIO.md` do `agilite-sistema-g
       homologação no mesmo dia:** NF 2-9 para a BBMD (RS) autorizada (cStat 100), CFOP 6108, ICMS 12% e DIFAL de R$ 3,94; o
       pedido de teste nº 6 foi cancelado. A busca de notas de compra na Sefaz e a ciência já funcionam desde 22/10.
 - [x] **Serviço fiscal na VPS `2026-10-23b`** (cesta básica com CST 20 + cBenef e o campo EXTIPI) — atualizado em 23/10 (`active`).
-- [ ] **Serviço fiscal na VPS `2026-10-23d`** (pedido sem forma de pagamento não emite; "PROGRAMADO 15/11/2026" vira o
-      vencimento da duplicata; remessa da entrega futura com a chave do faturamento feito no FKN): no SSH,
-      `cd /opt/oneclean-fiscal && git pull -q && systemctl restart oneclean-fiscal && systemctl is-active oneclean-fiscal`.
-      Antes da 1ª nota de 03/11. A tela já barra o pedido sem pagamento desde 23/10; o serviço é a segunda trava.
+- [x] **Serviço fiscal na VPS `2026-10-23d`** (pedido sem forma de pagamento não emite; "PROGRAMADO 15/11/2026" vira o
+      vencimento da duplicata; remessa da entrega futura com a chave do faturamento feito no FKN) — atualizado pelo Anderson
+      em 23/10 (`active`).
 - [ ] **Santa Casa (entrega futura):** ainda há saldo a entregar do faturamento (5922) feito no FKN? As remessas (5117) iam
       duas por mês até 03/08; em setembro e outubro não houve. Se houver, a remessa pelo CRM pede a chave da nota de faturamento
       (Pedido → Outra operação → Entrega futura — remessa).
