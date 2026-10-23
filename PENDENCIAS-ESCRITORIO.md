@@ -14,6 +14,12 @@ A mesma lista resumida está no `PENDENCIAS-ESCRITORIO.md` do `agilite-sistema-g
 
 ## Perguntas que só você responde
 
+- [ ] **Aviso automático de atraso** (Caixa → Cobrança): "Criar o modelo na Meta"; "Ver quem recebe hoje" (em 23/10 seriam 6:
+      Legas Metal 267 dias, Jeniffer Trust 245, Lipos 128, Qualyprint 105, AP+Elettro e Meraki 77 — Lipos e AP+Elettro sem
+      celular nem e-mail no cadastro); "Não avisar este cliente" em quem já negocia; depois "Enviar agora" ou "Ligar o envio automático".
+- [ ] **Contagem física (logística):** água sanitária 5 L 010003 (CRM 105 × FKN 5, sem saída no CRM), aromatizante Coala
+      010448 (CRM 6 × FKN −30) e Bom Ar 110014 (a nota trouxe 1 CX12 + 2 CJ3: o CRM contou 18, o FKN parece ter contado 12).
+
 - [ ] **Contador:** (1) concorda que o CRM dê ciência em todas as notas recebidas? (2) para a OneClean, alguma nota de compra
       exige resposta definitiva (confirmação ou desconhecimento)? Em que prazo (o CRM usa 90 dias da emissão)? Se todas
       precisarem, ligar `dfe_lembrete_todas` (o Claude liga).
