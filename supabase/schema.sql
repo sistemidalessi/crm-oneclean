@@ -4275,7 +4275,7 @@ begin
   select * into f from public.crm_fiscal_produtos where codigo = e.codigo;
   return jsonb_build_object('codigo', e.codigo, 'descricao', e.descricao, 'unidade', e.unidade, 'situacao', e.situacao, 'linha', e.linha, 'familia', e.familia,
     'fornecedor_cod', e.fornecedor_cod, 'fornecedor', e.fornecedor, 'estoque_min', e.estoque_min, 'estoque_max', e.estoque_max, 'preco_venda', e.preco_venda,
-    'localizacao', e.localizacao, 'ncm', f.ncm, 'cest', f.cest, 'gtin', f.gtin, 'origem', f.origem, 'tem_regra', f.regra is not null,
+    'localizacao', e.localizacao, 'ncm', f.ncm, 'cest', f.cest, 'gtin', f.gtin, 'origem', f.origem, 'tem_regra', coalesce(f.regra ? 'venda', false),
     'custo_unit', case when custo then e.custo_unit end, 'custo_compra', case when custo then e.custo_compra end, 'dono_crm', public.crm_produtos_do_crm());
 end;
 $$;

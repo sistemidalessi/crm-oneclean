@@ -1694,6 +1694,13 @@ levanta no BB (convênio, carteira, API de Cobrança ou CNAB 240/400) está em `
   (`regra.venda`, mais `revista` e `modelo`): o ICMS-ST retido (`st_ret`, `st_entrada`) é de cada produto e não vem junto, nem
   no produto novo (antes copiava a regra inteira). Produto que já tem regra não muda pelo modelo. Filtro e selo **"Sem regra
   fiscal"** em Produtos (administrador). Testado numa transação desfeita.
+- **23/10, com a listagem de NCM do FKN** (Anderson; carregada em `crm_backup.fkn_ncm_20261023`, 1.694 ativos; backup antes em
+  `crm_backup.fiscal_produtos_20261023c`): dos 532 sem regra, **446** ganharam a regra revista do mesmo NCM (`regra.fonte` =
+  "ncm do FKN", `modelo` = o produto de onde veio; os sabonetes em barra Dove/Lux pela do Lux 010093, com EXTIPI 01) e **70**,
+  de NCM sem regra revista, a **regra padrão** (5102/00/18%, PIS/COFINS 01: imposto cheio, aviso "a conferir"). **16** com NCM
+  claramente errado no FKN ficaram **sem regra** de propósito, com aviso de erro para o comprador (`regra` = `{}`; por isso
+  `crm_produto_ler.tem_regra` agora olha `regra ? 'venda'`). **25** produtos com regra têm NCM diferente entre o CRM (das
+  notas) e o FKN: aviso para o comprador; a nota sai com o NCM do CRM.
 - **Chave "o CRM é o dono do cadastro"** em `crm_sistema` (chave `produtos_dono` = `crm`), **fora do `crm_config`** de
   propósito: o `crm_config` é regravado inteiro por quem salva Configurações (tela aberta antes desligaria a chave). Liga só
   o administrador (`crm_produtos_passar_ao_crm`, botão "Passar o cadastro para o CRM" em Produtos); sem volta pela tela.
