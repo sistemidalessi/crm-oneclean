@@ -725,7 +725,7 @@
         if (!l.length) throw new Error('não achei a nota ' + v.numero + (forn ? ' entre as notas de compra' : ' entre as notas de venda'));
         if (l.length === 1) { setTimeout(() => devolucaoItens(tipo, l[0]), 0); return; }
         setTimeout(() => CRM.abrirForm({ titulo: 'Qual nota ' + v.numero + '?', campos: [{ nome: 'i', rotulo: 'Nota', tipo: 'select', obrigatorio: true,
-          opcoes: l.map((x, i) => [String(i), (x.nome || '') + ' · ' + String(x.emitida_em || '').slice(0, 10).split('-').reverse().join('/')]) }],
+          opcoes: l.map((x, i) => [String(i), 'NF ' + (x.serie && String(x.serie) !== '1' ? x.serie + '-' : '') + x.numero + ' · ' + (x.nome || '') + ' · ' + String(x.emitida_em || '').slice(0, 10).split('-').reverse().join('/')]) }],
           salvarTexto: 'Continuar', aoSalvar: w => { setTimeout(() => devolucaoItens(tipo, l[Number(w.i)]), 0); } }), 0);
       } });
   }

@@ -82,6 +82,16 @@
   // titulos: em atraso e fora do cartório, com .empresa_id; empresas: para o CNPJ. Ordem de certeza:
   // mesmo CNPJ e mesmo valor original; mesmo CNPJ e o número da nota no "Nº do documento"; o único
   // título vencido daquele CNPJ; sem CNPJ, o número da nota/duplicata no documento e o valor original.
+  // A nota do boleto (23/10/2026): número E série (a da duplicata: "2-000012/01" é série 2, sem prefixo é 1) e, se houver
+  // mais de uma, a do cliente. Pelo número só, o PDF da nota 2-12 levaria a DANFE da nota 12 do FKN, de outro cliente.
+  const serieDaDuplicata = d => +((/^(\d{1,3})-/.exec(String(d || '')) || [])[1] || 1);
+  function notaDoBoleto(notas, b, empresaId) {
+    const s = serieDaDuplicata(b && b.duplicata);
+    // nota de outro cliente nunca vai no PDF (melhor sair sem a DANFE)
+    const l = (notas || []).filter(x => b && x.chave && !x.cancelada && String(+x.numero) === String(+b.nota_numero) && +(x.serie || 1) === s &&
+      !(empresaId && x.empresa_id && x.empresa_id !== empresaId));
+    return l.find(x => empresaId && x.empresa_id === empresaId) || (l.length === 1 ? l[0] : null);
+  }
   // "002205/02" · "2205-2" · "NF 2300" → { numero: '2205' }; "2-000012/01" → { serie: 2, numero: '12' }
   function notaDoDocumento(v) {
     const x = String(v == null ? '' : v).trim();
@@ -99,7 +109,7 @@
     // a nota do "Nº do documento", exata (23/10/2026: com a série 2 começando na nota 1, "começa com" casava a nota 1 com
     // qualquer documento "1…"); "2-000012/01" traz a série, que tem de ser a do título (duplicata "2-000012/01"; sem série = 1)
     const nd = notaDoDocumento(b.numero_documento);
-    const serieDe = t => +((/^(\d{1,3})-/.exec(String(t.duplicata || '')) || [])[1] || 1);
+    const serieDe = t => serieDaDuplicata(t.duplicata);
     const temNota = t => !!(t.nota_numero && nd && String(+t.nota_numero) === nd.numero && (!nd.serie || nd.serie === serieDe(t)));
     const igualValor = t => b.valor_documento > 0 && Math.abs(Number(t.valor) - b.valor_documento) < 0.01;
     // desempate de parcelas iguais (16/10/2026): o vencimento original (a 2ª via do BB mantém o da linha
@@ -191,7 +201,7 @@
     return l.map((x, i) => [x, i]).sort((a, b) => (b[0].celular - a[0].celular) || (b[0].principal - a[0].principal) || a[1] - b[1]).map(x => x[0]);
   }
 
-  const C = { telefonesCliente, lerLinha, linhaDeCodigo, formataLinha, dataDoFator, mod10, mod11, confereBoleto, casaBoleto, notaDoDocumento, boletosPendentes, boletoAtual, mensagemBoleto, linksPdf, textoBoletos, MODELO_BOLETO };
+  const C = { telefonesCliente, lerLinha, linhaDeCodigo, formataLinha, dataDoFator, mod10, mod11, confereBoleto, casaBoleto, notaDoDocumento, notaDoBoleto, boletosPendentes, boletoAtual, mensagemBoleto, linksPdf, textoBoletos, MODELO_BOLETO };
   raiz.CRMCobranca = C;
   if (typeof module !== 'undefined') module.exports = C;
 
@@ -358,8 +368,11 @@
     const pdf = new raiz.jspdf.jsPDF({ unit: 'mm', format: 'a4', compress: true });
     // DANFEs primeiro (da página 2 em diante), para o resumo saber em que página fica o boleto
     const danfes = [], semNota = [], logo = await pegaLogo();
-    for (const n of [...new Set(l.map(b => b.nota_numero).filter(Boolean))]) {
-      const nota = (E().D.notas || []).find(x => String(x.numero) === String(n) && x.chave && !x.cancelada);
+    const vistas = new Set();
+    for (const b of l.filter(x => x.nota_numero)) {
+      const nota = notaDoBoleto(E().D.notas, b, e && e.id), n = b.nota_numero;
+      const k = nota ? nota.chave : 'n' + n;
+      if (vistas.has(k)) continue; vistas.add(k);
       const xml = nota ? await st.notaXml(nota.chave).catch(() => null) : null;
       const d = xml && Dn && Dn.ler(xml);
       if (!d) { semNota.push(n); continue; }

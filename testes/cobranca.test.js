@@ -133,3 +133,17 @@ test('boleto e as notas da série 2: a nota do documento é exata e respeita a s
   assert.strictEqual(C.casaBoleto({ numero_documento: '2-000012/01', valor_documento: 250 }, tits, empresas).titulo.duplicata, '2-000012/01');
   assert.strictEqual(C.casaBoleto({ numero_documento: '12/01', valor_documento: 250 }, tits, empresas).titulo, null);
 });
+
+test('DANFE do boleto: a nota pelo número e pela série da duplicata, e a do cliente', () => {
+  const notas = [
+    { chave: 'k1', numero: 12, serie: '1', empresa_id: 'outro' },
+    { chave: 'k2', numero: 12, serie: '2', empresa_id: 'e1' },
+    { chave: 'k3', numero: 2205, serie: '1', empresa_id: 'e1' },
+    { chave: 'k4', numero: 2205, serie: '1', empresa_id: 'e1', cancelada: true }
+  ];
+  assert.strictEqual(C.notaDoBoleto(notas, { nota_numero: 12, duplicata: '2-000012/01' }, 'e1').chave, 'k2');
+  assert.strictEqual(C.notaDoBoleto(notas, { nota_numero: 12, duplicata: '000012/01' }, 'e1'), null);       // série 1 é de outro cliente
+  assert.strictEqual(C.notaDoBoleto(notas, { nota_numero: 12, duplicata: '000012/01' }, 'outro').chave, 'k1');
+  assert.strictEqual(C.notaDoBoleto(notas, { nota_numero: 2205, duplicata: '002205/02' }, 'e1').chave, 'k3');  // a cancelada fica de fora
+  assert.strictEqual(C.notaDoBoleto(notas, { nota_numero: 99, duplicata: '000099/01' }, 'e1'), null);
+});
