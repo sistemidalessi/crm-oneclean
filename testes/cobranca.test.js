@@ -114,3 +114,22 @@ test('números do cliente para o boleto pela empresa: celular primeiro, principa
     ['5511987654321', 'Maria', true], ['5511912345678', 'José', true], ['551141234567', 'Compras', false]]);
   assert.deepStrictEqual(C.telefonesCliente(null, []), []);
 });
+
+test('boleto e as notas da série 2: a nota do documento é exata e respeita a série', () => {
+  assert.deepStrictEqual(C.notaDoDocumento('002205/02'), { serie: null, numero: '2205' });
+  assert.deepStrictEqual(C.notaDoDocumento('2205-2'), { serie: null, numero: '2205' });
+  assert.deepStrictEqual(C.notaDoDocumento('NF 2300'), { serie: null, numero: '2300' });
+  assert.deepStrictEqual(C.notaDoDocumento('2-000012/01'), { serie: 2, numero: '12' });
+  assert.strictEqual(C.notaDoDocumento(''), null);
+  const empresas = [{ id: 'e1', cnpj: '11.222.333/0001-81' }];
+  const tits = [
+    { duplicata: '2-000001/01', nota_numero: 1, empresa_id: 'e1', valor: 100, vencimento: '2026-11-20' },
+    { duplicata: '000012/01', nota_numero: 12, empresa_id: 'e9', valor: 250, vencimento: '2026-11-20' },
+    { duplicata: '2-000012/01', nota_numero: 12, empresa_id: 'e8', valor: 250, vencimento: '2026-11-20' }
+  ];
+  // "começa com" casava a nota 1 com o documento 1234 (de outro cliente, mesmo valor)
+  assert.strictEqual(C.casaBoleto({ numero_documento: '1234', valor_documento: 100 }, tits, empresas).titulo, null);
+  // sem CNPJ, nota 12 nas duas séries com o mesmo valor: a série do documento decide; sem série, não escolhe
+  assert.strictEqual(C.casaBoleto({ numero_documento: '2-000012/01', valor_documento: 250 }, tits, empresas).titulo.duplicata, '2-000012/01');
+  assert.strictEqual(C.casaBoleto({ numero_documento: '12/01', valor_documento: 250 }, tits, empresas).titulo, null);
+});

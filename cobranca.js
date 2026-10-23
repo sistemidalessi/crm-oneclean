@@ -82,14 +82,25 @@
   // titulos: em atraso e fora do cartório, com .empresa_id; empresas: para o CNPJ. Ordem de certeza:
   // mesmo CNPJ e mesmo valor original; mesmo CNPJ e o número da nota no "Nº do documento"; o único
   // título vencido daquele CNPJ; sem CNPJ, o número da nota/duplicata no documento e o valor original.
+  // "002205/02" · "2205-2" · "NF 2300" → { numero: '2205' }; "2-000012/01" → { serie: 2, numero: '12' }
+  function notaDoDocumento(v) {
+    const x = String(v == null ? '' : v).trim();
+    const s = /^(\d{1,3})\s*-\s*(\d{4,9})(?:\s*\/\s*\d{1,3})?$/.exec(x);
+    if (s) return { serie: +s[1], numero: String(+s[2]) };
+    const m = /^\D*(\d+)/.exec(x);
+    return m && +m[1] > 0 ? { serie: null, numero: String(+m[1]) } : null;
+  }
   function casaBoleto(b, titulos, empresas, usados) {
     usados = usados || new Set();
     const docDe = new Map((empresas || []).map(e => [e.id, doc(e.cnpj)]));
     const livres = (titulos || []).filter(t => !usados.has(t.duplicata) && !t.cartorio_em);
     const docB = doc(b.documento);
     const mesmoDoc = docB ? livres.filter(t => docDe.get(t.empresa_id) === docB || doc(t.cliente_doc) === docB) : [];
-    const ndoc = digitos(b.numero_documento);
-    const temNota = t => t.nota_numero && ndoc && ndoc.replace(/^0+/, '').indexOf(String(t.nota_numero)) === 0;
+    // a nota do "Nº do documento", exata (23/10/2026: com a série 2 começando na nota 1, "começa com" casava a nota 1 com
+    // qualquer documento "1…"); "2-000012/01" traz a série, que tem de ser a do título (duplicata "2-000012/01"; sem série = 1)
+    const nd = notaDoDocumento(b.numero_documento);
+    const serieDe = t => +((/^(\d{1,3})-/.exec(String(t.duplicata || '')) || [])[1] || 1);
+    const temNota = t => !!(t.nota_numero && nd && String(+t.nota_numero) === nd.numero && (!nd.serie || nd.serie === serieDe(t)));
     const igualValor = t => b.valor_documento > 0 && Math.abs(Number(t.valor) - b.valor_documento) < 0.01;
     // desempate de parcelas iguais (16/10/2026): o vencimento original (a 2ª via do BB mantém o da linha
     // digitável) e a parcela escrita no "Nº do documento" ("002205/02", "2205-2")
@@ -180,7 +191,7 @@
     return l.map((x, i) => [x, i]).sort((a, b) => (b[0].celular - a[0].celular) || (b[0].principal - a[0].principal) || a[1] - b[1]).map(x => x[0]);
   }
 
-  const C = { telefonesCliente, lerLinha, linhaDeCodigo, formataLinha, dataDoFator, mod10, mod11, confereBoleto, casaBoleto, boletosPendentes, boletoAtual, mensagemBoleto, linksPdf, textoBoletos, MODELO_BOLETO };
+  const C = { telefonesCliente, lerLinha, linhaDeCodigo, formataLinha, dataDoFator, mod10, mod11, confereBoleto, casaBoleto, notaDoDocumento, boletosPendentes, boletoAtual, mensagemBoleto, linksPdf, textoBoletos, MODELO_BOLETO };
   raiz.CRMCobranca = C;
   if (typeof module !== 'undefined') module.exports = C;
 
