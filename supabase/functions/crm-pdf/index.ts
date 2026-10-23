@@ -9,6 +9,8 @@
 // o boleto atualizado da NF 2428.") e anota o clique (cli_falou_em). Vale 90 dias.
 // GET ?e=<id da entrega> (21/10/2026): botão "Falar com quem me atende" do agradecimento da entrega (modelo entrega_cliente)
 // → abre o WhatsApp do(a) vendedor(a) da nota com "Olá, Silmara! Recebi a entrega da NF 2706." Vale 90 dias.
+// GET ?a=<id do aviso> (23/10/2026): botão "Falar com quem me atende" do aviso de atraso (modelo cobranca_atraso; a Meta não
+// aceita wa.me direto no botão) → abre o WhatsApp do(a) vendedor(a) do aviso com "Olá, Renata! Recebi o aviso sobre a NF 2428…".
 // Deploy: verify_jwt DESLIGADO (o cliente não tem login).
 import { createClient } from 'npm:@supabase/supabase-js@2.116.0';
 
@@ -38,6 +40,25 @@ Deno.serve(async (req) => {
     if (tel.length < 12) return pagina(404, 'Não achei o contato de quem te atende. Responda a mensagem que recebeu e retornamos.');
     const texto = 'Olá, ' + String((u && u.nome) || '').trim().split(/\s+/)[0] + '! Recebi a entrega' + (n ? ' da NF ' + n.numero : '') + '.';
     if (req.method === 'GET') await db.from('crm_whatsapp_eventos').insert({ tipo: 'clique', wamid: x.cli_msg, payload: 'falar_entrega:' + x.id, texto: 'Falar com quem me atende' });
+    return new Response(null, { status: 302, headers: { Location: 'https://wa.me/' + tel + '?text=' + encodeURIComponent(texto), 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex' } });
+  }
+  const av = q.get('a') || '';
+  if (av) {
+    if (!UUID.test(av)) return pagina(404, 'Link inválido.');
+    const { data: a } = await db.from('crm_cobranca_avisos').select('id, empresa_id, vendedor_id, notas, wa_msg, enviado_em, respondeu_em').eq('id', av).maybeSingle();
+    if (!a) return pagina(404, 'Não achei este aviso. Responda a mensagem que recebeu e retornamos.');
+    if (Date.now() - Date.parse(a.enviado_em) > 90 * 864e5) return pagina(410, 'Este link expirou. Responda a mensagem que recebeu e retornamos.');
+    let vid = a.vendedor_id;
+    if (!vid) { const { data: e } = await db.from('crm_empresas').select('responsavel_id').eq('id', a.empresa_id).maybeSingle(); vid = e && e.responsavel_id; }
+    const { data: u } = vid ? await db.from('crm_usuarios').select('nome, telefone').eq('user_id', vid).maybeSingle() : { data: null };
+    let tel = String((u && u.telefone) || '').replace(/\D/g, '');
+    if (tel.length === 10 || tel.length === 11) tel = '55' + tel;
+    if (tel.length < 12) return pagina(404, 'Não achei o contato de quem te atende. Responda a mensagem que recebeu e retornamos.');
+    const texto = 'Olá, ' + String((u && u.nome) || '').trim().split(/\s+/)[0] + '! Recebi o aviso sobre ' + (a.notas || 'o título em aberto') + '.';
+    if (req.method === 'GET') {
+      if (!a.respondeu_em) await db.from('crm_cobranca_avisos').update({ respondeu_em: new Date().toISOString() }).eq('id', a.id);
+      await db.from('crm_whatsapp_eventos').insert({ tipo: 'clique', wamid: a.wa_msg, payload: 'falar_aviso:' + a.id, texto: 'Falar com quem me atende (aviso de atraso)' });
+    }
     return new Response(null, { status: 302, headers: { Location: 'https://wa.me/' + tel + '?text=' + encodeURIComponent(texto), 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex' } });
   }
   const f = q.get('f') || '';

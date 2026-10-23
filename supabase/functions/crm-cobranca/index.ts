@@ -87,7 +87,8 @@ Deno.serve(async (req) => {
             { type: 'BODY', text: CORPO(EMPRESA), example: { body_text: [['Maria', 'Renata', 'a NF 2428, vencida em 16/10/2026', 'R$ 1.703,98', 'sexta-feira, 30/10/2026']] } },
             { type: 'FOOTER', text: EMPRESA + ' · financeiro' },
             { type: 'BUTTONS', buttons: [
-              { type: 'URL', text: BOTAO_FALAR, url: 'https://wa.me/{{1}}', example: ['https://wa.me/5511999999999'] },
+              // a Meta não aceita wa.me direto no botão: o crm-pdf (?a=<aviso>) redireciona para o WhatsApp do(a) vendedor(a)
+              { type: 'URL', text: BOTAO_FALAR, url: url + '/functions/v1/crm-pdf?a={{1}}', example: [url + '/functions/v1/crm-pdf?a=00000000-0000-4000-8000-000000000000'] },
               { type: 'QUICK_REPLY', text: BOTAO_PAGUEI }] }]
         })
       });
@@ -152,8 +153,7 @@ Deno.serve(async (req) => {
             messaging_product: 'whatsapp', to: m.celular, type: 'template',
             template: { name: MODELO, language: { code: 'pt_BR' }, components: [
               { type: 'body', parameters: m.p.map(param) },
-              { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: (m.telV || telWa(admin0 && admin0.telefone) || '') +
-                '?text=' + encodeURIComponent('Olá, ' + primeiro(m.vendedor.nome) + '! Recebi o aviso sobre ' + docsTexto(m.titulos) + '.') }] },
+              { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: id }] },
               { type: 'button', sub_type: 'quick_reply', index: '1', parameters: [{ type: 'payload', payload: 'avisopagou:' + id }] }] }
           }) });
           up.whatsapp_para = m.celular; up.wa_msg = (((r.messages as Linha[]) || [])[0] || {}).id || null; up.wa_status = 'enviado';
