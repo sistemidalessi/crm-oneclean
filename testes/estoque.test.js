@@ -156,3 +156,14 @@ test('"vem quantas na embalagem" suspeito: igual à quantidade da nota ou ≠ 1 
   assert.ok(/PAPEL: a nota já vem em FD/.test(r[1]));
   assert.deepStrictEqual(S.fatoresSuspeitos(itens, [{ id: 'a', codigo: '1', fator: 500, ignorar: true }], unDe), []);
 });
+
+test('código do cadastro: acerta o zero da frente e recusa o que o cadastro não tem', () => {
+  const cad = new Set(['010087', '010078', '030060', '10', '010']);
+  assert.strictEqual(S.codigoDoCadastro('010087', cad), '010087');
+  assert.strictEqual(S.codigoDoCadastro(' 10087 ', cad), '010087');
+  assert.strictEqual(S.codigoDoCadastro('30060', cad), '030060');
+  assert.strictEqual(S.codigoDoCadastro('1070048', cad), null);   // não adivinha
+  assert.strictEqual(S.codigoDoCadastro('010078.1', cad), null);  // caixa não é produto do estoque
+  assert.strictEqual(S.codigoDoCadastro('0010', cad), null);      // dois do cadastro sem os zeros ("10" e "010"): não escolhe
+  assert.strictEqual(S.codigoDoCadastro('', cad), null);
+});

@@ -262,7 +262,19 @@
       return null;
     }).filter(Boolean);
   }
-  const api = { fatoresSuspeitos, junta, valor, sequencia, lerContagem, atualFkn, ehCaixa, TIPOS, extrasDoXml, stDoDet, compraDoXml, devolucaoDoXml, custoItem, sugere, avisosDfe, sugereFornecedor, chegadaCompras, pareceDespesa };
+  // Código do produto como está no cadastro (23/10/2026: na entrada das compras o comprador digitou "10087" para o 010087 e
+  // nasceram 7 produtos que não existem, com a mercadoria fora do produto certo). Igual → o mesmo; sem os zeros da frente e
+  // um só no cadastro → esse; senão null (o banco recusa código fora do cadastro). codigos: os do cadastro, sem as caixas.
+  function codigoDoCadastro(cod, codigos) {
+    const c = String(cod || '').trim(); if (!c) return null;
+    const lista = codigos instanceof Set ? codigos : new Set(codigos || []);
+    if (lista.has(c)) return c;
+    if (ehCaixa(c)) return null;
+    const sem = c.replace(/^0+/, '');
+    const achados = [...lista].filter(x => !ehCaixa(x) && x.replace(/^0+/, '') === sem);
+    return achados.length === 1 ? achados[0] : null;
+  }
+  const api = { codigoDoCadastro, fatoresSuspeitos, junta, valor, sequencia, lerContagem, atualFkn, ehCaixa, TIPOS, extrasDoXml, stDoDet, compraDoXml, devolucaoDoXml, custoItem, sugere, avisosDfe, sugereFornecedor, chegadaCompras, pareceDespesa };
   raiz.CRMEstoque = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);
@@ -777,6 +789,7 @@
         const base = (op() ? nomesOp : fkn || []).filter(e => !S.ehCaixa(e.codigo));
         const nomeDe = new Map(base.map(e => [e.codigo, e.descricao])), unDe = new Map(base.map(e => [e.codigo, e.unidade]));
         (saldo || []).forEach(x => { if (!nomeDe.has(x.codigo)) { nomeDe.set(x.codigo, x.descricao); unDe.set(x.codigo, x.unidade); } });
+        const cad = new Set(base.map(e => e.codigo));
         const dv = devolucoes.get(id);
         const ctx = { vinculos: new Map(vinc.map(v => [v.fornecedor_doc + '|' + v.cod_fornecedor, v])), produtos: base, unidades: new Map(unis.map(u => [u.codigo + '|' + u.unidade, Number(u.fator)])), devolucao: !!dv };
         const pend = c.situacao === 'pendente';
@@ -796,14 +809,15 @@
               : 'Devolução: entrada dada em ' + quando(c.lancada_em) + '.' + (dv.efeitos && dv.efeitos.abatido != null ? ' Abatido dos títulos: ' + R.moeda(dv.efeitos.abatido) + (Number(dv.efeitos.sobra) > 0 ? ' · a devolver ao cliente: ' + R.moeda(dv.efeitos.sobra) : '') + '.' : ''))
           : (pend ? 'Ligue cada item a um produto nosso e diga quantas unidades do nosso estoque vêm em 1 unidade da nota (ex.: 1 caixa com 300 esponjas = 300). "Não é estoque": frete, brinde, material de uso. Dar entrada soma no estoque do CRM e, depois da virada (CRM dono do cadastro), lança as parcelas no contas a pagar do Caixa.'
             : 'Entrada dada em ' + quando(c.lancada_em) + '.') + (!dv && c.parcelas && c.parcelas.length ? ' Parcelas da nota: ' + c.parcelas.map(p => R.dataBR(p.vencimento) + ' ' + R.moeda(p.valor)).join(', ') + ' (depois da virada entram no contas a pagar do Caixa com a entrada; antes, vêm do FKN).' : ''),
-          htmlDepois: '<datalist id="esProdutos">' + R.ordemAlfa([...nomeDe.entries()], x => x[1] || x[0]).map(([k, v]) => '<option value="' + esc(k) + '">' + esc(v || '') + '</option>').join('') + '</datalist>' +
+          htmlDepois: '<datalist id="esProdutos">' + R.ordemAlfa(base.map(e => [e.codigo, e.descricao]), x => x[1] || x[0]).map(([k, v]) => '<option value="' + esc(k) + '">' + esc(v || '') + '</option>').join('') + '</datalist>' +
             '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Item da nota</th><th>Produto nosso</th><th title="Quantas unidades do nosso estoque vêm em 1 unidade da nota (o antigo &quot;fator&quot;)">Vem quantas na embalagem?</th><th></th></tr></thead><tbody>' + itens.map(linhaI).join('') + '</tbody></table></div>',
           salvarTexto: pend ? (dv ? 'Dar entrada da devolução' : 'Dar entrada no estoque') : 'Fechar',
           extras: form => {
             const atualiza = it => {
               const cod = form.elements['c_' + it.id].value.trim(), fat = Number(form.elements['f_' + it.id].value) || 0;
               const nome = form.querySelector('[data-nome="' + it.id + '"]'), q = form.querySelector('[data-q="' + it.id + '"]');
-              if (nome) nome.textContent = nomeDe.get(cod) || (cod ? 'código que o estoque não tem' : '');
+              const certo = cod && !cad.has(cod) ? S.codigoDoCadastro(cod, cad) : null;
+              if (nome) nome.textContent = cad.has(cod) ? nomeDe.get(cod) || '' : certo ? 'faltou o zero da frente: é o ' + certo + ' ' + (nomeDe.get(certo) || '') : cod ? 'código que o cadastro de produtos não tem' : '';
               if (q) q.textContent = fat ? '= ' + qtd(Number(it.quantidade) * fat) + ' ' + (unDe.get(cod) || '') + (dv ? ' · volta pelo custo médio' : op() ? '' : ' · ' + R.moeda(S.custoItem(it, fat)) + ' cada') : '';
             };
             itens.forEach(it => { atualiza(it); ['c_', 'f_'].forEach(p => form.elements[p + it.id].addEventListener('input', () => atualiza(it))); });
@@ -811,13 +825,21 @@
           aoSalvar: async (v, form) => {
             if (!pend) return;
             const lista = itens.map(it => ({ id: it.id, codigo: form.elements['c_' + it.id].value.trim(), fator: form.elements['f_' + it.id].value, ignorar: form.elements['i_' + it.id].checked }));
+            const trocados = [];
+            lista.forEach(x => {
+              if (x.ignorar || !x.codigo || cad.has(x.codigo)) return;
+              const certo = S.codigoDoCadastro(x.codigo, cad);
+              if (certo) { trocados.push(x.codigo + ' → ' + certo); x.codigo = certo; form.elements['c_' + x.id].value = certo; }
+            });
             const falta = lista.filter(x => !x.ignorar && (!x.codigo || !(Number(x.fator) > 0)));
             if (falta.length) throw new Error(falta.length + ' item(ns) sem produto ou sem "vem quantas na embalagem" (ou marque "não é estoque")');
             const susp = S.fatoresSuspeitos(itens, lista, unDe);
             if (susp.length && !confirm('Confira o "vem quantas na embalagem" de ' + susp.length + ' item(ns):\n\n' + susp.join('\n') +
               '\n\nSe a nota já vem na mesma unidade do estoque, o certo é 1. Dar entrada assim mesmo?')) return false;
-            const fora = lista.filter(x => !x.ignorar && !nomeDe.has(x.codigo));
-            if (fora.length && !confirm(fora.length + ' código(s) que o estoque não tem (' + fora.map(x => x.codigo).join(', ') + '). Criar no estoque do CRM assim mesmo?')) return false;
+            const fora = lista.filter(x => !x.ignorar && !cad.has(x.codigo));
+            if (fora.length) throw new Error(fora.length + ' código(s) que o cadastro de produtos não tem: ' + fora.map(x => x.codigo).join(', ') +
+              '. Escolha o produto na lista; se for produto novo, cadastre antes em Produtos.');
+            if (trocados.length && !confirm('Acertei o zero da frente: ' + trocados.join(', ') + '.\n\nDar entrada assim?')) return false;
             const r = await st.compraLancar(id, lista);
             const e = r.devolucao;
             CRM.toast('Entrada dada: ' + r.itens + ' item(ns) no estoque' + (r.ignorados ? ', ' + r.ignorados + ' fora do estoque' : '') + '.' +

@@ -4834,6 +4834,8 @@ begin
     if coalesce((x->>'ignorar')::boolean, false) then ign := ign + 1; continue; end if;
     cod := nullif(btrim(x->>'codigo'), ''); f := nullif(x->>'fator', '')::numeric;
     if cod is null or f is null or f <= 0 then raise exception 'item % (%): diga o produto e o fator', it.ordem, it.descricao; end if;
+    -- 23/10/2026: código fora do cadastro ("10087" digitado para o 010087) criava produto que não existe; caixa (.1) também não
+    if cod ~ '\.\d+$' or not exists (select 1 from public.crm_estoque e where e.codigo = cod) then raise exception 'item % (%): o código % não está no cadastro de produtos (confira o zero da frente)', it.ordem, it.descricao, cod; end if;
     q := round(it.quantidade * f, 3);
     if q <= 0 then raise exception 'item % (%): quantidade zerada', it.ordem, it.descricao; end if;
     custo := round((it.valor_total + it.ipi + it.st + it.frete + it.outras) / q, 4);
