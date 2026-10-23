@@ -158,8 +158,9 @@
     }
     const mesmasVendas = vendas.filter(c => venda && c.cfop === venda.cfop);
     const tribs = new Set(mesmasVendas.map(c => [c.cst_icms, n2(c.aliq_icms), c.cst_pis, n2(c.aliq_pis), c.cst_cofins, n2(c.aliq_cofins)].join('|')));
-    if (tribs.size > 1) alerta('atencao', 'A tributação deste produto mudou no histórico (' + tribs.size + ' combinações com o CFOP ' + venda.cfop + '); a proposta usa a mais recente.');
-    if ((r.gtins || []).length > 1) alerta('atencao', 'Mais de um código de barras (GTIN) nas notas: ' + r.gtins.join(', ') + '.');
+    // informação, não pendência (23/10/2026, Anderson: a lista de avisos "atrapalhava tudo"): a proposta já usa a mais recente
+    if (tribs.size > 1) alerta('info', 'A tributação deste produto mudou no histórico (' + tribs.size + ' combinações com o CFOP ' + venda.cfop + '); a proposta usa a mais recente.');
+    if ((r.gtins || []).length > 1) alerta('info', 'Mais de um código de barras (GTIN) nas notas: ' + r.gtins.join(', ') + '.');
     if ((r.origens || []).length > 1) alerta('atencao', 'Origem da mercadoria diferente entre as notas: ' + r.origens.join(', ') + '.');
 
     // 3) PIS/COFINS
@@ -174,7 +175,7 @@
         const cobradas = vendas.filter(c => c.cst_pis === '01' || c.cst_cofins === '01');
         if (cobradas.length) {
           const de = cobradas.map(c => c.primeira).sort()[0], ate = cobradas.map(c => c.ultima).sort().pop();
-          alerta('atencao', 'Papel higiênico com PIS/COFINS cobrado (CST 01) em ' + cobradas.reduce((s, c) => s + (c.n || 0), 0) + ' venda(s), de ' +
+          alerta('info', 'Papel higiênico com PIS/COFINS cobrado (CST 01) em ' + cobradas.reduce((s, c) => s + (c.n || 0), 0) + ' venda(s), de ' +
             dataBR(de) + ' a ' + dataBR(ate) + '. A regra atual (CST 06, alíquota zero) está certa; se foi pago, dá para recuperar (até 5 anos): falar com o contador.');
         }
       } else if (venda.cst_pis === '01' && (n2(venda.aliq_pis) !== PIS_LUCRO_REAL || n2(venda.aliq_cofins) !== COFINS_LUCRO_REAL)) {
@@ -283,9 +284,11 @@
   const E = () => CRM.estado;
   const esc = CRM.esc;
   let produtos = null, pendentes = null, carregando = false, rodando = '', filtro = { busca: '', mostrar: 'erro' };
-  const NIVEL = { erro: ['erro', 'vermelho'], atencao: ['atenção', 'ambar'] };
+  const NIVEL = { erro: ['erro', 'vermelho'], atencao: ['atenção', 'ambar'], info: ['informação', 'cinza'] };
+  // Só conta o que pede ação: o que já foi corrigido na proposta e o informativo vão para o "histórico" do produto.
+  const pendente = a => a && !a.corrigido && (a.nivel === 'erro' || a.nivel === 'atencao');
   const pct = v => (v == null ? '' : String(+Number(v).toFixed(2)).replace('.', ',') + '%');
-  const nivelDe = p => (p.alertas || []).some(a => a.nivel === 'erro') ? 'erro' : (p.alertas || []).length ? 'atencao' : 'ok';
+  const nivelDe = p => { const l = (p.alertas || []).filter(pendente); return l.some(a => a.nivel === 'erro') ? 'erro' : l.length ? 'atencao' : 'ok'; };
 
   async function carrega() {
     if (carregando) return;
@@ -405,9 +408,11 @@
 
   function linha(p) {
     const v = (p.regra || {}).venda || {};
-    const alertas = (p.alertas || []).map(a => '<li>' + CRM.selo(NIVEL[a.nivel][0], NIVEL[a.nivel][1]) + ' ' + esc(a.texto) + (a.corrigido ? ' <strong>(corrigido na proposta)</strong>' : '') + '</li>').join('');
+    const item = a => '<li>' + CRM.selo((NIVEL[a.nivel] || NIVEL.info)[0], (NIVEL[a.nivel] || NIVEL.info)[1]) + ' ' + esc(a.texto) + (a.corrigido ? ' <strong>(corrigido na proposta)</strong>' : '') + '</li>';
+    const ativos = (p.alertas || []).filter(pendente), hist = (p.alertas || []).filter(a => !pendente(a));
     return '<tr><td><strong>' + esc(R.nomeDeItem(p.descricao || p.codigo)) + '</strong><small>' + esc(p.codigo) + (p.unidade ? ' · ' + esc(p.unidade) : '') + '</small>' +
-      (alertas ? '<ul class="fi-alertas">' + alertas + '</ul>' : '') + '</td>' +
+      (ativos.length ? '<ul class="fi-alertas">' + ativos.map(item).join('') + '</ul>' : '') +
+      (hist.length ? '<details class="fi-hist"><summary>histórico (' + hist.length + ')</summary><ul class="fi-alertas">' + hist.map(item).join('') + '</ul></details>' : '') + '</td>' +
       '<td>' + esc(F.fmtNcm(p.ncm)) + (p.cest ? '<small>CEST ' + esc(p.cest) + '</small>' : '') + '</td><td>' + esc(p.origem == null ? '—' : p.origem) + '</td>' +
       '<td>' + esc(v.cfop || '—') + '</td><td>' + esc(v.cst_icms || '—') + (v.aliq_icms ? '<small>' + pct(v.aliq_icms) + '</small>' : '') + '</td>' +
       '<td>' + esc(v.cst_pis || '—') + '/' + esc(v.cst_cofins || '—') + (v.aliq_pis || v.aliq_cofins ? '<small>' + pct(v.aliq_pis) + ' + ' + pct(v.aliq_cofins) + '</small>' : '') + '</td>' +
@@ -438,7 +443,7 @@
         '<p class="acoes"><button type="button" class="btn sec" data-acao="fi-montar"' + (rodando ? ' disabled' : '') + '>' + (produtos.length ? 'Atualizar as propostas' : 'Montar as propostas') + '</button>' +
           (cont.ok ? '<button type="button" class="btn sec" data-acao="fi-conferir-ok">Marcar os ' + cont.ok + ' sem alerta como conferidos</button>' : '') +
           (produtos.length ? '<button type="button" class="btn sec" data-acao="fi-csv">Exportar a tabela (para o contador)</button>' : '') + '</p>' +
-        (produtos.length ? '<div class="kpis">' + kpi('Com erro', cont.erro, 'a proposta já vem corrigida quando dá', 'vermelho', 'erro') + kpi('Para olhar', cont.atencao, 'mudou no histórico ou diverge', '', 'atencao') +
+        (produtos.length ? '<div class="kpis">' + kpi('Com erro', cont.erro, 'precisa de ação (o já corrigido fica no histórico)', 'vermelho', 'erro') + kpi('Para olhar', cont.atencao, 'CEST, NCM que mudou, regra a conferir', '', 'atencao') +
           kpi('Sem alerta', cont.ok, 'prontos para conferir', '', 'ok') + kpi('Conferidos', cont.conferido, 'valem para emitir', 'verde', 'conferido') + kpi('Todos', produtos.length, 'produtos', '', 'todos') + '</div>' +
           '<p class="acoes"><input type="search" placeholder="Procurar produto, código ou NCM" value="' + esc(filtro.busca) + '" data-fi-busca class="of-busca"></p>' +
           (l.length ? '<div class="tabela-rolagem"><table class="tabela fi-tabela"><thead><tr><th>Produto</th><th>NCM</th><th>Origem</th><th>CFOP</th><th>ICMS</th><th>PIS/COFINS</th><th>Situação</th><th></th></tr></thead><tbody>' +

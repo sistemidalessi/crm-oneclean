@@ -865,6 +865,9 @@ pre.of-previa { white-space: pre-wrap; font-family: inherit; font-size: .88rem; 
 .fi-tabela td small { display: block; color: var(--suave); }
 .fi-alertas { margin: 6px 0 0; padding-left: 0; list-style: none; font-size: .82rem; }
 .fi-alertas li { margin: 3px 0; }
+.fi-hist { margin-top: 4px; font-size: .78rem; color: var(--suave, #667); }
+.fi-hist summary { cursor: pointer; }
+.fi-hist .fi-alertas { opacity: .8; }
 .kpi.ativo { outline: 2px solid var(--ouro); }
 
 /* ---------- pedidos (Fase 3): janela como a do FKN, grade de produtos e lista de separação ---------- */
