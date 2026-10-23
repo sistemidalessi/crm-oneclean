@@ -5013,7 +5013,7 @@ create or replace function public.crm_config_guarda() returns trigger language p
 declare k text;
 begin
   if current_user <> 'authenticated' or public.crm_eh_admin() then return new; end if;
-  foreach k in array array['fiscal', 'boleto', 'comissao_planos', 'comissao_usuarios', 'tabela_precos', 'margem_minima', 'pedido_trava_preco'] loop
+  foreach k in array array['fiscal', 'boleto', 'comissao_planos', 'comissao_usuarios', 'tabela_precos', 'margem_minima', 'pedido_trava_preco', 'cobranca_aviso', 'cobranca_prazo_cartorio'] loop
     if tg_op = 'UPDATE' and old.dados ? k then new.dados := jsonb_set(coalesce(new.dados, '{}'::jsonb), array[k], old.dados -> k);
     else new.dados := coalesce(new.dados, '{}'::jsonb) - k; end if;
   end loop;
@@ -5157,3 +5157,71 @@ $$;
 grant execute on function public.crm_config_mesclar(jsonb) to authenticated;
 revoke execute on function public.crm_config_mesclar(jsonb) from anon, public;   -- rodado pelo Anderson (docs/oneclean/sql/2026-10-23-config-mesclar.sql)
 
+
+-- ============================================================================================================
+-- Aviso de atraso ao cliente (23/10/2026, pedido do Anderson): com 5 dias úteis de atraso o cliente recebe, pelo
+-- WhatsApp da empresa (modelo cobranca_atraso) e por e-mail, UM aviso cordial já dizendo que, sem o pagamento até o
+-- prazo, o título segue para o cartório; o administrador decide o cartório (tarefa quando o prazo vence). Quem envia é a
+-- Edge Function crm-cobranca, chamada todo dia útil às 9h05 pelo pg_cron (crm_cobranca_tick) com uma senha que nasce
+-- aqui no banco e nunca sai dele (crm_interno não é exposto pela API); o administrador também roda pela tela.
+create table if not exists public.crm_cobranca_avisos (
+  id             uuid primary key default gen_random_uuid(),
+  empresa_id     uuid not null,
+  duplicatas     text[] not null,                -- títulos do aviso (a duplicata é estável; o crm_titulos pode ser refeito)
+  notas          text,                           -- "a NF 2428, vencida em 10/10/2026"
+  valor          numeric(14,2) not null,
+  dias           integer,                        -- dias corridos de atraso do título mais antigo, no envio
+  prazo          date not null,                  -- depois desta data: hora de decidir o cartório
+  vendedor_id    uuid,
+  texto          text,
+  whatsapp_para  text, wa_msg text, wa_status text, wa_erro text,
+  email_para     text[], email_ok boolean, email_erro text,
+  enviado_em     timestamptz not null default now(),
+  enviado_por    uuid,                           -- vazio = automático
+  pagou_em       timestamptz,                    -- tocou em "Já paguei"
+  respondeu_em   timestamptz,
+  alerta_em      timestamptz                     -- tarefa "decidir o cartório" criada
+);
+create index if not exists crm_cobranca_avisos_emp on public.crm_cobranca_avisos (empresa_id);
+create index if not exists crm_cobranca_avisos_msg on public.crm_cobranca_avisos (wa_msg);
+create index if not exists crm_cobranca_avisos_tel on public.crm_cobranca_avisos (whatsapp_para, enviado_em);
+alter table public.crm_cobranca_avisos enable row level security;
+revoke all on public.crm_cobranca_avisos from anon, public;
+grant select on public.crm_cobranca_avisos to authenticated;
+drop policy if exists ler on public.crm_cobranca_avisos;
+create policy ler on public.crm_cobranca_avisos for select to authenticated using ((select public.crm_eh_admin()));
+
+create schema if not exists crm_interno;
+create table if not exists crm_interno.cobranca_cfg (
+  id    integer primary key default 1 check (id = 1),
+  senha text not null default encode(extensions.gen_random_bytes(32), 'hex'),
+  url   text                                   -- https://<projeto>.supabase.co/functions/v1/crm-cobranca: gravar na instalação (update crm_interno.cobranca_cfg set url = …)
+);
+revoke all on crm_interno.cobranca_cfg from public, anon, authenticated;
+insert into crm_interno.cobranca_cfg (id) values (1) on conflict (id) do nothing;
+
+-- a Edge Function confere a senha do agendador (só com a chave de serviço)
+create or replace function public.crm_cobranca_senha_ok(p text) returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from crm_interno.cobranca_cfg where id = 1 and length(coalesce(p, '')) >= 32 and senha = p);
+$$;
+revoke all on function public.crm_cobranca_senha_ok(text) from public, anon, authenticated;
+do $$ begin
+  if exists (select 1 from pg_roles where rolname = 'service_role') then grant execute on function public.crm_cobranca_senha_ok(text) to service_role; end if;
+end $$;
+
+-- todo dia útil às 9h05 de São Paulo (12h05 UTC): chama a função; ela confere se o aviso está ligado
+create or replace function public.crm_cobranca_tick() returns void language plpgsql security definer set search_path = public as $$
+declare c record;
+begin
+  select * into c from crm_interno.cobranca_cfg where id = 1;
+  if c.url is null then return; end if;
+  perform net.http_post(url := c.url, body := jsonb_build_object('acao', 'rodar', 'origem', 'agendador'),
+    headers := jsonb_build_object('Content-Type', 'application/json', 'Authorization', 'Bearer ' || c.senha), timeout_milliseconds := 120000);
+end;
+$$;
+revoke all on function public.crm_cobranca_tick() from public, anon, authenticated;
+do $$ begin
+  if exists (select 1 from pg_extension where extname = 'pg_cron') and exists (select 1 from pg_extension where extname = 'pg_net') then
+    perform cron.schedule('crm-cobranca-avisos', '5 12 * * 1-5', 'select public.crm_cobranca_tick()');
+  end if;
+end $$;

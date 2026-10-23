@@ -907,6 +907,13 @@
     return r.data;
   };
   Local.prototype.whatsapp = async function (corpo) { return corpo && corpo.acao === 'situacao' ? { ligado: false, faltam: ['modo local'] } : Promise.reject(new Error('o WhatsApp da Meta só funciona com o Supabase ligado')); };
+  // Aviso de atraso ao cliente (23/10/2026): Edge Function crm-cobranca (só admin)
+  Supa.prototype.cobranca = async function (corpo) {
+    const r = await this.sb.functions.invoke('crm-cobranca', { body: corpo });
+    if (r.error) throw await erroDaFuncao(r);
+    return r.data;
+  };
+  Local.prototype.cobranca = async function (corpo) { return corpo && corpo.acao === 'situacao' ? { local: true, avisos: [] } : Promise.reject(new Error('o aviso de atraso só funciona com o Supabase ligado')); };
   Supa.prototype.email = async function (corpo) {
     const r = await this.sb.functions.invoke('crm-email', { body: corpo });
     if (r.error) {

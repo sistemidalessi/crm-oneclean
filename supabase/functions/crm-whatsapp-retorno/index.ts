@@ -12,7 +12,7 @@
 //   Tudo fica em crm_whatsapp_eventos (só o administrador lê). Sem os dois segredos, nada é aceito.
 // Deploy: verify_jwt DESLIGADO (quem chama é a Meta; a assinatura é a senha).
 import { createClient } from 'npm:@supabase/supabase-js@2.116.0';
-import { eventosDoCorpo, statusCRM, novoStatus, ehPagou, idDoPayload, variantesBR, textoPagou, textoRepasse, entregaDoPayload, textoProximo } from './logica.js';
+import { eventosDoCorpo, statusCRM, novoStatus, ehPagou, idDoPayload, avisoDoPayload, variantesBR, textoPagou, textoRepasse, entregaDoPayload, textoProximo } from './logica.js';
 
 const GRAPH = 'https://graph.facebook.com/v25.0';
 const texto = (status: number, t: string) => new Response(t, { status, headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' } });
@@ -84,6 +84,11 @@ Deno.serve(async (req) => {
           const s = novoStatus(x.cli_status, novo);
           if (s) await db.from('crm_entregas').update(Object.assign({ cli_status: s }, s === 'falhou' ? { cli_erro: ev.erro || 'a Meta não entregou' } : {})).eq('id', x.id);
         }
+        const { data: avi } = await db.from('crm_cobranca_avisos').select('id, wa_status').eq('wa_msg', ev.wamid);
+        for (const a of avi || []) {
+          const s = novoStatus(a.wa_status, novo);
+          if (s) await db.from('crm_cobranca_avisos').update(Object.assign({ wa_status: s }, s === 'falhou' ? { wa_erro: ev.erro || 'a Meta não entregou' } : {})).eq('id', a.id);
+        }
         const { data: ven } = await db.from('crm_boletos').select('id, wa_entrega').eq('wa_msg', ev.wamid);
         for (const b of ven || []) {
           const s = novoStatus(b.wa_entrega, novo);
@@ -112,6 +117,44 @@ Deno.serve(async (req) => {
           }
           if (!ev.texto || /^\[reação/.test(ev.texto)) continue;
           if (x.empresa_id) await tarefa(x.empresa_id, vid, 'O cliente respondeu ao agradecimento da entrega (' + nf + '): "' + ev.texto.slice(0, 500) + '". Responda pelo seu WhatsApp.');
+          const desde = new Date(Date.now() - 12 * 3600e3).toISOString();
+          const { count } = await db.from('crm_whatsapp_eventos').select('id', { count: 'exact', head: true }).eq('tipo', 'resposta').in('de', variantesBR(ev.de)).gte('criado_em', desde);
+          if (!count) await responde(String(ev.de), textoRepasse(primeiro(u && u.nome), telWa(u && u.telefone)));
+          continue;
+        }
+      }
+      // resposta ao aviso de atraso (crm-cobranca): pelo botão "Já paguei", pela mensagem respondida ou pelo último aviso a esse
+      // número nos últimos 15 dias (se não houver boleto mandado depois)
+      {
+        const campos = 'id, empresa_id, notas, valor, vendedor_id, pagou_em, respondeu_em, enviado_em';
+        const aid = avisoDoPayload(ev.payload);
+        let a = null;
+        if (aid) a = (await db.from('crm_cobranca_avisos').select(campos).eq('id', aid).maybeSingle()).data;
+        else if (ev.contexto) a = (await db.from('crm_cobranca_avisos').select(campos).eq('wa_msg', ev.contexto).maybeSingle()).data;
+        if (!a && !ev.contexto && !idDoPayload(ev.payload)) {
+          const desde = new Date(Date.now() - 15 * 864e5).toISOString();
+          const { data: ua } = await db.from('crm_cobranca_avisos').select(campos).in('whatsapp_para', variantesBR(ev.de)).gte('enviado_em', desde).order('enviado_em', { ascending: false }).limit(1);
+          const { data: ub } = await db.from('crm_boletos').select('cli_em').in('cli_tel', variantesBR(ev.de)).gte('cli_em', desde).order('cli_em', { ascending: false }).limit(1);
+          const x = (ua || [])[0], y = (ub || [])[0];
+          if (x && (!y || String(x.enviado_em) > String(y.cli_em))) a = x;
+        }
+        if (a) {
+          const { data: e } = await db.from('crm_empresas').select('nome, responsavel_id').eq('id', a.empresa_id).maybeSingle();
+          const vid = a.vendedor_id || (e && e.responsavel_id) || null;
+          const { data: u } = vid ? await db.from('crm_usuarios').select('nome, telefone').eq('user_id', vid).maybeSingle() : { data: null };
+          const docs = (a.notas || 'o título em aberto') + ' (' + moeda(Number(a.valor)) + ')';
+          if (ehPagou(ev)) {
+            if (a.pagou_em) continue; // tocou de novo
+            await db.from('crm_cobranca_avisos').update({ pagou_em: new Date().toISOString() }).eq('id', a.id);
+            await tarefa(a.empresa_id, vid, 'O cliente disse no WhatsApp que já pagou ' + docs + ' (aviso de atraso). O financeiro confere no banco; não precisa cobrar até lá.');
+            const { data: adms } = await db.from('crm_usuarios').select('user_id').eq('papel', 'admin').eq('ativo', true);
+            for (const ad of adms || []) if (ad.user_id !== vid) await tarefa(a.empresa_id, ad.user_id, 'Conferir no banco: ' + ((e && e.nome) || 'cliente') + ' tocou em "Já paguei" no aviso de atraso (' + docs + '). Entrou? Dê o "Recebi" no Caixa. Não foi? O cartório espera a sua decisão.');
+            await responde(String(ev.de), textoPagou(primeiro(ev.nome), primeiro(u && u.nome)));
+            continue;
+          }
+          if (!ev.texto || /^\[reação/.test(ev.texto)) continue;
+          if (!a.respondeu_em) await db.from('crm_cobranca_avisos').update({ respondeu_em: new Date().toISOString() }).eq('id', a.id);
+          await tarefa(a.empresa_id, vid, 'O cliente respondeu ao aviso de atraso (' + docs + '): "' + ev.texto.slice(0, 500) + '". Negocie pelo seu WhatsApp e avise o financeiro do que foi combinado.');
           const desde = new Date(Date.now() - 12 * 3600e3).toISOString();
           const { count } = await db.from('crm_whatsapp_eventos').select('id', { count: 'exact', head: true }).eq('tipo', 'resposta').in('de', variantesBR(ev.de)).gte('criado_em', desde);
           if (!count) await responde(String(ev.de), textoRepasse(primeiro(u && u.nome), telWa(u && u.telefone)));

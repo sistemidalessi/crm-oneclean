@@ -45,12 +45,14 @@ export function novoStatus(atual, novo) {
 const semAcento = t => String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
 // o botão "Já paguei" (payload pagou:<id>) ou o cliente escrevendo que já pagou
 export function ehPagou(m) {
-  if (/^pagou:/.test(String(m && m.payload || ''))) return true;
+  if (/^(pagou|avisopagou):/.test(String(m && m.payload || ''))) return true;
   // texto livre: só o que diz com clareza que pagou ("pago amanhã" e "não foi pago" não contam)
   const t = semAcento(m && m.texto);
   if (/\b(nao|vou|vamos|amanha|depois|semana)\b/.test(t)) return false;
   return t === 'paguei' || t === 'pago' || /\b(ja paguei|ja pagamos|ja foi pago|ja esta pago|ta pago|esta pago|foi pago|pagamento (foi )?(feito|realizado|efetuado))\b/.test(t);
 }
+// "Já paguei" do aviso de atraso (crm-cobranca, 23/10/2026): payload avisopagou:<id do aviso>
+export const avisoDoPayload = p => { const m = /^avisopagou:([0-9a-f-]{36})$/.exec(String(p || '')); return m ? m[1] : ''; };
 export const idDoPayload = p => { const m = /^(?:pagou|falar):([0-9a-f-]{36})$/.exec(String(p || '')); return m ? m[1] : ''; };
 
 // celular do Brasil no WhatsApp: a Meta às vezes devolve o número sem o 9 (55 11 8765-4321); vale com e sem

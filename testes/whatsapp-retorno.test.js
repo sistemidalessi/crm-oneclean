@@ -65,3 +65,11 @@ test('agradecimento da entrega: botão "Agendar próximo pedido"', () => {
   assert.strictEqual(L.textoProximo('Padaria Pão Quente', 'Renata'), 'Que ótimo, Padaria Pão Quente! Renata vai falar com você para combinarmos o próximo pedido. Obrigado pela preferência!');
   assert.match(L.textoProximo('', ''), /^Que ótimo! Quem te atende vai falar/);
 });
+
+test('"Já paguei" do aviso de atraso: payload avisopagou:<id>', () => {
+  const id = '0b8e2f8a-1c2d-4e5f-8a9b-0c1d2e3f4a5b';
+  assert.strictEqual(L.avisoDoPayload('avisopagou:' + id), id);
+  assert.strictEqual(L.avisoDoPayload('pagou:' + id), '');
+  assert.strictEqual(L.idDoPayload('avisopagou:' + id), '');   // não confunde com o boleto
+  assert.strictEqual(L.ehPagou({ payload: 'avisopagou:' + id, texto: 'Já paguei' }), true);
+});

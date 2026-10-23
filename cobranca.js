@@ -782,6 +782,72 @@
       (porEmp.size === 1 ? 'Boleto atualizado para você cobrar:' : porEmp.size + ' clientes com boleto atualizado para você cobrar:') + '\n\n' + blocos.join('\n\n────────\n\n') +
       '\n\nQuando o cliente responder, me avise. Obrigado!';
   }
+  // ---- aviso automático de atraso (23/10/2026): com N dias úteis de atraso o cliente recebe UM aviso cordial (WhatsApp da
+  // empresa e e-mail) já dizendo do cartório; quando o prazo vence sem pagamento, o administrador recebe a tarefa
+  let avisoSt = null, avisoLido = 0;
+  function avisoCarrega(forca) {
+    if (!CRM.store().cobranca || (!forca && Date.now() - avisoLido < 120000)) return;
+    avisoLido = Date.now();
+    CRM.store().cobranca({ acao: 'situacao' }).then(r => { avisoSt = r; CRM.render(); }).catch(e => { avisoSt = { erro: e.message || String(e) }; CRM.render(); });
+  }
+  const MOD_ST = { APPROVED: ['aprovado', 'verde'], PENDING: ['em análise na Meta', 'ambar'], REJECTED: ['recusado pela Meta', 'vermelho'], PAUSED: ['pausado', 'vermelho'], DISABLED: ['desligado', 'vermelho'] };
+  const WA_ST = { enviado: 'azul', entregue: 'azul', lido: 'verde', falhou: 'vermelho' };
+  function avisoHtml() {
+    const st = avisoSt, cfg = (E().cfg || {}).cobranca_aviso || {};
+    if (!st) return '<section class="cartao"><h2>Aviso automático de atraso</h2><p class="dica">Carregando…</p></section>';
+    if (st.local) return '';
+    if (st.erro) return '<section class="cartao"><h2>Aviso automático de atraso</h2><p class="alerta">' + esc(st.erro) + '</p></section>';
+    const dias = st.dias || 5, prazo = st.prazo || 5, ligado = cfg.ligado === true;
+    const m = st.modelo, ms = m ? (MOD_ST[m.status] || [String(m.status || '').toLowerCase(), 'ambar']) : null;
+    const lista = (st.avisos || []).slice(0, 60), h = hoje();
+    const titAberto = new Set(titulosAdmin().filter(t => !t.cartorio_em).map(t => t.empresa_id + '|' + t.duplicata));
+    return '<section class="cartao cob-aviso-auto"><h2>Aviso automático de atraso <small>' + (ligado ? CRM.selo('ligado: dias úteis, 9h', 'verde') : CRM.selo('desligado', 'cinza')) + '</small></h2>' +
+      '<p>Com <strong>' + dias + ' dias úteis</strong> de atraso o cliente recebe <strong>um aviso</strong>, cordial, em nome do(a) vendedor(a) da carteira: pelo WhatsApp da ' + esc(CRM.nomeInstalacao()) +
+        ' e por e-mail. O aviso já diz que, sem o pagamento até <strong>' + prazo + ' dias úteis</strong> depois, o título segue para o cartório. ' +
+        'Se o cliente procurar a vendedora, ela negocia; se o prazo vencer sem pagamento, você recebe a tarefa <strong>"Cartório?"</strong> e decide (o CRM nunca manda sozinho). ' +
+        'O prazo é o de Configurações → Automações. Título com data combinada (remarcado) ou em cartório não recebe.</p>' +
+      '<p>WhatsApp: ' + (!st.whatsapp ? CRM.selo('WhatsApp da Meta não ligado', 'cinza') : ms ? CRM.selo('modelo ' + ms[0], ms[1]) + (m.rejected_reason && m.status === 'REJECTED' ? ' <small>' + esc(m.rejected_reason) + '</small>' : '')
+          : CRM.selo('modelo ainda não criado', 'ambar') + ' <button type="button" class="mini" data-acao="cob-av-modelo">Criar o modelo na Meta</button>') +
+        (ms && m.status !== 'APPROVED' ? ' <small>enquanto isso, vai só por e-mail</small>' : '') +
+        ' · E-mail: ' + (st.email ? CRM.selo('ligado', 'verde') : CRM.selo('Brevo não ligado', 'cinza')) + '</p>' +
+      '<p class="acoes"><button type="button" class="btn ' + (ligado ? 'sec' : 'ouro') + '" data-acao="cob-av-ligar">' + (ligado ? 'Desligar o envio automático' : 'Ligar o envio automático') + '</button>' +
+        '<button type="button" class="btn sec" data-acao="cob-av-previa">Ver quem recebe hoje' + (st.hoje ? ' (' + st.hoje + ')' : '') + '</button>' +
+        '<button type="button" class="btn sec" data-acao="cob-av-atualiza">⟳</button></p>' +
+      (lista.length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Cliente</th><th>Aviso</th><th>Prazo</th><th></th></tr></thead><tbody>' + lista.map(a => {
+        const aberto = (a.duplicatas || []).some(d => titAberto.has(a.empresa_id + '|' + d)), venceu = a.prazo < h && !a.pagou_em && aberto;
+        return '<tr><td><button type="button" class="link" data-acao="abrir-empresa" data-id="' + esc(a.empresa_id) + '">' + esc(CRM.nomeEmpresa(a.empresa_id)) + '</button><small>' + esc(a.notas || '') + ' · ' + esc(R.moeda(a.valor)) + '</small></td>' +
+          '<td>' + esc(dm(R.diaLocal(a.enviado_em))) + (a.enviado_por ? '' : ' <small>automático</small>') + '<small>' +
+            [a.wa_status ? 'WhatsApp' : '', a.email_ok ? 'e-mail' : ''].filter(Boolean).join(' + ') + '</small>' +
+            (a.wa_status ? ' ' + CRM.selo(a.wa_status, WA_ST[a.wa_status] || 'azul') : '') + '</td>' +
+          '<td>' + (!aberto ? CRM.selo('pago / baixado', 'verde') : a.pagou_em ? CRM.selo('disse que pagou ' + dm(R.diaLocal(a.pagou_em)), 'verde')
+            : CRM.selo((venceu ? 'venceu ' : 'até ') + dm(a.prazo), venceu ? 'vermelho' : 'ambar')) + (a.respondeu_em ? ' ' + CRM.selo('respondeu', 'azul') : '') + '</td>' +
+          '<td class="acoes-linha">' + (aberto ? '<button type="button" class="mini perigo" data-acao="cob-cartorio" data-id="' + esc((a.duplicatas || [])[0]) + '">Cartório</button>' : '') + '</td></tr>';
+      }).join('') + '</tbody></table></div>' : '<p class="vazio">Nenhum aviso mandado ainda.</p>') + '</section>';
+  }
+  function avisoPrevia() {
+    CRM.toast('Montando a lista de hoje…');
+    CRM.store().cobranca({ acao: 'previa' }).then(r => {
+      const l = (r && r.lista) || [];
+      CRM.abrirForm({
+        titulo: 'Aviso de atraso: quem recebe hoje (' + l.length + ')', largura: 'largo', campos: [], valores: {},
+        intro: l.length ? 'Prazo antes do cartório: ' + R.dataBR(r.prazo) + '. Confira e clique em "Enviar agora"' + (r.ligado ? ' (ou deixe para as 9h do próximo dia útil).' : '.') : 'Ninguém chegou ao prazo hoje. 👍',
+        htmlDepois: l.map(x => '<details class="cob-av-item"><summary><strong>' + esc(x.nome || '') + '</strong> · ' + esc(R.moeda(x.valor)) + ' · ' + x.dias + ' dias · ' +
+          esc([x.celular ? 'WhatsApp ' + x.celular.replace(/^55/, '') : 'sem celular', x.emails.length ? x.emails.join(', ') : 'sem e-mail'].join(' · ')) +
+          (!x.celular && !x.emails.length ? ' ' + CRM.selo('sem canal: não vai', 'vermelho') : '') + '</summary><pre class="cob-av-texto">' + esc(x.texto) + '</pre></details>').join(''),
+        salvarTexto: l.length ? 'Enviar agora' : 'Fechar',
+        aoSalvar: async () => {
+          if (!l.length) return;
+          if (!confirm('Mandar agora o aviso de atraso a ' + l.length + ' cliente(s)?')) return false;
+          const res = await CRM.store().cobranca({ acao: 'rodar' });
+          const env = (res.enviados || []).filter(x => x.enviado), nao = (res.enviados || []).filter(x => !x.enviado);
+          CRM.toast(env.length + ' aviso(s) enviado(s)' + (nao.length ? '; ' + nao.length + ' sem canal (' + nao.map(x => x.empresa + ': ' + (x.erro || '')).join('; ') + ')' : '') +
+            (res.alertas ? '; ' + res.alertas + ' tarefa(s) "Cartório?" criada(s)' : '') + '.', !!nao.length);
+          avisoCarrega(true);
+        }
+      });
+    }).catch(CRM.falhou);
+  }
+
   function aba() {
     const venc = vencidosACobrar().sort((a, b) => a.vencimento.localeCompare(b.vencimento));
     const cart = titulosAdmin().filter(t => t.cartorio_em);
@@ -803,7 +869,7 @@
         ' <button type="button" class="mini" data-acao="cob-ja-cobrou" data-id="' + esc(b.id) + '" title="o(a) vendedor(a) já mandou ao cliente: tira da Fila e conclui a tarefa">Já cobrou</button>' + ver + refaz;
     };
     const avisar = porVendedora(paraAvisar());
-    return '<section class="cartao cob-soltar" id="cobSoltar"><h2>Boletos atualizados</h2>' +
+    return avisoHtml() + '<section class="cartao cob-soltar" id="cobSoltar"><h2>Boletos atualizados</h2>' +
       (lendo ? '<p class="cob-lendo">Lendo os boletos… ' + lendo.feitos + ' de ' + lendo.total + '</p>' :
         '<p>Gere no Banco do Brasil a 2ª via atualizada (com juros) dos vencidos e <strong>arraste os PDFs aqui</strong> — vários de uma vez, ou um PDF com vários boletos. ' +
         'O CRM lê cada um (valor, vencimento, linha digitável), acha o título e você confere antes de mandar aos(às) vendedores(as).</p>' +
@@ -830,6 +896,7 @@
         '</tbody></table></div><p class="dica">Pagou? Dê "Recebi…" no bloco "Em cartório" do Dia a dia, com o valor que entrou.</p></section>' : '');
   }
   function depoisAba(el) {
+    avisoCarrega();
     waSituacao();
     cliSituacao();
     if (paraAvisar().length && podeCompartilhar()) preCarrega(paraAvisar());
@@ -982,6 +1049,17 @@
         .then(() => CRM.toast('Linha digitável copiada: ' + l)).catch(() => prompt('Copie a linha digitável:', l));
     },
     'cob-baixar': id => { const b = boleto(id); if (b && b.arquivo) baixa(b).catch(CRM.falhou); },
+    'cob-av-atualiza': () => avisoCarrega(true),
+    'cob-av-previa': () => avisoPrevia(),
+    'cob-av-ligar': async () => {
+      const atual = (E().cfg || {}).cobranca_aviso || {}, liga = atual.ligado !== true;
+      if (liga && !confirm('Ligar o aviso automático? Todo dia útil às 9h, o cliente com ' + ((avisoSt && avisoSt.dias) || 5) + ' dias úteis de atraso recebe o aviso (uma vez por título).')) return;
+      try { await CRM.salvarConfig({ cobranca_aviso: Object.assign({}, atual, { ligado: liga }) }); CRM.toast(liga ? 'Aviso automático ligado.' : 'Aviso automático desligado.'); avisoCarrega(true); } catch (e) { CRM.falhou(e); }
+    },
+    'cob-av-modelo': async () => {
+      if (!confirm('Mandar o modelo "cobranca_atraso" para a Meta aprovar? (costuma levar de minutos a 1 dia)')) return;
+      try { await CRM.store().cobranca({ acao: 'criar_modelo' }); CRM.toast('Modelo enviado à Meta. Enquanto ela analisa, o aviso vai só por e-mail.'); avisoCarrega(true); } catch (e) { CRM.falhou(e); }
+    },
     'cob-cartorio': id => { fechaForm(); setTimeout(() => formCartorio(id), 0); },
     'cob-tirar-cartorio': id => { fechaForm(); tirarCartorio(id).catch(CRM.falhou); }
   });

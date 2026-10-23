@@ -1218,3 +1218,8 @@ pre.of-previa { white-space: pre-wrap; font-family: inherit; font-size: .88rem; 
 .mt-como { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .mt textarea { width: 100%; font: inherit; font-size: 1rem; }
 .mt-passo .campo { grid-column: auto; }
+
+/* aviso automático de atraso (Cobrança) */
+.cob-av-item { border-top: 1px solid var(--borda, #e3e8ee); padding: .4rem 0; }
+.cob-av-item summary { cursor: pointer; }
+.cob-av-texto { white-space: pre-wrap; font: inherit; font-size: .9rem; background: var(--fundo2, #f6f8fa); padding: .6rem .8rem; border-radius: 8px; margin: .4rem 0 0; }
