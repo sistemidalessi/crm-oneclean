@@ -352,7 +352,11 @@ Deno.serve(async (req) => {
     const { data: cfgRow } = await db.from('crm_config').select('dados').eq('id', 1).maybeSingle();
     const fiscal = ((cfgRow as Linha | null)?.dados as Linha | undefined)?.fiscal as Linha | undefined || {};
     const amb = ambienteDe(fiscal), serie = Number(fiscal.serie ?? 2);
-    if (acao === 'status') return resposta(200, await servico('/status', { ambiente: amb }));
+    // status: o da emissão atual, ou o da produção antes da virada (só consulta; nada é emitido)
+    if (acao === 'status') {
+      const a = b.ambiente === 'producao' || b.ambiente === 'homologacao' ? String(b.ambiente) : amb;
+      return resposta(200, Object.assign(await servico('/status', { ambiente: a }), { ambiente: a }));
+    }
     if (acao === 'dfe_buscar') return resposta(200, await dfeBuscar(db, fiscal));
     if (acao === 'dfe_ciencia') {
       if (eu.papel !== 'admin') throw new Error('só o administrador dá a ciência das notas de compra');

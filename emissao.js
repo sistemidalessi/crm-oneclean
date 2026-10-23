@@ -240,6 +240,7 @@
       '<p>' + seloAmb(amb) + (amb === 'homologacao' ? ' A nota de teste vai à Sefaz de homologação, sai com "SEM VALOR FISCAL" e <strong>não entra no CRM</strong> (nem estoque, nem título, nem comissão).' : ' A nota autorizada entra no CRM como as do vigia: estoque, títulos, comissão e o pedido faturado.') + '</p>' +
       '<p class="acoes"><button type="button" class="btn sec" data-acao="nf-saude"' + (testando ? ' disabled' : '') + '>Conferir o serviço fiscal</button>' +
         '<button type="button" class="btn sec" data-acao="nf-sefaz"' + (testando ? ' disabled' : '') + '>Status da Sefaz</button>' +
+        (amb === 'homologacao' ? '<button type="button" class="btn sec" data-acao="nf-sefaz-prod"' + (testando ? ' disabled' : '') + ' title="Só consulta: confere o certificado e a ligação com a Sefaz de produção antes da virada; nada é emitido">Testar a Sefaz de produção</button>' : '') +
         '<button type="button" class="btn sec" data-acao="ir-nfe">Ver as notas emitidas (Pedidos → NF-e)</button></p>' +
       (testando ? '<p class="dica">' + esc(testando) + '</p>' : '') + certificadoTexto() +
       (sefaz ? '<p class="' + (Number(sefaz.cStat) === 107 ? 'dica' : 'alerta') + '">Sefaz-SP (' + esc(sefaz.ambiente === 'producao' ? 'produção' : 'homologação') + '): <strong>' + esc(sefaz.cStat) + ' — ' + esc(sefaz.xMotivo || '') + '</strong></p>' : '') +
@@ -690,7 +691,12 @@
     },
     'nf-sefaz': async () => {
       testando = 'Perguntando à Sefaz…'; CRM.render();
-      try { sefaz = Object.assign(await chama({ acao: 'status' }), { ambiente: ambiente() }); } catch (e) { sefaz = null; CRM.falhou(e); }
+      try { sefaz = Object.assign({ ambiente: ambiente() }, await chama({ acao: 'status' })); } catch (e) { sefaz = null; CRM.falhou(e); }
+      testando = ''; CRM.render();
+    },
+    'nf-sefaz-prod': async () => {
+      testando = 'Perguntando à Sefaz de produção (só consulta)…'; CRM.render();
+      try { const r = await chama({ acao: 'status', ambiente: 'producao' }); sefaz = Object.assign({ ambiente: 'producao' }, r); } catch (e) { sefaz = null; CRM.falhou(e); }
       testando = ''; CRM.render();
     },
     'nf-aprender-st': async () => {
