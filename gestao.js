@@ -698,6 +698,7 @@
     if (!c.estoque || !c.estoque.completo) return '';
     const cad = todos.filter(f => f.cadastro).length;
     return '<section class="cartao" id="comprasPorForn"><h2>Pedido por fornecedor <small>' + l.length + ' fornecedor(es) · ' + esc(R.moeda(c.estoque.valorSugestao)) + ' para ' + c.dias + ' dias</small></h2>' +
+      (CRM.comprasPedidos && CRM.comprasPedidos.novoPedido ? '<p class="acoes"><button type="button" class="btn sec" data-acao="cp-novo">+ Novo pedido do zero</button> <small>para pedir o que não está na sugestão</small></p>' : '') +
       (l.length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Fornecedor</th><th class="num">Produtos</th><th class="num">Custo estimado</th><th class="num">Pedido mínimo</th><th class="num">Prazo</th><th>Frete</th><th></th></tr></thead><tbody>' +
       l.map((f, i) => '<tr><td><button type="button" class="link" data-acao="compras-ver-fornecedor" data-id="' + i + '">' + esc(f.nome) + '</button>' + (f.cod ? ' <small>' + esc(f.cod) + '</small>' : '') +
           (f.urgentes ? ' ' + CRM.selo(f.urgentes + ' pedir hoje', 'vermelho') : '') + (f.diaDePedido ? ' ' + CRM.selo('dia de pedido', 'azul') : '') + '</td>' +

@@ -162,7 +162,7 @@
       const vis = l.filter(p => f.ver === 'todos' || (f.ver === 'abertos' ? p.aberto : f.ver === 'atrasados' ? p.atrasado : p.situacaoAtual === 'recebido'));
       const kpi = (t, v, s, cls) => '<div class="kpi ' + (cls || '') + '"><span>' + esc(t) + '</span><strong>' + v + '</strong>' + (s ? '<small>' + esc(s) + '</small>' : '') + '</div>';
       return '<div class="cabecalho"><div><h1>Pedidos ao fornecedor</h1><p class="sub">o que já foi comprado e ainda não entrou: a nota do fornecedor (Sefaz) e a entrada dão a baixa sozinhas</p></div>' +
-        '<div class="acoes"><button type="button" class="btn sec" data-acao="cp-ir-compras">Registrar pela sugestão (Compras)</button> <button type="button" class="btn sec" data-acao="cp-recarregar"' + (carregando ? ' disabled' : '') + '>Atualizar</button></div></div>' +
+        '<div class="acoes"><button type="button" class="btn" data-acao="cp-novo">+ Novo pedido</button> <button type="button" class="btn sec" data-acao="cp-ir-compras">Registrar pela sugestão (Compras)</button> <button type="button" class="btn sec" data-acao="cp-recarregar"' + (carregando ? ' disabled' : '') + '>Atualizar</button></div></div>' +
         '<section class="kpis">' + kpi('Pedidos em aberto', String(ab.length), qtd(ab.reduce((s, p) => s + p.itens.reduce((t, i) => t + i.falta, 0), 0)) + ' unidades a chegar') +
           kpi('Atrasados', String(atr.length), 'a previsão passou', atr.length ? 'alerta' : '') + kpi('Faturados, chegando', String(fat.length), 'a nota do fornecedor já veio', 'verde') +
           kpi('Pendências só no FKN', String(dados.fknSemPedido || 0), 'produtos com pedido no FKN e sem pedido aqui (sem data)') + '</section>' +
@@ -170,7 +170,7 @@
             (v[0] === 'abertos' ? ' (' + ab.length + ')' : v[0] === 'atrasados' ? ' (' + atr.length + ')' : '') + '</button>').join('') + '</div>' +
           (vis.length ? '<div class="tabela-rolagem"><table class="tabela pc-tabela"><thead><tr><th>Nº</th><th>Fornecedor</th><th>Pedido em</th><th>Situação</th><th class="num">Chega</th></tr></thead><tbody>' +
             vis.map(linhaPedido).join('') + '</tbody></table></div>'
-            : '<p class="vazio">' + (l.length ? 'Nenhum pedido aqui.' : 'Nenhum pedido registrado ainda. Em Compras → "Pedido por fornecedor", use "Registrar pedido" em cada fornecedor.') + '</p>') +
+            : '<p class="vazio">' + (l.length ? 'Nenhum pedido aqui.' : 'Nenhum pedido registrado ainda. Use "+ Novo pedido" (do zero) ou, em Compras → "Pedido por fornecedor", "Registrar pedido" em cada fornecedor.') + '</p>') +
           '<p class="dica">Faturado = a nota do fornecedor chegou (pela Sefaz ou pelo XML); chega ~' + X.DIAS_DEPOIS_DA_NOTA + ' dias depois dela. Entrou = a entrada foi lançada (no CRM, ou no FKN depois da nota, pela listagem). ' +
             'As vendedoras veem a quantidade e a data, nunca o valor.</p></section>';
     }
@@ -204,7 +204,81 @@
       }
     });
   }
-  CRM.comprasPedidos = { registrar, recarregar: () => { dados = null; } };
+  // ----------------------------------------------------------------- pedido do zero (23/10/2026, pedido do Anderson: "quero começar
+  // um do zero, não só em cima da sugestão"): fornecedor do cadastro ou das listagens, produtos pelo código ou pela descrição.
+  async function novoPedido() {
+    let est = [], forns = [];
+    try { [est, forns] = await Promise.all([st().estoque ? st().estoque() : [], st().fornecedores ? st().fornecedores().catch(() => []) : []]); }
+    catch (e) { CRM.falhou(e); return; }
+    const prods = new Map();
+    (est || []).forEach(e => { const c = String(e.codigo || '').replace(/\.\d+$/, ''); if (c && !prods.has(c) && e.situacao !== 'INATIVO') prods.set(c, e); });
+    const fmap = new Map();   // nome → { cod, nome, prazo }
+    (forns || []).filter(x => x.ativo !== false).forEach(x => fmap.set(String(x.nome).trim().toUpperCase(), { cod: x.codigo || null, nome: x.nome, prazo: x.prazo_dias }));
+    (est || []).forEach(e => { const n = String(e.fornecedor || '').trim(); if (n && !fmap.has(n.toUpperCase())) fmap.set(n.toUpperCase(), { cod: e.fornecedor_cod || null, nome: n, prazo: null }); });
+    const lf = [...fmap.values()].sort((a, b) => String(a.nome).localeCompare(String(b.nome), 'pt-BR'));
+    const lp = [...prods.values()].sort((a, b) => String(a.descricao).localeCompare(String(b.descricao), 'pt-BR'));
+    const linha = k => '<tr data-cp-linha="' + k + '"><td><input list="cpProdLista" class="cp-cod" style="width:100%;min-width:260px" data-cp-cod="' + k + '" placeholder="código ou descrição" aria-label="Produto ' + (k + 1) + '"><small data-cp-desc="' + k + '"></small></td>' +
+      '<td class="num"><input type="number" min="0" step="any" class="cp-qtd" data-cp-q="' + k + '" aria-label="Quantidade ' + (k + 1) + '"></td>' +
+      '<td class="num"><input type="number" min="0" step="any" class="cp-qtd" data-cp-c="' + k + '" aria-label="Custo ' + (k + 1) + '"></td></tr>';
+    let n = 5;
+    const acha = v => {
+      const t = String(v || '').trim(); if (!t) return null;
+      const c = t.split(' ')[0].replace(/\.\d+$/, '');
+      if (prods.has(c)) return prods.get(c);
+      const u = t.toUpperCase(); return lp.find(e => String(e.descricao).toUpperCase() === u) || null;
+    };
+    CRM.abrirForm({
+      titulo: 'Novo pedido ao fornecedor', largura: 'extra', salvarTexto: 'Registrar pedido ao fornecedor', semFoco: true,
+      intro: 'Pedido começado do zero (sem a sugestão). Escolha o fornecedor e digite o código ou parte da descrição de cada produto; a quantidade é na unidade do estoque. As vendedoras passam a ver "a caminho" com a data.',
+      htmlAntes: '<datalist id="cpFornLista">' + lf.map(x => '<option value="' + esc(x.nome) + '">').join('') + '</datalist>' +
+        '<datalist id="cpProdLista">' + lp.map(e => '<option value="' + esc(String(e.codigo).replace(/\.\d+$/, '')) + '">' + esc(e.descricao) + '</option>').join('') + '</datalist>' +
+        '<div class="campos"><label class="campo largo"><span>Fornecedor</span><input id="cpForn" list="cpFornLista" placeholder="nome do fornecedor" autocomplete="off"><small id="cpFornInfo"></small></label></div>' +
+        '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Produto</th><th class="num">Quantidade</th><th class="num">Custo un. (opcional)</th></tr></thead><tbody id="cpLinhas">' +
+        [0, 1, 2, 3, 4].map(linha).join('') + '</tbody></table></div><p><button type="button" class="btn sec" id="cpMais">+ mais linhas</button></p>',
+      campos: [{ nome: 'previsao', rotulo: 'Chega em (previsão)', tipo: 'date', obrigatorio: true, ajuda: 'o prazo do fornecedor no cadastro, quando houver; mude se ele prometer outra data' },
+        { nome: 'obs', rotulo: 'Observação', largo: true, dica: 'ex.: combinado por telefone com o representante' }],
+      valores: { previsao: R.somaDias(CRM.hoje(), 7), obs: '' },
+      extras: form => {
+        const fi = form.querySelector('#cpForn'), info = form.querySelector('#cpFornInfo');
+        fi.addEventListener('change', () => {
+          const x = fmap.get(fi.value.trim().toUpperCase());
+          if (x && x.prazo != null && form.elements.previsao) form.elements.previsao.value = R.somaDias(CRM.hoje(), Number(x.prazo));
+          info.textContent = x ? (x.prazo != null ? 'prazo de ' + x.prazo + ' dias no cadastro' : 'sem prazo no cadastro (7 dias)') : (fi.value.trim() ? 'fornecedor novo: fica só com o nome' : '');
+        });
+        form.addEventListener('change', ev => {
+          const k = ev.target.dataset && ev.target.dataset.cpCod; if (k == null) return;
+          const e = acha(ev.target.value), d = form.querySelector('[data-cp-desc="' + k + '"]'), c = form.querySelector('[data-cp-c="' + k + '"]');
+          if (e) { ev.target.value = String(e.codigo).replace(/\.\d+$/, ''); d.textContent = R.nomeDeItem(e.descricao) + ' · ' + (e.unidade || '') + (e.estoque_atual != null ? ' · saldo ' + qtd(e.estoque_atual) : '');
+            if (c && !c.value && Number(e.custo_unit) > 0) c.value = Number(e.custo_unit); }
+          else d.textContent = ev.target.value.trim() ? 'produto não encontrado no cadastro' : '';
+        });
+        form.querySelector('#cpMais').addEventListener('click', () => { const tb = form.querySelector('#cpLinhas'); for (let i = 0; i < 5; i++) tb.insertAdjacentHTML('beforeend', linha(n++)); });
+        setTimeout(() => fi.focus(), 0);
+      },
+      aoSalvar: async (v, form) => {
+        const nome = form.querySelector('#cpForn').value.trim();
+        if (!nome) throw new Error('diga o fornecedor');
+        const x = fmap.get(nome.toUpperCase());
+        const its = [], ruins = [];
+        [...form.querySelectorAll('[data-cp-cod]')].forEach(el => {
+          const k = el.dataset.cpCod, q = Number(form.querySelector('[data-cp-q="' + k + '"]').value) || 0, cu = form.querySelector('[data-cp-c="' + k + '"]').value;
+          if (!el.value.trim() && !q) return;
+          const e = acha(el.value);
+          if (!e) { ruins.push(el.value.trim() || 'linha ' + (Number(k) + 1)); return; }
+          if (q <= 0) { ruins.push(String(e.codigo) + ' sem quantidade'); return; }
+          its.push({ codigo: String(e.codigo).replace(/\.\d+$/, ''), descricao: e.descricao, unidade: e.unidade || null, quantidade: q, custo_unit: cu === '' ? null : Number(cu) });
+        });
+        if (ruins.length) throw new Error('confira: ' + ruins.join(', '));
+        if (!its.length) throw new Error('ponha pelo menos um produto com quantidade');
+        const r = await st().compraPedidoGravar({ fornecedor_cod: x ? x.cod : null, fornecedor_nome: x ? x.nome : nome, previsao: v.previsao, obs: v.obs || null, itens: its });
+        CRM.toast('Pedido nº ' + r.id + ' registrado (' + its.length + ' itens · chega ~' + R.dataBR(v.previsao) + '). As vendedoras já veem "a caminho".');
+        dados = null; CRM.aCaminho.limpa();
+        if (CRM.comprasRecarregar) CRM.comprasRecarregar();
+        CRM.render();
+      }
+    });
+  }
+  CRM.comprasPedidos = { registrar, novoPedido, recarregar: () => { dados = null; } };
 
   async function acao(id, a, previsao) {
     await st().compraPedidoAcao(Number(id), a, previsao || null);
@@ -212,6 +286,7 @@
     CRM.render();
   }
   Object.assign(CRM.acoes, {
+    'cp-novo': () => novoPedido(),
     'cp-abrir': id => { aberto = aberto === Number(id) ? null : Number(id); CRM.render(); },
     'cp-ver': id => { f.ver = id; CRM.render(); },
     'cp-recarregar': () => { dados = null; CRM.aCaminho.limpa(); carrega(); },

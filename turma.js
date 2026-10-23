@@ -350,7 +350,8 @@
     b.title = d.nome + (d.papel ? ' · ' + d.papel : '') + ': clique para ver o dia e conversar';
     b.setAttribute('aria-label', d.nome + ': ' + (n ? n + ' coisa(s) para fazer' : 'tudo em dia'));
     const r = b.getBoundingClientRect();
-    p.style.setProperty('--turma-topo', Math.round(r.bottom + 8) + 'px');
+    // com a página rolada o Clean sobe para fora da tela: o painel não acompanha (abria acima da tela, 23/10/2026)
+    p.style.setProperty('--turma-topo', Math.max(12, Math.round(r.bottom + 8)) + 'px');
     p.style.setProperty('--turma-dir', Math.max(8, Math.round(window.innerWidth - r.right - 60)) + 'px');
   }
 
