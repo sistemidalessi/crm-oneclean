@@ -345,3 +345,36 @@ test('XML de 2027 (com e sem IBS/CBS na base do ICMS) passa no esquema oficial; 
     assert.strictEqual(D.ler(N.nfeCompleta(N.monta(nota()).infNFe, '')).reforma, null);   // 2026: sem a linha nova
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('DIFAL: venda a não contribuinte do RS (6108, 12%, ICMSUFDest) passa no esquema; contribuinte de fora e UF sem alíquota bloqueiam', { skip: !temFerramentas && 'sem xmllint/openssl' }, () => {
+  assert.deepStrictEqual([PD.aliqInter('SP', 'RS', 0), PD.aliqInter('SP', 'BA', 0), PD.aliqInter('SP', 'ES', 0), PD.aliqInter('SP', 'MG', 1)], [12, 7, 7, 4]);
+  const rs = Object.assign({}, cliente, { cnpj: '123.456.789-09', ie: '', ind_ie: '9', uf: 'RS', cidade: 'PORTO ALEGRE', codigo_municipio: '4314902', cep: '90010-000' });
+  const ped = Object.assign({}, pedido, { itens: [pedido.itens[0]] });
+  const cfg = { difal: { RS: { aliq: 17, fcp: 0, conferido: true } } };
+  const r = PD.notaDoPedido({ pedido: ped, empresa: rs, regras, emitente, ambiente: 'homologacao', serie: 2, numero: 40, emissao: '2026-10-23T10:00:00-03:00', cfg });
+  assert.deepStrictEqual(r.avisos.bloqueia, []);
+  const it = r.nota.itens[0];
+  assert.deepStrictEqual([it.cfop, it.icms.cst, it.icms.aliquota, r.nota.natOp], ['6108', '00', 12, 'VENDA FORA DO ESTADO']);
+  // 2 × 67,84 = 135,68: ICMS 12% = 16,28; DIFAL = 135,68 × 17% (23,07) − 16,28 = 6,79
+  assert.deepStrictEqual(r.difal, { uf: 'RS', valor: 6.79, icms: 6.79, fcp: 0, aliq: 17 });
+  assert.ok(r.avisos.conferir.some(x => /DIFAL de R\$ 6,79 .*GNRE ao RS/.test(x)));
+  const m = N.monta(r.nota);
+  assert.ok(/<idDest>2<\/idDest>/.test(m.infNFe) && /<ICMSUFDest><vBCUFDest>135.68<\/vBCUFDest><pICMSUFDest>17.00<\/pICMSUFDest><pICMSInter>12.00<\/pICMSInter><pICMSInterPart>100.0000<\/pICMSInterPart><vICMSUFDest>6.79<\/vICMSUFDest><vICMSUFRemet>0.00<\/vICMSUFRemet><\/ICMSUFDest>/.test(m.infNFe), 'grupo do item');
+  assert.ok(/<vICMSDeson>0.00<\/vICMSDeson><vFCPUFDest>0.00<\/vFCPUFDest><vICMSUFDest>6.79<\/vICMSUFDest><vICMSUFRemet>0.00<\/vICMSUFRemet>/.test(m.infNFe), 'totais');
+  assert.ok(/ICMS DIFAL DEVIDO A UF DE DESTINO \(RS\): R\$ 6.79/.test(m.infNFe), 'texto');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nfe-difal-'));
+  try {
+    const f = path.join(dir, 'n.xml'); fs.writeFileSync(f, N.nfeCompleta(m.infNFe, '<Signature xmlns="http://www.w3.org/2000/09/xmldsig#"><SignedInfo><CanonicalizationMethod Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"/><SignatureMethod Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1"/><Reference URI="#' + m.id + '"><Transforms><Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"/><Transform Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"/></Transforms><DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"/><DigestValue>AAAA</DigestValue></Reference></SignedInfo><SignatureValue>AAAA</SignatureValue><KeyInfo><X509Data><X509Certificate>AAAA</X509Certificate></X509Data></KeyInfo></Signature>'));
+    const v = spawnSync('xmllint', ['--noout', '--schema', path.join(ESQ, 'nfe_v4.00.xsd'), f]);
+    assert.strictEqual(v.status, 0, String(v.stderr));
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  // contribuinte de fora de SP, UF sem alíquota e produto com ST retida: bloqueia
+  const contrib = PD.notaDoPedido({ pedido: ped, empresa: Object.assign({}, rs, { ind_ie: '1', ie: '1234567890' }), regras, emitente, ambiente: 'homologacao', serie: 2, numero: 41, emissao: '2026-10-23T10:00:00-03:00', cfg });
+  assert.ok(contrib.avisos.bloqueia.some(x => /com inscrição estadual/.test(x)));
+  const semAliq = PD.notaDoPedido({ pedido: ped, empresa: Object.assign({}, rs, { uf: 'PR' }), regras, emitente, ambiente: 'homologacao', serie: 2, numero: 42, emissao: '2026-10-23T10:00:00-03:00', cfg });
+  assert.ok(semAliq.avisos.bloqueia.some(x => /falta a alíquota interna do PR/.test(x)));
+  const comSt = PD.notaDoPedido({ pedido, empresa: rs, regras, emitente, ambiente: 'homologacao', serie: 2, numero: 43, emissao: '2026-10-23T10:00:00-03:00', cfg });
+  assert.ok(comSt.avisos.bloqueia.some(x => /250011 .*ICMS-ST já retido em SP/.test(x)));
+  // nota de outra UF sem o DIFAL não monta
+  assert.throws(() => N.monta(Object.assign({}, r.nota, { itens: r.nota.itens.map(x => Object.assign({}, x, { difal: undefined })) })), /sem o DIFAL/);
+});

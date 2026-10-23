@@ -45,6 +45,14 @@ const OPERACOES = {
 // o: { pedido, empresa, regras (obj código → linha de crm_fiscal_produtos), emitente, ambiente, serie, numero, emissao,
 //      vendedorNome, cfg (dados.fiscal: indFinal, indPres, natOp, respTec, ibscbs, reforma2027: { pCBS, pIBSUF, pIBSMun,
 //      icmsComIbsCbs, cobrarPorFora } — só vale para nota emitida em 2027 ou depois; ver nfe.js REFORMA_2027) }
+// Alíquota interestadual (Resolução do Senado 22/1989 e 13/2012): 4% para mercadoria importada (origem 1, 2, 3 e 8); do
+// Sul/Sudeste (menos o ES) para Norte, Nordeste, Centro-Oeste e ES, 7%; nos demais casos, 12%.
+const SUL_SUDESTE = ['SP', 'RJ', 'MG', 'PR', 'SC', 'RS'];
+function aliqInter(ufOrig, ufDest, origem) {
+  if ([1, 2, 3, 8].indexOf(Number(origem)) !== -1) return 4;
+  return SUL_SUDESTE.indexOf(String(ufOrig).toUpperCase()) !== -1 && SUL_SUDESTE.indexOf(String(ufDest).toUpperCase()) === -1 ? 7 : 12;
+}
+
 function notaDoPedido(o) {
   const p = o.pedido || {}, e = o.empresa || {}, d = p.dados || {}, cfg = o.cfg || {};
   const bloqueia = [], conferir = [];
@@ -55,10 +63,18 @@ function notaDoPedido(o) {
   const docCli = String(e.cnpj || d.cliente_doc || '').toUpperCase().replace(/[^0-9A-Z]/g, '');
   if (!docCli) bloqueia.push('cliente sem CNPJ/CPF no cadastro');
   const uf = String(e.uf || '').toUpperCase();
-  if (uf && uf !== String((o.emitente && o.emitente.endereco && o.emitente.endereco.uf) || 'SP').toUpperCase()) bloqueia.push('cliente de outro estado (' + uf + '): a venda para fora de SP ainda é pelo FKN');
   if (!e.logradouro || !e.cidade || !uf || !dig(e.cep)) bloqueia.push('endereço do cliente incompleto (rua, cidade, UF e CEP)');
   if (!dig(e.codigo_municipio)) bloqueia.push('cliente sem o código IBGE do município (aba Fiscal → clientes sem dado fiscal)');
   const ind = String(e.ind_ie || (e.ie && !/ISENT/i.test(e.ie) ? '1' : docCli.length === 11 ? '9' : ''));
+  // Cliente de outra UF (23/10/2026): só a venda a consumidor final NÃO contribuinte, com o DIFAL (alíquota interna da UF de
+  // destino em Fiscal → Emissão, dados.fiscal.difal[UF] = { aliq, fcp }). Contribuinte de fora de SP e as outras operações
+  // (bonificação, entrega futura) para outra UF ainda não saem pelo CRM.
+  const foraUF = !!uf && uf !== ufEmit, dUF = foraUF ? ((cfg.difal || {})[uf] || null) : null;
+  if (foraUF) {
+    if (ind !== '9') bloqueia.push('cliente de outro estado (' + uf + ') com inscrição estadual: venda a contribuinte de fora de SP ainda não sai pelo CRM');
+    else if (opNome !== 'venda') bloqueia.push('cliente de outro estado (' + uf + '): só a venda sai pelo CRM (bonificação e entrega futura para fora de SP, não)');
+    else if (!dUF || !(num(dUF.aliq) > 0)) bloqueia.push('cliente de outro estado (' + uf + '): falta a alíquota interna do ' + uf + ' para o DIFAL (aba Fiscal → Emissão → DIFAL)');
+  }
   if (!ind) bloqueia.push('cliente sem a situação da inscrição estadual (contribuinte, isento ou não contribuinte)');
   if (ind === '1' && !dig(e.ie)) bloqueia.push('cliente contribuinte sem a inscrição estadual');
   const itens = (p.itens || []).map((it, i) => {
@@ -79,15 +95,17 @@ function notaDoPedido(o) {
       if (u) stRet = { vBCSTRet: r2(num(u.vBCSTRet) * q), pST: num(u.pST), vICMSSubstituto: u.vICMSSubstituto == null ? null : r2(num(u.vICMSSubstituto) * q), vICMSSTRet: r2(num(u.vICMSSTRet) * q) };
       else conferir.push('produto ' + cod + ': sem o ICMS-ST retido (' + unid + ') das notas do FKN; sai só com o CST 60 (aba Fiscal → "Aprender o ICMS-ST")');
     }
-    const foraUF = /^6/.test(String(v.cfop));
-    const icms = op && op.icms === 'sem' ? { cst: '90' } : { cst: String(v.cst_icms), aliquota: num(v.aliq_icms), stRet };
+    if (foraUF && ['60', '500'].indexOf(String(v.cst_icms)) !== -1) bloqueia.push('produto ' + cod + ' (' + it.descricao + '): ICMS-ST já retido em SP não vale para outro estado; venda para ' + uf + ' ainda não sai pelo CRM com este produto');
+    const inter = foraUF ? aliqInter(ufEmit, uf, r.origem) : null;
+    const icms = op && op.icms === 'sem' ? { cst: '90' } : { cst: String(v.cst_icms), aliquota: foraUF ? inter : num(v.aliq_icms), stRet };
     // simples faturamento sem destaque: em SP vai o cBenef SP099999 (sem benefício, legislação manda sair sem destaque)
     const cBenef = op && op.icms === 'sem' && ufEmit === 'SP' ? 'SP099999' : null;
     const pis = op && op.pis === '49' ? { cst: '49' } : { cst: String(v.cst_pis || '01'), aliquota: num(v.aliq_pis) };
     const cofins = op && op.pis === '49' ? { cst: '49' } : { cst: String(v.cst_cofins || '01'), aliquota: num(v.aliq_cofins) };
     return { codigo: cod, descricao: it.descricao, ncm: r.ncm, cest: r.cest || null, gtin: r.gtin || null, origem: r.origem == null ? 0 : r.origem,
-      cfop: op ? op.cfop(foraUF) : v.cfop, unidade: unid, quantidade: q, valorUnitario: pu, desconto: r2(q * pu * num(it.desconto) / 100),
-      icms, pis, cofins, cBenef, pedidoCliente: d.seu_pedido || null };
+      cfop: op ? op.cfop(foraUF) : foraUF ? '6108' : v.cfop, unidade: unid, quantidade: q, valorUnitario: pu, desconto: r2(q * pu * num(it.desconto) / 100),
+      icms, pis, cofins, cBenef, pedidoCliente: d.seu_pedido || null,
+      difal: foraUF && dUF ? { pICMSUFDest: num(dUF.aliq), pFCPUFDest: num(dUF.fcp) } : undefined };
   }).filter(Boolean);
   if (!itens.length && !bloqueia.length) bloqueia.push('o pedido não tem itens');
   const total = r2(itens.reduce((s, it) => s + r2(it.quantidade * it.valorUnitario) - it.desconto, 0) + num(p.frete));
@@ -111,6 +129,16 @@ function notaDoPedido(o) {
         try { cobrar = N.calcula({ emissao, itens, frete: { valor: num(p.frete) }, reforma: ref, ibscbs: cfg.ibscbs }).totais.vCobrar; } catch (e) { bloqueia.push(e.message); }
       }
     }
+  }
+  // DIFAL: o valor da guia (GNRE à UF de destino, por operação, paga antes da saída; a guia acompanha a mercadoria)
+  let difal = null;
+  if (foraUF && dUF && !bloqueia.length && itens.length) {
+    try {
+      const tt = N.calcula({ emissao, itens, frete: { valor: num(p.frete) }, ibscbs: cfg.ibscbs, reforma: ref || undefined }).totais;
+      difal = { uf, valor: r2(num(tt.vICMSUFDest) + num(tt.vFCPUFDest)), icms: num(tt.vICMSUFDest), fcp: num(tt.vFCPUFDest), aliq: num(dUF.aliq) };
+      conferir.push('venda a consumidor de ' + uf + ': DIFAL de R$ ' + difal.valor.toFixed(2).replace('.', ',') + ' (' + num(dUF.aliq) + '% do ' + uf + ' − ' + itens[0].icms.aliquota + '% interestadual) a pagar por GNRE ao ' + uf + ' antes da mercadoria sair; a guia acompanha a nota');
+      if (!dUF.conferido) conferir.push('alíquota interna do ' + uf + ' (' + num(dUF.aliq) + '%) ainda não marcada como conferida em Fiscal → Emissão → DIFAL');
+    } catch (e2) { bloqueia.push(e2.message); }
   }
   const cobra = !op || op.cobra;
   const aPrazo = cobra && pg.forma === '15';   // boleto: sempre com parcela (à vista vence no dia)
@@ -149,7 +177,7 @@ function notaDoPedido(o) {
   const infAdFisco = ((lc224 ? 'Operacao sujeita ao disposto na Lei Complementar no 224/2025;' : '') + tribTxt) || null;
   const transp = String(d.transportadora || 'PROPRIO').trim();
   const nota = {
-    ambiente: o.ambiente, emitente: o.emitente, serie: o.serie, numero: o.numero, emissao, natOp: op ? op.natOp : cfg.natOp || 'VENDA NO ESTADO',
+    ambiente: o.ambiente, emitente: o.emitente, serie: o.serie, numero: o.numero, emissao, natOp: op ? op.natOp : foraUF ? 'VENDA FORA DO ESTADO' : cfg.natOp || 'VENDA NO ESTADO',
     refs: opNome === 'remessa_futura' && o.ref && o.ref.chave ? [o.ref.chave] : undefined,
     indFinal: cfg.indFinal == null ? 1 : cfg.indFinal, indPres: cfg.indPres == null ? 9 : cfg.indPres,
     dest: { doc: docCli, nome: e.razao_social || e.nome || d.cliente_nome, ie: e.ie, indIEDest: ind || '9', email: (String(e.email || '').split(/[\s,;]+/)[0] || null),
@@ -160,7 +188,7 @@ function notaDoPedido(o) {
     pagamento: cobra ? [{ tPag: aPrazo ? '15' : pg.forma, indPag: aPrazo ? 1 : 0, valor: cobrar, descricao: pg.forma === '99' ? (d.pagamento || 'OUTROS') : null }] : [{ tPag: '90', valor: 0 }],
     infCpl, infAdFisco, respTec: cfg.respTec || null, ibscbs: cfg.ibscbs == null ? undefined : cfg.ibscbs, reforma: ref || undefined
   };
-  return { nota, avisos: { bloqueia: [...new Set(bloqueia)], conferir: [...new Set(conferir)] }, total, cobrar };
+  return { nota, avisos: { bloqueia: [...new Set(bloqueia)], conferir: [...new Set(conferir)] }, total, cobrar, difal };
 }
 
-module.exports = { lePagamento, parcelas, notaDoPedido, OPERACOES };
+module.exports = { lePagamento, parcelas, notaDoPedido, OPERACOES, aliqInter };

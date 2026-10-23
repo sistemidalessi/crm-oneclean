@@ -301,6 +301,7 @@ async function gravaResultado(db: ReturnType<typeof createClient>, nfeId: string
   if (r.totais) patch.valor = (r.totais as Linha).vNF;
   const { data } = await db.from('crm_nfe').update(patch).eq('id', nfeId).select().single();
   const nfe = data as Linha;
+  await lancaGnre(db, nfe).catch(() => null);
   // Homologação (teste, sem valor fiscal) NUNCA entra no CRM: nem estoque, nem título, nem comissão; o pedido não muda.
   if (nfe && nfe.ambiente === 'producao' && nfe.situacao === 'autorizada' && nfe.proc_xml && !nfe.nota_id) {
     const ent = await entregaAoCrm(db, 'NFe' + nfe.chave + '-procNFe.xml', String(nfe.proc_xml));
@@ -312,6 +313,21 @@ async function gravaResultado(db: ReturnType<typeof createClient>, nfeId: string
     return Object.assign({}, nfe, { nota_id: nota ? (nota as Linha).id : null, entrega: ent });
   }
   return nfe;
+}
+// DIFAL (23/10/2026): nota de produção autorizada para consumidor de outra UF vira a conta da guia GNRE no Caixa (paga
+// antes de a mercadoria sair; a guia acompanha a nota). Uma por nota: a chave fica na descrição.
+async function lancaGnre(db: ReturnType<typeof createClient>, nfe: Linha | null) {
+  const t = (nfe && nfe.totais) as Linha | undefined;
+  if (!nfe || nfe.ambiente !== 'producao' || nfe.situacao !== 'autorizada' || !t) return;
+  const valor = Math.round((Number(t.vICMSUFDest || 0) + Number(t.vFCPUFDest || 0)) * 100) / 100;
+  if (!(valor > 0)) return;
+  const dest = (((nfe.nota || {}) as Linha).dest || {}) as Linha, uf = String(((dest.endereco || {}) as Linha).uf || 'UF de destino').toUpperCase();
+  const desc = 'GNRE DIFAL ' + uf + ' - NF ' + nfe.serie + '-' + nfe.numero + ' (' + nfe.chave + ')';
+  const { data: ja } = await db.from('crm_fin_lancamentos').select('id').eq('descricao', desc).maybeSingle();
+  if (ja) return;
+  await db.from('crm_fin_lancamentos').insert({ tipo: 'saida', descricao: desc, fornecedor: 'Sefaz-' + uf + ' (GNRE)', categoria: 'Impostos', valor,
+    vencimento: new Date(Date.now() - 3 * 36e5).toISOString().slice(0, 10), situacao: 'aberto', origem: 'tela',
+    observacoes: 'ICMS DIFAL de venda a consumidor final não contribuinte de outra UF (EC 87/2015, LC 190/2022): pagar a GNRE antes de a mercadoria sair; a guia acompanha a nota.' });
 }
 const semXml = (n: Linha | null) => n && Object.assign({}, n, { nfe_xml: undefined, proc_xml: n.proc_xml ? true : false });
 

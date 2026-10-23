@@ -258,7 +258,7 @@
           : '<button type="button" class="btn sec" data-acao="nf-homologacao">Voltar para homologação</button>') + '</p>' +
       (amb === 'homologacao' ? '<p class="dica">Para passar para produção: serviço fiscal e certificado conferidos, Sefaz 107, e pelo menos uma nota de teste autorizada em homologação' +
         (nfes ? ' (até agora: ' + homAut + ')' : '') + '. O contador confere a tabela fiscal antes.</p>' : '') +
-      reformaHtml(fc) +
+      reformaHtml(fc) + difalHtml(fc) +
       '<h3>Tabela do IBPT (tributos aproximados na nota, Lei 12.741)</h3>' + ibptHtml() +
       '<h3>ICMS-ST já recolhido (produtos com CST 60)</h3><p class="dica">Na revenda com substituição tributária a nota informa o ICMS-ST que veio na ' +
         '<strong>compra mais recente</strong> do produto (base, alíquota, ICMS próprio do fornecedor e ICMS-ST), proporcional à quantidade vendida. ' +
@@ -522,6 +522,50 @@
     });
   }
 
+  // DIFAL (23/10/2026): venda a consumidor final não contribuinte de outro estado. A alíquota interna de cada UF de destino
+  // (e o FCP, se houver) fica em dados.fiscal.difal[UF]; sem ela a nota para aquela UF não sai. A guia GNRE vira conta no Caixa.
+  const UFS = ['AC', 'AL', 'AM', 'AP', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MG', 'MS', 'MT', 'PA', 'PB', 'PE', 'PI', 'PR', 'RJ', 'RN', 'RO', 'RR', 'RS', 'SC', 'SE', 'TO'];
+  function difalHtml(fc) {
+    const d = fc.difal || {}, ufs = Object.keys(d).sort();
+    return '<h3>Venda para consumidor de outro estado (DIFAL)</h3>' +
+      '<p class="dica">Só para cliente sem inscrição estadual. A nota sai com CFOP 6108, ICMS interestadual (12% para Sul/Sudeste, 7% para os outros, ' +
+        '4% em importado) e o DIFAL do estado do cliente (alíquota interna de lá − interestadual). A guia GNRE é paga antes de a mercadoria sair e ' +
+        'entra sozinha no Caixa quando a nota é autorizada. Contribuinte de outro estado ainda não sai pelo CRM.</p>' +
+      (ufs.length ? '<table class="tabela"><thead><tr><th>Estado</th><th>Alíquota interna</th><th>FCP</th><th>Conferida</th><th></th></tr></thead><tbody>' +
+        ufs.map(u => '<tr><td>' + esc(u) + '</td><td>' + esc(String(d[u].aliq)) + '%</td><td>' + esc(String(d[u].fcp || 0)) + '%</td><td>' + (d[u].conferido ? '✓' : '<span class="selo">a conferir</span>') +
+          '</td><td><button type="button" class="btn sec mini" data-acao="nf-difal" data-id="' + esc(u) + '">Alterar</button></td></tr>').join('') + '</tbody></table>'
+        : '<p class="alerta">Nenhum estado configurado: venda para fora de SP fica bloqueada.</p>') +
+      '<p class="acoes"><button type="button" class="btn sec" data-acao="nf-difal">Incluir estado</button></p>';
+  }
+  function formDifal(uf) {
+    const d = (fiscalCfg().difal || {}), x = uf ? d[uf] || {} : {};
+    CRM.abrirForm({
+      titulo: uf ? 'DIFAL: ' + uf : 'DIFAL: incluir estado',
+      intro: 'Alíquota interna geral do estado do cliente (a do RICMS de lá) e o adicional do FCP, se o estado cobrar sobre estes produtos. ' +
+        'Confira na legislação do estado ou com o contador e marque como conferida.',
+      campos: [
+        { nome: 'uf', rotulo: 'Estado', tipo: 'select', obrigatorio: true, opcoes: UFS.map(u => [u, u]) },
+        { nome: 'aliq', rotulo: 'Alíquota interna (%)', tipo: 'numero', passo: '0.01', min: 0, max: 40, obrigatorio: true },
+        { nome: 'fcp', rotulo: 'FCP (%)', tipo: 'numero', passo: '0.01', min: 0, max: 4, ajuda: 'Vazio = sem FCP.' },
+        { nome: 'conferido', rotulo: 'Conferida na legislação do estado', tipo: 'checkbox', largo: true },
+        { nome: 'remover', rotulo: 'Tirar este estado (a venda para ele volta a ser bloqueada)', tipo: 'checkbox', largo: true }],
+      valores: { uf: uf || 'RS', aliq: x.aliq == null ? '' : x.aliq, fcp: x.fcp == null ? '' : x.fcp, conferido: x.conferido === true, remover: false },
+      salvarTexto: 'Salvar',
+      aoSalvar: async v => {
+        const novo = Object.assign({}, d), u = String(v.uf || '').toUpperCase();
+        if (uf && uf !== u) delete novo[uf];
+        if (v.remover) delete novo[u];
+        else {
+          const aliq = Number(String(v.aliq).replace(',', '.')), fcp = Number(String(v.fcp || 0).replace(',', '.'));
+          if (!(aliq > 0)) { CRM.toast('Informe a alíquota interna do estado.'); return false; }
+          novo[u] = { aliq, fcp: fcp > 0 ? fcp : 0, conferido: !!v.conferido };
+        }
+        await salvaFiscal({ difal: novo });
+        CRM.toast('DIFAL ' + u + (v.remover ? ' retirado.' : ' salvo.')); CRM.render();
+      }
+    });
+  }
+
   const salvaFiscal = async patch => { await CRM.salvarConfig({ fiscal: Object.assign({}, fiscalCfg(), patch) }); };
   function formEmitente(base) {
     const fc = Object.assign({}, fiscalCfg(), base || {}), em = fc.emitente || {}, e = em.endereco || {}, rt = fc.respTec || {};
@@ -674,6 +718,7 @@
     },
     'nf-emitente': () => formEmitente(),
     'nf-reforma': () => formReforma(),
+    'nf-difal': id => formDifal(id || null),
     'nf-producao': async () => {
       const homAut = (nfes || []).filter(n => n.ambiente === 'homologacao' && (n.situacao === 'autorizada' || n.situacao === 'cancelada')).length;
       if (!homAut) { CRM.toast('Antes de passar para produção, emita pelo menos uma nota de teste em homologação e confira a DANFE.', true); return; }

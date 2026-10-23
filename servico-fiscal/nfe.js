@@ -162,12 +162,25 @@ function calcula(nota) {
       const vICMSST = q.vICMSST != null ? r2(q.vICMSST) : Math.max(0, r2(vBCST * num(q.pICMSST) / 100 - vICMS));
       st = { modBCST: q.modBCST == null ? (q.pMVAST != null ? 4 : 0) : q.modBCST, pMVAST: q.pMVAST, pICMSST: num(q.pICMSST), vBCST, vICMSST };
     } else if (cstI === '10') throw new Error('item ' + (i + 1) + ': ICMS CST 10 sem os dados do ST');
-    return { vProd, vDesc, vFrete, vOutro, icms: Object.assign({ cst: cstI, vBC, p: num(icms.aliquota), v: vICMS, stRet: icms.stRet || null }, st ? { st } : {}), ipiDevol: r2(num(it.ipiDevol)), pis, cofins, ibscbs };
+    // DIFAL (venda a consumidor final não contribuinte de outra UF; EC 87/2015, LC 190/2022, Convênio ICMS 236/2021): base única
+    // (o valor da operação), ICMS da UF de destino = base × alíquota interna de lá − ICMS interestadual destacado; 100% para o
+    // destino desde 2019 (pICMSInterPart 100, vICMSUFRemet 0). FCP do destino, se houver, sobre a mesma base.
+    let difal = null;
+    if (it.difal) {
+      if (cstI !== '00') throw new Error('item ' + (i + 1) + ': DIFAL só com ICMS CST 00 (venda tributada)');
+      const pDest = num(it.difal.pICMSUFDest), pFcp = num(it.difal.pFCPUFDest), pInter = num(icms.aliquota);
+      if (!(pDest > 0)) throw new Error('item ' + (i + 1) + ': DIFAL sem a alíquota interna da UF de destino');
+      if ([4, 7, 12].indexOf(pInter) === -1) throw new Error('item ' + (i + 1) + ': alíquota interestadual ' + pInter + '% (só 4, 7 ou 12)');
+      const vBCUF = vBC, vDest = Math.max(0, r2(r2(vBCUF * pDest / 100) - vICMS));
+      difal = { vBCUFDest: vBCUF, pFCPUFDest: pFcp, pICMSUFDest: pDest, pICMSInter: pInter, vFCPUFDest: pFcp > 0 ? r2(vBCUF * pFcp / 100) : 0, vICMSUFDest: vDest };
+    }
+    return { vProd, vDesc, vFrete, vOutro, icms: Object.assign({ cst: cstI, vBC, p: num(icms.aliquota), v: vICMS, stRet: icms.stRet || null }, st ? { st } : {}), ipiDevol: r2(num(it.ipiDevol)), pis, cofins, ibscbs, difal };
   });
   const soma = k => r2(out.reduce((s, x) => s + k(x), 0));
   const t = { vBC: soma(x => x.icms.vBC), vICMS: soma(x => x.icms.v), vProd: soma(x => x.vProd), vFrete: soma(x => x.vFrete), vDesc: soma(x => x.vDesc),
     vPIS: soma(x => x.pis.v), vCOFINS: soma(x => x.cofins.v), vBCST: soma(x => (x.icms.st ? x.icms.st.vBCST : 0)), vST: soma(x => (x.icms.st ? x.icms.st.vICMSST : 0)),
     vIPIDevol: soma(x => x.ipiDevol), vOutro: soma(x => x.vOutro) };
+  if (out.some(x => x.difal)) { t.vFCPUFDest = soma(x => (x.difal ? x.difal.vFCPUFDest : 0)); t.vICMSUFDest = soma(x => (x.difal ? x.difal.vICMSUFDest : 0)); t.vICMSUFRemet = 0; }
   t.vNF = r2(t.vProd + t.vFrete - t.vDesc + t.vST + t.vIPIDevol + t.vOutro);   // o IBS/CBS (por fora) nunca soma no vNF
   const comIbs = out.filter(x => x.ibscbs);
   t.ibscbs = comIbs.length ? { vBC: soma(x => (x.ibscbs ? x.ibscbs.vBC : 0)), vIBSUF: soma(x => (x.ibscbs ? x.ibscbs.vIBSUF : 0)),
@@ -204,6 +217,12 @@ function grupoFed(nome, g) {
   if (g.grupo === 'NT') return '<' + nome + '><' + nome + 'NT>' + tag('CST', g.cst) + '</' + nome + 'NT></' + nome + '>';
   return '<' + nome + '><' + nome + 'Outr>' + tag('CST', g.cst) + tag('vBC', d2(g.vBC)) + tag('p' + nome, pct(g.p)) + tag('v' + nome, d2(g.v)) + '</' + nome + 'Outr></' + nome + '>';
 }
+function grupoDifal(d) {
+  if (!d) return '';
+  return '<ICMSUFDest>' + tag('vBCUFDest', d2(d.vBCUFDest)) + (d.pFCPUFDest > 0 ? tag('vBCFCPUFDest', d2(d.vBCUFDest)) + tag('pFCPUFDest', pct(d.pFCPUFDest)) : '') +
+    tag('pICMSUFDest', pct(d.pICMSUFDest)) + tag('pICMSInter', d2(d.pICMSInter)) + '<pICMSInterPart>100.0000</pICMSInterPart>' +
+    (d.pFCPUFDest > 0 ? tag('vFCPUFDest', d2(d.vFCPUFDest)) : '') + tag('vICMSUFDest', d2(d.vICMSUFDest)) + '<vICMSUFRemet>0.00</vICMSUFRemet></ICMSUFDest>';
+}
 function grupoIbsCbs(g) {
   if (!g) return '';
   return '<IBSCBS>' + tag('CST', g.cst) + tag('cClassTrib', g.cClassTrib) + '<gIBSCBS>' + tag('vBC', d2(g.vBC)) +
@@ -230,6 +249,12 @@ function monta(nota, opc) {
   const ufDest = String((de.endereco || {}).uf || '').toUpperCase();
   const idDest = ufDest && ufDest !== String(e.uf || 'SP').toUpperCase() ? '2' : '1';
   const indPres = nota.indPres == null ? 9 : nota.indPres;
+  // venda para outra UF: CFOP 6xxx; a consumidor final não contribuinte, com o DIFAL em todos os itens tributados
+  if (idDest === '2' && String(nota.tpNF == null ? 1 : nota.tpNF) === '1') {
+    (nota.itens || []).forEach((it, i) => { if (!/^6/.test(String(it.cfop || ''))) throw new Error('item ' + (i + 1) + ': cliente de outra UF pede CFOP 6xxx (veio ' + it.cfop + ')'); });
+    if (String(de.indIEDest) === '9' && String(nota.indFinal == null ? 1 : nota.indFinal) === '1' && c.itens.some(x => x.icms.cst === '00' && !x.difal))
+      throw new Error('venda a consumidor final não contribuinte de outra UF sem o DIFAL (grupo ICMSUFDest)');
+  }
   const tpNF = String(nota.tpNF == null ? 1 : nota.tpNF), fin = String(nota.finNFe == null ? 1 : nota.finNFe);
   if (['0', '1'].indexOf(tpNF) === -1 || ['1', '2', '3', '4'].indexOf(fin) === -1) throw new Error('tipo ou finalidade da nota inválidos');
   // A nota original vai referenciada OU no cabeçalho (NFref) OU em cada item (DFeReferenciado), nunca nos dois (rejeição 1010).
@@ -262,7 +287,7 @@ function monta(nota, opc) {
       tag('vUnCom', d4(it.valorUnitario)) + tag('vProd', d2(ci.vProd)) + tag('cEANTrib', ean) + tag('uTrib', txt(it.unidade || 'UN')) + tag('qTrib', d4(it.quantidade)) +
       tag('vUnTrib', d4(it.valorUnitario)) + (ci.vFrete ? tag('vFrete', d2(ci.vFrete)) : '') + (ci.vDesc ? tag('vDesc', d2(ci.vDesc)) : '') + (ci.vOutro ? tag('vOutro', d2(ci.vOutro)) : '') + '<indTot>1</indTot>' +
       (it.pedidoCliente ? tag('xPed', txt(it.pedidoCliente)) : '') + '</prod>';
-    const imp = '<imposto>' + (it.vTotTrib != null ? tag('vTotTrib', d2(it.vTotTrib)) : '') + grupoIcms(ci, it) + grupoFed('PIS', ci.pis) + grupoFed('COFINS', ci.cofins) + grupoIbsCbs(ci.ibscbs) + '</imposto>';
+    const imp = '<imposto>' + (it.vTotTrib != null ? tag('vTotTrib', d2(it.vTotTrib)) : '') + grupoIcms(ci, it) + grupoFed('PIS', ci.pis) + grupoFed('COFINS', ci.cofins) + grupoDifal(ci.difal) + grupoIbsCbs(ci.ibscbs) + '</imposto>';
     const devol = ci.ipiDevol > 0 ? '<impostoDevol><pDevol>100.00</pDevol><IPI>' + tag('vIPIDevol', d2(ci.ipiDevol)) + '</IPI></impostoDevol>' : '';
     // devolução: cada item aponta o item da nota original (DFeReferenciado, leiaute PL_010; sem ele a Sefaz rejeita com 321)
     const ref = it.ref && it.ref.chave ? '<DFeReferenciado>' + tag('chaveAcesso', dig(it.ref.chave)) + (it.ref.nItem ? tag('nItem', String(Number(it.ref.nItem))) : '') + '</DFeReferenciado>' : '';
@@ -272,7 +297,8 @@ function monta(nota, opc) {
   // tributos aproximados (Lei 12.741/2012, tabela do IBPT): por item e o total
   const comTrib = (nota.itens || []).filter(it => it.vTotTrib != null);
   const totTrib = comTrib.length ? r2(comTrib.reduce((s, it) => s + num(it.vTotTrib), 0)) : null;
-  const icmsTot = '<ICMSTot>' + tag('vBC', d2(t.vBC)) + tag('vICMS', d2(t.vICMS)) + '<vICMSDeson>0.00</vICMSDeson><vFCP>0.00</vFCP>' + tag('vBCST', d2(t.vBCST)) + tag('vST', d2(t.vST)) + '<vFCPST>0.00</vFCPST><vFCPSTRet>0.00</vFCPSTRet>' +
+  const icmsTot = '<ICMSTot>' + tag('vBC', d2(t.vBC)) + tag('vICMS', d2(t.vICMS)) + '<vICMSDeson>0.00</vICMSDeson>' +
+    (t.vICMSUFDest != null ? tag('vFCPUFDest', d2(t.vFCPUFDest)) + tag('vICMSUFDest', d2(t.vICMSUFDest)) + tag('vICMSUFRemet', d2(t.vICMSUFRemet)) : '') + '<vFCP>0.00</vFCP>' + tag('vBCST', d2(t.vBCST)) + tag('vST', d2(t.vST)) + '<vFCPST>0.00</vFCPST><vFCPSTRet>0.00</vFCPSTRet>' +
     tag('vProd', d2(t.vProd)) + tag('vFrete', d2(t.vFrete)) + '<vSeg>0.00</vSeg>' + tag('vDesc', d2(t.vDesc)) + '<vII>0.00</vII><vIPI>0.00</vIPI>' + tag('vIPIDevol', d2(t.vIPIDevol)) +
     tag('vPIS', d2(t.vPIS)) + tag('vCOFINS', d2(t.vCOFINS)) + tag('vOutro', d2(t.vOutro)) + tag('vNF', d2(t.vNF)) +
     (totTrib != null ? tag('vTotTrib', d2(totTrib)) : '') + '</ICMSTot>';
@@ -293,6 +319,9 @@ function monta(nota, opc) {
   const pags = (nota.pagamento && nota.pagamento.length) ? nota.pagamento : [{ tPag: dups.length ? '15' : '90', indPag: dups.length ? 1 : null, valor: dups.length ? t.vCobrar : 0 }];
   const pag = '<pag>' + pags.map(p => '<detPag>' + (p.indPag != null ? tag('indPag', String(p.indPag)) : '') + tag('tPag', String(p.tPag).padStart(2, '0')) +
     (String(p.tPag) === '99' ? tag('xPag', txt(p.descricao || 'OUTROS')) : '') + tag('vPag', d2(p.valor)) + '</detPag>').join('') + '</pag>';
+  // DIFAL: valor e fundamento no texto da nota, como as notas do FKN para o RS (a guia GNRE acompanha a mercadoria)
+  if (t.vICMSUFDest > 0) nota = Object.assign({}, nota, { infCpl: (nota.infCpl ? String(nota.infCpl).replace(/;?$/, ';') : '') +
+    'ICMS DIFAL DEVIDO A UF DE DESTINO (' + ufDest + '): R$ ' + d2(t.vICMSUFDest) + (t.vFCPUFDest > 0 ? ' + FCP R$ ' + d2(t.vFCPUFDest) : '') + ' - EC 87/2015 E LC 190/2022, RECOLHIDO POR GNRE;' });
   const infAdic = nota.infCpl || nota.infAdFisco ? '<infAdic>' + tag('infAdFisco', txt(nota.infAdFisco)) + tag('infCpl', txt(nota.infCpl)) + '</infAdic>' : '';
   const rt = nota.respTec;
   const resp = rt && rt.cnpj ? '<infRespTec>' + tag('CNPJ', docLimpo(rt.cnpj)) + tag('xContato', txt(rt.contato)) + tag('email', txt(rt.email)) + tag('fone', dig(rt.fone)) + '</infRespTec>' : '';
