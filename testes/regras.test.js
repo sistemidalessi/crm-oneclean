@@ -328,3 +328,21 @@ test('ordem alfabética: sem acento nem maiúscula, número em ordem, especiais 
     [['', 'Escolha…'], ['a', 'Ana'], ['z', 'Zelador'], ['__outro', 'Outro…']]);
   assert.deepStrictEqual(R.ordemAlfa(null), []);
 });
+
+test('dados da nota do cliente: o que falta, CEP (ViaCEP) e CNPJ (BrasilAPI) viram campos do cadastro', () => {
+  const ok = { cnpj: '11.222.333/0001-81', ind_ie: '1', ie: '111.222.333.444', codigo_municipio: '3548708', logradouro: 'RUA A', numero: '10', bairro: 'CENTRO', cep: '09700-000', uf: 'SP' };
+  assert.deepStrictEqual(R.faltasNota(ok), []);
+  assert.deepStrictEqual(R.faltasNota({}), ['CNPJ/CPF', 'se é contribuinte do ICMS', 'código do município (IBGE)', 'endereço (rua, número, bairro e CEP)', 'UF']);
+  assert.ok(R.faltasNota(Object.assign({}, ok, { ie: '' })).includes('inscrição estadual (é contribuinte)'));
+  assert.ok(R.faltasNota(Object.assign({}, ok, { cnpj: '123.456.789-09', ie: '' })).includes('CPF marcado como contribuinte'));
+  assert.ok(R.faltasNota(Object.assign({}, ok, { codigo_municipio: '35487' })).includes('código do município (IBGE)'));
+  assert.strictEqual(R.enderecoDoCep({ erro: true }), null);
+  assert.deepStrictEqual(R.enderecoDoCep({ cep: '09750-730', logradouro: 'Rua José Versolato', bairro: 'Centro', localidade: 'São Bernardo do Campo', uf: 'SP', ibge: '3548708', complemento: '' }),
+    { cep: '09750-730', logradouro: 'Rua José Versolato', bairro: 'Centro', cidade: 'São Bernardo do Campo', uf: 'SP', codigo_municipio: '3548708', complemento: '' });
+  const c = R.empresaDoCnpj({ cnpj: '11222333000181', razao_social: 'EMPRESA DE TESTE LTDA', nome_fantasia: 'TESTE', cep: '09750730', descricao_tipo_de_logradouro: 'RUA',
+    logradouro: 'DOS TESTES', numero: '100', complemento: '', bairro: 'CENTRO', municipio: 'SAO BERNARDO DO CAMPO', uf: 'SP', codigo_municipio_ibge: 3548708,
+    ddd_telefone_1: '1140000000', email: 'CONTATO@TESTE.COM', descricao_situacao_cadastral: 'ATIVA' });
+  assert.deepStrictEqual([c.razao_social, c.cep, c.logradouro, c.codigo_municipio, c.telefone, c.email, c.situacao_receita],
+    ['EMPRESA DE TESTE LTDA', '09750-730', 'RUA DOS TESTES', '3548708', '1140000000', 'contato@teste.com', 'ATIVA']);
+  assert.strictEqual(R.empresaDoCnpj({ message: 'CNPJ não encontrado' }), null);
+});

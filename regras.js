@@ -998,7 +998,42 @@
     return l.slice(0, i).concat(ordemAlfa(l.slice(i, j), o => o[1]), l.slice(j));
   }
 
+  // ---------------------------------------------------------------- dados do cliente para a NF-e (23/10/2026)
+  // Antes da virada esses dados só chegavam pelas notas do FKN; a partir de 03/11 o cliente novo é cadastrado no CRM.
+  const IND_IE = [['1', 'Contribuinte (tem inscrição estadual)'], ['2', 'Isento de inscrição estadual'], ['9', 'Não contribuinte (CPF, condomínio, órgão sem IE…)']];
+  // O que falta (ou está incoerente) para a nota sair: [] quando está tudo certo.
+  function faltasNota(e) {
+    e = e || {};
+    const d = chaveDoc(e.cnpj), ind = String(e.ind_ie || ''), ie = digitos(e.ie), falta = [];
+    if (d.length !== 14 && d.length !== 11) falta.push('CNPJ/CPF');
+    if (!ind) falta.push('se é contribuinte do ICMS');
+    if (ind === '1' && !ie) falta.push('inscrição estadual (é contribuinte)');
+    if (ind === '9' && ie) falta.push('tem inscrição estadual mas está como não contribuinte');
+    if (d.length === 11 && ind === '1') falta.push('CPF marcado como contribuinte');
+    if (!digitos(e.codigo_municipio) || digitos(e.codigo_municipio).length !== 7) falta.push('código do município (IBGE)');
+    if (!e.logradouro || !e.numero || digitos(e.cep).length !== 8 || !e.bairro) falta.push('endereço (rua, número, bairro e CEP)');
+    if (!e.uf) falta.push('UF');
+    return falta;
+  }
+  // Resposta do ViaCEP (viacep.com.br/ws/<cep>/json/) → campos do cadastro (o "ibge" é o código do município da NF-e).
+  function enderecoDoCep(j) {
+    if (!j || j.erro) return null;
+    return { cep: String(j.cep || ''), logradouro: j.logradouro || '', bairro: j.bairro || '', cidade: j.localidade || '', uf: j.uf || '',
+      codigo_municipio: digitos(j.ibge), complemento: j.complemento || '' };
+  }
+  // Resposta da BrasilAPI (brasilapi.com.br/api/cnpj/v1/<cnpj>, dados públicos da Receita) → campos do cadastro.
+  function empresaDoCnpj(j) {
+    if (!j || !j.cnpj) return null;
+    const tel = digitos(j.ddd_telefone_1);
+    const log = [j.descricao_tipo_de_logradouro, j.logradouro].filter(Boolean).join(' ').trim();
+    return { razao_social: j.razao_social || '', nome: j.nome_fantasia || '', cep: digitos(j.cep).replace(/(\d{5})(\d{3})/, '$1-$2'), logradouro: log,
+      numero: j.numero || '', complemento: j.complemento || '', bairro: j.bairro || '', cidade: j.municipio || '', uf: j.uf || '',
+      codigo_municipio: digitos(j.codigo_municipio_ibge), telefone: tel.length >= 10 ? tel : '', email: String(j.email || '').toLowerCase(),
+      situacao_receita: j.descricao_situacao_cadastral || '' };
+  }
+
   const api = {
+    IND_IE, faltasNota, enderecoDoCep, empresaDoCnpj,
     comparaAlfa, ordemAlfa, alfaOpcoes,
     TIPOS_ATIVIDADE, TIPOS_MANUAIS, SITUACOES, STATUS_NEGOCIO, STATUS_PROPOSTA, RECORRENCIAS, PAPEIS, UFS,
     ETAPAS_PADRAO, OPCOES_PADRAO, CONFIG_PADRAO, config, rotulo, num, moeda, numero, pct,

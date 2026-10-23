@@ -588,6 +588,9 @@
       corpo = '<div class="campos pd-campos">' +
         '<label class="campo largo"><span>Cliente *</span><input data-ed-cliente list="pdClientes" value="' + esc(e ? e.nome + (e.cnpj ? ' · ' + e.cnpj : '') : '') + '" placeholder="Nome, CNPJ ou cidade" autocomplete="off"></label>' +
         '<datalist id="pdClientes">' + emps.slice(0, 5000).map(c => '<option value="' + esc(c.nome + (c.cnpj ? ' · ' + c.cnpj : '')) + '">' + esc([c.cidade, CRM.nomeUsuario(c.responsavel_id)].filter(Boolean).join(' · ')) + '</option>').join('') + '</datalist>' +
+        // cliente sem os dados da nota (23/10/2026): avisa já no pedido, em vez de só travar na emissão
+        (e && R.faltasNota(e).length ? '<p class="alerta largo">Para a nota sair, falta no cadastro do cliente: <strong>' + esc(R.faltasNota(e).join(', ')) + '</strong>. ' +
+          '<button type="button" class="btn sec mini" data-acao="pd-cad-cliente" data-id="' + esc(e.id) + '">Completar o cadastro</button></p>' : '') +
         (CRM.ehGestor() ? '<label class="campo"><span>Vendedor(a)</span><select data-ed="vendedor_id">' + CRM.opcoesHTML(CRM.opcoesUsuarios(), x.vendedor_id) + '</select></label>'
           : '<label class="campo"><span>Vendedor(a)</span><input value="' + esc(CRM.nomeUsuario(x.vendedor_id)) + '" disabled></label>') +
         '<label class="campo"><span>Tabela</span><input value="PADRAO" disabled></label>' +
@@ -899,6 +902,7 @@
   const vivo = fn => async id => { try { await fn(id); } catch (e) { CRM.falhou(e); } };
   const troca = r => { peds = (peds || []).map(p => (p.id === r.id ? r : p)); };
   Object.assign(CRM.acoes, {
+    'pd-cad-cliente': id => { const e = CRM.empresa(id); if (e && CRM.fichas) CRM.fichas.formEmpresa(e); },
     'pd-ver': id => { f.ver = id; f.bolao = null; aberto = null; CRM.render(); },
     'pd-sit': id => { f.sit = id; CRM.render(); },
     'pd-recarregar': () => recarrega(),

@@ -6,10 +6,10 @@
 <!-- CSP: nada inline (nem <script>, nem onclick=, nem style=). Script externo só o
      supabase-js do jsDelivr, com SRI (app.js). Imagens: as fotos dos produtos vêm do Storage do Supabase. Conexões: Supabase; links de
      WhatsApp/Maps/Agenda abrem em outra aba e não precisam estar aqui. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self'; img-src 'self' data: blob: https://*.supabase.co; connect-src 'self' https://*.supabase.co wss://*.supabase.co; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self'; img-src 'self' data: blob: https://*.supabase.co; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://viacep.com.br https://servicodados.ibge.gov.br https://brasilapi.com.br; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <title>CRM</title>
-<meta name="crm-versao" content="20cf8ab98b8a">
+<meta name="crm-versao" content="6e9a7e476db2">
 <!-- app no celular (21/10/2026): manifest + sw.js; ícones da instalação em assets/app-*.png -->
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#175b6d">
@@ -60,7 +60,7 @@
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
 <script src="config.js?v=885a5dc8a6"></script>
-<script src="regras.js?v=237da90734"></script>
+<script src="regras.js?v=62662d6ce1"></script>
 <script src="cadencia.js?v=8905237dde"></script>
 <script src="dados.js?v=62bb484d85"></script>
 <script src="planilha.js?v=df6eefcaec"></script>
@@ -77,7 +77,7 @@
 <script src="caixa.js?v=7148df59c3"></script>
 <script src="detalhe.js?v=468702339d"></script>
 <script src="financeiro.js?v=7d83ba4538"></script>
-<script src="fichas.js?v=4c75bd8d03"></script>
+<script src="fichas.js?v=cec190d133"></script>
 <script src="danfe.js?v=d964f9a61c"></script>
 <script src="cobranca.js?v=956281ab4c"></script>
 <script src="boleto.js?v=f9d5966ca1"></script>
@@ -87,7 +87,7 @@
 <script src="fiscal.js?v=f6d39859cc"></script>
 <script src="estoque.js?v=8797f74cb8"></script>
 <script src="compras-pedidos.js?v=7d1f6320e9"></script>
-<script src="pedidos.js?v=64be09e9ec"></script>
+<script src="pedidos.js?v=d0a54ca948"></script>
 <script src="rotas.js?v=3be41df6ef"></script>
 <script src="produtos.js?v=339c925bfb"></script>
 <script src="emissao.js?v=57ecf2b4c3"></script>

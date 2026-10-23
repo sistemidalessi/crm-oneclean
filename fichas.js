@@ -382,11 +382,76 @@
       { nome: 'cep', rotulo: 'CEP', terco: true }, { nome: 'logradouro', rotulo: 'Rua / avenida', largo: true },
       { nome: 'numero', rotulo: 'Número', terco: true }, { nome: 'complemento', rotulo: 'Complemento', terco: true }, { nome: 'bairro', rotulo: 'Bairro', terco: true },
       { nome: 'cidade', rotulo: 'Cidade' }, { nome: 'uf', rotulo: 'UF', tipo: 'select', opcoes: CRM.lista(R.UFS, '—') },
+      { tipo: 'secao', rotulo: 'Nota fiscal' },
+      { nome: 'ind_ie', rotulo: 'Contribuinte do ICMS?', tipo: 'select', opcoes: CRM.lista(R.IND_IE, '— (falta dizer)'),
+        ajuda: 'Com inscrição estadual = contribuinte. CPF, condomínio e órgão público sem IE = não contribuinte.' },
+      { nome: 'ie', rotulo: 'Inscrição estadual', terco: true, ajuda: 'Só os números. Vazio se não tiver.' },
+      { nome: 'codigo_municipio', rotulo: 'Código do município (IBGE)', terco: true, ajuda: 'Vem sozinho pelo CEP.' },
       { tipo: 'secao', rotulo: 'Pós-venda' },
       { nome: 'ciclo_recompra_dias', rotulo: 'Compra a cada (dias)', tipo: 'numero', passo: '1', min: 1, vazioNulo: true, ajuda: 'vazio = padrão de ' + E().cfg.ciclo_recompra_padrao + ' dias' },
       { nome: 'observacoes', rotulo: 'Observações importantes', tipo: 'textarea', largo: true }
     );
     return c;
+  }
+
+  // Endereço e código do município pelo CEP (ViaCEP; sem CEP, o IBGE pelo nome da cidade) e os dados públicos do CNPJ
+  // (BrasilAPI). Só preenche o que está vazio, menos o código do município, que segue o CEP. Se o serviço não responder,
+  // os campos continuam editáveis à mão.
+  const busca = async (url, ms) => {
+    const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), ms || 8000);
+    try { const r = await fetch(url, { signal: ctl.signal }); return r.ok ? await r.json() : { _status: r.status }; } finally { clearTimeout(t); }
+  };
+  const semAcento = t => R.normaliza(t).replace(/[^a-z0-9]/g, '');
+  function dadosDaNota(form) {
+    const el = n => form.elements[n];
+    const poe = (dados, sempre) => Object.keys(dados).forEach(k => {
+      const f = el(k); if (!f || dados[k] == null || dados[k] === '') return;
+      if (!String(f.value || '').trim() || (sempre || []).indexOf(k) !== -1) f.value = dados[k];
+    });
+    const porCep = async () => {
+      const d = R.digitos(el('cep').value);
+      if (d.length !== 8) return;
+      try {
+        const x = R.enderecoDoCep(await busca('https://viacep.com.br/ws/' + d + '/json/'));
+        if (!x) { CRM.avisoCampo(form, 'cep', 'CEP não encontrado: confira os números.'); return; }
+        delete x.cep; poe(x, ['codigo_municipio']); CRM.avisoCampo(form, 'cep', '');
+      } catch (e) { CRM.avisoCampo(form, 'cep', 'Não consegui buscar o CEP agora: preencha o endereço à mão.'); }
+    };
+    el('cep').addEventListener('change', porCep);
+    const porCidade = async () => {
+      if (R.digitos(el('codigo_municipio').value) || !el('cidade').value || !el('uf').value) return;
+      try {
+        const l = await busca('https://servicodados.ibge.gov.br/api/v1/localidades/estados/' + encodeURIComponent(el('uf').value) + '/municipios', 10000);
+        const m = Array.isArray(l) && l.find(x => semAcento(x.nome) === semAcento(el('cidade').value));
+        if (m) el('codigo_municipio').value = String(m.id);
+      } catch (e) { /* fica para preencher à mão */ }
+    };
+    el('cidade').addEventListener('change', porCidade); el('uf').addEventListener('change', porCidade);
+    // contribuinte: com IE é contribuinte; CPF sem IE é não contribuinte
+    el('ie').addEventListener('change', () => { if (R.digitos(el('ie').value) && !el('ind_ie').value) el('ind_ie').value = '1'; });
+    el('cnpj').addEventListener('change', () => { if (R.ehCPF(R.chaveDoc(el('cnpj').value)) && !el('ind_ie').value && !R.digitos(el('ie').value)) el('ind_ie').value = '9'; });
+    // botão "Buscar pelo CNPJ"
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'btn sec mini'; b.textContent = '🔍 Buscar pelo CNPJ';
+    b.title = 'Preenche razão social, endereço e município com os dados públicos da Receita (não traz a inscrição estadual)';
+    b.addEventListener('click', async () => {
+      const d = R.chaveDoc(el('cnpj').value);
+      if (!R.ehCNPJ(d) || !R.cnpjValido(d)) { CRM.avisoCampo(form, 'cnpj', 'Digite um CNPJ válido para buscar.'); return; }
+      b.disabled = true; b.textContent = 'Buscando…';
+      try {
+        const j = await busca('https://brasilapi.com.br/api/cnpj/v1/' + d, 12000);
+        const x = R.empresaDoCnpj(j);
+        if (!x) CRM.avisoCampo(form, 'cnpj', j && j._status === 404 ? 'CNPJ não encontrado na Receita.' : 'A busca do CNPJ não respondeu: preencha à mão.');
+        else {
+          const sit = x.situacao_receita; delete x.situacao_receita;
+          poe(x, ['codigo_municipio']);
+          CRM.avisoCampo(form, 'cnpj', sit && sit !== 'ATIVA' ? 'Atenção: na Receita o CNPJ está ' + esc(sit) + '.' : 'Dados da Receita preenchidos. Falta a inscrição estadual e se é contribuinte.');
+        }
+      } catch (e) { CRM.avisoCampo(form, 'cnpj', 'A busca do CNPJ não respondeu: preencha à mão.'); }
+      b.disabled = false; b.textContent = '🔍 Buscar pelo CNPJ';
+    });
+    const rot = el('cnpj').closest('label');
+    if (rot) rot.appendChild(b);
   }
 
   fichas.formEmpresa = e => {
@@ -402,6 +467,7 @@
           CRM.avisoCampo(form, 'cnpj', R.ehCNPJ(d) && !R.cnpjValido(d) ? 'CNPJ parece inválido (confira os dígitos).' : '');
         });
         form.elements.cep.addEventListener('blur', () => { const d = R.digitos(form.elements.cep.value); if (d.length === 8) form.elements.cep.value = d.replace(/(\d{5})(\d{3})/, '$1-$2'); });
+        dadosDaNota(form);
       },
       aoSalvar: async v => {
         if (!g) delete v.responsavel_id;
