@@ -824,6 +824,7 @@
           '<td class="acoes-linha">' + (aberto ? '<button type="button" class="mini perigo" data-acao="cob-cartorio" data-id="' + esc((a.duplicatas || [])[0]) + '">Cartório</button>' : '') + '</td></tr>';
       }).join('') + '</tbody></table></div>' : '<p class="vazio">Nenhum aviso mandado ainda.</p>') + '</section>';
   }
+  const semLista = () => (((E().cfg || {}).cobranca_aviso || {}).sem_aviso || []).slice();
   function avisoPrevia() {
     CRM.toast('Montando a lista de hoje…');
     CRM.store().cobranca({ acao: 'previa' }).then(r => {
@@ -833,7 +834,9 @@
         intro: l.length ? 'Prazo antes do cartório: ' + R.dataBR(r.prazo) + '. Confira e clique em "Enviar agora"' + (r.ligado ? ' (ou deixe para as 9h do próximo dia útil).' : '.') : 'Ninguém chegou ao prazo hoje. 👍',
         htmlDepois: l.map(x => '<details class="cob-av-item"><summary><strong>' + esc(x.nome || '') + '</strong> · ' + esc(R.moeda(x.valor)) + ' · ' + x.dias + ' dias · ' +
           esc([x.celular ? 'WhatsApp ' + x.celular.replace(/^55/, '') : 'sem celular', x.emails.length ? x.emails.join(', ') : 'sem e-mail'].join(' · ')) +
-          (!x.celular && !x.emails.length ? ' ' + CRM.selo('sem canal: não vai', 'vermelho') : '') + '</summary><pre class="cob-av-texto">' + esc(x.texto) + '</pre></details>').join(''),
+          (!x.celular && !x.emails.length ? ' ' + CRM.selo('sem canal: não vai', 'vermelho') : '') + '</summary><pre class="cob-av-texto">' + esc(x.texto) + '</pre>' +
+          '<p><button type="button" class="mini" data-acao="cob-av-sem" data-id="' + esc(x.empresa_id) + '" title="já está negociando, venda direta etc.: este cliente não recebe o aviso automático">Não avisar este cliente</button></p></details>').join('') +
+          (semLista().length ? '<p class="dica">Não recebem o aviso: ' + esc(semLista().map(id => CRM.nomeEmpresa(id)).join(', ')) + '. <button type="button" class="mini" data-acao="cob-av-sem-limpa">Voltar a avisar todos</button></p>' : ''),
         salvarTexto: l.length ? 'Enviar agora' : 'Fechar',
         aoSalvar: async () => {
           if (!l.length) return;
@@ -1050,6 +1053,15 @@
     },
     'cob-baixar': id => { const b = boleto(id); if (b && b.arquivo) baixa(b).catch(CRM.falhou); },
     'cob-av-atualiza': () => avisoCarrega(true),
+    'cob-av-sem': async id => {
+      const atual = (E().cfg || {}).cobranca_aviso || {}, l = semLista();
+      if (l.indexOf(id) === -1) l.push(id);
+      try { await CRM.salvarConfig({ cobranca_aviso: Object.assign({}, atual, { sem_aviso: l }) }); fechaForm(); CRM.toast(CRM.nomeEmpresa(id) + ' não recebe o aviso automático.'); setTimeout(avisoPrevia, 300); } catch (e) { CRM.falhou(e); }
+    },
+    'cob-av-sem-limpa': async () => {
+      const atual = (E().cfg || {}).cobranca_aviso || {};
+      try { await CRM.salvarConfig({ cobranca_aviso: Object.assign({}, atual, { sem_aviso: [] }) }); fechaForm(); setTimeout(avisoPrevia, 300); } catch (e) { CRM.falhou(e); }
+    },
     'cob-av-previa': () => avisoPrevia(),
     'cob-av-ligar': async () => {
       const atual = (E().cfg || {}).cobranca_aviso || {}, liga = atual.ligado !== true;
