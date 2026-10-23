@@ -784,7 +784,7 @@
           : (pend ? 'Ligue cada item a um produto nosso e diga quantas unidades do nosso estoque vêm em 1 unidade da nota (ex.: 1 caixa com 300 esponjas = 300). "Não é estoque": frete, brinde, material de uso. Dar entrada soma no estoque do CRM e, depois da virada (CRM dono do cadastro), lança as parcelas no contas a pagar do Caixa.'
             : 'Entrada dada em ' + quando(c.lancada_em) + '.') + (!dv && c.parcelas && c.parcelas.length ? ' Parcelas da nota: ' + c.parcelas.map(p => R.dataBR(p.vencimento) + ' ' + R.moeda(p.valor)).join(', ') + ' (depois da virada entram no contas a pagar do Caixa com a entrada; antes, vêm do FKN).' : ''),
           htmlDepois: '<datalist id="esProdutos">' + R.ordemAlfa([...nomeDe.entries()], x => x[1] || x[0]).map(([k, v]) => '<option value="' + esc(k) + '">' + esc(v || '') + '</option>').join('') + '</datalist>' +
-            '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Item da nota</th><th>Produto nosso</th><th title="Quantas unidades do nosso estoque vêm em 1 unidade da nota (o antigo &quot;fator&quot;)">Unidades em 1 da nota</th><th></th></tr></thead><tbody>' + itens.map(linhaI).join('') + '</tbody></table></div>',
+            '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Item da nota</th><th>Produto nosso</th><th title="Quantas unidades do nosso estoque vêm em 1 unidade da nota (o antigo &quot;fator&quot;)">Vem quantas na embalagem?</th><th></th></tr></thead><tbody>' + itens.map(linhaI).join('') + '</tbody></table></div>',
           salvarTexto: pend ? (dv ? 'Dar entrada da devolução' : 'Dar entrada no estoque') : 'Fechar',
           extras: form => {
             const atualiza = it => {
@@ -799,7 +799,7 @@
             if (!pend) return;
             const lista = itens.map(it => ({ id: it.id, codigo: form.elements['c_' + it.id].value.trim(), fator: form.elements['f_' + it.id].value, ignorar: form.elements['i_' + it.id].checked }));
             const falta = lista.filter(x => !x.ignorar && (!x.codigo || !(Number(x.fator) > 0)));
-            if (falta.length) throw new Error(falta.length + ' item(ns) sem produto ou sem as unidades em 1 da nota (ou marque "não é estoque")');
+            if (falta.length) throw new Error(falta.length + ' item(ns) sem produto ou sem "vem quantas na embalagem" (ou marque "não é estoque")');
             const fora = lista.filter(x => !x.ignorar && !nomeDe.has(x.codigo));
             if (fora.length && !confirm(fora.length + ' código(s) que o estoque não tem (' + fora.map(x => x.codigo).join(', ') + '). Criar no estoque do CRM assim mesmo?')) return false;
             const r = await st.compraLancar(id, lista);
