@@ -5241,3 +5241,115 @@ revoke execute on function public.crm_produtos_ncm(), public.crm_boleto_reservar
   public.crm_custo_mudou(), public.crm_estoque_guarda(), public.crm_estoque_mov_espelho(), public.crm_estoque_mov_saldo(),
   public.crm_estoque_nota_cancelada(), public.crm_estoque_nota_item(), public.crm_pedidos_espelho() from public, anon;
 alter function public.crm_endereco_texto(public.crm_empresas) set search_path = public;
+
+-- ============================================================ Conferência da virada (23/10/2026)
+-- Uma lista do que pode travar o dia só no CRM (03/11), para o administrador rodar na noite de 30/10 e na manhã de 03/11:
+-- nasceu do que a conferência à mão achou em 23/10 (entradas em código que não existe, produto com saldo sem regra fiscal,
+-- cliente com o município trocado). Só leitura. Cada item: { chave, titulo, nivel ('ok' | 'aviso' | 'trava'), n, dica, lista }.
+create or replace function public.crm_virada_conferir() returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare r jsonb := '[]'::jsonb; n integer; l jsonb; cfg jsonb; v text;
+begin
+  if not public.crm_eh_admin() then raise exception 'só o administrador confere a virada'; end if;
+  select dados into cfg from public.crm_config where id = 1;
+
+  -- 1. produto vendido no último ano sem regra fiscal de venda (a NF-e não sai)
+  select count(*), coalesce(jsonb_agg(jsonb_build_object('codigo', codigo, 'nome', descricao)) filter (where rn <= 30), '[]') into n, l
+  from (select e.codigo, e.descricao, row_number() over (order by e.descricao) rn from public.crm_estoque e
+        where coalesce(e.situacao, 'ATIVO') <> 'INATIVO'
+          and exists (select 1 from public.crm_nota_itens i join public.crm_notas nn on nn.id = i.nota_id
+                      where i.codigo = e.codigo and nn.emitida_em > now() - interval '12 months')
+          and not exists (select 1 from public.crm_fiscal_produtos f where f.codigo = e.codigo and f.regra ? 'venda')) y;
+  r := r || jsonb_build_object('chave', 'vendidos_sem_regra', 'titulo', 'Produtos vendidos no último ano sem regra fiscal', 'n', n,
+    'nivel', case when n = 0 then 'ok' else 'trava' end, 'dica', 'Sem regra a nota não sai. Em Produtos, filtro "Sem regra fiscal": "Mesma tributação que" um parecido.', 'lista', l);
+
+  -- 2. produto ativo com saldo e sem regra
+  select count(*), coalesce(jsonb_agg(jsonb_build_object('codigo', codigo, 'nome', descricao, 'qtd', saldo)) filter (where rn <= 30), '[]') into n, l
+  from (select s.codigo, coalesce(e.descricao, s.descricao) descricao, s.saldo, row_number() over (order by s.saldo desc) rn
+        from public.crm_estoque_saldo s join public.crm_estoque e on e.codigo = s.codigo
+        where s.saldo > 0 and coalesce(e.situacao, 'ATIVO') <> 'INATIVO'
+          and not exists (select 1 from public.crm_fiscal_produtos f where f.codigo = s.codigo and f.regra ? 'venda')) y;
+  r := r || jsonb_build_object('chave', 'saldo_sem_regra', 'titulo', 'Produtos ativos com estoque e sem regra fiscal', 'n', n,
+    'nivel', case when n = 0 then 'ok' else 'aviso' end, 'dica', 'Ainda não venderam, mas têm estoque: dê a regra antes da 1ª venda.', 'lista', l);
+
+  -- 3. inativo com estoque
+  select count(*), coalesce(jsonb_agg(jsonb_build_object('codigo', codigo, 'nome', descricao, 'qtd', saldo)) filter (where rn <= 30), '[]') into n, l
+  from (select s.codigo, coalesce(e.descricao, s.descricao) descricao, s.saldo, row_number() over (order by s.saldo desc) rn
+        from public.crm_estoque_saldo s join public.crm_estoque e on e.codigo = s.codigo where s.saldo > 0 and e.situacao = 'INATIVO') y;
+  r := r || jsonb_build_object('chave', 'inativo_com_saldo', 'titulo', 'Produtos inativos que ainda têm estoque', 'n', n,
+    'nivel', case when n = 0 then 'ok' else 'aviso' end, 'dica', 'Para vender: reativar no cadastro e dar a regra fiscal; senão, contar e baixar.', 'lista', l);
+
+  -- 4. saldo em código que o cadastro não tem
+  select count(*), coalesce(jsonb_agg(jsonb_build_object('codigo', codigo, 'nome', descricao, 'qtd', saldo)) filter (where rn <= 30), '[]') into n, l
+  from (select s.codigo, s.descricao, s.saldo, row_number() over (order by s.codigo) rn from public.crm_estoque_saldo s
+        where s.saldo <> 0 and not exists (select 1 from public.crm_estoque e where e.codigo = s.codigo)) y;
+  r := r || jsonb_build_object('chave', 'fora_do_cadastro', 'titulo', 'Estoque em código que o cadastro não tem', 'n', n,
+    'nivel', case when n = 0 then 'ok' else 'trava' end, 'dica', 'Mercadoria fora do produto certo (ex.: código digitado sem o zero da frente). Corrigir com estorno e entrada no código certo.', 'lista', l);
+
+  -- 5. cliente que comprou no último ano sem os dados da nota
+  select count(*), coalesce(jsonb_agg(jsonb_build_object('id', id, 'nome', nome, 'falta', falta)) filter (where rn <= 30), '[]') into n, l
+  from (select a.*, row_number() over (order by a.nome) rn from (select e.id, e.nome, concat_ws(', ',
+          case when e.ind_ie is null then 'contribuinte?' end,
+          case when e.ind_ie = '1' and coalesce(e.ie, '') = '' then 'inscrição estadual' end,
+          case when coalesce(e.codigo_municipio, '') !~ '^\d{7}$' then 'município (IBGE)' end,
+          case when coalesce(btrim(e.logradouro), '') = '' then 'rua' end,
+          case when coalesce(btrim(e.numero), '') = '' then 'número' end,
+          case when coalesce(btrim(e.bairro), '') = '' then 'bairro' end,
+          case when regexp_replace(coalesce(e.cep, ''), '\D', '', 'g') !~ '^\d{8}$' then 'CEP' end,
+          case when coalesce(e.uf, '') = '' then 'UF' end) falta
+        from public.crm_empresas e where e.id in (select n2.empresa_id from public.crm_notas n2 where n2.emitida_em > now() - interval '12 months')) a
+        where a.falta <> '') y;
+  r := r || jsonb_build_object('chave', 'clientes_sem_dado', 'titulo', 'Clientes do último ano sem os dados da nota', 'n', n,
+    'nivel', case when n = 0 then 'ok' else 'aviso' end, 'dica', 'O pedido mostra o que falta e o botão "Completar o cadastro"; dá para acertar antes, na ficha.', 'lista', l);
+
+  -- 6. código do município que não é o da cidade do cadastro (a maioria com o mesmo código diz outra cidade)
+  with c as (select id, nome, codigo_municipio cm, cidade, regexp_replace(upper(translate(btrim(coalesce(cidade, '')), 'áàâãéêíóôõúçÁÀÂÃÉÊÍÓÔÕÚÇ', 'aaaaeeioooucAAAAEEIOOOUC')), '\s+(DO|DA|DE|DOS|DAS)\s+', ' ', 'g') cn
+             from public.crm_empresas where codigo_municipio ~ '^\d{7}$' and coalesce(cidade, '') <> ''),
+       m as (select distinct on (cm) cm, cn from (select cm, cn, count(*) k from c group by 1, 2) z order by cm, k desc)
+  select count(*), coalesce(jsonb_agg(jsonb_build_object('id', c.id, 'nome', c.nome, 'falta', c.cidade || ' com o código de ' || initcap(lower(m.cn)))) filter (where true), '[]') into n, l
+  from c join m on m.cm = c.cm where c.cn <> m.cn and (select count(*) from c c2 where c2.cm = c.cm) >= 3;
+  r := r || jsonb_build_object('chave', 'municipio_trocado', 'titulo', 'Clientes com o código do município de outra cidade', 'n', n,
+    'nivel', case when n = 0 then 'ok' else 'aviso' end, 'dica', 'Na ficha, apague e digite o CEP de novo: o CRM busca o município certo.', 'lista', l);
+
+  -- 7. pedido em aberto sem forma de pagamento
+  select count(*), coalesce(jsonb_agg(jsonb_build_object('numero', p.numero, 'nome', e.nome)) filter (where true), '[]') into n, l
+  from public.crm_pedidos p join public.crm_empresas e on e.id = p.empresa_id
+  where p.situacao in ('aberto', 'separacao', 'separado') and coalesce(btrim(p.dados->>'pagamento'), '') = '';
+  r := r || jsonb_build_object('chave', 'pedido_sem_pagamento', 'titulo', 'Pedidos em aberto sem forma de pagamento', 'n', n,
+    'nivel', case when n = 0 then 'ok' else 'aviso' end, 'dica', 'A nota não sai sem a forma de pagamento.', 'lista', l);
+
+  -- 8. nota de compra parada sem entrada
+  select count(*), coalesce(jsonb_agg(jsonb_build_object('numero', numero, 'nome', fornecedor_nome, 'dia', (emitida_em at time zone 'America/Sao_Paulo')::date)) filter (where true), '[]') into n, l
+  from public.crm_compras where situacao = 'pendente' and emitida_em < now() - interval '5 days';
+  r := r || jsonb_build_object('chave', 'compras_paradas', 'titulo', 'Notas de compra há mais de 5 dias sem entrada', 'n', n,
+    'nivel', case when n = 0 then 'ok' else 'aviso' end, 'dica', 'Sem a entrada, o estoque do CRM fica a menos (Estoque → Notas de compra).', 'lista', l);
+
+  -- 9. equipe que nunca entrou
+  select count(*), coalesce(jsonb_agg(jsonb_build_object('nome', u.nome, 'papel', u.papel)) filter (where true), '[]') into n, l
+  from public.crm_usuarios u left join auth.users a on a.id = u.user_id where u.ativo and a.last_sign_in_at is null;
+  r := r || jsonb_build_object('chave', 'equipe_sem_acesso', 'titulo', 'Pessoas da equipe que nunca entraram no CRM', 'n', n,
+    'nivel', case when n = 0 then 'ok' else 'aviso' end, 'dica', 'Peça o 1º acesso antes do dia da virada (senha esquecida se resolve com tempo).', 'lista', l);
+
+  -- 10. tabela do IBPT
+  select max(vig_fim)::text into v from public.crm_ibpt;
+  r := r || jsonb_build_object('chave', 'ibpt', 'titulo', 'Tabela do IBPT (tributos aproximados)', 'n', case when v is null or v < current_date::text then 1 else 0 end,
+    'nivel', case when v is not null and v >= current_date::text then 'ok' else 'aviso' end,
+    'dica', case when v is null then 'Sem tabela: carregue na aba Fiscal.' when v < current_date::text then 'Venceu em ' || to_char(v::date, 'DD/MM/YYYY') || ': a nota sai, mas com aviso. Carregue a nova ou cole o IBPT_TOKEN.' else 'Vale até ' || to_char(v::date, 'DD/MM/YYYY') || '.' end, 'lista', '[]'::jsonb);
+
+  -- 11. cadastro e emissão (informativo: mudam na virada)
+  r := r || jsonb_build_object('chave', 'cadastro_dono', 'titulo', 'Cadastro de produtos no CRM', 'n', 0,
+    'nivel', case when public.crm_produtos_do_crm() then 'ok' else 'aviso' end,
+    'dica', case when public.crm_produtos_do_crm() then 'O CRM é o dono do cadastro e do estoque.' else 'Ainda vem do FKN: na noite de 30/10, Produtos → "Passar o cadastro para o CRM".' end, 'lista', '[]'::jsonb);
+  r := r || jsonb_build_object('chave', 'emissao', 'titulo', 'Emissão da NF-e', 'n', 0,
+    'nivel', case when coalesce(cfg->'fiscal'->>'ambiente', '') = 'producao' then 'ok' else 'aviso' end,
+    'dica', case when coalesce(cfg->'fiscal'->>'ambiente', '') = 'producao' then 'Em produção, série 2.' else 'Em homologação: em 03/11, antes da 1ª nota, Fiscal → Emissão → "Passar para produção…".' end, 'lista', '[]'::jsonb);
+
+  -- 12. vigia de notas
+  select count(*) into n from public.crm_integracoes where ativo and ultimo_sinal > now() - interval '75 minutes';
+  r := r || jsonb_build_object('chave', 'vigia', 'titulo', 'Vigia das notas no servidor', 'n', case when n > 0 then 0 else 1 end,
+    'nivel', case when n > 0 then 'ok' else 'aviso' end,
+    'dica', case when n > 0 then 'Mandou sinal na última hora: as notas do FKN (plano B) continuam entrando.' else 'Sem sinal há mais de 1 hora: confira o servidor do escritório.' end, 'lista', '[]'::jsonb);
+  return r;
+end;
+$$;
+revoke all on function public.crm_virada_conferir() from public, anon;
+grant execute on function public.crm_virada_conferir() to authenticated;

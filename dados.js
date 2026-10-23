@@ -489,6 +489,7 @@
     return !!(r && r.valor === 'crm');
   };
   Supa.prototype.produtosPassarAoCrm = async function () { return unwrap(await this.sb.rpc('crm_produtos_passar_ao_crm')); };
+  Supa.prototype.viradaConferir = async function () { return unwrap(await this.sb.rpc('crm_virada_conferir')) || []; };
   // Configuração por partes (crm_config_mesclar): só as chaves que vieram; "fiscal" um nível abaixo.
   Supa.prototype.configMesclar = async function (patch) { return unwrap(await this.sb.rpc('crm_config_mesclar', { p: patch })); };
   Supa.prototype.produtoLer = async function (codigo) { return unwrap(await this.sb.rpc('crm_produto_ler', { p_codigo: codigo })); };
@@ -536,6 +537,7 @@
   Local.prototype.comprasDevolucoes = async function () { return []; };
   Local.prototype.produtosDono = async function () { return false; };
   Local.prototype.produtosPassarAoCrm = async function () { throw new Error('o cadastro de produto só funciona ligado ao banco'); };
+  Local.prototype.viradaConferir = async function () { throw new Error('a conferência da virada só funciona ligada ao banco'); };
   Local.prototype.produtoLer = async function () { return null; };
   Local.prototype.produtoGravar = async function () { throw new Error('o cadastro de produto só funciona ligado ao banco'); };
   Local.prototype.produtoProximoCodigo = async function () { return ''; };

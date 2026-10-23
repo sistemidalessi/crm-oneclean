@@ -230,7 +230,7 @@
   const seloNfe = n => { const s = M.SITUACAO[M.situacaoDe(n)] || [n.situacao, 'cinza']; return CRM.selo(s[0], s[1]); };
 
   // estado da tela
-  let nfes = null, inuts = [], carregando = false, saude = null, sefaz = null, testando = '', certFkn = null;
+  let nfes = null, inuts = [], carregando = false, saude = null, sefaz = null, testando = '', certFkn = null, virada = null;
   const f = { mes: M.mesSP(new Date().toISOString()), amb: null };
 
   async function carrega() {
@@ -283,6 +283,22 @@
         (vps ? (igual ? ' · <strong>é o mesmo da VPS</strong>' : ' · <strong>não é o da VPS</strong> (o da VPS vale até ' + esc(new Date(vps.validoAte).toLocaleDateString('pt-BR')) + ')') : '') + '</li>';
     }).join('') + '</ul>' + (vps ? '' : '<p>Clique também em "Conferir o serviço fiscal" para comparar com o certificado da VPS.</p>') + '</div>';
   }
+  // Conferência da virada (23/10/2026): o que pode travar o dia só no CRM, para rodar na noite de 30/10 e na manhã de 03/11
+  // (crm_virada_conferir, só leitura). Cada item: { titulo, nivel 'ok' | 'aviso' | 'trava', n, dica, lista }.
+  function viradaHtml() {
+    if (!virada) return '';
+    const icone = { ok: '✓', aviso: '⚠', trava: '⛔' }, trava = virada.filter(x => x.nivel === 'trava').length, aviso = virada.filter(x => x.nivel === 'aviso').length;
+    const linhaL = x => {
+      const t = esc([x.codigo, x.numero ? 'pedido ' + x.numero : '', x.nome].filter(Boolean).join(' · ')) + (x.qtd != null ? ' <small>' + esc(String(Number(x.qtd))) + ' em estoque</small>' : '') +
+        (x.falta ? ' <small>falta: ' + esc(x.falta) + '</small>' : '') + (x.papel ? ' <small>' + esc(x.papel) + '</small>' : '') + (x.dia ? ' <small>' + esc(R.dataBR(x.dia)) + '</small>' : '');
+      return '<li>' + (x.id ? '<button type="button" class="link" data-acao="abrir-empresa" data-id="' + esc(x.id) + '">' + t + '</button>' : t) + '</li>';
+    };
+    return '<div class="' + (trava ? 'alerta' : 'dica') + '"><p><strong>Conferência da virada</strong> · ' + (trava ? trava + ' que travam a nota, ' : '') + aviso + ' para olhar, ' +
+      virada.filter(x => x.nivel === 'ok').length + ' em ordem.</p><ul class="lista">' + virada.map(x =>
+        '<li><strong>' + icone[x.nivel] + ' ' + esc(x.titulo) + (Number(x.n) > 0 && (x.lista || []).length ? ' (' + Number(x.n) + ')' : '') + '</strong><small>' + esc(x.dica || '') + '</small>' +
+        ((x.lista || []).length ? '<details><summary>ver ' + (Number(x.n) > x.lista.length ? 'os primeiros ' + x.lista.length : 'quais são') + '</summary><ul>' + x.lista.map(linhaL).join('') + '</ul></details>' : '') + '</li>').join('') +
+      '</ul></div>';
+  }
   function secaoFiscal() {
     const fc = fiscalCfg(), em = fc.emitente, falta = M.faltasEmitente(fc), amb = ambiente();
     const homAut = (nfes || []).filter(n => n.ambiente === 'homologacao' && (n.situacao === 'autorizada' || n.situacao === 'cancelada')).length;
@@ -294,8 +310,9 @@
         '<button type="button" class="btn sec" data-acao="nf-sefaz"' + (testando ? ' disabled' : '') + '>Status da Sefaz</button>' +
         (amb === 'homologacao' ? '<button type="button" class="btn sec" data-acao="nf-sefaz-prod"' + (testando ? ' disabled' : '') + ' title="Só consulta: confere o certificado e a ligação com a Sefaz de produção antes da virada; nada é emitido">Testar a Sefaz de produção</button>' : '') +
         '<button type="button" class="btn sec" data-acao="nf-cert-fkn"' + (testando ? ' disabled' : '') + ' title="Lê o certificado que assinou as últimas notas do FKN">Conferir o certificado do FKN</button>' +
-        '<button type="button" class="btn sec" data-acao="ir-nfe">Ver as notas emitidas (Pedidos → NF-e)</button></p>' +
-      (testando ? '<p class="dica">' + esc(testando) + '</p>' : '') + certificadoTexto() + certFknTexto() +
+        '<button type="button" class="btn sec" data-acao="ir-nfe">Ver as notas emitidas (Pedidos → NF-e)</button>' +
+        '<button type="button" class="btn" data-acao="nf-virada"' + (testando ? ' disabled' : '') + ' title="O que pode travar o dia só no CRM: produtos sem regra, clientes sem dados da nota, estoque fora do cadastro, equipe, IBPT, vigia">Conferir a virada</button></p>' +
+      (testando ? '<p class="dica">' + esc(testando) + '</p>' : '') + certificadoTexto() + certFknTexto() + viradaHtml() +
       (sefaz ? '<p class="' + (Number(sefaz.cStat) === 107 ? 'dica' : 'alerta') + '">Sefaz-SP (' + esc(sefaz.ambiente === 'producao' ? 'produção' : 'homologação') + '): <strong>' + esc(sefaz.cStat) + ' — ' + esc(sefaz.xMotivo || '') + '</strong></p>' : '') +
       '<h3>Emitente</h3>' +
       (em ? '<dl class="dados grade"><dt>Razão social</dt><dd>' + esc(em.razao || '—') + '</dd><dt>CNPJ</dt><dd>' + esc(em.cnpj) + '</dd><dt>IE</dt><dd>' + esc(em.ie || '—') +
@@ -783,6 +800,11 @@
           '. Depois, "Atualizar as propostas" na regra de cada produto.';
         CRM.toast(stUltimo);
       } catch (e) { CRM.falhou(e); }
+      testando = ''; CRM.render();
+    },
+    'nf-virada': async () => {
+      testando = 'Conferindo a virada…'; CRM.render();
+      try { virada = await CRM.store().viradaConferir(); } catch (e) { CRM.falhou(e); }
       testando = ''; CRM.render();
     },
     'nf-cert-fkn': async () => {

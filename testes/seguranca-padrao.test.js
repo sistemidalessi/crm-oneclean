@@ -10,3 +10,10 @@ test('padrão das funções: sem EXECUTE para anon e PUBLIC', () => {
   assert.ok(sql.includes('alter default privileges for role postgres in schema public revoke execute on functions from anon;'));
   assert.ok(sql.includes('alter default privileges for role postgres revoke execute on functions from public;'));
 });
+
+test('conferência da virada: só o administrador e sem anon', () => {
+  const i = sql.indexOf('create or replace function public.crm_virada_conferir()');
+  assert.ok(i > 0);
+  assert.ok(sql.slice(i, i + 600).includes("if not public.crm_eh_admin() then raise exception"));
+  assert.ok(sql.includes('revoke all on function public.crm_virada_conferir() from public, anon;'));
+});
