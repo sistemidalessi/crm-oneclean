@@ -1687,6 +1687,14 @@ itens e vínculos; contagem ok; vendedora bloqueada. Navegador: nenhuma chamada 
 **Retomar em 22/10: boleto pelo BB (Fase 5).** Modelo `entrega_cliente` aguardando análise da Meta. O que o Anderson
 levanta no BB (convênio, carteira, API de Cobrança ou CNAB 240/400) está em `sistemi-dalessi/docs/plano-sair-do-fkn.md`, Fase 5.
 
+## Revisão fiscal de especialista (23/10/2026, fim do dia)
+- Pedido do Anderson: arrumar sem esperar a contabilidade. De 183 produtos com pendência na aba Fiscal sobrou 1 (620002
+  "CONSULTOR 03", sem venda desde 08/2025). NCM certo pela descrição e TIPI, regra do NCM revisto, CEST do NCM; benefícios
+  só com fonte (requeijão e leite em pó 06, azeite 06, desodorante/talco para pés 04, copos descartáveis CEST 14.006.01).
+  Detalhes e fontes em `sistemi-dalessi/docs/oneclean/fiscal/regras-ncm-2026-11.md` (seção de 23/10, fim do dia); lista dos
+  NCM corrigidos em `crm_backup.ncm_correcao_20261023`; backup `crm_backup.fiscal_produtos_20261023e`.
+- A aba Fiscal mostra só o que pede ação: aviso `corrigido` e nível `info` vão para o "histórico (N)" de cada produto.
+
 ## Configuração gravada por partes (23/10/2026, antes da virada)
 - O app regravava o `crm_config` **inteiro** com a cópia da tela (`CRM.salvarConfig`): uma tela do administrador aberta antes,
   em outro computador, desfaria o que ele salvou depois — inclusive a **emissão em produção** (`dados.fiscal.ambiente`), que
