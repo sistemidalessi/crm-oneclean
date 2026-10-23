@@ -3808,7 +3808,7 @@ create policy "crm canhotos grava" on storage.objects for insert to authenticate
   with check (bucket_id = 'crm-canhotos' and ((select public.crm_eh_gestor()) or (select public.crm_eh_logistica()) or (select public.crm_eh_motorista())));
 
 -- endereço de uma linha da empresa, numa linha só (para a rota e para os mapas)
-create or replace function public.crm_endereco_texto(e public.crm_empresas) returns text language sql immutable as $$
+create or replace function public.crm_endereco_texto(e public.crm_empresas) returns text language sql immutable set search_path = public as $$
   select nullif(concat_ws(' · ', nullif(concat_ws(', ', nullif(btrim(coalesce(e.logradouro, '')), ''), nullif(btrim(coalesce(e.numero, '')), '')), ''),
     nullif(btrim(coalesce(e.complemento, '')), ''), nullif(btrim(coalesce(e.bairro, '')), ''),
     nullif(concat_ws('/', nullif(btrim(coalesce(e.cidade, '')), ''), nullif(btrim(coalesce(e.uf, '')), '')), ''),
@@ -5225,3 +5225,17 @@ do $$ begin
     perform cron.schedule('crm-cobranca-avisos', '5 12 * * 1-5', 'select public.crm_cobranca_tick()');
   end if;
 end $$;
+
+-- ============================================================================
+-- Segurança (23/10/2026, alertas do Supabase): 10 funções SECURITY DEFINER tinham voltado a aceitar chamada sem login
+-- (o padrão do esquema public dá EXECUTE ao anon e a PUBLIC em toda função nova, e a função recriada perde o revoke).
+-- Nenhuma vazava dado que importe (as de escrita conferem o papel por dentro; as de gatilho não rodam pela API), mas
+-- crm_produtos_ncm devolvia código e NCM a qualquer um. Agora o padrão é outro: função nova nasce só para quem fez login
+-- (authenticated e service_role); a que precisar do anon ganha o grant explícito.
+-- ============================================================================
+alter default privileges for role postgres in schema public revoke execute on functions from anon;
+alter default privileges for role postgres revoke execute on functions from public;
+revoke execute on function public.crm_produtos_ncm(), public.crm_boleto_reservar(text), public.crm_compra_lancar(uuid, jsonb),
+  public.crm_custo_mudou(), public.crm_estoque_guarda(), public.crm_estoque_mov_espelho(), public.crm_estoque_mov_saldo(),
+  public.crm_estoque_nota_cancelada(), public.crm_estoque_nota_item(), public.crm_pedidos_espelho() from public, anon;
+alter function public.crm_endereco_texto(public.crm_empresas) set search_path = public;
