@@ -2524,6 +2524,15 @@ ficou em `crm_backup.fiscal_produtos_20261023`.
 - o campo EXTIPI (`extipi` da regra), para o sabonete em barra com CST 06 (Ex 01 da 3401.11.90).
 A edição da regra na aba Fiscal tem os três campos novos (redução, cBenef, Ex da TIPI).
 
+**Forma de pagamento do pedido (23/10, serviço fiscal `2026-10-23c`):** achado na revisão para a virada — pedido com o
+pagamento vazio saía como nota **à vista, sem duplicata e sem título a receber**, e "PROGRAMADO 15/11" era lido como prazo
+em dias. Agora:
+- `lePagamento(texto, emissao)` em `servico-fiscal/pedido.js` lê datas dd/mm(/aaaa) como vencimento (dias a partir da
+  emissão); se o texto fala em DIAS/DDL ("28/35 DIAS"), não procura data; mês 1–12 e dia 1–31;
+- a nota que cobra (venda e entrega futura) **não sai** sem pagamento, nem com "PROGRAMADO" sem a data;
+- `emissao.js` tem a mesma trava na tela (`faltaPagamento`, no Emitir e no lote), que vale antes do `git pull` na VPS;
+- o pedido novo já vem com o último pagamento usado pelo cliente (pedidos do CRM e orçamentos; "programado" não é copiado).
+
 Avisos "NCM provavelmente errado" foram postos em 19 produtos, para o comprador corrigir.
 
 ### DIFAL: venda para consumidor de outro estado (23/10/2026)
