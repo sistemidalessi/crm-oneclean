@@ -24,3 +24,12 @@ test('devolução de cliente abate os títulos da venda pela duplicata com a sé
   assert.ok(!/where nota_numero = vnota\.numero/.test(f));
   assert.ok(f.includes("split_part(duplicata, '/', 1) = (case when coalesce(nullif(vnota.serie, '')::int, 1) = 1"));
 });
+
+test('entrada avulsa: só administrador e comprador; Caixa só pelo administrador', () => {
+  const i = sql.indexOf('create or replace function public.crm_estoque_entrada_avulsa');
+  const f = sql.slice(i, sql.indexOf('$$;', i));
+  assert.ok(f.includes("if not (public.crm_eh_admin() or public.crm_eh_comprador()) then raise exception"));
+  assert.ok(f.includes("(p->>'caixa')::boolean, false) and public.crm_eh_admin()"));
+  assert.ok(sql.includes('revoke all on function public.crm_estoque_entrada_avulsa(jsonb) from public, anon;'));
+  assert.ok(sql.includes("create policy ler on public.crm_estoque_avulsas for select to authenticated using ((select public.crm_eh_admin()) or (select public.crm_eh_comprador()));"));
+});

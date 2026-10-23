@@ -2116,6 +2116,7 @@ begin
     case
       when j.so_fkn then 'produto novo no FKN (o CRM ainda não tem)'
       when exists (select 1 from public.crm_estoque_mov m where m.codigo = j.codigo and m.conferir and m.quando <= f.gerado_em) then 'venda em unidade sem fator (confira a unidade)'
+      when j.qc > j.qk and exists (select 1 from public.crm_estoque_avulsas av where av.codigo = j.codigo and av.estornada_em is null and av.criado_em <= f.gerado_em and av.criado_em >= j.inicio) then 'entrada avulsa no CRM (compra sem nota de compra; o FKN não tem)'
       when exists (select 1 from public.crm_estoque_mov m where m.codigo = j.codigo and m.tipo = 'saida' and m.quando between f.gerado_em - interval '30 minutes' and f.gerado_em) then 'nota emitida perto da hora da listagem'
       when j.qk > j.qc and j.ult_entrada >= j.inicio::date then 'entrada no FKN em ' || to_char(j.ult_entrada, 'DD/MM') || ' sem entrada no CRM (nota de compra)'
       when j.qk < j.qc and j.ult_saida >= j.inicio::date then 'saída no FKN (' || to_char(j.ult_saida, 'DD/MM') || ') sem nota no CRM'
@@ -5364,3 +5365,104 @@ end;
 $$;
 revoke all on function public.crm_virada_conferir() from public, anon;
 grant execute on function public.crm_virada_conferir() to authenticated;
+
+-- ============================================================ Entrada avulsa (23/10/2026, pedido do Anderson)
+-- Compra de balcão sem nota de compra (faltou um item, comprou na loja perto): entra no estoque pelo custo pago, com
+-- onde comprou, o motivo e a foto do cupom/recibo, e fica numa lista para o contador. Só administrador e comprador.
+-- O administrador pode lançar o pagamento no Caixa junto. Engano: "Estornar" devolve o estoque (o livro não se apaga).
+create table if not exists public.crm_estoque_avulsas (
+  id            uuid primary key default gen_random_uuid(),
+  mov_id        uuid not null unique references public.crm_estoque_mov(id),
+  codigo        text not null,
+  descricao     text,
+  quantidade    numeric(14,3) not null check (quantidade > 0),
+  custo_unit    numeric(16,4) not null check (custo_unit > 0),
+  valor         numeric(14,2) not null,
+  onde          text not null check (length(btrim(onde)) > 0),
+  motivo        text not null check (length(btrim(motivo)) > 0),
+  comprado_em   date not null,
+  comprovante   text,                                   -- caminho no bucket crm-estoque-comprovantes
+  lancamento_id uuid references public.crm_fin_lancamentos(id) on delete set null,
+  estorno_mov   uuid references public.crm_estoque_mov(id),
+  estornada_em  timestamptz,
+  estornada_por uuid,
+  criado_por    uuid default auth.uid(),
+  criado_em     timestamptz not null default now()
+);
+create index if not exists crm_estoque_avulsas_dia on public.crm_estoque_avulsas (criado_em desc);
+alter table public.crm_estoque_avulsas enable row level security;
+revoke all on public.crm_estoque_avulsas from anon, public, authenticated;
+grant select on public.crm_estoque_avulsas to authenticated;
+drop policy if exists ler on public.crm_estoque_avulsas;
+create policy ler on public.crm_estoque_avulsas for select to authenticated using ((select public.crm_eh_admin()) or (select public.crm_eh_comprador()));
+
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('crm-estoque-comprovantes', 'crm-estoque-comprovantes', false, 10485760, array['image/jpeg', 'image/png', 'image/webp', 'application/pdf'])
+on conflict (id) do update set file_size_limit = excluded.file_size_limit, allowed_mime_types = excluded.allowed_mime_types;
+drop policy if exists "crm estoque comprovantes le" on storage.objects;
+create policy "crm estoque comprovantes le" on storage.objects for select to authenticated
+  using (bucket_id = 'crm-estoque-comprovantes' and ((select public.crm_eh_admin()) or (select public.crm_eh_comprador())));
+drop policy if exists "crm estoque comprovantes grava" on storage.objects;
+create policy "crm estoque comprovantes grava" on storage.objects for insert to authenticated
+  with check (bucket_id = 'crm-estoque-comprovantes' and ((select public.crm_eh_admin()) or (select public.crm_eh_comprador())));
+
+create or replace function public.crm_estoque_entrada_avulsa(p jsonb) returns jsonb language plpgsql security definer set search_path = public as $$
+declare cod text := nullif(btrim(p->>'codigo'), ''); q numeric := nullif(p->>'quantidade', '')::numeric; c numeric := nullif(p->>'custo_unit', '')::numeric;
+  onde text := nullif(btrim(p->>'onde'), ''); mot text := nullif(btrim(p->>'motivo'), ''); comp text := nullif(btrim(p->>'comprovante'), '');
+  hoje date := (now() at time zone 'America/Sao_Paulo')::date; dia date; pago boolean := coalesce((p->>'pago')::boolean, false);
+  mid uuid; lid uuid; nome text; v numeric;
+begin
+  if not (public.crm_eh_admin() or public.crm_eh_comprador()) then raise exception 'só o administrador ou o comprador'; end if;
+  dia := coalesce(nullif(p->>'comprado_em', '')::date, hoje);
+  if cod is null or cod ~ '\.\d+$' or not exists (select 1 from public.crm_estoque e where e.codigo = cod) then
+    raise exception 'o código % não está no cadastro de produtos', coalesce(cod, '(vazio)'); end if;
+  if q is null or q <= 0 then raise exception 'diga a quantidade que entrou'; end if;
+  if c is null or c <= 0 then raise exception 'diga quanto custou cada unidade'; end if;
+  if onde is null or mot is null then raise exception 'diga onde comprou e por quê'; end if;
+  if dia > hoje or dia < hoje - 60 then raise exception 'a data da compra tem de ser de até 60 dias atrás'; end if;
+  if comp is not null and not exists (select 1 from storage.objects o where o.bucket_id = 'crm-estoque-comprovantes' and o.name = comp) then
+    raise exception 'o comprovante não foi encontrado'; end if;
+  if not exists (select 1 from public.crm_estoque_saldo) then raise exception 'comece o estoque do CRM antes'; end if;
+  insert into public.crm_estoque_saldo (codigo, descricao, unidade, inicio)
+    select e.codigo, e.descricao, public.crm_un(e.unidade), now() - interval '1 second' from public.crm_estoque e where e.codigo = cod
+  on conflict (codigo) do nothing;
+  select descricao into nome from public.crm_estoque where codigo = cod;
+  v := round(q * c, 2);
+  insert into public.crm_estoque_mov (codigo, quando, tipo, quantidade, custo_unit, motivo)
+  values (cod, now(), 'entrada', round(q, 3), round(c, 4), left('Entrada avulsa (sem nota de compra): ' || onde || ' · ' || mot, 200)) returning id into mid;
+  if coalesce((p->>'caixa')::boolean, false) and public.crm_eh_admin() then
+    insert into public.crm_fin_lancamentos (tipo, descricao, fornecedor, categoria, valor, vencimento, situacao, pago_em, baixa, baixado_em, origem, observacoes)
+    values ('saida', 'Compra avulsa (sem nota): ' || coalesce(nome, cod), onde, 'Fornecedores', v, dia,
+      case when pago then 'pago' else 'aberto' end, case when pago then dia end, case when pago then 'caixa' end, case when pago then now() end,
+      'tela', left(mot || ' · comprovante em Estoque → Contagem e ajuste → Entradas avulsas', 500))
+    returning id into lid;
+  end if;
+  insert into public.crm_estoque_avulsas (mov_id, codigo, descricao, quantidade, custo_unit, valor, onde, motivo, comprado_em, comprovante, lancamento_id)
+  values (mid, cod, nome, round(q, 3), round(c, 4), v, onde, mot, dia, comp, lid);
+  return jsonb_build_object('ok', true, 'valor', v, 'caixa', lid is not null);
+end;
+$$;
+revoke all on function public.crm_estoque_entrada_avulsa(jsonb) from public, anon;
+grant execute on function public.crm_estoque_entrada_avulsa(jsonb) to authenticated;
+
+-- Engano na entrada avulsa: estorno no livro (devolve o estoque) e, se o pagamento ainda está aberto no Caixa, ele sai.
+create or replace function public.crm_estoque_avulsa_estornar(p_id uuid, p_motivo text) returns jsonb language plpgsql security definer set search_path = public as $$
+declare a record; eid uuid; tirou boolean := false;
+begin
+  if not (public.crm_eh_admin() or public.crm_eh_comprador()) then raise exception 'só o administrador ou o comprador'; end if;
+  if coalesce(btrim(p_motivo), '') = '' then raise exception 'diga o motivo do estorno'; end if;
+  select * into a from public.crm_estoque_avulsas where id = p_id for update;
+  if a.id is null then raise exception 'entrada avulsa não encontrada'; end if;
+  if a.estornada_em is not null then raise exception 'esta entrada já foi estornada'; end if;
+  insert into public.crm_estoque_mov (codigo, quando, tipo, quantidade, estorno_de, motivo)
+  values (a.codigo, now(), 'estorno', -a.quantidade, a.mov_id, left('Estorno da entrada avulsa: ' || p_motivo, 200)) returning id into eid;
+  if a.lancamento_id is not null and public.crm_eh_admin() then
+    delete from public.crm_fin_lancamentos where id = a.lancamento_id and situacao = 'aberto';
+    tirou := found;
+  end if;
+  update public.crm_estoque_avulsas set estorno_mov = eid, estornada_em = now(), estornada_por = auth.uid() where id = a.id;
+  return jsonb_build_object('ok', true, 'caixa_tirado', tirou, 'caixa_pago', a.lancamento_id is not null and not tirou);
+end;
+$$;
+revoke all on function public.crm_estoque_avulsa_estornar(uuid, text) from public, anon;
+grant execute on function public.crm_estoque_avulsa_estornar(uuid, text) to authenticated;

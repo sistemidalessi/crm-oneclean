@@ -558,6 +558,25 @@
   Supa.prototype.estoqueFoto = async function (gerado, linhas) { return unwrap(await this.sb.rpc('crm_estoque_foto', { p_gerado: gerado || null, p_linhas: linhas || null })); };
   Supa.prototype.estoqueIniciar = async function () { return unwrap(await this.sb.rpc('crm_estoque_iniciar')); };
   Supa.prototype.estoqueContagem = async function (lote, tipo, motivo) { return unwrap(await this.sb.rpc('crm_estoque_contagem', { lote, p_tipo: tipo, p_motivo: motivo })); };
+  // Entrada avulsa (23/10/2026): compra de balcão sem nota de compra, com o comprovante (bucket crm-estoque-comprovantes)
+  Supa.prototype.estoqueAvulsas = async function (limite) {
+    return unwrap(await this.sb.from('crm_estoque_avulsas').select('*').order('criado_em', { ascending: false }).limit(limite || 100)) || [];
+  };
+  Supa.prototype.estoqueAvulsa = async function (p) { return unwrap(await this.sb.rpc('crm_estoque_entrada_avulsa', { p })); };
+  Supa.prototype.estoqueAvulsaEstornar = async function (id, motivo) { return unwrap(await this.sb.rpc('crm_estoque_avulsa_estornar', { p_id: id, p_motivo: motivo })); };
+  Supa.prototype.comprovanteEnviar = async function (arquivo, hoje) {
+    const ext = (String(arquivo.name || '').split('.').pop() || '').toLowerCase().replace(/[^a-z]/g, '') ||
+      ({ 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'application/pdf': 'pdf' }[arquivo.type] || 'bin');
+    const caminho = 'avulsas/' + hoje.slice(0, 7) + '/' + uuid() + '.' + ext;
+    const r = await this.sb.storage.from('crm-estoque-comprovantes').upload(caminho, arquivo, { contentType: arquivo.type || undefined, upsert: false });
+    if (r.error) throw new Error('não consegui guardar o comprovante: ' + r.error.message);
+    return caminho;
+  };
+  Supa.prototype.comprovanteLink = async function (caminho) {
+    const r = await this.sb.storage.from('crm-estoque-comprovantes').createSignedUrl(caminho, 60);
+    if (r.error) throw new Error('não consegui abrir o comprovante: ' + r.error.message);
+    return r.data.signedUrl;
+  };
   Supa.prototype.estoqueSaldo = async function () {
     const out = [];
     for (let de = 0; ; de += PAGINA) {
@@ -660,6 +679,8 @@
   Local.prototype.estoqueFoto = async function () { return { foto: null, conferencia: null }; };
   Local.prototype.estoqueIniciar = async function () { throw new Error('o estoque do CRM só funciona ligado ao banco'); };
   Local.prototype.estoqueContagem = async function () { throw new Error('o estoque do CRM só funciona ligado ao banco'); };
+  Local.prototype.estoqueAvulsas = async function () { return []; };
+  Local.prototype.estoqueAvulsa = async function () { throw new Error('a entrada avulsa só funciona ligada ao banco'); };
   Local.prototype.estoqueSaldo = async function () { return []; };
   Local.prototype.estoqueMovs = async function () { return []; };
   Local.prototype.estoqueFotos = async function () { return []; };

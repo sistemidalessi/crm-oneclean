@@ -167,3 +167,10 @@ test('código do cadastro: acerta o zero da frente e recusa o que o cadastro nã
   assert.strictEqual(S.codigoDoCadastro('0010', cad), null);      // dois do cadastro sem os zeros ("10" e "010"): não escolhe
   assert.strictEqual(S.codigoDoCadastro('', cad), null);
 });
+
+test('entrada avulsa: custo de cada unidade pelo total pago', () => {
+  assert.strictEqual(S.custoAvulsa(3, 10), 3.3333);
+  assert.strictEqual(S.custoAvulsa('2', '11'), 5.5);
+  assert.strictEqual(S.custoAvulsa(0, 10), null);
+  assert.strictEqual(S.custoAvulsa(2, 0), null);
+});

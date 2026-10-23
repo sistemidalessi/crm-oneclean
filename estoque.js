@@ -274,7 +274,12 @@
     const achados = [...lista].filter(x => !ehCaixa(x) && x.replace(/^0+/, '') === sem);
     return achados.length === 1 ? achados[0] : null;
   }
-  const api = { codigoDoCadastro, fatoresSuspeitos, junta, valor, sequencia, lerContagem, atualFkn, ehCaixa, TIPOS, extrasDoXml, stDoDet, compraDoXml, devolucaoDoXml, custoItem, sugere, avisosDfe, sugereFornecedor, chegadaCompras, pareceDespesa };
+  // Entrada avulsa (23/10/2026): o comprovante traz o total pago; o estoque guarda o custo de cada unidade.
+  function custoAvulsa(qtd, total) {
+    const q = num(qtd), t = num(total);
+    return q > 0 && t > 0 ? Math.round(t / q * 10000) / 10000 : null;
+  }
+  const api = { custoAvulsa, codigoDoCadastro, fatoresSuspeitos, junta, valor, sequencia, lerContagem, atualFkn, ehCaixa, TIPOS, extrasDoXml, stDoDet, compraDoXml, devolucaoDoXml, custoItem, sugere, avisosDfe, sugereFornecedor, chegadaCompras, pareceDespesa };
   raiz.CRMEstoque = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);
@@ -289,6 +294,7 @@
   const quando = iso => (iso ? new Date(iso).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—');
 
   let saldo = null, fkn = [], fotos = [], difs = [], fotoVista = null, carregando = false, compras = [], lendoCompras = '';
+  let avulsas = null; // entradas avulsas (compra sem nota), só administrador e comprador
   const filtro = { ver: 'saldo', busca: '', soDif: false };
   let dfe = [], dfeEst = null, buscouDfe = false, buscandoDfe = '', fornDocs = [], fornCad = [], itensProd = [], itensPend = [], nomesOp = [];
   let chegadas = new Map(); // compra.id → { chegou_em, chegou_nome, chegou_obs }: o "Chegou" da logística (22/10/2026)
@@ -656,7 +662,23 @@
       '<p>Contou o estoque (todo ou uma parte)? Cole aqui uma linha por produto: <code>código;quantidade contada</code> (da planilha, com Tab, também serve). ' +
       'O CRM leva o saldo de cada produto ao contado e guarda a diferença no livro como "inventário", com o motivo.</p>' +
       '<p class="acoes"><button type="button" class="btn" data-acao="es-contagem">Lançar uma contagem</button></p>' +
-      '<p class="dica">Para acertar um produto só, use o ✎ na lista de saldo. O livro não se apaga: todo acerto fica registrado com quem fez e por quê.</p></section>';
+      '<p class="dica">Para acertar um produto só, use o ✎ na lista de saldo. O livro não se apaga: todo acerto fica registrado com quem fez e por quê.</p></section>' +
+      (CRM.ehAdmin() || CRM.ehComprador() ? telaAvulsas() : '');
+  }
+  function telaAvulsas() {
+    if (avulsas === null) { avulsas = []; CRM.store().estoqueAvulsas(100).then(l => { avulsas = l || []; CRM.render(); }).catch(CRM.falhou); }
+    const linha = a => '<tr' + (a.estornada_em ? ' class="apagado"' : '') + '><td>' + esc(R.dataBR(a.comprado_em)) + '</td><td><strong>' + esc(a.codigo) + '</strong> ' + esc(a.descricao || '') + '</td>' +
+      '<td class="num">' + qtd(a.quantidade) + '</td><td class="num">' + R.moeda(a.valor) + '<small>' + R.moeda(a.custo_unit) + ' cada</small></td>' +
+      '<td>' + esc(a.onde) + '<small>' + esc(a.motivo) + ' · ' + esc(CRM.nomeUsuario(a.criado_por)) + (a.lancamento_id ? ' · no Caixa' : '') + '</small></td><td class="num">' +
+      (a.comprovante ? '<button type="button" class="mini" data-acao="es-avulsa-comp" data-id="' + esc(a.comprovante) + '">📎 Comprovante</button> ' : CRM.selo('sem comprovante', 'ambar') + ' ') +
+      (a.estornada_em ? CRM.selo('estornada', 'etiqueta') : '<button type="button" class="mini" data-acao="es-avulsa-estornar" data-id="' + esc(a.id) + '">Estornar</button>') + '</td></tr>';
+    return '<section class="cartao"><h2>Entrada avulsa <small>compra sem nota de compra (balcão)</small></h2>' +
+      '<p>Faltou um item e foi comprado numa loja, sem nota de compra para a OneClean? Dê a entrada aqui: entra no estoque pelo valor pago, com onde comprou, o motivo e a foto do cupom ou recibo. ' +
+      'Fica nesta lista, com quem lançou, para o contador ver no fechamento do mês.' + (CRM.ehAdmin() ? ' O pagamento pode ir junto para o Caixa.' : '') + '</p>' +
+      '<p class="acoes"><button type="button" class="btn" data-acao="es-avulsa">+ Entrada avulsa</button></p>' +
+      (avulsas.length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Comprado em</th><th>Produto</th><th class="num">Qtd.</th><th class="num">Valor</th><th>Onde e por quê</th><th></th></tr></thead><tbody>' +
+        avulsas.map(linha).join('') + '</tbody></table></div>' : '<p class="vazio">Nenhuma entrada avulsa ainda.</p>') +
+      '<p class="dica">Peça o CPF/CNPJ da empresa no cupom sempre que der. Compra de fornecedor com nota não entra aqui: entra pela nota de compra.</p></section>';
   }
 
   CRM.telas.estoque = {
@@ -880,6 +902,66 @@
           await CRM.store().compraIgnorar(id, nome + (v.obs ? ': ' + v.obs : ''));
           compras = await CRM.store().compras(200); CRM.toast('Tirada da lista (' + nome + ').'); CRM.render();
         } });
+    },
+    'es-avulsa': () => {
+      const base = (fkn || []).filter(e => !S.ehCaixa(e.codigo));
+      const nomeDe = new Map(base.map(e => [e.codigo, e.descricao])), cad = new Set(base.map(e => e.codigo));
+      CRM.abrirForm({
+        titulo: 'Entrada avulsa (compra sem nota de compra)',
+        intro: 'Para compra de balcão: entra no estoque pelo valor pago. Compra de fornecedor com nota entra pela nota de compra.',
+        campos: [{ nome: 'codigo', rotulo: 'Produto (código)', obrigatorio: true, dica: 'comece a digitar o código ou o nome' },
+          { nome: 'quantidade', rotulo: 'Quantidade que entrou (na unidade do estoque)', tipo: 'numero', passo: '0.001', obrigatorio: true },
+          { nome: 'total', rotulo: 'Valor pago (total)', tipo: 'numero', obrigatorio: true },
+          { nome: 'comprado_em', rotulo: 'Comprado em', tipo: 'data', obrigatorio: true },
+          { nome: 'onde', rotulo: 'Onde comprou', obrigatorio: true, dica: 'ex.: Atacadão SBC, padaria da esquina' },
+          { nome: 'motivo', rotulo: 'Por quê', obrigatorio: true, dica: 'ex.: faltou para o pedido 123 da Escola X' }]
+          .concat(CRM.ehAdmin() ? [{ nome: 'caixa', rotulo: 'Lançar o pagamento no Caixa', tipo: 'checkbox' }, { nome: 'pago', rotulo: 'Já foi pago', tipo: 'checkbox' }] : []),
+        valores: { comprado_em: CRM.hoje(), caixa: true, pago: true }, salvarTexto: 'Dar entrada',
+        htmlDepois: '<datalist id="esAvulsaProd">' + R.ordemAlfa(base.map(e => [e.codigo, e.descricao]), x => x[1] || x[0]).map(([k, v]) => '<option value="' + esc(k) + '">' + esc(v || '') + '</option>').join('') + '</datalist>' +
+          '<label class="campo av-comprovante"><span>Comprovante (foto do cupom ou recibo, ou PDF)</span><input type="file" name="comprovante" accept="image/*,application/pdf" capture="environment"></label>' +
+          '<p class="dica" data-av-resumo></p>',
+        extras: form => {
+          const c = form.elements.codigo; if (c) c.setAttribute('list', 'esAvulsaProd');
+          const res = form.querySelector('[data-av-resumo]');
+          const atualiza = () => {
+            const cod = String(c.value || '').trim(), certo = cad.has(cod) ? cod : S.codigoDoCadastro(cod, cad);
+            const cu = S.custoAvulsa(String(form.elements.quantidade.value).replace(',', '.'), String(form.elements.total.value).replace(',', '.'));
+            res.textContent = (certo ? (nomeDe.get(certo) || certo) + (certo !== cod ? ' (faltava o zero: ' + certo + ')' : '') : cod ? 'código que o cadastro não tem' : '') + (cu ? ' · ' + R.moeda(cu) + ' cada' : '');
+          };
+          ['codigo', 'quantidade', 'total'].forEach(n => form.elements[n].addEventListener('input', atualiza));
+        },
+        aoSalvar: async (v, form) => {
+          const cod = String(v.codigo || '').trim(), certo = cad.has(cod) ? cod : S.codigoDoCadastro(cod, cad);
+          if (!certo) throw new Error('o código ' + cod + ' não está no cadastro de produtos');
+          const cu = S.custoAvulsa(v.quantidade, v.total);
+          if (!cu) throw new Error('diga a quantidade e o valor pago');
+          const arq = form.querySelector('input[name="comprovante"]').files[0];
+          if (arq && arq.size > 10 * 1024 * 1024) throw new Error('o comprovante passa de 10 MB');
+          if (!arq && !confirm('Dar entrada sem o comprovante? (o contador vai pedir)')) return false;
+          const st = CRM.store();
+          const comprovante = arq ? await st.comprovanteEnviar(arq, CRM.hoje()) : null;
+          const r = await st.estoqueAvulsa({ codigo: certo, quantidade: v.quantidade, custo_unit: cu, comprado_em: v.comprado_em, onde: v.onde, motivo: v.motivo,
+            comprovante, caixa: !!v.caixa, pago: !!v.pago });
+          CRM.toast('Entrada avulsa: ' + qtd(v.quantidade) + ' de ' + (nomeDe.get(certo) || certo) + ' (' + R.moeda(r.valor) + ')' + (r.caixa ? ', lançada no Caixa' : '') + '.');
+          avulsas = null; saldo = null; carrega();
+        }
+      });
+    },
+    'es-avulsa-comp': async caminho => {
+      try { window.open(await CRM.store().comprovanteLink(caminho), '_blank', 'noopener'); } catch (e) { CRM.falhou(e); }
+    },
+    'es-avulsa-estornar': id => {
+      const a = (avulsas || []).find(x => x.id === id); if (!a) return;
+      CRM.abrirForm({
+        titulo: 'Estornar a entrada avulsa', intro: qtd(a.quantidade) + ' de ' + (a.descricao || a.codigo) + ' (' + R.moeda(a.valor) + '). O estoque volta; o livro guarda as duas linhas.' +
+          (a.lancamento_id ? ' Se o pagamento ainda está aberto no Caixa, ele sai; se já foi pago, fica e precisa ser acertado lá.' : ''),
+        campos: [{ nome: 'motivo', rotulo: 'Motivo', obrigatorio: true, dica: 'ex.: lançado em dobro, produto errado' }], valores: {}, salvarTexto: 'Estornar',
+        aoSalvar: async v => {
+          const r = await CRM.store().estoqueAvulsaEstornar(id, v.motivo);
+          CRM.toast('Estornada.' + (r.caixa_tirado ? ' O pagamento aberto saiu do Caixa.' : r.caixa_pago ? ' O pagamento já estava pago: acerte no Caixa.' : ''));
+          avulsas = null; saldo = null; carrega();
+        }
+      });
     },
     'es-contagem': () => {
       CRM.abrirForm({
