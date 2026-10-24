@@ -174,3 +174,15 @@ test('entrada avulsa: custo de cada unidade pelo total pago', () => {
   assert.strictEqual(S.custoAvulsa(0, 10), null);
   assert.strictEqual(S.custoAvulsa(2, 0), null);
 });
+
+test('folha de contagem da virada: negativos e diferentes do FKN, sem custo, e volta colada inteira', () => {
+  const linhas = S.junta([{ codigo: '370051', descricao: 'SACO LIXO 100L', unidade: 'PCT', saldo: -47, custo_medio: 9.9 }, { codigo: '010003', descricao: 'AGUA SANITARIA', unidade: 'GL', saldo: 105 },
+    { codigo: '010004', descricao: 'BATE', unidade: 'UN', saldo: 10 }], [{ codigo: '370051', estoque_atual: 23 }, { codigo: '010003', estoque_atual: 5 }, { codigo: '010004', estoque_atual: 10 }]);
+  const f = S.folhaContagem(linhas);
+  assert.deepEqual(f.linhas.map(x => x[0]), ['010003', '370051']);
+  assert.ok(!f.cabecalho.some(c => /custo/i.test(c)) && !JSON.stringify(f.linhas).includes('9.9'));
+  // a folha preenchida volta: cabeçalho pulado, colunas depois do contado ignoradas, sem contado não muda
+  const r = S.lerContagem('﻿Código;Contado;Descrição;Unidade;Saldo no CRM;FKN;Por que contar\n010003;7;AGUA SANITARIA;GL;105;5;diferente do FKN\n370051;;SACO LIXO 100L;PCT;-47;23;saldo negativo no CRM');
+  assert.deepEqual(r.lote, [{ codigo: '010003', contado: 7 }]);
+  assert.equal(r.pulados, 1); assert.deepEqual(r.erros, []);
+});

@@ -45,17 +45,33 @@
 
   // Contagem colada (planilha ou bloco de notas): "código;quantidade", "código<TAB>quantidade" ou "código quantidade".
   // Quantidade aceita vírgula decimal ("12,5"). → { lote: [{codigo, contado}], erros: [linha] }
+  // A folha de contagem (abaixo) volta colada inteira: "código;contado;descrição;…" — as colunas depois do contado não contam,
+  // o cabeçalho é pulado e a linha sem o contado (produto que não foi contado) não muda nada.
   function lerContagem(texto) {
     const lote = new Map(), erros = [];
-    String(texto || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean).forEach(l => {
-      const m = /^([0-9A-Za-z.\-]+)\s*[;\t ,]\s*(-?[\d.]*\d(?:,\d+)?|-?\d+(?:\.\d+)?)\s*$/.exec(l);
+    let pulados = 0;
+    String(texto || '').split(/\r?\n/).map(l => l.trim().replace(/^\uFEFF/, '')).filter(Boolean).forEach(l => {
+      if (/^"?c[oó]digo"?\s*[;\t]/i.test(l)) return;
+      if (/^[0-9A-Za-z.\-]+\s*[;\t]\s*(?:[;\t].*)?$/.test(l)) { pulados++; return; }
+      const m = /^([0-9A-Za-z.\-]+)\s*[;\t ,]\s*(-?[\d.]*\d(?:,\d+)?|-?\d+(?:\.\d+)?)\s*(?:[;\t].*)?$/.exec(l);
       if (!m) { erros.push(l); return; }
       // "1.234,5" e "3.000" (milhar com ponto, como na planilha brasileira); "12.5" sem grupo de milhar = decimal
       const q = /,/.test(m[2]) || /^-?\d{1,3}(\.\d{3})+$/.test(m[2]) ? Number(m[2].replace(/\./g, '').replace(',', '.')) : Number(m[2]);
       if (!isFinite(q)) { erros.push(l); return; }
       lote.set(m[1], q);
     });
-    return { lote: [...lote.entries()].map(([codigo, contado]) => ({ codigo, contado })), erros };
+    return { lote: [...lote.entries()].map(([codigo, contado]) => ({ codigo, contado })), erros, pulados };
+  }
+
+  // Folha de contagem para a noite da virada (24/10/2026): os produtos com saldo negativo no CRM (vendido sem entrada) e os
+  // que não batem com o FKN. A logística conta, preenche a coluna "Contado" e cola a folha de volta em "Lançar uma contagem".
+  // Sem custo (a logística também usa).
+  function folhaContagem(linhas) {
+    const l = (linhas || []).filter(x => x.saldo != null && (x.saldo < 0 || (x.dif != null && x.dif !== 0)))
+      .sort((a, b) => String(a.descricao || '').localeCompare(String(b.descricao || ''), 'pt-BR'));
+    return { cabecalho: ['Código', 'Contado', 'Descrição', 'Unidade', 'Saldo no CRM', 'FKN', 'Por que contar'],
+      linhas: l.map(x => [x.codigo, '', x.descricao || '', x.unidade || '', x.saldo, x.fkn == null ? '' : x.fkn,
+        x.saldo < 0 ? 'saldo negativo no CRM' : 'diferente do FKN']) };
   }
 
   // ---------------------------------------------------------- entrada de compra pelo XML
@@ -279,7 +295,7 @@
     const q = num(qtd), t = num(total);
     return q > 0 && t > 0 ? Math.round(t / q * 10000) / 10000 : null;
   }
-  const api = { custoAvulsa, codigoDoCadastro, fatoresSuspeitos, junta, valor, sequencia, lerContagem, atualFkn, ehCaixa, TIPOS, extrasDoXml, stDoDet, compraDoXml, devolucaoDoXml, custoItem, sugere, avisosDfe, sugereFornecedor, chegadaCompras, pareceDespesa };
+  const api = { folhaContagem, custoAvulsa, codigoDoCadastro, fatoresSuspeitos, junta, valor, sequencia, lerContagem, atualFkn, ehCaixa, TIPOS, extrasDoXml, stDoDet, compraDoXml, devolucaoDoXml, custoItem, sugere, avisosDfe, sugereFornecedor, chegadaCompras, pareceDespesa };
   raiz.CRMEstoque = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);
@@ -658,10 +674,13 @@
   }
 
   function telaContagem() {
+    const folhaN = S.folhaContagem(S.junta(saldo, fkn)).linhas.length;
     return '<section class="cartao"><h2>Inventário por contagem</h2>' +
       '<p>Contou o estoque (todo ou uma parte)? Cole aqui uma linha por produto: <code>código;quantidade contada</code> (da planilha, com Tab, também serve). ' +
       'O CRM leva o saldo de cada produto ao contado e guarda a diferença no livro como "inventário", com o motivo.</p>' +
-      '<p class="acoes"><button type="button" class="btn" data-acao="es-contagem">Lançar uma contagem</button></p>' +
+      '<p class="acoes"><button type="button" class="btn" data-acao="es-contagem">Lançar uma contagem</button>' +
+        (folhaN ? ' <button type="button" class="btn sec" data-acao="es-folha">Baixar a folha de contagem (' + folhaN + ' produtos)</button>' : '') + '</p>' +
+      (folhaN ? '<p class="dica">A folha traz os produtos com saldo negativo no CRM e os que não batem com o FKN. Conte, preencha a coluna "Contado" e cole a folha inteira aqui; o que ficar sem contado não muda.</p>' : '') +
       '<p class="dica">Para acertar um produto só, use o ✎ na lista de saldo. O livro não se apaga: todo acerto fica registrado com quem fez e por quê.</p></section>' +
       (CRM.ehAdmin() || CRM.ehComprador() ? telaAvulsas() : '');
   }
@@ -963,6 +982,10 @@
         }
       });
     },
+    'es-folha': () => {
+      const f = S.folhaContagem(S.junta(saldo, fkn));
+      CRM.baixarCSV('folha-de-contagem', f.cabecalho, f.linhas);
+    },
     'es-contagem': () => {
       CRM.abrirForm({
         titulo: 'Lançar uma contagem', largura: 'largo',
@@ -978,7 +1001,7 @@
           if (fora.length) throw new Error('código(s) que o estoque do CRM não tem: ' + fora.slice(0, 8).join(', '));
           if (!confirm('Levar ' + r.lote.length + ' produto(s) ao contado?')) return false;
           const n = await CRM.store().estoqueContagem(r.lote, 'inventario', v.motivo);
-          CRM.toast('Contagem lançada: ' + n + ' produto(s) mudaram, ' + (r.lote.length - n) + ' já batiam.');
+          CRM.toast('Contagem lançada: ' + n + ' produto(s) mudaram, ' + (r.lote.length - n) + ' já batiam' + (r.pulados ? ', ' + r.pulados + ' sem contado (não mudaram)' : '') + '.');
           saldo = null; carrega();
         }
       });
