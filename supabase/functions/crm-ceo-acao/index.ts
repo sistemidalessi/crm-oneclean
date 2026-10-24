@@ -7,6 +7,9 @@
 // Recusa (401, sem detalhe): sem assinatura, assinatura que não confere, ts fora de ±5 min. O nonce de "liberar" é
 // único no banco (crm_ceo_acoes): o mesmo corpo assinado não libera duas vezes. LISTA FECHADA: só ler os pedidos
 // bloqueados e liberar um pedido em aberto; nunca dinheiro, nota, exclusão ou mensagem a cliente.
+// Cadastro da chave (25/10/2026, Anderson: "cadastre a chave por mim"): {"acao":"registrar_chave","chave_publica":…}
+// com Authorization: Bearer <senha de leitura do Caixa> (a mesma da crm-caixa-leitura, que o servidor da Agilité já
+// tem) E assinado pela própria chave. Só vale enquanto NÃO há chave ativa: depois da primeira, qualquer outra é 409.
 // Deploy: verify_jwt DESLIGADO (a autenticação é a assinatura). A chave de serviço só existe aqui dentro.
 import { createClient } from 'npm:@supabase/supabase-js@2.116.0';
 
@@ -15,9 +18,9 @@ const resposta = (status: number, obj: unknown) => new Response(JSON.stringify(o
 const b64 = (s: string) => Uint8Array.from(atob(s), c => c.charCodeAt(0));
 
 // deno-lint-ignore no-explicit-any
-async function assinaturaValida(db: any, corpo: string, assinatura: string) {
+async function assinaturaValida(db: any, corpo: string, assinatura: string, so: string | null = null) {
   if (!assinatura || assinatura.length > 200) return false;
-  const { data, error } = await db.from('crm_ceo_chaves').select('chave_publica').eq('ativa', true);
+  const { data, error } = so ? { data: [{ chave_publica: so }], error: null } : await db.from('crm_ceo_chaves').select('chave_publica').eq('ativa', true);
   if (error || !data) return false;
   let sig: Uint8Array;
   try { sig = b64(assinatura); } catch { return false; }
@@ -31,11 +34,43 @@ async function assinaturaValida(db: any, corpo: string, assinatura: string) {
   return false;
 }
 
+async function sha256(t: string) {
+  const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t));
+  return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join('');
+}
+// deno-lint-ignore no-explicit-any
+async function registrar(db: any, req: Request, corpo: string, c: any) {
+  const auth = req.headers.get('authorization') || '';
+  const senha = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+  if (senha.length < 32) return resposta(401, { erro: 'não autorizado' });
+  const { data: hs, error: e1 } = await db.from('crm_integracoes').select('token_hash').eq('uso', 'caixa').eq('ativo', true);
+  if (e1) return resposta(500, { erro: 'falhou no CRM' });
+  const h = await sha256(senha);
+  // deno-lint-ignore no-explicit-any
+  if (!(hs || []).some((x: any) => x.token_hash === h)) return resposta(401, { erro: 'não autorizado' });
+  const chave = String(c.chave_publica || '');
+  if (!/^[A-Za-z0-9+/]{43}=$/.test(chave)) return resposta(400, { erro: 'chave inválida' });
+  if (!Number.isFinite(c.ts) || Math.abs(Date.now() / 1000 - c.ts) > 300) return resposta(401, { erro: 'não autorizado' });
+  if (!(await assinaturaValida(db, corpo, req.headers.get('x-ceo-assinatura') || '', chave))) return resposta(401, { erro: 'não autorizado' });
+  const { data: ja, error: e2 } = await db.from('crm_ceo_chaves').select('chave_publica').eq('ativa', true);
+  if (e2) return resposta(500, { erro: 'falhou no CRM' });
+  // deno-lint-ignore no-explicit-any
+  if ((ja || []).some((x: any) => x.chave_publica === chave)) return resposta(200, { ok: true, ja_estava: true });
+  if ((ja || []).length) return resposta(409, { erro: 'já existe chave cadastrada; trocar só pelo banco' });
+  const { error: e3 } = await db.from('crm_ceo_chaves').insert({ nome: 'Servidor da Agilité (cadastrada por ele mesmo)', chave_publica: chave });
+  if (e3) return resposta(500, { erro: 'falhou no CRM' });
+  return resposta(200, { ok: true, registrada: true });
+}
+
 Deno.serve(async (req) => {
   if (req.method !== 'POST') return resposta(405, { erro: 'use POST' });
   const corpo = await req.text();
   if (corpo.length > 2000) return resposta(413, { erro: 'corpo grande demais' });
   const db = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } });
+  // deno-lint-ignore no-explicit-any
+  let pre: any = {};
+  try { pre = JSON.parse(corpo); } catch { /* conferido abaixo */ }
+  if (pre && pre.acao === 'registrar_chave') return await registrar(db, req, corpo, pre);
   if (!(await assinaturaValida(db, corpo, req.headers.get('x-ceo-assinatura') || ''))) return resposta(401, { erro: 'não autorizado' });
   // deno-lint-ignore no-explicit-any
   let c: any;

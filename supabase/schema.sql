@@ -5653,6 +5653,8 @@ create table if not exists public.crm_ceo_chaves (
   criada_em     timestamptz not null default now()
 );
 alter table public.crm_ceo_chaves enable row level security;
+-- uma chave ativa só (o cadastro automático pela crm-ceo-acao vale enquanto não há nenhuma)
+create unique index if not exists crm_ceo_chaves_uma_ativa on public.crm_ceo_chaves ((true)) where ativa;
 create table if not exists public.crm_ceo_acoes (
   id            bigint generated always as identity primary key,
   nonce         text not null unique,
