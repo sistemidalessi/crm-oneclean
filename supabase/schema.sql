@@ -4847,8 +4847,15 @@ alter table public.crm_compras add column if not exists devolucao boolean not nu
 alter table public.crm_compras add column if not exists ref_chave text;
 alter table public.crm_compras add column if not exists efeitos jsonb;
 
+-- 1ª palavra com 3 letras ou mais, sem acento nem pontuação ("P. SEVERINI NETTO" → SEVERINI): para casar o mesmo fornecedor
+-- escrito de jeitos diferentes no FKN e na nota (24/10/2026)
+create or replace function public.crm_nome_chave(t text) returns text language sql immutable set search_path = public as $$
+  select (regexp_match(upper(translate(coalesce(t, ''), 'áàâãéêíóôõúçÁÀÂÃÉÊÍÓÔÕÚÇ', 'aaaaeeioooucAAAAEEIOOOUC')), '[A-Z0-9]{3,}'))[1];
+$$;
+revoke all on function public.crm_nome_chave(text) from public, anon;
+
 create or replace function public.crm_compra_pagar() returns trigger language plpgsql security definer set search_path = public as $$
-declare p jsonb; k int; i int := 0; forn text; num text;
+declare p jsonb; k int; i int := 0; forn text; num text; ja int;
 begin
   if not public.crm_produtos_do_crm() then return new; end if;
   if new.situacao <> 'lancada' or old.situacao = 'lancada' then return new; end if;
@@ -4856,6 +4863,17 @@ begin
   if exists (select 1 from public.crm_fin_lancamentos where compra_id = new.id) then return new; end if;
   forn := coalesce(nullif(btrim(new.fornecedor_nome), ''), 'Fornecedor');
   num := coalesce(new.numero::text, '?');
+  -- 24/10/2026 (ensaio da virada): a nota que já entrou no FKN tem as contas trazidas do Sifn083 ("00271|8414-01": código
+  -- do fornecedor | NF-parcela). Dada a entrada no CRM depois da virada, não vira conta de novo: liga as do FKN à compra.
+  -- Casa pelo número da nota e pelo nome do fornecedor (1ª palavra com 3 letras ou mais), porque o número sozinho repete.
+  update public.crm_fin_lancamentos l set compra_id = new.id, parcela = f.rn
+    from (select x.id, row_number() over (order by x.chave_fkn)::int rn from public.crm_fin_lancamentos x
+           where x.origem = 'fkn' and x.compra_id is null and new.numero is not null
+             and ltrim(regexp_replace(split_part(split_part(x.chave_fkn, '|', 2), '-', 1), '\D', '', 'g'), '0') = ltrim(new.numero::text, '0')
+             and public.crm_nome_chave(split_part(x.descricao, ' · ', 1)) = public.crm_nome_chave(forn)) f
+   where l.id = f.id;
+  get diagnostics ja = row_count;
+  if ja > 0 then return new; end if;
   k := jsonb_array_length(coalesce(new.parcelas, '[]'::jsonb));
   if k = 0 then
     insert into public.crm_fin_lancamentos (tipo, descricao, fornecedor, categoria, valor, vencimento, origem, compra_id, parcela, parcelas, titulo_duplicata, observacoes)

@@ -66,3 +66,12 @@ test('números da NF-e sem uso: só gestão e logística, sem anônimo, e entram
   assert.ok(sql.includes('revoke all on function public.crm_nfe_sem_uso() from public, anon;'));
   assert.ok(sql.includes("r := r || jsonb_build_object('nfe_sem_uso', x);"));
 });
+
+test('virada: nota de compra que já entrou no FKN liga as contas dele em vez de criar outras', () => {
+  const i = sql.lastIndexOf('create or replace function public.crm_compra_pagar()');
+  const f = sql.slice(i, sql.indexOf('$$;', i));
+  assert.ok(f.includes("x.origem = 'fkn' and x.compra_id is null"));
+  assert.ok(f.includes('public.crm_nome_chave(split_part(x.descricao, \' · \', 1)) = public.crm_nome_chave(forn)'));
+  assert.ok(f.indexOf('if ja > 0 then return new; end if;') < f.indexOf('insert into public.crm_fin_lancamentos'));
+  assert.ok(sql.includes('revoke all on function public.crm_nome_chave(text) from public, anon;'));
+});
