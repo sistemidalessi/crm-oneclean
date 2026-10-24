@@ -358,7 +358,7 @@ select crm_espelho_aplicar('{"versao":1,"origem":"agilite","par":"agilite:1;drop
 select crm_espelho_aplicar('{"versao":1,"origem":"oneclean","par":"agilite:1","apagar":true}'); -- FALHA
 select crm_espelho_aplicar('{"versao":1,"origem":"agilite","par":"agilite:2","movimentos":[{"ref":"agilite:2","tipo":"saida","valor":-5,"data":"2026-10-08","situacao":"realizado"}]}'); -- FALHA
 
--- CEO Grupo, ações pelo celular (25/10/2026): só o servidor (service_role) chama; nonce não repete
+-- CEO Grupo, ações pelo celular (24/10/2026): só o servidor (service_role) chama; nonce não repete
 reset role; set role authenticated; select pg_temp.como('a0000000-0000-0000-0000-000000000001');
 select 'admin listou bloqueados pelo CEO (NÃO devia)' from (select public.crm_ceo_pedidos_bloqueados()) x; -- FALHA
 select 'admin liberou pelo CEO (NÃO devia)' from (select public.crm_ceo_pedido_liberar(1, 'nonce-ataque-000000001')) x; -- FALHA
