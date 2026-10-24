@@ -57,3 +57,12 @@ test('ensaio da virada: simples faturamento (5922/6922) não entra na rota de en
   const f = sql.slice(i, sql.indexOf('end $$;', i));
   assert.ok(f.includes("and not exists (select 1 from public.crm_nota_itens i where i.nota_id = n.id and i.cfop in ('5922', '6922'))"));
 });
+
+test('números da NF-e sem uso: só gestão e logística, sem anônimo, e entram no resumo da turma', () => {
+  const i = sql.indexOf('create or replace function public.crm_nfe_sem_uso');
+  const f = sql.slice(i, sql.indexOf('end $$;', i));
+  assert.ok(f.includes("if not (public.crm_eh_gestor() or public.crm_eh_logistica()) then raise exception 'sem acesso'; end if;"));
+  assert.ok(f.includes("f.ambiente = 'producao' and f.situacao in ('reservada', 'rejeitada', 'bloqueada') and f.inutilizada_em is null"));
+  assert.ok(sql.includes('revoke all on function public.crm_nfe_sem_uso() from public, anon;'));
+  assert.ok(sql.includes("r := r || jsonb_build_object('nfe_sem_uso', x);"));
+});

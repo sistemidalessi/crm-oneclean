@@ -3012,6 +3012,38 @@ end;
 $$;
 revoke all on function public.crm_fiscal_st_amostras() from public, anon, authenticated;
 grant execute on function public.crm_fiscal_st_amostras() to service_role;
+-- ============================================================ Números da NF-e sem uso (24/10/2026, Plano B da virada)
+-- O número é reservado ao clicar em "Emitir NF-e" e volta a ser o mesmo nas novas tentativas. Se a nota daquele pedido não sai
+-- pelo CRM (saiu pelo FKN no Plano B, o pedido foi cancelado, a operação desistida), o número fica pulado na série 2 e precisa
+-- ser inutilizado na Sefaz até o dia 10 do mês seguinte (Ajuste SINIEF 07/05, cláusula 14ª). Lista os de produção, ainda
+-- não inutilizados, com o motivo e o prazo; o que só está parado há mais de 3 dias também entra (decidir: emitir ou inutilizar).
+create or replace function public.crm_nfe_sem_uso()
+returns table (id uuid, serie integer, numero integer, situacao text, criado_em timestamptz, pedido_numero bigint, motivo text, prazo date)
+language plpgsql stable security definer set search_path = public as $$
+declare hoje date := (now() at time zone 'America/Sao_Paulo')::date;
+begin
+  if not (public.crm_eh_gestor() or public.crm_eh_logistica()) then raise exception 'sem acesso'; end if;
+  return query
+    select f.id, f.serie, f.numero, f.situacao, f.criado_em, p.numero,
+      case when f.outra_id is not null and o.situacao = 'cancelada' then 'a operação foi cancelada'
+           when f.outra_id is not null then 'parada há ' || (hoje - (f.criado_em at time zone 'America/Sao_Paulo')::date) || ' dias'
+           when p.id is null then 'o pedido ou a operação foi apagado'
+           when p.situacao = 'cancelado' then 'o pedido foi cancelado'
+           when p.situacao = 'faturado' then 'o pedido foi faturado por outra nota'
+           else 'parada há ' || (hoje - (f.criado_em at time zone 'America/Sao_Paulo')::date) || ' dias' end,
+      (date_trunc('month', f.criado_em at time zone 'America/Sao_Paulo') + interval '1 month 9 days')::date
+      from public.crm_nfe f
+      left join public.crm_pedidos p on p.id = f.pedido_id
+      left join public.crm_nfe_outras o on o.id = f.outra_id
+     where f.ambiente = 'producao' and f.situacao in ('reservada', 'rejeitada', 'bloqueada') and f.inutilizada_em is null
+       and (case when f.outra_id is not null then o.situacao = 'cancelada'
+                 else p.id is null or p.situacao in ('cancelado', 'faturado') end
+            or f.criado_em < now() - interval '3 days')
+     order by f.serie, f.numero;
+end $$;
+revoke all on function public.crm_nfe_sem_uso() from public, anon;
+grant execute on function public.crm_nfe_sem_uso() to authenticated;
+
 
 -- Turma (mascotes, 17/10/2026): números do "guia do dia" do assistente, num pedido só. SECURITY INVOKER: cada bloco
 -- conta só o que a RLS deixa a pessoa ver (a vendedora, os pedidos dela; o Caixa, só o administrador). Bloco que a
@@ -3038,6 +3070,11 @@ begin
       'rejeitadas', count(*) filter (where situacao = 'rejeitada' and criado_em > now() - interval '3 days'))
       into x from public.crm_nfe where ambiente = 'producao' and situacao in ('pendente', 'rejeitada');
     r := r || jsonb_build_object('nfe', x);
+  exception when others then null; end;
+  begin
+    -- números da série 2 sem uso, para inutilizar até o dia 10 (24/10/2026; a vendedora não tem acesso e fica sem o aviso)
+    select jsonb_build_object('n', count(*), 'prazo', min(s.prazo)) into x from public.crm_nfe_sem_uso() s;
+    r := r || jsonb_build_object('nfe_sem_uso', x);
   exception when others then null; end;
   begin
     -- 22/10/2026: o saldo é o do livro do estoque do CRM (o da listagem do FKN para de mudar na virada)

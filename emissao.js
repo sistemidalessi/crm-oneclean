@@ -230,13 +230,14 @@
   const seloNfe = n => { const s = M.SITUACAO[M.situacaoDe(n)] || [n.situacao, 'cinza']; return CRM.selo(s[0], s[1]); };
 
   // estado da tela
-  let nfes = null, inuts = [], carregando = false, saude = null, sefaz = null, testando = '', certFkn = null, virada = null;
+  let nfes = null, inuts = [], semUso = [], carregando = false, saude = null, sefaz = null, testando = '', certFkn = null, virada = null;
   const f = { mes: M.mesSP(new Date().toISOString()), amb: null };
 
   async function carrega() {
     if (carregando) return;
     carregando = true;
-    try { [nfes, inuts] = await Promise.all([CRM.store().nfes(), ehOp() ? CRM.store().nfeInutilizacoes() : Promise.resolve([])]); }
+    try { [nfes, inuts, semUso] = await Promise.all([CRM.store().nfes(), ehOp() ? CRM.store().nfeInutilizacoes() : Promise.resolve([]),
+      ehOp() ? CRM.store().nfeSemUso().catch(() => []) : Promise.resolve([])]); }
     catch (e) { nfes = nfes || []; CRM.falhou(e); }
     carregando = false;
     CRM.render();
@@ -423,6 +424,11 @@
         '<button type="button" class="btn sec" data-acao="nf-devolucao" data-id="devolucao_cliente">Devolução de cliente…</button></p>' +
         '<p class="dica">Cliente com inscrição estadual (contribuinte) devolve com a nota dele: o CRM só emite a nota de entrada para quem não é contribuinte (condomínio, escola, pessoa física).</p></section>' : '') +
       (ehOp() ? '<section class="cartao"><h2>Inutilizar numeração</h2><p class="dica">Para números que pularam e não vão ser usados (uma nota rejeitada de pedido que não sai, um salto na numeração). Nota autorizada não se inutiliza: cancela-se.</p>' +
+        // números da produção que ficaram sem nota (Plano B: a nota do pedido saiu pelo FKN; pedido cancelado; parada): a Sefaz
+        // pede a inutilização até o dia 10 do mês seguinte (Ajuste SINIEF 07/05, cláusula 14ª)
+        (semUso.length ? '<p class="alerta"><strong>' + semUso.length + (semUso.length === 1 ? ' número da produção sem nota' : ' números da produção sem nota') + '.</strong> Se a nota não vai mais sair pelo CRM, inutilize até o dia 10 do mês seguinte.</p>' +
+          '<ul class="lista">' + semUso.map(u => '<li>' + esc('NF ' + u.serie + '-' + u.numero + (u.pedido_numero ? ' · pedido ' + u.pedido_numero : '') + ' · ' + u.motivo + ' · até ' + String(u.prazo || '').split('-').reverse().join('/')) +
+            ' <button type="button" class="mini" data-acao="nf-inutilizar" data-id="' + esc(u.serie + ':' + u.numero) + '">Inutilizar</button></li>').join('') + '</ul>' : '') +
         (inuts.length ? '<ul class="lista">' + inuts.slice(0, 20).map(i => '<li>' + esc('Série ' + i.serie + ', ' + (i.de === i.ate ? 'nº ' + i.de : 'nº ' + i.de + ' a ' + i.ate) + ' · ' + (i.ambiente === 'producao' ? 'produção' : 'homologação') + ' · ' + quando(i.criado_em) + ' · ' + (i.cstat || '') + ' ' + (i.motivo || '')) + '</li>').join('') + '</ul>' : '') +
         '<p class="acoes"><button type="button" class="btn sec" data-acao="nf-inutilizar">Inutilizar números…</button></p></section>' : '');
   }
@@ -892,11 +898,11 @@
           CRM.toast('Carta de correção registrada. Protocolo ' + (r.evento && r.evento.protocolo || '') + '.');
         } });
     },
-    'nf-inutilizar': () => CRM.abrirForm({ titulo: 'Inutilizar números de NF-e',
+    'nf-inutilizar': id => { const [se, nu] = String(id || '').split(':').map(Number), u = semUso.find(x => x.serie === se && x.numero === nu); return CRM.abrirForm({ titulo: 'Inutilizar números de NF-e',
       intro: 'Ambiente atual: ' + (ambiente() === 'producao' ? 'PRODUÇÃO' : 'homologação') + '. Só números que não foram usados (nota autorizada se cancela, não se inutiliza). Não dá para desfazer.',
       campos: [{ nome: 'serie', rotulo: 'Série', tipo: 'numero', passo: '1', obrigatorio: true }, { nome: 'de', rotulo: 'Do número', tipo: 'numero', passo: '1', min: 1, obrigatorio: true },
         { nome: 'ate', rotulo: 'Até o número', tipo: 'numero', passo: '1', min: 1, obrigatorio: true }, { nome: 'texto', rotulo: 'Justificativa (15 a 255 letras)', tipo: 'textarea', obrigatorio: true, largo: true, dica: 'Ex.: número pulado por falha no envio, sem nota emitida' }],
-      valores: { serie: serie() }, salvarTexto: 'Inutilizar',
+      valores: u ? { serie: se, de: nu, ate: nu, texto: 'Numeração não utilizada: ' + u.motivo } : { serie: serie() }, salvarTexto: 'Inutilizar',
       aoSalvar: async v => {
         const erro = M.confereTexto(v.texto, 'inutilizar'); if (erro) throw new Error(erro);
         if (!(v.ate >= v.de)) throw new Error('o "até" precisa ser maior ou igual ao "do"');
@@ -907,7 +913,7 @@
         await recarrega();
         if (!r.ok) throw new Error('a Sefaz recusou: ' + r.cStat + ' — ' + r.motivo);
         CRM.toast('Números inutilizados (' + r.cStat + ').');
-      } }),
+      } }); },
     'nf-fechamento': async () => {
       try {
         const [l, ins] = await Promise.all([CRM.store().nfesDoMes(f.mes), CRM.store().nfeInutilizacoes()]);

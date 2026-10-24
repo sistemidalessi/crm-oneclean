@@ -1266,6 +1266,7 @@
   Supa.prototype.outraOrigem = async function (tipo, numero) { return unwrap(await this.sb.rpc('crm_nfe_outra_origem', { p_tipo: tipo, p_numero: numero })) || []; };
   Supa.prototype.outraCriar = async function (linha) { return unwrap(await this.sb.from('crm_nfe_outras').insert(linha).select().single()); };
   Supa.prototype.outras = async function () { return unwrap(await this.sb.from('crm_nfe_outras').select('*').order('criado_em', { ascending: false }).limit(300)); };
+  Supa.prototype.nfeSemUso = async function () { return unwrap(await this.sb.rpc('crm_nfe_sem_uso')) || []; };
   Supa.prototype.nfeInutilizacoes = async function () { return unwrap(await this.sb.from('crm_nfe_inutilizacoes').select('*').order('criado_em', { ascending: false }).limit(200)); };
 
   // Tabela do IBPT (tributos aproximados): o administrador carrega o CSV; a crm-fiscal lê pelo NCM.
@@ -1380,6 +1381,7 @@
   Local.prototype.outraOrigem = async function () { return []; };
   Local.prototype.outraCriar = async function () { throw new Error('as outras notas só funcionam ligadas ao banco'); };
   Local.prototype.outras = async function () { return []; };
+  Local.prototype.nfeSemUso = async function () { return []; };
   Local.prototype.nfeInutilizacoes = async function () { return (this._inuts || []).slice(); };
 
   // ---------------------------------------------------------------- fotos e fichas técnicas dos produtos (19/10/2026)

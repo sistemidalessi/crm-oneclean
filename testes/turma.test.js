@@ -115,3 +115,12 @@ test('ordem da agenda: urgente antes; no mesmo nível, o da tela aberta primeiro
   assert.deepStrictEqual(T.ordemAgenda(l, 'agenda').map(x => x.id), ['c', 'b', 'a']);
   assert.deepStrictEqual(T.ordemAgenda(l, 'compras').map(x => x.id), ['c', 'a', 'b']);
 });
+
+test('números da NF-e sem uso: aviso com o prazo, urgente a 5 dias do dia 10', () => {
+  const g = T.guia({ op: true, resumo: { nfe_sem_uso: { n: 2, prazo: '2026-11-10' } }, hoje: '2026-11-03' });
+  const x = g.find(i => i.id === 'nfe-sem-uso');
+  assert.strictEqual(x.texto, '2 números da NF-e sem uso: inutilizar até 10/11');
+  assert.strictEqual(x.nivel, 'atencao');
+  assert.strictEqual(T.guia({ op: true, resumo: { nfe_sem_uso: { n: 1, prazo: '2026-11-10' } }, hoje: '2026-11-06' }).find(i => i.id === 'nfe-sem-uso').nivel, 'urgente');
+  assert.ok(!T.guia({ op: true, resumo: { nfe_sem_uso: { n: 0 } }, hoje: '2026-11-06' }).some(i => i.id === 'nfe-sem-uso'));
+});

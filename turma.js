@@ -55,6 +55,12 @@
     const nf = r.nfe || {};
     if (nf.pendentes) poe('nfe-pend', 'urgente', plural(nf.pendentes, 'NF-e sem resposta da Sefaz (consultar)', 'NF-e sem resposta da Sefaz (consultar)'), 'pedidos', 'nfe');
     if (nf.rejeitadas) poe('nfe-rej', 'urgente', plural(nf.rejeitadas, 'NF-e rejeitada nos últimos dias', 'NF-e rejeitadas nos últimos dias'), 'pedidos', 'nfe');
+    const su = r.nfe_sem_uso || {};
+    if (su.n) {
+      const dias = su.prazo ? Math.round((new Date(su.prazo + 'T12:00:00') - new Date((c.hoje || new Date().toISOString().slice(0, 10)) + 'T12:00:00')) / 864e5) : null;
+      poe('nfe-sem-uso', dias != null && dias <= 5 ? 'urgente' : 'atencao', plural(su.n, 'número da NF-e sem uso', 'números da NF-e sem uso') +
+        ': inutilizar' + (su.prazo ? ' até ' + su.prazo.slice(8, 10) + '/' + su.prazo.slice(5, 7) : ''), 'pedidos', 'nfe');
+    }
     if (c.admin || c.comprador) {
       (c.recusas || []).forEach((x, i) => poe('fkn-recusa-' + i, 'urgente', 'Relatório do FKN recusado: puxe de novo com as opções certas', 'compras'));
       (c.fkn || []).forEach((x, i) => poe('fkn-' + i, 'atencao', 'Puxar do FKN: ' + x.arquivo, 'compras'));
@@ -195,7 +201,7 @@
       gestor: CRM.ehGestor(), admin: CRM.ehAdmin(), comprador: CRM.ehComprador(), op: CRM.ehLogistica() || CRM.ehGestor(),
       fkn: CRM.lembreteFkn ? CRM.lembreteFkn() : [], recusas: CRM.recusasFkn ? CRM.recusasFkn() : [],
       vigiasParados: CRM.ehAdmin() ? (E().vigias || []).filter(c => raiz.CRMDados.situacaoVigia(c).estado === 'parado').map(c => c.nome) : [],
-      papel: eu.papel,
+      papel: eu.papel, hoje: CRM.hoje(),
       analise: fazAnalise() ? { pronta: !!(analise && analise.texto), gerando: gerandoAnalise } : null
     });
   }
