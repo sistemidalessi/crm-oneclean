@@ -295,7 +295,14 @@
     const q = num(qtd), t = num(total);
     return q > 0 && t > 0 ? Math.round(t / q * 10000) / 10000 : null;
   }
-  const api = { folhaContagem, custoAvulsa, codigoDoCadastro, fatoresSuspeitos, junta, valor, sequencia, lerContagem, atualFkn, ehCaixa, TIPOS, extrasDoXml, stDoDet, compraDoXml, devolucaoDoXml, custoItem, sugere, avisosDfe, sugereFornecedor, chegadaCompras, pareceDespesa };
+  // Momento a antes do momento b, comparando o instante e não o texto (24/10/2026): o XML traz "2026-10-16T14:04:00-03:00" e o
+  // banco devolve "2026-10-16T14:56:00+00:00"; comparadas como texto, 14:04 de Brasília (17:04 UTC) passava por antes de 14:56
+  // UTC e a nota de depois do início do estoque virava "histórico de preço" (Belaplast 9758 e Leal 23026).
+  function antesDe(a, b) {
+    const x = Date.parse(a), y = Date.parse(b);
+    return Number.isFinite(x) && Number.isFinite(y) && x < y;
+  }
+  const api = { antesDe, folhaContagem, custoAvulsa, codigoDoCadastro, fatoresSuspeitos, junta, valor, sequencia, lerContagem, atualFkn, ehCaixa, TIPOS, extrasDoXml, stDoDet, compraDoXml, devolucaoDoXml, custoItem, sugere, avisosDfe, sugereFornecedor, chegadaCompras, pareceDespesa };
   raiz.CRMEstoque = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);
@@ -524,7 +531,7 @@
   // CRM já entrou no estoque pelo FKN: fica como "deixada de lado", só para o histórico de preço (comprador sênior).
   async function gravaTextos(textos, nosso) {
     const st = CRM.store(), N = raiz.CRMNfe;
-    const inicio = (saldo || []).reduce((m, x) => (x.inicio && (!m || x.inicio < m) ? x.inicio : m), null);
+    const inicio = (saldo || []).reduce((m, x) => (x.inicio && (!m || S.antesDe(x.inicio, m)) ? x.inicio : m), null);
     let novas = 0, ja = 0, historico = 0;
     const erros = [];
     for (const t of textos) {
@@ -535,7 +542,7 @@
         const g = await st.compraGravar(c.compra, c.itens);
         if (!g) { ja++; continue; }
         novas++;
-        if (inicio && c.compra.emitida_em && c.compra.emitida_em < inicio) { await st.compraIgnorar(g.id, 'antes do início do estoque do CRM: já entrou pelo FKN; fica como histórico de preço'); historico++; }
+        if (S.antesDe(c.compra.emitida_em, inicio)) { await st.compraIgnorar(g.id, 'antes do início do estoque do CRM: já entrou pelo FKN; fica como histórico de preço'); historico++; }
         lendoCompras = 'Gravando: ' + (novas + ja) + ' de ' + textos.length + '…'; CRM.render();
       } catch (e) { erros.push(t.nome + ': ' + (e.message || e)); }
     }
@@ -621,7 +628,7 @@
     const semCiencia = resumo.filter(d => !d.manifestada_em), aguardando = resumo.filter(d => d.manifestada_em);
     // Ciência só do que já chegou (decisão do Anderson, 19/10): as de antes do início do estoque do CRM já estão no saldo
     // (entraram pelo FKN) e vão juntas num clique; as de depois, uma a uma, quando a mercadoria chegar.
-    const ini = inicioEstoque(), antigas = ini ? semCiencia.filter(d => d.emitida_em && d.emitida_em < ini) : [];
+    const ini = inicioEstoque(), antigas = ini ? semCiencia.filter(d => S.antesDe(d.emitida_em, ini)) : [];
     const e = dfeEst || {}, espera = e.proxima_em && Date.parse(e.proxima_em) > Date.now();
     return '<section class="cartao"><h2>Notas da Sefaz <small>emitidas contra o nosso CNPJ nos últimos 3 meses</small></h2>' +
       '<p>' + (e.ultima_em ? 'Última consulta: <strong>' + esc(quando(e.ultima_em)) + '</strong>' + (e.ultimo_motivo ? ' (' + esc(e.ultimo_motivo) + ')' : '') + '. ' : 'Ainda não consultou. ') +
@@ -642,7 +649,7 @@
         '</tbody></table></div></details>' : '') + '</section>' + blocoAvisosDfe();
   }
 
-  const inicioEstoque = () => (saldo || []).reduce((m, x) => (x.inicio && (!m || x.inicio < m) ? x.inicio : m), null);
+  const inicioEstoque = () => (saldo || []).reduce((m, x) => (x.inicio && (!m || S.antesDe(x.inicio, m)) ? x.inicio : m), null);
   // uma por vez (a crm-fiscal recebe uma chave e confere que ainda falta a ciência)
   async function ciencia(chaves) {
     let ok = 0, falha = 0;
@@ -808,7 +815,7 @@
     },
     'es-sefaz-trazer': async () => { await trazDfe(false); CRM.render(); },
     'es-sefaz-ciencia-antigas': async () => {
-      const ini = inicioEstoque(), l = ini ? dfe.filter(d => d.situacao === 'autorizada' && !d.xml_em && !d.manifestada_em && d.emitida_em && d.emitida_em < ini) : [];
+      const ini = inicioEstoque(), l = ini ? dfe.filter(d => d.situacao === 'autorizada' && !d.xml_em && !d.manifestada_em && S.antesDe(d.emitida_em, ini)) : [];
       if (!l.length) return;
       if (!confirm('Dar a Ciência da Operação de ' + l.length + ' nota(s) emitidas antes de ' + quando(ini).slice(0, 5) + '?\n\n' +
         l.map(d => '· ' + (d.emitente_nome || '?') + ' (' + quando(d.emitida_em).slice(0, 5) + ', ' + R.moeda(d.valor) + ')').join('\n') +

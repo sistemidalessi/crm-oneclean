@@ -186,3 +186,11 @@ test('folha de contagem da virada: negativos e diferentes do FKN, sem custo, e v
   assert.deepEqual(r.lote, [{ codigo: '010003', contado: 7 }]);
   assert.equal(r.pulados, 1); assert.deepEqual(r.erros, []);
 });
+
+test('antesDe compara o instante, não o texto: 14:04 de Brasília é depois de 14:56 UTC', () => {
+  assert.equal(S.antesDe('2026-10-16T14:04:00-03:00', '2026-10-16T14:56:00+00:00'), false);
+  assert.equal(S.antesDe('2026-10-16T11:50:00-03:00', '2026-10-16T14:56:00+00:00'), true);
+  assert.equal(S.antesDe('2026-10-15T11:19:00-03:00', '2026-10-16 14:56:00+00'), true);
+  assert.equal(S.antesDe(null, '2026-10-16T14:56:00+00:00'), false);
+  assert.equal(S.antesDe('2026-10-16T14:04:00-03:00', null), false);
+});
