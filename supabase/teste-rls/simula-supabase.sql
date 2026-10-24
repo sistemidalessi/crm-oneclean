@@ -8,6 +8,8 @@ create schema auth; grant usage on schema auth to anon, authenticated;
 create table auth.users (id uuid primary key, email text);
 create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
 grant execute on function auth.uid() to anon, authenticated;
+create function auth.role() returns text language sql stable as $$ select nullif(current_setting('request.jwt.claim.role', true), '') $$;
+grant execute on function auth.role() to anon, authenticated;
 grant select on auth.users to authenticated; -- (para as FKs funcionarem)
 alter default privileges in schema public grant all on tables to anon, authenticated;
 alter default privileges in schema public grant all on functions to anon, authenticated;

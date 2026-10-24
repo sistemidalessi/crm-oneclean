@@ -5637,3 +5637,95 @@ end;
 $$;
 revoke all on function public.crm_ceo_resumo() from public, anon, authenticated;
 grant execute on function public.crm_ceo_resumo() to service_role;
+
+-- ============================================================ CEO Grupo Dalessi: ações pelo celular (25/10/2026)
+-- O Anderson responde no WhatsApp da Agilité e o sistema de lá pede ao CRM uma ação da LISTA FECHADA. Por enquanto só
+-- uma: liberar pedido bloqueado (Anderson, 25/10: "começa pelo liberar pedido bloqueado"). O pedido chega pela Edge
+-- Function crm-ceo-acao ASSINADO com Ed25519 pela chave privada que só existe no servidor da Agilité; aqui fica só a
+-- chave PÚBLICA (crm_ceo_chaves, não é segredo). Nenhuma senha nova trafega. Só o service_role executa estas funções
+-- (e elas mesmas conferem o papel, para não depender só do revoke). Cada ação fica em crm_ceo_acoes (o nonce é único:
+-- o mesmo pedido assinado não roda duas vezes). Nunca por aqui: dinheiro, nota, exclusão, mensagem a cliente.
+create table if not exists public.crm_ceo_chaves (
+  id            bigint generated always as identity primary key,
+  nome          text not null,
+  chave_publica text not null unique,              -- Ed25519, 32 bytes em base64
+  ativa         boolean not null default true,
+  criada_em     timestamptz not null default now()
+);
+alter table public.crm_ceo_chaves enable row level security;
+create table if not exists public.crm_ceo_acoes (
+  id            bigint generated always as identity primary key,
+  nonce         text not null unique,
+  acao          text not null,
+  pedido_numero bigint,
+  ok            boolean not null default false,
+  detalhe       text,
+  criado_em     timestamptz not null default now()
+);
+alter table public.crm_ceo_acoes enable row level security;
+
+-- o pedido como o CEO vê (cliente, vendedor(a), valor, bloqueios que ainda seguram)
+create or replace function public.crm_ceo_pedido_json(r public.crm_pedidos) returns jsonb language plpgsql stable security definer set search_path = public as $$
+begin
+  if coalesce(auth.role(), '') <> 'service_role' then raise exception 'só o servidor'; end if;
+  return jsonb_build_object('numero', r.numero, 'situacao', r.situacao, 'valor_total', r.valor_total, 'entrega', r.entrega, 'criado_em', r.criado_em,
+    'cliente', (select e.nome from public.crm_empresas e where e.id = r.empresa_id),
+    'vendedor', (select u.nome from public.crm_usuarios u where u.user_id = r.vendedor_id),
+    'bloqueios', coalesce((select jsonb_agg(b) from unnest(r.bloqueios) b where b <> all (r.liberado)), '[]'::jsonb));
+end;
+$$;
+
+create or replace function public.crm_ceo_pedidos_bloqueados() returns jsonb language plpgsql security definer set search_path = public as $$
+begin
+  if coalesce(auth.role(), '') <> 'service_role' then raise exception 'só o servidor'; end if;
+  perform public.crm_pedidos_atualizar();
+  return coalesce((select jsonb_agg(public.crm_ceo_pedido_json(p) order by p.criado_em) from (
+    select * from public.crm_pedidos where situacao = 'aberto' and exists (select 1 from unnest(bloqueios) b where b <> all (liberado))
+    order by criado_em limit 30) p), '[]'::jsonb);
+end;
+$$;
+
+create or replace function public.crm_ceo_pedido_ver(p_numero bigint) returns jsonb language plpgsql security definer set search_path = public as $$
+declare r public.crm_pedidos;
+begin
+  if coalesce(auth.role(), '') <> 'service_role' then raise exception 'só o servidor'; end if;
+  perform public.crm_pedidos_atualizar();
+  select * into r from public.crm_pedidos where numero = p_numero;
+  if r.id is null then return null; end if;
+  return public.crm_ceo_pedido_json(r);
+end;
+$$;
+
+-- libera os bloqueios de AGORA (um bloqueio novo volta a segurar, como no crm_pedido_liberar da tela)
+create or replace function public.crm_ceo_pedido_liberar(p_numero bigint, p_nonce text) returns jsonb language plpgsql security definer set search_path = public as $$
+declare r public.crm_pedidos; aid bigint; pend text[];
+begin
+  if coalesce(auth.role(), '') <> 'service_role' then raise exception 'só o servidor'; end if;
+  if coalesce(length(p_nonce), 0) < 16 then raise exception 'nonce inválido'; end if;
+  insert into public.crm_ceo_acoes (nonce, acao, pedido_numero) values (p_nonce, 'liberar', p_numero) returning id into aid;
+  select * into r from public.crm_pedidos where numero = p_numero for update;
+  if r.id is null then update public.crm_ceo_acoes set detalhe = 'pedido não encontrado' where id = aid; return jsonb_build_object('ok', false, 'erro', 'pedido não encontrado'); end if;
+  if r.situacao <> 'aberto' then update public.crm_ceo_acoes set detalhe = 'pedido ' || r.situacao where id = aid; return jsonb_build_object('ok', false, 'erro', 'só se libera pedido em aberto (este está ' || r.situacao || ')'); end if;
+  perform public.crm_pedidos_atualizar();
+  select * into r from public.crm_pedidos where id = r.id;
+  pend := array(select b from unnest(r.bloqueios) b where b <> all (r.liberado));
+  if cardinality(pend) = 0 then
+    update public.crm_ceo_acoes set ok = true, detalhe = 'já estava liberado' where id = aid;
+    return jsonb_build_object('ok', true, 'ja_estava', true, 'pedido', public.crm_ceo_pedido_json(r));
+  end if;
+  update public.crm_pedidos set liberado = r.bloqueios, liberado_por = null, liberado_em = now(), atualizado_em = now(),
+    comentarios = comentarios || jsonb_build_array(jsonb_build_object('quando', now(), 'por', null, 'nome', 'Anderson (CEO Grupo, pelo WhatsApp)',
+      'texto', 'Liberado pelo WhatsApp: ' || array_to_string(pend, ', ')))
+   where id = r.id returning * into r;
+  update public.crm_ceo_acoes set ok = true, detalhe = 'liberado: ' || array_to_string(pend, ', ') where id = aid;
+  return jsonb_build_object('ok', true, 'liberados', to_jsonb(pend), 'pedido', public.crm_ceo_pedido_json(r));
+end;
+$$;
+revoke all on table public.crm_ceo_chaves, public.crm_ceo_acoes from public, anon, authenticated;
+revoke all on function public.crm_ceo_pedido_json(public.crm_pedidos) from public, anon, authenticated;
+revoke all on function public.crm_ceo_pedidos_bloqueados() from public, anon, authenticated;
+revoke all on function public.crm_ceo_pedido_ver(bigint) from public, anon, authenticated;
+revoke all on function public.crm_ceo_pedido_liberar(bigint, text) from public, anon, authenticated;
+grant execute on function public.crm_ceo_pedidos_bloqueados() to service_role;
+grant execute on function public.crm_ceo_pedido_ver(bigint) to service_role;
+grant execute on function public.crm_ceo_pedido_liberar(bigint, text) to service_role;

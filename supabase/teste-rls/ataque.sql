@@ -357,3 +357,19 @@ select case when crm_espelho_pacote(par) ->> 'apagar' = 'true' then 'desfeito no
 select crm_espelho_aplicar('{"versao":1,"origem":"agilite","par":"agilite:1;drop","movimentos":[]}'); -- FALHA
 select crm_espelho_aplicar('{"versao":1,"origem":"oneclean","par":"agilite:1","apagar":true}'); -- FALHA
 select crm_espelho_aplicar('{"versao":1,"origem":"agilite","par":"agilite:2","movimentos":[{"ref":"agilite:2","tipo":"saida","valor":-5,"data":"2026-10-08","situacao":"realizado"}]}'); -- FALHA
+
+-- CEO Grupo, ações pelo celular (25/10/2026): só o servidor (service_role) chama; nonce não repete
+reset role; set role authenticated; select pg_temp.como('a0000000-0000-0000-0000-000000000001');
+select 'admin listou bloqueados pelo CEO (NÃO devia)' from (select public.crm_ceo_pedidos_bloqueados()) x; -- FALHA
+select 'admin liberou pelo CEO (NÃO devia)' from (select public.crm_ceo_pedido_liberar(1, 'nonce-ataque-000000001')) x; -- FALHA
+select 'admin viu chave do CEO (NÃO devia)' t, count(*) from crm_ceo_chaves having count(*) > 0;
+reset role; set role anon;
+select 'anon liberou pelo CEO (NÃO devia)' from (select public.crm_ceo_pedido_liberar(1, 'nonce-ataque-000000002')) x; -- FALHA
+reset role; select set_config('request.jwt.claim.role', 'service_role', false);
+insert into crm_pedidos (numero, empresa_id, dados) select 990001, id, '{"pagamento":"PIX"}' from crm_empresas order by nome limit 1;
+select case when public.crm_ceo_pedidos_bloqueados() @> '[{"numero":990001}]' then 'CEO vê o pedido bloqueado' else 'CEO não viu o bloqueado (NÃO devia)' end;
+select case when (public.crm_ceo_pedido_liberar(990001, 'nonce-teste-0000000001') ->> 'ok')::boolean then 'CEO liberou' else 'CEO não liberou (NÃO devia)' end;
+select case when exists (select 1 from crm_pedidos where numero = 990001 and 'SEM ENTRADA' = any (liberado) and comentarios::text like '%WhatsApp%') then 'liberação gravada com comentário' else 'liberação não gravada (NÃO devia)' end;
+select public.crm_ceo_pedido_liberar(990001, 'nonce-teste-0000000001'); -- FALHA (nonce repetido)
+select case when count(*) = 1 then 'nonce não repete' else 'nonce repetiu (NÃO devia)' end from crm_ceo_acoes where nonce = 'nonce-teste-0000000001';
+select set_config('request.jwt.claim.role', '', false);
