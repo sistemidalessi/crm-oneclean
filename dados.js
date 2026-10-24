@@ -1298,6 +1298,12 @@
   Supa.prototype.dfeSemCiencia = async function () { const r = await this.sb.from('crm_dfe').select('chave', { count: 'exact', head: true }).eq('situacao', 'autorizada').is('xml_em', null).is('manifestada_em', null); if (r.error) throw r.error; return r.count || 0; };
   Local.prototype.comprasPendentes = async function () { return (this._compras || []).filter(c => c.situacao === 'pendente'); };
   Local.prototype.dfeSemCiencia = async function () { return 0; };
+  // Análise de vendas do dia (Gerente de Vendas, 24/10/2026): a da equipe ('equipe') ou a da carteira (o user_id); a RLS
+  // deixa a vendedora ler só a dela.
+  Supa.prototype.analiseVendas = async function (refazer) { return this.assistente({ acao: 'analise_vendas', refazer: !!refazer }); };
+  Supa.prototype.analiseVendasHoje = async function (dia, chave) { return unwrap(await this.sb.from('crm_ia_analises_vendas').select('dia, texto, em').eq('dia', dia).eq('chave', chave).maybeSingle()); };
+  Local.prototype.analiseVendas = async function () { const a = { dia: R.hojeISO(), texto: '(modo local: sem IA) Aqui aparece a análise de vendas do dia: **o mês contra o mesmo período do mês passado**, a meta, os clientes sumidos e as propostas esquecidas.', em: new Date().toISOString(), nova: true }; this._analiseV = a; return a; };
+  Local.prototype.analiseVendasHoje = async function (dia) { return this._analiseV && this._analiseV.dia === dia ? this._analiseV : null; };
   Supa.prototype.analiseHoje = async function (dia) { return unwrap(await this.sb.from('crm_ia_analises').select('dia, texto, em').eq('dia', dia).eq('tipo', 'compras').maybeSingle()); };
   Local.prototype.analiseCompras = async function () { const a = { dia: R.hojeISO(), texto: '(modo local: sem IA) Aqui aparece a análise de compras do dia: **o que pedir hoje e de quem**, as notas que chegaram, o custo que subiu e o estoque parado.', em: new Date().toISOString(), nova: true }; this._analise = a; return a; };
   Local.prototype.analiseHoje = async function (dia) { return this._analise && this._analise.dia === dia ? this._analise : null; };

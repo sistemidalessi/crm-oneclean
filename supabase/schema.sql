@@ -5632,6 +5632,9 @@ begin
   r := r || jsonb_build_object('entregas', x);
   -- vigia das notas do FKN (plano B depois da virada)
   r := r || jsonb_build_object('vigia_ultimo_sinal', (select max(ultimo_sinal) from public.crm_integracoes where ativo and coalesce(uso, 'notas') = 'notas'));
+  -- Gerente de Vendas (24/10/2026): os clientes fiéis sumidos, pela mesma conta da tela (crm_gv_sumidos)
+  x := public.crm_gv_sumidos(3);
+  r := r || jsonb_build_object('clientes_sumidos', jsonb_build_object('quantidade', coalesce((x->>'quantidade')::int, 0), 'em_risco_por_mes', coalesce((x->>'em_risco_por_mes')::numeric, 0)));
   return jsonb_build_object('empresa', 'oneclean', 'nome', 'OneClean', 'hoje', hoje, 'gerado_em', now()) || r;
 end;
 $$;

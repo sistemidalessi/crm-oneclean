@@ -102,6 +102,7 @@
           '<p class="acoes"><button type="button" class="btn sec" data-acao="nova-tarefa">+ Tarefa</button> <button type="button" class="btn sec" data-acao="novo-registro">Registrar atividade</button></p>' +
         '</section>' +
         '<div class="pilha">' +
+          (CRM.gerenteVendas ? CRM.gerenteVendas.bloco() : '') +
           (meta ? '<section class="cartao"><h2>Meta do mês</h2><div class="meta">' + CRM.barra(vendido, meta) +
             '<p><strong>' + esc(R.moeda(vendido)) + '</strong> de ' + esc(R.moeda(meta)) + ' · ' + esc(R.pct(vendido / meta * 100)) + '</p></div></section>' : '') +
           '<section class="cartao" id="alerta-leads-sem-atendimento"><h2>Leads sem atendimento <small>nenhum contato registrado</small></h2>' +

@@ -158,7 +158,7 @@
   CRM.gerandoAnalise = () => gerandoAnalise;
 
   // perguntar: abre o painel e manda a pergunta (botões prontos das telas, ex.: "Pedir a análise de compras de hoje")
-  CRM.turma = { img, dados, ativo: true, atualizar, depoisRender, perguntar: t => setTimeout(() => { abrePainel(); perguntar(t); }, 0), fmt: t => fmt(t), analise: () => analise, gerarAnalise };   // depois do clique (senão o "clique fora" fecha o painel)
+  CRM.turma = { img, dados, ativo: true, atualizar, depoisRender, perguntar: (t, m) => setTimeout(() => { abrePainel(); perguntar(t, m); }, 0), fmt: t => fmt(t), analise: () => analise, gerarAnalise };   // depois do clique (senão o "clique fora" fecha o painel)
 
   async function atualizar(forca) {
     const st = CRM.store();
@@ -303,10 +303,11 @@
     try { chat.situacao = await st.assistente({ acao: 'situacao' }); } catch (e) { chat.situacao = null; }
     desenhaChat();
   }
-  async function perguntar(texto) {
+  // mascoteId (24/10/2026, Gerente de Vendas): quem responde, quando o botão da tela pede um especialista
+  async function perguntar(texto, mascoteId) {
     const t = String(texto || '').trim(), st = CRM.store();
     if (!t || chat.enviando || !st || !st.assistente) return;
-    const q = quemResponde();
+    const q = mascoteId && (cfgT.mascotes || {})[mascoteId] ? Object.assign({ id: mascoteId }, dados(mascoteId)) : quemResponde();
     chat.msgs.push({ eu: true, texto: t });
     const resp = { mascote: q.id, pensando: true };
     chat.msgs.push(resp);

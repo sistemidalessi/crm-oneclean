@@ -17,7 +17,7 @@ window.CRM_CONFIG = {
   // (topo, de corpo inteiro, guia do dia e conversa); o especialista de cada tela aparece dentro do painel; o Andi
   // recebe no login. turma.js explica. Trocar um desenho: mesmo nome de arquivo e subir a `versao`.
   turma: {
-    pasta: 'assets/turma/', versao: '8',
+    pasta: 'assets/turma/', versao: '9',
     principal: 'clean', anfitriao: 'andi',
     // 20/10/2026: o Andi agora é a foto do Anderson e só apresenta o sistema (quem ajuda no dia a dia é o Clean)
     boasVindas: 'Olá, seja bem-vindo! É um prazer receber você. Entre com o seu e-mail e a sua senha: você está entrando no mundo da OneClean.',
@@ -42,12 +42,14 @@ window.CRM_CONFIG = {
       financeiro: { nome: 'Financeiro', papel: 'Contas a pagar e a receber' },
       'proposta-comercial': { nome: 'Proposta', papel: 'Negócios e propostas' },
       cobranca: { nome: 'Cobrança', papel: 'Boletos e lembretes' },
-      auditoria: { nome: 'Auditoria', papel: 'Conferência, divergências e correções' }
+      auditoria: { nome: 'Auditoria', papel: 'Conferência, divergências e correções' },
+      // 24/10/2026: o Gerente de Vendas (diretor do CEO Grupo; desenho do Anderson)
+      'gerente-vendas': { nome: 'Gerente de Vendas', papel: 'Ritmo do mês, metas e carteira' }
     },
     telas: {
       inicio: 'clean', fila: 'capiclean', funil: 'proposta-comercial', empresas: 'capiclean', pessoas: 'capiclean',
       negocios: 'proposta-comercial', pedidos: 'compras-cliente-sacola', 'pedidos:separacao': 'logistica', 'pedidos:nfe': 'logistica',
-      'pedidos:estoque': 'estoque', 'pedidos:faltas': 'compras-setor-interno', agenda: 'capiclean', relatorios: 'clean', ajustes: 'clean',
+      'pedidos:estoque': 'estoque', 'pedidos:faltas': 'compras-setor-interno', agenda: 'capiclean', relatorios: 'gerente-vendas', ajustes: 'clean',
       compras: 'compras-setor-interno', estoque: 'estoque', gestao: 'financeiro', caixa: 'financeiro', 'caixa:cobranca': 'cobranca',
       emails: 'capiclean', ofertas: 'gotti', fiscal: 'auditoria', 'estoque:conferencia': 'auditoria', concorrentes: 'compras-setor-interno'
     },
