@@ -5544,3 +5544,96 @@ end;
 $$;
 revoke all on function public.crm_estoque_avulsa_estornar(uuid, text) from public, anon;
 grant execute on function public.crm_estoque_avulsa_estornar(uuid, text) to authenticated;
+
+-- ============================================================ CEO Grupo Dalessi (24/10/2026)
+-- Resumo da OneClean para o painel do dono ("os meus olhos quando eu não estiver no sistema"), que fica no sistema da
+-- Agilité e junta as duas empresas. Só leitura e só números calculados aqui (a IA, quando vier, lê isto e não inventa).
+-- Sai pela crm-caixa-leitura (?parte=ceo, a mesma senha de leitura que a Agilité já usa); por isso só o service_role
+-- executa. Venda = nota não cancelada com item de CFOP de venda (5/6/7 com 1 ou 4), como a Gestão.
+create or replace function public.crm_ceo_resumo() returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare hoje date := (now() at time zone 'America/Sao_Paulo')::date; ini date; ini_ant date; fim_ant_parcial date; r jsonb := '{}'; x jsonb; mes_txt text;
+begin
+  ini := date_trunc('month', hoje)::date; ini_ant := (ini - interval '1 month')::date; fim_ant_parcial := least(ini_ant + (hoje - ini), ini - 1);
+  mes_txt := to_char(ini, 'YYYY-MM');
+  -- vendas
+  with v as (
+    select n.id, n.valor_total, (n.emitida_em at time zone 'America/Sao_Paulo')::date dia, coalesce(n.empresa_id::text, n.cliente_doc) cli,
+           case when upper(btrim(coalesce(n.vendedor_nome, ''))) = 'DIRETO' then 'Direto (sem vendedor)'
+                else coalesce(u.nome, initcap(lower(nullif(btrim(n.vendedor_nome), ''))), 'Sem vendedor(a)') end vend,
+           upper(btrim(coalesce(n.vendedor_nome, ''))) = 'DIRETO' direto, n.vendedor_id
+      from public.crm_notas n left join public.crm_usuarios u on u.user_id = n.vendedor_id
+     where not n.cancelada and n.emitida_em >= (ini_ant::timestamp at time zone 'America/Sao_Paulo')
+       and (exists (select 1 from public.crm_nota_itens i where i.nota_id = n.id and i.cfop ~ '^[567][14]')
+            or not exists (select 1 from public.crm_nota_itens i where i.nota_id = n.id)))
+  select jsonb_build_object(
+    'hoje', jsonb_build_object('valor', coalesce(round(sum(valor_total) filter (where dia = hoje), 2), 0), 'notas', count(*) filter (where dia = hoje)),
+    'ontem', jsonb_build_object('valor', coalesce(round(sum(valor_total) filter (where dia = hoje - 1), 2), 0), 'notas', count(*) filter (where dia = hoje - 1)),
+    'mes', jsonb_build_object('valor', coalesce(round(sum(valor_total) filter (where dia >= ini), 2), 0), 'notas', count(*) filter (where dia >= ini),
+      'clientes', count(distinct cli) filter (where dia >= ini), 'dias_corridos', hoje - ini + 1,
+      'equipe', coalesce(round(sum(valor_total) filter (where dia >= ini and not direto), 2), 0)),
+    'mes_anterior_mesmo_periodo', coalesce(round(sum(valor_total) filter (where dia between ini_ant and fim_ant_parcial), 2), 0),
+    'mes_anterior', coalesce(round(sum(valor_total) filter (where dia between ini_ant and ini - 1), 2), 0),
+    'meta_mes', (select round(sum(m.valor), 2) from public.crm_metas m where m.mes::text like mes_txt || '%'),
+    'por_vendedor', (select coalesce(jsonb_agg(jsonb_build_object('nome', z.vend, 'valor', z.valor, 'notas', z.notas, 'meta', z.meta) order by z.valor desc), '[]') from (
+        select v2.vend, round(sum(v2.valor_total), 2) valor, count(*) notas,
+               (select round(sum(m.valor), 2) from public.crm_metas m where m.usuario_id = max(v2.vendedor_id::text)::uuid and m.mes::text like mes_txt || '%') meta
+          from v v2 where v2.dia >= ini group by v2.vend) z))
+    into x from v;
+  r := r || jsonb_build_object('vendas', x);
+  -- funil
+  select jsonb_build_object(
+    'abertos', count(*) filter (where status = 'aberto'), 'abertos_valor', coalesce(round(sum(valor) filter (where status = 'aberto'), 2), 0),
+    'ganhos_mes', count(*) filter (where status = 'ganho' and fechado_em >= (ini::timestamp at time zone 'America/Sao_Paulo')),
+    'ganhos_mes_valor', coalesce(round(sum(valor) filter (where status = 'ganho' and fechado_em >= (ini::timestamp at time zone 'America/Sao_Paulo')), 2), 0),
+    'perdidos_mes', count(*) filter (where status = 'perdido' and fechado_em >= (ini::timestamp at time zone 'America/Sao_Paulo')),
+    'parados_15_dias', count(*) filter (where status = 'aberto' and coalesce(etapa_desde, criado_em) < now() - interval '15 days'),
+    'propostas_sem_resposta_7_dias', (select count(*) from public.crm_propostas p where p.status = 'enviada' and p.enviada_em < now() - interval '7 days'))
+    into x from public.crm_negocios;
+  r := r || jsonb_build_object('funil', x);
+  -- contas a receber (título em cartório fica à parte, como no Caixa)
+  select jsonb_build_object(
+    'vencidos', count(*) filter (where vencimento < hoje and cartorio_em is null and not abono),
+    'vencidos_valor', coalesce(round(sum(valor) filter (where vencimento < hoje and cartorio_em is null and not abono), 2), 0),
+    'vencem_7_dias_valor', coalesce(round(sum(valor) filter (where vencimento between hoje and hoje + 7 and cartorio_em is null), 2), 0),
+    'em_cartorio', count(*) filter (where cartorio_em is not null), 'em_cartorio_valor', coalesce(round(sum(valor) filter (where cartorio_em is not null), 2), 0),
+    'maiores_atrasos', (select coalesce(jsonb_agg(jsonb_build_object('cliente', y.cliente, 'valor', y.valor, 'dias', y.dias) order by y.valor desc), '[]') from (
+        select coalesce(e.nome, t.cliente_nome, 'Cliente') cliente, round(sum(t.valor), 2) valor, max(hoje - t.vencimento) dias
+          from public.crm_titulos t left join public.crm_empresas e on e.id = t.empresa_id
+         where t.vencimento < hoje and t.cartorio_em is null and not t.abono group by 1 order by 2 desc limit 5) y))
+    into x from public.crm_titulos;
+  r := r || jsonb_build_object('receber', x);
+  -- pedidos e NF-e
+  select jsonb_build_object('abertos', count(*) filter (where situacao = 'aberto'),
+    'bloqueados', count(*) filter (where situacao = 'aberto' and exists (select 1 from unnest(coalesce(bloqueios, '{}')) b where b <> all (coalesce(liberado, '{}')))),
+    'em_separacao', count(*) filter (where situacao = 'separacao'), 'separados', count(*) filter (where situacao = 'separado'),
+    'faturados_hoje', count(*) filter (where situacao = 'faturado' and faturado_em >= (hoje::timestamp at time zone 'America/Sao_Paulo')))
+    into x from public.crm_pedidos;
+  r := r || jsonb_build_object('pedidos', x);
+  select jsonb_build_object('ambiente', coalesce((select dados->'fiscal'->>'ambiente' from public.crm_config where id = 1), 'homologacao'),
+    'autorizadas_hoje', count(*) filter (where situacao = 'autorizada' and autorizada_em >= (hoje::timestamp at time zone 'America/Sao_Paulo')),
+    'sem_resposta', count(*) filter (where situacao = 'pendente'),
+    'rejeitadas_3_dias', count(*) filter (where situacao = 'rejeitada' and criado_em > now() - interval '3 days'),
+    'numeros_parados', count(*) filter (where situacao in ('reservada', 'rejeitada', 'bloqueada') and inutilizada_em is null and criado_em < now() - interval '3 days'))
+    into x from public.crm_nfe where ambiente = 'producao';
+  r := r || jsonb_build_object('nfe', x);
+  -- estoque e compras
+  select jsonb_build_object('valor_a_custo', coalesce(round(sum(greatest(s.saldo, 0) * coalesce(s.custo_medio, 0)), 2), 0),
+    'negativos', count(*) filter (where s.saldo < 0),
+    'abaixo_do_minimo', count(*) filter (where coalesce(e.estoque_min, 0) > 0 and s.saldo < e.estoque_min and coalesce(e.situacao, '') <> 'INATIVO'),
+    'crm_e_dono', public.crm_produtos_do_crm())
+    into x from public.crm_estoque_saldo s left join public.crm_estoque e on e.codigo = s.codigo;
+  r := r || jsonb_build_object('estoque', x || jsonb_build_object(
+    'compras_sem_entrada_5_dias', (select count(*) from public.crm_compras where situacao = 'pendente' and emitida_em < now() - interval '5 days'),
+    'compras_chegaram_sem_entrada', (select count(*) from public.crm_compras where situacao = 'pendente' and chegou_em is not null)));
+  -- entregas
+  select jsonb_build_object('hoje', count(*) filter (where dia = hoje), 'atrasadas', count(*) filter (where dia < hoje and situacao = 'pendente'),
+    'problemas_7_dias', count(*) filter (where situacao = 'problema' and dia > hoje - 7))
+    into x from public.crm_entregas;
+  r := r || jsonb_build_object('entregas', x);
+  -- vigia das notas do FKN (plano B depois da virada)
+  r := r || jsonb_build_object('vigia_ultimo_sinal', (select max(ultimo_sinal) from public.crm_integracoes where ativo and coalesce(uso, 'notas') = 'notas'));
+  return jsonb_build_object('empresa', 'oneclean', 'nome', 'OneClean', 'hoje', hoje, 'gerado_em', now()) || r;
+end;
+$$;
+revoke all on function public.crm_ceo_resumo() from public, anon, authenticated;
+grant execute on function public.crm_ceo_resumo() to service_role;

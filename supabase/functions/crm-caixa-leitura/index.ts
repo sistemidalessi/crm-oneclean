@@ -3,6 +3,9 @@
 // grupo. Mesmo formato do GET /api/ceo/resumo da Agilité.
 //   GET …/functions/v1/crm-caixa-leitura?dias=30        (dias de 1 a 90; padrão 30)
 //   Authorization: Bearer <senha de leitura>
+//   GET …/crm-caixa-leitura?parte=ceo                   (24/10/2026: o resumo da OneClean para o painel "CEO Grupo
+//        Dalessi" do sistema da Agilité — vendas, funil, receber, pedidos, NF-e, estoque, compras, entregas;
+//        crm_ceo_resumo(), que só o service_role executa. Mesma senha.)
 // A senha é gerada pelo administrador em Configurações → Integrações → "Leitura do Caixa" (aparece uma
 // vez só; aqui fica só o SHA-256, em crm_integracoes com uso = 'caixa'). Sem senha ou com senha errada:
 // 401 e nada mais. Só GET (o resto: 405). Não grava nada, nem registro de uso.
@@ -78,6 +81,11 @@ Deno.serve(async (req) => {
 
   try {
     const url = new URL(req.url);
+    if (url.searchParams.get('parte') === 'ceo') {
+      const { data, error } = await db.rpc('crm_ceo_resumo');
+      if (error) throw new Error('crm_ceo_resumo: ' + error.message);
+      return resposta(200, data);
+    }
     const dias = Math.min(90, Math.max(1, parseInt(url.searchParams.get('dias') ?? '30', 10) || 30));
     const K = await carregaMotor();
     const [lancamentos, saldos, recorrentes, titulos, usuarios, cfg] = await Promise.all([

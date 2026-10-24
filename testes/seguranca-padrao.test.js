@@ -82,3 +82,15 @@ test('conferir a virada avisa quando o contador de pedidos fica atrás do maior 
   assert.ok(f.includes("(select last_value from public.crm_pedidos_numero_seq)"));
   assert.ok(f.includes("'chave', 'contador_pedidos'"));
 });
+
+test('CEO Grupo Dalessi: o resumo da OneClean só sai pela senha de leitura (service_role), nunca pelo app', () => {
+  const i = sql.indexOf('create or replace function public.crm_ceo_resumo()');
+  assert.ok(i > 0);
+  assert.ok(sql.slice(i, i + 200).includes('stable security definer'));
+  assert.ok(sql.includes('revoke all on function public.crm_ceo_resumo() from public, anon, authenticated;'));
+  assert.ok(!/grant execute on function public\.crm_ceo_resumo\(\) to (anon|authenticated)/.test(sql));
+  const ef = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'functions', 'crm-caixa-leitura', 'index.ts'), 'utf8');
+  const senha = ef.indexOf("if (!ok) return resposta(401");
+  const ceo = ef.indexOf("db.rpc('crm_ceo_resumo')");
+  assert.ok(senha > 0 && ceo > senha, 'o resumo só depois de conferir a senha');
+});
