@@ -1037,13 +1037,16 @@ create policy so_admin on public.crm_fin_titulos_baixados for all to authenticat
 
 create or replace function public.crm_titulo_saiu()
 returns trigger language plpgsql security definer set search_path = public as $$
-declare num bigint := coalesce(old.nota_numero, nullif(regexp_replace(split_part(old.duplicata, '/', 1), '\D', '', 'g'), '')::bigint);
+-- duplicata "002527/01" (série 1, FKN) ou "2-000012/01" (série 2, CRM): a nota é achada pelo número E pela série
+declare pre text := split_part(old.duplicata, '/', 1);
+  ser int := case when pre ~ '^\d+-' then split_part(pre, '-', 1)::int else 1 end;
+  num bigint := coalesce(old.nota_numero, nullif(regexp_replace(case when pre ~ '^\d+-' then split_part(pre, '-', 2) else pre end, '\D', '', 'g'), '')::bigint);
 begin
   -- recebido no Caixa ("Recebi"): o dinheiro já está lá
   if exists (select 1 from public.crm_fin_lancamentos where titulo_duplicata = old.duplicata and situacao = 'pago') then return old; end if;
   insert into public.crm_fin_titulos_baixados (duplicata, nota_numero, empresa_id, cliente_nome, vencimento, previsao, valor, origem, resolvido, resolvido_em)
   select old.duplicata, num, old.empresa_id, old.cliente_nome, old.vencimento, old.previsao, old.valor, old.origem, c.r, case when c.r is not null then now() end
-    from (select case when exists (select 1 from public.crm_notas where numero = num and cancelada) then 'cancelada' end r) c
+    from (select case when exists (select 1 from public.crm_notas where numero = num and coalesce(nullif(regexp_replace(coalesce(serie, ''), '\D', '', 'g'), '')::int, 1) = ser and cancelada) then 'cancelada' end r) c
   on conflict (duplicata) where resolvido is null do nothing;
   return old;
 end;
@@ -2022,7 +2025,7 @@ begin
   select id, nota_id, codigo, descricao, unidade, quantidade, cfop into i from public.crm_nota_itens where id = p_item;
   if i.id is null or coalesce(btrim(i.codigo), '') = '' or coalesce(i.quantidade, 0) = 0 then return; end if;
   if i.cfop is not null and (i.cfop !~ '^[56]' or i.cfop in ('5922', '6922', '5933', '6933')) then return; end if;
-  select numero, emitida_em, cancelada into n from public.crm_notas where id = i.nota_id;
+  select numero, serie, emitida_em, cancelada into n from public.crm_notas where id = i.nota_id;
   if n.emitida_em is null or n.cancelada then return; end if;
   if exists (select 1 from public.crm_estoque_mov where nota_item_id = p_item) then return; end if;
   if not exists (select 1 from public.crm_estoque_saldo) then return; end if; -- o livro ainda não começou
@@ -2037,7 +2040,9 @@ begin
   select u.fator into f from public.crm_estoque_unidades u where u.codigo = i.codigo and u.unidade = un;
   if f is null then f := 1; conf := un is not null and s.unidade is not null and un <> s.unidade; end if;
   insert into public.crm_estoque_mov (codigo, quando, tipo, quantidade, qtd_doc, unidade_doc, fator, conferir, nota_item_id, motivo, criado_por)
-  values (i.codigo, n.emitida_em, 'saida', -round(i.quantidade * f, 3), i.quantidade, un, f, conf, p_item, 'NF ' || n.numero, null);
+  values (i.codigo, n.emitida_em, 'saida', -round(i.quantidade * f, 3), i.quantidade, un, f, conf, p_item,
+    'NF ' || case when coalesce(nullif(regexp_replace(coalesce(n.serie, ''), '\D', '', 'g'), '')::int, 1) = 1 then n.numero::text
+                  else nullif(regexp_replace(n.serie, '\D', '', 'g'), '')::int || '-' || n.numero end, null);   -- série 2 do CRM: "NF 2-1"
 end;
 $$;
 revoke all on function public.crm_estoque_saida_item(uuid) from public, anon, authenticated;
@@ -2529,10 +2534,18 @@ $$;
 
 -- A nota que chegou (vigia ou importação) fatura o pedido: mesmo cliente, emitida depois do pedido (até 20 dias), com
 -- pelo menos 60% dos produtos do pedido. Mais de um pedido do cliente: o que mais casa, depois o mais antigo.
+-- Nota emitida pelo CRM (24/10/2026, ensaio da virada): fatura o pedido dela pela ligação em crm_nfe, nunca pela
+-- semelhança (com dois pedidos parecidos do mesmo cliente, o "Repetir pedido", a nota do novo faturava o antigo, que
+-- perdia a reserva sem ter saído). Nota do CRM sem pedido (bonificação, remessa, devolução) não fatura pedido nenhum.
 create or replace function public.crm_pedidos_casar_int() returns integer language plpgsql security definer set search_path = public as $$
 declare r record; n integer := 0;
 begin
   if not (public.crm_eh_ativo() or coalesce(auth.role(), '') = 'service_role') then return 0; end if;
+  update public.crm_pedidos p set situacao = 'faturado', nota_id = nt.id, faturado_em = nt.emitida_em, atualizado_em = now()
+    from public.crm_nfe f join public.crm_notas nt on nt.chave = f.chave
+   where f.pedido_id = p.id and f.outra_id is null and f.ambiente = 'producao' and f.situacao = 'autorizada' and not nt.cancelada
+     and p.situacao in ('aberto', 'separacao', 'separado');
+  get diagnostics n = row_count;
   for r in
     select distinct on (nt.id) nt.id nota, p.id pedido, nt.emitida_em
       from public.crm_notas nt
@@ -2543,6 +2556,7 @@ begin
           from jsonb_array_elements(p.itens) i) s
      where nt.emitida_em > now() - interval '20 days' and not nt.cancelada
        and not exists (select 1 from public.crm_pedidos x where x.nota_id = nt.id)
+       and not exists (select 1 from public.crm_nfe f where f.chave = nt.chave)
        and exists (select 1 from public.crm_nota_itens ni where ni.nota_id = nt.id and coalesce(ni.cfop, '') not in ('5922', '6922'))
        and s.sc >= 0.6
      order by nt.id, s.sc desc, p.criado_em
@@ -2555,6 +2569,7 @@ begin
 end;
 $$;
 revoke all on function public.crm_pedidos_casar_int() from public, anon, authenticated;
+create index if not exists crm_nfe_chave on public.crm_nfe (chave);
 revoke all on function public.crm_pedidos_atualizar() from public, anon;
 grant execute on function public.crm_pedidos_atualizar() to authenticated, service_role;
 

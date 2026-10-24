@@ -33,3 +33,21 @@ test('entrada avulsa: só administrador e comprador; Caixa só pelo administrado
   assert.ok(sql.includes('revoke all on function public.crm_estoque_entrada_avulsa(jsonb) from public, anon;'));
   assert.ok(sql.includes("create policy ler on public.crm_estoque_avulsas for select to authenticated using ((select public.crm_eh_admin()) or (select public.crm_eh_comprador()));"));
 });
+
+test('ensaio da virada: nota emitida pelo CRM fatura o pedido dela (crm_nfe), nunca outro pelo parecido', () => {
+  const i = sql.lastIndexOf('create or replace function public.crm_pedidos_casar_int');
+  const f = sql.slice(i, sql.indexOf('$$;', i));
+  assert.ok(f.includes('from public.crm_nfe f join public.crm_notas nt on nt.chave = f.chave'));
+  assert.ok(f.includes("f.pedido_id = p.id and f.outra_id is null and f.ambiente = 'producao' and f.situacao = 'autorizada'"));
+  assert.ok(f.includes('and not exists (select 1 from public.crm_nfe f where f.chave = nt.chave)'));
+});
+
+test('ensaio da virada: baixa do estoque e título que sai olham a série (NF 2-1 não é a NF 1 do FKN)', () => {
+  const i = sql.indexOf('create or replace function public.crm_estoque_saida_item');
+  const f = sql.slice(i, sql.indexOf('$$;', i));
+  assert.ok(f.includes('select numero, serie, emitida_em, cancelada into n'));
+  const j = sql.indexOf('create or replace function public.crm_titulo_saiu');
+  const g = sql.slice(j, sql.indexOf('$$;', j));
+  assert.ok(g.includes("ser int := case when pre ~ '^\\d+-' then split_part(pre, '-', 1)::int else 1 end;"));
+  assert.ok(!/where numero = num and cancelada/.test(g));
+});
