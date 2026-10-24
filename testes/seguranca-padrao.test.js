@@ -51,3 +51,9 @@ test('ensaio da virada: baixa do estoque e título que sai olham a série (NF 2-
   assert.ok(g.includes("ser int := case when pre ~ '^\\d+-' then split_part(pre, '-', 1)::int else 1 end;"));
   assert.ok(!/where numero = num and cancelada/.test(g));
 });
+
+test('ensaio da virada: simples faturamento (5922/6922) não entra na rota de entrega', () => {
+  const i = sql.indexOf('create or replace function public.crm_rota_candidatas');
+  const f = sql.slice(i, sql.indexOf('end $$;', i));
+  assert.ok(f.includes("and not exists (select 1 from public.crm_nota_itens i where i.nota_id = n.id and i.cfop in ('5922', '6922'))"));
+});

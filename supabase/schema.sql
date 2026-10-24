@@ -3846,6 +3846,8 @@ begin
       left join public.crm_usuarios u on u.user_id = n.vendedor_id
      where not n.cancelada and n.emitida_em >= p_desde::timestamptz
        and not exists (select 1 from public.crm_entregas x where x.nota_id = n.id)
+       -- simples faturamento da entrega futura (5922/6922) não leva mercadoria: quem vai na rota é a remessa (24/10/2026)
+       and not exists (select 1 from public.crm_nota_itens i where i.nota_id = n.id and i.cfop in ('5922', '6922'))
      order by n.emitida_em desc
      limit 300;
 end $$;
