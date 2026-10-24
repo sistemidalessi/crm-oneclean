@@ -27,6 +27,20 @@ Preço e margem:
 - Concorrentes ("concorrentes"): só o que o comprador lançou; nunca invente preço de concorrente. Nosso preço muito
   acima num item da curva A = risco de perder o cliente; muito abaixo = margem deixada na mesa.
 
+Giro (24/10/2026): o "pedido_sugerido" já tira da sugestão o item SEM GIRO (vendeu em menos de 3 notas ou para menos
+de 2 clientes em 90 dias), mesmo abaixo do mínimo do FKN; só fica o que já foi vendido sem estoque. Não sugira de volta
+um item da lista "sem_giro_fora_da_sugestao": no máximo, diga que o mínimo do FKN dele deveria baixar.
+
+Preço de compra ("preco_negociar"): para os itens do pedido, a conta já vem pronta do sistema: "comecar_em" (o menor
+custo pago em 180 dias, com o fornecedor), a média, cada fornecedor e "negociar_ate" (o menor teto entre a margem
+mínima sobre a tabela e o preço do concorrente). Diga "comece pedindo R$ X (o que a Y cobrou em DD/MM) e não passe de
+R$ Z". Item com "ultimo_acima_do_teto": negociar ou trocar de fornecedor. Nunca invente preço: sem nota de compra,
+diga que não há histórico.
+
+Vencimento ("vencimento_sugerido"): para o total de cada pedido, o sistema diz a partir de que dia o pagamento cabe no
+caixa. Você recebe SÓ a data (nunca saldo nem valor do caixa) e repassa só ela: "peça vencimento a partir de 15/11".
+Se vier sem data, diga para negociar parcelado ou adiar.
+
 Estoque parado ("estoque_parado"): sem venda há 90 dias e com dinheiro empatado. Sugira oferta (tela Ofertas),
 devolução/troca com o fornecedor ou parar de repor. Diga o valor parado.
 
@@ -41,11 +55,15 @@ Como responder:
 
 export const PERGUNTA_ANALISE = `Faça a ANÁLISE DE COMPRAS DE HOJE para o comprador, como o comprador sênior do manual.
 Consulte "pedido_sugerido" (todos os fornecedores), "notas_de_compra", "precos_compra" (termo vazio) e "estoque_parado".
-Responda em no máximo 12 linhas, nesta ordem:
-1) Pedir hoje: cada fornecedor com urgência (nome, valor, quantos itens, se chega ao mínimo e o item mais crítico).
-2) Notas de compra: o que já chegou e falta dar entrada; despesa para tirar da lista.
-3) Custo que subiu e margem a revisar (até 3 itens).
-4) Estoque parado: o valor e os 2 maiores.
+Para os 2 fornecedores mais urgentes, consulte também "preco_negociar" (os itens de maior valor do pedido) e
+"vencimento_sugerido" (o total do pedido).
+Responda em no máximo 14 linhas, nesta ordem:
+1) Pedir hoje: cada fornecedor com urgência (nome, valor, quantos itens, se chega ao mínimo e o item mais crítico),
+   com o vencimento sugerido e, para o item de maior valor, "comece em R$ X e não passe de R$ Z".
+2) Sem giro: quantos itens ficaram fora da sugestão (e 2 exemplos), se houver.
+3) Notas de compra: o que já chegou e falta dar entrada; despesa para tirar da lista.
+4) Custo que subiu e margem a revisar (até 3 itens).
+5) Estoque parado: o valor e os 2 maiores.
 Se uma parte não tiver nada, pule. Sem introdução.`;
 
 // deno-lint-ignore no-explicit-any
@@ -60,6 +78,8 @@ type Ajuda = {
 };
 
 const DIAS = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
+// item com giro: saiu em pelo menos GIRO_NOTAS notas e para pelo menos GIRO_CLIENTES clientes nos últimos 90 dias
+const GIRO_NOTAS = 3, GIRO_CLIENTES = 2;
 const base = (cod: unknown) => String(cod || '').replace(/\.\d+$/, '');
 const un = (u: unknown) => String(u || '').trim().toUpperCase();
 
@@ -85,13 +105,17 @@ export function ferramentasComprador(h: Ajuda) {
       c.u.from('crm_produto_fornecedor').select('codigo, fornecedor').not('fornecedor', 'is', null),
       c.u.from('crm_estoque_unidades').select('codigo, unidade, fator'),
       c.u.from('crm_config').select('dados').eq('id', 1).maybeSingle(),
-      tudo<Linha>((a, b) => c.u.from('crm_nota_itens').select('codigo, unidade, quantidade, valor_total, crm_notas!inner(emitida_em, cancelada)').eq('crm_notas.cancelada', false).gte('crm_notas.emitida_em', desde).range(a, b), 40000)
+      tudo<Linha>((a, b) => c.u.from('crm_nota_itens').select('codigo, unidade, quantidade, valor_total, nota_id, crm_notas!inner(emitida_em, cancelada, empresa_id, cliente_doc)').eq('crm_notas.cancelada', false).gte('crm_notas.emitida_em', desde).range(a, b), 40000)
     ]);
     const fator = new Map(((unisR.data || []) as Linha[]).map(x => [x.codigo + '|' + un(x.unidade), Number(x.fator) || 1]));
-    const venda = new Map<string, { q: number; v: number }>();
+    // giro (24/10/2026, plano do CEO: "não sugerir compra de item sem giro"): em quantas notas e para quantos clientes saiu
+    const venda = new Map<string, { q: number; v: number; notas: Set<string>; clientes: Set<string> }>();
     it.forEach(x => {
-      const k = base(x.codigo), f = fator.get(k + '|' + un(x.unidade)) || 1, a = venda.get(k) || { q: 0, v: 0 };
-      a.q += Number(x.quantidade || 0) * f; a.v += Number(x.valor_total || 0); venda.set(k, a);
+      const k = base(x.codigo), f = fator.get(k + '|' + un(x.unidade)) || 1, a = venda.get(k) || { q: 0, v: 0, notas: new Set<string>(), clientes: new Set<string>() };
+      a.q += Number(x.quantidade || 0) * f; a.v += Number(x.valor_total || 0);
+      if (x.nota_id) a.notas.add(String(x.nota_id));
+      const cli = x.crm_notas && (x.crm_notas.empresa_id || x.crm_notas.cliente_doc); if (cli) a.clientes.add(String(cli));
+      venda.set(k, a);
     });
     const caixa = new Map<string, number>();
     ((unisR.data || []) as Linha[]).forEach(x => { if (un(x.unidade) === 'CX' && Number(x.fator) > 1) caixa.set(x.codigo, Number(x.fator)); });
@@ -108,8 +132,9 @@ export function ferramentasComprador(h: Ajuda) {
       if (tMap.get(e.codigo)) nome = (fMap.get(cod) || {}).nome || cod;
       const fc = cod ? fMap.get(String(cod)) : null;
       if (fc && fc.ativo === false && !tMap.get(e.codigo)) { cod = null; nome = null; }   // "não compramos" (cadastro)
-      const vd = venda.get(e.codigo) || { q: 0, v: 0 };
+      const vd = venda.get(e.codigo) || { q: 0, v: 0, notas: new Set<string>(), clientes: new Set<string>() };
       return Object.assign({}, e, { forn_cod: cod, forn_nome: nome, forn: cod ? fMap.get(String(cod)) || null : null, venda90: vd.q, valor90: vd.v, dia: vd.q / 90,
+        vezes90: vd.notas.size, clientes90: vd.clientes.size,
         abc: abc.get(e.codigo) || 'C', custo: Number(e.custo_compra) > 0 ? Number(e.custo_compra) : Number(e.custo_unit) || 0, caixa: caixa.get(e.codigo) || null });
     });
     return { produtos, margemMin };
@@ -124,7 +149,7 @@ export function ferramentasComprador(h: Ajuda) {
         const { produtos } = await dados(c);
         const dias = Number(i.dias) > 0 ? Math.min(120, Number(i.dias)) : 30, f = normaliza(i.fornecedor);
         const hojeDia = new Date(c.hoje + 'T12:00:00Z').getUTCDay();
-        const grupos = new Map<string, Linha>();
+        const grupos = new Map<string, Linha>(), semGiro: Linha[] = [];
         produtos.forEach(p => {
           if (f && !normaliza((p.forn_cod || '') + ' ' + (p.forn_nome || '')).includes(f)) return;
           // saldo negativo (vendido sem estoque) entra negativo: o que já foi vendido sai do que está pedido (20/10/2026)
@@ -133,18 +158,26 @@ export function ferramentasComprador(h: Ajuda) {
           if (!(p.dia > 0) && !(min > 0 && saldo + pend < min) && !(saldo + pend < 0)) return;
           const alvo = Math.max(p.dia * (dias + prazo), min), comprar = Math.ceil(alvo - saldo - pend - 1e-9);
           if (comprar <= 0) return;
+          // sem giro (vendeu em menos de GIRO_NOTAS notas ou para menos de GIRO_CLIENTES clientes em 90 dias): fora da
+          // sugestão, mesmo abaixo do mínimo do FKN; só entra o que já foi vendido sem estoque (saldo negativo)
+          if (saldo + pend >= 0 && (p.vezes90 < GIRO_NOTAS || p.clientes90 < GIRO_CLIENTES)) {
+            semGiro.push({ codigo: p.codigo, descricao: p.descricao, fornecedor: p.forn_nome, saldo: n2(saldo), minimo: n2(min), notas_90d: p.vezes90, clientes_90d: p.clientes90 });
+            return;
+          }
           const urgente = (p.dia > 0 && saldo + pend <= p.dia * prazo) || (min > 0 && saldo < min) || saldo < 0;
           const k = p.forn_cod || '';
           if (!grupos.has(k)) grupos.set(k, { codigo: k || null, nome: p.forn_nome || 'Sem fornecedor (definir em Compras)', cad: p.forn, prazo, itens: [], total: 0, urgentes: 0, sem_custo: 0 });
           const g = grupos.get(k)!;
           const qtd = p.caixa ? Math.ceil(comprar / p.caixa) * p.caixa : comprar;
           g.itens.push({ codigo: p.codigo, descricao: p.descricao, unidade: p.unidade, abc: p.abc, saldo: n2(saldo), minimo: n2(min), ja_pedido: n2(pend), venda_dia: n2(p.dia),
+            notas_90d: p.vezes90, clientes_90d: p.clientes90,
             cobertura_dias: p.dia > 0 ? Math.round(Math.max(0, saldo) / p.dia) : null, comprar: n2(qtd), caixas: p.caixa ? Math.ceil(comprar / p.caixa) : null, custo_unit: n2(p.custo), total: n2(qtd * p.custo), urgente });
           g.total += qtd * p.custo; if (!p.custo) g.sem_custo++; if (urgente) g.urgentes++;
         });
         const lista = [...grupos.values()].sort((a, b) => (!a.codigo ? 1 : 0) - (!b.codigo ? 1 : 0) || b.urgentes - a.urgentes || b.total - a.total);
         const ORD: Record<string, number> = { A: 0, B: 1, C: 2 };
         return { cobertura_pedida_dias: dias, fornecedores_com_pedido: lista.length, urgentes: lista.reduce((s, g) => s + g.urgentes, 0),
+          sem_giro_fora_da_sugestao: { quantidade: semGiro.length, regra: 'vendeu em menos de ' + GIRO_NOTAS + ' notas ou para menos de ' + GIRO_CLIENTES + ' clientes nos últimos 90 dias', exemplos: semGiro.slice(0, 8) },
           fornecedores: lista.slice(0, f ? 3 : 8).map(g => {
             const cad = g.cad || {}, minimo = Number(cad.pedido_minimo) || 0;
             const cif = cad.frete === 'cif' || (cad.frete === 'cif_acima' && g.total >= Number(cad.frete_cif_acima || 0));
@@ -183,6 +216,34 @@ export function ferramentasComprador(h: Ajuda) {
           .filter(x => f || x.abaixo_da_minima)
           .sort((a, b) => (b.abaixo_da_minima ? 1 : 0) - (a.abaixo_da_minima ? 1 : 0) || ORD[a.abc] - ORD[b.abc] || b.venda_90d_rs - a.venda_90d_rs);
         return { margem_minima_pct: margemMin, abaixo_da_minima: l.filter(x => x.abaixo_da_minima).length, produtos: l.slice(0, 30) };
+      }
+    },
+    preco_negociar: {
+      papeis: ['admin', 'comprador'],
+      def: { name: 'preco_negociar', description: 'Preço de compra para negociar, pela conta do sistema (crm_cs_preco_alvo): para cada código, o último custo pago e o menor dos últimos 180 dias pelas notas de compra (com IPI, ST e frete; fornecedor e dia), a média, o último custo de cada fornecedor, o preço de tabela, o teto pela margem mínima, o teto pelo menor preço de concorrente do mês e "negociar_ate" (o menor teto). Até 40 códigos.', strict: true,
+        input_schema: obj({ codigos: { type: 'string', description: 'códigos dos produtos separados por vírgula' } }, ['codigos']) },
+      async roda(c: Ctx, i: Linha) {
+        const cods = String(i.codigos || '').split(/[,;\s]+/).map(x => x.trim()).filter(Boolean).slice(0, 40);
+        if (!cods.length) return { erro: 'informe os códigos' };
+        const { data, error } = await c.u.rpc('crm_cs_preco_alvo', { p_codigos: cods });
+        if (error) throw error;
+        return { itens: data, observacao: 'as notas de compra entram pela Sefaz desde 17/10/2026: histórico curto ainda' };
+      }
+    },
+    vencimento_sugerido: {
+      papeis: ['admin', 'comprador'],
+      def: { name: 'vencimento_sugerido', description: 'A partir de que dia o pagamento de um pedido ao fornecedor cabe no caixa (a mesma previsão da tela do Caixa). Devolve SÓ a data e uma frase, nunca saldo nem valor do caixa.', strict: true,
+        input_schema: obj({ valor: { type: 'number', description: 'total do pedido em reais' }, prazo_minimo_dias: { type: 'integer', description: 'menor prazo aceitável, em dias a partir de hoje (0 = 7)' }, prazo_maximo_dias: { type: 'integer', description: 'maior prazo que o fornecedor costuma dar (0 = 45; até 75)' } }, ['valor', 'prazo_minimo_dias', 'prazo_maximo_dias']) },
+      async roda(_c: Ctx, i: Linha) {
+        const valor = Number(i.valor), de = Number(i.prazo_minimo_dias) > 0 ? Math.round(Number(i.prazo_minimo_dias)) : 7;
+        const ate = Math.min(75, Number(i.prazo_maximo_dias) > 0 ? Math.round(Number(i.prazo_maximo_dias)) : 45);
+        if (!(valor > 0)) return { erro: 'informe o valor do pedido' };
+        // a crm-caixa-leitura faz a conta com o motor do Caixa e devolve só o sinal (data + frase)
+        const r = await fetch(Deno.env.get('SUPABASE_URL') + '/functions/v1/crm-caixa-leitura?parte=sinal&valor=' + encodeURIComponent(String(Math.round(valor * 100) / 100)) + '&de=' + de + '&ate=' + Math.max(de, ate),
+          { headers: { Authorization: 'Bearer ' + Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') }, signal: AbortSignal.timeout(30000) });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) return { erro: 'o caixa não respondeu agora' };
+        return { vencer_a_partir_de: j.vencer_a_partir_de || null, sinal: String(j.sinal || '') };
       }
     },
     notas_de_compra: {

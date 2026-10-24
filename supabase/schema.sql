@@ -5876,3 +5876,49 @@ revoke all on function public.crm_gv_funil() from public, anon;
 grant execute on function public.crm_gv_notas(date), public.crm_gv_ritmo(), public.crm_gv_sumidos(int), public.crm_gv_funil() to authenticated, service_role;
 revoke all on table public.crm_ia_analises_vendas from anon;
 revoke insert, update, delete, truncate on table public.crm_ia_analises_vendas from authenticated;
+
+
+-- ============================================================ Comprador Sênior: preço de compra (CEO Grupo, 24/10/2026)
+-- Plano do CEO: "opinar no preço de compra (último preço, média, outros fornecedores pelas notas da Sefaz,
+-- concorrentes; 'negociar até R$ Y')". A CONTA é daqui (a IA só lê). SECURITY INVOKER: quem não vê compras (vendedora)
+-- recebe vazio. Custo unitário de nota = (produtos + IPI + ST + frete + outras) ÷ (quantidade × fator), como o precos_compra.
+--   comecar_em      = o menor custo pago nos últimos 180 dias (qualquer fornecedor)
+--   teto_margem     = preço de tabela × (1 − margem mínima)          (acima disso a margem fica abaixo da mínima)
+--   teto_concorrencia = menor preço de concorrente do mês mais recente, na nossa unidade, × (1 − margem mínima)
+--   negociar_ate    = o menor dos tetos
+create or replace function public.crm_cs_preco_alvo(p_codigos text[]) returns jsonb language sql stable security invoker set search_path = public as $$
+  with cods as (select distinct btrim(x) codigo from unnest(coalesce(p_codigos, '{}')) x where btrim(x) <> '' limit 40),
+  mm as (select coalesce(nullif(dados->>'margem_minima', '')::numeric, 23) m from public.crm_config where id = 1),
+  n as (select i.codigo, c.fornecedor_nome forn, (c.emitida_em at time zone 'America/Sao_Paulo')::date dia,
+               (i.valor_total + i.ipi + i.st + i.frete + i.outras) tot, i.quantidade * coalesce(nullif(i.fator, 0), 1) q
+          from public.crm_compra_itens i join public.crm_compras c on c.id = i.compra_id
+         where i.codigo in (select codigo from cods) and c.emitida_em >= now() - interval '180 days' and i.quantidade > 0),
+  nu as (select *, round(tot / q, 4) cu from n where q > 0),
+  conc as (select p.codigo, min(p.preco / nullif(p.quantidade, 0) * coalesce(nullif(k.fator, 0), 1)) menor, max(p.mes) mes
+             from public.crm_precos_concorrente p join public.crm_cesta k on k.codigo = p.codigo and k.ativo
+            where p.codigo in (select codigo from cods)
+              and p.mes = (select max(p2.mes) from public.crm_precos_concorrente p2 where p2.codigo = p.codigo)
+            group by p.codigo),
+  base as (select c.codigo, e.descricao, e.preco_venda, coalesce(nullif(e.custo_compra, 0), e.custo_unit) custo_fkn,
+                  (select jsonb_build_object('custo', cu, 'fornecedor', forn, 'dia', dia) from nu where nu.codigo = c.codigo order by dia desc, cu limit 1) ult,
+                  (select jsonb_build_object('custo', cu, 'fornecedor', forn, 'dia', dia) from nu where nu.codigo = c.codigo order by cu, dia desc limit 1) menor,
+                  (select round(sum(tot) / nullif(sum(q), 0), 4) from nu where nu.codigo = c.codigo) media,
+                  (select count(*) from nu where nu.codigo = c.codigo) notas,
+                  (select jsonb_agg(jsonb_build_object('fornecedor', f.forn, 'ultimo_custo', f.cu, 'dia', f.dia) order by f.cu) from (
+                     select distinct on (forn) forn, cu, dia from nu where nu.codigo = c.codigo order by forn, dia desc) f) por_fornecedor,
+                  case when e.preco_venda > 0 then round(e.preco_venda * (1 - (select m from mm) / 100), 4) end teto_margem,
+                  case when k.menor > 0 then round(k.menor * (1 - (select m from mm) / 100), 4) end teto_conc, k.menor conc_menor, k.mes conc_mes
+             from cods c left join public.crm_estoque e on e.codigo = c.codigo left join conc k on k.codigo = c.codigo)
+  select coalesce(jsonb_agg(jsonb_build_object(
+    'codigo', b.codigo, 'descricao', b.descricao, 'preco_tabela', b.preco_venda, 'ultimo_custo_fkn', b.custo_fkn,
+    'notas_de_compra_180d', b.notas,
+    'ultimo_pago', b.ult, 'comecar_em', b.menor,
+    'media_180d', b.media, 'por_fornecedor', coalesce(b.por_fornecedor, '[]'::jsonb),
+    'margem_minima_pct', (select m from mm), 'teto_pela_margem', b.teto_margem,
+    'concorrente_menor_preco_na_nossa_unidade', b.conc_menor, 'concorrencia_mes', b.conc_mes, 'teto_pela_concorrencia', b.teto_conc,
+    'negociar_ate', nullif(least(coalesce(b.teto_margem, 'infinity'::numeric), coalesce(b.teto_conc, 'infinity'::numeric)), 'infinity'::numeric),
+    'ultimo_acima_do_teto', case when b.ult is not null and least(coalesce(b.teto_margem, 'infinity'::numeric), coalesce(b.teto_conc, 'infinity'::numeric)) < (b.ult->>'custo')::numeric then true else false end
+  ) order by b.codigo), '[]'::jsonb) from base b;
+$$;
+revoke all on function public.crm_cs_preco_alvo(text[]) from public, anon;
+grant execute on function public.crm_cs_preco_alvo(text[]) to authenticated, service_role;
