@@ -5432,6 +5432,12 @@ begin
   r := r || jsonb_build_object('chave', 'conferencia_fkn', 'titulo', 'Estoque: diferenças com o FKN sem explicação ou com compra sem entrada no CRM', 'n', n,
     'nivel', case when n = 0 then 'ok' else 'trava' end,
     'dica', 'Antes de "Passar o cadastro para o CRM": dar entrada nas notas de compra pendentes e contar o que sobrar; senão o estoque do CRM nasce errado.', 'lista', l);
+  -- 14. contador dos números de pedido atrás do maior pedido gravado (24/10/2026: pedidos de teste gravados com número à mão
+  -- deixaram o contador para trás e o pedido novo da vendedora dava "número já existe")
+  select case when coalesce((select max(numero) from public.crm_pedidos), 0) > (select last_value from public.crm_pedidos_numero_seq) then 1 else 0 end into n;
+  r := r || jsonb_build_object('chave', 'contador_pedidos', 'titulo', 'Numeração dos pedidos', 'n', n,
+    'nivel', case when n = 0 then 'ok' else 'trava' end,
+    'dica', case when n = 0 then 'O próximo pedido sai com número novo.' else 'O contador ficou atrás do maior pedido: o pedido novo dá "número já existe". Peça ao Claude para acertar (setval).' end, 'lista', '[]'::jsonb);
   return r;
 end;
 $$;

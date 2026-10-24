@@ -75,3 +75,10 @@ test('virada: nota de compra que já entrou no FKN liga as contas dele em vez de
   assert.ok(f.indexOf('if ja > 0 then return new; end if;') < f.indexOf('insert into public.crm_fin_lancamentos'));
   assert.ok(sql.includes('revoke all on function public.crm_nome_chave(text) from public, anon;'));
 });
+
+test('conferir a virada avisa quando o contador de pedidos fica atrás do maior número', () => {
+  const i = sql.indexOf('create or replace function public.crm_virada_conferir()');
+  const f = sql.slice(i, sql.indexOf('$$;', i));
+  assert.ok(f.includes("(select last_value from public.crm_pedidos_numero_seq)"));
+  assert.ok(f.includes("'chave', 'contador_pedidos'"));
+});
