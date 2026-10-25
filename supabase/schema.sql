@@ -6008,3 +6008,46 @@ begin
 end $$;
 revoke all on function public.crm_dl_painel() from public, anon;
 grant execute on function public.crm_dl_painel() to authenticated, service_role;
+
+-- ============================================================ CEO Grupo Dalessi: o quadro fiscal da OneClean (25/10/2026)
+-- Para o Diretor Fiscal do painel /ceo (sistema da Agilité, src/ceo/fiscal.js), lido pela crm-caixa-leitura ?parte=ceo
+-- (que junta a validade do certificado A1 pelo serviço fiscal). Só contagens e totais; só o service_role executa.
+--   nfe: as NF-e de PRODUÇÃO emitidas pelo CRM (a virada é 03/11/2026; antes disso, quase nada)
+--   notas_fkn: as notas de venda que chegam do FKN pelo vigia (o faturamento de hoje), no mês
+--   dfe: notas de compra contra o CNPJ, vistas pela Sefaz; as sem ciência e a última consulta
+--   ibpt: a vigência da tabela de tributos aproximados (a nota sai com aviso quando vence)
+create or replace function public.crm_ceo_fiscal() returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare
+  hoje date := (now() at time zone 'America/Sao_Paulo')::date;
+  ini timestamptz := (date_trunc('month', hoje)::date)::timestamptz;
+  r jsonb;
+begin
+  select jsonb_build_object(
+    'nfe', (select jsonb_build_object(
+        'producao_total', count(*) filter (where ambiente = 'producao' and situacao = 'autorizada'),
+        'autorizadas_mes', count(*) filter (where ambiente = 'producao' and situacao = 'autorizada' and autorizada_em >= ini),
+        'valor_mes', coalesce(sum(valor) filter (where ambiente = 'producao' and situacao = 'autorizada' and autorizada_em >= ini), 0),
+        'canceladas_mes', count(*) filter (where ambiente = 'producao' and situacao = 'cancelada' and atualizado_em >= ini),
+        'rejeitadas_7_dias', count(*) filter (where ambiente = 'producao' and situacao = 'rejeitada' and atualizado_em >= now() - interval '7 days'),
+        'denegadas', count(*) filter (where ambiente = 'producao' and situacao = 'denegada'),
+        'pendentes', count(*) filter (where ambiente = 'producao' and situacao = 'pendente'),
+        'numeros_parados', count(*) filter (where ambiente = 'producao' and situacao in ('reservada', 'rejeitada', 'bloqueada') and inutilizada_em is null and criado_em < now() - interval '3 days'),
+        'homologacao_7_dias', count(*) filter (where ambiente = 'homologacao' and criado_em >= now() - interval '7 days'),
+        'ultimos_motivos_de_rejeicao', coalesce((select jsonb_agg(z) from (select jsonb_build_object('numero', numero, 'cstat', cstat, 'motivo', left(coalesce(motivo, ''), 160), 'quando', atualizado_em) z
+            from public.crm_nfe where ambiente = 'producao' and situacao = 'rejeitada' and atualizado_em >= now() - interval '7 days' order by atualizado_em desc limit 5) q), '[]'::jsonb))
+      from public.crm_nfe),
+    'notas_fkn_mes', (select jsonb_build_object('notas', count(*) filter (where not cancelada), 'valor', coalesce(sum(valor_total) filter (where not cancelada), 0), 'canceladas', count(*) filter (where cancelada))
+      from public.crm_notas where emitida_em >= ini),
+    'dfe', (select jsonb_build_object(
+        'sem_ciencia', count(*) filter (where situacao = 'autorizada' and xml_em is null and manifestada_em is null),
+        'sem_ciencia_valor', coalesce(sum(valor) filter (where situacao = 'autorizada' and xml_em is null and manifestada_em is null), 0),
+        'sem_ciencia_mais_de_10_dias', count(*) filter (where situacao = 'autorizada' and xml_em is null and manifestada_em is null and emitida_em < now() - interval '10 days'),
+        'ultima_consulta', (select ultima_em from public.crm_dfe_estado where id = 1),
+        'ultimo_retorno', (select left(coalesce(ultimo_cstat::text || ' ' || ultimo_motivo, ''), 120) from public.crm_dfe_estado where id = 1))
+      from public.crm_dfe),
+    'ibpt', (select jsonb_build_object('vigencia_ate', max(vig_fim), 'versao', max(versao)) from public.crm_ibpt)
+  ) into r;
+  return r;
+end $$;
+revoke all on function public.crm_ceo_fiscal() from public, anon, authenticated;
+grant execute on function public.crm_ceo_fiscal() to service_role;

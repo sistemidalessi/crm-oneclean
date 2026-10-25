@@ -5,7 +5,8 @@
 //   Authorization: Bearer <senha de leitura>
 //   GET …/crm-caixa-leitura?parte=ceo                   (24/10/2026: o resumo da OneClean para o painel "CEO Grupo
 //        Dalessi" do sistema da Agilité — vendas, funil, receber, pedidos, NF-e, estoque, compras, entregas;
-//        crm_ceo_resumo(), que só o service_role executa. Mesma senha.)
+//        crm_ceo_resumo(), que só o service_role executa. Mesma senha.) 25/10/2026: junta `fiscal` (crm_ceo_fiscal() e a
+//        validade do certificado A1, pelo /saude do serviço fiscal) para o Diretor Fiscal do painel.
 // A senha é gerada pelo administrador em Configurações → Integrações → "Leitura do Caixa" (aparece uma
 // vez só; aqui fica só o SHA-256, em crm_integracoes com uso = 'caixa'). Sem senha ou com senha errada:
 // 401 e nada mais. Só GET (o resto: 405). Não grava nada, nem registro de uso.
@@ -28,6 +29,17 @@ const PAGINA = 1000;
 
 const cabecalhos = { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' };
 const resposta = (status: number, obj: unknown) => new Response(JSON.stringify(obj), { status, headers: cabecalhos });
+// validade do certificado A1 da OneClean, pelo /saude do serviço fiscal (mesmos Secrets da crm-fiscal); só a data
+async function certificadoA1() {
+  const url = Deno.env.get('FISCAL_URL'), tok = Deno.env.get('FISCAL_TOKEN');
+  if (!url || !tok) return { erro: 'serviço fiscal não configurado' };
+  try {
+    const r = await fetch(url.replace(/\/+$/, '') + '/saude', { headers: { Authorization: 'Bearer ' + tok }, signal: AbortSignal.timeout(8000) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) return { erro: 'serviço fiscal respondeu ' + r.status };
+    return { valido_ate: j.certificado ? j.certificado.validoAte || null : null, servico_no_ar: !!j.ok };
+  } catch (_e) { return { erro: 'serviço fiscal não respondeu' }; }
+}
 
 async function sha256(t: string) {
   const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t));
@@ -148,9 +160,10 @@ Deno.serve(async (req) => {
   try {
     const url = new URL(req.url);
     if (url.searchParams.get('parte') === 'ceo') {
-      const { data, error } = await db.rpc('crm_ceo_resumo');
+      const [{ data, error }, fisc, cert] = await Promise.all([db.rpc('crm_ceo_resumo'), db.rpc('crm_ceo_fiscal'), certificadoA1()]);
       if (error) throw new Error('crm_ceo_resumo: ' + error.message);
-      return resposta(200, data);
+      if (fisc.error) console.error('[crm-caixa-leitura] crm_ceo_fiscal: ' + fisc.error.message);
+      return resposta(200, Object.assign({}, data, { fiscal: Object.assign({}, fisc.data || {}, { certificado_a1: cert }) }));
     }
     const dias = Math.min(90, Math.max(1, parseInt(url.searchParams.get('dias') ?? '30', 10) || 30));
     const { r } = await montar(db, dias);
