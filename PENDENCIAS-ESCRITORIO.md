@@ -1,6 +1,6 @@
 # O que fazer no escritório — CRM OneClean
 
-Atualizado em 23/10/2026. Quando um item for resolvido, apague a linha (ou peça ao Claude).
+Atualizado em 24/10/2026. Quando um item for resolvido, apague a linha (ou peça ao Claude).
 A mesma lista resumida está no `PENDENCIAS-ESCRITORIO.md` do `agilite-sistema-gestao` (a sessão do escritório abre lá).
 
 ## Só dá pra fazer estando no escritório (SSH da VPS)
@@ -13,6 +13,13 @@ A mesma lista resumida está no `PENDENCIAS-ESCRITORIO.md` do `agilite-sistema-g
       (Pedido → Outra operação → Entrega futura — remessa).
 
 ## Perguntas que só você responde
+
+- [ ] **Estoque antes da virada (24/10):** parte das 36 diferenças era erro do CRM (fuso), já corrigido; Belaplast 9758 e
+      Leal 23026 reabertas. Falta: (1) **você** dar a ciência das 4 notas sem XML completo (Vigut ×2 e AJA de 23/10, Lotus de
+      19/10: Estoque → Notas de compra → Notas da Sefaz → "dar ciência"); (2) o **comprador** dar entrada nas notas pendentes
+      que já chegaram e conferir no FKN quando entrou a **Leal 23020 (15/10)** — se foi depois de 16/10 12h, os sacos Leal
+      dela faltam no CRM. Depois disso, rodar de novo "Conferir a virada" e ver quantas das 36 sobram (as que sobrarem são as
+      do Wellington, abaixo).
 
 - [ ] **ANTES DA VIRADA — compras que não chegam pela Sefaz** (achado em 23/10, noite): na conferência CRM × FKN, **36
       produtos** tiveram entrada no FKN entre 19 e 23/10 sem nota de compra no CRM (ex.: papel interfolha Packpel 290027, 3.000;
