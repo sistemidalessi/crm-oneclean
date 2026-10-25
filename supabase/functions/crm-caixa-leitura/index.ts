@@ -6,7 +6,8 @@
 //   GET …/crm-caixa-leitura?parte=ceo                   (24/10/2026: o resumo da OneClean para o painel "CEO Grupo
 //        Dalessi" do sistema da Agilité — vendas, funil, receber, pedidos, NF-e, estoque, compras, entregas;
 //        crm_ceo_resumo(), que só o service_role executa. Mesma senha.) 25/10/2026: junta `fiscal` (crm_ceo_fiscal() e a
-//        validade do certificado A1, pelo /saude do serviço fiscal) para o Diretor Fiscal do painel.
+//        validade do certificado A1, pelo /saude do serviço fiscal) para o Diretor Fiscal do painel; e `analises`: os
+//        textos de hoje do Gerente de Vendas (equipe), do Comprador e da Logística, para o CEO do grupo (os que já saíram).
 // A senha é gerada pelo administrador em Configurações → Integrações → "Leitura do Caixa" (aparece uma
 // vez só; aqui fica só o SHA-256, em crm_integracoes com uso = 'caixa'). Sem senha ou com senha errada:
 // 401 e nada mais. Só GET (o resto: 405). Não grava nada, nem registro de uso.
@@ -160,10 +161,15 @@ Deno.serve(async (req) => {
   try {
     const url = new URL(req.url);
     if (url.searchParams.get('parte') === 'ceo') {
-      const [{ data, error }, fisc, cert] = await Promise.all([db.rpc('crm_ceo_resumo'), db.rpc('crm_ceo_fiscal'), certificadoA1()]);
+      const hoje = hojeSP(), corta = (x: { texto?: string; em?: string } | null) => (x && x.texto ? { texto: String(x.texto).slice(0, 2500), em: x.em || null } : null);
+      const [{ data, error }, fisc, cert, av, ac, al] = await Promise.all([db.rpc('crm_ceo_resumo'), db.rpc('crm_ceo_fiscal'), certificadoA1(),
+        db.from('crm_ia_analises_vendas').select('texto, em').eq('dia', hoje).eq('chave', 'equipe').maybeSingle(),
+        db.from('crm_ia_analises').select('texto, em').eq('dia', hoje).eq('tipo', 'compras').maybeSingle(),
+        db.from('crm_ia_analises_areas').select('texto, em').eq('dia', hoje).eq('area', 'logistica').maybeSingle()]);
       if (error) throw new Error('crm_ceo_resumo: ' + error.message);
       if (fisc.error) console.error('[crm-caixa-leitura] crm_ceo_fiscal: ' + fisc.error.message);
-      return resposta(200, Object.assign({}, data, { fiscal: Object.assign({}, fisc.data || {}, { certificado_a1: cert }) }));
+      return resposta(200, Object.assign({}, data, { fiscal: Object.assign({}, fisc.data || {}, { certificado_a1: cert }),
+        analises: { dia: hoje, vendas: corta(av.data), compras: corta(ac.data), logistica: corta(al.data) } }));
     }
     const dias = Math.min(90, Math.max(1, parseInt(url.searchParams.get('dias') ?? '30', 10) || 30));
     const { r } = await montar(db, dias);
