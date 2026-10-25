@@ -1468,6 +1468,8 @@
     return { pedidos, itens, andamento, fornecedores, fknSemPedido };
   };
   Supa.prototype.compraPedidoGravar = async function (p) { return unwrap(await this.sb.rpc('crm_compra_pedido_gravar', { p })); };
+  // aprovação do pedido ao fornecedor (25/10/2026; só o administrador; a trava fica desligada até o Anderson ligar)
+  Supa.prototype.compraPedidoAprovar = async function (id, decisao, motivo) { return unwrap(await this.sb.rpc('crm_compra_pedido_aprovar', { p_id: id, p_decisao: decisao, p_motivo: motivo })); };
   Supa.prototype.compraPedidoAcao = async function (id, acao, previsao) { return unwrap(await this.sb.rpc('crm_compra_pedido_acao', { p_id: id, p_acao: acao, p_previsao: previsao || null })); };
   Supa.prototype.aCaminho = async function () { return paginado((de, ate) => this.sb.rpc('crm_a_caminho').range(de, ate)); };
   // NCM de cada produto para o orçamento do cliente (20/10/2026): só o NCM, para qualquer pessoa ativa.

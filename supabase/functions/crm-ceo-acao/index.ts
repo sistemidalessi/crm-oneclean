@@ -9,6 +9,9 @@
 // Recusa (401, sem detalhe): sem assinatura, assinatura que não confere, ts fora de ±5 min. O nonce de "liberar" é
 // único no banco (crm_ceo_acoes): o mesmo corpo assinado não libera duas vezes. LISTA FECHADA: só ler os pedidos
 // bloqueados e liberar um pedido em aberto; nunca dinheiro, nota, exclusão ou mensagem a cliente.
+// (25/10/2026) E a aprovação de pedido ao fornecedor, pronta e DESLIGADA (crm_sistema 'compras_aprovacao'):
+//   {"acao":"compras"} lista os que aguardam; {"acao":"aprovar_compra"|"recusar_compra","numero":12,"esperado":["8000.00"],
+//   "motivo":"…"} decide, com o total que o Anderson viu (o CRM recusa se mudou) e o nonce único. Desligada, o CRM recusa.
 // Cadastro da chave (24/10/2026, Anderson: "cadastre a chave por mim"): {"acao":"registrar_chave","chave_publica":…}
 // com Authorization: Bearer <senha de leitura do Caixa> (a mesma da crm-caixa-leitura, que o servidor da Agilité já
 // tem) E assinado pela própria chave. Só vale enquanto NÃO há NENHUMA chave (nem desativada): depois da primeira, o
@@ -97,6 +100,20 @@ Deno.serve(async (req) => {
         : await db.rpc('crm_ceo_pedido_liberar', { p_numero: numero, p_nonce: c.nonce, p_esperado: esperado });
       if (error) throw new Error(error.message);
       return resposta(200, c.acao === 'ver' ? { ok: true, pedido: data } : data);
+    }
+    if (c.acao === 'compras') {
+      const { data, error } = await db.rpc('crm_ceo_compras_aguardando');
+      if (error) throw new Error(error.message);
+      return resposta(200, Object.assign({ ok: true }, data));
+    }
+    if (c.acao === 'aprovar_compra' || c.acao === 'recusar_compra') {
+      if (!Number.isInteger(numero) || numero < 1 || numero > 999999999) return resposta(400, { erro: 'número do pedido inválido' });
+      const total = Array.isArray(c.esperado) && c.esperado.length === 1 ? Number(c.esperado[0]) : NaN;
+      if (!Number.isFinite(total) || total < 0) return resposta(400, { erro: 'falta o total visto' });
+      const motivo = typeof c.motivo === 'string' ? c.motivo.slice(0, 200) : null;
+      const { data, error } = await db.rpc('crm_ceo_compra_decidir', { p_id: numero, p_nonce: c.nonce, p_decisao: c.acao === 'aprovar_compra' ? 'aprovar' : 'recusar', p_total: total, p_motivo: motivo });
+      if (error) throw new Error(error.message);
+      return resposta(200, data);
     }
     return resposta(400, { erro: 'ação fora da lista' });
   } catch (e) {

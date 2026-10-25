@@ -6051,3 +6051,140 @@ begin
 end $$;
 revoke all on function public.crm_ceo_fiscal() from public, anon, authenticated;
 grant execute on function public.crm_ceo_fiscal() to service_role;
+
+-- ============================================================ Aprovação de pedido ao fornecedor (CEO Grupo, 25/10/2026)
+-- Anderson: "se quiser deixar feito tudo bem, mas não ativa ainda essa trava, quero pensar melhor". Pronta e DESLIGADA.
+-- Liga e desliga pela chave crm_sistema 'compras_aprovacao' = '{"ativa":true,"acima":5000}' (só pelo banco; sem a chave ou
+-- com "ativa": false, nada muda para o comprador). Ligada: o pedido registrado com total (quantidade × custo) a partir de
+-- "acima" nasce "aguardando aprovação" (não conta como "a caminho" para as vendedoras) até o Anderson aprovar: no CRM
+-- (admin, Pedidos ao fornecedor) ou pelo WhatsApp do CEO (crm-ceo-acao, código + PIN, mesmo esquema do "liberar").
+-- Recusado = pedido cancelado, com o motivo.
+alter table public.crm_compra_pedidos add column if not exists aprovacao text check (aprovacao in ('aguardando', 'aprovado', 'recusado'));
+alter table public.crm_compra_pedidos add column if not exists aprovacao_total numeric(14,2);
+alter table public.crm_compra_pedidos add column if not exists aprovado_em timestamptz;
+alter table public.crm_compra_pedidos add column if not exists aprovado_por text;
+alter table public.crm_compra_pedidos add column if not exists aprovacao_motivo text;
+
+create or replace function public.crm_compras_aprovacao() returns jsonb language sql stable security definer set search_path = public as $$
+  select case when s.valor is null then jsonb_build_object('ativa', false, 'acima', null)
+    else jsonb_build_object('ativa', coalesce((s.valor::jsonb->>'ativa')::boolean, false), 'acima', nullif(s.valor::jsonb->>'acima', '')::numeric) end
+    from (select (select valor from public.crm_sistema where chave = 'compras_aprovacao') valor) s;
+$$;
+revoke all on function public.crm_compras_aprovacao() from public, anon;
+grant execute on function public.crm_compras_aprovacao() to authenticated, service_role;
+
+-- Grava o pedido inteiro: { fornecedor_cod, fornecedor_nome, previsao, obs, itens: [{codigo, descricao, unidade, quantidade, custo_unit}] }.
+-- (25/10/2026) com a aprovação ligada, o pedido a partir do valor nasce "aguardando".
+create or replace function public.crm_compra_pedido_gravar(p jsonb) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare pid bigint; x jsonb; k int := 0; r public.crm_compra_pedidos; ap jsonb; tot numeric;
+begin
+  if not (public.crm_eh_admin() or public.crm_eh_comprador()) then raise exception 'só o administrador e o comprador registram pedido ao fornecedor'; end if;
+  if coalesce(btrim(p->>'fornecedor_nome'), '') = '' then raise exception 'diga o fornecedor'; end if;
+  if nullif(p->>'previsao', '') is null then raise exception 'diga quando deve chegar'; end if;
+  insert into public.crm_compra_pedidos (fornecedor_cod, fornecedor_nome, previsao, obs)
+    values (nullif(btrim(p->>'fornecedor_cod'), ''), btrim(p->>'fornecedor_nome'), (p->>'previsao')::date, nullif(btrim(coalesce(p->>'obs', '')), ''))
+    returning id into pid;
+  for x in select value from jsonb_array_elements(coalesce(p->'itens', '[]'::jsonb)) loop
+    if coalesce(nullif(x->>'quantidade', '')::numeric, 0) <= 0 then continue; end if;
+    if coalesce(btrim(x->>'codigo'), '') = '' then raise exception 'item sem código'; end if;
+    k := k + 1;
+    insert into public.crm_compra_pedido_itens (pedido_id, ordem, codigo, descricao, unidade, quantidade, custo_unit)
+      values (pid, k, regexp_replace(btrim(x->>'codigo'), '\.\d+$', ''), nullif(btrim(coalesce(x->>'descricao', '')), ''), nullif(btrim(coalesce(x->>'unidade', '')), ''),
+              (x->>'quantidade')::numeric, nullif(x->>'custo_unit', '')::numeric);
+  end loop;
+  if k = 0 then raise exception 'o pedido precisa de pelo menos um item com quantidade'; end if;
+  ap := public.crm_compras_aprovacao();
+  if (ap->>'ativa')::boolean then
+    select round(coalesce(sum(quantidade * coalesce(custo_unit, 0)), 0), 2) into tot from public.crm_compra_pedido_itens where pedido_id = pid;
+    if tot >= coalesce((ap->>'acima')::numeric, 0) then
+      update public.crm_compra_pedidos set aprovacao = 'aguardando', aprovacao_total = tot where id = pid;
+    end if;
+  end if;
+  select * into r from public.crm_compra_pedidos where id = pid;
+  return to_jsonb(r) || jsonb_build_object('itens', k);
+end;
+$$;
+revoke all on function public.crm_compra_pedido_gravar(jsonb) from public, anon;
+grant execute on function public.crm_compra_pedido_gravar(jsonb) to authenticated;
+
+-- O que está a caminho (25/10/2026: sem os pedidos aguardando aprovação, que ainda não foram feitos ao fornecedor).
+create or replace function public.crm_a_caminho()
+returns table (codigo text, pedido_id bigint, pedido_em timestamptz, previsao date, falta numeric, faturado numeric, faturado_em timestamptz)
+language sql stable security definer set search_path = public as $$
+  select a.codigo, p.id, p.criado_em, p.previsao, a.quantidade - a.cancelado - a.recebido, greatest(a.faturado - a.recebido, 0), a.faturado_em
+    from public.crm_compra_andamento_int() a join public.crm_compra_pedidos p on p.id = a.pedido_id
+   where p.situacao = 'aberto' and p.aprovacao is distinct from 'aguardando' and a.quantidade - a.cancelado - a.recebido > 0 and (select public.crm_eh_ativo());
+$$;
+revoke all on function public.crm_a_caminho() from public, anon;
+grant execute on function public.crm_a_caminho() to authenticated;
+
+-- a decisão (interna): aprovar | recusar; confere que ainda aguarda e, se vier, que o total é o que foi visto
+create or replace function public.crm_compra_decidir_int(p_id bigint, p_decisao text, p_total numeric, p_quem text, p_motivo text) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare r public.crm_compra_pedidos;
+begin
+  if p_decisao not in ('aprovar', 'recusar') then raise exception 'decisão inválida'; end if;
+  select * into r from public.crm_compra_pedidos where id = p_id for update;
+  if r.id is null then return jsonb_build_object('ok', false, 'erro', 'pedido ao fornecedor não encontrado'); end if;
+  if r.aprovacao is distinct from 'aguardando' or r.situacao <> 'aberto' then return jsonb_build_object('ok', false, 'erro', 'o pedido ' || p_id || ' não está aguardando aprovação'); end if;
+  if p_total is not null and r.aprovacao_total is distinct from round(p_total, 2) then
+    return jsonb_build_object('ok', false, 'erro', 'o valor do pedido mudou desde a pergunta (agora ' || r.aprovacao_total || '); peça de novo');
+  end if;
+  update public.crm_compra_pedidos set aprovacao = case when p_decisao = 'aprovar' then 'aprovado' else 'recusado' end,
+      aprovado_em = now(), aprovado_por = left(p_quem, 80), aprovacao_motivo = nullif(left(btrim(coalesce(p_motivo, '')), 300), ''),
+      situacao = case when p_decisao = 'recusar' then 'cancelado' else situacao end,
+      fechado_em = case when p_decisao = 'recusar' then now() else fechado_em end, atualizado_em = now()
+   where id = p_id returning * into r;
+  return jsonb_build_object('ok', true, 'pedido', jsonb_build_object('id', r.id, 'fornecedor', r.fornecedor_nome, 'total', r.aprovacao_total, 'aprovacao', r.aprovacao));
+end;
+$$;
+revoke all on function public.crm_compra_decidir_int(bigint, text, numeric, text, text) from public, anon, authenticated;
+
+-- no CRM: só o administrador decide
+create or replace function public.crm_compra_pedido_aprovar(p_id bigint, p_decisao text, p_motivo text) returns jsonb
+language plpgsql security definer set search_path = public as $$
+begin
+  if not public.crm_eh_admin() then raise exception 'só o administrador aprova pedido ao fornecedor'; end if;
+  return public.crm_compra_decidir_int(p_id, p_decisao, null, coalesce((select nome from public.crm_usuarios where user_id = auth.uid()), 'administrador') || ' (no CRM)', p_motivo);
+end;
+$$;
+revoke all on function public.crm_compra_pedido_aprovar(bigint, text, text) from public, anon;
+grant execute on function public.crm_compra_pedido_aprovar(bigint, text, text) to authenticated;
+
+-- pelo WhatsApp do CEO (crm-ceo-acao, só o servidor): a lista e a decisão (com nonce único, como o "liberar")
+create or replace function public.crm_ceo_compras_aguardando() returns jsonb language plpgsql stable security definer set search_path = public as $$
+begin
+  if coalesce(auth.role(), '') <> 'service_role' then raise exception 'só o servidor'; end if;
+  return jsonb_build_object('config', public.crm_compras_aprovacao(), 'pedidos', coalesce((select jsonb_agg(z order by (z->>'id')::bigint) from (
+    select jsonb_build_object('id', p.id, 'fornecedor', p.fornecedor_nome, 'total', p.aprovacao_total, 'previsao', p.previsao, 'criado_em', p.criado_em,
+      'por', (select nome from public.crm_usuarios where user_id = p.criado_por), 'obs', left(coalesce(p.obs, ''), 120),
+      'itens', (select count(*) from public.crm_compra_pedido_itens i where i.pedido_id = p.id),
+      'maiores', (select coalesce(jsonb_agg(jsonb_build_object('descricao', left(coalesce(i.descricao, i.codigo), 60), 'quantidade', i.quantidade, 'unidade', i.unidade, 'total', round(i.quantidade * coalesce(i.custo_unit, 0), 2)) order by i.quantidade * coalesce(i.custo_unit, 0) desc), '[]'::jsonb)
+                  from (select * from public.crm_compra_pedido_itens i2 where i2.pedido_id = p.id order by i2.quantidade * coalesce(i2.custo_unit, 0) desc limit 3) i)) z
+      from public.crm_compra_pedidos p where p.aprovacao = 'aguardando' and p.situacao = 'aberto') q), '[]'::jsonb));
+end;
+$$;
+revoke all on function public.crm_ceo_compras_aguardando() from public, anon, authenticated;
+grant execute on function public.crm_ceo_compras_aguardando() to service_role;
+
+create or replace function public.crm_ceo_compra_decidir(p_id bigint, p_nonce text, p_decisao text, p_total numeric, p_motivo text) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare aid bigint; res jsonb;
+begin
+  if coalesce(auth.role(), '') <> 'service_role' then raise exception 'só o servidor'; end if;
+  if coalesce(length(p_nonce), 0) < 16 then raise exception 'nonce inválido'; end if;
+  if p_id is null or p_id < 1 or p_id > 999999999 then raise exception 'número inválido'; end if;
+  if p_total is null then raise exception 'falta o total visto'; end if;
+  insert into public.crm_ceo_acoes (nonce, acao, pedido_numero) values (p_nonce, p_decisao || '_compra', p_id) returning id into aid;
+  if not (public.crm_compras_aprovacao()->>'ativa')::boolean then
+    update public.crm_ceo_acoes set detalhe = 'aprovação de compras desligada' where id = aid;
+    return jsonb_build_object('ok', false, 'erro', 'a aprovação de pedidos ao fornecedor está desligada');
+  end if;
+  res := public.crm_compra_decidir_int(p_id, p_decisao, p_total, 'Anderson (CEO Grupo, pelo WhatsApp)', p_motivo);
+  update public.crm_ceo_acoes set ok = (res->>'ok')::boolean, detalhe = coalesce(res->>'erro', p_decisao) where id = aid;
+  return res;
+end;
+$$;
+revoke all on function public.crm_ceo_compra_decidir(bigint, text, text, numeric, text) from public, anon, authenticated;
+grant execute on function public.crm_ceo_compra_decidir(bigint, text, text, numeric, text) to service_role;

@@ -131,15 +131,27 @@
       '<td><button type="button" class="link" data-acao="cp-abrir" data-id="' + p.id + '" aria-expanded="' + abre + '">' + esc(R.nomeDeItem(p.fornecedor_nome)) + '</button>' +
         '<small>' + p.itens.length + ' ' + (p.itens.length === 1 ? 'item' : 'itens') + ' · ' + qtd(p.unidades) + ' unidades' + (p.total ? ' · ' + esc(R.moeda(p.total)) : '') + '</small></td>' +
       '<td>' + esc(br(p.criado_em && R.diaLocal(p.criado_em))) + '</td>' +
-      '<td>' + CRM.selo(s[0], s[1]) + (p.atrasado ? ' ' + CRM.selo('atrasado ' + p.diasAtraso + ' dia(s)', 'vermelho') : '') + (p.notas ? ' <small>NF ' + esc(p.notas) + '</small>' : '') + '</td>' +
+      '<td>' + CRM.selo(s[0], s[1]) + seloAprovacao(p) + (p.atrasado ? ' ' + CRM.selo('atrasado ' + p.diasAtraso + ' dia(s)', 'vermelho') : '') + (p.notas ? ' <small>NF ' + esc(p.notas) + '</small>' : '') + '</td>' +
       '<td class="num' + (p.atrasado ? ' neg' : '') + '">' + (p.aberto ? (p.atrasado ? 'era ' : '~') + esc(br(p.previsaoEf)) : p.situacaoAtual === 'recebido' ? 'chegou' : '—') + '</td></tr>' +
       (abre ? '<tr class="cp-detalhe"><td colspan="5">' + detalhe(p) + '</td></tr>' : '');
+  }
+  // aprovação do pedido ao fornecedor (25/10/2026, CEO Grupo; pronta e DESLIGADA até o Anderson ligar no banco:
+  // crm_sistema 'compras_aprovacao'): o pedido a partir do valor nasce "aguardando" e só o administrador decide
+  const seloAprovacao = p => p.aprovacao === 'aguardando' ? ' ' + CRM.selo('aguardando aprovação', 'ambar')
+    : p.aprovacao === 'recusado' ? ' ' + CRM.selo('recusado', 'vermelho') : p.aprovacao === 'aprovado' ? ' ' + CRM.selo('aprovado', 'verde') : '';
+  function blocoAprovacao(p) {
+    if (!p.aprovacao) return '';
+    if (p.aprovacao === 'aguardando') return '<p class="aviso-notas"><strong>Aguardando a aprovação do administrador</strong> (' + esc(R.moeda(p.aprovacao_total)) + '): ainda não mande ao fornecedor. ' +
+      (CRM.ehAdmin() ? '</p><p class="acoes"><button type="button" class="btn" data-acao="cp-aprovar" data-id="' + p.id + '">Aprovar o pedido</button> <button type="button" class="btn sec" data-acao="cp-recusar" data-id="' + p.id + '">Recusar</button></p>'
+        : 'O Anderson aprova pelo CRM ou pelo WhatsApp.</p>');
+    return '<p class="dica">' + (p.aprovacao === 'aprovado' ? 'Aprovado' : 'Recusado') + (p.aprovado_por ? ' por ' + esc(p.aprovado_por) : '') + (p.aprovado_em ? ' em ' + esc(R.dataBR(R.diaLocal(p.aprovado_em))) : '') +
+      (p.aprovacao_motivo ? ': ' + esc(p.aprovacao_motivo) : '') + '.</p>';
   }
   function detalhe(p) {
     const forn = (dados.fornecedores || []).find(x => p.fornecedor_cod && String(x.codigo) === String(p.fornecedor_cod));
     const tel = forn && forn.telefone ? R.linkWhatsApp(forn.telefone, 'Olá! Aqui é da ' + CRM.nomeInstalacao() + '. Sobre o nosso pedido de ' + br(R.diaLocal(p.criado_em)) +
       ': ainda faltam ' + p.itens.filter(i => i.falta > 0).map(i => qtd(i.falta) + ' ' + (i.unidade || '') + ' de ' + R.nomeDeItem(i.descricao || i.codigo)).join(', ') + '. Tem previsão de entrega?') : '';
-    return '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Produto</th><th class="num">Pedido</th><th class="num">Faturado (nota)</th><th class="num">Entrou</th><th class="num">Falta chegar</th>' +
+    return blocoAprovacao(p) + '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Produto</th><th class="num">Pedido</th><th class="num">Faturado (nota)</th><th class="num">Entrou</th><th class="num">Falta chegar</th>' +
         '<th class="num">Custo un.</th></tr></thead><tbody>' +
       p.itens.map(i => '<tr><td>' + esc(R.nomeDeItem(i.descricao || i.codigo)) + ' <small>' + esc(i.codigo) + '</small></td><td class="num">' + qtd(i.quantidade) + ' ' + esc(i.unidade || '') +
         (num(i.cancelado) ? '<br><small>' + qtd(i.cancelado) + ' cancelado(s)</small>' : '') + '</td><td class="num">' + (i.faturado ? qtd(i.faturado) : '—') + '</td><td class="num">' + (i.recebido ? qtd(i.recebido) : '—') + '</td>' +
@@ -198,7 +210,8 @@
         const its = itens.map((it, k) => Object.assign({}, it, { quantidade: qs.length ? qs[k] : it.quantidade })).filter(it => it.quantidade > 0);
         if (!its.length) throw new Error('ponha a quantidade de pelo menos um item');
         const r = await st().compraPedidoGravar({ fornecedor_cod: forn.cod || null, fornecedor_nome: forn.nome, previsao: v.previsao, obs: v.obs || null, itens: its });
-        CRM.toast('Pedido nº ' + r.id + ' registrado (' + its.length + ' itens · chega ~' + R.dataBR(v.previsao) + '). As vendedoras já veem "a caminho".');
+        if (r.aprovacao === 'aguardando') CRM.toast('Pedido nº ' + r.id + ' registrado e AGUARDANDO APROVAÇÃO (' + R.moeda(r.aprovacao_total) + '): ainda não mande ao fornecedor.');
+        else CRM.toast('Pedido nº ' + r.id + ' registrado (' + its.length + ' itens · chega ~' + R.dataBR(v.previsao) + '). As vendedoras já veem "a caminho".');
         dados = null; CRM.aCaminho.limpa();
         if (CRM.comprasRecarregar) CRM.comprasRecarregar();
       }
@@ -271,7 +284,8 @@
         if (ruins.length) throw new Error('confira: ' + ruins.join(', '));
         if (!its.length) throw new Error('ponha pelo menos um produto com quantidade');
         const r = await st().compraPedidoGravar({ fornecedor_cod: x ? x.cod : null, fornecedor_nome: x ? x.nome : nome, previsao: v.previsao, obs: v.obs || null, itens: its });
-        CRM.toast('Pedido nº ' + r.id + ' registrado (' + its.length + ' itens · chega ~' + R.dataBR(v.previsao) + '). As vendedoras já veem "a caminho".');
+        if (r.aprovacao === 'aguardando') CRM.toast('Pedido nº ' + r.id + ' registrado e AGUARDANDO APROVAÇÃO (' + R.moeda(r.aprovacao_total) + '): ainda não mande ao fornecedor.');
+        else CRM.toast('Pedido nº ' + r.id + ' registrado (' + its.length + ' itens · chega ~' + R.dataBR(v.previsao) + '). As vendedoras já veem "a caminho".');
         dados = null; CRM.aCaminho.limpa();
         if (CRM.comprasRecarregar) CRM.comprasRecarregar();
         CRM.render();
@@ -280,6 +294,11 @@
   }
   CRM.comprasPedidos = { registrar, novoPedido, recarregar: () => { dados = null; } };
 
+  async function aprovar(id, decisao, motivo) {
+    const r = await st().compraPedidoAprovar(Number(id), decisao, motivo || null);
+    if (r && r.ok === false) throw new Error(r.erro);
+    dados = null; CRM.aCaminho.limpa(); carrega();
+  }
   async function acao(id, a, previsao) {
     await st().compraPedidoAcao(Number(id), a, previsao || null);
     dados = null; CRM.aCaminho.limpa(); if (CRM.comprasRecarregar) CRM.comprasRecarregar();
@@ -298,6 +317,9 @@
     },
     'cp-chegou': async id => { if (confirm('Marcar que tudo deste pedido chegou? Ele sai do "a caminho".')) { try { await acao(id, 'chegou'); CRM.toast('Pedido fechado.'); } catch (e) { CRM.falhou(e); } } },
     'cp-cancelar-resto': async id => { if (confirm('Cancelar o que ainda não chegou deste pedido? O que já entrou fica.')) { try { await acao(id, 'cancelar_resto'); CRM.toast('O que faltava foi cancelado.'); } catch (e) { CRM.falhou(e); } } },
+    'cp-aprovar': async id => { if (confirm('Aprovar o pedido ' + id + ' ao fornecedor?')) { try { await aprovar(id, 'aprovar'); CRM.toast('Pedido aprovado: o comprador já pode mandar ao fornecedor.'); } catch (e) { CRM.falhou(e); } } },
+    'cp-recusar': id => CRM.abrirForm({ titulo: 'Recusar o pedido ' + id, campos: [{ nome: 'motivo', rotulo: 'Motivo (o comprador vê)', largo: true }], valores: { motivo: '' },
+      salvarTexto: 'Recusar o pedido', aoSalvar: async v => { await aprovar(id, 'recusar', v.motivo); CRM.toast('Pedido recusado (cancelado).'); } }),
     'cp-cancelar': async id => { if (confirm('Cancelar o pedido todo?')) { try { await acao(id, 'cancelar'); CRM.toast('Pedido cancelado.'); } catch (e) { CRM.falhou(e); } } }
   });
 })(typeof window !== 'undefined' ? window : globalThis);
