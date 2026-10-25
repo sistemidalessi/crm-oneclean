@@ -5632,8 +5632,559 @@ begin
   r := r || jsonb_build_object('entregas', x);
   -- vigia das notas do FKN (plano B depois da virada)
   r := r || jsonb_build_object('vigia_ultimo_sinal', (select max(ultimo_sinal) from public.crm_integracoes where ativo and coalesce(uso, 'notas') = 'notas'));
+  -- Gerente de Vendas (24/10/2026): os clientes fiéis sumidos, pela mesma conta da tela (crm_gv_sumidos)
+  x := public.crm_gv_sumidos(3);
+  r := r || jsonb_build_object('clientes_sumidos', jsonb_build_object('quantidade', coalesce((x->>'quantidade')::int, 0), 'em_risco_por_mes', coalesce((x->>'em_risco_por_mes')::numeric, 0)));
   return jsonb_build_object('empresa', 'oneclean', 'nome', 'OneClean', 'hoje', hoje, 'gerado_em', now()) || r;
 end;
 $$;
 revoke all on function public.crm_ceo_resumo() from public, anon, authenticated;
 grant execute on function public.crm_ceo_resumo() to service_role;
+
+-- ============================================================ CEO Grupo Dalessi: ações pelo celular (24/10/2026)
+-- O Anderson responde no WhatsApp da Agilité e o sistema de lá pede ao CRM uma ação da LISTA FECHADA. Por enquanto só
+-- uma: liberar pedido bloqueado (Anderson, 24/10: "começa pelo liberar pedido bloqueado"). O pedido chega pela Edge
+-- Function crm-ceo-acao ASSINADO com Ed25519 pela chave privada que só existe no servidor da Agilité; aqui fica só a
+-- chave PÚBLICA (crm_ceo_chaves, não é segredo). Nenhuma senha nova trafega. Só o service_role executa estas funções
+-- (e elas mesmas conferem o papel, para não depender só do revoke). Cada ação fica em crm_ceo_acoes (o nonce é único:
+-- o mesmo pedido assinado não roda duas vezes). Nunca por aqui: dinheiro, nota, exclusão, mensagem a cliente.
+create table if not exists public.crm_ceo_chaves (
+  id            bigint generated always as identity primary key,
+  nome          text not null,
+  chave_publica text not null unique,              -- Ed25519, 32 bytes em base64
+  ativa         boolean not null default true,
+  criada_em     timestamptz not null default now()
+);
+alter table public.crm_ceo_chaves enable row level security;
+-- uma chave ativa só (o cadastro automático pela crm-ceo-acao vale enquanto não há nenhuma)
+create unique index if not exists crm_ceo_chaves_uma_ativa on public.crm_ceo_chaves ((true)) where ativa;
+create table if not exists public.crm_ceo_acoes (
+  id            bigint generated always as identity primary key,
+  nonce         text not null unique,
+  acao          text not null,
+  pedido_numero bigint,
+  ok            boolean not null default false,
+  detalhe       text,
+  criado_em     timestamptz not null default now()
+);
+alter table public.crm_ceo_acoes enable row level security;
+
+-- o pedido como o CEO vê (cliente, vendedor(a), valor, bloqueios que ainda seguram)
+create or replace function public.crm_ceo_pedido_json(r public.crm_pedidos) returns jsonb language plpgsql stable security definer set search_path = public as $$
+begin
+  if coalesce(auth.role(), '') <> 'service_role' then raise exception 'só o servidor'; end if;
+  return jsonb_build_object('numero', r.numero, 'situacao', r.situacao, 'valor_total', r.valor_total, 'entrega', r.entrega, 'criado_em', r.criado_em,
+    'cliente', (select e.nome from public.crm_empresas e where e.id = r.empresa_id),
+    'vendedor', (select u.nome from public.crm_usuarios u where u.user_id = r.vendedor_id),
+    'bloqueios', coalesce((select jsonb_agg(b) from unnest(r.bloqueios) b where b <> all (r.liberado)), '[]'::jsonb));
+end;
+$$;
+
+create or replace function public.crm_ceo_pedidos_bloqueados() returns jsonb language plpgsql security definer set search_path = public as $$
+begin
+  if coalesce(auth.role(), '') <> 'service_role' then raise exception 'só o servidor'; end if;
+  perform public.crm_pedidos_atualizar();
+  return coalesce((select jsonb_agg(public.crm_ceo_pedido_json(p) order by p.criado_em) from (
+    select * from public.crm_pedidos where situacao = 'aberto' and exists (select 1 from unnest(bloqueios) b where b <> all (liberado))
+    order by criado_em limit 30) p), '[]'::jsonb);
+end;
+$$;
+
+create or replace function public.crm_ceo_pedido_ver(p_numero bigint) returns jsonb language plpgsql security definer set search_path = public as $$
+declare r public.crm_pedidos;
+begin
+  if coalesce(auth.role(), '') <> 'service_role' then raise exception 'só o servidor'; end if;
+  perform public.crm_pedidos_atualizar();
+  select * into r from public.crm_pedidos where numero = p_numero;
+  if r.id is null then return null; end if;
+  return public.crm_ceo_pedido_json(r);
+end;
+$$;
+
+-- libera os bloqueios de AGORA (um bloqueio novo volta a segurar, como no crm_pedido_liberar da tela)
+create or replace function public.crm_ceo_pedido_liberar(p_numero bigint, p_nonce text) returns jsonb language plpgsql security definer set search_path = public as $$
+declare r public.crm_pedidos; aid bigint; pend text[];
+begin
+  if coalesce(auth.role(), '') <> 'service_role' then raise exception 'só o servidor'; end if;
+  if coalesce(length(p_nonce), 0) < 16 then raise exception 'nonce inválido'; end if;
+  insert into public.crm_ceo_acoes (nonce, acao, pedido_numero) values (p_nonce, 'liberar', p_numero) returning id into aid;
+  select * into r from public.crm_pedidos where numero = p_numero for update;
+  if r.id is null then update public.crm_ceo_acoes set detalhe = 'pedido não encontrado' where id = aid; return jsonb_build_object('ok', false, 'erro', 'pedido não encontrado'); end if;
+  if r.situacao <> 'aberto' then update public.crm_ceo_acoes set detalhe = 'pedido ' || r.situacao where id = aid; return jsonb_build_object('ok', false, 'erro', 'só se libera pedido em aberto (este está ' || r.situacao || ')'); end if;
+  perform public.crm_pedidos_atualizar();
+  select * into r from public.crm_pedidos where id = r.id;
+  pend := array(select b from unnest(r.bloqueios) b where b <> all (r.liberado));
+  if cardinality(pend) = 0 then
+    update public.crm_ceo_acoes set ok = true, detalhe = 'já estava liberado' where id = aid;
+    return jsonb_build_object('ok', true, 'ja_estava', true, 'pedido', public.crm_ceo_pedido_json(r));
+  end if;
+  update public.crm_pedidos set liberado = r.bloqueios, liberado_por = null, liberado_em = now(), atualizado_em = now(),
+    comentarios = comentarios || jsonb_build_array(jsonb_build_object('quando', now(), 'por', null, 'nome', 'Anderson (CEO Grupo, pelo WhatsApp)',
+      'texto', 'Liberado pelo WhatsApp: ' || array_to_string(pend, ', ')))
+   where id = r.id returning * into r;
+  update public.crm_ceo_acoes set ok = true, detalhe = 'liberado: ' || array_to_string(pend, ', ') where id = aid;
+  return jsonb_build_object('ok', true, 'liberados', to_jsonb(pend), 'pedido', public.crm_ceo_pedido_json(r));
+end;
+$$;
+revoke all on table public.crm_ceo_chaves, public.crm_ceo_acoes from public, anon, authenticated;
+revoke all on function public.crm_ceo_pedido_json(public.crm_pedidos) from public, anon, authenticated;
+revoke all on function public.crm_ceo_pedidos_bloqueados() from public, anon, authenticated;
+revoke all on function public.crm_ceo_pedido_ver(bigint) from public, anon, authenticated;
+revoke all on function public.crm_ceo_pedido_liberar(bigint, text) from public, anon, authenticated;
+grant execute on function public.crm_ceo_pedidos_bloqueados() to service_role;
+grant execute on function public.crm_ceo_pedido_ver(bigint) to service_role;
+grant execute on function public.crm_ceo_pedido_liberar(bigint, text) to service_role;
+-- Revisão de segurança de 24/10/2026: o liberar recebe os bloqueios que o Anderson viu e recusa se forem outros (a
+-- versão de 2 argumentos fica sem execute para ninguém; a Edge Function só chama esta).
+create or replace function public.crm_ceo_pedido_liberar(p_numero bigint, p_nonce text, p_esperado text[]) returns jsonb language plpgsql security definer set search_path = public as $$
+declare r public.crm_pedidos; aid bigint; pend text[];
+begin
+  if coalesce(auth.role(), '') <> 'service_role' then raise exception 'só o servidor'; end if;
+  if coalesce(length(p_nonce), 0) < 16 then raise exception 'nonce inválido'; end if;
+  if p_numero is null or p_numero < 1 or p_numero > 999999999 then raise exception 'número inválido'; end if;
+  insert into public.crm_ceo_acoes (nonce, acao, pedido_numero) values (p_nonce, 'liberar', p_numero) returning id into aid;
+  select * into r from public.crm_pedidos where numero = p_numero for update;
+  if r.id is null then update public.crm_ceo_acoes set detalhe = 'pedido não encontrado' where id = aid; return jsonb_build_object('ok', false, 'erro', 'pedido não encontrado'); end if;
+  if r.situacao <> 'aberto' then update public.crm_ceo_acoes set detalhe = 'pedido ' || r.situacao where id = aid; return jsonb_build_object('ok', false, 'erro', 'só se libera pedido em aberto (este está ' || r.situacao || ')'); end if;
+  perform public.crm_pedidos_atualizar();
+  select * into r from public.crm_pedidos where id = r.id;
+  pend := array(select b from unnest(r.bloqueios) b where b <> all (r.liberado) order by b);
+  if cardinality(pend) = 0 then
+    update public.crm_ceo_acoes set ok = true, detalhe = 'já estava liberado' where id = aid;
+    return jsonb_build_object('ok', true, 'ja_estava', true, 'pedido', public.crm_ceo_pedido_json(r));
+  end if;
+  if pend is distinct from array(select x from unnest(coalesce(p_esperado, '{}')) x order by x) then
+    update public.crm_ceo_acoes set detalhe = 'bloqueios mudaram: ' || array_to_string(pend, ', ') where id = aid;
+    return jsonb_build_object('ok', false, 'erro', 'os bloqueios do pedido mudaram desde a pergunta (agora: ' || array_to_string(pend, ', ') || '); peça de novo', 'pedido', public.crm_ceo_pedido_json(r));
+  end if;
+  update public.crm_pedidos set liberado = r.bloqueios, liberado_por = null, liberado_em = now(), atualizado_em = now(),
+    comentarios = comentarios || jsonb_build_array(jsonb_build_object('quando', now(), 'por', null, 'nome', 'Anderson (CEO Grupo, pelo WhatsApp)',
+      'texto', 'Liberado pelo WhatsApp: ' || array_to_string(pend, ', ')))
+   where id = r.id returning * into r;
+  update public.crm_ceo_acoes set ok = true, detalhe = 'liberado: ' || array_to_string(pend, ', ') where id = aid;
+  return jsonb_build_object('ok', true, 'liberados', to_jsonb(pend), 'pedido', public.crm_ceo_pedido_json(r));
+end;
+$$;
+revoke all on function public.crm_ceo_pedido_liberar(bigint, text, text[]) from public, anon, authenticated;
+grant execute on function public.crm_ceo_pedido_liberar(bigint, text, text[]) to service_role;
+revoke all on function public.crm_ceo_pedido_liberar(bigint, text) from service_role;
+
+-- ============================================================ Gerente de Vendas (CEO Grupo Dalessi, 24/10/2026)
+-- O diretor de vendas da turma (Anderson: "Gerente de Vendas… conversa também com a Isabela e com os(as) vendedores(as),
+-- cada um vendo só o que o papel permite"). As CONTAS ficam aqui, em SQL, e a IA só lê o resultado (a regra do CEO:
+-- números vêm do sistema, nunca da IA). Todas são SECURITY INVOKER: rodam com o login de quem pergunta, e a RLS de
+-- sempre decide o que entra (a vendedora vê só a carteira dela e a meta dela; sem custo em nenhuma). Venda = nota não
+-- cancelada com item de CFOP de venda (5/6/7 com 1 ou 4), como a Gestão e o crm_ceo_resumo; dono = o vendedor da nota
+-- (vendedor_id); sem ele, a carteira do cliente (como a Gestão: nota com nome de ex-vendedor fica sem dono).
+create or replace function public.crm_gv_notas(p_desde date)
+returns table (id uuid, valor numeric, dia date, empresa_id uuid, cli text, dono uuid, vend text)
+language sql stable security invoker set search_path = public as $$
+  select n.id, n.valor_total, (n.emitida_em at time zone 'America/Sao_Paulo')::date, n.empresa_id, coalesce(n.empresa_id::text, n.cliente_doc),
+         d.dono,
+         case when upper(btrim(coalesce(n.vendedor_nome, ''))) = 'DIRETO' then 'Direto (sem vendedor)'
+              else coalesce(u.nome, initcap(lower(nullif(btrim(n.vendedor_nome), ''))), 'Sem vendedor(a)') end
+    from public.crm_notas n
+    left join public.crm_empresas e on e.id = n.empresa_id
+    cross join lateral (select coalesce(n.vendedor_id, case when nullif(btrim(coalesce(n.vendedor_nome, '')), '') is null then e.responsavel_id end) dono) d
+    left join public.crm_usuarios u on u.user_id = d.dono
+   where not n.cancelada and n.emitida_em >= (p_desde::timestamp at time zone 'America/Sao_Paulo')
+     and (exists (select 1 from public.crm_nota_itens i where i.nota_id = n.id and i.cfop ~ '^[567][14]')
+          or not exists (select 1 from public.crm_nota_itens i where i.nota_id = n.id));
+$$;
+
+-- ritmo do mês: até hoje × o mesmo período do mês passado, o mês passado inteiro, a meta e a projeção linear
+create or replace function public.crm_gv_ritmo() returns jsonb language plpgsql stable security invoker set search_path = public as $$
+declare hoje date := (now() at time zone 'America/Sao_Paulo')::date; ini date; ini_ant date; fim_ant date; dc int; dm int; r jsonb;
+begin
+  ini := date_trunc('month', hoje)::date; ini_ant := (ini - interval '1 month')::date;
+  fim_ant := least(ini_ant + (hoje - ini), ini - 1); dc := hoje - ini + 1; dm := ((ini + interval '1 month')::date - ini);
+  with v as (select * from public.crm_gv_notas(ini_ant)),
+  g as (select dono, vend,
+          round(coalesce(sum(valor) filter (where dia >= ini), 0), 2) mes,
+          count(*) filter (where dia >= ini) notas,
+          count(distinct cli) filter (where dia >= ini) clientes,
+          round(coalesce(sum(valor) filter (where dia between ini_ant and fim_ant), 0), 2) ant_mesmo,
+          round(coalesce(sum(valor) filter (where dia between ini_ant and ini - 1), 0), 2) ant
+          from v group by dono, vend),
+  m as (select usuario_id, sum(valor) meta from public.crm_metas where mes = ini group by usuario_id)
+  select jsonb_build_object('hoje', hoje, 'dias_corridos', dc, 'dias_no_mes', dm,
+    'total', (select jsonb_build_object('mes', coalesce(sum(g.mes), 0), 'notas', coalesce(sum(g.notas), 0), 'mes_anterior_mesmo_periodo', coalesce(sum(g.ant_mesmo), 0),
+       'mes_anterior', coalesce(sum(g.ant), 0), 'meta', (select round(sum(meta), 2) from m), 'projecao', round(coalesce(sum(g.mes), 0) / dc * dm, 2)) from g),
+    'por_vendedor', coalesce((select jsonb_agg(jsonb_build_object('vendedor', g.vend, 'mes', g.mes, 'notas', g.notas, 'clientes', g.clientes,
+       'mes_anterior_mesmo_periodo', g.ant_mesmo, 'mes_anterior', g.ant, 'meta', round(m.meta, 2),
+       'pct_meta', case when m.meta > 0 then round(g.mes / m.meta * 100, 1) end, 'projecao', round(g.mes / dc * dm, 2)) order by g.mes desc)
+       from g left join m on m.usuario_id = g.dono), '[]'::jsonb),
+    'metas_sem_venda', coalesce((select jsonb_agg(jsonb_build_object('vendedor', u.nome, 'meta', round(m.meta, 2))) from m join public.crm_usuarios u on u.user_id = m.usuario_id
+       where not exists (select 1 from g where g.dono = m.usuario_id)), '[]'::jsonb))
+    into r;
+  return r;
+end;
+$$;
+
+-- clientes fiéis sumidos: compraram em pelo menos 3 dias diferentes no último ano e já passaram de 2 ciclos de recompra
+-- (o ciclo do cadastro; sem ele, o intervalo médio entre as compras) e de 45 dias sem comprar. Em risco = a média por mês.
+create or replace function public.crm_gv_sumidos(p_limite int default 15) returns jsonb language sql stable security invoker set search_path = public as $$
+  with hoje as (select (now() at time zone 'America/Sao_Paulo')::date d),
+  v as (select * from public.crm_gv_notas((select d - 365 from hoje)) where empresa_id is not null),
+  c as (select empresa_id, max(dono::text)::uuid dono, count(distinct dia) compras, sum(valor) total, max(dia) ultima, min(dia) primeira from v group by empresa_id having count(distinct dia) >= 3),
+  x as (select c.*, e.nome, coalesce(nullif(e.ciclo_recompra_dias, 0), greatest(7, round((c.ultima - c.primeira)::numeric / (c.compras - 1))))::int ciclo, (select d from hoje) - c.ultima sem
+          from c join public.crm_empresas e on e.id = c.empresa_id),
+  s as (select x.*, row_number() over (order by x.total desc) rn from x where x.sem > greatest(2 * x.ciclo, 45))
+  select jsonb_build_object('quantidade', (select count(*) from s), 'em_risco_por_mes', (select round(coalesce(sum(total), 0) / 12, 2) from s),
+    'clientes', coalesce((select jsonb_agg(jsonb_build_object('cliente', s.nome, 'carteira', u.nome, 'ultima_compra', s.ultima, 'dias_sem_comprar', s.sem,
+       'ciclo_dias', s.ciclo, 'compras_no_ano', s.compras, 'media_por_mes', round(s.total / 12, 2)) order by s.rn)
+       from s left join public.crm_usuarios u on u.user_id = s.dono where s.rn <= greatest(1, least(p_limite, 50))), '[]'::jsonb));
+$$;
+
+-- funil parado: negócio aberto sem mudar de etapa há mais de 15 dias e proposta enviada há mais de 7 dias sem resposta
+create or replace function public.crm_gv_funil() returns jsonb language sql stable security invoker set search_path = public as $$
+  with n as (select g.*, e.nome cliente, et.nome etapa, u.nome dono, (now()::date - coalesce(g.etapa_desde, g.criado_em)::date) parado
+               from public.crm_negocios g left join public.crm_empresas e on e.id = g.empresa_id left join public.crm_etapas et on et.id = g.etapa_id
+               left join public.crm_usuarios u on u.user_id = g.responsavel_id
+              where g.status = 'aberto' and coalesce(g.etapa_desde, g.criado_em) < now() - interval '15 days'),
+  p as (select pr.numero, pr.valor_total, pr.enviada_em, e.nome cliente, u.nome dono from public.crm_propostas pr join public.crm_negocios g on g.id = pr.negocio_id
+               left join public.crm_empresas e on e.id = g.empresa_id left join public.crm_usuarios u on u.user_id = g.responsavel_id
+              where pr.status = 'enviada' and pr.enviada_em < (now() at time zone 'America/Sao_Paulo')::date - 7)
+  select jsonb_build_object(
+    'negocios_parados', (select count(*) from n), 'negocios_parados_valor', (select round(coalesce(sum(valor), 0), 2) from n),
+    'maiores_parados', coalesce((select jsonb_agg(jsonb_build_object('negocio', y.titulo, 'cliente', y.cliente, 'valor', y.valor, 'etapa', y.etapa, 'parado_dias', y.parado, 'responsavel', y.dono))
+       from (select * from n order by valor desc limit 10) y), '[]'::jsonb),
+    'propostas_sem_resposta', (select count(*) from p), 'propostas_sem_resposta_valor', (select round(coalesce(sum(valor_total), 0), 2) from p),
+    'maiores_propostas', coalesce((select jsonb_agg(jsonb_build_object('proposta', y.numero, 'cliente', y.cliente, 'valor', y.valor_total, 'enviada_em', y.enviada_em, 'responsavel', y.dono))
+       from (select * from p order by valor_total desc limit 10) y), '[]'::jsonb));
+$$;
+
+-- a análise do dia guardada (uma da equipe, para administrador e gestora; uma por vendedor(a), da carteira dele(a)).
+-- Só a Edge Function grava (service_role); lê quem é o dono da linha, e a gestão lê todas.
+create table if not exists public.crm_ia_analises_vendas (
+  dia       date not null,
+  chave     text not null,              -- 'equipe' ou o user_id do(a) vendedor(a)
+  user_id   uuid references public.crm_usuarios(user_id) on delete cascade,
+  texto     text not null,
+  em        timestamptz not null default now(),
+  por       uuid,
+  custo_usd numeric(10,5),
+  primary key (dia, chave)
+);
+alter table public.crm_ia_analises_vendas enable row level security;
+drop policy if exists le on public.crm_ia_analises_vendas;
+create policy le on public.crm_ia_analises_vendas for select to authenticated using ((select public.crm_eh_gestor()) or user_id = (select auth.uid()));
+revoke all on function public.crm_gv_notas(date) from public, anon;
+revoke all on function public.crm_gv_ritmo() from public, anon;
+revoke all on function public.crm_gv_sumidos(int) from public, anon;
+revoke all on function public.crm_gv_funil() from public, anon;
+grant execute on function public.crm_gv_notas(date), public.crm_gv_ritmo(), public.crm_gv_sumidos(int), public.crm_gv_funil() to authenticated, service_role;
+revoke all on table public.crm_ia_analises_vendas from anon;
+revoke insert, update, delete, truncate on table public.crm_ia_analises_vendas from authenticated;
+
+
+-- ============================================================ Comprador Sênior: preço de compra (CEO Grupo, 24/10/2026)
+-- Plano do CEO: "opinar no preço de compra (último preço, média, outros fornecedores pelas notas da Sefaz,
+-- concorrentes; 'negociar até R$ Y')". A CONTA é daqui (a IA só lê). SECURITY INVOKER: quem não vê compras (vendedora)
+-- recebe vazio. Custo unitário de nota = (produtos + IPI + ST + frete + outras) ÷ (quantidade × fator), como o precos_compra.
+--   comecar_em      = o menor custo pago nos últimos 180 dias (qualquer fornecedor)
+--   teto_margem     = preço de tabela × (1 − margem mínima)          (acima disso a margem fica abaixo da mínima)
+--   teto_concorrencia = menor preço de concorrente do mês mais recente, na nossa unidade, × (1 − margem mínima)
+--   negociar_ate    = o menor dos tetos
+create or replace function public.crm_cs_preco_alvo(p_codigos text[]) returns jsonb language sql stable security invoker set search_path = public as $$
+  with cods as (select distinct btrim(x) codigo from unnest(coalesce(p_codigos, '{}')) x where btrim(x) <> '' limit 40),
+  mm as (select coalesce(nullif(dados->>'margem_minima', '')::numeric, 23) m from public.crm_config where id = 1),
+  n as (select i.codigo, c.fornecedor_nome forn, (c.emitida_em at time zone 'America/Sao_Paulo')::date dia,
+               (i.valor_total + i.ipi + i.st + i.frete + i.outras) tot, i.quantidade * coalesce(nullif(i.fator, 0), 1) q
+          from public.crm_compra_itens i join public.crm_compras c on c.id = i.compra_id
+         where i.codigo in (select codigo from cods) and c.emitida_em >= now() - interval '180 days' and i.quantidade > 0),
+  nu as (select *, round(tot / q, 4) cu from n where q > 0),
+  conc as (select p.codigo, min(p.preco / nullif(p.quantidade, 0) * coalesce(nullif(k.fator, 0), 1)) menor, max(p.mes) mes
+             from public.crm_precos_concorrente p join public.crm_cesta k on k.codigo = p.codigo and k.ativo
+            where p.codigo in (select codigo from cods)
+              and p.mes = (select max(p2.mes) from public.crm_precos_concorrente p2 where p2.codigo = p.codigo)
+            group by p.codigo),
+  base as (select c.codigo, e.descricao, e.preco_venda, coalesce(nullif(e.custo_compra, 0), e.custo_unit) custo_fkn,
+                  (select jsonb_build_object('custo', cu, 'fornecedor', forn, 'dia', dia) from nu where nu.codigo = c.codigo order by dia desc, cu limit 1) ult,
+                  (select jsonb_build_object('custo', cu, 'fornecedor', forn, 'dia', dia) from nu where nu.codigo = c.codigo order by cu, dia desc limit 1) menor,
+                  (select round(sum(tot) / nullif(sum(q), 0), 4) from nu where nu.codigo = c.codigo) media,
+                  (select count(*) from nu where nu.codigo = c.codigo) notas,
+                  (select jsonb_agg(jsonb_build_object('fornecedor', f.forn, 'ultimo_custo', f.cu, 'dia', f.dia) order by f.cu) from (
+                     select distinct on (forn) forn, cu, dia from nu where nu.codigo = c.codigo order by forn, dia desc) f) por_fornecedor,
+                  case when e.preco_venda > 0 then round(e.preco_venda * (1 - (select m from mm) / 100), 4) end teto_margem,
+                  case when k.menor > 0 then round(k.menor * (1 - (select m from mm) / 100), 4) end teto_conc, k.menor conc_menor, k.mes conc_mes
+             from cods c left join public.crm_estoque e on e.codigo = c.codigo left join conc k on k.codigo = c.codigo)
+  select coalesce(jsonb_agg(jsonb_build_object(
+    'codigo', b.codigo, 'descricao', b.descricao, 'preco_tabela', b.preco_venda, 'ultimo_custo_fkn', b.custo_fkn,
+    'notas_de_compra_180d', b.notas,
+    'ultimo_pago', b.ult, 'comecar_em', b.menor,
+    'media_180d', b.media, 'por_fornecedor', coalesce(b.por_fornecedor, '[]'::jsonb),
+    'margem_minima_pct', (select m from mm), 'teto_pela_margem', b.teto_margem,
+    'concorrente_menor_preco_na_nossa_unidade', b.conc_menor, 'concorrencia_mes', b.conc_mes, 'teto_pela_concorrencia', b.teto_conc,
+    'negociar_ate', nullif(least(coalesce(b.teto_margem, 'infinity'::numeric), coalesce(b.teto_conc, 'infinity'::numeric)), 'infinity'::numeric),
+    'ultimo_acima_do_teto', case when b.ult is not null and least(coalesce(b.teto_margem, 'infinity'::numeric), coalesce(b.teto_conc, 'infinity'::numeric)) < (b.ult->>'custo')::numeric then true else false end
+  ) order by b.codigo), '[]'::jsonb) from base b;
+$$;
+revoke all on function public.crm_cs_preco_alvo(text[]) from public, anon;
+grant execute on function public.crm_cs_preco_alvo(text[]) to authenticated, service_role;
+
+-- ============================================================ Diretor de Logística (CEO Grupo Dalessi, 24/10/2026)
+-- O diretor da logística na turma (plano do CEO: "entregas atrasadas, rotas, canhotos, problemas de entrega"). A CONTA é
+-- daqui; a IA (crm-assistente, logistica.ts) só lê e escreve. SECURITY DEFINER com a mesma trava das funções da rota:
+-- só a gestão (administrador e gestora) e a logística. Sem custo; valor de nota a logística já vê na rota.
+-- Notas sem rota contam desde o 1º dia de rota no CRM (antes disso a logística era fora do sistema), sem as de hoje e sem
+-- o simples faturamento da entrega futura (5922/6922): podem ser retirada no balcão, a IA diz isso.
+create table if not exists public.crm_ia_analises_areas (
+  dia date not null,
+  area text not null check (area in ('logistica', 'financeiro', 'fiscal')),
+  texto text not null,
+  em timestamptz not null default now(),
+  por uuid,
+  custo_usd numeric(10,5),
+  primary key (dia, area)
+);
+alter table public.crm_ia_analises_areas enable row level security;
+revoke all on public.crm_ia_analises_areas from anon, public;
+grant select on public.crm_ia_analises_areas to authenticated;
+drop policy if exists le on public.crm_ia_analises_areas;
+create policy le on public.crm_ia_analises_areas for select to authenticated
+  using ((area = 'logistica' and ((select public.crm_eh_gestor()) or (select public.crm_eh_logistica()))) or (select public.crm_eh_admin()));
+
+create or replace function public.crm_dl_painel() returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare
+  hoje date := (now() at time zone 'America/Sao_Paulo')::date;
+  inicio date;
+  r jsonb;
+begin
+  if not (public.crm_eh_gestor() or public.crm_eh_logistica()) then raise exception 'só a logística e a gestão'; end if;
+  select min(dia) into inicio from public.crm_entregas;
+  with e as (
+    select x.*, n.numero::int nf, coalesce(em.nome, n.cliente_nome) cliente, coalesce(em.cidade, n.cidade) cidade, em.bairro,
+           coalesce(u.nome, 'sem motorista') motorista
+      from public.crm_entregas x join public.crm_notas n on n.id = x.nota_id
+      left join public.crm_empresas em on em.id = x.empresa_id left join public.crm_usuarios u on u.user_id = x.motorista_id
+     where x.dia >= hoje - 30)
+  select jsonb_build_object(
+    'hoje', hoje,
+    'rota_desde', inicio,
+    'rota_de_hoje', (select jsonb_build_object('total', count(*), 'entregues', count(*) filter (where situacao = 'entregue'),
+        'com_problema', count(*) filter (where situacao = 'problema'), 'pendentes', count(*) filter (where situacao = 'pendente'),
+        'sem_motorista', count(*) filter (where motorista_id is null), 'nao_mandadas_ao_celular', count(*) filter (where motorista_id is not null and not liberada),
+        'por_motorista', coalesce((select jsonb_agg(jsonb_build_object('motorista', m.motorista, 'paradas', m.t, 'entregues', m.ent, 'problemas', m.pro, 'pendentes', m.pen) order by m.motorista)
+          from (select motorista, count(*) t, count(*) filter (where situacao = 'entregue') ent, count(*) filter (where situacao = 'problema') pro, count(*) filter (where situacao = 'pendente') pen
+                  from e where dia = hoje group by motorista) m), '[]'::jsonb))
+      from e where dia = hoje),
+    'atrasadas', (select jsonb_build_object('quantidade', count(*), 'valor', coalesce(sum(valor_total_nf), 0), 'mais_antigas',
+        coalesce((select jsonb_agg(z order by z->>'dia', z->>'nf') from (select jsonb_build_object('dia', a.dia, 'dias', hoje - a.dia, 'nf', a.nf, 'cliente', a.cliente, 'cidade', a.cidade,
+          'motorista', a.motorista, 'mandada_ao_celular', a.liberada) z from e a where a.dia < hoje and a.situacao = 'pendente' order by a.dia, a.nf limit 15) q), '[]'::jsonb))
+      from (select e.*, (select valor_total from public.crm_notas where id = e.nota_id) valor_total_nf from e where dia < hoje and situacao = 'pendente') p),
+    'problemas_7_dias', coalesce((select jsonb_agg(jsonb_build_object('dia', p.dia, 'nf', p.nf, 'cliente', p.cliente, 'motorista', p.motorista, 'obs', left(coalesce(p.obs, ''), 200)) order by p.dia desc)
+        from e p where p.situacao = 'problema' and p.dia > hoje - 7), '[]'::jsonb),
+    'entregues_sem_canhoto', (select count(*) from e where situacao = 'entregue' and canhoto is null),
+    'agradecimento_falhou_7_dias', (select count(*) from e where cli_status = 'falhou' and dia > hoje - 7),
+    'notas_sem_rota', (select jsonb_build_object('quantidade', count(*), 'valor', coalesce(sum(s.valor_total), 0),
+        'mais_de_2_dias', count(*) filter (where s.d < hoje - 2),
+        'mais_antigas', coalesce((select jsonb_agg(z) from (select jsonb_build_object('emitida', t.d, 'dias', hoje - t.d, 'nf', t.numero, 'cliente', t.cliente, 'cidade', t.cidade) z
+           from (select (n.emitida_em at time zone 'America/Sao_Paulo')::date d, n.numero::int numero, coalesce(em.nome, n.cliente_nome) cliente, coalesce(em.cidade, n.cidade) cidade
+                   from public.crm_notas n left join public.crm_empresas em on em.id = n.empresa_id
+                  where inicio is not null and not n.cancelada and n.emitida_em >= inicio::timestamptz and (n.emitida_em at time zone 'America/Sao_Paulo')::date < hoje
+                    and not exists (select 1 from public.crm_entregas x where x.nota_id = n.id)
+                    and not exists (select 1 from public.crm_nota_itens i where i.nota_id = n.id and i.cfop in ('5922', '6922'))
+                  order by n.emitida_em limit 10) t) q), '[]'::jsonb),
+        'observacao', 'pode ser retirada no balcão ou transportadora: conferir antes de cobrar a rota')
+      from (select n.valor_total, (n.emitida_em at time zone 'America/Sao_Paulo')::date d from public.crm_notas n
+             where inicio is not null and not n.cancelada and n.emitida_em >= inicio::timestamptz and (n.emitida_em at time zone 'America/Sao_Paulo')::date < hoje
+               and not exists (select 1 from public.crm_entregas x where x.nota_id = n.id)
+               and not exists (select 1 from public.crm_nota_itens i where i.nota_id = n.id and i.cfop in ('5922', '6922'))) s),
+    'pedidos', (select jsonb_build_object(
+        'abertos', count(*) filter (where situacao = 'aberto'), 'em_separacao', count(*) filter (where situacao = 'separacao'),
+        'separados_esperando_nfe', count(*) filter (where situacao = 'separado'),
+        'separados_ha_mais_de_1_dia', count(*) filter (where situacao = 'separado' and atualizado_em < now() - interval '1 day'),
+        'entrega_vencida', count(*) filter (where entrega < hoje),
+        'com_bloqueio', count(*) filter (where exists (select 1 from unnest(bloqueios) b where not b = any(liberado))),
+        'mais_urgentes', coalesce((select jsonb_agg(z) from (select jsonb_build_object('pedido', p2.numero, 'cliente', coalesce(em.nome, p2.dados->>'cliente_nome'), 'situacao', p2.situacao, 'entrega', p2.entrega,
+            'bloqueios', (select coalesce(jsonb_agg(b), '[]'::jsonb) from unnest(p2.bloqueios) b where not b = any(p2.liberado))) z
+          from public.crm_pedidos p2 left join public.crm_empresas em on em.id = p2.empresa_id
+         where p2.situacao in ('aberto', 'separacao', 'separado') order by p2.entrega nulls last, p2.criado_em limit 10) q), '[]'::jsonb),
+        'observacao', 'os pedidos pelo CRM começam na virada de 03/11/2026')
+      from public.crm_pedidos where situacao in ('aberto', 'separacao', 'separado'))
+  ) into r from (select 1) um;
+  return r;
+end $$;
+revoke all on function public.crm_dl_painel() from public, anon;
+grant execute on function public.crm_dl_painel() to authenticated, service_role;
+
+-- ============================================================ CEO Grupo Dalessi: o quadro fiscal da OneClean (25/10/2026)
+-- Para o Diretor Fiscal do painel /ceo (sistema da Agilité, src/ceo/fiscal.js), lido pela crm-caixa-leitura ?parte=ceo
+-- (que junta a validade do certificado A1 pelo serviço fiscal). Só contagens e totais; só o service_role executa.
+--   nfe: as NF-e de PRODUÇÃO emitidas pelo CRM (a virada é 03/11/2026; antes disso, quase nada)
+--   notas_fkn: as notas de venda que chegam do FKN pelo vigia (o faturamento de hoje), no mês
+--   dfe: notas de compra contra o CNPJ, vistas pela Sefaz; as sem ciência e a última consulta
+--   ibpt: a vigência da tabela de tributos aproximados (a nota sai com aviso quando vence)
+create or replace function public.crm_ceo_fiscal() returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare
+  hoje date := (now() at time zone 'America/Sao_Paulo')::date;
+  ini timestamptz := (date_trunc('month', hoje)::date)::timestamptz;
+  r jsonb;
+begin
+  select jsonb_build_object(
+    'nfe', (select jsonb_build_object(
+        'producao_total', count(*) filter (where ambiente = 'producao' and situacao = 'autorizada'),
+        'autorizadas_mes', count(*) filter (where ambiente = 'producao' and situacao = 'autorizada' and autorizada_em >= ini),
+        'valor_mes', coalesce(sum(valor) filter (where ambiente = 'producao' and situacao = 'autorizada' and autorizada_em >= ini), 0),
+        'canceladas_mes', count(*) filter (where ambiente = 'producao' and situacao = 'cancelada' and atualizado_em >= ini),
+        'rejeitadas_7_dias', count(*) filter (where ambiente = 'producao' and situacao = 'rejeitada' and atualizado_em >= now() - interval '7 days'),
+        'denegadas', count(*) filter (where ambiente = 'producao' and situacao = 'denegada'),
+        'pendentes', count(*) filter (where ambiente = 'producao' and situacao = 'pendente'),
+        'numeros_parados', count(*) filter (where ambiente = 'producao' and situacao in ('reservada', 'rejeitada', 'bloqueada') and inutilizada_em is null and criado_em < now() - interval '3 days'),
+        'homologacao_7_dias', count(*) filter (where ambiente = 'homologacao' and criado_em >= now() - interval '7 days'),
+        'ultimos_motivos_de_rejeicao', coalesce((select jsonb_agg(z) from (select jsonb_build_object('numero', numero, 'cstat', cstat, 'motivo', left(coalesce(motivo, ''), 160), 'quando', atualizado_em) z
+            from public.crm_nfe where ambiente = 'producao' and situacao = 'rejeitada' and atualizado_em >= now() - interval '7 days' order by atualizado_em desc limit 5) q), '[]'::jsonb))
+      from public.crm_nfe),
+    'notas_fkn_mes', (select jsonb_build_object('notas', count(*) filter (where not cancelada), 'valor', coalesce(sum(valor_total) filter (where not cancelada), 0), 'canceladas', count(*) filter (where cancelada))
+      from public.crm_notas where emitida_em >= ini),
+    'dfe', (select jsonb_build_object(
+        'sem_ciencia', count(*) filter (where situacao = 'autorizada' and xml_em is null and manifestada_em is null),
+        'sem_ciencia_valor', coalesce(sum(valor) filter (where situacao = 'autorizada' and xml_em is null and manifestada_em is null), 0),
+        'sem_ciencia_mais_de_10_dias', count(*) filter (where situacao = 'autorizada' and xml_em is null and manifestada_em is null and emitida_em < now() - interval '10 days'),
+        'ultima_consulta', (select ultima_em from public.crm_dfe_estado where id = 1),
+        'ultimo_retorno', (select left(coalesce(ultimo_cstat::text || ' ' || ultimo_motivo, ''), 120) from public.crm_dfe_estado where id = 1))
+      from public.crm_dfe),
+    'ibpt', (select jsonb_build_object('vigencia_ate', max(vig_fim), 'versao', max(versao)) from public.crm_ibpt)
+  ) into r;
+  return r;
+end $$;
+revoke all on function public.crm_ceo_fiscal() from public, anon, authenticated;
+grant execute on function public.crm_ceo_fiscal() to service_role;
+
+-- ============================================================ Aprovação de pedido ao fornecedor (CEO Grupo, 25/10/2026)
+-- Anderson: "se quiser deixar feito tudo bem, mas não ativa ainda essa trava, quero pensar melhor". Pronta e DESLIGADA.
+-- Liga e desliga pela chave crm_sistema 'compras_aprovacao' = '{"ativa":true,"acima":5000}' (só pelo banco; sem a chave ou
+-- com "ativa": false, nada muda para o comprador). Ligada: o pedido registrado com total (quantidade × custo) a partir de
+-- "acima" nasce "aguardando aprovação" (não conta como "a caminho" para as vendedoras) até o Anderson aprovar: no CRM
+-- (admin, Pedidos ao fornecedor) ou pelo WhatsApp do CEO (crm-ceo-acao, código + PIN, mesmo esquema do "liberar").
+-- Recusado = pedido cancelado, com o motivo.
+alter table public.crm_compra_pedidos add column if not exists aprovacao text check (aprovacao in ('aguardando', 'aprovado', 'recusado'));
+alter table public.crm_compra_pedidos add column if not exists aprovacao_total numeric(14,2);
+alter table public.crm_compra_pedidos add column if not exists aprovado_em timestamptz;
+alter table public.crm_compra_pedidos add column if not exists aprovado_por text;
+alter table public.crm_compra_pedidos add column if not exists aprovacao_motivo text;
+
+create or replace function public.crm_compras_aprovacao() returns jsonb language sql stable security definer set search_path = public as $$
+  select case when s.valor is null then jsonb_build_object('ativa', false, 'acima', null)
+    else jsonb_build_object('ativa', coalesce((s.valor::jsonb->>'ativa')::boolean, false), 'acima', nullif(s.valor::jsonb->>'acima', '')::numeric) end
+    from (select (select valor from public.crm_sistema where chave = 'compras_aprovacao') valor) s;
+$$;
+revoke all on function public.crm_compras_aprovacao() from public, anon;
+grant execute on function public.crm_compras_aprovacao() to authenticated, service_role;
+
+-- Grava o pedido inteiro: { fornecedor_cod, fornecedor_nome, previsao, obs, itens: [{codigo, descricao, unidade, quantidade, custo_unit}] }.
+-- (25/10/2026) com a aprovação ligada, o pedido a partir do valor nasce "aguardando".
+create or replace function public.crm_compra_pedido_gravar(p jsonb) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare pid bigint; x jsonb; k int := 0; r public.crm_compra_pedidos; ap jsonb; tot numeric;
+begin
+  if not (public.crm_eh_admin() or public.crm_eh_comprador()) then raise exception 'só o administrador e o comprador registram pedido ao fornecedor'; end if;
+  if coalesce(btrim(p->>'fornecedor_nome'), '') = '' then raise exception 'diga o fornecedor'; end if;
+  if nullif(p->>'previsao', '') is null then raise exception 'diga quando deve chegar'; end if;
+  insert into public.crm_compra_pedidos (fornecedor_cod, fornecedor_nome, previsao, obs)
+    values (nullif(btrim(p->>'fornecedor_cod'), ''), btrim(p->>'fornecedor_nome'), (p->>'previsao')::date, nullif(btrim(coalesce(p->>'obs', '')), ''))
+    returning id into pid;
+  for x in select value from jsonb_array_elements(coalesce(p->'itens', '[]'::jsonb)) loop
+    if coalesce(nullif(x->>'quantidade', '')::numeric, 0) <= 0 then continue; end if;
+    if coalesce(btrim(x->>'codigo'), '') = '' then raise exception 'item sem código'; end if;
+    k := k + 1;
+    insert into public.crm_compra_pedido_itens (pedido_id, ordem, codigo, descricao, unidade, quantidade, custo_unit)
+      values (pid, k, regexp_replace(btrim(x->>'codigo'), '\.\d+$', ''), nullif(btrim(coalesce(x->>'descricao', '')), ''), nullif(btrim(coalesce(x->>'unidade', '')), ''),
+              (x->>'quantidade')::numeric, nullif(x->>'custo_unit', '')::numeric);
+  end loop;
+  if k = 0 then raise exception 'o pedido precisa de pelo menos um item com quantidade'; end if;
+  ap := public.crm_compras_aprovacao();
+  if (ap->>'ativa')::boolean then
+    select round(coalesce(sum(quantidade * coalesce(custo_unit, 0)), 0), 2) into tot from public.crm_compra_pedido_itens where pedido_id = pid;
+    if tot >= coalesce((ap->>'acima')::numeric, 0) then
+      update public.crm_compra_pedidos set aprovacao = 'aguardando', aprovacao_total = tot where id = pid;
+    end if;
+  end if;
+  select * into r from public.crm_compra_pedidos where id = pid;
+  return to_jsonb(r) || jsonb_build_object('itens', k);
+end;
+$$;
+revoke all on function public.crm_compra_pedido_gravar(jsonb) from public, anon;
+grant execute on function public.crm_compra_pedido_gravar(jsonb) to authenticated;
+
+-- O que está a caminho (25/10/2026: sem os pedidos aguardando aprovação, que ainda não foram feitos ao fornecedor).
+create or replace function public.crm_a_caminho()
+returns table (codigo text, pedido_id bigint, pedido_em timestamptz, previsao date, falta numeric, faturado numeric, faturado_em timestamptz)
+language sql stable security definer set search_path = public as $$
+  select a.codigo, p.id, p.criado_em, p.previsao, a.quantidade - a.cancelado - a.recebido, greatest(a.faturado - a.recebido, 0), a.faturado_em
+    from public.crm_compra_andamento_int() a join public.crm_compra_pedidos p on p.id = a.pedido_id
+   where p.situacao = 'aberto' and p.aprovacao is distinct from 'aguardando' and a.quantidade - a.cancelado - a.recebido > 0 and (select public.crm_eh_ativo());
+$$;
+revoke all on function public.crm_a_caminho() from public, anon;
+grant execute on function public.crm_a_caminho() to authenticated;
+
+-- a decisão (interna): aprovar | recusar; confere que ainda aguarda e, se vier, que o total é o que foi visto
+create or replace function public.crm_compra_decidir_int(p_id bigint, p_decisao text, p_total numeric, p_quem text, p_motivo text) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare r public.crm_compra_pedidos;
+begin
+  if p_decisao not in ('aprovar', 'recusar') then raise exception 'decisão inválida'; end if;
+  select * into r from public.crm_compra_pedidos where id = p_id for update;
+  if r.id is null then return jsonb_build_object('ok', false, 'erro', 'pedido ao fornecedor não encontrado'); end if;
+  if r.aprovacao is distinct from 'aguardando' or r.situacao <> 'aberto' then return jsonb_build_object('ok', false, 'erro', 'o pedido ' || p_id || ' não está aguardando aprovação'); end if;
+  if p_total is not null and r.aprovacao_total is distinct from round(p_total, 2) then
+    return jsonb_build_object('ok', false, 'erro', 'o valor do pedido mudou desde a pergunta (agora ' || r.aprovacao_total || '); peça de novo');
+  end if;
+  update public.crm_compra_pedidos set aprovacao = case when p_decisao = 'aprovar' then 'aprovado' else 'recusado' end,
+      aprovado_em = now(), aprovado_por = left(p_quem, 80), aprovacao_motivo = nullif(left(btrim(coalesce(p_motivo, '')), 300), ''),
+      situacao = case when p_decisao = 'recusar' then 'cancelado' else situacao end,
+      fechado_em = case when p_decisao = 'recusar' then now() else fechado_em end, atualizado_em = now()
+   where id = p_id returning * into r;
+  return jsonb_build_object('ok', true, 'pedido', jsonb_build_object('id', r.id, 'fornecedor', r.fornecedor_nome, 'total', r.aprovacao_total, 'aprovacao', r.aprovacao));
+end;
+$$;
+revoke all on function public.crm_compra_decidir_int(bigint, text, numeric, text, text) from public, anon, authenticated;
+
+-- no CRM: só o administrador decide
+create or replace function public.crm_compra_pedido_aprovar(p_id bigint, p_decisao text, p_motivo text) returns jsonb
+language plpgsql security definer set search_path = public as $$
+begin
+  if not public.crm_eh_admin() then raise exception 'só o administrador aprova pedido ao fornecedor'; end if;
+  return public.crm_compra_decidir_int(p_id, p_decisao, null, coalesce((select nome from public.crm_usuarios where user_id = auth.uid()), 'administrador') || ' (no CRM)', p_motivo);
+end;
+$$;
+revoke all on function public.crm_compra_pedido_aprovar(bigint, text, text) from public, anon;
+grant execute on function public.crm_compra_pedido_aprovar(bigint, text, text) to authenticated;
+
+-- pelo WhatsApp do CEO (crm-ceo-acao, só o servidor): a lista e a decisão (com nonce único, como o "liberar")
+create or replace function public.crm_ceo_compras_aguardando() returns jsonb language plpgsql stable security definer set search_path = public as $$
+begin
+  if coalesce(auth.role(), '') <> 'service_role' then raise exception 'só o servidor'; end if;
+  return jsonb_build_object('config', public.crm_compras_aprovacao(), 'pedidos', coalesce((select jsonb_agg(z order by (z->>'id')::bigint) from (
+    select jsonb_build_object('id', p.id, 'fornecedor', p.fornecedor_nome, 'total', p.aprovacao_total, 'previsao', p.previsao, 'criado_em', p.criado_em,
+      'por', (select nome from public.crm_usuarios where user_id = p.criado_por), 'obs', left(coalesce(p.obs, ''), 120),
+      'itens', (select count(*) from public.crm_compra_pedido_itens i where i.pedido_id = p.id),
+      'maiores', (select coalesce(jsonb_agg(jsonb_build_object('descricao', left(coalesce(i.descricao, i.codigo), 60), 'quantidade', i.quantidade, 'unidade', i.unidade, 'total', round(i.quantidade * coalesce(i.custo_unit, 0), 2)) order by i.quantidade * coalesce(i.custo_unit, 0) desc), '[]'::jsonb)
+                  from (select * from public.crm_compra_pedido_itens i2 where i2.pedido_id = p.id order by i2.quantidade * coalesce(i2.custo_unit, 0) desc limit 3) i)) z
+      from public.crm_compra_pedidos p where p.aprovacao = 'aguardando' and p.situacao = 'aberto') q), '[]'::jsonb));
+end;
+$$;
+revoke all on function public.crm_ceo_compras_aguardando() from public, anon, authenticated;
+grant execute on function public.crm_ceo_compras_aguardando() to service_role;
+
+create or replace function public.crm_ceo_compra_decidir(p_id bigint, p_nonce text, p_decisao text, p_total numeric, p_motivo text) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare aid bigint; res jsonb;
+begin
+  if coalesce(auth.role(), '') <> 'service_role' then raise exception 'só o servidor'; end if;
+  if coalesce(length(p_nonce), 0) < 16 then raise exception 'nonce inválido'; end if;
+  if p_id is null or p_id < 1 or p_id > 999999999 then raise exception 'número inválido'; end if;
+  if p_total is null then raise exception 'falta o total visto'; end if;
+  insert into public.crm_ceo_acoes (nonce, acao, pedido_numero) values (p_nonce, p_decisao || '_compra', p_id) returning id into aid;
+  if not (public.crm_compras_aprovacao()->>'ativa')::boolean then
+    update public.crm_ceo_acoes set detalhe = 'aprovação de compras desligada' where id = aid;
+    return jsonb_build_object('ok', false, 'erro', 'a aprovação de pedidos ao fornecedor está desligada');
+  end if;
+  res := public.crm_compra_decidir_int(p_id, p_decisao, p_total, 'Anderson (CEO Grupo, pelo WhatsApp)', p_motivo);
+  update public.crm_ceo_acoes set ok = (res->>'ok')::boolean, detalhe = coalesce(res->>'erro', p_decisao) where id = aid;
+  return res;
+end;
+$$;
+revoke all on function public.crm_ceo_compra_decidir(bigint, text, text, numeric, text) from public, anon, authenticated;
+grant execute on function public.crm_ceo_compra_decidir(bigint, text, text, numeric, text) to service_role;

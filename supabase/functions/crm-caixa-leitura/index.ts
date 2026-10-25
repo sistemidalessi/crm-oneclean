@@ -5,10 +5,17 @@
 //   Authorization: Bearer <senha de leitura>
 //   GET …/crm-caixa-leitura?parte=ceo                   (24/10/2026: o resumo da OneClean para o painel "CEO Grupo
 //        Dalessi" do sistema da Agilité — vendas, funil, receber, pedidos, NF-e, estoque, compras, entregas;
-//        crm_ceo_resumo(), que só o service_role executa. Mesma senha.)
+//        crm_ceo_resumo(), que só o service_role executa. Mesma senha.) 25/10/2026: junta `fiscal` (crm_ceo_fiscal() e a
+//        validade do certificado A1, pelo /saude do serviço fiscal) para o Diretor Fiscal do painel; e `analises`: os
+//        textos de hoje do Gerente de Vendas (equipe), do Comprador e da Logística, para o CEO do grupo (os que já saíram).
 // A senha é gerada pelo administrador em Configurações → Integrações → "Leitura do Caixa" (aparece uma
 // vez só; aqui fica só o SHA-256, em crm_integracoes com uso = 'caixa'). Sem senha ou com senha errada:
 // 401 e nada mais. Só GET (o resto: 405). Não grava nada, nem registro de uso.
+//   GET …/crm-caixa-leitura?parte=sinal&valor=V&de=7&ate=45   (24/10/2026, Comprador Sênior do CEO Grupo): SÓ para a
+//        crm-assistente (Authorization: Bearer <a chave de serviço do próprio projeto>): a partir de que dia um
+//        pagamento de V cabe no caixa (o saldo do fim de cada dia, dali até o fim da previsão, fica >= o colchão de
+//        Configurações, `caixa_colchao_compras`, padrão R$ 0). Devolve SÓ a data e uma frase, nunca saldo ou valor: o
+//        comprador recebe só o sinal ("melhor vencer a partir de 15/11"). Com a chave de serviço, nenhuma outra parte.
 // As contas NÃO são copiadas para cá: a função baixa caixa-calculo.js (o mesmo arquivo da tela do
 // Caixa) do GitHub num commit FIXO e confere o SHA-256 antes de usar. Depois de mexer nele: commit +
 // push, `node ferramentas/fixa-motor-notas.js` (fixa as duas funções) e publicar esta de novo.
@@ -23,6 +30,17 @@ const PAGINA = 1000;
 
 const cabecalhos = { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' };
 const resposta = (status: number, obj: unknown) => new Response(JSON.stringify(obj), { status, headers: cabecalhos });
+// validade do certificado A1 da OneClean, pelo /saude do serviço fiscal (mesmos Secrets da crm-fiscal); só a data
+async function certificadoA1() {
+  const url = Deno.env.get('FISCAL_URL'), tok = Deno.env.get('FISCAL_TOKEN');
+  if (!url || !tok) return { erro: 'serviço fiscal não configurado' };
+  try {
+    const r = await fetch(url.replace(/\/+$/, '') + '/saude', { headers: { Authorization: 'Bearer ' + tok }, signal: AbortSignal.timeout(8000) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) return { erro: 'serviço fiscal respondeu ' + r.status };
+    return { valido_ate: j.certificado ? j.certificado.validoAte || null : null, servico_no_ar: !!j.ok };
+  } catch (_e) { return { erro: 'serviço fiscal não respondeu' }; }
+}
 
 async function sha256(t: string) {
   const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t));
@@ -65,28 +83,9 @@ async function tudo(db: any, tabela: string, colunas: string, ordem = 'id') {
 // "hoje" de São Bernardo do Campo (a tela usa o dia do computador do Anderson)
 const hojeSP = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 
-Deno.serve(async (req) => {
-  if (req.method !== 'GET') return new Response(JSON.stringify({ erro: 'só GET' }), { status: 405, headers: Object.assign({ Allow: 'GET' }, cabecalhos) });
-  const auth = req.headers.get('authorization') ?? '';
-  const senha = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
-  if (senha.length < 32) return resposta(401, { erro: 'Senha de leitura inválida.' });
-
-  const db = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } });
-  const { data: chaves, error: e1 } = await db.from('crm_integracoes').select('token_hash').eq('uso', 'caixa').eq('ativo', true);
-  if (e1) return resposta(500, { erro: 'Falha ao conferir a senha.' });
-  const h = await sha256(senha);
-  let ok = false;
-  for (const c of chaves ?? []) if (iguais(h, String(c.token_hash))) ok = true; // sem sair no meio: mesmo tempo para todas
-  if (!ok) return resposta(401, { erro: 'Senha de leitura inválida.' });
-
-  try {
-    const url = new URL(req.url);
-    if (url.searchParams.get('parte') === 'ceo') {
-      const { data, error } = await db.rpc('crm_ceo_resumo');
-      if (error) throw new Error('crm_ceo_resumo: ' + error.message);
-      return resposta(200, data);
-    }
-    const dias = Math.min(90, Math.max(1, parseInt(url.searchParams.get('dias') ?? '30', 10) || 30));
+// a previsão do Caixa, com as mesmas contas da tela (caixa-calculo.js no commit fixado)
+// deno-lint-ignore no-explicit-any
+async function montar(db: any, dias: number) {
     const K = await carregaMotor();
     const [lancamentos, saldos, recorrentes, titulos, usuarios, cfg] = await Promise.all([
       tudo(db, 'crm_fin_lancamentos', 'id, tipo, descricao, fornecedor, categoria, valor, vencimento, situacao, pago_em, baixa, baixado_em, entre_empresas, origem, recorrente_id, titulo_duplicata, emprestimo, juros'),
@@ -112,6 +111,68 @@ Deno.serve(async (req) => {
     const dados = ((cfg as any).data && (cfg as any).data.dados) || {};
     const r = K.resumoLeitura({ lancamentos, saldos, recorrentes, titulos: tits, pessoas: (usuarios as { nome: string }[]).map(u => u.nome) },
       { hoje: hojeSP(), dias, d1: dados.caixa_credito_d1 !== false, gerado_em: new Date().toISOString() });
+    return { r, dados };
+}
+
+// o sinal do vencimento (só data e frase): o primeiro dia útil entre de e ate dias a partir do qual o saldo do fim de
+// cada dia, até o fim da previsão, menos o valor, fica >= o colchão
+// deno-lint-ignore no-explicit-any
+async function sinal(db: any, valor: number, de: number, ate: number) {
+  const { r, dados } = await montar(db, 75);
+  const ddmm = (iso: string) => iso.slice(8, 10) + '/' + iso.slice(5, 7);
+  if (!r.saldo || r.saldo.atual == null) return { vencer_a_partir_de: null, sinal: 'o Caixa está sem saldo informado: não dá para sugerir a data' };
+  const colchao = Number(dados.caixa_colchao_compras) || 0;
+  // deno-lint-ignore no-explicit-any
+  const dias = (r.proximos_dias as any[]).filter(x => x.saldo_fim_do_dia != null);
+  const hoje = r.hoje as string, soma = (n: number) => new Date(Date.parse(hoje + 'T12:00:00Z') + n * 86400000).toISOString().slice(0, 10);
+  const ini = soma(de), fim = soma(ate), horizonte = dias.length ? dias[dias.length - 1].data : hoje;
+  for (const d of dias.filter(x => x.dia_util && x.data >= ini && x.data <= fim)) {
+    if (dias.filter(x => x.data >= d.data).every(x => x.saldo_fim_do_dia - valor >= colchao)) {
+      return { vencer_a_partir_de: d.data, sinal: 'melhor vencer a partir de ' + ddmm(d.data), previsao_ate: horizonte };
+    }
+  }
+  return { vencer_a_partir_de: null, sinal: 'o caixa não comporta esse valor de uma vez até ' + ddmm(fim) + ': melhor parcelar ou adiar', previsao_ate: horizonte };
+}
+
+Deno.serve(async (req) => {
+  if (req.method !== 'GET') return new Response(JSON.stringify({ erro: 'só GET' }), { status: 405, headers: Object.assign({ Allow: 'GET' }, cabecalhos) });
+  const auth = req.headers.get('authorization') ?? '';
+  const senha = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+  if (senha.length < 32) return resposta(401, { erro: 'Senha de leitura inválida.' });
+
+  const servico = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+  const db = createClient(Deno.env.get('SUPABASE_URL')!, servico, { auth: { persistSession: false } });
+  // a crm-assistente (com a chave de serviço) só pode pedir o sinal do vencimento
+  if (iguais(await sha256(senha), await sha256(servico))) {
+    const u0 = new URL(req.url);
+    if (u0.searchParams.get('parte') !== 'sinal') return resposta(401, { erro: 'Senha de leitura inválida.' });
+    const valor = Number(u0.searchParams.get('valor')), de = Number(u0.searchParams.get('de') ?? 7), ate = Number(u0.searchParams.get('ate') ?? 45);
+    if (!(valor > 0) || !(de >= 0) || !(ate >= de) || ate > 75) return resposta(400, { erro: 'valor, de ou ate inválidos' });
+    try { return resposta(200, await sinal(db, valor, Math.round(de), Math.round(ate))); }
+    catch (e) { console.error('[crm-caixa-leitura] sinal: ' + ((e as Error).message || 'falha')); return resposta(500, { erro: 'Falha ao montar o sinal.' }); }
+  }
+  const { data: chaves, error: e1 } = await db.from('crm_integracoes').select('token_hash').eq('uso', 'caixa').eq('ativo', true);
+  if (e1) return resposta(500, { erro: 'Falha ao conferir a senha.' });
+  const h = await sha256(senha);
+  let ok = false;
+  for (const c of chaves ?? []) if (iguais(h, String(c.token_hash))) ok = true; // sem sair no meio: mesmo tempo para todas
+  if (!ok) return resposta(401, { erro: 'Senha de leitura inválida.' });
+
+  try {
+    const url = new URL(req.url);
+    if (url.searchParams.get('parte') === 'ceo') {
+      const hoje = hojeSP(), corta = (x: { texto?: string; em?: string } | null) => (x && x.texto ? { texto: String(x.texto).slice(0, 2500), em: x.em || null } : null);
+      const [{ data, error }, fisc, cert, av, ac, al] = await Promise.all([db.rpc('crm_ceo_resumo'), db.rpc('crm_ceo_fiscal'), certificadoA1(),
+        db.from('crm_ia_analises_vendas').select('texto, em').eq('dia', hoje).eq('chave', 'equipe').maybeSingle(),
+        db.from('crm_ia_analises').select('texto, em').eq('dia', hoje).eq('tipo', 'compras').maybeSingle(),
+        db.from('crm_ia_analises_areas').select('texto, em').eq('dia', hoje).eq('area', 'logistica').maybeSingle()]);
+      if (error) throw new Error('crm_ceo_resumo: ' + error.message);
+      if (fisc.error) console.error('[crm-caixa-leitura] crm_ceo_fiscal: ' + fisc.error.message);
+      return resposta(200, Object.assign({}, data, { fiscal: Object.assign({}, fisc.data || {}, { certificado_a1: cert }),
+        analises: { dia: hoje, vendas: corta(av.data), compras: corta(ac.data), logistica: corta(al.data) } }));
+    }
+    const dias = Math.min(90, Math.max(1, parseInt(url.searchParams.get('dias') ?? '30', 10) || 30));
+    const { r } = await montar(db, dias);
     return resposta(200, r);
   } catch (e) {
     console.error('[crm-caixa-leitura] ' + ((e as Error).message || 'falha')); // só a mensagem, sem dado

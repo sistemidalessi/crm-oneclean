@@ -94,7 +94,7 @@
     dados.rota.forEach(x => { const k = x.motorista_id || ''; if (!grupos.has(k)) grupos.set(k, []); grupos.get(k).push(x); });
     const chaves = [...grupos.keys()].sort((a, b) => (a ? 0 : 1) - (b ? 0 : 1) || nomeMot(a).localeCompare(nomeMot(b)));
     const opMot = (sel, vazio) => '<option value="">' + esc(vazio || '— escolher —') + '</option>' + mots.map(u => '<option value="' + esc(u.user_id) + '"' + (u.user_id === sel ? ' selected' : '') + '>' + esc(u.nome + (u.equipe ? ' (' + u.equipe + ')' : '')) + '</option>').join('');
-    return cabRotas() +
+    return cabRotas() + (CRM.diretorLogistica ? CRM.diretorLogistica.bloco() : '') +
       '<section class="kpis">' + kpi('Entregas do dia', r.total) + kpi('Entregues', r.entregues, r.entregues ? 'verde' : '') + kpi('Com problema', r.problemas, r.problemas ? 'vermelho' : '') +
         kpi('Sem motorista', r.semMotorista, r.semMotorista ? 'ambar' : '') + kpi('Agradecimentos enviados', r.agradecidos) + '</section>' +
       (mots.length ? '' : '<p class="aviso-notas">Ainda não há nenhum usuário com o papel <strong>Motorista</strong>. O administrador cria em Configurações → Equipe (um login para cada motorista).</p>') +

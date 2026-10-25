@@ -1298,6 +1298,17 @@
   Supa.prototype.dfeSemCiencia = async function () { const r = await this.sb.from('crm_dfe').select('chave', { count: 'exact', head: true }).eq('situacao', 'autorizada').is('xml_em', null).is('manifestada_em', null); if (r.error) throw r.error; return r.count || 0; };
   Local.prototype.comprasPendentes = async function () { return (this._compras || []).filter(c => c.situacao === 'pendente'); };
   Local.prototype.dfeSemCiencia = async function () { return 0; };
+  // Análise de vendas do dia (Gerente de Vendas, 24/10/2026): a da equipe ('equipe') ou a da carteira (o user_id); a RLS
+  // deixa a vendedora ler só a dela.
+  Supa.prototype.analiseVendas = async function (refazer) { return this.assistente({ acao: 'analise_vendas', refazer: !!refazer }); };
+  Supa.prototype.analiseVendasHoje = async function (dia, chave) { return unwrap(await this.sb.from('crm_ia_analises_vendas').select('dia, texto, em').eq('dia', dia).eq('chave', chave).maybeSingle()); };
+  Local.prototype.analiseVendas = async function () { const a = { dia: R.hojeISO(), texto: '(modo local: sem IA) Aqui aparece a análise de vendas do dia: **o mês contra o mesmo período do mês passado**, a meta, os clientes sumidos e as propostas esquecidas.', em: new Date().toISOString(), nova: true }; this._analiseV = a; return a; };
+  Local.prototype.analiseVendasHoje = async function (dia) { return this._analiseV && this._analiseV.dia === dia ? this._analiseV : null; };
+  // Análise de logística do dia (Diretor de Logística, 24/10/2026): uma só para a gestão e a logística (crm_ia_analises_areas).
+  Supa.prototype.analiseLogistica = async function (refazer) { return this.assistente({ acao: 'analise_logistica', refazer: !!refazer }); };
+  Supa.prototype.analiseLogisticaHoje = async function (dia) { return unwrap(await this.sb.from('crm_ia_analises_areas').select('dia, texto, em').eq('dia', dia).eq('area', 'logistica').maybeSingle()); };
+  Local.prototype.analiseLogistica = async function () { const a = { dia: R.hojeISO(), texto: '(modo local: sem IA) Aqui aparece a análise de logística do dia: **a rota de hoje**, as entregas sem confirmação, os problemas de entrega e as notas que não entraram em rota.', em: new Date().toISOString(), nova: true }; this._analiseL = a; return a; };
+  Local.prototype.analiseLogisticaHoje = async function (dia) { return this._analiseL && this._analiseL.dia === dia ? this._analiseL : null; };
   Supa.prototype.analiseHoje = async function (dia) { return unwrap(await this.sb.from('crm_ia_analises').select('dia, texto, em').eq('dia', dia).eq('tipo', 'compras').maybeSingle()); };
   Local.prototype.analiseCompras = async function () { const a = { dia: R.hojeISO(), texto: '(modo local: sem IA) Aqui aparece a análise de compras do dia: **o que pedir hoje e de quem**, as notas que chegaram, o custo que subiu e o estoque parado.', em: new Date().toISOString(), nova: true }; this._analise = a; return a; };
   Local.prototype.analiseHoje = async function (dia) { return this._analise && this._analise.dia === dia ? this._analise : null; };
@@ -1457,6 +1468,8 @@
     return { pedidos, itens, andamento, fornecedores, fknSemPedido };
   };
   Supa.prototype.compraPedidoGravar = async function (p) { return unwrap(await this.sb.rpc('crm_compra_pedido_gravar', { p })); };
+  // aprovação do pedido ao fornecedor (25/10/2026; só o administrador; a trava fica desligada até o Anderson ligar)
+  Supa.prototype.compraPedidoAprovar = async function (id, decisao, motivo) { return unwrap(await this.sb.rpc('crm_compra_pedido_aprovar', { p_id: id, p_decisao: decisao, p_motivo: motivo })); };
   Supa.prototype.compraPedidoAcao = async function (id, acao, previsao) { return unwrap(await this.sb.rpc('crm_compra_pedido_acao', { p_id: id, p_acao: acao, p_previsao: previsao || null })); };
   Supa.prototype.aCaminho = async function () { return paginado((de, ate) => this.sb.rpc('crm_a_caminho').range(de, ate)); };
   // NCM de cada produto para o orçamento do cliente (20/10/2026): só o NCM, para qualquer pessoa ativa.
