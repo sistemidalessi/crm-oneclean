@@ -8,6 +8,8 @@
 //   POST { acao: 'analise_vendas', refazer? }   (admin, gestora, vendedor(a)) → { dia, texto, em, nova }: a análise de
 //        vendas do dia do Gerente de Vendas (vendas.ts; 24/10/2026): uma da equipe para a gestão e uma por vendedor(a),
 //        da carteira dele(a), guardadas em crm_ia_analises_vendas.
+//   POST { acao: 'analise_logistica', refazer? } (admin, gestora, logística) → { dia, texto, em, nova }: a análise do dia do
+//        Diretor de Logística (logistica.ts; 24/10/2026), guardada em crm_ia_analises_areas (area 'logistica').
 // Regras que valem sempre:
 //   - SÓ CONSULTA. Nenhuma ferramenta grava nada; para fazer, a resposta aponta a tela.
 //   - Toda consulta roda com o LOGIN de quem pergunta (cliente com o token dele): a RLS de sempre decide o que
@@ -22,6 +24,7 @@ import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2.1
 import Anthropic from 'npm:@anthropic-ai/sdk@0.129.0';
 import { COMPRADOR, PERGUNTA_ANALISE, ferramentasComprador } from './comprador.ts';
 import { GERENTE, perguntaAnalise as perguntaAnaliseVendas, ferramentasGerente, FERRAMENTAS_GERENTE } from './vendas.ts';
+import { LOGISTICA, PERGUNTA_ANALISE_LOGISTICA, ferramentasLogistica, FERRAMENTAS_LOGISTICA } from './logistica.ts';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -345,6 +348,9 @@ const FERRAMENTAS: Record<string, Ferr> = {
 Object.assign(FERRAMENTAS, ferramentasComprador({ tudo, obj, n2, normaliza, somaDias }));
 // o Gerente de Vendas (vendas.ts): as contas são do banco (crm_gv_*), com o login de quem pergunta
 Object.assign(FERRAMENTAS, ferramentasGerente({ obj }));
+// o Diretor de Logística (logistica.ts): a conta é do banco (crm_dl_painel)
+Object.assign(FERRAMENTAS, ferramentasLogistica({ obj }));
+const ehLogistica = (tela: string, m: Record<string, unknown>) => /rota|entrega|separa|logist|motorista|canhoto/i.test(tela + ' ' + String(m.papel || '') + ' ' + String(m.id || ''));
 const ehVenda = (tela: string, m: Record<string, unknown>) => /venda|meta|funil|neg[oó]cio|cliente|fila|inicio|in[ií]cio|empresa/i.test(tela + ' ' + String(m.papel || '') + ' ' + String(m.id || ''));
 const ehCompra = (tela: string, m: Record<string, unknown>) => /compra|estoque|concorr|oferta/i.test(tela + ' ' + String(m.papel || '') + ' ' + String(m.id || ''));
 
@@ -446,15 +452,22 @@ Deno.serve(async (req) => {
     const { data: ja } = await db.from('crm_ia_analises_vendas').select('dia, texto, em').eq('dia', hoje).eq('chave', chaveV).maybeSingle();
     if (ja && !c.refazer) return resposta(200, Object.assign({ nova: false }, ja));
   }
-  const pergunta = analise ? PERGUNTA_ANALISE : analiseV ? perguntaAnaliseVendas(eu.papel) : String(c.pergunta ?? '').trim().slice(0, 2000);
+  // a análise de logística do dia: uma só, para a gestão e a logística
+  const analiseL = c.acao === 'analise_logistica';
+  if (analiseL) {
+    if (!['admin', 'gestor', 'logistica'].includes(eu.papel)) return resposta(403, { erro: 'a análise de logística é da logística e da gestão' });
+    const { data: ja } = await db.from('crm_ia_analises_areas').select('dia, texto, em').eq('dia', hoje).eq('area', 'logistica').maybeSingle();
+    if (ja && !c.refazer) return resposta(200, Object.assign({ nova: false }, ja));
+  }
+  const pergunta = analise ? PERGUNTA_ANALISE : analiseL ? PERGUNTA_ANALISE_LOGISTICA : analiseV ? perguntaAnaliseVendas(eu.papel) : String(c.pergunta ?? '').trim().slice(0, 2000);
   if (!pergunta) return resposta(400, { erro: 'escreva a pergunta' });
   const m = c.mascote && typeof c.mascote === 'object' ? c.mascote : {};
   const quemResponde = String(m.nome || 'Clean').slice(0, 40) + (m.papel ? ' (' + String(m.papel).slice(0, 60) + ')' : '');
-  const tela = analise ? 'Compras (análise do dia)' : analiseV ? 'Vendas (análise do dia)' : String(c.tela || '').slice(0, 40);
+  const tela = analise ? 'Compras (análise do dia)' : analiseL ? 'Rotas (análise do dia)' : analiseV ? 'Vendas (análise do dia)' : String(c.tela || '').slice(0, 40);
 
   // conversa: a mesma (só do próprio usuário) ou nova
   let conversa: { id: string; mensagens: Anthropic.Beta.BetaMessageParam[] } | null = null;
-  if (c.conversa_id && !analise && !analiseV) {
+  if (c.conversa_id && !analise && !analiseV && !analiseL) {
     const { data } = await db.from('crm_assistente_conversas').select('id, mensagens').eq('id', String(c.conversa_id)).eq('user_id', eu.user_id).maybeSingle();
     if (data && Array.isArray(data.mensagens) && data.mensagens.length < 60) conversa = { id: data.id, mensagens: data.mensagens };
   }
@@ -472,11 +485,13 @@ Deno.serve(async (req) => {
   const { data: us } = await db.from('crm_usuarios').select('user_id, nome');
   const ctx: Ctx = { u, papel: papelF, meuId: eu.user_id, hoje, usuarios: new Map((us || []).map(x => [x.user_id, x.nome])) };
   // a análise de vendas roda só com as ferramentas do Gerente (nada de Caixa nem títulos, mesmo para o administrador)
-  const minhas = Object.entries(FERRAMENTAS).filter(([n, f]) => f.papeis.includes(papelF) && (!analiseV || FERRAMENTAS_GERENTE.includes(n)));
+  const minhas = Object.entries(FERRAMENTAS).filter(([n, f]) => f.papeis.includes(papelF) && (!analiseV || FERRAMENTAS_GERENTE.includes(n)) && (!analiseL || FERRAMENTAS_LOGISTICA.includes(n)));
   const tools = minhas.map(([, f]) => f.def);
   const comprador = ['admin', 'comprador'].includes(eu.papel) && (analise || ehCompra(tela, m));
-  const gerente = !comprador && ['admin', 'gestor', 'vendedor'].includes(eu.papel) && (analiseV || m.id === 'gerente-vendas' || ehVenda(tela, m));
+  const logistica = !comprador && !analiseV && (analiseL || eu.papel === 'logistica' || (['admin', 'gestor'].includes(eu.papel) && ehLogistica(tela, m)));
+  const gerente = !comprador && !logistica && ['admin', 'gestor', 'vendedor'].includes(eu.papel) && (analiseV || m.id === 'gerente-vendas' || ehVenda(tela, m));
   const system = comprador ? [{ type: 'text', text: SISTEMA }, { type: 'text', text: COMPRADOR }]
+    : logistica ? [{ type: 'text', text: SISTEMA }, { type: 'text', text: LOGISTICA }]
     : gerente ? [{ type: 'text', text: SISTEMA }, { type: 'text', text: GERENTE }] : SISTEMA;
   const r0 = await roda(new Anthropic({ apiKey: chave, timeout: 120000, maxRetries: 1 }), system, tools, mensagens, ctx, papelF);
   const { texto, erro, usadasF, tok } = r0;
@@ -493,6 +508,13 @@ Deno.serve(async (req) => {
     const linha = { dia: hoje, chave: chaveV, user_id: chaveV === 'equipe' ? null : eu.user_id, texto, em: new Date().toISOString(), por: eu.user_id, custo_usd: custo(tok) };
     await db.from('crm_ia_analises_vendas').upsert(linha, { onConflict: 'dia,chave' });
     await db.from('crm_assistente_uso').update({ conversa_id: null, tela, mascote: 'analise-vendas', ferramentas: usadasF,
+      tokens_entrada: tok.entrada, tokens_saida: tok.saida, cache_lido: tok.lido, cache_escrito: tok.escrito, custo_usd: custo(tok), erro: null }).eq('id', reserva);
+    return resposta(200, { nova: true, dia: hoje, texto, em: linha.em });
+  }
+  if (analiseL && !erro && texto) {
+    const linha = { dia: hoje, area: 'logistica', texto, em: new Date().toISOString(), por: eu.user_id, custo_usd: custo(tok) };
+    await db.from('crm_ia_analises_areas').upsert(linha, { onConflict: 'dia,area' });
+    await db.from('crm_assistente_uso').update({ conversa_id: null, tela, mascote: 'analise-logistica', ferramentas: usadasF,
       tokens_entrada: tok.entrada, tokens_saida: tok.saida, cache_lido: tok.lido, cache_escrito: tok.escrito, custo_usd: custo(tok), erro: null }).eq('id', reserva);
     return resposta(200, { nova: true, dia: hoje, texto, em: linha.em });
   }

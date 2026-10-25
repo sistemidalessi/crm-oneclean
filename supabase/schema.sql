@@ -5922,3 +5922,89 @@ create or replace function public.crm_cs_preco_alvo(p_codigos text[]) returns js
 $$;
 revoke all on function public.crm_cs_preco_alvo(text[]) from public, anon;
 grant execute on function public.crm_cs_preco_alvo(text[]) to authenticated, service_role;
+
+-- ============================================================ Diretor de Logística (CEO Grupo Dalessi, 24/10/2026)
+-- O diretor da logística na turma (plano do CEO: "entregas atrasadas, rotas, canhotos, problemas de entrega"). A CONTA é
+-- daqui; a IA (crm-assistente, logistica.ts) só lê e escreve. SECURITY DEFINER com a mesma trava das funções da rota:
+-- só a gestão (administrador e gestora) e a logística. Sem custo; valor de nota a logística já vê na rota.
+-- Notas sem rota contam desde o 1º dia de rota no CRM (antes disso a logística era fora do sistema), sem as de hoje e sem
+-- o simples faturamento da entrega futura (5922/6922): podem ser retirada no balcão, a IA diz isso.
+create table if not exists public.crm_ia_analises_areas (
+  dia date not null,
+  area text not null check (area in ('logistica', 'financeiro', 'fiscal')),
+  texto text not null,
+  em timestamptz not null default now(),
+  por uuid,
+  custo_usd numeric(10,5),
+  primary key (dia, area)
+);
+alter table public.crm_ia_analises_areas enable row level security;
+revoke all on public.crm_ia_analises_areas from anon, public;
+grant select on public.crm_ia_analises_areas to authenticated;
+drop policy if exists le on public.crm_ia_analises_areas;
+create policy le on public.crm_ia_analises_areas for select to authenticated
+  using ((area = 'logistica' and ((select public.crm_eh_gestor()) or (select public.crm_eh_logistica()))) or (select public.crm_eh_admin()));
+
+create or replace function public.crm_dl_painel() returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare
+  hoje date := (now() at time zone 'America/Sao_Paulo')::date;
+  inicio date;
+  r jsonb;
+begin
+  if not (public.crm_eh_gestor() or public.crm_eh_logistica()) then raise exception 'só a logística e a gestão'; end if;
+  select min(dia) into inicio from public.crm_entregas;
+  with e as (
+    select x.*, n.numero::int nf, coalesce(em.nome, n.cliente_nome) cliente, coalesce(em.cidade, n.cidade) cidade, em.bairro,
+           coalesce(u.nome, 'sem motorista') motorista
+      from public.crm_entregas x join public.crm_notas n on n.id = x.nota_id
+      left join public.crm_empresas em on em.id = x.empresa_id left join public.crm_usuarios u on u.user_id = x.motorista_id
+     where x.dia >= hoje - 30)
+  select jsonb_build_object(
+    'hoje', hoje,
+    'rota_desde', inicio,
+    'rota_de_hoje', (select jsonb_build_object('total', count(*), 'entregues', count(*) filter (where situacao = 'entregue'),
+        'com_problema', count(*) filter (where situacao = 'problema'), 'pendentes', count(*) filter (where situacao = 'pendente'),
+        'sem_motorista', count(*) filter (where motorista_id is null), 'nao_mandadas_ao_celular', count(*) filter (where motorista_id is not null and not liberada),
+        'por_motorista', coalesce((select jsonb_agg(jsonb_build_object('motorista', m.motorista, 'paradas', m.t, 'entregues', m.ent, 'problemas', m.pro, 'pendentes', m.pen) order by m.motorista)
+          from (select motorista, count(*) t, count(*) filter (where situacao = 'entregue') ent, count(*) filter (where situacao = 'problema') pro, count(*) filter (where situacao = 'pendente') pen
+                  from e where dia = hoje group by motorista) m), '[]'::jsonb))
+      from e where dia = hoje),
+    'atrasadas', (select jsonb_build_object('quantidade', count(*), 'valor', coalesce(sum(valor_total_nf), 0), 'mais_antigas',
+        coalesce((select jsonb_agg(z order by z->>'dia', z->>'nf') from (select jsonb_build_object('dia', a.dia, 'dias', hoje - a.dia, 'nf', a.nf, 'cliente', a.cliente, 'cidade', a.cidade,
+          'motorista', a.motorista, 'mandada_ao_celular', a.liberada) z from e a where a.dia < hoje and a.situacao = 'pendente' order by a.dia, a.nf limit 15) q), '[]'::jsonb))
+      from (select e.*, (select valor_total from public.crm_notas where id = e.nota_id) valor_total_nf from e where dia < hoje and situacao = 'pendente') p),
+    'problemas_7_dias', coalesce((select jsonb_agg(jsonb_build_object('dia', p.dia, 'nf', p.nf, 'cliente', p.cliente, 'motorista', p.motorista, 'obs', left(coalesce(p.obs, ''), 200)) order by p.dia desc)
+        from e p where p.situacao = 'problema' and p.dia > hoje - 7), '[]'::jsonb),
+    'entregues_sem_canhoto', (select count(*) from e where situacao = 'entregue' and canhoto is null),
+    'agradecimento_falhou_7_dias', (select count(*) from e where cli_status = 'falhou' and dia > hoje - 7),
+    'notas_sem_rota', (select jsonb_build_object('quantidade', count(*), 'valor', coalesce(sum(s.valor_total), 0),
+        'mais_de_2_dias', count(*) filter (where s.d < hoje - 2),
+        'mais_antigas', coalesce((select jsonb_agg(z) from (select jsonb_build_object('emitida', t.d, 'dias', hoje - t.d, 'nf', t.numero, 'cliente', t.cliente, 'cidade', t.cidade) z
+           from (select (n.emitida_em at time zone 'America/Sao_Paulo')::date d, n.numero::int numero, coalesce(em.nome, n.cliente_nome) cliente, coalesce(em.cidade, n.cidade) cidade
+                   from public.crm_notas n left join public.crm_empresas em on em.id = n.empresa_id
+                  where inicio is not null and not n.cancelada and n.emitida_em >= inicio::timestamptz and (n.emitida_em at time zone 'America/Sao_Paulo')::date < hoje
+                    and not exists (select 1 from public.crm_entregas x where x.nota_id = n.id)
+                    and not exists (select 1 from public.crm_nota_itens i where i.nota_id = n.id and i.cfop in ('5922', '6922'))
+                  order by n.emitida_em limit 10) t) q), '[]'::jsonb),
+        'observacao', 'pode ser retirada no balcão ou transportadora: conferir antes de cobrar a rota')
+      from (select n.valor_total, (n.emitida_em at time zone 'America/Sao_Paulo')::date d from public.crm_notas n
+             where inicio is not null and not n.cancelada and n.emitida_em >= inicio::timestamptz and (n.emitida_em at time zone 'America/Sao_Paulo')::date < hoje
+               and not exists (select 1 from public.crm_entregas x where x.nota_id = n.id)
+               and not exists (select 1 from public.crm_nota_itens i where i.nota_id = n.id and i.cfop in ('5922', '6922'))) s),
+    'pedidos', (select jsonb_build_object(
+        'abertos', count(*) filter (where situacao = 'aberto'), 'em_separacao', count(*) filter (where situacao = 'separacao'),
+        'separados_esperando_nfe', count(*) filter (where situacao = 'separado'),
+        'separados_ha_mais_de_1_dia', count(*) filter (where situacao = 'separado' and atualizado_em < now() - interval '1 day'),
+        'entrega_vencida', count(*) filter (where entrega < hoje),
+        'com_bloqueio', count(*) filter (where exists (select 1 from unnest(bloqueios) b where not b = any(liberado))),
+        'mais_urgentes', coalesce((select jsonb_agg(z) from (select jsonb_build_object('pedido', p2.numero, 'cliente', coalesce(em.nome, p2.dados->>'cliente_nome'), 'situacao', p2.situacao, 'entrega', p2.entrega,
+            'bloqueios', (select coalesce(jsonb_agg(b), '[]'::jsonb) from unnest(p2.bloqueios) b where not b = any(p2.liberado))) z
+          from public.crm_pedidos p2 left join public.crm_empresas em on em.id = p2.empresa_id
+         where p2.situacao in ('aberto', 'separacao', 'separado') order by p2.entrega nulls last, p2.criado_em limit 10) q), '[]'::jsonb),
+        'observacao', 'os pedidos pelo CRM começam na virada de 03/11/2026')
+      from public.crm_pedidos where situacao in ('aberto', 'separacao', 'separado'))
+  ) into r from (select 1) um;
+  return r;
+end $$;
+revoke all on function public.crm_dl_painel() from public, anon;
+grant execute on function public.crm_dl_painel() to authenticated, service_role;

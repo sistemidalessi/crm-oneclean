@@ -1304,6 +1304,11 @@
   Supa.prototype.analiseVendasHoje = async function (dia, chave) { return unwrap(await this.sb.from('crm_ia_analises_vendas').select('dia, texto, em').eq('dia', dia).eq('chave', chave).maybeSingle()); };
   Local.prototype.analiseVendas = async function () { const a = { dia: R.hojeISO(), texto: '(modo local: sem IA) Aqui aparece a análise de vendas do dia: **o mês contra o mesmo período do mês passado**, a meta, os clientes sumidos e as propostas esquecidas.', em: new Date().toISOString(), nova: true }; this._analiseV = a; return a; };
   Local.prototype.analiseVendasHoje = async function (dia) { return this._analiseV && this._analiseV.dia === dia ? this._analiseV : null; };
+  // Análise de logística do dia (Diretor de Logística, 24/10/2026): uma só para a gestão e a logística (crm_ia_analises_areas).
+  Supa.prototype.analiseLogistica = async function (refazer) { return this.assistente({ acao: 'analise_logistica', refazer: !!refazer }); };
+  Supa.prototype.analiseLogisticaHoje = async function (dia) { return unwrap(await this.sb.from('crm_ia_analises_areas').select('dia, texto, em').eq('dia', dia).eq('area', 'logistica').maybeSingle()); };
+  Local.prototype.analiseLogistica = async function () { const a = { dia: R.hojeISO(), texto: '(modo local: sem IA) Aqui aparece a análise de logística do dia: **a rota de hoje**, as entregas sem confirmação, os problemas de entrega e as notas que não entraram em rota.', em: new Date().toISOString(), nova: true }; this._analiseL = a; return a; };
+  Local.prototype.analiseLogisticaHoje = async function (dia) { return this._analiseL && this._analiseL.dia === dia ? this._analiseL : null; };
   Supa.prototype.analiseHoje = async function (dia) { return unwrap(await this.sb.from('crm_ia_analises').select('dia, texto, em').eq('dia', dia).eq('tipo', 'compras').maybeSingle()); };
   Local.prototype.analiseCompras = async function () { const a = { dia: R.hojeISO(), texto: '(modo local: sem IA) Aqui aparece a análise de compras do dia: **o que pedir hoje e de quem**, as notas que chegaram, o custo que subiu e o estoque parado.', em: new Date().toISOString(), nova: true }; this._analise = a; return a; };
   Local.prototype.analiseHoje = async function (dia) { return this._analise && this._analise.dia === dia ? this._analise : null; };

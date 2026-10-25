@@ -1227,5 +1227,5 @@ pre.of-previa { white-space: pre-wrap; font-family: inherit; font-size: .88rem; 
 .cob-av-espera li { margin: .15rem 0; }
 .form-corpo > .av-comprovante { display: block; margin: 4px 18px 10px; }
 /* Gerente de Vendas no Início (24/10/2026) */
-.gerente-vendas h2 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.gerente-vendas .gv-rosto { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; background: var(--papel); }
+.diretor h2 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.diretor .gv-rosto { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; background: var(--papel); }
