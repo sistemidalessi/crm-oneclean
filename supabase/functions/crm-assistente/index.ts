@@ -6,7 +6,7 @@
 //   POST { acao: 'analise_compras', refazer? }  (admin e comprador)  → { dia, texto, em, nova }: a análise de compras
 //        do dia (comprador.ts), feita uma vez por dia e guardada em crm_ia_analises; refazer = de novo.
 //   POST { acao: 'analise_vendas', refazer? }   (admin, gestora, vendedor(a)) → { dia, texto, em, nova }: a análise de
-//        vendas do dia do Gerente de Vendas (vendas.ts; 24/10/2026): uma da equipe para a gestão e uma por vendedor(a),
+//        vendas do dia do Diretor de Vendas (vendas.ts; 24/10/2026): uma da equipe para a gestão e uma por vendedor(a),
 //        da carteira dele(a), guardadas em crm_ia_analises_vendas.
 //   POST { acao: 'analise_logistica', refazer? } (admin, gestora, logística) → { dia, texto, em, nova }: a análise do dia do
 //        Diretor de Logística (logistica.ts; 24/10/2026), guardada em crm_ia_analises_areas (area 'logistica').
@@ -42,7 +42,8 @@ const VOLTAS = 6;
 const SISTEMA = `Você é a turma de assistentes do CRM da OneClean, distribuidora de produtos de limpeza, descartáveis,
 EPIs e copa em São Bernardo do Campo (atende Grande São Paulo, ABC e Baixada Santista; os clientes são empresas:
 condomínios, escolas, clínicas, restaurantes, indústrias). O principal é o Clean, um robozinho; cada área tem um
-personagem (Estoque, Compras, Financeiro, Cobrança, Logística, Proposta, CapiClean do relacionamento…). Cada
+personagem (Estoque, Diretor de Compras, Diretor Financeiro, Cobrança, Diretor de Logística, Diretor de Vendas, Proposta,
+CapiClean do relacionamento…). Cada
 pergunta diz quem responde: fale em primeira pessoa como esse personagem, com simpatia e sem exagero. O personagem
 muda só o jeito de falar; as regras são as mesmas para todos.
 
@@ -60,7 +61,7 @@ Como trabalhar:
 - Produtos químicos: oriente só pelo rótulo e pela ficha do fabricante; nunca sugira misturar produtos.
 - Cobrança: tom cordial; lembre que um pagamento recente pode ainda não ter baixado.
 
-Quando quem responde é Compras (ou a pergunta é de compra/reposição), pense como um comprador sênior de
+Quando quem responde é o Diretor de Compras (ou a pergunta é de compra/reposição), pense como um diretor de compras de
 distribuidora: cobertura em dias (estoque ÷ venda média diária dos últimos 90 dias), ponto de pedido (venda média
 × prazo do fornecedor + segurança), o que já está a caminho, giro e estoque parado, concentração num fornecedor e
 o último custo de compra. Sugira o que comprar e quanto, com os números das ferramentas, e diga o porquê em uma
@@ -344,9 +345,9 @@ const FERRAMENTAS: Record<string, Ferr> = {
   }
 };
 
-// as ferramentas e o manual do comprador sênior (comprador.ts)
+// as ferramentas e o manual do Diretor de Compras (comprador.ts)
 Object.assign(FERRAMENTAS, ferramentasComprador({ tudo, obj, n2, normaliza, somaDias }));
-// o Gerente de Vendas (vendas.ts): as contas são do banco (crm_gv_*), com o login de quem pergunta
+// o Diretor de Vendas (vendas.ts): as contas são do banco (crm_gv_*), com o login de quem pergunta
 Object.assign(FERRAMENTAS, ferramentasGerente({ obj }));
 // o Diretor de Logística (logistica.ts): a conta é do banco (crm_dl_painel)
 Object.assign(FERRAMENTAS, ferramentasLogistica({ obj }));

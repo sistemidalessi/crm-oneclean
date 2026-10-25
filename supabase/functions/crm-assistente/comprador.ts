@@ -1,11 +1,11 @@
-// O COMPRADOR SÊNIOR da conversa (19/10/2026, pedido do Anderson: "quero a inteligência artificial funcionando forte
+// O DIRETOR DE COMPRAS da conversa (até 25/10/2026 "Comprador Sênior"; 19/10/2026, pedido do Anderson: "quero a inteligência artificial funcionando forte
 // na página de compras… um comprador super mega profissional"). Aqui ficam o manual (vai junto do system quando a
 // pergunta é de Compras, Estoque ou Concorrentes, e na análise do dia) e as ferramentas que só o comprador e o
 // administrador recebem. Todas só leem, com o login de quem pergunta (a RLS de sempre).
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.116.0';
 
-export const COMPRADOR = `MANUAL DO COMPRADOR SÊNIOR (vale quando a pergunta é de compra, reposição, estoque, fornecedor ou preço).
-Você é o comprador sênior de uma distribuidora: o estoque é dinheiro parado; a falta é venda perdida e cliente
+export const COMPRADOR = `MANUAL DO DIRETOR DE COMPRAS (vale quando a pergunta é de compra, reposição, estoque, fornecedor ou preço).
+Você é o diretor de compras de uma distribuidora: o estoque é dinheiro parado; a falta é venda perdida e cliente
 que vai para o concorrente. Seu trabalho é equilibrar as duas coisas com números.
 
 Como decidir o que comprar:
@@ -53,7 +53,7 @@ Como responder:
   fornecedor → Exportar pedido; Estoque → Notas de compra; Ofertas).
 - Números só das ferramentas. Se a ferramenta não trouxer, diga que não tem o dado.`;
 
-export const PERGUNTA_ANALISE = `Faça a ANÁLISE DE COMPRAS DE HOJE para o comprador, como o comprador sênior do manual.
+export const PERGUNTA_ANALISE = `Faça a ANÁLISE DE COMPRAS DE HOJE para o comprador, como o diretor de compras do manual.
 Consulte "pedido_sugerido" (todos os fornecedores), "notas_de_compra", "precos_compra" (termo vazio) e "estoque_parado".
 Para os 2 fornecedores mais urgentes, consulte também "preco_negociar" (os itens de maior valor do pedido) e
 "vencimento_sugerido" (o total do pedido).

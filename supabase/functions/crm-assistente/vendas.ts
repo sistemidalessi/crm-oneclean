@@ -1,12 +1,12 @@
-// O GERENTE DE VENDAS da turma (24/10/2026, plano do CEO Grupo Dalessi; Anderson: "Gerente de Vendas… conversa também
+// O DIRETOR DE VENDAS da turma (até 25/10/2026 "Gerente de Vendas"; 24/10/2026, plano do CEO Grupo Dalessi; Anderson: "Gerente de Vendas… conversa também
 // com a Isabela e com os(as) vendedores(as), cada um vendo só o que o papel permite"). Aqui ficam o manual (vai junto do
 // system quando a pergunta é de vendas ou quando quem responde é ele, e na análise do dia) e as ferramentas dele.
 // As CONTAS são do banco (crm_gv_ritmo, crm_gv_sumidos, crm_gv_funil: SECURITY INVOKER, rodam com o login de quem
 // pergunta, e a RLS de sempre decide o que entra); a IA só lê e escreve. Sem custo nem margem em nada daqui.
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.116.0';
 
-export const GERENTE = `MANUAL DO GERENTE DE VENDAS (vale quando a pergunta é de vendas, metas, clientes, funil ou propostas).
-Você é o gerente de vendas de uma distribuidora: acompanha o ritmo do mês, cobra a meta com respeito e aponta onde está
+export const GERENTE = `MANUAL DO DIRETOR DE VENDAS (vale quando a pergunta é de vendas, metas, clientes, funil ou propostas).
+Você é o diretor de vendas de uma distribuidora: acompanha o ritmo do mês, cobra a meta com respeito e aponta onde está
 o dinheiro mais fácil (cliente fiel que sumiu, proposta esquecida, negócio parado). Fala com o dono, com a gestora e com
 cada vendedor(a), e cada um só vê o que o perfil permite: as ferramentas já trazem só isso.
 
@@ -30,7 +30,7 @@ Como responder:
 
 export function perguntaAnalise(papel: string) {
   const equipe = papel === 'admin' || papel === 'gestor';
-  return `Faça a ANÁLISE DE VENDAS DE HOJE ${equipe ? 'da EQUIPE, para a gestão' : 'da SUA CARTEIRA, para você (vendedor(a))'}, como o gerente de vendas do manual.
+  return `Faça a ANÁLISE DE VENDAS DE HOJE ${equipe ? 'da EQUIPE, para a gestão' : 'da SUA CARTEIRA, para você (vendedor(a))'}, como o diretor de vendas do manual.
 Consulte "ritmo_vendas", "clientes_sumidos" e "funil_parado".
 Responda em no máximo 12 linhas, nesta ordem:
 1) O mês: vendido até hoje × o mesmo período do mês passado, a meta (se houver) e a projeção.

@@ -1,7 +1,7 @@
 /* Os diretores da turma (CEO Grupo Dalessi): um cartão com a análise do dia feita pela IA (crm-assistente), uma vez por
    dia, e guardada no banco. O primeiro que abre a tela no dia (em cada chave) dispara a análise em segundo plano; depois,
    todos leem a guardada. As contas são do banco, com o login de quem abre.
-   - Gerente de Vendas (24/10/2026): no Início; a análise da equipe para o administrador e a gestora, a da carteira para
+   - Diretor de Vendas (24/10/2026; até 25/10 "Gerente de Vendas"): no Início; a análise da equipe para o administrador e a gestora, a da carteira para
      cada vendedor(a) (acao 'analise_vendas', manual em supabase/functions/crm-assistente/vendas.ts, crm_ia_analises_vendas).
    - Diretor de Logística (24/10/2026): no alto de Rotas, para a logística e a gestão (acao 'analise_logistica', manual em
      logistica.ts, conta em crm_dl_painel, guardada em crm_ia_analises_areas). O personagem é o da Logística da turma. */
@@ -65,7 +65,7 @@
   }
 
   CRM.gerenteVendas = cartao({
-    id: 'gerente-vendas', titulo: 'Gerente de Vendas', papeis: ['admin', 'gestor', 'vendedor'],
+    id: 'gerente-vendas', titulo: 'Diretor de Vendas', papeis: ['admin', 'gestor', 'vendedor'],
     temStore: st => !!st.analiseVendas,
     chave: () => (CRM.ehGestor() ? 'equipe' : CRM.meuId()),
     quem: () => (CRM.ehGestor() ? 'da equipe' : 'da sua carteira'),
