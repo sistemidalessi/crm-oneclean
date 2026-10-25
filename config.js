@@ -17,7 +17,7 @@ window.CRM_CONFIG = {
   // (topo, de corpo inteiro, guia do dia e conversa); o especialista de cada tela aparece dentro do painel; o Andi
   // recebe no login. turma.js explica. Trocar um desenho: mesmo nome de arquivo e subir a `versao`.
   turma: {
-    pasta: 'assets/turma/', versao: '9',
+    pasta: 'assets/turma/', versao: '10',
     principal: 'clean', anfitriao: 'andi',
     // 20/10/2026: o Andi agora é a foto do Anderson e só apresenta o sistema (quem ajuda no dia a dia é o Clean)
     boasVindas: 'Olá, seja bem-vindo! É um prazer receber você. Entre com o seu e-mail e a sua senha: você está entrando no mundo da OneClean.',
