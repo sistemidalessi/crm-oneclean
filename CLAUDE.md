@@ -239,8 +239,9 @@ motorista, pela logística e como app instalado (PWA).
   mascarados).
 - Lançamento excluído vai inteiro para `crm_fin_excluidos`; conta do FKN excluída não volta.
 - Baixa no FKN **não vira entrada sozinha** (nem sempre é dinheiro no banco): bloco "Baixados no FKN".
-- Espelho com a Agilité: só a categoria "Transferência entre empresas"; `ref` **sempre** o id original, par
-  completo, sem eco (`crm.espelho = '1'`).
+- Espelho com a Agilité: "Transferência entre empresas" (`ref` **sempre** o id original, par completo) e, desde
+  26/10/2026, o "Reembolso da folha à Agilité" (assunto `reembolso`, `crm_espelho_reembolso`: vem da Agilité com o
+  valor da folha, adota e substitui a previsão recorrente do grupo no mês; daqui volta só o pago). Sem eco (`crm.espelho = '1'`).
 - Boleto: PDF com vários boletos é separado por página — a vendedora **nunca** recebe o boleto de outro cliente
   (se não separar, vai sem PDF). Boleto de exemplo do BB sai com o dígito trocado e **nunca** é registrado.
 

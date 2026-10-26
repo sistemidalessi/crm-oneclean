@@ -58,7 +58,8 @@
   // excluir"). O lançamento fica guardado inteiro em crm_fin_excluidos (cópia de segurança); o que veio
   // do FKN entra na lista que a próxima listagem do contas a pagar respeita (tela e vigia): não volta.
   const textoExcluir = l => (l.chave_fkn ? 'Excluir esta conta do FKN? Ela sai do caixa e não volta nas próximas listagens do FKN.' : 'Excluir este lançamento? Ele sai do caixa.') +
-    (l.espelho_par || l.espelho_ref ? '\nO espelho no Caixa da Agilité também é desfeito.' : '') + '\n(Fica guardada uma cópia.)';
+    (l.categoria === 'Reembolso da folha à Agilité' && /^agilite:/.test(l.espelho_ref || '') ? '\nO reembolso continua no Caixa da Agilité (lá vale o valor da folha) e volta aqui se for ajustado lá.'
+      : l.espelho_par || l.espelho_ref ? '\nO espelho no Caixa da Agilité também é desfeito.' : '') + '\n(Fica guardada uma cópia.)';
   async function excluirLanc(l) {
     const ja = l.chave_fkn && (F.excluidos || []).some(x => x.chave_fkn === l.chave_fkn);
     const r = await CRM.store().inserir('fin_excluidos', { lancamento_id: l.id, chave_fkn: ja ? null : l.chave_fkn || null, descricao: l.descricao, valor: l.valor,
@@ -67,6 +68,10 @@
     await remove(l.id);
   }
   const chavesExcluidas = () => (F.excluidos || []).map(x => x.chave_fkn).filter(Boolean);
+  // previsões de reembolso somadas no lançamento que veio do Caixa da Agilité (crm_espelho_reembolso, 26/10/2026):
+  // contam como já geradas, senão "Gerar o mês" recriaria as linhas que o valor da folha já cobre
+  const comSomadas = () => F.lancamentos.concat((F.excluidos || []).filter(x => x.dados && x.dados.somado_no_espelho && x.dados.recorrente_id)
+    .map(x => ({ recorrente_id: x.dados.recorrente_id, competencia: x.dados.competencia })));
   const lanc = id => F && F.lancamentos.find(x => x.id === id);
 
   // ---- ações sobre um lançamento
@@ -555,7 +560,7 @@
   }
 
   async function gerar(compet) {
-    const novas = gerarMes(F.recorrentes, compet, F.lancamentos);
+    const novas = gerarMes(F.recorrentes, compet, comSomadas());
     if (!novas.length) { CRM.toast('Nada a gerar em ' + R.mesCurto(compet + '-01') + ': as contas desse mês já existem.'); return; }
     const r = await CRM.store().inserirVarios('fin_lancamentos', novas);
     r.forEach(x => troca(F.lancamentos, x));
@@ -800,7 +805,7 @@
   function listaRecorrentes() {
     const h = hoje(), compet = h.slice(0, 7), prox = R.somaMeses(compet + '-01', 1).slice(0, 7);
     const l = F.recorrentes.slice().sort((a, b) => (b.ativo !== false) - (a.ativo !== false) || a.dia - b.dia || a.descricao.localeCompare(b.descricao, 'pt-BR'));
-    const faltam = c => gerarMes(F.recorrentes, c, F.lancamentos).length;
+    const faltam = c => gerarMes(F.recorrentes, c, comSomadas()).length;
     const totMes = l.filter(r => r.ativo !== false).reduce((t, r) => t + (r.tipo === 'entrada' ? 1 : -1) * Number(r.valor || 0), 0);
     const parcelaDe = r => r.parcelas ? ((r.parcela_inicio || 1) + (+compet.slice(0, 4) - +String(r.inicio).slice(0, 4)) * 12 + (+compet.slice(5, 7) - +String(r.inicio).slice(5, 7))) + ' de ' + r.parcelas : '';
     return '<section class="cartao"><div class="filtros-compras"><button type="button" class="btn" data-acao="cx-rec-nova">+ Conta recorrente</button>' +

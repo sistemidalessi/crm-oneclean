@@ -979,9 +979,11 @@
     const situacao = !s.url || !s.tem_senha ? CRM.selo('falta configurar o envio', 'ambar')
       : s.com_erro ? CRM.selo(s.com_erro + ' com erro: ' + (s.ultimo_erro || ''), 'vermelho')
       : s.pendentes ? CRM.selo(s.pendentes + ' esperando envio', 'ambar') : CRM.selo('em dia', 'verde');
-    return '<section class="cartao"><h2>Espelho com a Agilité (transferências entre empresas)</h2>' +
+    return '<section class="cartao"><h2>Espelho com a Agilité (transferências e reembolso da folha)</h2>' +
       '<p>Toda <strong>Transferência entre empresas</strong> (empréstimo de uma empresa para a outra e a volta) lançada, ajustada, paga ou desfeita aqui ' +
-      'vai sozinha para o Caixa do dia da Agilité, e a de lá vem para cá. Ninguém lança duas vezes. Reembolso da folha e material vendido à Agilité continuam como estão.</p>' +
+      'vai sozinha para o Caixa do dia da Agilité, e a de lá vem para cá. Ninguém lança duas vezes.</p>' +
+      '<p>O <strong>Reembolso da folha à Agilité</strong> (benefícios, salários, Cesta II, FGTS e 13º dos funcionários da OneClean) chega lançado pela Agilité com o valor da folha: ' +
+      'toma o lugar da previsão recorrente do mês e muda sozinho quando a Agilité ajusta. Daqui volta para lá só o pago. Material vendido à Agilité continua como está.</p>' +
       '<p>Situação: ' + situacao + ' · último envio ' + quando(s.ultimo_enviado) + ' · último recebido ' + quando(s.ultimo_recebido) + '</p>' +
       '<h3>1. Daqui para a Agilité</h3>' +
       '<form class="form-linha" id="formEspelho"><label class="campo">Endereço da Agilité<input name="url" type="url" value="' + esc(s.url || AGILITE_ESPELHO) + '"></label>' +

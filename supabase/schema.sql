@@ -1265,8 +1265,16 @@ $$;
 -- o par como a Agilité espera receber (e marca o par nas linhas, sem voltar para a fila)
 create or replace function public.crm_espelho_pacote(p_par text)
 returns jsonb language plpgsql security definer set search_path = public as $$
-declare movs jsonb; tem_ida boolean;
+declare movs jsonb; tem_ida boolean; pac jsonb;
 begin
+  -- reembolso da folha (26/10/2026): só o ✓ volta para a Agilité (lá o valor é sempre o da folha)
+  select jsonb_build_object('versao', 1, 'origem', 'oneclean', 'assunto', 'reembolso', 'par', p_par, 'movimentos', jsonb_build_array(jsonb_build_object(
+           'ref', l.espelho_ref, 'papel', 'ida', 'data', case when l.situacao = 'pago' then l.pago_em else l.vencimento end,
+           'tipo', l.tipo, 'valor', l.valor, 'descricao', l.descricao,
+           'situacao', case when l.situacao = 'pago' then 'realizado' else 'previsto' end)))
+    into pac from public.crm_fin_lancamentos l
+   where l.espelho_ref = p_par and l.espelho_par = p_par and l.categoria = 'Reembolso da folha à Agilité' limit 1;
+  if pac is not null then return pac; end if;
   select jsonb_agg(jsonb_build_object(
            'ref', coalesce(l.espelho_ref, 'oneclean:' || l.id),
            'papel', case when coalesce(l.espelho_ref, 'oneclean:' || l.id) = p_par then 'ida' else 'volta' end,
@@ -1294,6 +1302,13 @@ returns trigger language plpgsql security definer set search_path = public as $$
 declare v_id uuid; v_par text; c_transf constant text := 'Transferência entre empresas';
 begin
   if coalesce(current_setting('crm.espelho', true), '') = '1' then return null; end if;
+  -- reembolso que veio da Agilité: o ✓ (ou outro dia/valor) dado aqui volta para lá. Apagar aqui não apaga lá.
+  if tg_op = 'UPDATE' and new.categoria = 'Reembolso da folha à Agilité' and new.espelho_ref like 'agilite:%' then
+    if (new.valor, new.vencimento, new.situacao, new.pago_em) is not distinct from (old.valor, old.vencimento, old.situacao, old.pago_em) then return null; end if;
+    insert into public.crm_fin_espelho_fila (par) values (new.espelho_ref)
+    on conflict (par) do update set pendente = true, mudou_em = now(), enviar_depois = least(crm_fin_espelho_fila.enviar_depois, now());
+    return null;
+  end if;
   if tg_op = 'INSERT' then
     if new.categoria is distinct from c_transf then return null; end if;
     v_id := new.id; v_par := new.espelho_par;
@@ -1316,6 +1331,110 @@ drop trigger if exists crm_fin_lanc_espelho on public.crm_fin_lancamentos;
 create trigger crm_fin_lanc_espelho after insert or update or delete on public.crm_fin_lancamentos
   for each row execute function public.crm_espelho_marca();
 
+-- ---- reembolso da folha (26/10/2026). Pedido do Anderson: "já quero que lance automático a parte da OneClean para
+-- já aparecer no seu fluxo de caixa". A Agilité paga a folha e os benefícios dos 5 da OneClean e a OneClean reembolsa;
+-- o valor certo é o da folha da Agilité. Cada entrada "Reembolso OneClean — …" lançada lá (benefícios da Caju/SAT,
+-- salários, Cesta II, FGTS, 13º) chega com assunto 'reembolso' e vira aqui a SAÍDA "Reembolso da folha à Agilité"
+-- (mesmo dia e valor, entre empresas). Na primeira vez ela ADOTA a previsão que o CRM já tinha do mesmo grupo no mês
+-- (as recorrentes "Reembolso benefícios — VR/VT/cesta", "— salários"…): a mais parecida vira a linha da Agilité e as
+-- outras do grupo saem (cópia em crm_fin_excluidos, com recorrente e competência, para "Gerar o mês" não recriar).
+-- Daqui volta para lá só o ✓; apagar aqui não apaga lá (o próximo ajuste de lá cria de novo).
+create or replace function public.crm_reembolso_grupo(t text)
+returns text language sql immutable set search_path = public as $$
+  select case
+    when t ~* '13[º°o]|d[eé]cimo' then '13'
+    when t ~* 'cesta\s*(ii|2)\M|assiduidade' then 'cesta2'
+    when t ~* 'fgts|consignado' then 'fgts'
+    when t ~* 'benef|caju|\mv[rat]\M|vale|cesta|mobilidade|\msat\M|alimenta|refei' then 'beneficios'
+    when t ~* 'sal[aá]rio|l[ií]quido|folha' then 'salarios'
+    else 'outro' end;
+$$;
+
+create or replace function public.crm_espelho_reembolso(p jsonb)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare
+  c_cat constant text := 'Reembolso da folha à Agilité';
+  v_par text := p ->> 'par'; m jsonb; d date; v numeric; s text; dsc text; grupo text; nome text;
+  lid uuid; antes numeric; acao text; n_abs int := 0; n_del int := 0;
+begin
+  if v_par is null or v_par !~ '^agilite:[0-9]{1,18}$' then raise exception 'par inválido (reembolso: agilite:<id>)'; end if;
+  perform set_config('crm.espelho', '1', true);
+  if coalesce(p ->> 'apagar', '') = 'true' then
+    -- tirado no caixa da Agilité: sai o que está em aberto; o que já foi pago aqui fica, com o aviso
+    delete from public.crm_fin_lancamentos where espelho_ref = v_par and categoria = c_cat and situacao <> 'pago';
+    get diagnostics n_del = row_count;
+    update public.crm_fin_lancamentos set espelho_ref = null, espelho_par = null,
+        observacoes = left(coalesce(observacoes || ' ', '') || 'A Agilité tirou este reembolso do caixa dela em ' || to_char(now(), 'DD/MM/YYYY') || ': conferir.', 300)
+     where espelho_ref = v_par and categoria = c_cat;
+    delete from public.crm_fin_espelho_fila where par = v_par;
+    insert into public.crm_fin_espelho_log (sentido, par, status, detalhe) values ('recebido', v_par, 200, jsonb_build_object('assunto', 'reembolso', 'apagados', n_del));
+    return jsonb_build_object('ok', true, 'assunto', 'reembolso', 'apagados', n_del);
+  end if;
+  if jsonb_typeof(p -> 'movimentos') is distinct from 'array' or jsonb_array_length(p -> 'movimentos') <> 1 then
+    raise exception 'reembolso: movimentos precisa ser uma lista com 1';
+  end if;
+  m := p -> 'movimentos' -> 0;
+  if (m ->> 'ref') is distinct from v_par then raise exception 'ref inválido: %', m ->> 'ref'; end if;
+  if (m ->> 'tipo') is distinct from 'entrada' then raise exception 'tipo inválido no reembolso: %', m ->> 'tipo'; end if;
+  s := coalesce(m ->> 'situacao', '');
+  if s not in ('realizado', 'previsto') then raise exception 'situacao inválida: %', s; end if;
+  d := (m ->> 'data')::date; v := round((m ->> 'valor')::numeric, 2);
+  if d is null or v is null or v <= 0 then raise exception 'data/valor inválidos em %', v_par; end if;
+  dsc := left(coalesce(m ->> 'descricao', ''), 200);
+  grupo := public.crm_reembolso_grupo(dsc);
+  nome := 'Reembolso à Agilité — ' || coalesce(nullif(btrim(regexp_replace(dsc, '^\s*reembolso\s+oneclean\s*[—–-]?\s*', '', 'i')), ''), 'folha');
+
+  select id, valor into lid, antes from public.crm_fin_lancamentos where espelho_ref = v_par;
+  if lid is not null then acao := 'atualizado';
+  else
+    -- a previsão que o CRM já tinha desse reembolso: mesmo grupo e mês, em aberto, ainda sem ligação
+    select l.id, l.valor into lid, antes from public.crm_fin_lancamentos l
+     where l.categoria = c_cat and l.tipo = 'saida' and l.situacao = 'aberto' and l.espelho_ref is null and l.espelho_par is null
+       and date_trunc('month', l.vencimento) = date_trunc('month', d) and public.crm_reembolso_grupo(l.descricao) = grupo
+     order by (l.vencimento = d) desc, abs(l.valor - v), l.criado_em limit 1;
+    acao := case when lid is null then 'novo' else 'adotado' end;
+  end if;
+
+  if lid is null then
+    insert into public.crm_fin_lancamentos (tipo, descricao, fornecedor, categoria, valor, vencimento, situacao, pago_em, baixa, baixado_em,
+        entre_empresas, origem, observacoes, espelho_ref, espelho_par, criado_por)
+    values ('saida', nome, 'Agilité', c_cat, v, d, case when s = 'realizado' then 'pago' else 'aberto' end, case when s = 'realizado' then d end,
+        case when s = 'realizado' then 'caixa' end, case when s = 'realizado' then now() end,
+        true, 'tela', left('Lançado pelo caixa da Agilité (valor da folha): ' || dsc, 300), v_par, v_par, null)
+    returning id into lid;
+  else
+    update public.crm_fin_lancamentos set espelho_ref = v_par, espelho_par = v_par, descricao = nome, fornecedor = coalesce(fornecedor, 'Agilité'),
+        entre_empresas = true, valor = v,
+        vencimento = case when s = 'previsto' then d else vencimento end,
+        situacao = case when s = 'realizado' then 'pago' when situacao = 'pausado' then 'pausado' else 'aberto' end,
+        pago_em = case when s = 'realizado' then d end,
+        baixa = case when s = 'realizado' then coalesce(baixa, 'caixa') end,
+        baixado_em = case when s = 'realizado' then coalesce(baixado_em, now()) end,
+        observacoes = case when acao = 'adotado' then left(coalesce(observacoes || ' ', '') || 'Ligado ao caixa da Agilité: valor da folha '
+          || to_char(v, 'FM999G999G990D00') || ' (previsto aqui ' || to_char(antes, 'FM999G999G990D00') || ').', 300) else observacoes end
+     where id = lid;
+  end if;
+
+  -- as outras previsões do mesmo grupo no mês já estão somadas no valor da Agilité: saem, com cópia
+  if acao = 'adotado' then
+    with alvo as (
+      select l.* from public.crm_fin_lancamentos l
+       where l.id <> lid and l.categoria = c_cat and l.tipo = 'saida' and l.situacao = 'aberto' and l.espelho_ref is null and l.espelho_par is null
+         and date_trunc('month', l.vencimento) = date_trunc('month', d) and public.crm_reembolso_grupo(l.descricao) = grupo),
+    guarda as (
+      insert into public.crm_fin_excluidos (lancamento_id, descricao, valor, vencimento, dados, excluido_por)
+      select a.id, a.descricao, a.valor, a.vencimento, to_jsonb(a) || jsonb_build_object('somado_no_espelho', v_par), null from alvo a
+      returning lancamento_id),
+    apaga as (delete from public.crm_fin_lancamentos l using guarda g where l.id = g.lancamento_id returning 1)
+    select count(*) into n_abs from apaga;
+  end if;
+
+  insert into public.crm_fin_espelho_log (sentido, par, status, detalhe)
+    values ('recebido', v_par, 200, jsonb_build_object('assunto', 'reembolso', 'acao', acao, 'lancamento', lid, 'somados', n_abs));
+  return jsonb_build_object('ok', true, 'assunto', 'reembolso', 'acao', acao, 'somados', n_abs);
+end;
+$$;
+
 -- recebe o par da Agilité (Edge Function crm-caixa-espelho, com a chave de serviço). 'tipo' vem do ponto
 -- de vista dela: aqui inverte. Ref 'oneclean:…' = um original nosso: só data, valor e situação.
 create or replace function public.crm_espelho_aplicar(p jsonb)
@@ -1328,6 +1447,8 @@ declare
 begin
   if coalesce(p ->> 'versao', '') <> '1' then raise exception 'versao precisa ser 1'; end if;
   if coalesce(p ->> 'origem', '') <> 'agilite' then raise exception 'origem precisa ser agilite'; end if;
+  if p ->> 'assunto' = 'reembolso' then return public.crm_espelho_reembolso(p); end if;
+  if coalesce(p ->> 'assunto', 'transferencia') <> 'transferencia' then raise exception 'assunto inválido: %', left(p ->> 'assunto', 40); end if;
   if v_par is null or v_par !~ '^(agilite:[A-Za-z0-9_-]{1,64}|oneclean:[0-9a-f-]{36})$' then raise exception 'par inválido'; end if;
   perform set_config('crm.espelho', '1', true);
   if coalesce(p ->> 'apagar', '') = 'true' then
@@ -1475,7 +1596,7 @@ returns jsonb language sql stable security definer set search_path = public as $
     'ultimo_recebido', (select max(quando) from public.crm_fin_espelho_log where sentido = 'recebido')) end;
 $$;
 revoke all on function public.crm_espelho_par_de(uuid, text), public.crm_espelho_linhas(text), public.crm_espelho_pacote(text),
-  public.crm_espelho_marca(), public.crm_espelho_aplicar(jsonb), public.crm_espelho_tick() from public, anon, authenticated;
+  public.crm_espelho_marca(), public.crm_espelho_aplicar(jsonb), public.crm_espelho_tick(), public.crm_espelho_reembolso(jsonb) from public, anon, authenticated;
 revoke all on function public.crm_espelho_configura(text, text), public.crm_espelho_situacao(), public.crm_espelho_nova_senha() from public, anon;
 grant execute on function public.crm_espelho_configura(text, text), public.crm_espelho_situacao(), public.crm_espelho_nova_senha() to authenticated;
 do $$ begin
