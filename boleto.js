@@ -300,7 +300,11 @@
       '<p>Multa ' + esc(pct(c.multa_pct)) + ' · juros ' + esc(pct(c.juros_mes_pct)) + ' ao mês' + (c.protesto_dias ? ' · protesto ' + esc(c.protesto_dias) + ' dias após o vencimento' : '') +
         ' · próximo número do CRM: <strong>' + esc(c.inicio_numeracao || '—') + '</strong></p>' +
       '<p class="acoes"><button type="button" class="btn sec" data-acao="bol-convenio">Dados do convênio</button> ' +
-        '<button type="button" class="btn" data-acao="bol-exemplo"' + (falta.length ? ' disabled title="preencha o convênio primeiro"' : '') + '>Ver um boleto de exemplo</button></p>' +
+        '<button type="button" class="btn" data-acao="bol-exemplo"' + (falta.length ? ' disabled title="preencha o convênio primeiro"' : '') + '>Ver um boleto de exemplo</button> ' +
+        '<button type="button" class="btn sec" data-acao="bol-remessa-teste"' + (falta.length || !raiz.CRMCnab240 ? ' disabled title="preencha o convênio primeiro"' : '') + '>Baixar arquivo de teste (Validador do BB)</button></p>' +
+      '<p class="dica">O arquivo de teste é a remessa CNAB 240 com até 3 títulos em aberto, marcada como TESTE. Use só no <strong>Validador de Leiautes</strong> ' +
+        'do Gerenciador Financeiro (Troca de arquivos e APIs → Leiautes → "CNAB240 - Cobrança Segmento P/Q/R/S" → Analisar). Não suba em Remessa/retorno: ' +
+        'o envio de verdade só depois do teste combinado com o gerente.</p>' +
       '<p class="dica">O exemplo usa um título de verdade em aberto, sai marcado <strong>SIMULAÇÃO - SEM VALOR</strong> e não registra nada no banco. ' +
         'A numeração do CRM precisa começar numa faixa que o site do BB não use (o gerente confirma).</p></section>';
   }
@@ -328,7 +332,30 @@
     pdf.save('Boleto de exemplo (simulação) - ' + (t.nota_numero ? 'NF ' + t.nota_numero : 'exemplo') + '.pdf');
   }
 
-  CRM.boletoBB = { cartao, exemplo };
+  // Remessa CNAB 240 de teste (26/10/2026): até 3 títulos de verdade em aberto, com o pagador completo (CPF/CNPJ e CEP),
+  // nosso número a partir do primeiro número do CRM e "TS" no lote. Não grava nada: é só para o Validador de Leiautes do BB.
+  function remessaTeste() {
+    const K = raiz.CRMCnab240, c = cfgB(), em = emitente(), D = CRM.estado.D || {}, h = CRM.hoje();
+    const f = K.falta(c, em);
+    if (f.length) throw new Error('falta: ' + f.join(', '));
+    let seq = Number(digitos(c.inicio_numeracao)) || 1;
+    const tits = [];
+    for (const t of (D.titulos || []).filter(x => x.vencimento >= h && Number(x.valor) > 0).sort((a, b) => a.vencimento.localeCompare(b.vencimento))) {
+      const e = t.empresa_id ? CRM.empresa(t.empresa_id) : null;
+      if (!e || digitos(e.cep).length !== 8 || ![11, 14].includes(digitos(e.cnpj).length)) continue;
+      tits.push({ nosso_numero: nossoNumero(c.convenio, seq++), documento: t.duplicata, id_empresa: t.duplicata, vencimento: t.vencimento,
+        emissao: t.emitida_em && t.emitida_em <= t.vencimento ? t.emitida_em : h, valor: t.valor,
+        pagador: { doc: e.cnpj, nome: e.razao_social || e.nome, logradouro: e.logradouro, numero: e.numero, complemento: e.complemento, bairro: e.bairro, cep: e.cep, cidade: e.cidade, uf: e.uf } });
+      if (tits.length === 3) break;
+    }
+    if (!tits.length) throw new Error('nenhum título em aberto com o cadastro do cliente completo (CNPJ e CEP) para o teste');
+    const agora = new Date().toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour12: false }).replace(/\D/g, '').slice(0, 6);
+    const txt = K.remessa(c, em, tits, { hoje: h, hora: agora, seq: 1, teste: true });
+    CRM.baixar('remessa-teste-cnab240-' + h + '.txt', txt, 'text/plain');
+    CRM.toast('Arquivo de teste com ' + tits.length + ' título(s). Suba no Validador de Leiautes do BB.');
+  }
+
+  CRM.boletoBB = { cartao, exemplo, remessaTeste };
   Object.assign(CRM.acoes, {
     'bol-convenio': () => {
       const c = cfgB();
@@ -356,6 +383,7 @@
         }
       });
     },
-    'bol-exemplo': async () => { try { await exemplo(); } catch (e) { CRM.falhou(e); } }
+    'bol-exemplo': async () => { try { await exemplo(); } catch (e) { CRM.falhou(e); } },
+    'bol-remessa-teste': () => { try { remessaTeste(); } catch (e) { CRM.falhou(e); } }
   });
 })(typeof window !== 'undefined' ? window : globalThis);
