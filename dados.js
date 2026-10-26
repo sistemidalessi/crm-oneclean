@@ -1017,6 +1017,27 @@
     return paginado((de, ate) => this.sb.from('crm_boletos').select('*').gte('criado_em', desde).order('criado_em').order('id').range(de, ate));
   };
   Local.prototype.boletos = async function () { return this.ler().boletos || []; };
+  // Boleto do BB pelo arquivo CNAB 240 (26/10/2026): lê os boletos dos últimos 120 dias (administrador, gestora e logística — RLS)
+  // e as remessas (só o administrador); o resto é por função do banco (preparar, remessa, instrução, retorno, reenviar).
+  const BB_COLUNAS = 'id, convenio, seq, nosso_numero, duplicata, documento, nota_numero, parcela, empresa_id, valor, vencimento, emissao, situacao, ' +
+    'remessa_seq, remessa_em, instrucao, instrucao_remessa, motivo, pago_em, valor_pago, registrado_em, criado_em';
+  Supa.prototype.boletosBB = async function () {
+    const desde = new Date(Date.now() - 120 * 864e5).toISOString();
+    return paginado((de, ate) => this.sb.from('crm_boletos_bb').select(BB_COLUNAS).gte('criado_em', desde).order('criado_em').order('id').range(de, ate));
+  };
+  Supa.prototype.boletosBBdaNota = async function (prefixo) {
+    return unwrap(await this.sb.from('crm_boletos_bb').select(BB_COLUNAS).like('duplicata', prefixo + '%').in('situacao', ['preparado', 'registrado']).order('duplicata'));
+  };
+  Supa.prototype.boletoRemessas = async function () { return unwrap(await this.sb.from('crm_boleto_remessas').select('*').order('seq', { ascending: false }).limit(10)); };
+  Supa.prototype.boletoBBPreparar = async function (dups) { return unwrap(await this.sb.rpc('crm_boleto_bb_preparar', { p_duplicatas: dups })); };
+  Supa.prototype.boletoBBRemessa = async function (teste) { return unwrap(await this.sb.rpc('crm_boleto_bb_remessa', { p_teste: !!teste })); };
+  Supa.prototype.boletoBBRemessaDados = async function (seq) { return unwrap(await this.sb.rpc('crm_boleto_bb_remessa_dados', { p_seq: seq })); };
+  Supa.prototype.boletoBBInstrucao = async function (dup, mov) { return unwrap(await this.sb.rpc('crm_boleto_bb_instrucao', { p_duplicata: dup, p_mov: mov })); };
+  Supa.prototype.boletoBBRetorno = async function (assinatura, cab, itens) { return unwrap(await this.sb.rpc('crm_boleto_bb_retorno', { p_assinatura: assinatura, p_cab: cab, p_itens: itens })); };
+  Supa.prototype.boletoBBReenviar = async function (id) { return unwrap(await this.sb.rpc('crm_boleto_bb_reenviar', { p_id: id })); };
+  Local.prototype.boletosBB = async function () { return []; };
+  Local.prototype.boletosBBdaNota = async function () { return []; };
+  Local.prototype.boletoRemessas = async function () { return []; };
   // O(a) vendedor(a) mandou o boleto ao cliente (só pela função: ela não altera a tabela).
   Supa.prototype.boletoCobrado = async function (ids) {
     return unwrap(await this.sb.rpc('crm_boleto_cobrado', { ids }));

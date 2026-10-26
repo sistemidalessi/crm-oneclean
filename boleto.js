@@ -301,7 +301,9 @@
         ' · próximo número do CRM: <strong>' + esc(c.inicio_numeracao || '—') + '</strong></p>' +
       '<p class="acoes"><button type="button" class="btn sec" data-acao="bol-convenio">Dados do convênio</button> ' +
         '<button type="button" class="btn" data-acao="bol-exemplo"' + (falta.length ? ' disabled title="preencha o convênio primeiro"' : '') + '>Ver um boleto de exemplo</button> ' +
-        '<button type="button" class="btn sec" data-acao="bol-remessa-teste"' + (falta.length || !raiz.CRMCnab240 ? ' disabled title="preencha o convênio primeiro"' : '') + '>Baixar arquivo de teste (Validador do BB)</button></p>' +
+        '<button type="button" class="btn sec" data-acao="bol-remessa-teste"' + (falta.length || !raiz.CRMCnab240 ? ' disabled title="preencha o convênio primeiro"' : '') + '>Baixar arquivo de teste (Validador do BB)</button> ' +
+        (c.ligado ? '<button type="button" class="btn sec" data-acao="bol-desligar">Desligar</button>'
+          : '<button type="button" class="btn sec" data-acao="bol-ligar-remessa"' + (falta.length || !raiz.CRMCnab240 ? ' disabled title="preencha o convênio primeiro"' : '') + '>Ligar pelo arquivo de remessa</button>') + '</p>' +
       '<p class="dica">O arquivo de teste é a remessa CNAB 240 com até 3 títulos em aberto, marcada como TESTE. Use só no <strong>Validador de Leiautes</strong> ' +
         'do Gerenciador Financeiro (Troca de arquivos e APIs → Leiautes → "CNAB240 - Cobrança Segmento P/Q/R/S" → Analisar). Não suba em Remessa/retorno: ' +
         'o envio de verdade só depois do teste combinado com o gerente.</p>' +
@@ -355,7 +357,134 @@
     CRM.toast('Arquivo de teste com ' + tits.length + ' título(s). Suba no Validador de Leiautes do BB.');
   }
 
-  CRM.boletoBB = { cartao, exemplo, remessaTeste };
+  // ================================================================ boleto pelo arquivo CNAB 240 (26/10/2026)
+  // Bloco em Caixa → Cobrança (só o administrador e só com o boleto ligado no caminho "remessa"): preparar os boletos das
+  // parcelas das notas do CRM, gerar o arquivo de remessa (sobe no Gerenciador Financeiro → Troca de arquivos e APIs →
+  // Remessa/retorno), baixar de novo uma remessa, ler o arquivo de retorno (baixa e Caixa pelo banco, crm_boleto_bb_retorno),
+  // PDF de cada boleto e "Mandar de novo" o que o banco rejeitou. O cartório (cobranca.js) manda a instrução de protesto.
+  const R = raiz.CRMRegras;
+  let bb = null, carregandoBB = false, lendoRetorno = false;
+  const ligadoArquivo = () => { const c = cfgB(); return !!c.ligado && c.caminho === 'remessa'; };
+  const VIVO = ['preparado', 'registrado', 'pago'];
+  async function carregaBB() {
+    const st = CRM.store();
+    if (carregandoBB || !st || !st.boletosBB) return;
+    carregandoBB = true;
+    try { const [lista, remessas] = await Promise.all([st.boletosBB(), st.boletoRemessas()]); bb = { lista, remessas }; } finally { carregandoBB = false; }
+    CRM.render();
+  }
+  // parcelas das notas do CRM (duplicata "2-000012/01") a pagar por boleto, a vencer e sem boleto vivo
+  function aRegistrar() {
+    const vivos = new Set(((bb && bb.lista) || []).filter(b => VIVO.includes(b.situacao)).map(b => b.duplicata)), h = CRM.hoje();
+    return ((CRM.estado.D || {}).titulos || []).filter(t => /^\d+-/.test(t.duplicata || '') && (!t.portador || /BOLETO/i.test(t.portador)) &&
+      t.vencimento >= h && Number(t.valor) > 0 && !t.cartorio_em && !t.abono && !vivos.has(t.duplicata)).sort((a, b) => a.vencimento.localeCompare(b.vencimento));
+  }
+  const SITUACAO_BB = { preparado: ['preparado', 'cinza'], registrado: ['no banco', 'azul'], pago: ['pago', 'verde'], baixado: ['baixado', 'cinza'], cancelado: ['cancelado', 'cinza'], erro: ['rejeitado pelo banco', 'vermelho'] };
+  function blocoArquivo() {
+    if (!CRM.ehAdmin() || !ligadoArquivo() || !raiz.CRMCnab240) return '';
+    if (!bb) return '<section class="cartao"><h2>Boleto do BB pelo arquivo</h2><p class="vazio">Carregando os boletos…</p></section>';
+    const lista = bb.lista || [], novos = aRegistrar();
+    const prontos = lista.filter(b => b.situacao === 'preparado' && !b.remessa_seq), instr = lista.filter(b => b.instrucao && !b.instrucao_remessa);
+    const tot = l => R.moeda(l.reduce((s2, x) => s2 + Number(x.valor || 0), 0));
+    const nomeDe = b => { const e = b.empresa_id && CRM.empresa(b.empresa_id); return (e && e.nome) || ''; };
+    const linha = b => { const st = SITUACAO_BB[b.situacao] || [b.situacao, 'cinza'];
+      return '<tr><td><strong>' + esc(b.documento || b.duplicata) + '</strong><small>' + esc(nomeDe(b)) + '</small></td><td class="num">' + esc(R.moeda(b.valor)) +
+        '<small>vence ' + esc(R.dataBR(b.vencimento)) + '</small></td><td>' + CRM.selo(st[0] + (b.situacao === 'preparado' && b.remessa_seq ? ' · na remessa ' + b.remessa_seq : ''), st[1]) +
+        (b.instrucao ? ' ' + CRM.selo({ '09': 'protestar', '10': 'sustar protesto', '02': 'baixar', '06': 'novo vencimento' }[b.instrucao] + (b.instrucao_remessa ? ' (remessa ' + b.instrucao_remessa + ')' : ' (próxima remessa)'), 'ambar') : '') +
+        (b.pago_em ? '<small>crédito ' + esc(R.dataBR(b.pago_em)) + ' · ' + esc(R.moeda(b.valor_pago)) + '</small>' : '') + (b.motivo ? '<small>' + esc(b.motivo) + '</small>' : '') + '</td>' +
+        '<td class="num acoes-linha">' + (b.situacao === 'erro' ? '<button type="button" class="mini" data-acao="bb-reenviar" data-id="' + esc(b.id) + '" title="depois de corrigir o cadastro do cliente">Mandar de novo</button> ' : '') +
+        (['preparado', 'registrado'].includes(b.situacao) ? '<button type="button" class="mini" data-acao="bb-pdf" data-id="' + esc(b.id) + '">PDF</button>' : '') + '</td></tr>'; };
+    return '<section class="cartao"><h2>Boleto do BB pelo arquivo <small>CNAB 240 · convênio ' + esc(cfgB().convenio || '') + '</small></h2>' +
+      '<ol class="lista">' +
+        '<li><strong>Preparar:</strong> ' + (novos.length ? novos.length + ' parcela(s) das notas do CRM sem boleto (' + esc(tot(novos)) + '). ' +
+          '<button type="button" class="btn" data-acao="bb-preparar">Preparar ' + novos.length + ' boleto(s)</button>' : '<span class="dica">nenhuma parcela nova a pagar por boleto.</span>') + '</li>' +
+        '<li><strong>Mandar ao banco:</strong> ' + (prontos.length || instr.length ? prontos.length + ' boleto(s)' + (instr.length ? ' e ' + instr.length + ' instrução(ões) (cartório, baixa)' : '') + ' esperando o arquivo. ' +
+          '<button type="button" class="btn" data-acao="bb-remessa">Gerar o arquivo de remessa</button>' +
+          '<small>Suba o arquivo no Gerenciador Financeiro do BB: Troca de arquivos e APIs → Remessa/retorno.</small>' : '<span class="dica">nada esperando.</span>') + '</li>' +
+        '<li><strong>Retorno:</strong> no dia seguinte, baixe o arquivo de retorno no Gerenciador e suba aqui. O CRM confirma o registro, dá a baixa dos pagos e ' +
+          'lança no Caixa no dia do crédito, com a tarifa. ' + (lendoRetorno ? '<span class="cob-lendo">Lendo o retorno…</span>'
+          : '<label class="btn sec arquivo">Ler o arquivo de retorno<input type="file" id="bbRetorno" accept=".ret,.txt,.RET,.TXT,text/plain"></label>') + '</li></ol>' +
+      ((bb.remessas || []).length ? '<details data-chave="bb-remessas"><summary>Remessas geradas (' + bb.remessas.length + ')</summary><ul class="lista">' +
+        bb.remessas.map(r => '<li>Remessa ' + esc(r.seq) + ' · ' + esc(new Date(r.gerada_em).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', dateStyle: 'short', timeStyle: 'short' })) +
+          ' · ' + esc(r.boletos) + ' boleto(s), ' + esc(r.instrucoes) + ' instrução(ões) · ' + esc(R.moeda(r.valor)) +
+          ' <button type="button" class="mini" data-acao="bb-remessa-de-novo" data-id="' + esc(r.seq) + '">Baixar de novo</button></li>').join('') + '</ul></details>' : '') +
+      (lista.length ? '<details data-chave="bb-lista"' + (lista.some(b => b.situacao === 'erro') ? ' open' : '') + '><summary>Boletos dos últimos 120 dias (' + lista.length + ')</summary>' +
+        '<div class="tabela-rolagem"><table class="tabela"><tbody>' + lista.slice().reverse().slice(0, 60).map(linha).join('') + '</tbody></table></div></details>' : '') +
+      '</section>';
+  }
+  function depoisBloco(el) {
+    if (!CRM.ehAdmin() || !ligadoArquivo()) return;
+    if (!bb) carregaBB().catch(CRM.falhou);
+    const arq = el.querySelector('#bbRetorno');
+    if (arq) arq.addEventListener('change', () => { const f = arq.files && arq.files[0]; arq.value = ''; if (f) lerRetorno(f).catch(e => { lendoRetorno = false; CRM.render(); CRM.falhou(e); }); });
+  }
+  function baixaRemessa(d) {
+    const itens = (d.boletos || []).concat(d.instrucoes || []);
+    const agora = new Date().toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour12: false }).replace(/\D/g, '').slice(0, 6);
+    const txt = raiz.CRMCnab240.remessa(cfgB(), emitente(), itens, { hoje: CRM.hoje(), hora: agora, seq: d.seq, teste: !!d.teste });
+    CRM.baixar('remessa-cnab240-' + String(d.seq).padStart(4, '0') + '.txt', txt, 'text/plain');
+  }
+  async function sha256(texto) {
+    const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(texto));
+    return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join('');
+  }
+  async function lerRetorno(arquivo) {
+    const texto = await new Promise((ok, falha) => { const r = new FileReader(); r.onload = () => ok(String(r.result || '')); r.onerror = () => falha(new Error('não consegui ler o arquivo')); r.readAsText(arquivo, 'ISO-8859-1'); });
+    const r = raiz.CRMCnab240.retorno(texto);
+    if (!r.ok) throw new Error('arquivo de retorno com problema: ' + r.erros.slice(0, 3).join('; '));
+    if (!r.itens.length) throw new Error('o arquivo de retorno não tem nenhum boleto');
+    lendoRetorno = true; CRM.render();
+    const res = await CRM.store().boletoBBRetorno(await sha256(texto), r.cabecalho, r.itens);
+    lendoRetorno = false;
+    const liq = res.liquidados || [], rej = res.rejeitados || [];
+    const linhas = [res.registrados + ' boleto(s) registrado(s) no banco.', liq.length + ' pago(s): ' + R.moeda(liq.reduce((s2, x) => s2 + Number(x.pago || 0), 0)) + ' lançado(s) no Caixa no dia do crédito.']
+      .concat(liq.map(x => '· ' + x.documento + ' ' + x.cliente + ': ' + R.moeda(x.pago) + ' em ' + R.dataBR(x.credito) + (x.caixa ? '' : ' (já estava recebido no Caixa)')))
+      .concat(Object.keys(res.tarifas || {}).map(k => '· tarifa de cobrança de ' + R.moeda(res.tarifas[k]) + ' em ' + R.dataBR(k) + ' (Tarifas bancárias)'))
+      .concat(rej.length ? ['', rej.length + ' rejeitado(s) pelo banco — confira o cadastro do cliente e use "Mandar de novo":'].concat(rej.map(x => '· ' + x.documento + ' (' + R.moeda(x.valor) + ')' + (x.motivos ? ' motivo ' + x.motivos : '') + (x.instrucao ? ' — era uma instrução' : ''))) : [])
+      .concat(res.desconhecidos ? ['', res.desconhecidos + ' boleto(s) do arquivo não são do CRM (feitos no site do BB): ficaram como estavam.'] : []);
+    CRM.abrirForm({ titulo: 'Retorno do banco lido', intro: linhas.join('\n'), campos: [], salvarTexto: 'Fechar', aoSalvar: async () => {} });
+    await Promise.all([carregaBB(), CRM.recarregar(true)]);
+  }
+  async function pdfBoleto(id) {
+    const b = ((bb && bb.lista) || []).find(x => x.id === id);
+    if (!b) return;
+    const e = b.empresa_id ? CRM.empresa(b.empresa_id) : null;
+    const d = montar(cfgB(), emitente(), { valor: b.valor, vencimento: b.vencimento, nosso_numero: b.nosso_numero, documento: b.documento, emissao: b.emissao },
+      { nome: (e && (e.razao_social || e.nome)) || '', doc: e && e.cnpj, endereco: e ? { logradouro: e.logradouro, numero: e.numero, complemento: e.complemento, bairro: e.bairro, cidade: e.cidade, uf: e.uf, cep: e.cep } : '' },
+      { hoje: CRM.hoje() });
+    await carregaJsPdf();
+    const pdf = new raiz.jspdf.jsPDF({ unit: 'mm', format: 'a4' });
+    desenha(pdf, d, {});
+    pdf.save('Boleto ' + (b.documento || b.duplicata).replace(/[\\/]/g, '-') + '.pdf');
+  }
+  async function carregaJsPdf() {
+    if (raiz.jspdf) return;
+    await new Promise((ok, falha) => { const sc = document.createElement('script'); sc.src = 'vendor/jspdf.umd.min.js'; sc.onload = ok; sc.onerror = () => falha(new Error('não consegui carregar o gerador de PDF (sem internet?)')); document.head.appendChild(sc); });
+  }
+  // páginas de boleto no PDF da nota (DANFE): as parcelas da nota com boleto preparado ou no banco
+  async function paginasNota(pdf, n) {
+    if (!n || !ligadoArquivo() || !CRM.store().boletosBBdaNota) return 0;
+    const l = await CRM.store().boletosBBdaNota((n.serie || '') + '-' + String(n.numero).padStart(6, '0') + '/');
+    for (const b of l) {
+      const e = b.empresa_id ? CRM.empresa(b.empresa_id) : null;
+      const d = montar(cfgB(), emitente(), { valor: b.valor, vencimento: b.vencimento, nosso_numero: b.nosso_numero, documento: b.documento, emissao: b.emissao },
+        { nome: (e && (e.razao_social || e.nome)) || '', doc: e && e.cnpj, endereco: e ? { logradouro: e.logradouro, numero: e.numero, complemento: e.complemento, bairro: e.bairro, cidade: e.cidade, uf: e.uf, cep: e.cep } : '' },
+        { hoje: CRM.hoje() });
+      pdf.addPage('a4', 'portrait');
+      desenha(pdf, d, {});
+    }
+    return l.length;
+  }
+  // instrução ao banco (cobranca.js: cartório → '09' protestar; tirar do cartório → '10' sustar). Devolve quantas foram marcadas.
+  async function instrucao(dups, mov) {
+    if (!CRM.ehAdmin() || !ligadoArquivo()) return 0;
+    let n = 0;
+    for (const d of dups) { const r = await CRM.store().boletoBBInstrucao(d, mov); if (r && r.ok) n++; }
+    if (n) carregaBB().catch(() => {});
+    return n;
+  }
+
+  CRM.boletoBB = { cartao, exemplo, remessaTeste, blocoArquivo, depoisBloco, paginasNota, instrucao };
   Object.assign(CRM.acoes, {
     'bol-convenio': () => {
       const c = cfgB();
@@ -387,6 +516,51 @@
       });
     },
     'bol-exemplo': async () => { try { await exemplo(); } catch (e) { CRM.falhou(e); } },
-    'bol-remessa-teste': () => { try { remessaTeste(); } catch (e) { CRM.falhou(e); } }
+    'bol-remessa-teste': () => { try { remessaTeste(); } catch (e) { CRM.falhou(e); } },
+    // ligar e desligar (26/10/2026): ligado, o bloco "Boleto do BB pelo arquivo" aparece em Caixa → Cobrança e a DANFE leva o boleto
+    'bol-ligar-remessa': async () => {
+      try {
+        const c = cfgB(), f = faltaNoConvenio(c, emitente()).concat(raiz.CRMCnab240 ? raiz.CRMCnab240.falta(c, emitente()) : ['leitor do CNAB']);
+        if (f.length) throw new Error('falta: ' + Array.from(new Set(f)).join(', '));
+        if (!confirm('Ligar o boleto pelo arquivo de remessa (CNAB 240)?\n\nSó ligue depois que o gerente do BB confirmar: cobrança por arquivo liberada em produção no convênio ' + c.convenio +
+          ', a faixa do nosso número a partir de ' + (c.inicio_numeracao || '?') + ' e o 1º arquivo de teste. Ligado, as parcelas das notas do CRM aparecem em Caixa → Cobrança para preparar e mandar ao banco.')) return;
+        await CRM.salvarConfig({ boleto: Object.assign({}, c, { ligado: true, caminho: 'remessa' }) });
+        CRM.toast('Boleto ligado pelo arquivo de remessa. Veja em Caixa → Cobrança.');
+      } catch (e) { CRM.falhou(e); }
+    },
+    'bol-desligar': async () => {
+      try {
+        if (!confirm('Desligar o boleto do BB? Os boletos já mandados ao banco continuam valendo lá; o CRM só para de preparar novos e de mostrar o bloco em Caixa → Cobrança.')) return;
+        await CRM.salvarConfig({ boleto: Object.assign({}, cfgB(), { ligado: false }) });
+        CRM.toast('Boleto do BB desligado.');
+      } catch (e) { CRM.falhou(e); }
+    },
+    'bb-preparar': async () => {
+      try {
+        const l = aRegistrar();
+        if (!l.length || !confirm('Preparar o boleto de ' + l.length + ' parcela(s)? Cada uma ganha o nosso número do CRM; o registro no banco é pelo arquivo de remessa.')) return;
+        const r = await CRM.store().boletoBBPreparar(l.map(t => t.duplicata));
+        await carregaBB();
+        const pul = r.pulados || [];
+        CRM.toast(r.preparados + ' boleto(s) preparado(s)' + (pul.length ? '; ' + pul.length + ' ficaram de fora: ' + pul.slice(0, 3).map(x => x.duplicata + ' (' + x.motivo + ')').join(', ') : '') + '.');
+      } catch (e) { CRM.falhou(e); }
+    },
+    'bb-remessa': async () => {
+      try {
+        if (!confirm('Gerar o arquivo de remessa com os boletos preparados e as instruções pendentes? Depois de gerado, suba o arquivo no Gerenciador Financeiro do BB (Troca de arquivos e APIs → Remessa/retorno).')) return;
+        const d = await CRM.store().boletoBBRemessa(false);
+        baixaRemessa(d);
+        await carregaBB();
+        CRM.toast('Remessa ' + d.seq + ' gerada: ' + (d.boletos || []).length + ' boleto(s), ' + (d.instrucoes || []).length + ' instrução(ões). Suba no Gerenciador do BB.');
+      } catch (e) { CRM.falhou(e); }
+    },
+    'bb-remessa-de-novo': async id => { try { baixaRemessa(await CRM.store().boletoBBRemessaDados(Number(id))); } catch (e) { CRM.falhou(e); } },
+    'bb-pdf': id => { pdfBoleto(id).catch(CRM.falhou); },
+    'bb-reenviar': async id => {
+      try {
+        if (!confirm('Mandar este boleto de novo na próxima remessa? Corrija antes o cadastro do cliente (CPF/CNPJ, endereço, CEP).')) return;
+        await CRM.store().boletoBBReenviar(id); await carregaBB(); CRM.toast('Volta na próxima remessa.');
+      } catch (e) { CRM.falhou(e); }
+    }
   });
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -6309,3 +6309,264 @@ end;
 $$;
 revoke all on function public.crm_ceo_compra_decidir(bigint, text, text, numeric, text) from public, anon, authenticated;
 grant execute on function public.crm_ceo_compra_decidir(bigint, text, text, numeric, text) to service_role;
+
+-- ============================================================================================================
+-- Boleto do BB pelo arquivo CNAB 240 (26/10/2026, Fase 5; remessa aprovada no Validador de Leiautes do BB às 17:56).
+-- O arquivo (remessa e leitura do retorno) é montado no navegador por cnab240.js; aqui fica o que precisa ser único e
+-- seguro: a numeração, quais boletos foram em qual remessa, as instruções pendentes (cartório, baixa) e o retorno, que dá
+-- a baixa e lança no Caixa numa transação só (ou entra tudo, ou nada). Só o administrador; preparar, gerar remessa e
+-- instrução só com boleto.ligado = true e boleto.caminho = 'remessa' (a leitura do retorno vale mesmo desligado).
+alter table public.crm_boletos_bb add column if not exists duplicata text;
+alter table public.crm_boletos_bb add column if not exists documento text;
+alter table public.crm_boletos_bb add column if not exists remessa_seq integer;
+alter table public.crm_boletos_bb add column if not exists remessa_em timestamptz;
+alter table public.crm_boletos_bb add column if not exists instrucao text check (instrucao is null or instrucao in ('02', '06', '09', '10'));
+alter table public.crm_boletos_bb add column if not exists instrucao_em timestamptz;
+alter table public.crm_boletos_bb add column if not exists instrucao_remessa integer;
+alter table public.crm_boletos_bb add column if not exists motivo text;
+alter table public.crm_boletos_bb add column if not exists caixa_lancamento uuid;
+-- um boleto vivo por parcela (o que deu erro, foi baixado ou cancelado pode ganhar outro)
+create unique index if not exists crm_boletos_bb_dup_vivo on public.crm_boletos_bb (duplicata) where situacao in ('preparado', 'registrado', 'pago');
+
+create table if not exists public.crm_boleto_remessas (
+  convenio text not null, seq integer not null, gerada_em timestamptz not null default now(), gerada_por uuid default auth.uid(),
+  boletos integer not null default 0, instrucoes integer not null default 0, valor numeric(14,2) not null default 0, teste boolean not null default false,
+  primary key (convenio, seq)
+);
+alter table public.crm_boleto_remessas enable row level security;
+do $$ begin
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'crm_boleto_remessas' and policyname = 'so_admin') then
+    create policy so_admin on public.crm_boleto_remessas for select to authenticated using ((select public.crm_eh_admin()));
+  end if;
+end $$;
+create table if not exists public.crm_boleto_retornos (
+  id uuid primary key default gen_random_uuid(), assinatura text not null unique, lido_em timestamptz not null default now(), lido_por uuid default auth.uid(),
+  arquivo_seq integer, gerado_em date, itens integer not null default 0, resumo jsonb
+);
+alter table public.crm_boleto_retornos enable row level security;
+do $$ begin
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'crm_boleto_retornos' and policyname = 'so_admin') then
+    create policy so_admin on public.crm_boleto_retornos for select to authenticated using ((select public.crm_eh_admin()));
+  end if;
+end $$;
+revoke all on public.crm_boleto_remessas, public.crm_boleto_retornos from anon, public;
+
+-- o convênio ligado para o arquivo de remessa (recusa se não estiver)
+create or replace function public.crm_boleto_cfg_remessa() returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare cfg jsonb;
+begin
+  if not (public.crm_eh_admin() or coalesce(auth.jwt() ->> 'role', '') = 'service_role') then raise exception 'só o administrador'; end if;
+  select dados -> 'boleto' into cfg from public.crm_config where id = 1;
+  if coalesce((cfg ->> 'ligado')::boolean, false) is not true then raise exception 'o boleto pelo BB ainda não está ligado'; end if;
+  if coalesce(cfg ->> 'caminho', '') <> 'remessa' then raise exception 'o boleto não está no caminho do arquivo de remessa'; end if;
+  if coalesce(cfg ->> 'convenio', '') !~ '^[0-9]{7}$' then raise exception 'convênio do boleto inválido'; end if;
+  return cfg;
+end;
+$$;
+revoke all on function public.crm_boleto_cfg_remessa() from public, anon, authenticated;
+
+-- a numeração do nosso número, para o serviço (API) e para a remessa
+create or replace function public.crm_boleto_proximo_int(p_convenio text, cfg jsonb) returns bigint language plpgsql security definer set search_path = public as $$
+declare n bigint;
+begin
+  if not (public.crm_eh_admin() or coalesce(auth.jwt() ->> 'role', '') = 'service_role') then raise exception 'só o administrador ou o serviço do boleto'; end if;
+  if not exists (select 1 from public.crm_boleto_numeracao where convenio = p_convenio) then
+    n := nullif(regexp_replace(coalesce(cfg ->> 'inicio_numeracao', ''), '\D', '', 'g'), '')::bigint;
+    if n is null then raise exception 'defina o primeiro número do CRM (boleto.inicio_numeracao)'; end if;
+    insert into public.crm_boleto_numeracao (convenio, proximo) values (p_convenio, n) on conflict (convenio) do nothing;
+  end if;
+  update public.crm_boleto_numeracao set proximo = proximo + 1, atualizado_em = now() where convenio = p_convenio returning proximo - 1 into n;
+  return n;
+end;
+$$;
+revoke all on function public.crm_boleto_proximo_int(text, jsonb) from public, anon, authenticated;
+
+create or replace function public.crm_boleto_reservar(p_convenio text) returns bigint language plpgsql security definer set search_path = public as $$
+declare cfg jsonb;
+begin
+  if coalesce(auth.jwt() ->> 'role', '') <> 'service_role' then raise exception 'só o serviço do boleto reserva número'; end if;
+  select dados -> 'boleto' into cfg from public.crm_config where id = 1;
+  if coalesce((cfg ->> 'ligado')::boolean, false) is not true then raise exception 'o boleto pelo BB ainda não está ligado'; end if;
+  if p_convenio !~ '^[0-9]{7}$' or p_convenio <> coalesce(cfg ->> 'convenio', '') then raise exception 'convênio diferente do configurado'; end if;
+  return public.crm_boleto_proximo_int(p_convenio, cfg);
+end;
+$$;
+
+-- Prepara o boleto das parcelas escolhidas (título em aberto, a vencer, fora do cartório, com CPF/CNPJ e CEP do cliente).
+-- Devolve { preparados, pulados: [{ duplicata, motivo }] }.
+create or replace function public.crm_boleto_bb_preparar(p_duplicatas text[]) returns jsonb language plpgsql security definer set search_path = public as $$
+declare cfg jsonb; conv text; t record; e record; n bigint; feitos integer := 0; pulados jsonb := '[]'; hoje date := (now() at time zone 'America/Sao_Paulo')::date;
+begin
+  if not public.crm_eh_admin() then raise exception 'só o administrador prepara boleto'; end if;
+  cfg := public.crm_boleto_cfg_remessa(); conv := cfg ->> 'convenio';
+  for t in select * from public.crm_titulos where duplicata = any(coalesce(p_duplicatas, '{}')) order by vencimento, duplicata loop
+    if exists (select 1 from public.crm_boletos_bb b where b.duplicata = t.duplicata and b.situacao in ('preparado', 'registrado', 'pago')) then
+      pulados := pulados || jsonb_build_object('duplicata', t.duplicata, 'motivo', 'já tem boleto'); continue; end if;
+    if t.valor <= 0 or t.abono or t.cartorio_em is not null then
+      pulados := pulados || jsonb_build_object('duplicata', t.duplicata, 'motivo', 'título sem valor, abonado ou em cartório'); continue; end if;
+    if t.vencimento < hoje then pulados := pulados || jsonb_build_object('duplicata', t.duplicata, 'motivo', 'vencido'); continue; end if;
+    select cnpj, cep into e from public.crm_empresas where id = t.empresa_id;
+    if length(regexp_replace(coalesce(e.cnpj, ''), '\D', '', 'g')) not in (11, 14) or length(regexp_replace(coalesce(e.cep, ''), '\D', '', 'g')) <> 8 then
+      pulados := pulados || jsonb_build_object('duplicata', t.duplicata, 'motivo', 'cadastro do cliente sem CPF/CNPJ ou CEP'); continue; end if;
+    n := public.crm_boleto_proximo_int(conv, cfg);
+    insert into public.crm_boletos_bb (convenio, seq, nosso_numero, titulo_id, nota_numero, parcela, empresa_id, valor, vencimento, emissao, duplicata, documento, situacao, caminho)
+    values (conv, n, conv || lpad(n::text, 10, '0'), t.id, t.nota_numero, t.parcela, t.empresa_id, t.valor, t.vencimento,
+            least(coalesce(t.emitida_em, hoje), t.vencimento), t.duplicata, left(t.duplicata, 15), 'preparado', 'remessa');
+    feitos := feitos + 1;
+  end loop;
+  return jsonb_build_object('preparados', feitos, 'pulados', pulados);
+end;
+$$;
+revoke all on function public.crm_boleto_bb_preparar(text[]) from public, anon;
+grant execute on function public.crm_boleto_bb_preparar(text[]) to authenticated;
+
+-- Os dados de uma remessa (para montar e baixar o arquivo, inclusive de novo)
+create or replace function public.crm_boleto_bb_remessa_dados(p_seq integer) returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare cfg jsonb; conv text; r record;
+begin
+  if not public.crm_eh_admin() then raise exception 'só o administrador'; end if;
+  select dados -> 'boleto' into cfg from public.crm_config where id = 1; conv := cfg ->> 'convenio';
+  select * into r from public.crm_boleto_remessas where convenio = conv and seq = p_seq;
+  if r.seq is null then raise exception 'remessa % não encontrada', p_seq; end if;
+  return jsonb_build_object('seq', r.seq, 'gerada_em', r.gerada_em, 'teste', r.teste,
+    'boletos', coalesce((select jsonb_agg(jsonb_build_object('movimento', 'entrada', 'nosso_numero', b.nosso_numero, 'documento', b.documento,
+        'id_empresa', b.duplicata, 'vencimento', b.vencimento, 'emissao', b.emissao, 'valor', b.valor,
+        'pagador', jsonb_build_object('doc', e.cnpj, 'nome', coalesce(nullif(btrim(e.razao_social), ''), e.nome), 'logradouro', e.logradouro, 'numero', e.numero,
+          'complemento', e.complemento, 'bairro', e.bairro, 'cep', e.cep, 'cidade', e.cidade, 'uf', e.uf)) order by b.seq)
+      from public.crm_boletos_bb b left join public.crm_empresas e on e.id = b.empresa_id where b.convenio = conv and b.remessa_seq = p_seq), '[]'),
+    'instrucoes', coalesce((select jsonb_agg(jsonb_build_object('movimento', case b.instrucao when '02' then 'baixa' when '06' then 'vencimento' when '09' then 'protestar' else 'sustar' end,
+        'nosso_numero', b.nosso_numero, 'documento', b.documento, 'id_empresa', b.duplicata, 'vencimento', b.vencimento, 'emissao', b.emissao, 'valor', b.valor) order by b.seq)
+      from public.crm_boletos_bb b where b.convenio = conv and b.instrucao_remessa = p_seq), '[]'));
+end;
+$$;
+revoke all on function public.crm_boleto_bb_remessa_dados(integer) from public, anon;
+grant execute on function public.crm_boleto_bb_remessa_dados(integer) to authenticated;
+
+-- Gera a próxima remessa: os boletos preparados ainda não enviados e as instruções pendentes. Devolve os dados do arquivo.
+create or replace function public.crm_boleto_bb_remessa(p_teste boolean default false) returns jsonb language plpgsql security definer set search_path = public as $$
+declare cfg jsonb; conv text; s integer; nb integer; ni integer; v numeric;
+begin
+  if not public.crm_eh_admin() then raise exception 'só o administrador gera remessa'; end if;
+  cfg := public.crm_boleto_cfg_remessa(); conv := cfg ->> 'convenio';
+  perform pg_advisory_xact_lock(hashtext('crm_boleto_remessa_' || conv));
+  select coalesce(max(seq), 0) + 1 into s from public.crm_boleto_remessas where convenio = conv;
+  update public.crm_boletos_bb set remessa_seq = s, remessa_em = now(), atualizado_em = now()
+   where convenio = conv and situacao = 'preparado' and remessa_seq is null;
+  get diagnostics nb = row_count;
+  update public.crm_boletos_bb set instrucao_remessa = s, atualizado_em = now()
+   where convenio = conv and instrucao is not null and instrucao_remessa is null and situacao in ('preparado', 'registrado') and remessa_seq is not null and remessa_seq <> s;
+  get diagnostics ni = row_count;
+  if nb + ni = 0 then raise exception 'nada para mandar: nenhum boleto preparado nem instrução pendente'; end if;
+  select coalesce(sum(valor), 0) into v from public.crm_boletos_bb where convenio = conv and remessa_seq = s;
+  insert into public.crm_boleto_remessas (convenio, seq, boletos, instrucoes, valor, teste) values (conv, s, nb, ni, v, coalesce(p_teste, false));
+  return public.crm_boleto_bb_remessa_dados(s);
+end;
+$$;
+revoke all on function public.crm_boleto_bb_remessa(boolean) from public, anon;
+grant execute on function public.crm_boleto_bb_remessa(boolean) to authenticated;
+
+-- Instrução para um boleto já mandado: '09' protestar (o "Mandar para cartório"), '10' sustar o protesto, '02' baixar.
+create or replace function public.crm_boleto_bb_instrucao(p_duplicata text, p_mov text) returns jsonb language plpgsql security definer set search_path = public as $$
+declare b public.crm_boletos_bb;
+begin
+  if not public.crm_eh_admin() then raise exception 'só o administrador'; end if;
+  perform public.crm_boleto_cfg_remessa();
+  if p_mov not in ('02', '09', '10') then raise exception 'instrução inválida'; end if;
+  select * into b from public.crm_boletos_bb where duplicata = p_duplicata and situacao in ('preparado', 'registrado') and remessa_seq is not null order by criado_em desc limit 1;
+  if b.id is null then return jsonb_build_object('ok', false, 'motivo', 'sem boleto do CRM mandado ao banco para este título'); end if;
+  update public.crm_boletos_bb set instrucao = p_mov, instrucao_em = now(), instrucao_remessa = null, atualizado_em = now() where id = b.id;
+  return jsonb_build_object('ok', true, 'nosso_numero', b.nosso_numero);
+end;
+$$;
+revoke all on function public.crm_boleto_bb_instrucao(text, text) from public, anon;
+grant execute on function public.crm_boleto_bb_instrucao(text, text) to authenticated;
+
+-- Retorno do banco (já lido pelo cnab240.js): confirma a entrada, marca rejeição e, na liquidação, dá a baixa do título
+-- e lança no Caixa (a entrada no dia do crédito, pelo valor pago; a tarifa como saída do mesmo dia), uma vez só por boleto.
+-- p_assinatura = SHA-256 do arquivo (o mesmo arquivo não é lido duas vezes).
+create or replace function public.crm_boleto_bb_retorno(p_assinatura text, p_cab jsonb, p_itens jsonb) returns jsonb language plpgsql security definer set search_path = public as $$
+declare cfg jsonb; conv text; it jsonb; b public.crm_boletos_bb; mov text; dia date; pago numeric; tar numeric; lid uuid; t public.crm_titulos;
+  nome text; out_liq jsonb := '[]'; out_rej jsonb := '[]'; nreg integer := 0; ndes integer := 0; nja integer := 0; tarifas jsonb := '{}'; k text; motivos text;
+begin
+  if not public.crm_eh_admin() then raise exception 'só o administrador lê o retorno'; end if;
+  if coalesce(p_assinatura, '') !~ '^[0-9a-f]{64}$' then raise exception 'assinatura do arquivo inválida'; end if;
+  if exists (select 1 from public.crm_boleto_retornos where assinatura = p_assinatura) then
+    raise exception 'este arquivo de retorno já foi lido em %', (select to_char(lido_em at time zone 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI') from public.crm_boleto_retornos where assinatura = p_assinatura);
+  end if;
+  select dados -> 'boleto' into cfg from public.crm_config where id = 1; conv := cfg ->> 'convenio';
+  if coalesce(p_cab ->> 'convenio', '') <> coalesce(conv, '-') then raise exception 'o retorno é do convênio %, o CRM está no %', p_cab ->> 'convenio', conv; end if;
+  for it in select * from jsonb_array_elements(coalesce(p_itens, '[]')) loop
+    select * into b from public.crm_boletos_bb where convenio = conv and nosso_numero = regexp_replace(coalesce(it ->> 'nosso_numero', ''), '\D', '', 'g');
+    if b.id is null then ndes := ndes + 1; continue; end if;
+    mov := it ->> 'movimento';
+    motivos := nullif(array_to_string(array(select jsonb_array_elements_text(coalesce(it -> 'motivos', '[]'))), ', '), '');
+    update public.crm_boletos_bb set retorno = coalesce(retorno, '[]'::jsonb) || jsonb_build_array(it), atualizado_em = now() where id = b.id;
+    if mov = '02' then
+      update public.crm_boletos_bb set situacao = case when situacao = 'preparado' then 'registrado' else situacao end,
+        registrado_em = coalesce(registrado_em, now()), motivo = null where id = b.id;
+      nreg := nreg + 1;
+    elsif mov = '03' then
+      update public.crm_boletos_bb set situacao = 'erro', motivo = 'entrada rejeitada pelo banco' || coalesce(' (motivo ' || motivos || ')', '') where id = b.id;
+      out_rej := out_rej || jsonb_build_object('documento', b.documento, 'valor', b.valor, 'motivos', motivos);
+    elsif mov in ('26', '30') then
+      update public.crm_boletos_bb set motivo = 'instrução rejeitada pelo banco' || coalesce(' (motivo ' || motivos || ')', ''), instrucao = null where id = b.id;
+      out_rej := out_rej || jsonb_build_object('documento', b.documento, 'valor', b.valor, 'motivos', motivos, 'instrucao', true);
+    elsif mov in ('12', '13', '14', '19', '20', '23', '24', '27') then
+      update public.crm_boletos_bb set instrucao = null, motivo = case mov when '23' then 'remetido a cartório' when '19' then 'protesto confirmado pelo banco' else motivo end where id = b.id;
+    elsif mov in ('09', '25') then
+      update public.crm_boletos_bb set situacao = 'baixado', instrucao = null, motivo = case mov when '25' then 'protestado e baixado' else 'baixado pelo banco' end where id = b.id;
+    elsif mov in ('06', '17') then
+      if b.situacao = 'pago' then nja := nja + 1; continue; end if;
+      dia := coalesce(nullif(it ->> 'credito', '')::date, nullif(it ->> 'ocorrencia', '')::date, (now() at time zone 'America/Sao_Paulo')::date);
+      pago := round(coalesce(nullif(it ->> 'pago', '')::numeric, b.valor), 2);
+      tar := round(coalesce(nullif(it ->> 'tarifa', '')::numeric, 0), 2);
+      select * into t from public.crm_titulos where duplicata = b.duplicata;
+      nome := coalesce((select e.nome from public.crm_empresas e where e.id = coalesce(t.empresa_id, b.empresa_id)), t.cliente_nome, 'Cliente');
+      lid := null;
+      if not exists (select 1 from public.crm_fin_lancamentos where titulo_duplicata = b.duplicata and situacao = 'pago' and tipo = 'entrada') then
+        -- a previsão já ligada ao título vira o recebimento (como o "Recebi"); senão, uma entrada nova
+        update public.crm_fin_lancamentos set situacao = 'pago', pago_em = dia, baixa = 'caixa', baixado_em = now(), valor = pago,
+          observacoes = concat_ws(' ', observacoes, 'Boleto BB pago (nosso número ' || b.nosso_numero || ').'), atualizado_em = now()
+         where id = (select l.id from public.crm_fin_lancamentos l where l.titulo_duplicata = b.duplicata and l.situacao = 'aberto' and l.tipo = 'entrada' order by l.vencimento limit 1)
+         returning id into lid;
+        if lid is null then
+          insert into public.crm_fin_lancamentos (tipo, descricao, categoria, valor, vencimento, situacao, pago_em, baixa, baixado_em, origem, titulo_duplicata, entre_empresas, observacoes)
+          values ('entrada', 'Recebido: ' || nome || ' · ' || b.duplicata, 'Duplicatas recebidas', pago, b.vencimento, 'pago', dia, 'caixa', now(), 'titulo', b.duplicata,
+                  nome ~* 'agilit', 'Boleto BB pago (nosso número ' || b.nosso_numero || ')' ||
+                  case when pago <> b.valor then '; título de ' || to_char(b.valor, 'FM999G999G990D00') || ', entrou ' || to_char(pago, 'FM999G999G990D00') else '' end || '.')
+          returning id into lid;
+        end if;
+      else nja := nja + 1; end if;
+      update public.crm_boletos_bb set situacao = 'pago', pago_em = dia, valor_pago = pago, caixa_lancamento = lid, instrucao = null, motivo = null where id = b.id;
+      if tar > 0 then tarifas := jsonb_set(tarifas, array[dia::text], to_jsonb(coalesce((tarifas ->> dia::text)::numeric, 0) + tar)); end if;
+      out_liq := out_liq || jsonb_build_object('documento', b.documento, 'cliente', nome, 'valor', b.valor, 'pago', pago, 'credito', dia, 'tarifa', tar, 'caixa', lid is not null);
+    end if;
+  end loop;
+  -- tarifas de cobrança: uma saída por dia de crédito
+  for k in select jsonb_object_keys(tarifas) loop
+    insert into public.crm_fin_lancamentos (tipo, descricao, categoria, valor, vencimento, situacao, pago_em, baixa, baixado_em, origem, observacoes)
+    values ('saida', 'Tarifa de cobrança BB (retorno do boleto)', 'Tarifas bancárias', (tarifas ->> k)::numeric, k::date, 'pago', k::date, 'caixa', now(), 'tela',
+            'Lançada pela leitura do retorno do banco.');
+  end loop;
+  insert into public.crm_boleto_retornos (assinatura, arquivo_seq, gerado_em, itens, resumo)
+  values (p_assinatura, nullif(p_cab ->> 'seq', '')::integer, nullif(p_cab ->> 'gerado_em', '')::date, jsonb_array_length(coalesce(p_itens, '[]')),
+          jsonb_build_object('registrados', nreg, 'liquidados', jsonb_array_length(out_liq), 'rejeitados', jsonb_array_length(out_rej), 'desconhecidos', ndes, 'ja_recebidos', nja));
+  return jsonb_build_object('registrados', nreg, 'liquidados', out_liq, 'rejeitados', out_rej, 'desconhecidos', ndes, 'ja_recebidos', nja, 'tarifas', tarifas);
+end;
+$$;
+revoke all on function public.crm_boleto_bb_retorno(text, jsonb, jsonb) from public, anon;
+grant execute on function public.crm_boleto_bb_retorno(text, jsonb, jsonb) to authenticated;
+
+-- Mandar de novo um boleto que o banco rejeitou (depois de corrigir o cadastro): volta a "preparado" para a próxima remessa.
+create or replace function public.crm_boleto_bb_reenviar(p_id uuid) returns void language plpgsql security definer set search_path = public as $$
+begin
+  if not public.crm_eh_admin() then raise exception 'só o administrador'; end if;
+  perform public.crm_boleto_cfg_remessa();
+  update public.crm_boletos_bb b set situacao = 'preparado', remessa_seq = null, remessa_em = null, motivo = null, atualizado_em = now()
+   where b.id = p_id and b.situacao = 'erro'
+     and not exists (select 1 from public.crm_boletos_bb o where o.duplicata = b.duplicata and o.id <> p_id and o.situacao in ('preparado', 'registrado', 'pago'));
+  if not found then raise exception 'só boleto rejeitado, sem outro boleto vivo da mesma parcela'; end if;
+end;
+$$;
+revoke all on function public.crm_boleto_bb_reenviar(uuid) from public, anon;
+grant execute on function public.crm_boleto_bb_reenviar(uuid) to authenticated;

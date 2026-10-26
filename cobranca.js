@@ -565,8 +565,11 @@
         const sel = l.filter((t, i) => v['t' + i]);
         if (!sel.length) throw new Error('Marque pelo menos um título.');
         for (const t of sel) trocaTitulo(await CRM.store().atualizar('titulos', t.id, { cartorio_em: v.dia || hoje(), cartorio_obs: (v.obs || '').trim() || null, previsao: null }));
+        // boleto do CRM no banco (arquivo CNAB): a instrução de protesto vai na próxima remessa (26/10/2026)
+        const prot = CRM.boletoBB && CRM.boletoBB.instrucao ? await CRM.boletoBB.instrucao(sel.map(t => t.duplicata), '09').catch(() => 0) : 0;
         CRM.render();
-        CRM.toast(sel.length + ' título(s) em cartório (' + R.moeda(sel.reduce((s2, t) => s2 + Number(t.valor), 0)) + '): fora da previsão até o cliente pagar.');
+        CRM.toast(sel.length + ' título(s) em cartório (' + R.moeda(sel.reduce((s2, t) => s2 + Number(t.valor), 0)) + '): fora da previsão até o cliente pagar.' +
+          (prot ? ' ' + prot + ' instrução(ões) de protesto vão na próxima remessa do boleto.' : ''));
       }
     });
   }
@@ -574,8 +577,9 @@
     const t = titulosAdmin().find(x => x.duplicata === dup);
     if (!t || !confirm('Tirar ' + nomeNF(t) + ' (' + R.moeda(t.valor) + ') do cartório? Ele volta para "A receber vencido" e para a cobrança do(a) vendedor(a).')) return;
     trocaTitulo(await CRM.store().atualizar('titulos', t.id, { cartorio_em: null, cartorio_obs: null }));
+    const sust = CRM.boletoBB && CRM.boletoBB.instrucao ? await CRM.boletoBB.instrucao([dup], '10').catch(() => 0) : 0;
     CRM.render();
-    CRM.toast(nomeNF(t) + ' saiu do cartório.');
+    CRM.toast(nomeNF(t) + ' saiu do cartório.' + (sust ? ' A sustação do protesto vai na próxima remessa do boleto.' : ''));
   }
 
   // ---- administrador: aba Cobrança do Caixa (boletos atualizados)
@@ -902,7 +906,7 @@
         ' <button type="button" class="mini" data-acao="cob-ja-cobrou" data-id="' + esc(b.id) + '" title="o(a) vendedor(a) já mandou ao cliente: tira da Fila e conclui a tarefa">Já cobrou</button>' + ver + refaz;
     };
     const avisar = porVendedora(paraAvisar());
-    return avisoHtml() + '<section class="cartao cob-soltar" id="cobSoltar"><h2>Boletos atualizados</h2>' +
+    return avisoHtml() + (CRM.boletoBB && CRM.boletoBB.blocoArquivo ? CRM.boletoBB.blocoArquivo() : '') + '<section class="cartao cob-soltar" id="cobSoltar"><h2>Boletos atualizados</h2>' +
       (lendo ? '<p class="cob-lendo">Lendo os boletos… ' + lendo.feitos + ' de ' + lendo.total + '</p>' :
         '<p>Gere no Banco do Brasil a 2ª via atualizada (com juros) dos vencidos e <strong>arraste os PDFs aqui</strong> — vários de uma vez, ou um PDF com vários boletos. ' +
         'O CRM lê cada um (valor, vencimento, linha digitável), acha o título e você confere antes de mandar aos(às) vendedores(as).</p>' +
@@ -929,6 +933,7 @@
         '</tbody></table></div><p class="dica">Pagou? Dê "Recebi…" no bloco "Em cartório" do Dia a dia, com o valor que entrou.</p></section>' : '');
   }
   function depoisAba(el) {
+    if (CRM.boletoBB && CRM.boletoBB.depoisBloco) CRM.boletoBB.depoisBloco(el);
     avisoCarrega();
     waSituacao();
     cliSituacao();
