@@ -366,8 +366,8 @@
           { nome: 'convenio', rotulo: 'Número do convênio (7 dígitos)', obrigatorio: true },
           { nome: 'carteira', rotulo: 'Carteira', obrigatorio: true },
           { nome: 'variacao', rotulo: 'Variação da carteira' },
-          { nome: 'agencia', rotulo: 'Agência (com o dígito)', obrigatorio: true },
-          { nome: 'conta', rotulo: 'Conta (com o dígito)', obrigatorio: true },
+          { nome: 'agencia', rotulo: 'Agência com o dígito, como no extrato (ex.: 3034-1)', obrigatorio: true },
+          { nome: 'conta', rotulo: 'Conta com o dígito, como no extrato (ex.: 48730-9)', obrigatorio: true },
           { nome: 'multa_pct', rotulo: 'Multa depois do vencimento (%)', tipo: 'numero', vazioNulo: true },
           { nome: 'juros_mes_pct', rotulo: 'Juros ao mês (%)', tipo: 'numero', vazioNulo: true },
           { nome: 'protesto_dias', rotulo: 'Protesto: dias depois do vencimento (vazio = sem a frase)', tipo: 'numero', passo: '1', vazioNulo: true },
@@ -378,6 +378,9 @@
           const conv = digitos(v.convenio);
           if (conv.length !== 7) throw new Error('o convênio tem 7 dígitos (são os 7 primeiros do "Nosso número" do boleto)');
           if (v.inicio_numeracao && !zeros(v.inicio_numeracao, 10)) throw new Error('o primeiro número tem até 10 dígitos');
+          // o dígito vem depois do traço, como no extrato (26/10/2026: "487309" foi lido como conta 487309 sem dígito)
+          if (!/^\s*\d+\s*-\s*[0-9xX]\s*$/.test(String(v.agencia || ''))) throw new Error('agência com o dígito depois do traço, como no extrato (ex.: 3034-1)');
+          if (!/^\s*\d+\s*-\s*[0-9xX]\s*$/.test(String(v.conta || ''))) throw new Error('conta com o dígito depois do traço, como no extrato (ex.: 48730-9)');
           await CRM.salvarConfig({ boleto: Object.assign({}, c, v, { convenio: conv, carteira: digitos(v.carteira), variacao: digitos(v.variacao), inicio_numeracao: digitos(v.inicio_numeracao) }) });
           CRM.toast('Dados do convênio salvos.');
         }

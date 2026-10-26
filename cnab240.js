@@ -57,8 +57,9 @@
     if (digitos(cfg.convenio).length !== 7) f.push('convênio (7 dígitos)');
     if (!digitos(cfg.carteira)) f.push('carteira');
     if (!digitos(cfg.variacao)) f.push('variação da carteira');
-    if (!String(cfg.agencia || '').trim()) f.push('agência');
-    if (!String(cfg.conta || '').trim()) f.push('conta');
+    // com o dígito (26/10/2026: sem ele o Validador do BB não acha a conta, e por isso nem o convênio nem o nosso número)
+    if (!/^\s*\d+\s*-\s*[0-9xX]\s*$/.test(String(cfg.agencia || ''))) f.push('agência com o dígito (ex.: 3034-1)');
+    if (!/^\s*\d+\s*-\s*[0-9xX]\s*$/.test(String(cfg.conta || ''))) f.push('conta com o dígito (ex.: 48730-9)');
     if (!(emitente && digitos(emitente.cnpj).length === 14 && (emitente.razao || emitente.nome))) f.push('emitente (aba Fiscal)');
     return f;
   }

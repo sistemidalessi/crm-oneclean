@@ -92,7 +92,10 @@ test('remessa recusa o que o banco recusaria', () => {
   assert.throws(() => K.remessa(CFG, EMIT, [Object.assign({}, TIT[0], { pagador: Object.assign({}, TIT[0].pagador, { cep: '0971' }) })], { hoje: '2026-11-03' }), /CEP/);
   assert.throws(() => K.remessa(CFG, EMIT, [Object.assign({}, TIT[0], { emissao: '2026-12-01' })], { hoje: '2026-11-03' }), /emissão depois do vencimento/);
   assert.throws(() => K.remessa(CFG, EMIT, [], { hoje: '2026-11-03' }), /nenhum título/);
-  assert.deepEqual(K.falta({}, null), ['convênio (7 dígitos)', 'carteira', 'variação da carteira', 'agência', 'conta', 'emitente (aba Fiscal)']);
+  assert.deepEqual(K.falta({}, null), ['convênio (7 dígitos)', 'carteira', 'variação da carteira', 'agência com o dígito (ex.: 3034-1)', 'conta com o dígito (ex.: 48730-9)', 'emitente (aba Fiscal)']);
+  // 26/10/2026, Validador do BB: agência e conta sem o dígito = "agência e conta não localizadas" e convênio não achado
+  assert.deepEqual(K.falta(Object.assign({}, CFG, { agencia: '3034', conta: '487309' }), EMIT), ['agência com o dígito (ex.: 3034-1)', 'conta com o dígito (ex.: 48730-9)']);
+  assert.throws(() => K.remessa(Object.assign({}, CFG, { conta: '487309' }), EMIT, TIT, { hoje: '2026-11-03' }), /conta com o dígito/);
 });
 
 // retorno de mentira, montado pelas posições do manual (segmentos T e U)
