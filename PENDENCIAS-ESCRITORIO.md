@@ -12,6 +12,12 @@ A mesma lista resumida está no `PENDENCIAS-ESCRITORIO.md` do `agilite-sistema-g
 
 ## Perguntas que só você responde
 
+- [ ] **Boleto (26/10):** o gerente indicou o BB Pay; perguntas (protesto, juros/multa, custos, API) mandadas a ele. Para o
+      **CNAB enquanto isso**: (1) preencher Configurações → Integrações → "Dados do convênio" (convênio de 7 dígitos, carteira,
+      variação, agência e conta); (2) pedir ao gerente a transmissão de arquivos de cobrança no Gerenciador Financeiro, o layout
+      (CNAB 240 ou 400) e o teste do arquivo; (3) mandar ao Claude o PDF do manual do layout. Detalhes no plano da Fase 5
+      (`sistemi-dalessi`, `docs/plano-sair-do-fkn.md`).
+
 - [ ] **Estoque antes da virada (24/10):** parte das 36 diferenças era erro do CRM (fuso), já corrigido; Belaplast 9758 e
       Leal 23026 reabertas. Falta: (1) **você** dar a ciência das 4 notas sem XML completo (Vigut ×2 e AJA de 23/10, Lotus de
       19/10: Estoque → Notas de compra → Notas da Sefaz → "dar ciência"); (2) o **comprador** dar entrada nas notas pendentes
