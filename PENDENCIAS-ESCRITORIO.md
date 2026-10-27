@@ -6,6 +6,8 @@ A mesma lista resumida está no `PENDENCIAS-ESCRITORIO.md` do `agilite-sistema-g
 ## Só dá pra fazer estando no escritório (SSH da VPS)
 
 - [x] **Serviço fiscal na VPS `2026-10-23e`**: atualizado pelo Anderson em 26/10 e conferido em Fiscal → Emissão.
+- [ ] **Serviço fiscal na VPS `2026-10-27a`** (aviso contra boleto falso no texto da nota com parcelas): `git pull` e
+      reiniciar o serviço, como no dia 26; conferir a versão em Fiscal → 4. Emissão → "Conferir o serviço fiscal".
 - [ ] **Santa Casa (entrega futura):** ainda há saldo a entregar do faturamento (5922) feito no FKN? As remessas (5117) iam
       duas por mês até 03/08; em setembro e outubro não houve. Se houver, a remessa pelo CRM pede a chave da nota de faturamento
       (Pedido → Outra operação → Entrega futura — remessa).
