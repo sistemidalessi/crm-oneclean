@@ -10,6 +10,8 @@
 //        da carteira dele(a), guardadas em crm_ia_analises_vendas.
 //   POST { acao: 'analise_logistica', refazer? } (admin, gestora, logística) → { dia, texto, em, nova }: a análise do dia do
 //        Diretor de Logística (logistica.ts; 24/10/2026), guardada em crm_ia_analises_areas (area 'logistica').
+//   (26/10/2026) As análises do dia recebem a análise anterior (para dizer o que mudou e cobrar o que ficou) e, quando
+//   quem responde é um diretor (Vendas, Compras, Logística), as diretrizes da empresa para a área (diretrizes.ts).
 // Regras que valem sempre:
 //   - SÓ CONSULTA. Nenhuma ferramenta grava nada; para fazer, a resposta aponta a tela.
 //   - Toda consulta roda com o LOGIN de quem pergunta (cliente com o token dele): a RLS de sempre decide o que
@@ -25,6 +27,7 @@ import Anthropic from 'npm:@anthropic-ai/sdk@0.129.0';
 import { COMPRADOR, PERGUNTA_ANALISE, ferramentasComprador } from './comprador.ts';
 import { GERENTE, perguntaAnalise as perguntaAnaliseVendas, ferramentasGerente, FERRAMENTAS_GERENTE } from './vendas.ts';
 import { LOGISTICA, PERGUNTA_ANALISE_LOGISTICA, ferramentasLogistica, FERRAMENTAS_LOGISTICA } from './logistica.ts';
+import { carregar as carregarDiretrizes, bloco as blocoDiretrizes, fechar as fecharDiretrizes } from './diretrizes.ts';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -460,7 +463,16 @@ Deno.serve(async (req) => {
     const { data: ja } = await db.from('crm_ia_analises_areas').select('dia, texto, em').eq('dia', hoje).eq('area', 'logistica').maybeSingle();
     if (ja && !c.refazer) return resposta(200, Object.assign({ nova: false }, ja));
   }
-  const pergunta = analise ? PERGUNTA_ANALISE : analiseL ? PERGUNTA_ANALISE_LOGISTICA : analiseV ? perguntaAnaliseVendas(eu.papel) : String(c.pergunta ?? '').trim().slice(0, 2000);
+  let pergunta = analise ? PERGUNTA_ANALISE : analiseL ? PERGUNTA_ANALISE_LOGISTICA : analiseV ? perguntaAnaliseVendas(eu.papel) : String(c.pergunta ?? '').trim().slice(0, 2000);
+  // memória: a análise anterior da mesma área (e da mesma carteira) vai junto, para dizer o que mudou e cobrar o que ficou
+  if (analise || analiseV || analiseL) {
+    const q = analise ? db.from('crm_ia_analises').select('dia, texto').eq('tipo', 'compras')
+      : analiseV ? db.from('crm_ia_analises_vendas').select('dia, texto').eq('chave', chaveV)
+      : db.from('crm_ia_analises_areas').select('dia, texto').eq('area', 'logistica');
+    const { data: ant } = await q.lt('dia', hoje).order('dia', { ascending: false }).limit(1).maybeSingle();
+    if (ant && ant.texto) pergunta += '\n\nSua análise anterior (' + String(ant.dia).slice(8, 10) + '/' + String(ant.dia).slice(5, 7) + '), para acompanhar:\n<<<\n' + String(ant.texto).slice(0, 3000) +
+      '\n>>>\nComece com uma linha "**Desde ontem:**" dizendo o que mudou nos números e o que ela pediu que ainda aparece pendente (só o que as ferramentas mostram).';
+  }
   if (!pergunta) return resposta(400, { erro: 'escreva a pergunta' });
   const m = c.mascote && typeof c.mascote === 'object' ? c.mascote : {};
   const quemResponde = String(m.nome || 'Clean').slice(0, 40) + (m.papel ? ' (' + String(m.papel).slice(0, 60) + ')' : '');
@@ -483,7 +495,7 @@ Deno.serve(async (req) => {
   // Item 2: a análise do dia lê nomes de fornecedor e de produto que o comprador digita e o texto dela fica para o comprador
   // ler: roda só com as ferramentas do comprador, mesmo quando quem dispara é o administrador (nada de Caixa nem títulos).
   const papelF = analise ? 'comprador' : eu.papel;
-  const { data: us } = await db.from('crm_usuarios').select('user_id, nome');
+  const { data: us } = await db.from('crm_usuarios').select('user_id, nome, papel, ativo');
   const ctx: Ctx = { u, papel: papelF, meuId: eu.user_id, hoje, usuarios: new Map((us || []).map(x => [x.user_id, x.nome])) };
   // a análise de vendas roda só com as ferramentas do Gerente (nada de Caixa nem títulos, mesmo para o administrador)
   const minhas = Object.entries(FERRAMENTAS).filter(([n, f]) => f.papeis.includes(papelF) && (!analiseV || FERRAMENTAS_GERENTE.includes(n)) && (!analiseL || FERRAMENTAS_LOGISTICA.includes(n)));
@@ -491,11 +503,24 @@ Deno.serve(async (req) => {
   const comprador = ['admin', 'comprador'].includes(eu.papel) && (analise || ehCompra(tela, m));
   const logistica = !comprador && !analiseV && (analiseL || eu.papel === 'logistica' || (['admin', 'gestor'].includes(eu.papel) && ehLogistica(tela, m)));
   const gerente = !comprador && !logistica && ['admin', 'gestor', 'vendedor'].includes(eu.papel) && (analiseV || m.id === 'gerente-vendas' || ehVenda(tela, m));
-  const system = comprador ? [{ type: 'text', text: SISTEMA }, { type: 'text', text: COMPRADOR }]
+  const system: { type: 'text'; text: string }[] = comprador ? [{ type: 'text', text: SISTEMA }, { type: 'text', text: COMPRADOR }]
     : logistica ? [{ type: 'text', text: SISTEMA }, { type: 'text', text: LOGISTICA }]
-    : gerente ? [{ type: 'text', text: SISTEMA }, { type: 'text', text: GERENTE }] : SISTEMA;
+    : gerente ? [{ type: 'text', text: SISTEMA }, { type: 'text', text: GERENTE }] : [{ type: 'text', text: SISTEMA }];
+  // diretrizes da empresa para a área do diretor que responde (diretrizes.ts). Na análise do dia: as de quem vai ler
+  // (a da equipe é da gestora; a de compras, do comprador; a de logística, da logística e da gestora; a da carteira, da
+  // vendedora). Na conversa: as da própria pessoa; o administrador conversa sem elas.
+  const areaD = analise ? 'compras' : analiseL ? 'logistica' : analiseV ? 'vendas' : comprador ? 'compras' : logistica ? 'logistica' : gerente ? 'vendas' : null;
+  const ativos = ((us || []) as { user_id: string; papel: string; ativo: boolean }[]).filter(x => x.ativo);
+  const daArea = (...p: string[]) => ativos.filter(x => p.includes(x.papel)).map(x => x.user_id);
+  const paraD = analise ? daArea('comprador') : analiseL ? daArea('logistica', 'gestor') : analiseV ? (chaveV === 'equipe' ? daArea('gestor') : [eu.user_id])
+    : eu.papel === 'admin' ? [] : [eu.user_id];
+  const diretrizes = areaD && paraD.length ? await carregarDiretrizes(db, areaD, paraD, hoje, ctx.usuarios) : [];
+  if (diretrizes.length) system.push({ type: 'text', text: blocoDiretrizes(diretrizes) });
   const r0 = await roda(new Anthropic({ apiKey: chave, timeout: 120000, maxRetries: 1 }), system, tools, mensagens, ctx, papelF);
-  const { texto, erro, usadasF, tok } = r0;
+  const { erro, usadasF, tok } = r0;
+  let texto = r0.texto;
+  // a marca [[d:…]] sai do texto e da conversa guardada antes de a pessoa ler; o uso fica registrado
+  if (texto && !erro) texto = await fecharDiretrizes(db, texto, mensagens, diretrizes, analise || analiseV || analiseL ? null : eu.user_id, analise || analiseV || analiseL ? 'analise' : 'conversa');
   // a conversa só guarda turnos completos: se deu erro no meio, não grava o pedaço
   let conversaId = conversa ? conversa.id : null;
   if (analise && !erro && texto) {

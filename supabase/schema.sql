@@ -6570,3 +6570,32 @@ end;
 $$;
 revoke all on function public.crm_boleto_bb_reenviar(uuid) from public, anon;
 grant execute on function public.crm_boleto_bb_reenviar(uuid) to authenticated;
+
+-- ============================================================ Diretrizes da empresa para a IA (26/10/2026)
+-- Prioridades e cobranças que a empresa quer que os diretores da turma (Vendas, Compras, Logística) levem à equipe nas
+-- conversas e na análise do dia. Chegam pela Edge Function crm-ceo-acao (acao 'diretrizes'), assinadas com a mesma chave
+-- Ed25519 das ações do CEO, e a lista enviada substitui a anterior (o que não veio fica inativo). NENHUM login lê estas
+-- tabelas (RLS ligada e nenhuma política): só o servidor (crm-assistente, com o service_role) põe as da pessoa nas
+-- instruções da IA. O texto nunca vai para a tela; a IA leva o assunto com as palavras dela.
+--   alvo: o usuário (crm_usuarios.user_id) ou vazio = todos da área. tipo: regra | provocacao | pergunta.
+--   crm_ia_diretrizes_uso: cada vez que a IA levou uma diretriz (ela marca na resposta; a marca sai antes de a pessoa ler).
+create table if not exists public.crm_ia_diretrizes (
+  id          bigint primary key,                  -- o número que vem de fora
+  area        text not null check (area in ('vendas', 'compras', 'logistica')),
+  alvo        uuid,
+  tipo        text not null check (tipo in ('regra', 'provocacao', 'pergunta')),
+  texto       text not null,
+  valida_ate  date,
+  ativa       boolean not null default true,
+  atualizado_em timestamptz not null default now()
+);
+alter table public.crm_ia_diretrizes enable row level security;
+create table if not exists public.crm_ia_diretrizes_uso (
+  id          bigint generated always as identity primary key,
+  diretriz_id bigint not null,
+  user_id     uuid,
+  onde        text,                                -- conversa | analise
+  em          timestamptz not null default now()
+);
+alter table public.crm_ia_diretrizes_uso enable row level security;
+create index if not exists crm_ia_diretrizes_uso_d on public.crm_ia_diretrizes_uso (diretriz_id, em desc);
