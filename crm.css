@@ -1229,3 +1229,17 @@ pre.of-previa { white-space: pre-wrap; font-family: inherit; font-size: .88rem; 
 /* Gerente de Vendas no Início (24/10/2026) */
 .diretor h2 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .diretor .gv-rosto { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; background: var(--papel); }
+
+/* Apresentação dos diretores (apresentacao.js, 27/10/2026): janela da primeira vez, tom de carta */
+.apresentacao { width: min(600px, calc(100vw - 32px)); overflow: auto; }
+.apresentacao .apres-cab { display: flex; align-items: center; gap: 14px; padding: 18px 22px 12px; border-bottom: 1px solid var(--borda); }
+.apresentacao .apres-cab img { width: 64px; height: 64px; object-fit: contain; }
+.apresentacao .apres-cab small { color: var(--suave); text-transform: uppercase; letter-spacing: .06em; font-size: 11px; }
+.apresentacao .apres-cab h2 { margin: 2px 0 0; font-size: 20px; }
+.apresentacao .apres-corpo { padding: 14px 22px 4px; line-height: 1.55; }
+.apresentacao .apres-corpo p { margin: 0 0 10px; }
+.apresentacao .apres-corpo ul { margin: 0 0 12px; padding-left: 20px; }
+.apresentacao .apres-corpo li { margin-bottom: 6px; }
+.apresentacao .apres-assina { margin-top: 14px !important; font-weight: 600; }
+.apresentacao .apres-assina small { font-weight: 400; color: var(--suave); }
+.apresentacao .acoes { padding: 8px 22px 20px; margin: 0; display: flex; justify-content: flex-end; }

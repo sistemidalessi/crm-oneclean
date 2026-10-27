@@ -492,6 +492,7 @@
     }
     if (CRM.fichas) CRM.fichas.renderAbertas();
     if (CRM.turma) CRM.turma.depoisRender(E.aba, al); // mascotes (turma.js): guia do dia no topo e o especialista da tela
+    if (CRM.apresentacao) CRM.apresentacao.conferir(); // na 1ª vez, o diretor da área se apresenta (apresentacao.js)
   }
 
   CRM.irPara = (aba, filtros) => {

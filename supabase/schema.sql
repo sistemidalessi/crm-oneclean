@@ -6679,3 +6679,26 @@ $$;
 revoke all on function public.crm_gv_indicadores() from public, anon;
 revoke all on function public.crm_gv_mix(int) from public, anon;
 grant execute on function public.crm_gv_indicadores(), public.crm_gv_mix(int) to authenticated, service_role;
+
+-- Apresentação dos diretores (27/10/2026, pedido do Anderson: "o diretor de cada área fala com os funcionários daquela
+-- área, se apresentando, que ele é uma inteligência artificial"). Na primeira vez que a pessoa entra, o diretor da área
+-- dela se apresenta (apresentacao.js); "Entendi" grava aqui. Cada um grava e lê só a sua linha; o administrador lê
+-- todas (para saber quem já leu). Subir a versão do texto em apresentacao.js mostra de novo.
+create table if not exists public.crm_ia_apresentacoes (
+  user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  diretor text not null,
+  versao integer not null default 1,
+  visto_em timestamptz not null default now(),
+  primary key (user_id, diretor)
+);
+alter table public.crm_ia_apresentacoes enable row level security;
+revoke all on public.crm_ia_apresentacoes from anon, public;
+grant select, insert, update on public.crm_ia_apresentacoes to authenticated;
+drop policy if exists le on public.crm_ia_apresentacoes;
+create policy le on public.crm_ia_apresentacoes for select to authenticated
+  using (user_id = (select auth.uid()) or (select public.crm_eh_admin()));
+drop policy if exists grava on public.crm_ia_apresentacoes;
+create policy grava on public.crm_ia_apresentacoes for insert to authenticated with check (user_id = (select auth.uid()));
+drop policy if exists muda on public.crm_ia_apresentacoes;
+create policy muda on public.crm_ia_apresentacoes for update to authenticated
+  using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));

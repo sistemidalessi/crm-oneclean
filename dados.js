@@ -1338,6 +1338,11 @@
     if (corpo.acao === 'situacao') return { ligado: true, hoje: 0, limite: 40, custo_mes: null };
     return { conversa_id: corpo.conversa_id || 'local', resposta: '(modo local: sem IA) Você perguntou: **' + corpo.pergunta + '**\n- No sistema ligado ao banco eu consulto os dados e respondo aqui.', ferramentas: [] };
   };
+  // Apresentação dos diretores (apresentacao.js): quem já leu. RLS: cada um a sua linha; o administrador lê todas.
+  Supa.prototype.apresentacoes = async function () { return unwrap(await this.sb.from('crm_ia_apresentacoes').select('user_id, diretor, versao, visto_em')); };
+  Supa.prototype.apresentacaoVista = async function (diretor, versao) { return unwrap(await this.sb.from('crm_ia_apresentacoes').upsert({ diretor, versao, visto_em: new Date().toISOString() }, { onConflict: 'user_id,diretor' })); };
+  Local.prototype.apresentacoes = async function () { return lsLe('crm_ia_apresentacoes', []); };
+  Local.prototype.apresentacaoVista = async function (diretor, versao) { const eu = 'local'; lsGrava('crm_ia_apresentacoes', lsLe('crm_ia_apresentacoes', []).filter(x => x.diretor !== diretor).concat({ user_id: eu, diretor, versao, visto_em: new Date().toISOString() })); };
   Local.prototype.turmaMarcas = async function () { return lsLe('crm_turma_marcas', []); };
   Local.prototype.turmaMarcar = async function (m) { lsGrava('crm_turma_marcas', lsLe('crm_turma_marcas', []).filter(x => x.id !== m.id).concat(m)); return m; };
   Local.prototype.turmaDesmarcar = async function (ids) { lsGrava('crm_turma_marcas', lsLe('crm_turma_marcas', []).filter(x => ids.indexOf(x.id) === -1)); };

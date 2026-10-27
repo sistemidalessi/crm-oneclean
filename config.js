@@ -5,6 +5,7 @@
 // quem protege os dados é a RLS de crm/supabase/schema.sql.
 window.CRM_CONFIG = {
   nomeEmpresa: 'OneClean', // aparece no login, no topo e nas propostas
+  grupo: 'Grupo Dalessi',  // o grupo da empresa: a apresentação dos diretores (apresentacao.js) diz que a diretoria reporta ao CEO dele
   logo: 'assets/oneclean-logo.png',        // logo completo: login e propostas (vazio = logo da Sistemi Dalessi)
   logoIcone: 'assets/oneclean-icone.png',  // versão quadrada: aba do navegador e menu encolhido
   logoNoMenu: 'completo',                  // logo completo no alto do menu, num cartão branco
