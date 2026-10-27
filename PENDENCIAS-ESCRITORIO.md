@@ -66,7 +66,6 @@ A mesma lista resumida está no `PENDENCIAS-ESCRITORIO.md` do `agilite-sistema-g
 - [ ] **Especialista no alto das telas** (18/10): conferir se ficou do jeito que você queria.
 - [ ] **Primeira pergunta real à IA** (clicar no Clean e perguntar): conferir se responde certo.
 - [ ] **Certificado A1:** o da VPS (que emite pelo CRM) vale até **23/12/2026** — renovar e instalar na VPS na 1ª quinzena de
-      dezembro. O que vence em **29/10/2026** é outro (provavelmente o do FKN/UniNFe): se for, para o FKN seguir de reserva até
-      30/11, apontar o FKN para o mesmo certificado da VPS; se não precisar da reserva, nada a fazer. **Para saber:** Fiscal →
-      4. Emissão → "Conferir o serviço fiscal" e depois "Conferir o certificado do FKN" (lê o certificado das notas do FKN).
+      dezembro. **Conferido em 27/10:** o FKN já assina com um certificado da OneClean válido até 23/12/2026 (NF 2780 de 26/10),
+      o mesmo prazo do da VPS; o que vencia em 29/10 não está mais em uso. Nada a fazer até dezembro.
 - [ ] **Tabela do IBPT** (tributos aproximados na nota) está vencida desde 30/09: subir a nova pela aba Fiscal.
