@@ -463,7 +463,7 @@ Deno.serve(async (req) => {
     const { data: ja } = await db.from('crm_ia_analises_areas').select('dia, texto, em').eq('dia', hoje).eq('area', 'logistica').maybeSingle();
     if (ja && !c.refazer) return resposta(200, Object.assign({ nova: false }, ja));
   }
-  let pergunta = analise ? PERGUNTA_ANALISE : analiseL ? PERGUNTA_ANALISE_LOGISTICA : analiseV ? perguntaAnaliseVendas(eu.papel) : String(c.pergunta ?? '').trim().slice(0, 2000);
+  let pergunta = analise ? PERGUNTA_ANALISE : analiseL ? PERGUNTA_ANALISE_LOGISTICA : analiseV ? perguntaAnaliseVendas(eu.papel, hoje) : String(c.pergunta ?? '').trim().slice(0, 2000);
   // memória: a análise anterior da mesma área (e da mesma carteira) vai junto, para dizer o que mudou e cobrar o que ficou
   if (analise || analiseV || analiseL) {
     const q = analise ? db.from('crm_ia_analises').select('dia, texto').eq('tipo', 'compras')
@@ -516,6 +516,15 @@ Deno.serve(async (req) => {
     : eu.papel === 'admin' ? [] : [eu.user_id];
   const diretrizes = areaD && paraD.length ? await carregarDiretrizes(db, areaD, paraD, hoje, ctx.usuarios) : [];
   if (diretrizes.length) system.push({ type: 'text', text: blocoDiretrizes(diretrizes) });
+  // continuidade (27/10/2026): na conversa com um diretor, a análise de hoje que a pessoa leu vai junto, para ele seguir
+  // dela (a vendedora responde ao acompanhamento de segunda sem precisar repetir nada)
+  if (!analise && !analiseV && !analiseL && areaD && eu.papel !== 'admin') {
+    const q = areaD === 'vendas' ? db.from('crm_ia_analises_vendas').select('texto').eq('dia', hoje).eq('chave', ['gestor'].includes(eu.papel) ? 'equipe' : eu.user_id)
+      : areaD === 'compras' ? db.from('crm_ia_analises').select('texto').eq('dia', hoje).eq('tipo', 'compras')
+      : db.from('crm_ia_analises_areas').select('texto').eq('dia', hoje).eq('area', 'logistica');
+    const { data: hj } = await q.maybeSingle();
+    if (hj && hj.texto) system.push({ type: 'text', text: 'A ANÁLISE DE HOJE que esta pessoa leu (escrita por você; continue a partir dela, sem repetir tudo):\n' + String(hj.texto).slice(0, 3000) });
+  }
   const r0 = await roda(new Anthropic({ apiKey: chave, timeout: 120000, maxRetries: 1 }), system, tools, mensagens, ctx, papelF);
   const { erro, usadasF, tok } = r0;
   let texto = r0.texto;

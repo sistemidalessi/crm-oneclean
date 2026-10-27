@@ -6599,3 +6599,83 @@ create table if not exists public.crm_ia_diretrizes_uso (
 );
 alter table public.crm_ia_diretrizes_uso enable row level security;
 create index if not exists crm_ia_diretrizes_uso_d on public.crm_ia_diretrizes_uso (diretriz_id, em desc);
+
+-- ============================================================ Diretor de Vendas: reforço (27/10/2026)
+-- Diretor de Vendas, reforço (27/10/2026; Anderson: "pode seguir com o reforço do Diretor de Vendas"). Mesmas regras de
+-- crm_gv_*: SECURITY INVOKER (a RLS de sempre decide; a vendedora vê só a carteira dela), venda pelo crm_gv_notas, sem
+-- custo nem margem.
+-- Indicadores do mês por vendedor(a) e da equipe: ticket médio (× mesmo período do mês passado), clientes atendidos e
+-- clientes novos (primeira compra da vida no mês, dentro do histórico que o CRM tem: "historico_desde"), o mesmo período
+-- do ano passado, a semana passada (segunda a domingo) × a anterior, e o funil fechado no mês (ganhos × perdidos, taxa de
+-- ganho e os motivos de perda mais comuns).
+create or replace function public.crm_gv_indicadores() returns jsonb language plpgsql stable security invoker set search_path = public as $$
+declare hoje date := (now() at time zone 'America/Sao_Paulo')::date; ini date; ini_ant date; fim_ant date; ini_ano date; fim_ano date;
+  seg date; seg_ant date; r jsonb;
+begin
+  ini := date_trunc('month', hoje)::date; ini_ant := (ini - interval '1 month')::date;
+  fim_ant := least(ini_ant + (hoje - ini), ini - 1);
+  ini_ano := (ini - interval '1 year')::date; fim_ano := least((hoje - interval '1 year')::date, (ini_ano + interval '1 month')::date - 1);
+  seg := hoje - ((extract(isodow from hoje)::int - 1) + 7); seg_ant := seg - 7;   -- segunda da semana passada e da anterior
+  with v as (select * from public.crm_gv_notas(least(ini_ano, hoje - 730))),
+  prim as (select cli, min(dia) primeira from v group by cli),
+  g as (select v.dono, v.vend,
+     round(coalesce(sum(valor) filter (where dia >= ini), 0), 2) mes, count(*) filter (where dia >= ini) notas,
+     round(coalesce(sum(valor) filter (where dia between ini_ant and fim_ant), 0), 2) ant, count(*) filter (where dia between ini_ant and fim_ant) notas_ant,
+     round(coalesce(sum(valor) filter (where dia between ini_ano and fim_ano), 0), 2) ano_ant,
+     count(distinct v.cli) filter (where dia >= ini) clientes,
+     count(distinct v.cli) filter (where dia >= ini and p.primeira >= ini) novos,
+     round(coalesce(sum(valor) filter (where dia between seg and seg + 6), 0), 2) sem_passada, count(*) filter (where dia between seg and seg + 6) notas_sem_passada,
+     round(coalesce(sum(valor) filter (where dia between seg_ant and seg_ant + 6), 0), 2) sem_anterior
+     from v join prim p on p.cli = v.cli group by v.dono, v.vend),
+  f as (select n.responsavel_id dono, count(*) filter (where n.status = 'ganho') ganhos, count(*) filter (where n.status = 'perdido') perdidos,
+          round(coalesce(sum(n.valor) filter (where n.status = 'ganho'), 0), 2) ganhos_valor, round(coalesce(sum(n.valor) filter (where n.status = 'perdido'), 0), 2) perdidos_valor
+        from public.crm_negocios n where n.status in ('ganho', 'perdido') and n.fechado_em >= ini group by n.responsavel_id),
+  mot as (select coalesce(nullif(btrim(motivo_perda), ''), 'sem motivo') motivo, count(*) q from public.crm_negocios
+           where status = 'perdido' and fechado_em >= ini group by 1 order by 2 desc limit 5)
+  select jsonb_build_object('hoje', hoje, 'historico_desde', (select min(dia) from v),
+    'semana_passada', jsonb_build_object('de', seg, 'ate', seg + 6), 'semana_anterior', jsonb_build_object('de', seg_ant, 'ate', seg_ant + 6),
+    'equipe', (select jsonb_build_object('mes', sum(mes), 'notas', sum(notas), 'ticket_medio', round(sum(mes) / nullif(sum(notas), 0), 2),
+        'ticket_mesmo_periodo_mes_passado', round(sum(ant) / nullif(sum(notas_ant), 0), 2), 'mesmo_periodo_ano_passado', sum(ano_ant),
+        'clientes_atendidos', sum(clientes), 'clientes_novos', sum(novos), 'semana_passada', sum(sem_passada), 'semana_anterior', sum(sem_anterior)) from g),
+    'funil_do_mes', (select jsonb_build_object('ganhos', coalesce(sum(ganhos), 0), 'perdidos', coalesce(sum(perdidos), 0),
+        'taxa_ganho_pct', round(sum(ganhos)::numeric / nullif(sum(ganhos) + sum(perdidos), 0) * 100, 1), 'ganhos_valor', coalesce(sum(ganhos_valor), 0),
+        'perdidos_valor', coalesce(sum(perdidos_valor), 0)) from f),
+    'motivos_de_perda_do_mes', coalesce((select jsonb_agg(jsonb_build_object('motivo', motivo, 'negocios', q)) from mot), '[]'::jsonb),
+    'por_vendedor', coalesce((select jsonb_agg(jsonb_build_object('vendedor', g.vend, 'mes', g.mes, 'notas', g.notas, 'ticket_medio', round(g.mes / nullif(g.notas, 0), 2),
+        'ticket_mesmo_periodo_mes_passado', round(g.ant / nullif(g.notas_ant, 0), 2), 'mesmo_periodo_ano_passado', g.ano_ant,
+        'clientes_atendidos', g.clientes, 'clientes_novos', g.novos, 'semana_passada', g.sem_passada, 'notas_semana_passada', g.notas_sem_passada,
+        'semana_anterior', g.sem_anterior, 'funil_ganhos', coalesce(f.ganhos, 0), 'funil_perdidos', coalesce(f.perdidos, 0),
+        'taxa_ganho_pct', round(f.ganhos::numeric / nullif(f.ganhos + f.perdidos, 0) * 100, 1)) order by g.mes desc)
+       from g left join f on f.dono = g.dono where g.mes > 0 or g.sem_passada > 0 or g.ant > 0), '[]'::jsonb))
+    into r;
+  return r;
+end;
+$$;
+
+-- Mix parado: o cliente continua comprando (comprou nos últimos 60 dias), mas parou de levar um produto que levava
+-- sempre (em pelo menos 3 compras no último ano) e já passou de 2 intervalos do produto (e de 45 dias) sem ele. É venda
+-- que está indo para outro fornecedor. Em risco = o que ele gastava por mês com o produto.
+create or replace function public.crm_gv_mix(p_limite int default 15) returns jsonb language sql stable security invoker set search_path = public as $$
+  with hoje as (select (now() at time zone 'America/Sao_Paulo')::date d),
+  v as (select * from public.crm_gv_notas((select d - 365 from hoje)) where empresa_id is not null),
+  ult as (select empresa_id, max(dia) ultima from v group by empresa_id),
+  it as (select v.empresa_id, coalesce(nullif(btrim(i.codigo), ''), upper(btrim(i.descricao))) prod, max(i.descricao) descricao, max(i.codigo) codigo,
+            count(distinct v.dia) vezes, min(v.dia) primeira, max(v.dia) ultima, sum(i.valor_total) total,
+            (array_agg(v.dono order by v.dia desc))[1] dono
+           from v join public.crm_nota_itens i on i.nota_id = v.id
+          where i.cfop is null or i.cfop ~ '^[567][14]'
+          group by v.empresa_id, 2 having count(distinct v.dia) >= 3),
+  x as (select it.*, greatest(14, round((it.ultima - it.primeira)::numeric / (it.vezes - 1)))::int ciclo, u.ultima cli_ultima, (select d from hoje) - it.ultima sem
+          from it join ult u on u.empresa_id = it.empresa_id),
+  s as (select x.*, row_number() over (order by x.total desc) rn from x
+         where x.sem > greatest(2 * x.ciclo, 45) and x.cli_ultima > x.ultima and x.cli_ultima >= (select d - 60 from hoje))
+  select jsonb_build_object('quantidade', (select count(*) from s), 'em_risco_por_mes', (select round(coalesce(sum(total), 0) / 12, 2) from s),
+    'oportunidades', coalesce((select jsonb_agg(jsonb_build_object('cliente', e.nome, 'carteira', u.nome, 'produto', s.descricao, 'codigo', s.codigo,
+       'compras_do_produto_no_ano', s.vezes, 'ultima_compra_do_produto', s.ultima, 'dias_sem_o_produto', s.sem, 'intervalo_do_produto_dias', s.ciclo,
+       'ultima_compra_do_cliente', s.cli_ultima, 'media_por_mes', round(s.total / 12, 2)) order by s.rn)
+       from s join public.crm_empresas e on e.id = s.empresa_id left join public.crm_usuarios u on u.user_id = s.dono
+      where s.rn <= greatest(1, least(p_limite, 50))), '[]'::jsonb));
+$$;
+revoke all on function public.crm_gv_indicadores() from public, anon;
+revoke all on function public.crm_gv_mix(int) from public, anon;
+grant execute on function public.crm_gv_indicadores(), public.crm_gv_mix(int) to authenticated, service_role;
