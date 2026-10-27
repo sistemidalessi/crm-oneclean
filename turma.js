@@ -294,7 +294,8 @@
       : '<div class="turma-sugestoes">' + sug.map(x => '<button type="button" class="turma-chip" data-acao="turma-sugestao" data-id="' + esc(x) + '">' + esc(x) + '</button>').join('') + '</div>');
     const s = chat.situacao;
     el.querySelector('[data-turma-sit]').textContent = !s ? '' : !s.ligado ? 'A IA ainda não está ligada (falta a chave nos segredos do Supabase).'
-      : s.hoje + ' de ' + s.limite + ' perguntas hoje' + (s.custo_mes != null ? ' · uso do mês ≈ US$ ' + Number(s.custo_mes).toFixed(2) : '');
+      : s.hoje + ' de ' + s.limite + ' perguntas hoje' + (s.custo_mes != null ? ' · uso do mês ≈ US$ ' + Number(s.custo_mes).toFixed(2) : '') +
+        (s.teto ? ' · grupo: US$ ' + Number(s.teto.gasto_total_usd).toFixed(2) + ' de ' + Number(s.teto.limite_usd).toFixed(2) + (s.teto.estourado ? ' (limite atingido)' : '') : '');
     const ms = el.querySelector('.turma-msgs'); ms.scrollTop = ms.scrollHeight;
   }
   async function situacaoChat() {

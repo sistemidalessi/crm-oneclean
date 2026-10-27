@@ -16,6 +16,9 @@
 //   {"acao":"diretrizes","lista":[{"id":12,"area":"vendas","alvo":"<uuid>"|null,"tipo":"provocacao","texto":"…","valida_ate":"2026-11-02"|null}]}
 //   a lista inteira substitui a anterior (o que não veio fica inativo). Volta a equipe que pode receber (nome e papel) e,
 //   para cada diretriz, quantas vezes a IA a levou, a última vez e a quem. Corpo até 150 kB só para esta ação.
+// (27/10/2026) Teto de gasto mensal da IA do grupo (tabela crm_ia_limite, ver o schema.sql):
+//   {"acao":"ia_limite","limite_usd":50|null,"aviso_pct":80,"mes":"2026-10","gasto_agilite_usd":12.34} grava o teto e o
+//   gasto da Agilité no mês; volta a situação do mês (crm_ia_teto), com o gasto do CRM, para a Agilité somar do lado dela.
 // Cadastro da chave (24/10/2026, Anderson: "cadastre a chave por mim"): {"acao":"registrar_chave","chave_publica":…}
 // com Authorization: Bearer <senha de leitura do Caixa> (a mesma da crm-caixa-leitura, que o servidor da Agilité já
 // tem) E assinado pela própria chave. Só vale enquanto NÃO há NENHUMA chave (nem desativada): depois da primeira, o
@@ -112,6 +115,20 @@ async function diretrizes(db: any, lista: unknown) {
   return resposta(200, { ok: true, ativas: ids.length, pessoas: (us || []).map((x: { user_id: string; nome: string; papel: string }) => ({ id: x.user_id, nome: x.nome, papel: x.papel })), uso });
 }
 
+// deno-lint-ignore no-explicit-any
+async function iaLimite(db: any, c: any) {
+  const lim = c.limite_usd == null || c.limite_usd === '' ? null : Number(c.limite_usd);
+  const av = Number(c.aviso_pct), g = Number(c.gasto_agilite_usd), mes = String(c.mes || '');
+  if ((lim !== null && (!Number.isFinite(lim) || lim < 0 || lim > 100000)) || !Number.isInteger(av) || av < 1 || av > 100 ||
+    !Number.isFinite(g) || g < 0 || g > 1000000 || !/^\d{4}-\d{2}$/.test(mes)) return resposta(400, { erro: 'teto inválido' });
+  const { error } = await db.from('crm_ia_limite').upsert({ id: 1, limite_usd: lim, aviso_pct: av, mes, gasto_agilite_usd: Math.round(g * 10000) / 10000,
+    atualizado_em: new Date().toISOString() }, { onConflict: 'id' });
+  if (error) throw new Error(error.message);
+  const { data, error: e2 } = await db.rpc('crm_ia_teto');
+  if (e2) throw new Error(e2.message);
+  return resposta(200, Object.assign({ ok: true }, data));
+}
+
 Deno.serve(async (req) => {
   if (req.method !== 'POST') return resposta(405, { erro: 'use POST' });
   const corpo = await req.text();
@@ -161,6 +178,7 @@ Deno.serve(async (req) => {
       return resposta(200, data);
     }
     if (c.acao === 'diretrizes') return await diretrizes(db, c.lista);
+    if (c.acao === 'ia_limite') return await iaLimite(db, c);
     return resposta(400, { erro: 'ação fora da lista' });
   } catch (e) {
     const m = (e as Error).message;

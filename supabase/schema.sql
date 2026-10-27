@@ -6876,3 +6876,61 @@ revoke all on function public.crm_cs_ruptura(int) from public, anon;
 revoke all on function public.crm_cs_fornecedores(int) from public, anon;
 revoke all on function public.crm_cs_tendencia(int) from public, anon;
 grant execute on function public.crm_cs_ruptura(int), public.crm_cs_fornecedores(int), public.crm_cs_tendencia(int) to authenticated, service_role;
+
+-- ============================================================ Teto de gasto mensal da IA do grupo (27/10/2026)
+-- Plano aprovado pelo Anderson: "limite de gasto mensal da IA somando as duas empresas". O teto é definido no CEO Grupo
+-- (sistema da Agilité, /diretores do app do CEO) e chega aqui pela crm-ceo-acao (acao 'ia_limite', assinada), junto com o
+-- gasto da Agilité no mês; a resposta leva o gasto do CRM, e cada lado soma os dois. Passou do teto, a IA para nos dois
+-- até virar o mês ou o Anderson subir o teto. Nenhum login lê esta tabela (RLS sem política); só as funções da IA.
+create table if not exists public.crm_ia_limite (
+  id                smallint primary key default 1 check (id = 1),
+  limite_usd        numeric(10,2) check (limite_usd is null or limite_usd >= 0),   -- vazio ou 0 = sem teto
+  aviso_pct         integer not null default 80 check (aviso_pct between 1 and 100),
+  mes               text not null check (mes ~ '^\d{4}-\d{2}$'),                     -- o mês do gasto da Agilité (São Paulo)
+  gasto_agilite_usd numeric(12,4) not null default 0 check (gasto_agilite_usd >= 0),
+  atualizado_em     timestamptz not null default now()
+);
+alter table public.crm_ia_limite enable row level security;
+revoke all on public.crm_ia_limite from anon, authenticated, public;
+
+-- A situação do mês: gasto do CRM (crm_assistente_uso, todas as telas) + o da Agilité (se for do mesmo mês), o teto, se
+-- passou do aviso e se estourou. Só as funções da IA (service_role) chamam.
+create or replace function public.crm_ia_teto() returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare
+  mes text := to_char(now() at time zone 'America/Sao_Paulo', 'YYYY-MM');
+  ini timestamptz := date_trunc('month', now() at time zone 'America/Sao_Paulo') at time zone 'America/Sao_Paulo';
+  lim numeric; av integer; mes_ag text; ag numeric; em timestamptz; crm numeric; tot numeric;
+begin
+  -- só as funções da IA (a revogação do execute para os logins vai pelo SQL Editor; até lá, esta trava basta)
+  if coalesce(auth.role(), '') <> 'service_role' then raise exception 'só a função da IA'; end if;
+  select l.limite_usd, l.aviso_pct, l.mes, l.gasto_agilite_usd, l.atualizado_em into lim, av, mes_ag, ag, em from public.crm_ia_limite l where l.id = 1;
+  select coalesce(sum(u.custo_usd), 0) into crm from public.crm_assistente_uso u where u.criado_em >= ini;
+  ag := case when mes_ag = mes then coalesce(ag, 0) else 0 end;
+  tot := crm + ag;
+  return jsonb_build_object('mes', mes, 'limite_usd', lim, 'aviso_pct', coalesce(av, 80),
+    'gasto_crm_usd', round(crm, 4), 'gasto_agilite_usd', round(ag, 4), 'gasto_total_usd', round(tot, 4),
+    'aviso', coalesce(lim > 0 and tot >= lim * coalesce(av, 80) / 100.0, false),
+    'estourado', coalesce(lim > 0 and tot >= lim, false), 'atualizado_em', em);
+end $$;
+revoke execute on function public.crm_ia_teto() from public, anon, authenticated;
+grant execute on function public.crm_ia_teto() to service_role;
+
+-- (Substitui a versão de crm_ia_reservar mais acima.) O teto entra na reserva que toda chamada da IA já faz (crm-assistente e crm-produto-buscar): estourado, não reserva
+-- (as funções perguntam crm_ia_teto() para dizer o motivo certo).
+create or replace function public.crm_ia_reservar(p_user uuid, p_tela text, p_limite integer, p_desde timestamptz) returns bigint
+language plpgsql security definer set search_path = public as $$
+declare n integer; id bigint; fotos boolean := coalesce(p_tela, '') = 'fotos';
+begin
+  if coalesce(auth.role(), '') <> 'service_role' then raise exception 'só a função da IA'; end if;
+  perform pg_advisory_xact_lock(hashtext('crm_ia:' || p_user::text || ':' || fotos::text));
+  select count(*) into n from public.crm_assistente_uso u where u.user_id = p_user and u.criado_em >= p_desde and (coalesce(u.tela, '') = 'fotos') = fotos;
+  if n >= p_limite then return null; end if;
+  if (public.crm_ia_teto() ->> 'estourado')::boolean then return null; end if;
+  insert into public.crm_assistente_uso (user_id, tela, ferramentas, tokens_entrada, tokens_saida, cache_lido, cache_escrito, custo_usd, erro)
+  values (p_user, p_tela, '{}', 0, 0, 0, 0, 0, 'em andamento') returning crm_assistente_uso.id into id;
+  return id;
+end;
+$$;
+revoke execute on function public.crm_ia_reservar(uuid, text, integer, timestamptz) from public, anon, authenticated;
+grant execute on function public.crm_ia_reservar(uuid, text, integer, timestamptz) to service_role;

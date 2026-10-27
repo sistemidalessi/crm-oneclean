@@ -182,7 +182,12 @@ Deno.serve(async (req) => {
   // (a busca em lote do administrador passa de mil num dia; a logística busca um produto por vez).
   const limite = ({ admin: 2500, comprador: 400, logistica: 60 } as Record<string, number>)[eu.papel] ?? 0;
   const { data: reserva } = await db.rpc('crm_ia_reservar', { p_user: quem.user.id, p_tela: 'fotos', p_limite: limite, p_desde: hojeSP() + 'T03:00:00Z' });
-  if (!reserva) return resposta(429, { erro: 'limite de buscas de fotos de hoje atingido (' + limite + '). Amanhã libera de novo.' });
+  if (!reserva) {
+    // também recusa quando o grupo passou do teto de gasto do mês com a IA (crm_ia_teto, 27/10/2026)
+    const { data: t } = await db.rpc('crm_ia_teto');
+    return resposta(429, { erro: t && t.estourado ? 'o limite de gasto do mês com a IA foi atingido. A busca volta no mês que vem ou quando o administrador aumentar o limite (CEO Grupo → Diretores).'
+      : 'limite de buscas de fotos de hoje atingido (' + limite + '). Amanhã libera de novo.' });
+  }
   const ia = new Anthropic({ apiKey: chave, timeout: 240000, maxRetries: 1 });
   const tok = { entrada: 0, saida: 0, lido: 0, escrito: 0, buscas: 0, usd: 0 };
   let modelo = MODELO;

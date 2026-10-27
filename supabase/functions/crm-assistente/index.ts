@@ -447,7 +447,10 @@ Deno.serve(async (req) => {
       const { data } = await db.rpc('crm_ia_custo_mes', { p_desde: hoje.slice(0, 7) + '-01T03:00:00Z' });
       custoMes = Math.round(Number(((data && data[0]) || {}).total || 0) * 100) / 100;
     }
-    return resposta(200, { ligado: !!chave, hoje: usadas || 0, limite, custo_mes: custoMes });
+    // o teto do grupo (27/10/2026, crm_ia_teto: CRM + Agilité no mês), só para o administrador
+    let teto = null;
+    if (eu.papel === 'admin') { const { data: t } = await db.rpc('crm_ia_teto'); if (t && Number(t.limite_usd) > 0) teto = { limite_usd: Number(t.limite_usd), gasto_total_usd: Number(t.gasto_total_usd), estourado: !!t.estourado }; }
+    return resposta(200, { ligado: !!chave, hoje: usadas || 0, limite, custo_mes: custoMes, teto });
   }
   if (!chave) return resposta(503, { erro: 'a IA ainda não está ligada: falta a chave da Anthropic nos segredos do Supabase (ANTHROPIC_API_KEY)' });
   if ((usadas || 0) >= limite) return resposta(429, { erro: 'você já fez ' + limite + ' perguntas hoje (o limite do dia). Amanhã libera de novo.' });
@@ -501,7 +504,12 @@ Deno.serve(async (req) => {
   // Segurança (auditoria de 22/10/2026, item 8): o limite do dia é reservado no banco antes de chamar a IA (chamadas em
   // paralelo não passam dele, e a que dá erro também conta); o resultado vai na mesma linha.
   const { data: reserva } = await db.rpc('crm_ia_reservar', { p_user: eu.user_id, p_tela: tela || null, p_limite: limite, p_desde: hoje + 'T03:00:00Z' });
-  if (!reserva) return resposta(429, { erro: 'você já fez ' + limite + ' perguntas hoje (o limite do dia). Amanhã libera de novo.' });
+  if (!reserva) {
+    // a reserva também recusa quando o grupo passou do teto de gasto do mês com a IA (crm_ia_teto, 27/10/2026)
+    const { data: t } = await db.rpc('crm_ia_teto');
+    return resposta(429, { erro: t && t.estourado ? 'o limite de gasto do mês com a IA foi atingido. A IA volta no mês que vem ou quando o administrador aumentar o limite (CEO Grupo → Diretores).'
+      : 'você já fez ' + limite + ' perguntas hoje (o limite do dia). Amanhã libera de novo.' });
+  }
   // Item 2: a análise do dia lê nomes de fornecedor e de produto que o comprador digita e o texto dela fica para o comprador
   // ler: roda só com as ferramentas do comprador, mesmo quando quem dispara é o administrador (nada de Caixa nem títulos).
   const papelF = analise ? 'comprador' : eu.papel;
