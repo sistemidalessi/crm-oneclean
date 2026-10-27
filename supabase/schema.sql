@@ -2629,14 +2629,27 @@ revoke all on function public.crm_pedido_itens_norm(jsonb) from public, anon, au
 create or replace function public.crm_pedidos_atualizar() returns integer language plpgsql security definer set search_path = public as $$
 -- PREÇO (16/10, Anderson): item com margem abaixo da mínima (cfg.margem_minima, padrão 23% = tabela A) ou sem preço;
 -- sem custo conhecido, abaixo da faixa negativa da tabela. cfg.pedido_trava_preco = false desliga.
-declare n integer; neg numeric; mmin numeric; trava boolean; hoje date := (now() at time zone 'America/Sao_Paulo')::date;
+-- Crédito (27/10/2026): com crm_config.dados.credito.ligado, o pedido a prazo ganha SEM ANÁLISE, PRAZO e LIMITE (ver a
+-- seção "Crédito do cliente"); no limite contam os títulos em aberto e os pedidos a prazo do cliente feitos ANTES deste.
+declare n integer; neg numeric; mmin numeric; trava boolean; cred boolean; hoje date := (now() at time zone 'America/Sao_Paulo')::date;
 begin
   if not (public.crm_eh_ativo() or coalesce(auth.role(), '') = 'service_role') then raise exception 'sem acesso'; end if;
   perform public.crm_pedidos_casar_int();
   select coalesce(nullif(dados->'tabela_precos'->>'NEG', '')::numeric, -10), coalesce(nullif(dados->>'margem_minima', '')::numeric, 23),
-         coalesce((dados->>'pedido_trava_preco')::boolean, true)
-    into neg, mmin, trava from public.crm_config where id = 1;
+         coalesce((dados->>'pedido_trava_preco')::boolean, true), coalesce((dados->'credito'->>'ligado')::boolean, false)
+    into neg, mmin, trava, cred from public.crm_config where id = 1;
   with f as (select distinct pedido_id from public.crm_pedidos_faltas_todas()),
+  cr as (
+    select p.id, c.empresa_id tem, c.situacao, c.limite, c.prazo_max, pz.d prazo,
+           coalesce((select sum(t.valor) from public.crm_titulos t where t.empresa_id = p.empresa_id and not t.abono), 0)
+         + coalesce((select sum(o.valor_total) from public.crm_pedidos o where o.empresa_id = p.empresa_id and o.id <> p.id
+                       and o.situacao in ('aberto', 'separacao', 'separado') and (o.criado_em, o.numero) < (p.criado_em, p.numero)
+                       and public.crm_credito_prazo(o.dados->>'pagamento', (o.criado_em at time zone 'America/Sao_Paulo')::date) is not null), 0)
+         + p.valor_total usado
+      from public.crm_pedidos p
+      cross join lateral (select public.crm_credito_prazo(p.dados->>'pagamento', (p.criado_em at time zone 'America/Sao_Paulo')::date) d) pz
+      left join public.crm_credito c on c.empresa_id = p.empresa_id
+     where cred and p.situacao = 'aberto' and pz.d is not null),
   b as (
     select p.id, array_remove(array[
       case when p.id in (select pedido_id from f) then 'ESTOQUE' end,
@@ -2645,8 +2658,11 @@ begin
       case when trava and exists (select 1 from jsonb_array_elements(p.itens) i
         cross join lateral (select (i->>'preco')::numeric * (1 - coalesce((i->>'desconto')::numeric, 0) / 100) pl, coalesce((i->>'custo')::numeric, 0) c, coalesce((i->>'preco_tab')::numeric, 0) tb) v
         where case when v.c > 0 then v.pl <= 0 or (v.pl - v.c) / v.pl * 100 < mmin - 0.005
-                   else v.tb > 0 and v.pl < round(v.tb * (1 + neg / 100), 4) - 0.00005 end) then 'PREÇO' end
-    ], null) bl from public.crm_pedidos p where p.situacao = 'aberto')
+                   else v.tb > 0 and v.pl < round(v.tb * (1 + neg / 100), 4) - 0.00005 end) then 'PREÇO' end,
+      case when cr.id is not null and (cr.tem is null or cr.situacao = 'analise') then 'SEM ANÁLISE' end,
+      case when cr.id is not null and (cr.situacao = 'vista' or (cr.situacao = 'prazo' and cr.prazo_max is not null and cr.prazo > cr.prazo_max)) then 'PRAZO' end,
+      case when cr.id is not null and cr.situacao = 'prazo' and cr.usado > cr.limite + 0.005 then 'LIMITE' end
+    ], null) bl from public.crm_pedidos p left join cr on cr.id = p.id where p.situacao = 'aberto')
   update public.crm_pedidos p set bloqueios = b.bl from b where p.id = b.id and p.bloqueios is distinct from b.bl;
   get diagnostics n = row_count;
   return n;
@@ -2806,8 +2822,11 @@ begin
   if p_entrada is not null then update public.crm_pedidos set entrada_ok = p_entrada where id = p_id; end if;
   perform public.crm_pedidos_atualizar();
   select * into r from public.crm_pedidos where id = p_id;
+  -- Crédito (27/10/2026): SEM ANÁLISE, PRAZO e LIMITE só o administrador libera; a gestora e a logística liberam o resto.
   if p_liberar is not null then
-    update public.crm_pedidos set liberado = case when p_liberar then r.bloqueios else '{}' end,
+    update public.crm_pedidos set liberado = case when not p_liberar then '{}'
+        when public.crm_eh_admin() then r.bloqueios
+        else array(select b from unnest(r.bloqueios) b where b <> all(array['SEM ANÁLISE', 'PRAZO', 'LIMITE']) or b = any(r.liberado)) end,
       liberado_por = case when p_liberar then auth.uid() end, liberado_em = case when p_liberar then now() end, atualizado_em = now() where id = p_id;
   end if;
   select * into r from public.crm_pedidos where id = p_id;
@@ -5211,7 +5230,7 @@ create or replace function public.crm_config_guarda() returns trigger language p
 declare k text;
 begin
   if current_user <> 'authenticated' or public.crm_eh_admin() then return new; end if;
-  foreach k in array array['fiscal', 'boleto', 'comissao_planos', 'comissao_usuarios', 'tabela_precos', 'margem_minima', 'pedido_trava_preco', 'cobranca_aviso', 'cobranca_prazo_cartorio'] loop
+  foreach k in array array['fiscal', 'boleto', 'comissao_planos', 'comissao_usuarios', 'tabela_precos', 'margem_minima', 'pedido_trava_preco', 'cobranca_aviso', 'cobranca_prazo_cartorio', 'credito'] loop
     if tg_op = 'UPDATE' and old.dados ? k then new.dados := jsonb_set(coalesce(new.dados, '{}'::jsonb), array[k], old.dados -> k);
     else new.dados := coalesce(new.dados, '{}'::jsonb) - k; end if;
   end loop;
@@ -6934,3 +6953,193 @@ end;
 $$;
 revoke execute on function public.crm_ia_reservar(uuid, text, integer, timestamptz) from public, anon, authenticated;
 grant execute on function public.crm_ia_reservar(uuid, text, integer, timestamptz) to service_role;
+
+-- =================================================================== Crédito do cliente (27/10/2026, pedido do Anderson)
+-- "Está faltando esse módulo para fechar 100%": cliente novo passa pela consulta de crédito (site da Rekta, onde o Anderson
+-- já tem login; o CRM só abre o site com o CNPJ copiado, nunca guarda a senha nem entra no site), a IA lê o PDF da consulta
+-- (crm-caixa-ler, modo credito) e propõe; o ADMINISTRADOR aprova. A ficha (crm_credito) é só dele; a gestora vê; a
+-- equipe vê só o disponível e o prazo máximo (crm_credito_ver). Com a chave crm_config.dados.credito.ligado, o pedido a
+-- prazo ganha três bloqueios, que só o administrador libera:
+--   SEM ANÁLISE  cliente sem ficha (ou "em análise") comprando a prazo;
+--   PRAZO        ficha "só à vista" comprando a prazo, ou prazo do pagamento acima do máximo da ficha;
+--   LIMITE       títulos em aberto + outros pedidos a prazo ainda não faturados + este pedido acima do limite.
+-- Pedido à vista (pix, transferência, depósito, dinheiro, cartão, antecipado) não usa crédito (o SEM ENTRADA já segura).
+create table if not exists public.crm_credito (
+  empresa_id   uuid primary key references public.crm_empresas(id) on delete cascade,
+  situacao     text not null default 'analise' check (situacao in ('prazo', 'vista', 'analise')),
+  limite       numeric(12,2) not null default 0 check (limite >= 0),
+  prazo_max    integer check (prazo_max is null or prazo_max between 0 and 365),
+  analisado_em date,
+  revisar_em   date,
+  score        integer,
+  origem       text not null default 'manual' check (origem in ('consulta', 'historico', 'manual')),
+  resumo       jsonb,              -- o que a IA leu da consulta (score, restrições, pontualidade, limite sugerido, alertas…)
+  pdf          text,               -- caminho no bucket privado crm-credito
+  obs          text,
+  aprovado_por uuid,
+  aprovado_em  timestamptz,
+  atualizado_em timestamptz not null default now()
+);
+alter table public.crm_credito enable row level security;
+drop policy if exists le on public.crm_credito;
+create policy le on public.crm_credito for select to authenticated using ((select public.crm_eh_gestor()));
+revoke insert, update, delete on public.crm_credito from anon, authenticated;
+
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+  values ('crm-credito', 'crm-credito', false, 10485760, array['image/png','image/jpeg','image/webp','application/pdf'])
+  on conflict (id) do nothing;
+do $$ begin
+  if not exists (select 1 from pg_policies where schemaname = 'storage' and tablename = 'objects' and policyname = 'crm_credito_le') then
+    create policy crm_credito_le on storage.objects for select to authenticated using (bucket_id = 'crm-credito' and (select public.crm_eh_admin()));
+    create policy crm_credito_grava on storage.objects for insert to authenticated with check (bucket_id = 'crm-credito' and (select public.crm_eh_admin()));
+  end if;
+end $$;
+
+-- Prazo do pagamento em dias (a maior parcela), como o serviço fiscal lê (servico-fiscal/pedido.js, lePagamento):
+-- null = à vista / sem crédito; -1 = a prazo sem prazo legível ("BOLETO"). "28/35 DIAS" são prazos; sem "DIAS", "15/11"
+-- (ou "PROGRAMADO 15/11/2026") é uma data, contada do dia do pedido.
+create or replace function public.crm_credito_prazo(p_pag text, p_dia date) returns integer
+language plpgsql immutable set search_path = public as $$
+declare t text := upper(translate(coalesce(p_pag, ''), 'áàâãäéèêëíìîïóòôõöúùûüçÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÇ', 'aaaaaeeeeiiiiooooouuuucAAAAAEEEEIIIIOOOOOUUUUC'));
+  m text[]; d int; mx int := null; dt date; ano int;
+begin
+  if t ~ '\mA ?VISTA\M|\mANTECIPAD' then return null; end if;
+  if t ~ '\mDIAS?\M|\mDDL?\M' then
+    for m in select regexp_matches(t, '\d+', 'g') loop
+      d := m[1]::int; if d > 0 and d <= 365 then mx := greatest(coalesce(mx, 0), d); end if;
+    end loop;
+    return coalesce(mx, -1);
+  end if;
+  for m in select regexp_matches(t, '\m(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?\M', 'g') loop
+    if m[2]::int between 1 and 12 and m[1]::int between 1 and 31 then
+      ano := case when m[3] is null then extract(year from p_dia)::int when length(m[3]) = 2 then 2000 + m[3]::int else m[3]::int end;
+      begin dt := make_date(ano, m[2]::int, m[1]::int); exception when others then continue; end;
+      if m[3] is null and dt < p_dia then dt := (dt + interval '1 year')::date; end if;
+      d := dt - p_dia; if d >= 0 and d <= 365 then mx := greatest(coalesce(mx, 0), d); end if;
+    end if;
+  end loop;
+  if mx is not null then return mx; end if;
+  if t ~ 'PIX|TRANSFER|DEPOSIT|\mTED\M|\mDOC\M|DINHEIRO|ESPECIE|CARTAO|CREDITO|DEBITO' then return null; end if;
+  for m in select regexp_matches(t, '\d+', 'g') loop
+    d := m[1]::int; if d > 0 and d <= 365 then mx := greatest(coalesce(mx, 0), d); end if;
+  end loop;
+  return coalesce(mx, case when t ~ 'BOLETO|DUPLICATA|PRAZO|PROGRAMAD' then -1 end);
+end;
+$$;
+revoke all on function public.crm_credito_prazo(text, date) from public, anon;
+grant execute on function public.crm_credito_prazo(text, date) to authenticated;
+
+-- Quanto o cliente usa do crédito: títulos em aberto (sem abono) + pedidos a prazo ainda não faturados (menos um, se dado).
+create or replace function public.crm_credito_usado(p_empresa uuid, p_sem_pedido uuid) returns numeric
+language sql stable security definer set search_path = public as $$
+  select coalesce((select sum(t.valor) from public.crm_titulos t where t.empresa_id = p_empresa and not t.abono), 0)
+       + coalesce((select sum(p.valor_total) from public.crm_pedidos p where p.empresa_id = p_empresa and p.situacao in ('aberto', 'separacao', 'separado')
+                     and p.id is distinct from p_sem_pedido and public.crm_credito_prazo(p.dados->>'pagamento', (p.criado_em at time zone 'America/Sao_Paulo')::date) is not null), 0);
+$$;
+revoke all on function public.crm_credito_usado(uuid, uuid) from public, anon, authenticated;
+
+-- O que cada um vê do crédito de um cliente. Administrador e gestora: a ficha inteira (sem o caminho do PDF para a gestora).
+-- Equipe com o cliente na carteira: situação, disponível e prazo máximo.
+create or replace function public.crm_credito_ver(p_empresa uuid) returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare c public.crm_credito; usado numeric; ligado boolean;
+begin
+  if not (public.crm_eh_gestor() or public.crm_eh_logistica() or p_empresa in (select public.crm_empresas_minhas())
+          or exists (select 1 from public.crm_empresas e where e.id = p_empresa and e.responsavel_id = auth.uid() and public.crm_eh_membro())) then
+    return null;
+  end if;
+  select coalesce((dados->'credito'->>'ligado')::boolean, false) into ligado from public.crm_config where id = 1;
+  select * into c from public.crm_credito where empresa_id = p_empresa;
+  usado := public.crm_credito_usado(p_empresa, null);
+  if c.empresa_id is null then
+    return jsonb_build_object('ligado', ligado, 'situacao', 'sem_ficha', 'usado', case when public.crm_eh_gestor() then usado end);
+  end if;
+  if public.crm_eh_gestor() then
+    return to_jsonb(c) - case when public.crm_eh_admin() then '' else 'pdf' end
+      || jsonb_build_object('ligado', ligado, 'usado', usado, 'disponivel', greatest(0, c.limite - usado),
+         'revisao_vencida', c.revisar_em is not null and c.revisar_em < (now() at time zone 'America/Sao_Paulo')::date);
+  end if;
+  return jsonb_build_object('ligado', ligado, 'situacao', c.situacao, 'prazo_max', c.prazo_max,
+    'disponivel', case when c.situacao = 'prazo' then greatest(0, c.limite - usado) end);
+end;
+$$;
+revoke all on function public.crm_credito_ver(uuid) from public, anon;
+grant execute on function public.crm_credito_ver(uuid) to authenticated;
+
+-- Grava fichas (uma ou várias de uma vez: "Aplicar as sugestões"). Só o administrador.
+-- Item: {empresa_id, situacao, limite, prazo_max, revisar_em, score, origem, resumo, pdf, obs}.
+create or replace function public.crm_credito_gravar(p_itens jsonb) returns integer
+language plpgsql security definer set search_path = public as $$
+declare x jsonb; n integer := 0; hoje date := (now() at time zone 'America/Sao_Paulo')::date; pdf text;
+begin
+  if not public.crm_eh_admin() then raise exception 'só o administrador aprova crédito'; end if;
+  for x in select value from jsonb_array_elements(case when jsonb_typeof(p_itens) = 'array' then p_itens else jsonb_build_array(p_itens) end) loop
+    if not exists (select 1 from public.crm_empresas where id = (x->>'empresa_id')::uuid) then raise exception 'cliente não encontrado'; end if;
+    if coalesce(x->>'situacao', '') not in ('prazo', 'vista', 'analise') then raise exception 'situação inválida'; end if;
+    pdf := nullif(x->>'pdf', '');
+    if pdf is not null and pdf !~ ('^credito/' || (x->>'empresa_id') || '/[\w.-]{1,160}$') then raise exception 'arquivo da consulta inválido'; end if;
+    insert into public.crm_credito as c (empresa_id, situacao, limite, prazo_max, analisado_em, revisar_em, score, origem, resumo, pdf, obs, aprovado_por, aprovado_em, atualizado_em)
+    values ((x->>'empresa_id')::uuid, x->>'situacao', greatest(0, coalesce(nullif(x->>'limite', '')::numeric, 0)),
+      nullif(x->>'prazo_max', '')::int, hoje,
+      coalesce(nullif(x->>'revisar_em', '')::date, (hoje + interval '6 months')::date), nullif(x->>'score', '')::int,
+      coalesce(nullif(x->>'origem', ''), 'manual'), x->'resumo', pdf, nullif(btrim(coalesce(x->>'obs', '')), ''), auth.uid(), now(), now())
+    on conflict (empresa_id) do update set situacao = excluded.situacao, limite = excluded.limite, prazo_max = excluded.prazo_max,
+      analisado_em = excluded.analisado_em, revisar_em = excluded.revisar_em,
+      score = coalesce(excluded.score, case when excluded.origem = 'consulta' then null else c.score end),
+      origem = case when excluded.origem = 'manual' and c.origem = 'consulta' then 'consulta' else excluded.origem end,
+      resumo = coalesce(excluded.resumo, c.resumo), pdf = coalesce(excluded.pdf, c.pdf), obs = excluded.obs,
+      aprovado_por = excluded.aprovado_por, aprovado_em = excluded.aprovado_em, atualizado_em = now();
+    n := n + 1;
+  end loop;
+  perform public.crm_pedidos_atualizar();
+  return n;
+end;
+$$;
+revoke all on function public.crm_credito_gravar(jsonb) from public, anon;
+grant execute on function public.crm_credito_gravar(jsonb) to authenticated;
+
+-- Painel do administrador: as fichas, quem precisa de análise (pedido travado por crédito, cliente novo sem ficha) e as
+-- sugestões pelo histórico para quem já compra (limite = 2 × a maior compra do mês nos últimos 12 meses, arredondado para
+-- cima de 500 em 500; prazo = o maior que o cliente usa hoje, no mínimo 28 dias; com título vencido: "em análise").
+create or replace function public.crm_credito_painel() returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare hoje date := (now() at time zone 'America/Sao_Paulo')::date; r jsonb;
+begin
+  if not public.crm_eh_admin() then raise exception 'só o administrador'; end if;
+  with vendas as (
+    select n.empresa_id, date_trunc('month', n.emitida_em at time zone 'America/Sao_Paulo') mes, sum(n.valor_total) v, max(n.emitida_em) ult
+      from public.crm_notas n
+     where not n.cancelada and n.empresa_id is not null and n.emitida_em >= now() - interval '12 months'
+       and exists (select 1 from public.crm_nota_itens i where i.nota_id = n.id and (i.cfop ~ '^[56]10[1-9]$' or i.cfop ~ '^[56]40[1-5]$' or i.cfop in ('5922', '6922')))
+     group by 1, 2),
+  hist as (select empresa_id, max(v) maior_mes, count(*) meses, max(ult) ultima from vendas group by 1),
+  tit as (select empresa_id, sum(valor) filter (where not abono) aberto, sum(valor) filter (where not abono and vencimento < hoje) vencido,
+                 max(vencimento - emitida_em) prazo from public.crm_titulos where empresa_id is not null group by 1),
+  fichas as (
+    select jsonb_agg(to_jsonb(c) || jsonb_build_object('nome', e.nome, 'cnpj', e.cnpj, 'usado', public.crm_credito_usado(c.empresa_id, null),
+             'vencido', coalesce(t.vencido, 0), 'ultima', h.ultima) order by e.nome) j
+      from public.crm_credito c join public.crm_empresas e on e.id = c.empresa_id left join tit t on t.empresa_id = c.empresa_id left join hist h on h.empresa_id = c.empresa_id),
+  pend as (
+    select jsonb_agg(jsonb_build_object('empresa_id', e.id, 'nome', e.nome, 'cnpj', e.cnpj, 'criado_em', e.criado_em,
+             'pedidos', (select jsonb_agg(jsonb_build_object('id', p.id, 'numero', p.numero, 'valor', p.valor_total, 'bloqueios', p.bloqueios))
+                           from public.crm_pedidos p where p.empresa_id = e.id and p.situacao = 'aberto' and p.bloqueios && array['SEM ANÁLISE', 'PRAZO', 'LIMITE']))
+             order by e.criado_em desc) j
+      from public.crm_empresas e
+     where exists (select 1 from public.crm_pedidos p where p.empresa_id = e.id and p.situacao = 'aberto' and p.bloqueios && array['SEM ANÁLISE', 'PRAZO', 'LIMITE'])
+        or (e.criado_em >= now() - interval '60 days' and not exists (select 1 from public.crm_credito c where c.empresa_id = e.id)
+            and not exists (select 1 from hist h where h.empresa_id = e.id) and coalesce(e.cnpj, '') <> '')),
+  sug as (
+    select jsonb_agg(jsonb_build_object('empresa_id', e.id, 'nome', e.nome, 'cnpj', e.cnpj, 'maior_mes', round(h.maior_mes, 2), 'meses', h.meses,
+             'ultima', h.ultima, 'aberto', coalesce(t.aberto, 0), 'vencido', coalesce(t.vencido, 0),
+             'situacao', case when coalesce(t.vencido, 0) > 0 then 'analise' else 'prazo' end,
+             'limite', case when coalesce(t.vencido, 0) > 0 then 0 else ceil(h.maior_mes * 2 / 500) * 500 end,
+             'prazo_max', greatest(28, coalesce(t.prazo, 28))) order by h.maior_mes desc) j
+      from hist h join public.crm_empresas e on e.id = h.empresa_id left join tit t on t.empresa_id = h.empresa_id
+     where not exists (select 1 from public.crm_credito c where c.empresa_id = h.empresa_id))
+  select jsonb_build_object('fichas', coalesce((select j from fichas), '[]'), 'pendentes', coalesce((select j from pend), '[]'),
+    'sugestoes', coalesce((select j from sug), '[]')) into r;
+  return r;
+end;
+$$;
+revoke all on function public.crm_credito_painel() from public, anon;
+grant execute on function public.crm_credito_painel() to authenticated;
