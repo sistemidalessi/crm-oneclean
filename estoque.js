@@ -594,7 +594,7 @@
   }
   const NOME_RESP = { confirmacao: 'Confirmar a operação', desconhecimento: 'Desconhecimento', nao_realizada: 'Operação não realizada' };
   function blocoAvisosDfe() {
-    const a = avisos(), adm = CRM.ehAdmin();
+    const a = avisos(), adm = podeSefaz();   // 27/10/2026: o comprador cuida das notas de compra do começo ao fim
     let h = '';
     if (a.desconhecidos.length) h += '<section class="cartao aviso-dfe"><h2>⚠ Fornecedor que nunca vendeu para a empresa <small>' + a.desconhecidos.length + ' CNPJ(s) nas notas da Sefaz</small></h2>' +
       '<p>Confira se a compra aconteceu. Se não reconhecer, marque "Não reconheço": a nota entra no lembrete para responder <strong>Desconhecimento</strong> à Sefaz dentro do prazo.</p>' +
@@ -612,7 +612,7 @@
           '<td class="num">' + (adm ? (p.desconhecido ? '<button type="button" class="btn" data-acao="es-dfe-resp" data-id="' + esc(p.chave + '|desconhecimento') + '">Responder Desconhecimento</button> ' : '') +
             '<button type="button" class="mini" data-acao="es-dfe-resp" data-id="' + esc(p.chave + '|confirmacao') + '">Confirmar</button> ' +
             '<button type="button" class="mini" data-acao="es-dfe-resp" data-id="' + esc(p.chave + '|nao_realizada') + '">Não realizada</button>' + (p.desconhecido ? '' : ' <button type="button" class="mini" data-acao="es-dfe-resp" data-id="' + esc(p.chave + '|desconhecimento') + '">Desconheço</button>')
-            : '<small>quem responde é o administrador</small>') + '</td></tr>').join('') + '</tbody></table></div>'
+            : '<small>quem responde é o administrador ou o comprador</small>') + '</td></tr>').join('') + '</tbody></table></div>'
         : '<p class="vazio">Nenhuma nota perto do prazo.</p>') +
       (a.naoReconhecidos.length ? '<p class="dica">Não reconhecidos: ' + a.naoReconhecidos.map(g => esc(g.nome || g.doc) + ' (' + g.semResposta + ' sem resposta)').join(' · ') +
         '. As notas deles aparecem aqui quando faltarem 30 dias para o prazo; dá para responder antes pela lista "Só com o resumo".</p>' : '') + '</section>';
@@ -645,7 +645,7 @@
         resumo.slice(0, 100).map(d => '<tr><td><strong>' + esc(d.emitente_nome || '?') + '</strong><small>' + esc(quando(d.emitida_em)) + '</small></td><td class="num">' + R.moeda(d.valor) + '</td><td>' +
           (d.manifestada_em ? CRM.selo('ciência dada', 'azul') : d.manifesto_motivo ? CRM.selo(d.manifesto_motivo.slice(0, 60), 'vermelho') : CRM.selo('falta ciência', 'ambar')) +
           (!d.manifestada_em && podeSefaz() ? ' <button type="button" class="mini" data-acao="es-sefaz-ciencia-uma" data-id="' + esc(d.chave) + '" title="Dar a Ciência da Operação desta nota (quando a mercadoria chegar)">dar ciência</button>' : '') +
-          (d.conclusiva_tipo ? ' ' + CRM.selo(NOME_RESP[d.conclusiva_tipo], 'verde') : CRM.ehAdmin() ? ' <button type="button" class="mini" data-acao="es-dfe-resp" data-id="' + esc(d.chave + '|desconhecimento') + '" title="Responder Desconhecimento à Sefaz">desconheço</button>' : '') + '</td></tr>').join('') +
+          (d.conclusiva_tipo ? ' ' + CRM.selo(NOME_RESP[d.conclusiva_tipo], 'verde') : podeSefaz() ? ' <button type="button" class="mini" data-acao="es-dfe-resp" data-id="' + esc(d.chave + '|desconhecimento') + '" title="Responder Desconhecimento à Sefaz">desconheço</button>' : '') + '</td></tr>').join('') +
         '</tbody></table></div></details>' : '') + '</section>' + blocoAvisosDfe();
   }
 
@@ -790,7 +790,7 @@
     },
     'es-dfe-naoreconheco': async doc => {
       const g = avisos().desconhecidos.find(x => x.doc === doc);
-      if (!confirm('Marcar ' + ((g && g.nome) || doc) + ' como NÃO RECONHECIDO?\nAs notas dele entram no lembrete para responder Desconhecimento à Sefaz (o administrador responde; dá para fazer já pela lista "Só com o resumo").')) return;
+      if (!confirm('Marcar ' + ((g && g.nome) || doc) + ' como NÃO RECONHECIDO?\nAs notas dele entram no lembrete para responder Desconhecimento à Sefaz (dá para responder já pela lista "Só com o resumo").')) return;
       await CRM.store().salvarFornecedorDoc({ doc, situacao: 'desconhecido', nome: g ? g.nome : null });
       fornDocs = await CRM.store().fornecedorDocs().catch(() => fornDocs); CRM.toast('Marcado como não reconhecido.'); CRM.render();
     },

@@ -21,7 +21,7 @@ A mesma lista resumida está no `PENDENCIAS-ESCRITORIO.md` do `agilite-sistema-g
       `docs/plano-sair-do-fkn.md`).
 
 - [ ] **Estoque antes da virada (24/10):** parte das 36 diferenças era erro do CRM (fuso), já corrigido; Belaplast 9758 e
-      Leal 23026 reabertas. Falta: (1) **você ou o comprador** (desde 27/10 os dois podem) dar a ciência das notas sem XML completo (Vigut ×2 e AJA de 23/10, Lotus de
+      Leal 23026 reabertas. Falta: (1) o **comprador** dar a ciência das notas sem XML completo (desde 27/10 as notas de compra são dele do começo ao fim) (Vigut ×2 e AJA de 23/10, Lotus de
       19/10: Estoque → Notas de compra → Notas da Sefaz → "dar ciência"); (2) o **comprador** dar entrada nas notas pendentes
       que já chegaram e conferir no FKN quando entrou a **Leal 23020 (15/10)** — se foi depois de 16/10 12h, os sacos Leal
       dela faltam no CRM. Depois disso, rodar de novo "Conferir a virada" e ver quantas das 36 sobram (as que sobrarem são as
