@@ -10,19 +10,6 @@ A mesma lista resumida está no `PENDENCIAS-ESCRITORIO.md` do `agilite-sistema-g
       duas por mês até 03/08; em setembro e outubro não houve. Se houver, a remessa pelo CRM pede a chave da nota de faturamento
       (Pedido → Outra operação → Entrega futura — remessa).
 
-- [ ] **SQL Editor do Supabase (27/10, diretores de Vendas e Compras e apresentação):** colar e rodar de uma vez (fecha o
-      acesso do `anon` às funções e tabelas novas; a RLS já barra, isto é o reforço). Depois pedir ao Claude para conferir.
-      ```sql
-      revoke all on function public.crm_gv_indicadores() from public, anon;
-      revoke all on function public.crm_gv_mix(int) from public, anon;
-      grant execute on function public.crm_gv_indicadores(), public.crm_gv_mix(int) to authenticated, service_role;
-      revoke all on public.crm_ia_apresentacoes from anon, public;
-      revoke all on function public.crm_cs_ruptura(int) from public, anon;
-      revoke all on function public.crm_cs_fornecedores(int) from public, anon;
-      revoke all on function public.crm_cs_tendencia(int) from public, anon;
-      revoke all on public.crm_cs_negociacoes from anon, public;
-      ```
-
 ## Perguntas que só você responde
 
 - [ ] **Boleto (26/10):** o gerente indicou o BB Pay; perguntas (protesto, juros/multa, custos, API) mandadas a ele. O
