@@ -1260,3 +1260,7 @@ pre.of-previa { white-space: pre-wrap; font-family: inherit; font-size: .88rem; 
 .cred-proposta { border-left: 3px solid var(--verde, #2e7d32); padding-left: 10px; margin: 8px 0; }
 .cred-form { padding: 0 18px; }
 a.btn, a.mini { text-decoration: none; display: inline-block; }
+.cred-filtros { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; }
+.cred-filtros input { min-width: 260px; }
+button.ordena { appearance: none; border: 0; background: none; font: inherit; color: inherit; text-transform: inherit; letter-spacing: inherit; cursor: pointer; padding: 0; }
+button.ordena.ativo { color: var(--marinho); }

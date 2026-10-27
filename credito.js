@@ -154,22 +154,59 @@
           '<td class="acoes-linha"><button type="button" class="mini" data-acao="cred-analisar" data-id="' + esc(s.empresa_id) + '">Ajustar</button></td></tr>').join('') +
         '</tbody></table></div>' + (sug.length > 60 ? '<p class="mais">mostrando os 60 que mais compram</p>' : '') + '</section>' : '') +
       '<section class="cartao"><h2>Fichas de crédito <small>' + fichas.length + (vencidas.length ? ' · ' + vencidas.length + ' com revisão vencida' : '') + (perto.length ? ' · ' + perto.length + ' perto do limite' : '') + '</small></h2>' +
-      (fichas.length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Cliente</th><th>Situação</th><th class="num">Limite</th><th class="num">Usado</th><th class="num">Disponível</th><th>Prazo</th><th>Revisar</th><th></th></tr></thead><tbody>' +
-        fichas.map(f => {
-          const disp = Math.max(0, Number(f.limite) - Number(f.usado)), venc = f.revisar_em && f.revisar_em < h;
-          return '<tr><td><button type="button" class="link" data-acao="abrir-empresa" data-id="' + esc(f.empresa_id) + '">' + esc(f.nome) + '</button><small>' + esc({ consulta: 'pela consulta', historico: 'pelo histórico', manual: 'à mão' }[f.origem] || '') + (f.score ? ' · score ' + f.score : '') + '</small></td>' +
-            '<td>' + seloSit(f.situacao) + (f.vencido > 0 ? ' ' + CRM.selo('vencido ' + R.moeda(f.vencido), 'vermelho') : '') + '</td>' +
-            '<td class="num">' + (f.situacao === 'prazo' ? esc(R.moeda(f.limite)) : '—') + '</td><td class="num">' + esc(R.moeda(f.usado)) + '</td>' +
-            '<td class="num' + (f.situacao === 'prazo' && disp < Number(f.limite) * 0.2 ? ' cx-neg' : '') + '">' + (f.situacao === 'prazo' ? esc(R.moeda(disp)) : '—') + '</td>' +
-            '<td>' + (f.prazo_max ? f.prazo_max + ' dias' : '—') + '</td><td>' + (venc ? CRM.selo(R.dataBR(f.revisar_em), 'ambar') : esc(R.dataBR(f.revisar_em || ''))) + '</td>' +
-            '<td class="acoes-linha">' + (f.pdf ? '<button type="button" class="mini" data-acao="cred-pdf" data-id="' + esc(f.empresa_id) + '">Consulta</button> ' : '') +
-              '<button type="button" class="mini" data-acao="cred-analisar" data-id="' + esc(f.empresa_id) + '">' + (venc ? 'Revisar' : 'Editar') + '</button></td></tr>';
-        }).join('') + '</tbody></table></div>' : '<p class="vazio">Nenhuma ficha ainda.</p>') + '</section>';
+      (fichas.length ? filtrosFichas(fichas) + '<div id="credFichas">' + tabelaFichas(fichas) + '</div>' : '<p class="vazio">Nenhuma ficha ainda.</p>') + '</section>';
+  }
+
+  // Fichas: busca por nome/CNPJ, filtro por situação e ordenação pela coluna (27/10/2026, pedido do Anderson:
+  // "clicando em situação, vem todos os bloqueados para eu dar uma verificada rápida").
+  const vf = { busca: '', filtro: '', ordem: 'nome', desc: false };
+  const FILTROS = [['', 'Todas'], ['prazo', 'A prazo'], ['vista', 'Só à vista'], ['analise', 'Em análise'], ['vencido', 'Com título vencido'],
+    ['perto', 'Perto do limite'], ['revisar', 'Revisão vencida'], ['historico', 'Pelo histórico'], ['consulta', 'Pela consulta']];
+  const dispDe = f => Math.max(0, Number(f.limite) - Number(f.usado));
+  function passa(f, h) {
+    const k = vf.filtro;
+    if (k === 'prazo' || k === 'vista' || k === 'analise') { if (f.situacao !== k) return false; }
+    else if (k === 'vencido') { if (!(f.vencido > 0)) return false; }
+    else if (k === 'perto') { if (!(f.situacao === 'prazo' && f.limite > 0 && f.usado >= f.limite * 0.8)) return false; }
+    else if (k === 'revisar') { if (!(f.revisar_em && f.revisar_em < h)) return false; }
+    else if (k === 'historico' || k === 'consulta') { if (f.origem !== k) return false; }
+    const t = vf.busca.trim();
+    if (!t) return true;
+    const dig = t.replace(/[^0-9A-Za-z]/g, '').toUpperCase(), cnpj = String(f.cnpj || '').replace(/[^0-9A-Za-z]/g, '').toUpperCase();
+    return R.normaliza(String(f.nome || '')).indexOf(R.normaliza(t)) !== -1 || (dig.length >= 3 && /\d/.test(dig) && cnpj.indexOf(dig) !== -1);
+  }
+  function filtrosFichas(fichas) {
+    const h = CRM.hoje(), conta = k => { const a = vf.filtro; vf.filtro = k; const b = vf.busca; vf.busca = ''; const n = fichas.filter(f => passa(f, h)).length; vf.filtro = a; vf.busca = b; return n; };
+    return '<div class="filtro-linha cred-filtros"><input type="search" id="credFiltroBusca" placeholder="procurar por nome ou CNPJ" value="' + esc(vf.busca) + '">' +
+      FILTROS.map(([k, r]) => { const n = conta(k); return k && !n ? '' : '<button type="button" class="chip-filtro' + (vf.filtro === k ? ' ativo' : '') + '" data-acao="cred-filtro" data-id="' + k + '">' + esc(r) + ' (' + n + ')</button>'; }).join('') + '</div>';
+  }
+  function tabelaFichas(fichas) {
+    const h = CRM.hoje();
+    const chave = { nome: f => R.normaliza(String(f.nome || '')), situacao: f => ({ analise: 0, vista: 1, prazo: 2 }[f.situacao]) + R.normaliza(String(f.nome || '')),
+      limite: f => Number(f.limite), usado: f => Number(f.usado), disp: f => (f.situacao === 'prazo' ? dispDe(f) : -1), prazo: f => Number(f.prazo_max || 0), revisar: f => f.revisar_em || '' }[vf.ordem];
+    const l = fichas.filter(f => passa(f, h)).sort((a, b) => { const x = chave(a), y = chave(b); return (x < y ? -1 : x > y ? 1 : 0) * (vf.desc ? -1 : 1); });
+    const th = (k, rot, cls) => '<th' + (cls ? ' class="' + cls + '"' : '') + '><button type="button" class="ordena' + (vf.ordem === k ? ' ativo' : '') + '" data-acao="cred-ordem" data-id="' + k + '">' + esc(rot) + (vf.ordem === k ? (vf.desc ? ' ▼' : ' ▲') : '') + '</button></th>';
+    if (!l.length) return '<p class="vazio">Nenhuma ficha com esse filtro.</p>';
+    return '<div class="tabela-rolagem"><table class="tabela"><thead><tr>' + th('nome', 'Cliente') + th('situacao', 'Situação') + th('limite', 'Limite', 'num') + th('usado', 'Usado', 'num') +
+      th('disp', 'Disponível', 'num') + th('prazo', 'Prazo') + th('revisar', 'Revisar') + '<th></th></tr></thead><tbody>' +
+      l.slice(0, 500).map(f => {
+        const disp = dispDe(f), venc = f.revisar_em && f.revisar_em < h;
+        return '<tr><td><button type="button" class="link" data-acao="abrir-empresa" data-id="' + esc(f.empresa_id) + '">' + esc(f.nome) + '</button><small>' + esc(f.cnpj || '') + ' · ' + esc({ consulta: 'pela consulta', historico: 'pelo histórico', manual: 'à mão' }[f.origem] || '') + (f.score ? ' · score ' + f.score : '') + '</small></td>' +
+          '<td>' + seloSit(f.situacao) + (f.vencido > 0 ? ' ' + CRM.selo('vencido ' + R.moeda(f.vencido), 'vermelho') : '') + '</td>' +
+          '<td class="num">' + (f.situacao === 'prazo' ? esc(R.moeda(f.limite)) : '—') + '</td><td class="num">' + esc(R.moeda(f.usado)) + '</td>' +
+          '<td class="num' + (f.situacao === 'prazo' && disp < Number(f.limite) * 0.2 ? ' cx-neg' : '') + '">' + (f.situacao === 'prazo' ? esc(R.moeda(disp)) : '—') + '</td>' +
+          '<td>' + (f.prazo_max ? f.prazo_max + ' dias' : '—') + '</td><td>' + (venc ? CRM.selo(R.dataBR(f.revisar_em), 'ambar') : esc(R.dataBR(f.revisar_em || ''))) + '</td>' +
+          '<td class="acoes-linha">' + (f.pdf ? '<button type="button" class="mini" data-acao="cred-pdf" data-id="' + esc(f.empresa_id) + '">Consulta</button> ' : '') +
+            '<button type="button" class="mini" data-acao="cred-analisar" data-id="' + esc(f.empresa_id) + '">' + (venc ? 'Revisar' : 'Editar') + '</button></td></tr>';
+      }).join('') + '</tbody></table></div>' + (l.length > 500 ? '<p class="mais">mostrando 500 de ' + l.length + ': use a busca</p>' : '<p class="mais">' + l.length + ' ficha(s)</p>');
   }
   function depoisAba(el) {
     carrega();
     const b = el.querySelector('#credBusca');
     if (b) b.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); CRM.acoes['cred-buscar'](); } });
+    // a busca redesenha só a tabela (redesenhar a tela tiraria o cursor da caixa)
+    const fb = el.querySelector('#credFiltroBusca'), alvo = el.querySelector('#credFichas');
+    if (fb && alvo) fb.addEventListener('input', () => { vf.busca = fb.value; alvo.innerHTML = tabelaFichas((painel && painel.fichas) || []); });
   }
 
   // Botão "Consultar crédito": um link de verdade (<a target=_blank>), que o navegador abre sem bloquear; o clique só
@@ -283,6 +320,8 @@
 
   Object.assign(CRM.acoes, {
     'cred-atualiza': () => carrega(true),
+    'cred-filtro': id => { vf.filtro = id || ''; CRM.render(); },
+    'cred-ordem': id => { if (vf.ordem === id) vf.desc = !vf.desc; else { vf.ordem = id; vf.desc = ['limite', 'usado', 'disp'].indexOf(id) !== -1; } CRM.render(); },
     'cred-endereco': async () => {
       const c = cfg(), u = prompt('Endereço do site de consulta de crédito (onde você faz a pesquisa):', c.url || '');
       if (u == null) return;
