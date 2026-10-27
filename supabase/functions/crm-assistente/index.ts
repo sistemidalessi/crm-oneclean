@@ -84,7 +84,9 @@ curva A). Se faltar o prazo do fornecedor, use 7 dias e avise que é estimativa.
 que o comprador lançou no mês, por unidade de comparação, contra a nossa tabela); o que não estiver lá, não invente.`;
 
 // ------------------------------------------------------------------ ferramentas (todas de leitura)
-type Ctx = { u: SupabaseClient; papel: string; meuId: string; hoje: string; usuarios: Map<string, string> };
+// equipe: só para a gestora (27/10/2026, Anderson) — o faturamento dela conta só a equipe de vendas (gestora e vendedores(as)
+// internos), sem o Direto (administrador) nem externo(a) (comissão "externo"); o geral fica para o administrador.
+type Ctx = { u: SupabaseClient; papel: string; meuId: string; hoje: string; usuarios: Map<string, string>; equipe?: Set<string> };
 type Ferr = { papeis: string[]; def: Anthropic.Tool; roda: (c: Ctx, i: Record<string, unknown>) => Promise<unknown> };
 
 const VENDAS = ['admin', 'gestor', 'vendedor'];
@@ -164,20 +166,23 @@ const FERRAMENTAS: Record<string, Ferr> = {
   },
   vendas: {
     papeis: VENDAS,
-    def: { name: 'vendas', description: 'Faturamento (notas fiscais de venda, sem as canceladas) num período, somado por vendedor(a), cliente, produto ou mês. A vendedora vê só a carteira dela.', strict: true,
+    def: { name: 'vendas', description: 'Faturamento (notas fiscais de venda, sem as canceladas) num período, somado por vendedor(a), cliente, produto ou mês. A vendedora vê só a carteira dela; a gestora, só a equipe de vendas dela (sem o Direto e sem vendedor(a) externo(a)).', strict: true,
       input_schema: obj({ de: dt, ate: dt, agrupar: { type: 'string', enum: ['vendedor', 'cliente', 'produto', 'mes'] } }, ['de', 'ate', 'agrupar']) },
     async roda(c, i) {
       if (!ehData(i.de) || !ehData(i.ate)) return { erro: 'datas no formato AAAA-MM-DD' };
       const de = String(i.de), ate = somaDias(String(i.ate), 1), g = String(i.agrupar);
       if (g === 'produto') {
-        const it = await tudo((a, b) => c.u.from('crm_nota_itens').select('codigo, descricao, unidade, quantidade, valor_total, crm_notas!inner(emitida_em, cancelada)').eq('crm_notas.cancelada', false)
-          .gte('crm_notas.emitida_em', de).lt('crm_notas.emitida_em', ate).range(a, b), 20000);
+        const it = (await tudo((a, b) => c.u.from('crm_nota_itens').select('codigo, descricao, unidade, quantidade, valor_total, crm_notas!inner(emitida_em, cancelada, vendedor_id)').eq('crm_notas.cancelada', false)
+          .gte('crm_notas.emitida_em', de).lt('crm_notas.emitida_em', ate).range(a, b), 20000))
+          // deno-lint-ignore no-explicit-any
+          .filter((x: any) => !c.equipe || c.equipe.has(x.crm_notas.vendedor_id));
         const m = new Map<string, { descricao: string; unidade: string; quantidade: number; valor: number }>();
         it.forEach(x => { const k = x.codigo || x.descricao; const p = m.get(k) || { descricao: x.descricao, unidade: x.unidade, quantidade: 0, valor: 0 }; p.quantidade += Number(x.quantidade || 0); p.valor += Number(x.valor_total || 0); m.set(k, p); });
         const l = [...m.entries()].sort((a, b) => b[1].valor - a[1].valor);
         return { periodo: [de, i.ate], itens: it.length, total: n2(l.reduce((s, x) => s + x[1].valor, 0)), top: l.slice(0, 15).map(([cod, p]) => ({ codigo: cod, descricao: p.descricao, unidade: p.unidade, quantidade: n2(p.quantidade), valor: n2(p.valor) })) };
       }
-      const ns = await tudo((a, b) => c.u.from('crm_notas').select('emitida_em, valor_total, vendedor_nome, cliente_nome, empresa_id').eq('cancelada', false).gte('emitida_em', de).lt('emitida_em', ate).range(a, b));
+      const ns = (await tudo((a, b) => c.u.from('crm_notas').select('emitida_em, valor_total, vendedor_nome, vendedor_id, cliente_nome, empresa_id').eq('cancelada', false).gte('emitida_em', de).lt('emitida_em', ate).range(a, b)))
+        .filter(n => !c.equipe || c.equipe.has(n.vendedor_id));
       const m = new Map<string, { notas: number; valor: number }>();
       ns.forEach(n => {
         const k = g === 'vendedor' ? (n.vendedor_nome || 'sem vendedor') : g === 'cliente' ? (n.cliente_nome || '?') : String(n.emitida_em).slice(0, 7);
@@ -463,7 +468,8 @@ Deno.serve(async (req) => {
   }
   // a análise de vendas do dia: da equipe (administrador e gestora) ou da carteira (vendedor(a))
   const analiseV = c.acao === 'analise_vendas';
-  const chaveV = ['admin', 'gestor'].includes(eu.papel) ? 'equipe' : eu.user_id;
+  // 27/10/2026: a do administrador ("geral", com o Direto e os externos) não é a da gestora ("equipe", só a equipe dela)
+  const chaveV = eu.papel === 'admin' ? 'geral' : eu.papel === 'gestor' ? 'equipe' : eu.user_id;
   if (analiseV) {
     if (!['admin', 'gestor', 'vendedor'].includes(eu.papel)) return resposta(403, { erro: 'a análise de vendas é da equipe de vendas' });
     const { data: ja } = await db.from('crm_ia_analises_vendas').select('dia, texto, em').eq('dia', hoje).eq('chave', chaveV).maybeSingle();
@@ -515,6 +521,11 @@ Deno.serve(async (req) => {
   const papelF = analise ? 'comprador' : eu.papel;
   const { data: us } = await db.from('crm_usuarios').select('user_id, nome, papel, ativo');
   const ctx: Ctx = { u, papel: papelF, meuId: eu.user_id, hoje, usuarios: new Map((us || []).map(x => [x.user_id, x.nome])) };
+  if (papelF === 'gestor') {
+    const { data: cfg } = await db.from('crm_config').select('dados').eq('id', 1).maybeSingle();
+    const ext = ((cfg && (cfg as { dados?: Record<string, unknown> }).dados) || {}).comissao_usuarios as Record<string, string> || {};
+    ctx.equipe = new Set((us || []).filter(x => (x.papel === 'gestor' || x.papel === 'vendedor') && ext[x.user_id] !== 'externo').map(x => x.user_id));
+  }
   // a análise de vendas roda só com as ferramentas do Gerente (nada de Caixa nem títulos, mesmo para o administrador)
   const minhas = Object.entries(FERRAMENTAS).filter(([n, f]) => f.papeis.includes(papelF) && (!analiseV || FERRAMENTAS_GERENTE.includes(n)) && (!analiseL || FERRAMENTAS_LOGISTICA.includes(n)));
   const tools = minhas.map(([, f]) => f.def);

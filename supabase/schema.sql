@@ -5929,7 +5929,12 @@ language sql stable security invoker set search_path = public as $$
     left join public.crm_usuarios u on u.user_id = d.dono
    where not n.cancelada and n.emitida_em >= (p_desde::timestamp at time zone 'America/Sao_Paulo')
      and (exists (select 1 from public.crm_nota_itens i where i.nota_id = n.id and i.cfop ~ '^[567][14]')
-          or not exists (select 1 from public.crm_nota_itens i where i.nota_id = n.id));
+          or not exists (select 1 from public.crm_nota_itens i where i.nota_id = n.id))
+     -- gestora (27/10/2026, Anderson): só a equipe de vendas dela — gestora e vendedores(as) internos —, sem o Direto
+     -- (administrador) nem externo(a) (comissão "externo"); o administrador vê o geral; a vendedora já vê só o dela (RLS)
+     and (public.crm_eh_admin() or not public.crm_eh_gestor()
+          or (u.papel in ('gestor', 'vendedor')
+              and coalesce((select c.dados->'comissao_usuarios'->>u.user_id::text from public.crm_config c where c.id = 1), '') <> 'externo'));
 $$;
 
 -- ritmo do mês: até hoje × o mesmo período do mês passado, o mês passado inteiro, a meta e a projeção linear

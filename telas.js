@@ -631,18 +631,40 @@
       notas: () => ({ titulo: 'Notas fiscais do período', sub, tipo: 'notas', itens: r.fat.lista || [], vendedor: r.fat.vendedorDe, cliente: r.fat.clienteDe })
     }[id];
   }
+  // Gestora (27/10/2026, pedido do Anderson: "deixar ela ver só a equipe dela, nem a Silmara; o geral só eu"): os
+  // Relatórios dela contam só a equipe de vendas — gestora e vendedores(as) internos —, sem o Direto (venda do
+  // administrador) nem vendedor(a) externo(a) (comissão "externo" em Configurações, hoje a Silmara). A ficha do cliente
+  // continua com todas as notas dele (é o histórico para vender); muda só o que soma faturamento e compara vendedores.
+  let visao = null;
+  CRM.equipeDeVendas = () => {
+    const ext = (E().cfg || {}).comissao_usuarios || {};
+    return new Set((E().D.usuarios || []).filter(u => (u.papel === 'gestor' || u.papel === 'vendedor') && ext[u.user_id] !== 'externo').map(u => u.user_id));
+  };
+  function visaoRelatorios() {
+    if (CRM.ehAdmin() || !CRM.ehGestor()) return { D: E().D, ix: E().ix, eq: null };
+    if (visao && visao.base === E().ix) return visao;
+    const D = E().D, eq = CRM.equipeDeVendas();
+    const resp = id => { const e = id && E().ix.porId.empresas.get(id); return e ? e.responsavel_id : null; };
+    const dono = n => n.vendedor_id || (n.vendedor_nome ? null : resp(n.empresa_id));
+    const Dg = Object.assign({}, D, { notas: (D.notas || []).filter(n => eq.has(dono(n))), negocios: (D.negocios || []).filter(n => eq.has(n.responsavel_id)),
+      usuarios: (D.usuarios || []).filter(u => eq.has(u.user_id)) });
+    visao = { base: E().ix, D: Dg, ix: R.indexa(Dg), eq };
+    return visao;
+  }
   const relatorios = {
     render() {
       const f = F('relatorios');
       if (!f.periodo) f.periodo = 'mes';
       const hoje = CRM.hoje();
       const p = R.periodo(f.periodo, hoje, f.de, f.ate);
-      const resp = f.responsavel || CRM.carteira();
+      const V = visaoRelatorios();
+      let resp = f.responsavel || CRM.carteira();
+      if (V.eq && resp && !V.eq.has(resp)) resp = null;   // gestora: fora da equipe não aparece
       const funis = CRM.funis();
       if (f.funil == null || (f.funil && funis.indexOf(f.funil) === -1)) f.funil = funis.length > 1 ? funis[0] : '';
-      const d = R.dashboard(E().D, E().ix, E().cfg, hoje, { periodo: p, responsavel_id: resp, funil: f.funil });
-      const fat = ultimoFat = R.faturamento(E().D, E().ix, hoje, { periodo: p, responsavel_id: resp });
-      ultimoRel = { d, fat, quando: (p.de > '0001' ? R.dataBR(p.de) + ' a ' + R.dataBR(p.ate) : 'todo o histórico') + (resp ? ' · ' + CRM.nomeUsuario(resp) : ' · equipe toda') };
+      const d = R.dashboard(V.D, V.ix, E().cfg, hoje, { periodo: p, responsavel_id: resp, funil: f.funil });
+      const fat = ultimoFat = R.faturamento(V.D, V.ix, hoje, { periodo: p, responsavel_id: resp });
+      ultimoRel = { d, fat, quando: (p.de > '0001' ? R.dataBR(p.de) + ' a ' + R.dataBR(p.ate) : 'todo o histórico') + (resp ? ' · ' + CRM.nomeUsuario(resp) : V.eq ? ' · sua equipe de vendas' : ' · equipe toda') };
       // Quadro com "id" vira botão: clicar abre a lista do que ele conta (CRM.mostraLista).
       const k = (t, v, s, cls, id) => (id ? '<button type="button" class="kpi clicavel ' + (cls || '') + '" data-acao="rel-lista" data-id="' + id + '" title="Ver quais são">' : '<div class="kpi ' + (cls || '') + '">') +
         '<span>' + esc(t) + '</span><strong>' + esc(v) + '</strong><small>' + esc(s || '') + '</small>' + (id ? '</button>' : '</div>');
@@ -660,8 +682,8 @@
         sel('periodo', [['hoje', 'Hoje'], ['semana', 'Esta semana'], ['mes', 'Este mês'], ['mes_passado', 'Mês passado'], ['trimestre', 'Últimos 3 meses'], ['ano', 'Este ano'], ['12meses', 'Últimos 12 meses'], ['tudo', 'Tudo'], ['personalizado', 'Escolher datas…']], f.periodo) +
         (f.periodo === 'personalizado' ? '<input type="date" id="fDe" value="' + esc(f.de || '') + '" aria-label="De"><input type="date" id="fAte" value="' + esc(f.ate || '') + '" aria-label="Até">' : '') +
         (funis.length > 1 ? sel('funil', [['', 'Todos os funis']].concat(funis.map(x => [x, x])), f.funil) : '') +
-        (CRM.ehGestor() ? sel('responsavel', CRM.opcoesUsuarios('Conforme o topo'), f.responsavel) : '') +
-        '<span class="sub">' + (p.de > '0001' ? esc(R.dataBR(p.de)) + ' a ' + esc(R.dataBR(p.ate)) : 'todo o histórico') + (resp ? ' · ' + esc(CRM.nomeUsuario(resp)) : ' · equipe toda') + '</span>' +
+        (CRM.ehGestor() ? sel('responsavel', CRM.opcoesUsuarios(V.eq ? 'Minha equipe' : 'Conforme o topo').filter(o => !V.eq || !o[0] || V.eq.has(o[0])), f.responsavel) : '') +
+        '<span class="sub">' + (p.de > '0001' ? esc(R.dataBR(p.de)) + ' a ' + esc(R.dataBR(p.ate)) : 'todo o histórico') + (resp ? ' · ' + esc(CRM.nomeUsuario(resp)) : V.eq ? ' · sua equipe de vendas' : ' · equipe toda') + '</span>' +
         '<span class="flex"></span><button type="button" class="btn sec" data-acao="imprimir">Imprimir</button></div>' +
         '<section class="kpis">' +
         // Mesmos nomes do painel do Agendor, que a equipe já conhece.

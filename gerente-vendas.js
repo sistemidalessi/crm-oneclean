@@ -67,8 +67,9 @@
   CRM.gerenteVendas = cartao({
     id: 'gerente-vendas', titulo: 'Diretor de Vendas', papeis: ['admin', 'gestor', 'vendedor'],
     temStore: st => !!st.analiseVendas,
-    chave: () => (CRM.ehGestor() ? 'equipe' : CRM.meuId()),
-    quem: () => (CRM.ehGestor() ? 'da equipe' : 'da sua carteira'),
+    // 27/10/2026: a do administrador é a "geral" (com o Direto e os externos); a da gestora, só a equipe dela
+    chave: () => (CRM.ehAdmin() ? 'geral' : CRM.ehGestor() ? 'equipe' : CRM.meuId()),
+    quem: () => (CRM.ehAdmin() ? 'geral' : CRM.ehGestor() ? 'da sua equipe' : 'da sua carteira'),
     gerar: (st, refazer) => st.analiseVendas(refazer),
     hoje: (st, d, k) => st.analiseVendasHoje(d, k),
     pergunta: () => (CRM.ehGestor()
