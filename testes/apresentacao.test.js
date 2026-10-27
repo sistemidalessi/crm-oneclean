@@ -23,6 +23,9 @@ test('todo texto diz que é IA, o que não faz e que a diretoria reporta ao CEO 
     assert.match(s, /treinamentos/, p);
     assert.match(s, /^Olá, Ana\./, p);
     assert.ok(s.includes('Empresa Teste'), p);
+    // postura de diretor (27/10/2026): cobra plano e prazo, sem tom de parceiro
+    assert.match(s, /planos? de ação/, p);
+    assert.doesNotMatch(s, /parceir|caminhar ao seu lado|Conte comigo/i, p);
     // a apresentação nunca fala das orientações em off
     assert.doesNotMatch(s, /orienta|diretriz/i, p);
   }

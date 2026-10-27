@@ -13,46 +13,50 @@
   const DIRETOR_DO_PAPEL = { vendedor: 'gerente-vendas', gestor: 'gerente-vendas', comprador: 'compras-setor-interno', logistica: 'logistica' };
 
   const COMUM = [
-    'Eu apenas consulto o sistema: não altero cadastros, pedidos ou valores e não envio mensagens a clientes.',
+    'Eu consulto o sistema e oriento; a execução é de vocês. Não altero cadastros, pedidos ou valores e não envio mensagens a clientes.',
     'Os números que apresento vêm do próprio sistema. Quando eu não tiver um dado, direi isso com clareza.',
-    'Como em qualquer empresa, a diretoria presta contas: eu e os demais diretores apresentamos relatórios sobre o andamento das áreas ao CEO do {grupo}.'
+    'A diretoria presta contas: eu e os demais diretores apresentamos relatórios sobre o andamento das áreas ao CEO do {grupo}.'
   ];
+  // o que vale para todos: cobrança com plano e prazo, e treinamento quando os números pedirem
+  const COBRA = 'Quando algo estiver atrasado ou fora do padrão, vou cobrar um plano de ação e um prazo de retorno, e vou acompanhar até ser resolvido. Também vou indicar treinamentos e temas de estudo sempre que os números mostrarem necessidade de desenvolvimento.';
 
   // texto(papel, primeiroNome, { empresa, grupo }) → { diretor, titulo, saudacao, paragrafos, importante, convite } ou null
+  // 27/10/2026 (Anderson: "deixa o CRM firme também", depois de trocar o Agilitinho da Agilité pelo Diretor de RH e DP):
+  // postura de diretor, sem tom de parceiro ou de mascote.
   function texto(papel, nome, o) {
     const diretor = DIRETOR_DO_PAPEL[papel];
     if (!diretor) return null;
     const empresa = (o && o.empresa) || 'empresa', grupo = (o && o.grupo) || 'grupo';
-    const ia = 'Antes de começarmos, quero me apresentar com transparência: sou uma inteligência artificial, criada pela ' + empresa + ' para apoiar ';
+    const ia = area => 'Sou uma inteligência artificial e respondo pela ' + area + ' junto à gestão da empresa.';
     let titulo, p;
     if (papel === 'gestor') {
       titulo = 'Diretor de Vendas';
       p = [
-        ia + 'você na liderança da equipe comercial.',
+        ia('área comercial') + ' Com você, meu papel é sustentar a liderança da equipe com números.',
         'Todos os dias trago a análise da equipe: o ritmo do mês por vendedor(a), quem precisa de apoio e em quê, os clientes que deixaram de comprar, o funil de negócios e os indicadores de ticket médio, conversão e clientes novos. Às segundas-feiras, preparo o acompanhamento da semana com os focos da equipe.',
-        'Posso ajudar você a montar planos de ação, preparar as conversas com cada vendedor(a), sugerir treinamentos para a equipe e acompanhar o que foi combinado. Os Diretores de Compras e de Logística também estão à disposição nas áreas deles.',
-        'Pela sua posição de liderança, também trarei a você pontos de atenção e pedidos de retorno sobre os resultados da equipe.'
+        'Vou ajudar você a definir planos de ação, preparar as conversas com cada vendedor(a), indicar treinamentos para a equipe e acompanhar o que foi combinado até ser cumprido. Os Diretores de Compras e de Logística respondem pelas áreas deles.',
+        'Pela sua posição de liderança, vou trazer a você pontos de atenção e pedidos de retorno sobre os resultados da equipe, com prazo.'
       ];
     } else if (papel === 'vendedor') {
       titulo = 'Diretor de Vendas';
       p = [
-        ia + 'a área comercial.',
-        'Meu papel é caminhar ao seu lado. Todos os dias acompanho os números da sua carteira (o ritmo do mês, a meta, os clientes que deixaram de comprar e os negócios em andamento) e trago uma análise com as prioridades do dia. Às segundas-feiras, faremos juntos o acompanhamento da semana.',
-        'Também estou aqui para ajudar a montar planos de ação, sugerir treinamentos e temas de estudo quando os números mostrarem uma oportunidade de desenvolvimento, e responder às suas dúvidas a qualquer hora.'
+        ia('área comercial'),
+        'Meu trabalho é garantir que a sua carteira renda o que pode render: o ritmo do mês, a meta, os clientes que deixaram de comprar e os negócios em andamento. Acompanho esses números todos os dias e aponto o que precisa ser feito, em que ordem e até quando. Às segundas-feiras, faremos o acompanhamento da semana, e vou pedir o seu retorno.',
+        COBRA
       ];
     } else if (papel === 'comprador') {
       titulo = 'Diretor de Compras';
       p = [
-        ia + 'a área de compras.',
-        'Todos os dias acompanho o estoque, a venda de cada produto, os prazos e preços dos fornecedores e as notas de compra, e trago uma análise com o que pedir, de quem e por qual preço negociar, além do estoque parado que merece atenção.',
-        'Também estou aqui para ajudar a montar planos de compra, preparar negociações com fornecedores, sugerir treinamentos e temas de estudo quando os números mostrarem uma oportunidade de desenvolvimento, e responder às suas dúvidas a qualquer hora.'
+        ia('área de compras'),
+        'Meu trabalho é garantir que não falte o que vende e que não sobre o que não gira, comprando pelo preço certo: estoque, venda de cada produto, prazos e preços dos fornecedores e notas de compra. Acompanho isso todos os dias e aponto o que pedir, de quem, por qual preço negociar e até quando.',
+        COBRA
       ];
     } else {
       titulo = 'Diretor de Logística';
       p = [
-        ia + 'a área de logística.',
-        'Todos os dias acompanho as rotas, as entregas, os canhotos, os pedidos em separação e as notas que ainda não entraram em rota, e trago uma análise com o que precisa de atenção primeiro.',
-        'Também estou aqui para ajudar a organizar a rotina, montar planos de ação para os problemas de entrega, sugerir treinamentos e temas de estudo quando os números mostrarem uma oportunidade de desenvolvimento, e responder às suas dúvidas a qualquer hora.'
+        ia('área de logística'),
+        'Meu trabalho é garantir que o que foi vendido chegue ao cliente no dia combinado, com o canhoto assinado: rotas, entregas, canhotos, pedidos em separação e notas que ainda não entraram em rota. Acompanho isso todos os dias e aponto o que precisa ser resolvido primeiro e até quando.',
+        COBRA
       ];
     }
     return {
@@ -61,7 +65,7 @@
       apresentacao: 'Sou o ' + titulo + ' da ' + empresa + '.',
       paragrafos: p,
       importante: COMUM.map(t => t.replace('{grupo}', grupo)),
-      convite: 'Conte comigo. Quando quiser, é só clicar em "Conversar com o ' + titulo + '" e fazer a sua primeira pergunta.'
+      convite: 'Conto com o compromisso ' + (papel === 'gestor' ? 'da sua liderança' : 'de cada um') + '. Dúvidas, planos e os retornos que eu pedir passam por "Conversar com o ' + titulo + '".'
     };
   }
 
