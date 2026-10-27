@@ -7,9 +7,10 @@ A mesma lista resumida está no `PENDENCIAS-ESCRITORIO.md` do `agilite-sistema-g
 
 - [x] **Serviço fiscal na VPS `2026-10-23e`**: atualizado pelo Anderson em 26/10 e conferido em Fiscal → Emissão.
 - [x] **Serviço fiscal na VPS `2026-10-27a`** (aviso contra boleto falso no texto da nota): atualizado pelo Anderson em 27/10 e conferido.
-- [ ] **Santa Casa (entrega futura):** ainda há saldo a entregar do faturamento (5922) feito no FKN? As remessas (5117) iam
-      duas por mês até 03/08; em setembro e outubro não houve. Se houver, a remessa pelo CRM pede a chave da nota de faturamento
-      (Pedido → Outra operação → Entrega futura — remessa).
+- [ ] **Santa Casa (entrega futura):** **ainda há entregas a fazer** (Anderson, 27/10). O faturamento (5922) é de antes de 2026
+      e não está no CRM; as remessas de 2026 foram álcool 800 ml, pano multiuso Lifeclean e Bettanin (a última em 03/08). Falta a
+      **logística** passar a chave (ou o número) da nota de faturamento e o saldo de cada produto; a remessa pelo CRM é em
+      Pedido → Outra operação → Entrega futura — remessa, informando essa chave.
 
 ## Perguntas que só você responde
 
@@ -69,4 +70,7 @@ A mesma lista resumida está no `PENDENCIAS-ESCRITORIO.md` do `agilite-sistema-g
 - [ ] **Certificado A1:** o da VPS (que emite pelo CRM) vale até **23/12/2026** — renovar e instalar na VPS na 1ª quinzena de
       dezembro. **Conferido em 27/10:** o FKN já assina com um certificado da OneClean válido até 23/12/2026 (NF 2780 de 26/10),
       o mesmo prazo do da VPS; o que vencia em 29/10 não está mais em uso. Nada a fazer até dezembro.
-- [ ] **Tabela do IBPT** (tributos aproximados na nota) está vencida desde 30/09: subir a nova pela aba Fiscal.
+- [ ] **Tabela do IBPT** (tributos aproximados na nota, vencida desde 30/09): token gratuito do De Olho no Imposto. Passo a passo:
+      deolhonoimposto.ibpt.org.br → Criar conta (confirma por e-mail e SMS) → Gerenciamento de Empresas → incluir a OneClean pelo
+      CNPJ → copiar o **Token** → Supabase → Edge Functions → Secrets → novo segredo `IBPT_TOKEN` com o token → no CRM, Fiscal →
+      4. Emissão → "Atualizar pelo IBPT agora". Depois disso o CRM atualiza sozinho.
