@@ -206,6 +206,15 @@
     let y = 14;
     if (d.pix && op.qr) { op.qr(pdf, X, y, 30); fonte(13, true); pdf.setTextColor(60, 90, 220); pdf.text('Pague agora com o seu Pix', X + 36, y + 14); pdf.setTextColor(0);
       fonte(7, false); pdf.text('Para efetuar o pagamento via Pix, utilize a opção Pix de seu aplicativo', X + 36, y + 19); pdf.text('e aponte a câmera do seu aparelho para o QR code ao lado.', X + 36, y + 22.5); y += 36; }
+    // ---------------- aviso contra boleto falso (op.aviso, regras.js avisoGolpe), grifado em amarelo com borda vermelha
+    if (op.aviso) {
+      fonte(7.6, true);
+      const ls = pdf.splitTextToSize(limpa(op.aviso), W - 8), ha = 4 + ls.length * 3.3;
+      pdf.setFillColor(255, 241, 118); pdf.setDrawColor(200, 30, 30); pdf.setLineWidth(0.6);
+      pdf.rect(X, y, W, ha, 'FD');
+      pdf.setTextColor(150, 0, 0); pdf.text(ls, X + 4, y + 4.6, { lineHeightFactor: 1.2 }); pdf.setTextColor(0);
+      y += ha + 3;
+    }
     // ---------------- recibo do pagador
     fonte(7, true); pdf.text('Recibo do Pagador', X + W, y + 3, { align: 'right' });
     y = topo(y + 5);
@@ -246,7 +255,10 @@
     y += H;
     const yIns = y;
     rot('Informações de responsabilidade do Beneficiário', X + 1.2, y);
-    d.instrucoes.forEach((t, i) => escreve(t, X + 3, y + 6.5 + i * 3.6, ESQ - 6, 7.4, {}));
+    const ins = d.instrucoes.slice();
+    // na ficha, a linha curta do aviso (o banco e o caixa veem esta parte)
+    if (op.aviso && ins.length < 6) ins.push('ATENÇÃO: SÓ PAGUE SE O BENEFICIÁRIO FOR ' + limpa(d.beneficiario.nome).toUpperCase() + (d.beneficiario.doc ? ' - CNPJ ' + d.beneficiario.doc : ''));
+    ins.forEach((t, i) => escreve(t, X + 3, y + 6.5 + i * 3.6, ESQ - 6, 7.4, { negrito: op.aviso && i === ins.length - 1 && /^ATENÇÃO: SÓ PAGUE/.test(t) }));
     [['(-) Abatimento', ''], ['(+) Juros / Multa', ''], ['(=) Valor Cobrado', '']].forEach((c, i) => cel(X + ESQ, yIns + i * H, DIR, H, c[0], c[1], { amarela: true, cinza: i === 2 }));
     y += 3 * H + 8;
     pdf.setDrawColor(0); pdf.setLineWidth(0.4); pdf.line(X, y, X + W, y);
@@ -274,7 +286,28 @@
     return y + 16;
   }
 
-  const B = { fatorDe, nossoNumero, campoLivre, codigoBarras, itf, instrucoes, dvNossoNumero, nossoImpresso, faltaNoConvenio, montar, desenha, docFmt, enderecoTexto, enderecoLinhas };
+  // Aviso contra boleto falso (27/10/2026, pedido do Anderson: estão clonando os boletos e mandando aos clientes).
+  // Vai na nota (informações complementares), na DANFE, no boleto, na folha de resumo e nas mensagens, grifado.
+  // texto = o que o administrador gravou em Configurações (fiscal.aviso_golpe): '' desliga, ausente usa o padrão abaixo.
+  // banco = '001 (Banco do Brasil)' quando a empresa só cobra por um banco (os 3 primeiros números da linha digitável).
+  function foneBR(v) {
+    const d = digitos(v).replace(/^55(?=\d{10,11}$)/, '');
+    return d.length === 11 ? '(' + d.slice(0, 2) + ') ' + d.slice(2, 7) + '-' + d.slice(7) : d.length === 10 ? '(' + d.slice(0, 2) + ') ' + d.slice(2, 6) + '-' + d.slice(6) : '';
+  }
+  function avisoGolpe(emit, texto, banco) {
+    if (texto === '') return '';
+    if (texto != null && String(texto).trim()) return String(texto).replace(/\s+/g, ' ').trim();
+    emit = emit || {};
+    const nome = String(emit.razao || emit.nome || '').trim();
+    if (!nome) return '';
+    const cnpj = emit.cnpj ? docFmt(emit.cnpj) : '', tel = foneBR((emit.endereco || {}).fone || emit.fone);
+    return 'ATENÇÃO, GOLPE DO BOLETO FALSO: antes de pagar, confira no app do seu banco se o beneficiário é ' + nome +
+      (cnpj ? ', CNPJ ' + cnpj : '') + (banco ? ', e se a linha digitável começa com ' + banco : '') + '. ' +
+      'Não mudamos dados bancários por e-mail ou WhatsApp e não pedimos pagamento em nome de outra pessoa ou empresa.' +
+      (tel ? ' Na dúvida, ligue para ' + tel + ' antes de pagar.' : '') +
+      ' Pagamento de boleto que não foi emitido por nós não quita esta cobrança.';
+  }
+  const B = { fatorDe, avisoGolpe, foneBR, nossoNumero, campoLivre, codigoBarras, itf, instrucoes, dvNossoNumero, nossoImpresso, faltaNoConvenio, montar, desenha, docFmt, enderecoTexto, enderecoLinhas };
   raiz.CRMBoleto = B;
   if (typeof module !== 'undefined') module.exports = B;
 
@@ -311,6 +344,19 @@
         'A numeração do CRM precisa começar numa faixa que o site do BB não use (o gerente confirma).</p></section>';
   }
 
+  // Aviso contra boleto falso (27/10/2026): cartão em Configurações → Integrações. O texto gravado (fiscal.aviso_golpe) vai
+  // na nota (serviço fiscal) e no e-mail de atraso; enquanto não gravar, boleto, DANFE e resumo usam o padrão de regras.js.
+  function cartaoGolpe() {
+    const f = (CRM.estado.cfg && CRM.estado.cfg.fiscal) || {}, t = CRM.avisoGolpe ? CRM.avisoGolpe() : '';
+    const sit = f.aviso_golpe === '' ? CRM.selo('desligado', 'ambar') : f.aviso_golpe ? CRM.selo('ligado', 'verde')
+      : CRM.selo('ligado no boleto, na DANFE e no resumo; falta gravar para ir na nota e no e-mail', 'ambar');
+    return '<section class="cartao"><h2>Aviso contra boleto falso</h2>' +
+      '<p>Sai grifado em amarelo no boleto, na DANFE, na folha de resumo que vai com o boleto, no texto da nota fiscal (só nas notas com parcelas), ' +
+        'no fim da mensagem do WhatsApp com o boleto e no e-mail de atraso. Situação: ' + sit + '</p>' +
+      (t ? '<p style="background:#fff176;border:2px solid #c81e1e;border-radius:8px;padding:8px 12px;color:#7a0000;font-weight:600">' + esc(t) + '</p>' : '') +
+      '<p class="acoes"><button type="button" class="btn sec" data-acao="bol-golpe">Editar o aviso</button></p></section>';
+  }
+
   async function exemplo() {
     const c = cfgB(), em = emitente();
     const D = CRM.estado.D || {};
@@ -330,7 +376,7 @@
     });
     const { jsPDF } = raiz.jspdf;
     const pdf = new jsPDF({ unit: 'mm', format: 'a4' });
-    desenha(pdf, d, { simulacao: true });
+    desenha(pdf, d, { simulacao: true, aviso: CRM.avisoGolpe ? CRM.avisoGolpe() : '' });
     pdf.save('Boleto de exemplo (simulação) - ' + (t.nota_numero ? 'NF ' + t.nota_numero : 'exemplo') + '.pdf');
   }
 
@@ -454,7 +500,7 @@
       { hoje: CRM.hoje() });
     await carregaJsPdf();
     const pdf = new raiz.jspdf.jsPDF({ unit: 'mm', format: 'a4' });
-    desenha(pdf, d, {});
+    desenha(pdf, d, { aviso: CRM.avisoGolpe ? CRM.avisoGolpe() : '' });
     pdf.save('Boleto ' + (b.documento || b.duplicata).replace(/[\\/]/g, '-') + '.pdf');
   }
   async function carregaJsPdf() {
@@ -471,7 +517,7 @@
         { nome: (e && (e.razao_social || e.nome)) || '', doc: e && e.cnpj, endereco: e ? { logradouro: e.logradouro, numero: e.numero, complemento: e.complemento, bairro: e.bairro, cidade: e.cidade, uf: e.uf, cep: e.cep } : '' },
         { hoje: CRM.hoje() });
       pdf.addPage('a4', 'portrait');
-      desenha(pdf, d, {});
+      desenha(pdf, d, { aviso: CRM.avisoGolpe ? CRM.avisoGolpe() : '' });
     }
     return l.length;
   }
@@ -484,7 +530,7 @@
     return n;
   }
 
-  CRM.boletoBB = { cartao, exemplo, remessaTeste, blocoArquivo, depoisBloco, paginasNota, instrucao };
+  CRM.boletoBB = { cartao, cartaoGolpe, exemplo, remessaTeste, blocoArquivo, depoisBloco, paginasNota, instrucao };
   Object.assign(CRM.acoes, {
     'bol-convenio': () => {
       const c = cfgB();
@@ -512,6 +558,28 @@
           if (!/^\s*\d+\s*-\s*[0-9xX]\s*$/.test(String(v.conta || ''))) throw new Error('conta com o dígito depois do traço, como no extrato (ex.: 48730-9)');
           await CRM.salvarConfig({ boleto: Object.assign({}, c, v, { convenio: conv, carteira: digitos(v.carteira), variacao: digitos(v.variacao), inicio_numeracao: digitos(v.inicio_numeracao) }) });
           CRM.toast('Dados do convênio salvos.');
+        }
+      });
+    },
+    'bol-golpe': () => {
+      const f = (CRM.estado.cfg && CRM.estado.cfg.fiscal) || {};
+      CRM.abrirForm({
+        titulo: 'Aviso contra boleto falso',
+        intro: 'Deixe o texto em branco para usar o padrão (nome, CNPJ, banco e telefone da empresa). Sai do jeito que estiver aqui, grifado.',
+        campos: [
+          { nome: 'texto', rotulo: 'Texto do aviso', tipo: 'textarea', largo: true, linhas: 6 },
+          { nome: 'desligar', rotulo: 'Não mostrar o aviso em lugar nenhum', tipo: 'checkbox', largo: true }],
+        valores: { texto: f.aviso_golpe || (CRM.avisoGolpe ? CRM.avisoGolpe() : ''), desligar: f.aviso_golpe === '' },
+        aoSalvar: async v => {
+          let t = '';
+          if (!v.desligar) {
+            const e = (f.emitente || {}), b = (CRM.estado.cfg && CRM.estado.cfg.boleto) || {};
+            t = String(v.texto || '').replace(/\s+/g, ' ').trim() || avisoGolpe(e, undefined, b.convenio ? '001 (Banco do Brasil)' : '');
+            if (!t) throw new Error('preencha o emitente em Fiscal → Emissão (nome e CNPJ) ou escreva o texto');
+            if (t.length > 1000) throw new Error('o aviso passa de 1.000 letras: encurte');
+          }
+          await CRM.salvarConfig({ fiscal: { aviso_golpe: t } });
+          CRM.toast(t ? 'Aviso gravado: vai em todos os documentos de cobrança.' : 'Aviso desligado.');
         }
       });
     },

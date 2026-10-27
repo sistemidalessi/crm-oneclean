@@ -729,6 +729,11 @@
   // contato da Sistemi Dalessi na assinatura do produto (login e rodapé dos orçamentos)
   CRM.ASSINATURA_EMAIL = 'afdalessi@gmail.com';
   CRM.logo = logo;
+  // aviso contra boleto falso (boleto.js avisoGolpe): texto de Configurações ou o padrão com os dados do emitente
+  CRM.avisoGolpe = () => {
+    const f = (E.cfg && E.cfg.fiscal) || {}, b = (E.cfg && E.cfg.boleto) || {};
+    return window.CRMBoleto ? window.CRMBoleto.avisoGolpe(f.emitente, f.aviso_golpe, b.convenio ? '001 (Banco do Brasil)' : '') : '';
+  };
 
   // Tela de entrada (login, senha nova, avisos): fundo no degradê da marca com ondas brancas
   // translúcidas no pé e a mesma onda do orçamento no alto do cartão.

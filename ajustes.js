@@ -866,7 +866,7 @@
             '<button type="button" class="mini" data-acao="integ-excluir" data-id="' + esc(c.id) + '">excluir</button>' : '') + '</td></tr>').join('') + '</tbody></table>'
         : '<p class="vazio">' + (admin ? 'Nenhuma chave ainda.' : 'Só o administrador vê e gera as chaves.') + '</p>') +
       (admin ? '<p><button type="button" class="btn ouro" data-acao="integ-nova">Gerar chave para o vigia</button></p>' : '') + '</section>' +
-      (admin ? leituraCaixa(url, quando) + espelhoAgilite(url, quando) + whatsappMeta() + (CRM.boletoBB ? CRM.boletoBB.cartao() : '') : '') +
+      (admin ? leituraCaixa(url, quando) + espelhoAgilite(url, quando) + whatsappMeta() + (CRM.boletoBB ? CRM.boletoBB.cartaoGolpe() + CRM.boletoBB.cartao() : '') : '') +
       '<section class="cartao"><h2>Últimas entregas <button type="button" class="mini" data-acao="integ-atualizar">atualizar</button></h2>' +
       (integ.registro.length ? '<table class="tabela"><thead><tr><th>Quando</th><th class="num">Arquivos</th><th class="num">Notas novas</th><th class="num">Valor</th><th class="num">Fora</th><th>Detalhes</th></tr></thead><tbody>' +
         integ.registro.map(l => {

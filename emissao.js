@@ -548,7 +548,7 @@
       const x = await CRM.store().nfeXml(id), xml = x && (x.proc_xml || x.nfe_xml), d = xml && Dn.ler(xml);
       if (!d) continue;
       if (n++) pdf.addPage('a4', 'portrait');
-      Dn.desenha(pdf, d, { logo: lg, cores: (raiz.CRM_CONFIG || {}).cores });
+      Dn.desenha(pdf, d, { logo: lg, cores: (raiz.CRM_CONFIG || {}).cores, aviso: CRM.avisoGolpe ? CRM.avisoGolpe() : '' });
     }
     if (n) pdf.save('DANFEs-' + new Date().toISOString().slice(0, 10) + '.pdf');
   }
@@ -567,7 +567,7 @@
       if (!d) throw new Error('não consegui ler o XML da nota');
       if (n && n.situacao === 'cancelada') Object.assign(d, { autorizada: false, marca: 'NF-e CANCELADA' });
       const pdf = new raiz.jspdf.jsPDF({ unit: 'mm', format: 'a4', compress: true });
-      Dn.desenha(pdf, d, { logo: await pegaLogo(), cores: (raiz.CRM_CONFIG || {}).cores });
+      Dn.desenha(pdf, d, { logo: await pegaLogo(), cores: (raiz.CRM_CONFIG || {}).cores, aviso: CRM.avisoGolpe ? CRM.avisoGolpe() : '' });
       // boleto do BB pelo arquivo (26/10/2026): as parcelas da nota com boleto do CRM vão no mesmo PDF, uma por página
       const nb = n && n.situacao !== 'cancelada' && CRM.boletoBB && CRM.boletoBB.paginasNota ? await CRM.boletoBB.paginasNota(pdf, n).catch(() => 0) : 0;
       pdf.save((nb ? 'DANFE e boleto-NF' : 'DANFE-NF') + (n ? n.serie + '-' + n.numero : d.numero) + '.pdf');

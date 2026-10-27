@@ -97,3 +97,13 @@ test('desenha o boleto num jsPDF (uma folha, com a simulação)', () => {
   const saida = pdf.output();
   assert.ok(saida.length > 5000);
 });
+
+test('avisoGolpe: padrão com nome, CNPJ, banco e telefone; texto gravado vence; vazio desliga', () => {
+  const e = { razao: 'EMPRESA TESTE LTDA', cnpj: '11222333000181', endereco: { fone: '11987654321' } };
+  const t = B.avisoGolpe(e, undefined, '001 (Banco do Brasil)');
+  assert.ok(/^ATENÇÃO, GOLPE DO BOLETO FALSO/.test(t));
+  assert.ok(t.indexOf('EMPRESA TESTE LTDA, CNPJ 11.222.333/0001-81') !== -1 && t.indexOf('começa com 001 (Banco do Brasil)') !== -1 && t.indexOf('(11) 98765-4321') !== -1);
+  assert.strictEqual(B.avisoGolpe(e, '  meu  texto '), 'meu texto');
+  assert.strictEqual(B.avisoGolpe(e, ''), '');
+  assert.strictEqual(B.avisoGolpe({}, undefined), '');
+});

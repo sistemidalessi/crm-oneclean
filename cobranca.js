@@ -167,7 +167,12 @@
   // links: endereços do PDF completo (resumo, nota fiscal e boleto) para o cliente abrir — a mensagem do WhatsApp (wa.me)
   // só leva texto, então o PDF vai como link (20/10/2026, pedido do Anderson). Modelo próprio sem a frase do PDF: o link
   // vai numa linha no fim.
+  // vars.aviso_golpe (27/10/2026): o aviso contra boleto falso vai no fim de toda mensagem de boleto
   function mensagemBoleto(modelo, lista, vars, links) {
+    const t = textoMensagemBoleto(modelo, lista, vars, links), av = vars && String(vars.aviso_golpe || '').trim();
+    return av ? t + '\n\n⚠️ ' + av : t;
+  }
+  function textoMensagemBoleto(modelo, lista, vars, links) {
     let t = R.aplicaModelo(modelo || MODELO_BOLETO, Object.assign({}, vars, { boletos: textoBoletos(lista), titulos_boleto: titulosBoleto(lista) }));
     // sem linha digitável (não deu para conferir): só o PDF
     if (!lista.some(b => b.linha_digitavel)) t = t.replace('É só copiar a linha digitável no app do banco. Também te mando o PDF aqui.', 'Te mando o PDF do boleto aqui.');
@@ -300,6 +305,13 @@
   const diaB = b => R.diaLocal(b.criado_em || new Date().toISOString());
   const comJuros = b => Number(b.valor_original) > 0 && Number(b.valor) > Number(b.valor_original) + 0.005;
   const nomeArquivo = (e, l) => ('Boleto atualizado - ' + l.map(nomeNF).join(', ') + ' - ' + (e ? e.nome : '')).replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120) + '.pdf';
+  // aviso contra boleto falso (27/10/2026), grifado no resumo que vai com o boleto
+  function golpeHtml() {
+    const t = CRM.avisoGolpe ? CRM.avisoGolpe() : '';
+    if (!t) return '';
+    const corpo = t.replace(/^ATEN[CÇ][AÃ]O,? GOLPE DO BOLETO FALSO:\s*/i, '');
+    return '<section class="golpe"><b>⚠ Atenção: golpe do boleto falso</b><span>' + esc(corpo.charAt(0).toUpperCase() + corpo.slice(1)) + '</span></section>';
+  }
   function resumoHtml(e, l, danfes, pagBoleto) {
     const cfg = E().cfg || {}, b0 = l[0], um = l.length === 1, h = diaB(b0);
     // mascote da cobrança da instalação (turma.js), no canto da chamada
@@ -330,6 +342,7 @@
       valores +
       (linhas.length ? '<section class="linha"><h2>Linha digitável</h2>' + linhas.map(b => (linhas.length > 1 ? '<small>' + esc(nomeNF(b)) + '</small>' : '') + '<code>' + esc(formataLinha(b.linha_digitavel)) + '</code>').join('') +
         '<small>Copie e cole no app do seu banco, em "Pagar boleto".</small></section>' : '') +
+      golpeHtml() +
       '<section class="passos"><div><b><i>1</i>Pelo app do banco</b><span>' + (linhas.length ? 'Pagar boleto → cole a linha digitável acima.' : 'Pagar boleto → leia o código de barras do boleto.') + '</span></div>' +
         '<div><b><i>2</i>Pelo código de barras</b><span>Use o boleto ' + esc(doBanco(b0)) + ', na página ' + pagBoleto + '.</span></div>' +
         '<div><b><i>3</i>Já pagou?</b><span>Desconsidere este aviso e responda a mensagem em que o recebeu, com o comprovante.</span></div></section>' +
@@ -377,7 +390,7 @@
       const d = xml && Dn && Dn.ler(xml);
       if (!d) { semNota.push(n); continue; }
       pdf.addPage('a4', 'portrait');
-      Dn.desenha(pdf, d, { logo, cores: (raiz.CRM_CONFIG || {}).cores });
+      Dn.desenha(pdf, d, { logo, cores: (raiz.CRM_CONFIG || {}).cores, aviso: CRM.avisoGolpe ? CRM.avisoGolpe() : '' });
       danfes.push({ numero: n });
     }
     const pagBoleto = pdf.getNumberOfPages() + 1;
@@ -804,7 +817,7 @@
           : links.length ? '\n' + (l.some(b => b.arquivo_banco) ? 'PDF completo (resumo, nota fiscal e boleto)' : 'PDF do boleto') + ': ' + links.join('\n') +
             '\n(abra o link no celular e use o Compartilhar para mandar o PDF ao cliente)' : '\n(sem PDF: mande a linha digitável)') +
         (tel ? '\nTelefone no CRM: ' + telBR(tel) + (c && c.nome ? ' (' + c.nome + ')' : '') : '\nSem telefone no CRM') +
-        '\n\nMensagem pronta para o cliente (copie e mande junto com o PDF):\n' + mensagemBoleto((E().cfg || {}).modelo_boleto, l, vars));
+        '\n\nMensagem pronta para o cliente (copie e mande junto com o PDF):\n' + mensagemBoleto((E().cfg || {}).modelo_boleto, l, Object.assign({}, vars, { aviso_golpe: CRM.avisoGolpe ? CRM.avisoGolpe() : '' })));
     }
     return 'Oi, ' + R.primeiroNome(nomeV) + '! Aqui é ' + R.primeiroNome((E().eu || {}).nome || '') + ', do financeiro da ' + CRM.nomeInstalacao() + '. ' +
       (porEmp.size === 1 ? 'Boleto atualizado para você cobrar:' : porEmp.size + ' clientes com boleto atualizado para você cobrar:') + '\n\n' + blocos.join('\n\n────────\n\n') +
@@ -955,7 +968,7 @@
       if (!e || !lista.length) return;
       const c = F.escolheContato(e, el && el.dataset.contato, x => R.linkWhatsApp(x.whatsapp || x.celular || x.telefone));
       const tel = F.telDe(e, c);
-      const texto = mensagemBoleto((E().cfg || {}).modelo_boleto, lista, F.variaveis(e, c), linksPdf(lista, (raiz.CRM_CONFIG || {}).supabaseUrl));
+      const texto = mensagemBoleto((E().cfg || {}).modelo_boleto, lista, Object.assign(F.variaveis(e, c), { aviso_golpe: CRM.avisoGolpe ? CRM.avisoGolpe() : '' }), linksPdf(lista, (raiz.CRM_CONFIG || {}).supabaseUrl));
       // sem celular no cadastro (ou só telefone fixo): abre o WhatsApp para o(a) vendedor(a) escolher o contato
       const fixo = /^(55)?\d{2}[2-5]\d{7}$/.test(String(tel || '').replace(/\D/g, ''));
       const link = !fixo && R.linkWhatsApp(tel, texto) || 'https://wa.me/?text=' + encodeURIComponent(texto);
@@ -1021,7 +1034,7 @@
       const e = CRM.empresa(id), lista = pendentesDe(id), F = CRM.fichas;
       if (!e || !lista.length) return;
       const c = F.escolheContato(e, el && el.dataset.contato, x => R.linkWhatsApp(x.whatsapp || x.celular || x.telefone));
-      const texto = mensagemBoleto((E().cfg || {}).modelo_boleto, lista, F.variaveis(e, c)).replace('Também te mando o PDF aqui.', 'O PDF vai junto.');
+      const texto = mensagemBoleto((E().cfg || {}).modelo_boleto, lista, Object.assign(F.variaveis(e, c), { aviso_golpe: CRM.avisoGolpe ? CRM.avisoGolpe() : '' })).replace('Também te mando o PDF aqui.', 'O PDF vai junto.');
       (async () => {
         if (!(await compartilha(await arquivosDe(lista), texto))) return;
         await marcaCobrado(e, lista, c, texto, true);

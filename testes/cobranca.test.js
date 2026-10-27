@@ -147,3 +147,10 @@ test('DANFE do boleto: a nota pelo número e pela série da duplicata, e a do cl
   assert.strictEqual(C.notaDoBoleto(notas, { nota_numero: 2205, duplicata: '002205/02' }, 'e1').chave, 'k3');  // a cancelada fica de fora
   assert.strictEqual(C.notaDoBoleto(notas, { nota_numero: 99, duplicata: '000099/01' }, 'e1'), null);
 });
+
+test('mensagemBoleto leva o aviso contra boleto falso no fim (27/10/2026)', () => {
+  const b = { duplicata: '002900/01', nota_numero: 2900, valor: 100, vencimento: '2026-11-10', criado_em: '2026-10-27T12:00:00Z', linha_digitavel: '00190000090380488010000000000000100000000010000' };
+  const vars = { saudacao: 'Olá!', vendedor_primeiro_nome: 'Ana', minha_empresa: 'Empresa Teste' };
+  assert.ok(/\n\n⚠️ ATENÇÃO, GOLPE$/.test(C.mensagemBoleto(null, [b], Object.assign({ aviso_golpe: 'ATENÇÃO, GOLPE' }, vars), ['https://x/pdf'])));
+  assert.strictEqual(C.mensagemBoleto(null, [b], vars).indexOf('⚠️'), -1);
+});

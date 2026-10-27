@@ -193,7 +193,9 @@ function notaDoPedido(o) {
   const refTxt = opNome === 'remessa_futura' && o.ref ? 'REMESSA REF. NF DE SIMPLES FATURAMENTO ' + (o.ref.numero || '') +
     (o.ref.emissao ? ' DE ' + String(o.ref.emissao).slice(0, 10).split('-').reverse().join('/') : '') + (o.ref.chave ? ' CHAVE ' + o.ref.chave : '') : '';
   const infCpl = [fatTxt, refTxt, cobra && PORTADOR[pg.forma] ? 'PORTADOR: ' + PORTADOR[pg.forma] + ' PRAZO: ' + prazo : '', entregaTxt, vendedor ? 'VENDEDOR: ' + vendedor : '', 'PEDIDO CRM: ' + (p.numero || ''),
-    d.seu_pedido ? 'SEU PEDIDO: ' + d.seu_pedido : '', d.texto_nota || ''].filter(Boolean).map(x => String(x).replace(/;/g, ',')).join(';') + ';';
+    d.seu_pedido ? 'SEU PEDIDO: ' + d.seu_pedido : '', d.texto_nota || '',
+    // aviso contra boleto falso (27/10/2026, cfg.aviso_golpe de Configurações): só em nota com parcelas a pagar
+    duplicatas.length && cfg.aviso_golpe ? String(cfg.aviso_golpe).replace(/\s+/g, ' ').trim() : ''].filter(Boolean).map(x => String(x).replace(/;/g, ',')).join(';') + ';';
   // LC 224/2025 (redução dos benefícios federais): item com PIS/COFINS de alíquota zero (06) ou isento (07) continua com o
   // mesmo CST, e a nota leva este aviso nas informações de interesse do fisco (Receita, Perguntas e Respostas 34.1; o FKN põe)
   // Tributos aproximados (Lei 12.741/2012), pela tabela do IBPT que o CRM guarda (aba Fiscal), como o FKN faz:

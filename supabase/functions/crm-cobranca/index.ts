@@ -73,6 +73,8 @@ Deno.serve(async (req) => {
   const { data: cfgRow } = await db.from('crm_config').select('dados').eq('id', 1).maybeSingle();
   const dados = ((cfgRow as Linha | null)?.dados || {}) as Linha;
   const cfg = (dados.cobranca_aviso || {}) as Linha;
+  // aviso contra boleto falso (27/10/2026): o texto gravado em Configurações (fiscal.aviso_golpe), grifado no e-mail
+  const golpe = String(((dados.fiscal || {}) as Linha).aviso_golpe || '').replace(/\s+/g, ' ').trim();
   const diasAtraso = Number(cfg.dias) > 0 ? Number(cfg.dias) : 5;
   const prazoDias = Number(dados.cobranca_prazo_cartorio) > 0 ? Number(dados.cobranca_prazo_cartorio) : 5;
   const hoje = hojeSP();
@@ -165,11 +167,13 @@ Deno.serve(async (req) => {
       if (brevo && m.emails.length && rem && /@/.test(String(rem.email || ''))) {
         try {
           const html = '<div style="font-family:Arial,sans-serif;font-size:15px;line-height:1.5;color:#222;max-width:600px">' +
-            m.email.split('\n\n').map((s: string) => '<p>' + s.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</p>').join('') + '<p style="color:#777;font-size:12px">' + EMPRESA + ' · financeiro</p></div>';
+            m.email.split('\n\n').map((s: string) => '<p>' + s.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</p>').join('') +
+            (golpe ? '<p style="background:#fff176;border:2px solid #c81e1e;border-radius:8px;padding:10px 14px;color:#7a0000;font-weight:bold">⚠️ ' + golpe.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</p>' : '') +
+            '<p style="color:#777;font-size:12px">' + EMPRESA + ' · financeiro</p></div>';
           const r = await fetch('https://api.brevo.com/v3/smtp/email', { method: 'POST', headers: { 'api-key': brevo, 'content-type': 'application/json', accept: 'application/json' },
             body: JSON.stringify({ sender: { name: String(rem.nome) + ' · ' + EMPRESA, email: rem.email }, replyTo: { name: String(rem.nome), email: rem.email },
               to: m.emails.map((x: string) => ({ email: x })), subject: EMPRESA + ' · título em aberto (' + docsTexto(m.titulos).replace(/^(a|as) /, '') + ')',
-              htmlContent: html, textContent: m.email + '\n\n' + EMPRESA + ' · financeiro', tags: ['cobranca'] }) });
+              htmlContent: html, textContent: m.email + (golpe ? '\n\n' + golpe : '') + '\n\n' + EMPRESA + ' · financeiro', tags: ['cobranca'] }) });
           up.email_para = m.emails; up.email_ok = r.ok;
           if (!r.ok) up.email_erro = 'o Brevo recusou (' + r.status + ')';
         } catch (e) { up.email_para = m.emails; up.email_ok = false; up.email_erro = String((e as Error).message).slice(0, 300); }

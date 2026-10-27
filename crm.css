@@ -567,6 +567,9 @@ body.arrastando-card .zonas-fim { display: grid; grid-template-columns: 1fr 1fr;
 .bol .passos b { color: var(--dd); font-size: 9pt; text-transform: uppercase; letter-spacing: .2px; }
 .bol .passos b i { display: inline-grid; place-items: center; width: 18px; height: 18px; margin-right: 5px; border-radius: 50%; background: var(--dv); color: #1c1c1c; font-style: normal; font-size: 8.5pt; }
 .bol .passos span { color: #5f6b70; font-size: 9pt; line-height: 1.4; }
+.bol .golpe { margin-top: 5mm; padding: 3.5mm 5mm; border-radius: 10px; background: #fff176; border: 2px solid #c81e1e; color: #7a0000; }
+.bol .golpe b { display: block; font-size: 11pt; text-transform: uppercase; letter-spacing: .2px; margin-bottom: 1.2mm; }
+.bol .golpe span { display: block; font-size: 9.6pt; line-height: 1.4; font-weight: 600; }
 .bol .anexos { margin-top: 5mm; }
 .bol .anexos div { display: flex; gap: 3mm; flex-wrap: wrap; }
 .bol .anexos span { display: inline-flex; align-items: center; gap: 6px; padding: 2mm 4mm; border-radius: 999px; background: #edf7f8; color: #163e50; font-size: 9.5pt; font-weight: 600; }

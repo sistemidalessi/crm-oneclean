@@ -429,11 +429,27 @@
         const ha = BAIXO - ya;
         cel(X, ya, 130, ha, 'INFORMAÇÕES COMPLEMENTARES', '');
         cel(X + 130, ya, 70, ha, 'RESERVADO AO FISCO', '');
-        const inf = [d.fisco, d.complementar].filter(Boolean).join(' ');
+        let inf = [d.fisco, d.complementar].filter(Boolean).join(' ');
+        // aviso contra boleto falso (27/10/2026): op.aviso, ou o trecho que já veio no texto da nota; sai grifado em
+        // amarelo, em negrito e vermelho, no começo das informações complementares (e não se repete no resto do texto)
+        let aviso = (d.duplicatas || []).length ? String(op.aviso || '').trim() : '';   // só em nota com parcelas a pagar
+        const mAv = /ATEN[CÇ][AÃ]O,? GOLPE DO BOLETO FALSO[^;]*;?/i.exec(inf);
+        if (mAv) { if (!aviso) aviso = mAv[0].replace(/;$/, ''); inf = (inf.slice(0, mAv.index) + inf.slice(mAv.index + mAv[0].length)).replace(/\s+/g, ' ').trim(); }
+        if (aviso && inf.indexOf(aviso) !== -1) inf = inf.replace(aviso, '').replace(/\s+/g, ' ').trim();
+        let yt = ya + 3.4;
+        if (aviso) {
+          fonte(6.4, true);
+          const la = pdf.splitTextToSize(limpa(aviso), 125), hb = 1.6 + la.length * 6.4 * 0.3528 * 1.15;
+          pdf.setFillColor(255, 241, 118); pdf.setDrawColor(200, 30, 30); pdf.setLineWidth(0.4);
+          pdf.rect(X + 0.6, yt, 128.8, hb, 'FD');
+          pdf.setTextColor(150, 0, 0); pdf.text(la, X + 2, yt + 0.6 + 6.4 * 0.3528, { lineHeightFactor: 1.15 }); pdf.setTextColor(0);
+          pdf.setDrawColor(C.borda); yt += hb + 0.8;
+        }
+        const hr = ya + ha - yt;
         let tam = 6.2, ls = quebra(inf, 128, tam);
-        while (ls.length * tam * 0.3528 * 1.15 > ha - 3.4 && tam > 4.6) { tam -= 0.2; ls = quebra(inf, 128, tam); }
+        while (ls.length * tam * 0.3528 * 1.15 > hr - 0.4 && tam > 4.6) { tam -= 0.2; ls = quebra(inf, 128, tam); }
         fonte(tam, false);
-        pdf.text(ls, X + 0.8, ya + 3.6 + tam * 0.3528, { lineHeightFactor: 1.15 });
+        if (inf) pdf.text(ls, X + 0.8, yt + 0.2 + tam * 0.3528, { lineHeightFactor: 1.15 });
       } else {
         produtos(y, lista, BAIXO);
       }

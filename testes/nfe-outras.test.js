@@ -177,3 +177,11 @@ test('entrega futura: faturamento 5922 sem ICMS e com as parcelas; remessa 5117 
   assert.ok(/^REMESSA REF\. NF DE SIMPLES FATURAMENTO 50 CHAVE /.test(fkn.infCpl));
   assert.deepStrictEqual(fkn.refs, [ch]);
 });
+
+test('aviso contra boleto falso (27/10/2026): no texto da nota com parcelas, fora da bonificação', () => {
+  const av = 'ATENÇÃO, GOLPE DO BOLETO FALSO: confira o beneficiário antes de pagar.';
+  const f = doPedido('faturamento_futuro', { cfg: { aviso_golpe: av } }).nota;
+  assert.ok(f.cobranca.duplicatas.length && f.infCpl.indexOf(av) !== -1);
+  assert.ok(doPedido('bonificacao', { cfg: { aviso_golpe: av } }).nota.infCpl.indexOf('GOLPE') === -1);
+  assert.ok(doPedido('faturamento_futuro').nota.infCpl.indexOf('GOLPE') === -1);   // sem texto gravado, nada
+});
