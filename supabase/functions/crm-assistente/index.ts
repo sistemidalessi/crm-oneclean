@@ -84,7 +84,7 @@ curva A). Se faltar o prazo do fornecedor, use 7 dias e avise que é estimativa.
 que o comprador lançou no mês, por unidade de comparação, contra a nossa tabela); o que não estiver lá, não invente.`;
 
 // ------------------------------------------------------------------ ferramentas (todas de leitura)
-// equipe: só para a gestora (27/10/2026, Anderson) — o faturamento dela conta só a equipe de vendas (gestora e vendedores(as)
+// equipe: para a gestora e a vendedora (27/10/2026, Anderson) — o faturamento dela conta só a equipe de vendas (gestora e vendedores(as)
 // internos), sem o Direto (administrador) nem externo(a) (comissão "externo"); o geral fica para o administrador.
 type Ctx = { u: SupabaseClient; papel: string; meuId: string; hoje: string; usuarios: Map<string, string>; equipe?: Set<string> };
 type Ferr = { papeis: string[]; def: Anthropic.Tool; roda: (c: Ctx, i: Record<string, unknown>) => Promise<unknown> };
@@ -166,7 +166,7 @@ const FERRAMENTAS: Record<string, Ferr> = {
   },
   vendas: {
     papeis: VENDAS,
-    def: { name: 'vendas', description: 'Faturamento (notas fiscais de venda, sem as canceladas) num período, somado por vendedor(a), cliente, produto ou mês. A vendedora vê só a carteira dela; a gestora, só a equipe de vendas dela (sem o Direto e sem vendedor(a) externo(a)).', strict: true,
+    def: { name: 'vendas', description: 'Faturamento (notas fiscais de venda, sem as canceladas) num período, somado por vendedor(a), cliente, produto ou mês. A vendedora vê só o que ela vendeu; a gestora, só a equipe de vendas dela (sem o Direto e sem vendedor(a) externo(a)).', strict: true,
       input_schema: obj({ de: dt, ate: dt, agrupar: { type: 'string', enum: ['vendedor', 'cliente', 'produto', 'mes'] } }, ['de', 'ate', 'agrupar']) },
     async roda(c, i) {
       if (!ehData(i.de) || !ehData(i.ate)) return { erro: 'datas no formato AAAA-MM-DD' };
@@ -525,6 +525,10 @@ Deno.serve(async (req) => {
     const { data: cfg } = await db.from('crm_config').select('dados').eq('id', 1).maybeSingle();
     const ext = ((cfg && (cfg as { dados?: Record<string, unknown> }).dados) || {}).comissao_usuarios as Record<string, string> || {};
     ctx.equipe = new Set((us || []).filter(x => (x.papel === 'gestor' || x.papel === 'vendedor') && ext[x.user_id] !== 'externo').map(x => x.user_id));
+  } else if (papelF === 'vendedor') {
+    // 27/10/2026 (Anderson): a vendedora soma só o que ela vendeu (o vendedor da nota), como nos Relatórios; a nota do
+    // Direto ou de outro(a) vendedor(a) num cliente da carteira dela continua na ficha, mas não entra no faturamento dela
+    ctx.equipe = new Set([eu.user_id]);
   }
   // a análise de vendas roda só com as ferramentas do Gerente (nada de Caixa nem títulos, mesmo para o administrador)
   const minhas = Object.entries(FERRAMENTAS).filter(([n, f]) => f.papeis.includes(papelF) && (!analiseV || FERRAMENTAS_GERENTE.includes(n)) && (!analiseL || FERRAMENTAS_LOGISTICA.includes(n)));
