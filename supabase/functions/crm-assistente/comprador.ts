@@ -47,6 +47,21 @@ devolução/troca com o fornecedor ou parar de repor. Diga o valor parado.
 Notas de compra ("notas_de_compra"): o que chegou e falta dar entrada, o que está aguardando, a nota que parece
 despesa (não é mercadoria) e fornecedor que nunca vendeu para a empresa (conferir antes de dar ciência).
 
+Reforço (27/10/2026):
+- Ruptura ("ruptura"): produto com giro que está zerado ou negativo é venda perdida todo dia. A "venda_em_risco_por_dia"
+  é uma estimativa (o que ele vendia por dia em R$). Sem pedido ao fornecedor = pedir hoje; com pedido = cobrar a entrega
+  (e dizer quando chega). Pedidos de venda travados por estoque vêm junto.
+- Fornecedores ("desempenho_fornecedores"): intervalo entre compras, prazo real (da nota até a entrada no estoque; ainda
+  com poucos casos, porque a entrada pelo CRM começou em 16/10/2026) contra o prazo combinado, pedidos atrasados e quantos
+  itens subiram de preço. Fornecedor que atrasa ou que sobe preço repetidamente = negociar ou ter um segundo fornecedor.
+  Prazo combinado vazio = o cadastro do fornecedor não casou com as notas: peça para preencher o CNPJ no cadastro.
+- Tendência ("tendencia_vendas"): os produtos que mais pesam, com a venda por mês e o ritmo dos últimos 60 dias contra
+  180. Acelerando = aumentar a cobertura antes de faltar; caindo = segurar a compra. Sazonalidade de verdade (o mesmo mês
+  do ano passado) só quando "ano_passado_disponivel" for verdadeiro: até lá, diga que é tendência, não sazonalidade.
+- Memória de negociação ("negociacoes"): o que já foi pedido a cada fornecedor e o que ficou combinado. Antes de sugerir
+  uma negociação, consulte: não peça de novo o que ele já recusou sem um argumento novo (volume, concorrente, prazo), e
+  cobre o que ele prometeu. Sugira registrar o resultado em Compras → Pedido por fornecedor → 🤝 Negociação.
+
 Como responder:
 - Comece pela decisão ("Peça hoje à X: R$ 2.340 em 6 itens"), depois os números que importam, um item por linha com
   o porquê curto (ex.: "cobertura 3 dias, prazo 7"). No fim, o próximo passo na tela (Compras → Pedido por
@@ -54,16 +69,18 @@ Como responder:
 - Números só das ferramentas. Se a ferramenta não trouxer, diga que não tem o dado.`;
 
 export const PERGUNTA_ANALISE = `Faça a ANÁLISE DE COMPRAS DE HOJE para o comprador, como o diretor de compras do manual.
-Consulte "pedido_sugerido" (todos os fornecedores), "notas_de_compra", "precos_compra" (termo vazio) e "estoque_parado".
-Para os 2 fornecedores mais urgentes, consulte também "preco_negociar" (os itens de maior valor do pedido) e
-"vencimento_sugerido" (o total do pedido).
-Responda em no máximo 14 linhas, nesta ordem:
-1) Pedir hoje: cada fornecedor com urgência (nome, valor, quantos itens, se chega ao mínimo e o item mais crítico),
-   com o vencimento sugerido e, para o item de maior valor, "comece em R$ X e não passe de R$ Z".
-2) Sem giro: quantos itens ficaram fora da sugestão (e 2 exemplos), se houver.
-3) Notas de compra: o que já chegou e falta dar entrada; despesa para tirar da lista.
-4) Custo que subiu e margem a revisar (até 3 itens).
-5) Estoque parado: o valor e os 2 maiores.
+Consulte "ruptura", "pedido_sugerido" (todos os fornecedores), "notas_de_compra", "precos_compra" (termo vazio),
+"tendencia_vendas" e "estoque_parado". Para os 2 fornecedores mais urgentes, consulte também "preco_negociar" (os itens
+de maior valor do pedido), "vencimento_sugerido" (o total do pedido) e "negociacoes" (o que já foi combinado).
+Responda em no máximo 16 linhas, nesta ordem:
+1) Ruptura: quantos produtos com giro estão zerados, a venda em risco por dia e os 3 maiores (com ou sem pedido feito).
+2) Pedir hoje: cada fornecedor com urgência (nome, valor, quantos itens, se chega ao mínimo e o item mais crítico),
+   com o vencimento sugerido e, para o item de maior valor, "comece em R$ X e não passe de R$ Z" (lembrando o que já foi
+   negociado com ele, se houver).
+3) Tendência: até 2 produtos acelerando (aumentar a cobertura) e até 2 caindo (segurar a compra).
+4) Notas de compra: o que já chegou e falta dar entrada; despesa para tirar da lista.
+5) Custo que subiu e margem a revisar (até 3 itens).
+6) Estoque parado: o valor e os 2 maiores.
 Se uma parte não tiver nada, pule. Sem introdução.`;
 
 // deno-lint-ignore no-explicit-any
@@ -244,6 +261,53 @@ export function ferramentasComprador(h: Ajuda) {
         const j = await r.json().catch(() => ({}));
         if (!r.ok) return { erro: 'o caixa não respondeu agora' };
         return { vencer_a_partir_de: j.vencer_a_partir_de || null, sinal: String(j.sinal || '') };
+      }
+    },
+    ruptura: {
+      papeis: ['admin', 'comprador'],
+      def: { name: 'ruptura', description: 'Ruptura pela conta do banco (crm_cs_ruptura): produtos com giro (3+ notas e 2+ clientes em 90 dias) que estão com saldo zerado ou negativo, com o fornecedor, o que já está pedido, a venda média por dia em R$ (a venda em risco, estimativa), a última venda e a última entrada; o total em risco por dia, quantos estão sem pedido ao fornecedor e os pedidos de venda travados por falta de estoque.', strict: true,
+        input_schema: obj({ limite: { type: 'integer', description: 'quantos da lista, de 1 a 40' } }, ['limite']) },
+      async roda(c: Ctx, i: Linha) {
+        const { data, error } = await c.u.rpc('crm_cs_ruptura', { p_limite: Math.max(1, Math.min(40, Number(i.limite) || 15)) });
+        if (error) throw error;
+        return data;
+      }
+    },
+    desempenho_fornecedores: {
+      papeis: ['admin', 'comprador'],
+      def: { name: 'desempenho_fornecedores', description: 'Desempenho de cada fornecedor pelas notas de compra (crm_cs_fornecedores): notas e valor no período, intervalo médio entre compras, dias desde a última, prazo combinado no cadastro, prazo real (da nota até a entrada no estoque), pedidos de compra atrasados, quantos itens recomprados subiram ou baixaram de preço e a variação média. Os de maior valor primeiro.', strict: true,
+        input_schema: obj({ dias: { type: 'integer', description: 'período em dias, de 30 a 365 (0 = 180)' }, fornecedor: { type: 'string', description: 'parte do nome; vazio = todos' } }, ['dias', 'fornecedor']) },
+      async roda(c: Ctx, i: Linha) {
+        const { data, error } = await c.u.rpc('crm_cs_fornecedores', { p_dias: Number(i.dias) > 0 ? Math.min(365, Number(i.dias)) : 180 });
+        if (error) throw error;
+        const f = normaliza(i.fornecedor), l = ((data && data.fornecedores) || []) as Linha[];
+        return Object.assign({}, data, { fornecedores: l.filter(x => !f || normaliza(x.fornecedor).includes(f)).slice(0, f ? 10 : 25), total_de_fornecedores: l.length });
+      }
+    },
+    tendencia_vendas: {
+      papeis: ['admin', 'comprador'],
+      def: { name: 'tendencia_vendas', description: 'Tendência de venda dos produtos que mais pesam (crm_cs_tendencia): venda por mês desde o começo do histórico, média por dia dos últimos 60 dias contra 180 (acelerando, estável, caindo) e o mês de pico. Traz "historico_desde" e "ano_passado_disponivel" (sazonalidade de verdade só com mais de um ano).', strict: true,
+        input_schema: obj({ limite: { type: 'integer', description: 'quantos produtos, de 1 a 40' } }, ['limite']) },
+      async roda(c: Ctx, i: Linha) {
+        const { data, error } = await c.u.rpc('crm_cs_tendencia', { p_limite: Math.max(1, Math.min(40, Number(i.limite) || 20)) });
+        if (error) throw error;
+        return data;
+      }
+    },
+    negociacoes: {
+      papeis: ['admin', 'comprador'],
+      def: { name: 'negociacoes', description: 'Memória de negociação: o que o comprador já pediu a cada fornecedor e o que ficou combinado (dia, produto, pedido, resultado, preço antes e depois, condição, quando voltar a conversar), registrado em Compras → 🤝 Negociação. Pelo nome ou código do fornecedor, ou vazio para as mais recentes de todos.', strict: true,
+        input_schema: obj({ fornecedor: { type: 'string', description: 'parte do nome ou o código; vazio = todos' } }, ['fornecedor']) },
+      async roda(c: Ctx, i: Linha) {
+        const [{ data, error }, { data: forn }] = await Promise.all([
+          c.u.from('crm_cs_negociacoes').select('fornecedor_cod, dia, codigo, pedido, resultado, preco_antes, preco_depois, condicao, proxima_conversa').order('dia', { ascending: false }).limit(200),
+          c.u.from('crm_fornecedores').select('codigo, nome')]);
+        if (error) throw error;
+        const nome = new Map(((forn || []) as Linha[]).map(f => [f.codigo, f.nome])), f = normaliza(i.fornecedor);
+        const l = ((data || []) as Linha[]).map(n => Object.assign({ fornecedor: nome.get(n.fornecedor_cod) || n.fornecedor_cod }, n))
+          .filter(n => !f || normaliza(n.fornecedor + ' ' + n.fornecedor_cod).includes(f));
+        return { registradas: l.length, negociacoes: l.slice(0, f ? 20 : 30),
+          observacao: l.length ? '' : 'nenhuma negociação registrada ainda; o comprador registra em Compras → Pedido por fornecedor → 🤝 Negociação' };
       }
     },
     notas_de_compra: {

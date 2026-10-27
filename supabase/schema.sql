@@ -6702,3 +6702,177 @@ create policy grava on public.crm_ia_apresentacoes for insert to authenticated w
 drop policy if exists muda on public.crm_ia_apresentacoes;
 create policy muda on public.crm_ia_apresentacoes for update to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
+
+-- ============================================================ Diretor de Compras: reforço (27/10/2026)
+-- Plano aprovado: ruptura e venda perdida, prazo real e desempenho do fornecedor, sazonalidade (tendência) e memória de
+-- negociação. As CONTAS são daqui (a IA só lê). SECURITY INVOKER: quem não vê compras e estoque recebe vazio. Item de
+-- venda = CFOP 5/6/7 com grupo 1 ou 4 (o mesmo de crm_gv_notas). A caixa (código .1, .2) conta no código da unidade.
+
+-- Ruptura: produto com giro (3 ou mais notas e 2 ou mais clientes em 90 dias) que está com saldo zerado ou negativo.
+-- "venda em risco por dia" = o que ele vendia por dia em R$ nos 90 dias (estimativa: o histórico do saldo dia a dia só
+-- existe desde 16/10/2026). Também os pedidos de venda travados por falta de estoque.
+create or replace function public.crm_cs_ruptura(p_limite int default 15) returns jsonb
+language plpgsql stable security invoker set search_path = public as $$
+declare hoje date := (now() at time zone 'America/Sao_Paulo')::date; r jsonb;
+begin
+  with v as (
+    select regexp_replace(i.codigo, '\.\d+$', '') cod, sum(i.valor_total) val, count(distinct i.nota_id) notas,
+           count(distinct coalesce(n.empresa_id::text, n.cliente_doc)) clientes, max((n.emitida_em at time zone 'America/Sao_Paulo')::date) ultima
+      from public.crm_nota_itens i join public.crm_notas n on n.id = i.nota_id
+     where not n.cancelada and i.codigo is not null and i.cfop ~ '^[567][14]'
+       and n.emitida_em >= ((hoje - 90)::timestamp at time zone 'America/Sao_Paulo')
+     group by 1),
+  pf as (select codigo, fornecedor from public.crm_produto_fornecedor where fornecedor is not null),
+  x as (
+    select e.codigo, e.descricao, coalesce(f.nome, e.fornecedor) fornecedor, coalesce(e.quantidade, 0) saldo,
+           coalesce(e.pend_fornecedor, 0) ja_pedido, coalesce(e.pend_cliente, 0) pedido_de_cliente,
+           round(v.val / 90, 2) venda_dia_rs, v.notas notas_90d, v.clientes clientes_90d, v.ultima ultima_venda,
+           e.ult_entrada ultima_entrada, hoje - v.ultima dias_desde_ultima_venda
+      from public.crm_estoque e join v on v.cod = e.codigo
+      left join pf on pf.codigo = e.codigo
+      left join public.crm_fornecedores f on f.codigo = coalesce(pf.fornecedor, e.fornecedor_cod)
+     where e.codigo !~ '\.\d+$' and e.situacao is distinct from 'INATIVO' and coalesce(e.quantidade, 0) <= 0
+       and v.notas >= 3 and v.clientes >= 2),
+  b as (
+    select count(*) n, coalesce(sum(p.valor_total), 0) val from public.crm_pedidos p
+     where p.situacao in ('aberto', 'separacao') and 'ESTOQUE' = any(p.bloqueios) and not ('ESTOQUE' = any(coalesce(p.liberado, '{}'))))
+  select jsonb_build_object(
+    'hoje', hoje,
+    'regra', 'produto com giro (3+ notas e 2+ clientes em 90 dias) com saldo zerado ou negativo; venda em risco = venda média por dia em R$ dos 90 dias (estimativa)',
+    'produtos_em_ruptura', (select count(*) from x),
+    'sem_pedido_ao_fornecedor', (select count(*) from x where ja_pedido <= 0),
+    'venda_em_risco_por_dia', (select coalesce(round(sum(venda_dia_rs), 2), 0) from x),
+    'pedidos_travados_por_estoque', (select jsonb_build_object('quantidade', n, 'valor', round(val, 2)) from b),
+    'lista', coalesce((select jsonb_agg(to_jsonb(y) order by y.venda_dia_rs desc) from (select * from x order by venda_dia_rs desc limit greatest(1, least(coalesce(p_limite, 15), 40))) y), '[]'::jsonb))
+  into r;
+  return r;
+end $$;
+
+-- Desempenho dos fornecedores pelas notas de compra (Sefaz) dos últimos p_dias: notas, valor, intervalo entre compras,
+-- prazo real (emissão da nota → entrada no estoque do CRM, quando houver; despesa fora), preço (itens comprados mais de uma vez do mesmo
+-- fornecedor: quantos subiram e a variação média entre a primeira e a última compra) e os pedidos de compra do CRM
+-- (atrasados = previsão vencida sem receber). O cadastro (prazo combinado) casa pelo nome quando não há CNPJ.
+create or replace function public.crm_cs_fornecedores(p_dias int default 180) returns jsonb
+language plpgsql stable security invoker set search_path = public as $$
+declare hoje date := (now() at time zone 'America/Sao_Paulo')::date; desde date := hoje - greatest(30, least(coalesce(p_dias, 180), 365)); r jsonb;
+begin
+  with c as (
+    select c.id, coalesce(nullif(regexp_replace(coalesce(c.fornecedor_doc, ''), '[^0-9A-Za-z]', '', 'g'), ''), upper(btrim(c.fornecedor_nome))) chave,
+           c.fornecedor_nome nome, (c.emitida_em at time zone 'America/Sao_Paulo')::date dia, c.valor_total
+      from public.crm_compras c
+     where c.emitida_em >= (desde::timestamp at time zone 'America/Sao_Paulo')
+       -- todas as notas (as "ignoradas" são o histórico de antes de 17/10), menos as de despesa (combustível, cupom de
+       -- posto, serviço: o mesmo critério de comprador.ts pareceDespesa)
+       and not coalesce((select bool_and(i.ncm ~ '^(2710|2711|2207)' or i.cfop in ('5929', '6929', '5655', '5656', '5667', '6655', '6656', '6667', '5933', '6933'))
+                           from public.crm_compra_itens i where i.compra_id = c.id), false)),
+  it as (
+    select c.chave, coalesce(i.codigo, i.cod_fornecedor) item, c.dia,
+           (i.valor_total + i.ipi + i.st + i.frete + i.outras) / nullif(i.quantidade * coalesce(nullif(i.fator, 0), 1), 0) unit
+      from c join public.crm_compra_itens i on i.compra_id = c.id where i.quantidade > 0),
+  pr as (
+    select chave, item, (array_agg(unit order by dia))[1] primeiro, (array_agg(unit order by dia desc))[1] ultimo, count(*) vezes
+      from it where unit > 0 group by 1, 2 having count(distinct dia) > 1),
+  prf as (
+    select chave, count(*) itens_recomprados, count(*) filter (where ultimo > primeiro * 1.005) subiram,
+           count(*) filter (where ultimo < primeiro * 0.995) baixaram, round(avg((ultimo / primeiro - 1) * 100), 1) variacao_media_pct
+      from pr group by 1),
+  ent as (
+    select c.chave, avg(m.quando::date - c.dia) prazo, count(distinct c.id) notas
+      from public.crm_estoque_mov m join public.crm_compra_itens i on i.id = m.compra_item_id join c on c.id = i.compra_id
+     where m.tipo = 'entrada' group by 1),
+  g as (
+    select chave, (array_agg(nome order by dia desc))[1] nome, count(*) notas, round(sum(valor_total), 2) valor,
+           max(dia) ultima, min(dia) primeira,
+           case when count(*) > 1 then round((max(dia) - min(dia))::numeric / (count(*) - 1), 0) end intervalo_dias
+      from c group by 1),
+  cad as (select upper(btrim(nome)) nm, regexp_replace(coalesce(cnpj, ''), '[^0-9A-Za-z]', '', 'g') doc, codigo, prazo_dias, pagamento, pedido_minimo from public.crm_fornecedores),
+  pc as (
+    select upper(btrim(fornecedor_nome)) nm, count(*) pedidos,
+           count(*) filter (where situacao = 'aberto' and previsao < hoje) atrasados_abertos,
+           count(*) filter (where situacao = 'recebido' and fechado_em is not null and (fechado_em at time zone 'America/Sao_Paulo')::date > previsao) recebidos_com_atraso,
+           round(avg(((fechado_em at time zone 'America/Sao_Paulo')::date - (criado_em at time zone 'America/Sao_Paulo')::date)) filter (where situacao = 'recebido' and fechado_em is not null), 1) prazo_real_pedido
+      from public.crm_compra_pedidos where criado_em >= (desde::timestamp at time zone 'America/Sao_Paulo') group by 1)
+  select jsonb_build_object(
+    'periodo', jsonb_build_object('de', desde, 'ate', hoje),
+    'observacao', 'notas de compra pela Sefaz desde 07/2026; entrada no estoque do CRM desde 16/10/2026 e pedidos de compra pelo CRM a partir de 03/11/2026: prazo real ainda com poucos casos',
+    'fornecedores', coalesce((select jsonb_agg(jsonb_build_object(
+        'fornecedor', g.nome, 'notas', g.notas, 'valor', g.valor, 'primeira_compra', g.primeira, 'ultima_compra', g.ultima,
+        'intervalo_medio_dias', g.intervalo_dias, 'dias_desde_a_ultima', hoje - g.ultima,
+        'prazo_combinado_dias', k.prazo_dias, 'condicao_pagamento', k.pagamento, 'pedido_minimo', k.pedido_minimo,
+        'prazo_real_nota_a_entrada_dias', round(ent.prazo, 1), 'notas_com_entrada', coalesce(ent.notas, 0),
+        'pedidos_de_compra', coalesce(pc.pedidos, 0), 'pedidos_atrasados_abertos', coalesce(pc.atrasados_abertos, 0),
+        'pedidos_recebidos_com_atraso', coalesce(pc.recebidos_com_atraso, 0), 'prazo_real_pedido_dias', pc.prazo_real_pedido,
+        'itens_recomprados', coalesce(prf.itens_recomprados, 0), 'itens_que_subiram', coalesce(prf.subiram, 0),
+        'itens_que_baixaram', coalesce(prf.baixaram, 0), 'variacao_media_preco_pct', prf.variacao_media_pct)
+        order by g.valor desc)
+      from g
+      left join lateral (select * from cad where cad.doc = g.chave or cad.nm = upper(btrim(g.nome)) limit 1) k on true
+      left join ent on ent.chave = g.chave left join prf on prf.chave = g.chave
+      left join pc on pc.nm = upper(btrim(g.nome)) or pc.nm = k.nm), '[]'::jsonb))
+  into r;
+  return r;
+end $$;
+
+-- Tendência de venda dos produtos que mais pesam (curva A pelos 90 dias): venda por mês desde o começo do histórico,
+-- média por dia dos últimos 60 dias × 180 dias (acelerando, estável, caindo) e o mês de pico. Sazonalidade de verdade
+-- (o mesmo mês do ano passado) só existe quando o histórico passar de um ano: "historico_desde" diz desde quando.
+create or replace function public.crm_cs_tendencia(p_limite int default 20) returns jsonb
+language plpgsql stable security invoker set search_path = public as $$
+declare hoje date := (now() at time zone 'America/Sao_Paulo')::date; desde date; r jsonb;
+begin
+  select min((n.emitida_em at time zone 'America/Sao_Paulo')::date) into desde from public.crm_notas n where not n.cancelada;
+  with it as (
+    select regexp_replace(i.codigo, '\.\d+$', '') cod, i.descricao, i.valor_total val, (n.emitida_em at time zone 'America/Sao_Paulo')::date dia
+      from public.crm_nota_itens i join public.crm_notas n on n.id = i.nota_id
+     where not n.cancelada and i.codigo is not null and i.cfop ~ '^[567][14]'),
+  -- 60 × 180 dias (e não 30 × 90): produto comprado de dois em dois meses parece "caindo" numa janela de 30 dias
+  t as (select cod, sum(val) filter (where dia > hoje - 90) v90, sum(val) filter (where dia > hoje - 60) v60, sum(val) v180 from it where dia > hoje - 180 group by 1),
+  top as (select cod, coalesce(v90, 0) v90, coalesce(v60, 0) v60, v180 from t where v90 > 0 order by v90 desc limit greatest(1, least(coalesce(p_limite, 20), 40))),
+  mes as (select it.cod, to_char(date_trunc('month', dia), 'YYYY-MM') m, round(sum(val), 2) v from it join top using (cod) group by 1, 2),
+  dsc as (select distinct on (cod) cod, descricao from it join top using (cod) order by cod, dia desc)
+  select jsonb_build_object(
+    'hoje', hoje, 'historico_desde', desde,
+    'regra', 'ritmo = média por dia em R$ dos últimos 60 dias ÷ a dos 180 dias; acima de 1,2 acelerando, abaixo de 0,8 caindo',
+    'ano_passado_disponivel', desde <= hoje - 365,
+    'produtos', coalesce((select jsonb_agg(jsonb_build_object(
+        'codigo', top.cod, 'descricao', dsc.descricao, 'venda_90d', round(top.v90, 2),
+        'por_dia_60d', round(top.v60 / 60, 2), 'por_dia_180d', round(top.v180 / 180, 2),
+        'ritmo', round((top.v60 / 60) / nullif(top.v180 / 180, 0), 2),
+        'tendencia', case when (top.v60 / 60) > (top.v180 / 180) * 1.2 then 'acelerando' when (top.v60 / 60) < (top.v180 / 180) * 0.8 then 'caindo' else 'estavel' end,
+        'mes_de_pico', (select m from mes where mes.cod = top.cod order by v desc limit 1),
+        'por_mes', (select jsonb_object_agg(m, v order by m) from mes where mes.cod = top.cod))
+        order by top.v90 desc) from top join dsc using (cod)), '[]'::jsonb))
+  into r;
+  return r;
+end $$;
+
+-- Memória de negociação: o que o comprador combinou com cada fornecedor (pedido, resultado, preço antes e depois,
+-- condição). O comprador e o administrador registram e corrigem em Compras (🤝 Negociação); não se apaga (é memória: não
+-- há grant de delete). A IA lê para não começar do zero.
+create table if not exists public.crm_cs_negociacoes (
+  id             bigint generated by default as identity primary key,
+  fornecedor_cod text not null references public.crm_fornecedores(codigo),
+  dia            date not null default ((now() at time zone 'America/Sao_Paulo')::date),
+  codigo         text,
+  pedido         text not null check (length(btrim(pedido)) between 1 and 1000),
+  resultado      text check (resultado is null or length(resultado) <= 1000),
+  preco_antes    numeric(14,4) check (preco_antes is null or preco_antes >= 0),
+  preco_depois   numeric(14,4) check (preco_depois is null or preco_depois >= 0),
+  condicao       text check (condicao is null or length(condicao) <= 300),
+  proxima_conversa date,
+  criado_por     uuid default auth.uid(),
+  criado_em      timestamptz not null default now()
+);
+create index if not exists crm_cs_negociacoes_forn on public.crm_cs_negociacoes (fornecedor_cod, dia desc);
+alter table public.crm_cs_negociacoes enable row level security;
+revoke all on public.crm_cs_negociacoes from anon, public;
+grant select, insert, update on public.crm_cs_negociacoes to authenticated;
+drop policy if exists tudo on public.crm_cs_negociacoes;
+create policy tudo on public.crm_cs_negociacoes for all to authenticated
+  using ((select public.crm_eh_admin()) or (select public.crm_eh_comprador()))
+  with check ((select public.crm_eh_admin()) or (select public.crm_eh_comprador()));
+
+revoke all on function public.crm_cs_ruptura(int) from public, anon;
+revoke all on function public.crm_cs_fornecedores(int) from public, anon;
+revoke all on function public.crm_cs_tendencia(int) from public, anon;
+grant execute on function public.crm_cs_ruptura(int), public.crm_cs_fornecedores(int), public.crm_cs_tendencia(int) to authenticated, service_role;

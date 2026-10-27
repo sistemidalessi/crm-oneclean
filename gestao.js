@@ -707,6 +707,7 @@
         '<td class="num">' + (f.cod ? f.prazo + ' dias' + (f.prazoEstimado ? '<br><small>estimado</small>' : '') : '—') + '</td>' +
         '<td><small>' + esc(fretePor(f.cadastro)) + (f.freteCif === true ? ' ✓' : '') + '</small></td>' +
         '<td class="num">' + (f.cod ? '<button type="button" class="mini" data-acao="compras-forn-editar" data-id="' + esc(f.cod) + '" title="Prazo, pedido mínimo, frete, dias de pedido e contato">✎ Cadastro</button> ' : '') +
+          (f.cod ? '<button type="button" class="mini" data-acao="compras-negociacao" data-id="' + esc(f.cod) + '" title="O que você pediu ao fornecedor e o que ficou combinado (o Diretor de Compras lê antes de sugerir a próxima negociação)">🤝 Negociação</button> ' : '') +
           (CRM.comprasPedidos ? '<button type="button" class="mini" data-acao="compras-registrar" data-id="' + i + '" title="Registra o pedido no CRM: as vendedoras veem o que está a caminho e quando chega">Registrar pedido</button> ' : '') +
           '<button type="button" class="mini" data-acao="compras-pedido-fornecedor" data-id="' + i + '" title="' + (doCrm() ? 'Planilha do pedido (abre no Excel)">Baixar planilha' : 'Planilha para lançar no FKN">Exportar para o FKN') + '</button></td></tr>').join('') +
       '</tbody></table></div>' : '<p class="vazio">Nada para pedir no prazo escolhido.</p>') +
@@ -719,7 +720,7 @@
             '<td class="num">' + (f.cadastro ? k.prazo_dias + ' dias' : '<small>7 (estimado)</small>') + '</td><td class="num">' + (num(k.pedido_minimo) ? esc(R.moeda(k.pedido_minimo)) : '—') + '</td>' +
             '<td><small>' + esc(fretePor(f.cadastro) || '—') + '</small></td><td><small>' + esc((k.dias_pedido || []).map(d => DIAS[d]).join(', ') || '—') + '</small></td>' +
             '<td><small>' + esc([k.contato, k.telefone].filter(Boolean).join(' · ') || '—') + '</small></td>' +
-            '<td class="num"><button type="button" class="mini" data-acao="compras-forn-editar" data-id="' + esc(f.cod) + '">✎</button></td></tr>'; }).join('') +
+            '<td class="num"><button type="button" class="mini" data-acao="compras-forn-editar" data-id="' + esc(f.cod) + '">✎</button> <button type="button" class="mini" data-acao="compras-negociacao" data-id="' + esc(f.cod) + '" title="Registrar uma negociação">🤝</button></td></tr>'; }).join('') +
         '</tbody></table></div></details></section>';
   }
 
@@ -807,6 +808,34 @@
         CRM.toast('Fornecedor salvo.'); estoque = null; CRM.render();
       } });
   }
+  // Memória de negociação (27/10/2026, reforço do Diretor de Compras): o comprador registra o que pediu e o que ficou
+  // combinado; as últimas aparecem no próprio formulário e a IA lê pela ferramenta "negociacoes" (crm_cs_negociacoes).
+  async function formNegociacao(cod) {
+    const c = ultimo && ultimo.c, t = c ? (c.todosFornecedores || []).find(f => f.cod === cod) : null;
+    let ant = [];
+    try { ant = await CRM.store().negociacoes(cod); } catch (e) { ant = []; }
+    const dm = d => (d ? String(d).slice(8, 10) + '/' + String(d).slice(5, 7) + '/' + String(d).slice(0, 4) : '');
+    const hist = ant.length ? '<div class="negociacoes"><h4>Negociações anteriores</h4><ul>' + ant.slice(0, 5).map(n => '<li><strong>' + esc(dm(n.dia)) + '</strong> ' + esc(n.pedido) +
+      (n.resultado ? ' → ' + esc(n.resultado) : '') + (n.preco_antes != null || n.preco_depois != null ? ' <small>(' + esc([n.preco_antes != null ? 'de ' + R.moeda(n.preco_antes) : '', n.preco_depois != null ? 'para ' + R.moeda(n.preco_depois) : ''].filter(Boolean).join(' ')) + ')</small>' : '') +
+      (n.condicao ? ' <small>· ' + esc(n.condicao) + '</small>' : '') + '</li>').join('') + '</ul></div>' : '<p class="dica">Nenhuma negociação registrada com este fornecedor ainda.</p>';
+    CRM.abrirForm({ titulo: 'Negociação: ' + ((t && t.nome) || cod), largura: 'largo',
+      intro: 'Registre o que você pediu e o que ficou combinado. O Diretor de Compras lê antes de sugerir a próxima negociação, para não começar do zero.',
+      campos: [
+        { nome: 'dia', rotulo: 'Quando', tipo: 'data', obrigatorio: true },
+        { nome: 'codigo', rotulo: 'Produto (código, se for de um produto)' },
+        { nome: 'pedido', rotulo: 'O que você pediu', tipo: 'textarea', largo: true, obrigatorio: true, dica: 'ex.: 5% no papel interfolha para pedido de 20 fardos; prazo de 42 dias' },
+        { nome: 'resultado', rotulo: 'O que o fornecedor respondeu / o que ficou combinado', tipo: 'textarea', largo: true },
+        { nome: 'preco_antes', rotulo: 'Preço antes (R$)', tipo: 'numero', min: 0 }, { nome: 'preco_depois', rotulo: 'Preço combinado (R$)', tipo: 'numero', min: 0 },
+        { nome: 'condicao', rotulo: 'Condição combinada', dica: 'prazo de pagamento, frete, pedido mínimo, bonificação' },
+        { nome: 'proxima_conversa', rotulo: 'Voltar a conversar em', tipo: 'data' }],
+      valores: { dia: CRM.hoje() }, rodape: hist,
+      aoSalvar: async v => {
+        await CRM.store().salvarNegociacao({ fornecedor_cod: cod, dia: v.dia || CRM.hoje(), codigo: v.codigo ? String(v.codigo).trim() : null, pedido: String(v.pedido).trim(),
+          resultado: v.resultado ? String(v.resultado).trim() : null, preco_antes: v.preco_antes || v.preco_antes === 0 ? v.preco_antes : null,
+          preco_depois: v.preco_depois || v.preco_depois === 0 ? v.preco_depois : null, condicao: v.condicao ? String(v.condicao).trim() : null, proxima_conversa: v.proxima_conversa || null });
+        CRM.toast('Negociação registrada.');
+      } });
+  }
   function formTrocaForn(codigo) {
     const c = ultimo && ultimo.c, g = c ? c.produtos.find(x => x.codigo === codigo) : null;
     const atual = g && g.fornecedorTrocado ? g.fornecedorCod : null;
@@ -864,6 +893,7 @@
     'compras-colunas': () => { todasColunas = !todasColunas; try { localStorage.setItem('crm_compras_colunas', todasColunas ? 'todas' : ''); } catch (e) { /* sem armazenamento */ } CRM.render(); },
     'compras-forn-editar': cod => formFornecedor(cod),
     'compras-troca-forn': cod => formTrocaForn(cod),
+    'compras-negociacao': cod => formNegociacao(cod),
     'compras-sem-forn': () => {
       Object.assign(fc, { fornecedor: '-', mostrar: 'vendidos', busca: '', curva: '', linha: '', col: null, ordem: 'vendido' });
       CRM.render();

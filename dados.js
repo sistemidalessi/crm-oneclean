@@ -473,6 +473,9 @@
     const desde = new Date(Date.now() - (dias || 90) * 864e5).toISOString();
     return paginado((de, ate) => this.sb.from('crm_custo_historico').select('*').gte('em', desde).order('em', { ascending: false }).order('id').range(de, ate));
   };
+  // Memória de negociação (crm_cs_negociacoes, 27/10/2026): o que o comprador combinou com o fornecedor; a IA lê.
+  Supa.prototype.negociacoes = async function (fornecedor) { return unwrap(await this.sb.from('crm_cs_negociacoes').select('*').eq('fornecedor_cod', fornecedor).order('dia', { ascending: false }).order('id', { ascending: false }).limit(20)); };
+  Supa.prototype.salvarNegociacao = async function (n) { return unwrap(await this.sb.from('crm_cs_negociacoes').insert(n).select().single()); };
   Supa.prototype.salvarFornecedor = async function (f) {
     return unwrap(await this.sb.from('crm_fornecedores').upsert(Object.assign({}, f, { atualizado_em: new Date().toISOString() }), { onConflict: 'codigo' }).select().single());
   };
@@ -527,6 +530,8 @@
   Local.prototype.fornecedores = async function () { return lsLe('crm_fornecedores', []); };
   Local.prototype.produtoForn = async function () { return lsLe('crm_produto_fornecedor', []).filter(x => x.fornecedor); };
   Local.prototype.custoHist = async function () { return []; };
+  Local.prototype.negociacoes = async function (fornecedor) { return lsLe('crm_cs_negociacoes', []).filter(x => x.fornecedor_cod === fornecedor).sort((a, b) => (a.dia < b.dia ? 1 : -1)).slice(0, 20); };
+  Local.prototype.salvarNegociacao = async function (n) { const l = lsLe('crm_cs_negociacoes', []); const r = Object.assign({ id: l.length + 1, dia: R.hojeISO() }, n); lsGrava('crm_cs_negociacoes', l.concat(r)); return r; };
   Local.prototype.salvarFornecedor = async function (f) {
     const l = lsLe('crm_fornecedores', []).filter(x => x.codigo !== f.codigo).concat(Object.assign({ prazo_dias: 7, dias_pedido: [] }, f));
     lsGrava('crm_fornecedores', l); return f;
