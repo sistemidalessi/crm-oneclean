@@ -1259,3 +1259,4 @@ pre.of-previa { white-space: pre-wrap; font-family: inherit; font-size: .88rem; 
 .cred-fatos ul, .cred-proposta ul { margin: 4px 0 8px 18px; padding: 0; }
 .cred-proposta { border-left: 3px solid var(--verde, #2e7d32); padding-left: 10px; margin: 8px 0; }
 .cred-form { padding: 0 18px; }
+a.btn, a.mini { text-decoration: none; display: inline-block; }

@@ -134,14 +134,15 @@
       '<p class="cred-liga">' + (lig ? CRM.selo('trava ligada', 'verde') + ' <button type="button" class="btn sec" data-acao="cred-ligar">Desligar a trava</button>'
         : CRM.selo('trava desligada', 'cinza') + ' <button type="button" class="btn" data-acao="cred-ligar">Ligar a trava nos pedidos</button>' +
           ' <small>antes, aplique as sugestões dos clientes que já compram (abaixo), senão todo pedido a prazo deles para em SEM ANÁLISE</small>') +
-      ' <button type="button" class="btn sec" data-acao="cred-link">Site de consulta</button> <button type="button" class="btn sec" data-acao="cred-atualiza" title="atualizar">⟳</button></p>' +
+      ' ' + linkConsultar('', 'Abrir o site de consulta', 'btn sec') + ' <button type="button" class="mini" data-acao="cred-endereco" title="trocar o endereço do site de consulta">✎ endereço</button>' +
+      ' <button type="button" class="btn sec" data-acao="cred-atualiza" title="atualizar">⟳</button></p>' +
       '<p><label class="cred-busca">Analisar um cliente: <input type="search" id="credBusca" list="credEmpresas" placeholder="nome ou CNPJ"></label>' +
         '<datalist id="credEmpresas">' + ((CRM.estado.D.empresas) || []).filter(e => e.cnpj).slice(0, 4000).map(e => '<option value="' + esc(e.nome + ' · ' + e.cnpj) + '">').join('') + '</datalist>' +
         ' <button type="button" class="btn" data-acao="cred-buscar">Analisar</button></p></section>' +
       (pend.length ? '<section class="cartao"><h2>Para analisar <small>' + pend.length + '</small></h2><div class="tabela-rolagem"><table class="tabela"><tbody>' +
         pend.map(p => '<tr><td><button type="button" class="link" data-acao="abrir-empresa" data-id="' + esc(p.empresa_id) + '">' + esc(p.nome) + '</button><small>' + esc(p.cnpj || '') + ' · cadastro ' + esc(R.dataBR(R.diaLocal(p.criado_em))) + '</small></td>' +
           '<td>' + ((p.pedidos || []).map(x => 'pedido ' + x.numero + ' · ' + R.moeda(x.valor) + ' · ' + (x.bloqueios || []).filter(b => BLOQUEIOS.indexOf(b) !== -1).join(', ')).map(esc).join('<br>') || '<small>cliente novo sem análise</small>') + '</td>' +
-          '<td class="acoes-linha"><button type="button" class="mini" data-acao="cred-consultar" data-id="' + esc(p.empresa_id) + '">Consultar crédito</button> <button type="button" class="mini" data-acao="cred-analisar" data-id="' + esc(p.empresa_id) + '">Analisar</button></td></tr>').join('') +
+          '<td class="acoes-linha">' + linkConsultar(p.empresa_id, 'Consultar crédito', 'mini') + ' <button type="button" class="mini" data-acao="cred-analisar" data-id="' + esc(p.empresa_id) + '">Analisar</button></td></tr>').join('') +
         '</tbody></table></div></section>' : '') +
       (sug.length ? '<section class="cartao"><h2>Clientes que já compram <small>' + sug.length + ' sem ficha · sugestão pelo histórico</small></h2>' +
         '<p>Limite = 2 × a maior compra do mês nos últimos 12 meses (de 500 em 500), prazo = o maior que o cliente usa hoje (mínimo 28 dias). Quem tem título vencido fica "em análise". Revisão em 6 meses.</p>' +
@@ -171,11 +172,15 @@
     if (b) b.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); CRM.acoes['cred-buscar'](); } });
   }
 
-  // Copia o CNPJ e abre o site de consulta (antes de qualquer espera, senão o navegador bloqueia a aba).
+  // Botão "Consultar crédito": um link de verdade (<a target=_blank>), que o navegador abre sem bloquear; o clique só
+  // copia o CNPJ. Sem endereço configurado, vira botão que pede o endereço.
+  function linkConsultar(id, rotulo, cls) {
+    const u = linkConsulta();
+    if (!u) return '<button type="button" class="' + cls + '" data-acao="cred-endereco">' + esc(rotulo) + '</button>';
+    return '<a class="' + cls + '" href="' + esc(u) + '" target="_blank" rel="noopener noreferrer" data-acao="cred-consultar"' + (id ? ' data-id="' + esc(id) + '"' : '') + '>' + esc(rotulo) + '</a>';
+  }
   function consultar(id) {
-    const e = CRM.empresa(id), doc = docTxt(e);
-    if (!linkConsulta()) { CRM.toast('Falta o endereço do site de consulta: Caixa → Crédito → "Site de consulta".', true); return; }
-    raiz.open(linkConsulta(), '_blank', 'noopener');
+    const e = id && CRM.empresa(id), doc = docTxt(e);
     if (doc && navigator.clipboard) navigator.clipboard.writeText(R.chaveDoc ? R.chaveDoc(doc) : doc.replace(/\D/g, '')).then(() => CRM.toast('CNPJ ' + doc + ' copiado: cole no site de consulta (Ctrl+V). Depois solte o PDF em "Analisar".')).catch(() => {});
     else if (doc) CRM.toast('CNPJ do cliente: ' + doc);
   }
@@ -198,7 +203,7 @@
     CRM.abrirForm({
       titulo: 'Crédito: ' + e.nome, largura: 'largo',
       htmlAntes: '<div class="cred-form"><p>' + esc(e.cnpj || 'sem CNPJ') + (ficha ? ' · ficha de ' + esc(R.dataBR(ficha.analisado_em)) + ' · usado hoje ' + esc(R.moeda(ficha.usado || 0)) : s ? ' · em aberto ' + esc(R.moeda(s.aberto)) : '') + '</p>' +
-        '<div class="cred-passos"><button type="button" class="btn sec" data-acao="cred-consultar" data-id="' + esc(id) + '">1. Consultar crédito (copia o CNPJ)</button>' +
+        '<div class="cred-passos">' + linkConsultar(id, '1. Consultar crédito (copia o CNPJ)', 'btn sec') +
         '<label class="btn sec arquivo">2. Soltar o PDF da consulta<input type="file" id="credArq" accept="application/pdf,image/png,image/jpeg,image/webp"></label>' +
         '<span id="credLendo"></span></div>' + fatos() + prop(lida ? propor(lida, ctx) : null) + '</div>',
       campos: [
@@ -274,7 +279,7 @@
 
   Object.assign(CRM.acoes, {
     'cred-atualiza': () => carrega(true),
-    'cred-link': async () => {
+    'cred-endereco': async () => {
       const c = cfg(), u = prompt('Endereço do site de consulta de crédito (onde você faz a pesquisa):', c.url || '');
       if (u == null) return;
       if (u && !/^https:\/\//i.test(u.trim())) { CRM.toast('O endereço precisa começar com https://', true); return; }
