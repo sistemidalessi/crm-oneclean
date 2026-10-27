@@ -4,8 +4,8 @@
 // (servico-fiscal/, que assina com o A1 e fala com a Sefaz-SP). A nota autorizada entra no CRM pelo mesmo caminho do
 // vigia (crm-notas): estoque, títulos das parcelas, comissão, XML guardado.
 // Secrets: FISCAL_URL (https://fiscal.oneclean.com.br) e FISCAL_TOKEN (gerado na VPS; ver servico-fiscal/INSTALAR.md).
-// Notas de COMPRA (dfe_buscar, dfe_ciencia, dfe_manifestar): administrador e comprador; a ciência e a resposta definitiva
-// (confirmação, desconhecimento, operação não realizada), só o administrador.
+// Notas de COMPRA (dfe_buscar, dfe_ciencia, dfe_manifestar): administrador e comprador, inclusive a ciência (27/10/2026);
+// a resposta definitiva (confirmação, desconhecimento, operação não realizada), só o administrador.
 // Deploy: verify_jwt LIGADO.
 import { createClient } from 'npm:@supabase/supabase-js@2.116.0';
 import { ibptUrl, ibptLinha, ibptPrecisa } from './ibpt.js';
@@ -371,7 +371,8 @@ Deno.serve(async (req) => {
     }
     if (acao === 'dfe_buscar') return resposta(200, await dfeBuscar(db, fiscal));
     if (acao === 'dfe_ciencia') {
-      if (eu.papel !== 'admin') throw new Error('só o administrador dá a ciência das notas de compra');
+      // 27/10/2026 (pedido do Anderson): o comprador também dá a ciência; a resposta definitiva segue só do administrador
+      if (!DFE.includes(String(eu.papel))) throw new Error('só o administrador ou o comprador dá a ciência das notas de compra');
       return resposta(200, await dfeCiencias(db, fiscal, b.chave ? [String(b.chave)] : null));
     }
     if (acao === 'dfe_manifestar') {

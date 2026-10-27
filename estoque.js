@@ -637,14 +637,14 @@
         (completas.length ? '<button type="button" class="btn" data-acao="es-sefaz-trazer">Trazer ' + completas.length + ' nota(s) para a conferência</button> ' : '') + '</p>' +
       '<p>' + aut.length + ' nota(s) vista(s) · ' + (aut.length - resumo.length) + ' com o XML completo · ' + resumo.length + ' só com o resumo' + (aguardando.length ? ' (' + aguardando.length + ' esperando a Sefaz liberar o XML)' : '') + '.</p>' +
       (semCiencia.length ? '<p class="dica">O XML completo (itens e preços) só vem depois da <strong>Ciência da Operação</strong>: o aviso à Sefaz de que a empresa sabe da nota. ' +
-          'Não confirma nem recusa a compra. ' + (CRM.ehAdmin() ? '' : 'Quem dá a ciência é o administrador.') + '</p>' +
-        (CRM.ehAdmin() && antigas.length ? '<p class="acoes"><button type="button" class="btn sec" data-acao="es-sefaz-ciencia-antigas">Dar ciência nas ' + antigas.length + ' nota(s) de antes de ' +
+          'Não confirma nem recusa a compra. ' + (podeSefaz() ? '' : 'Quem dá a ciência é o administrador ou o comprador.') + '</p>' +
+        (podeSefaz() && antigas.length ? '<p class="acoes"><button type="button" class="btn sec" data-acao="es-sefaz-ciencia-antigas">Dar ciência nas ' + antigas.length + ' nota(s) de antes de ' +
           esc(quando(ini).slice(0, 5)) + ' (a mercadoria já está no estoque)</button></p>' : '') +
-        (CRM.ehAdmin() && semCiencia.length > antigas.length ? '<p class="dica">As mais novas: dê a ciência na nota (na lista abaixo) quando a mercadoria chegar; aí o XML vem e a nota fica pendente para a entrada.</p>' : '') : '') +
+        (podeSefaz() && semCiencia.length > antigas.length ? '<p class="dica">As mais novas: dê a ciência na nota (na lista abaixo) quando a mercadoria chegar; aí o XML vem e a nota fica pendente para a entrada.</p>' : '') : '') +
       (resumo.length ? '<details data-chave="es-sefaz-resumos"><summary>Só com o resumo (' + resumo.length + ')</summary><div class="tabela-rolagem"><table class="tabela"><tbody>' +
         resumo.slice(0, 100).map(d => '<tr><td><strong>' + esc(d.emitente_nome || '?') + '</strong><small>' + esc(quando(d.emitida_em)) + '</small></td><td class="num">' + R.moeda(d.valor) + '</td><td>' +
           (d.manifestada_em ? CRM.selo('ciência dada', 'azul') : d.manifesto_motivo ? CRM.selo(d.manifesto_motivo.slice(0, 60), 'vermelho') : CRM.selo('falta ciência', 'ambar')) +
-          (!d.manifestada_em && CRM.ehAdmin() ? ' <button type="button" class="mini" data-acao="es-sefaz-ciencia-uma" data-id="' + esc(d.chave) + '" title="Dar a Ciência da Operação desta nota (quando a mercadoria chegar)">dar ciência</button>' : '') +
+          (!d.manifestada_em && podeSefaz() ? ' <button type="button" class="mini" data-acao="es-sefaz-ciencia-uma" data-id="' + esc(d.chave) + '" title="Dar a Ciência da Operação desta nota (quando a mercadoria chegar)">dar ciência</button>' : '') +
           (d.conclusiva_tipo ? ' ' + CRM.selo(NOME_RESP[d.conclusiva_tipo], 'verde') : CRM.ehAdmin() ? ' <button type="button" class="mini" data-acao="es-dfe-resp" data-id="' + esc(d.chave + '|desconhecimento') + '" title="Responder Desconhecimento à Sefaz">desconheço</button>' : '') + '</td></tr>').join('') +
         '</tbody></table></div></details>' : '') + '</section>' + blocoAvisosDfe();
   }
