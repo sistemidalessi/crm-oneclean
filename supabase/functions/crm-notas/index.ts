@@ -178,6 +178,58 @@ async function tudo(db: any, tabela: string, colunas: string) {
   }
 }
 
+// Devolução de venda emitida pela PRÓPRIA empresa (27/10/2026, NF 2555 da TEA Clínica: o FKN desfez duas vendas de setembro
+// com uma nota de entrada). O motor (nfe.js) ignora toda nota de entrada; aqui a que tem o nosso CNPJ de emitente e finalidade
+// 4, ou todos os itens em CFOP de devolução de venda (1/2 201, 202, 410, 411), vira crm_compras com devolucao = true e a
+// venda que ela desfaz em ref_chave, como a devolução emitida pelo cliente: crm_devolucoes_venda desconta do faturamento e
+// da comissão no mês da devolução. Antes do início do estoque do CRM entra já lançada (o FKN acertou estoque e títulos);
+// depois, fica pendente para o comprador dar a entrada no estoque. A devolução emitida pelo próprio CRM (crm_nfe) já é
+// contada por lá e não entra aqui.
+const CFOP_DEVOLUCAO = /^[12](201|202|410|411)$/;
+// deno-lint-ignore no-explicit-any
+type Doc = Record<string, any>;
+function ehDevolucaoPropria(d: Doc | null, nosso: string) {
+  if (!d || d.tipo !== 'nota' || d.saida !== false || !d.autorizada || !nosso || (d.emitente || {}).doc !== nosso) return false;
+  const itens = (d.itens || []) as Doc[];
+  return String(d.finalidade) === '4' || (itens.length > 0 && itens.every(it => CFOP_DEVOLUCAO.test(String(it.cfop || ''))));
+}
+const r2 = (v: unknown) => Math.round((Number(v) || 0) * 100) / 100;
+// deno-lint-ignore no-explicit-any
+async function devolucoesProprias(db: any, lidos: { doc: Doc | null; xml: string }[], nosso: string) {
+  const feitas = new Map<string, string>(), erros: string[] = [];
+  const cand = lidos.filter(l => ehDevolucaoPropria(l.doc, nosso));
+  if (!cand.length) return { feitas, erros };
+  const chaves = cand.map(l => String((l.doc as Doc).chave));
+  const [{ data: jaCompra }, { data: jaCrm }, { data: ini }] = await Promise.all([
+    db.from('crm_compras').select('chave').in('chave', chaves),
+    db.from('crm_nfe').select('chave').in('chave', chaves),
+    db.from('crm_estoque_saldo').select('inicio').order('inicio', { ascending: true }).limit(1).maybeSingle()]);
+  const pular = new Set([...((jaCompra || []) as Doc[]), ...((jaCrm || []) as Doc[])].map(x => String(x.chave)));
+  const inicio = ini && ini.inicio ? Date.parse(ini.inicio) : null;
+  for (const l of cand) {
+    const d = l.doc as Doc;
+    if (pular.has(d.chave)) { feitas.set(d.chave, 'devolução de venda (já no CRM)'); continue; }
+    const refs: string[] = [], re = /<(?:refNFe|chaveAcesso)>(\d{44})<\/(?:refNFe|chaveAcesso)>/g;
+    let m; while ((m = re.exec(l.xml))) if (!refs.includes(m[1])) refs.push(m[1]);
+    const ref = refs.find(c => c.slice(6, 20) === nosso) || refs[0] || null;
+    const antes = inicio != null && d.emitida_em && Date.parse(d.emitida_em) < inicio;
+    const agora = new Date().toISOString(), cli = (d.cliente || {}) as Doc;
+    const compra = { chave: d.chave, numero: d.numero, serie: d.serie, emitida_em: d.emitida_em, fornecedor_doc: cli.doc || null, fornecedor_nome: cli.nome || null,
+      valor_produtos: r2(d.valor_produtos), valor_total: r2(d.valor_total), parcelas: [], devolucao: true, ref_chave: ref,
+      situacao: antes ? 'lancada' : 'pendente', lancada_em: antes ? agora : null,
+      obs: 'Devolução de venda emitida pela própria empresa (FKN)' + (refs.length > 1 ? '; desfaz ' + refs.length + ' notas: ' + refs.map(c => Number(c.slice(25, 34))).join(', ') : '') +
+        (antes ? '; antes do início do estoque do CRM: o FKN já acertou o estoque e os títulos' : '') };
+    const { data: c, error } = await db.from('crm_compras').insert(compra).select('id').single();
+    if (error) { erros.push('devolução NF ' + d.numero + ': ' + error.message); continue; }
+    const itens = ((d.itens || []) as Doc[]).map(it => ({ compra_id: c.id, ordem: it.ordem, cod_fornecedor: it.codigo, codigo: it.codigo, fator: 1, descricao: it.descricao,
+      ncm: it.ncm, cfop: it.cfop, unidade: it.unidade, quantidade: Number(it.quantidade) || 0, valor_total: r2(it.valor_total) }));
+    const { error: e2 } = itens.length ? await db.from('crm_compra_itens').insert(itens) : { error: null };
+    if (e2) erros.push('itens da devolução NF ' + d.numero + ': ' + e2.message);
+    feitas.set(d.chave, 'devolução de venda');
+  }
+  return { feitas, erros };
+}
+
 Deno.serve(async (req) => {
   if (req.method !== 'POST') return resposta(405, { erro: 'use POST' });
   const chave = req.headers.get('x-crm-chave') ?? '';
@@ -207,6 +259,29 @@ Deno.serve(async (req) => {
     const ft = Deno.env.get('FISCAL_TOKEN');
     if (ft && await sha256(await sha256('crm-notas:' + ft)) === await sha256(chave)) return resposta(403, { erro: 'esta chave só entrega notas' });
     try { return await arquivoFkn(db, integ, corpo.fkn); } catch (e) { return resposta(500, { erro: 'falha no arquivo do FKN: ' + (e instanceof Error ? e.message : String(e)) }); }
+  }
+  // Reler do bucket as notas da própria empresa já guardadas (27/10/2026): até 50 chaves; só a devolução de venda é tratada.
+  if (Array.isArray((corpo as Doc).reler)) {
+    const lista = ((corpo as Doc).reler as unknown[]).map(String).filter(c => /^\d{44}$/.test(c)).slice(0, 50);
+    try {
+      const N = await carregaMotor();
+      const { data: cf } = await db.from('crm_config').select('dados').eq('id', 1).maybeSingle();
+      const nosso = String((((cf && cf.dados) || {}).fiscal || {}).emitente?.cnpj || '').replace(/\D/g, '');
+      const lidos: { doc: Doc | null; xml: string }[] = [];
+      for (const c of lista) {
+        const { data: f } = await db.storage.from('crm-notas-xml').download('nfe/' + c + '.xml');
+        const xml = f ? await f.text() : '';
+        lidos.push({ doc: xml ? N.lerXml(xml) : null, xml });
+      }
+      const dv = await devolucoesProprias(db, lidos, nosso);
+      // também devolve as chaves referenciadas e o texto da nota (ex.: a nota de faturamento que cada remessa 5117 baixa)
+      const refsDe = (x: string) => [...new Set([...x.matchAll(/<(?:refNFe|chaveAcesso)>(\d{44})<\/(?:refNFe|chaveAcesso)>/g)].map(m => m[1]))];
+      const cpl = (x: string) => ((/<infCpl>([^<]*)<\/infCpl>/.exec(x) || [])[1] || '').slice(0, 400);
+      return resposta(200, { ok: true, arquivos: lidos.map((l, i) => ({ chave: lista[i], refs: refsDe(l.xml), infCpl: cpl(l.xml), numero: l.doc ? l.doc.numero : null,
+        itens: l.doc ? ((l.doc.itens || []) as Doc[]).map(it => [it.codigo, it.quantidade, it.unidade, it.valor_total, it.cfop]) : [], situacao: !l.doc ? 'sem XML' : dv.feitas.get(lista[i]) ||
+        ('não é devolução de venda (' + (l.doc.saida ? 'saída' : 'entrada') + ', finalidade ' + l.doc.finalidade + ', CFOP ' + [...new Set(((l.doc.itens || []) as Doc[]).map(it => it.cfop))].join('/') + ', ' + (l.doc.natureza || '') + ')') })),
+        erros: dv.erros });
+    } catch (e) { return resposta(500, { erro: 'falha ao reler: ' + (e instanceof Error ? e.message : String(e)) }); }
   }
   const arquivos = Array.isArray(corpo.arquivos) ? corpo.arquivos : [];
   if (arquivos.length > MAX_ARQUIVOS) return resposta(413, { erro: 'no máximo ' + MAX_ARQUIVOS + ' arquivos por envio' });
@@ -277,6 +352,11 @@ Deno.serve(async (req) => {
       }
     }
 
+    // devolução de venda emitida pela própria empresa (o motor ignora as notas de entrada)
+    const nosso = String(((cfg.fiscal || {}) as Doc).emitente?.cnpj || '').replace(/\D/g, '');
+    const dv = await devolucoesProprias(db, lidos, nosso);
+    erros.push(...dv.erros);
+
     // Situação de cada arquivo, para o vigia registrar.
     const criadas = new Map(plano.criar.notas.map((n: { chave: string; id: string }) => [n.chave, n.id]));
     const foraPor = new Map(plano.ignorados.map((x: { registro: { chave: string }; motivo: string }) => [x.registro.chave, x.motivo]));
@@ -285,6 +365,7 @@ Deno.serve(async (req) => {
       const d = l.doc as { tipo: string; chave: string } | null;
       if (!d) return { nome: l.nome, situacao: 'não é NF-e (ignorado)' };
       if (d.tipo === 'cancelamento') return { nome: l.nome, situacao: 'cancelamento', chave: d.chave };
+      if (dv.feitas.has(d.chave)) return { nome: l.nome, situacao: dv.feitas.get(d.chave), chave: d.chave };
       if (criadas.has(d.chave)) return { nome: l.nome, situacao: falhou.has(criadas.get(d.chave) as string) ? 'erro' : 'importada', chave: d.chave };
       if (jaTinha.has(d.chave)) return { nome: l.nome, situacao: 'já importada', chave: d.chave };
       if (foraPor.has(d.chave)) return { nome: l.nome, situacao: 'fora: ' + foraPor.get(d.chave), chave: d.chave };
