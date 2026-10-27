@@ -162,6 +162,7 @@
       '<div class="ficha-col">' +
         '<section class="' + (pendentes.length ? '' : 'sem-proximo') + '"><h3>Próximo passo <button type="button" class="mini" data-acao="tarefa-empresa">+ tarefa</button></h3>' +
           (pendentes.length ? '<ul class="lista tarefas">' + pendentes.map(a => CRM.itemTarefa(a, { resp: true, editar: true })).join('') + '</ul>' : '<p class="vazio alerta">Nenhum próximo passo agendado.</p>') + '</section>' +
+        (CRM.credito ? CRM.credito.blocoFicha(e.id) : '') +
         (CRM.fichaFinanceiro ? CRM.fichaFinanceiro(e.id) : '') +
         '<section><h3>Negócios em andamento <button type="button" class="mini" data-acao="negocio-empresa">+ negócio</button></h3>' +
           (abertos.length ? abertos.map(n => cartaoNegocio(n)).join('') : '<p class="vazio">Nenhum.</p>') + '</section>' +
@@ -181,6 +182,7 @@
       '</div></div></div>';
 
     $('#formRegistroRapido', dlg).addEventListener('submit', ev => registrarRapido(ev, e));
+    if (CRM.credito) CRM.credito.preencheFicha(dlg, e.id);
   }
 
   function itemNota(n) {

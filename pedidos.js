@@ -82,7 +82,8 @@
 
   // Bloqueios que ainda seguram (os liberados à mão não contam; um novo volta a segurar).
   const bloqueiosAbertos = p => (p.bloqueios || []).filter(b => (p.liberado || []).indexOf(b) === -1);
-  const ROTULO_BLOQUEIO = { ESTOQUE: 'estoque', ATRASO: 'duplicata em atraso', 'SEM ENTRADA': 'sem entrada (pagamento antecipado)', 'PREÇO': 'margem abaixo do mínimo' };
+  const ROTULO_BLOQUEIO = { ESTOQUE: 'estoque', ATRASO: 'duplicata em atraso', 'SEM ENTRADA': 'sem entrada (pagamento antecipado)', 'PREÇO': 'margem abaixo do mínimo',
+    'SEM ANÁLISE': 'sem análise de crédito', PRAZO: 'prazo além do crédito', LIMITE: 'acima do limite de crédito' };
   // Situação como no Sifn050: BLOQUEADO / LIBERADO / EM SEPARAÇÃO (SP n) / A EMITIR NF / FATURADO / CANCELADO.
   function situacao(p, notaNumero) {
     if (p.situacao === 'cancelado') return { rotulo: 'CANCELADO', cor: 'cinza', chave: 'cancelado' };
@@ -493,7 +494,8 @@
       corpo = gradeProdutos(p.itens || [], { ctx, faltas: fs, ler: true }) + rodapeTotais(t);
     }
     return '<section class="cartao pd-janela"><header class="pd-topo"><button type="button" class="btn sec" data-acao="pd-fechar">← Voltar</button><h2>Pedido ' + esc(p.numero) + ' · ' + esc(nomeCliente(p)) + '</h2>' + CRM.selo(s.rotulo, s.cor) + '</header>' +
-      (bAbertos.length ? '<p class="alerta">Bloqueado por: <strong>' + esc(bAbertos.map(b => P.ROTULO_BLOQUEIO[b] || b).join(', ')) + '</strong>.' + (gest ? ' Confira e clique em "Liberar".' : ' Quem libera é a gestora ou a logística.') + '</p>' : '') +
+      (bAbertos.length ? '<p class="alerta">Bloqueado por: <strong>' + esc(bAbertos.map(b => P.ROTULO_BLOQUEIO[b] || b).join(', ')) + '</strong>.' + (gest ? ' Confira e clique em "Liberar".' : ' Quem libera é a gestora ou a logística.') +
+        (bAbertos.some(b => ['SEM ANÁLISE', 'PRAZO', 'LIMITE'].indexOf(b) !== -1) ? ' O crédito (' + esc(bAbertos.filter(b => ['SEM ANÁLISE', 'PRAZO', 'LIMITE'].indexOf(b) !== -1).map(b => P.ROTULO_BLOQUEIO[b]).join(', ') + ') só o administrador libera' + (CRM.ehAdmin() ? ' — ou ajuste a ficha em Caixa → Crédito' : '') + '.') : '') + '</p>' : '') +
       '<p class="acoes">' + botoes.join(' ') + '</p>' + (CRM.nfe ? CRM.nfe.doPedido(p) : '') +
       '<div class="chips">' + abas.map(a => '<button type="button" class="chip-filtro' + (abaPed === a[0] ? ' ativo' : '') + '" data-acao="pd-aba-ped" data-id="' + a[0] + '">' + esc(a[1]) + '</button>').join('') + '</div>' + corpo + '</section>';
   }
@@ -947,7 +949,8 @@
     },
     'pd-gravar': vivo(gravarPedido),
     'pd-salvar-orcamento': vivo(salvarOrcamento),
-    'pd-liberar': vivo(async id => { const p = ped(id); if (!confirm('Liberar o pedido ' + p.numero + ' (' + P.bloqueiosAbertos(p).map(b => P.ROTULO_BLOQUEIO[b] || b).join(', ') + ')?')) return; troca(await CRM.store().pedidoLiberar(id, true, null)); CRM.toast('Pedido liberado para a separação.'); CRM.render(); }),
+    'pd-liberar': vivo(async id => { const p = ped(id); if (!confirm('Liberar o pedido ' + p.numero + ' (' + P.bloqueiosAbertos(p).map(b => P.ROTULO_BLOQUEIO[b] || b).join(', ') + ')?')) return; troca(await CRM.store().pedidoLiberar(id, true, null)); const r = P.bloqueiosAbertos(ped(id));
+      CRM.toast(r.length ? 'Liberado o que você pode. Continua bloqueado por ' + r.map(b => P.ROTULO_BLOQUEIO[b] || b).join(', ') + ' (crédito: só o administrador).' : 'Pedido liberado para a separação.', !!r.length); CRM.render(); }),
     'pd-desliberar': vivo(async id => { troca(await CRM.store().pedidoLiberar(id, false, null)); CRM.render(); }),
     'pd-entrada': vivo(async id => { const p = ped(id); troca(await CRM.store().pedidoLiberar(id, null, !p.entrada_ok)); CRM.render(); }),
     'pd-cancelar': vivo(async id => { const p = ped(id); const m = prompt('Cancelar o pedido ' + p.numero + '? A reserva do estoque sai. Diga o motivo:'); if (!m) return; troca(await CRM.store().pedidoSituacao(id, 'cancelado', m)); await recarrega(); }),

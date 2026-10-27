@@ -912,6 +912,28 @@
     if (r.error) throw new Error('não consegui abrir o boleto: ' + r.error.message);
     return r.data.signedUrl;
   };
+  // Crédito do cliente (27/10/2026, credito.js): ficha só do administrador; a equipe lê o disponível por crm_credito_ver.
+  // O PDF da consulta vai para o bucket privado crm-credito (credito/<cliente>/…) e a IA lê pela crm-caixa-ler (modo credito).
+  Supa.prototype.creditoPainel = async function () { return unwrap(await this.sb.rpc('crm_credito_painel')); };
+  Supa.prototype.creditoVer = async function (empresa) { return unwrap(await this.sb.rpc('crm_credito_ver', { p_empresa: empresa })); };
+  Supa.prototype.creditoGravar = async function (itens) { return unwrap(await this.sb.rpc('crm_credito_gravar', { p_itens: itens })); };
+  Supa.prototype.creditoEnviar = async function (arquivo, empresa) {
+    const ext = arquivo.type === 'application/pdf' ? 'pdf' : ({ 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' }[arquivo.type] || 'pdf');
+    const caminho = 'credito/' + empresa + '/' + new Date().toISOString().slice(0, 10) + '-' + uuid().slice(0, 8) + '.' + ext;
+    const r = await this.sb.storage.from('crm-credito').upload(caminho, arquivo, { contentType: arquivo.type || 'application/pdf', upsert: false });
+    if (r.error) throw new Error('não consegui guardar a consulta: ' + r.error.message);
+    return caminho;
+  };
+  Supa.prototype.creditoLer = async function (caminho) {
+    const r = await this.sb.functions.invoke('crm-caixa-ler', { body: { modo: 'credito', caminho } });
+    if (r.error) throw await erroDaFuncao(r);
+    return r.data;
+  };
+  Supa.prototype.creditoLink = async function (caminho) {
+    const r = await this.sb.storage.from('crm-credito').createSignedUrl(caminho, 120);
+    if (r.error) throw new Error('não consegui abrir a consulta: ' + r.error.message);
+    return r.data.signedUrl;
+  };
   const SO_SUPABASE = () => Promise.reject(new Error('anexar documento só funciona com o Supabase ligado (o modo local não guarda arquivos)'));
   Local.prototype.anexoEnviar = SO_SUPABASE;
   Local.prototype.anexoLer = SO_SUPABASE;
@@ -925,6 +947,13 @@
   Local.prototype.boletoArquivo = SO_SUPABASE;
   Local.prototype.boletoEnviar = SO_SUPABASE;
   Local.prototype.boletoLer = SO_SUPABASE;
+  // Crédito no modo local (demonstração): sem fichas; o CRM mostra a aba vazia e não trava pedido.
+  Local.prototype.creditoPainel = async function () { return { fichas: [], pendentes: [], sugestoes: [] }; };
+  Local.prototype.creditoVer = async function () { return null; };
+  Local.prototype.creditoGravar = SO_SUPABASE;
+  Local.prototype.creditoEnviar = SO_SUPABASE;
+  Local.prototype.creditoLer = SO_SUPABASE;
+  Local.prototype.creditoLink = SO_SUPABASE;
   Local.prototype.boletoLink = SO_SUPABASE;
 
   // E-mails da cadência: a Edge Function crm-email envia pelo Brevo (a chave fica só no Supabase).

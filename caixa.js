@@ -837,11 +837,14 @@
         '<small>' + (s.ancora ? 'banco ' + esc(R.moeda(s.ancora.valor)) + ' em ' + esc(R.dataBR(s.ancora.data)) + (s.n ? ' · +' + esc(R.moeda(s.entradas)) + ' −' + esc(R.moeda(s.saidas)) + ' baixados aqui' : '') : 'informe o saldo do banco') + '</small>' +
         '<button type="button" class="btn sec" data-acao="cx-conferir">Conferir com o banco</button></div></div>' +
         '<nav class="cx-abas">' + aba('dia', 'Dia a dia') + aba('contas', 'Contas a pagar') + aba('recorrentes', 'Recorrentes') + aba('pausadas', 'Contas pausadas' + (pausadas ? ' (' + pausadas + ')' : '')) +
-          (CRM.cobranca ? aba('cobranca', 'Cobrança' + (CRM.cobranca.contagem() ? ' (' + CRM.cobranca.contagem() + ')' : '')) : '') + '</nav>' +
-        (vista === 'dia' ? caixaFrases() + grade(s) + blocosVencidos() : vista === 'recorrentes' ? listaRecorrentes() : vista === 'cobranca' && CRM.cobranca ? CRM.cobranca.aba() : listaContas());
+          (CRM.cobranca ? aba('cobranca', 'Cobrança' + (CRM.cobranca.contagem() ? ' (' + CRM.cobranca.contagem() + ')' : '')) : '') +
+          (CRM.credito ? aba('credito', 'Crédito' + (CRM.credito.contagem() ? ' (' + CRM.credito.contagem() + ')' : '')) : '') + '</nav>' +
+        (vista === 'dia' ? caixaFrases() + grade(s) + blocosVencidos() : vista === 'recorrentes' ? listaRecorrentes() : vista === 'cobranca' && CRM.cobranca ? CRM.cobranca.aba()
+          : vista === 'credito' && CRM.credito ? CRM.credito.aba() : listaContas());
     },
     depois(el) {
       if (vista === 'cobranca' && CRM.cobranca) CRM.cobranca.depoisAba(el);
+      if (vista === 'credito' && CRM.credito) CRM.credito.depoisAba(el);
       const fr = el.querySelector('#cxFrases');
       if (fr) {
         fr.addEventListener('input', () => { rascunho = fr.value; });
