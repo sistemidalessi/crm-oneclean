@@ -129,7 +129,7 @@
     const vencidas = fichas.filter(f => f.revisar_em && f.revisar_em < h);
     const perto = fichas.filter(f => f.situacao === 'prazo' && f.limite > 0 && f.usado >= f.limite * 0.8);
     return '<section class="cartao cred-topo"><h2>Crédito dos clientes</h2>' +
-      '<p>Cliente novo: <strong>1.</strong> "Consultar crédito" copia o CNPJ e abre o site de consulta · <strong>2.</strong> baixe o PDF e solte aqui · ' +
+      '<p>Cliente novo: <strong>1.</strong> "Analisar" abre o site de consulta com o CNPJ copiado (cole e consulte) · <strong>2.</strong> baixe o PDF e solte na janela que abriu no CRM · ' +
       '<strong>3.</strong> confira a proposta (score, restrições, pontualidade) e aprove. A trava vale no pedido a prazo: SEM ANÁLISE, PRAZO e LIMITE, que só você libera.</p>' +
       '<p class="cred-liga">' + (lig ? CRM.selo('trava ligada', 'verde') + ' <button type="button" class="btn sec" data-acao="cred-ligar">Desligar a trava</button>'
         : CRM.selo('trava desligada', 'cinza') + ' <button type="button" class="btn" data-acao="cred-ligar">Ligar a trava nos pedidos</button>' +
@@ -142,7 +142,7 @@
       (pend.length ? '<section class="cartao"><h2>Para analisar <small>' + pend.length + '</small></h2><div class="tabela-rolagem"><table class="tabela"><tbody>' +
         pend.map(p => '<tr><td><button type="button" class="link" data-acao="abrir-empresa" data-id="' + esc(p.empresa_id) + '">' + esc(p.nome) + '</button><small>' + esc(p.cnpj || '') + ' · cadastro ' + esc(R.dataBR(R.diaLocal(p.criado_em))) + '</small></td>' +
           '<td>' + ((p.pedidos || []).map(x => 'pedido ' + x.numero + ' · ' + R.moeda(x.valor) + ' · ' + (x.bloqueios || []).filter(b => BLOQUEIOS.indexOf(b) !== -1).join(', ')).map(esc).join('<br>') || '<small>cliente novo sem análise</small>') + '</td>' +
-          '<td class="acoes-linha">' + linkConsultar(p.empresa_id, 'Consultar crédito', 'mini') + ' <button type="button" class="mini" data-acao="cred-analisar" data-id="' + esc(p.empresa_id) + '">Analisar</button></td></tr>').join('') +
+          '<td class="acoes-linha">' + linkConsultar(p.empresa_id, 'Analisar', 'mini', 'cred-analisar-site') + '</td></tr>').join('') +
         '</tbody></table></div></section>' : '') +
       (sug.length ? '<section class="cartao"><h2>Clientes que já compram <small>' + sug.length + ' sem ficha · sugestão pelo histórico</small></h2>' +
         '<p>Limite = 2 × a maior compra do mês nos últimos 12 meses (de 500 em 500), prazo = o maior que o cliente usa hoje (mínimo 28 dias). Quem tem título vencido fica "em análise". Revisão em 6 meses.</p>' +
@@ -174,10 +174,12 @@
 
   // Botão "Consultar crédito": um link de verdade (<a target=_blank>), que o navegador abre sem bloquear; o clique só
   // copia o CNPJ. Sem endereço configurado, vira botão que pede o endereço.
-  function linkConsultar(id, rotulo, cls) {
+  // acao 'cred-analisar-site' (27/10/2026, pedido do Anderson: "só deixar o Analisar"): o mesmo clique abre o site com o
+  // CNPJ copiado e a janela da análise no CRM, onde se solta o PDF.
+  function linkConsultar(id, rotulo, cls, acao) {
     const u = linkConsulta();
-    if (!u) return '<button type="button" class="' + cls + '" data-acao="cred-endereco">' + esc(rotulo) + '</button>';
-    return '<a class="' + cls + '" href="' + esc(u) + '" target="_blank" rel="noopener noreferrer" data-acao="cred-consultar"' + (id ? ' data-id="' + esc(id) + '"' : '') + '>' + esc(rotulo) + '</a>';
+    if (!u) return '<button type="button" class="' + cls + '" data-acao="' + (acao ? 'cred-analisar' : 'cred-endereco') + '"' + (id ? ' data-id="' + esc(id) + '"' : '') + '>' + esc(rotulo) + '</button>';
+    return '<a class="' + cls + '" href="' + esc(u) + '" target="_blank" rel="noopener noreferrer" data-acao="' + (acao || 'cred-consultar') + '"' + (id ? ' data-id="' + esc(id) + '"' : '') + '>' + esc(rotulo) + '</a>';
   }
   function consultar(id) {
     const e = id && CRM.empresa(id), doc = docTxt(e);
@@ -186,7 +188,7 @@
   }
 
   // Formulário da análise: consulta (PDF lido pela IA) → proposta pela política → aprovar.
-  async function analisar(id) {
+  async function analisar(id, siteAberto) {
     const e = CRM.empresa(id);
     if (!e) { CRM.toast('Cliente não encontrado (fora da sua lista?).', true); return; }
     let atual = null;
@@ -203,7 +205,8 @@
     CRM.abrirForm({
       titulo: 'Crédito: ' + e.nome, largura: 'largo',
       htmlAntes: '<div class="cred-form"><p>' + esc(e.cnpj || 'sem CNPJ') + (ficha ? ' · ficha de ' + esc(R.dataBR(ficha.analisado_em)) + ' · usado hoje ' + esc(R.moeda(ficha.usado || 0)) : s ? ' · em aberto ' + esc(R.moeda(s.aberto)) : '') + '</p>' +
-        '<div class="cred-passos">' + linkConsultar(id, '1. Consultar crédito (copia o CNPJ)', 'btn sec') +
+        (siteAberto ? '<p class="dica"><strong>O site da consulta abriu numa aba nova, com o CNPJ copiado:</strong> cole no Documento (Ctrl+V), clique em Consulta, baixe o PDF e solte aqui.</p>' : '') +
+        '<div class="cred-passos">' + linkConsultar(id, siteAberto ? 'Abrir o site de novo' : '1. Consultar crédito (copia o CNPJ)', 'btn sec') +
         '<label class="btn sec arquivo">2. Soltar o PDF da consulta<input type="file" id="credArq" accept="application/pdf,image/png,image/jpeg,image/webp"></label>' +
         '<span id="credLendo"></span></div>' + fatos() + prop(lida ? propor(lida, ctx) : null) + '</div>',
       campos: [
@@ -268,7 +271,8 @@
     const d = v.d;
     if (!d) return;
     if (!CRM.ehGestor()) { const t = textoEquipe(d); el.innerHTML = t ? '<h3>Crédito</h3><p class="resumo-compras">' + esc(t) + '</p>' : ''; return; }
-    const editar = CRM.ehAdmin() ? ' <button type="button" class="mini" data-acao="cred-analisar" data-id="' + esc(id) + '">' + (d.situacao === 'sem_ficha' ? 'Analisar' : 'Editar') + '</button>' : '';
+    const editar = !CRM.ehAdmin() ? '' : d.situacao === 'sem_ficha' ? ' ' + linkConsultar(id, 'Analisar', 'mini', 'cred-analisar-site')
+      : ' <button type="button" class="mini" data-acao="cred-analisar" data-id="' + esc(id) + '">Editar</button>';
     el.innerHTML = '<h3>Crédito' + editar + '</h3><p class="resumo-compras">' + (d.situacao === 'sem_ficha' ? 'Sem análise de crédito' + (d.ligado ? ': pedido a prazo fica bloqueado.' : '.')
       : seloSit(d.situacao) + (d.situacao === 'prazo' ? ' limite <strong>' + esc(R.moeda(d.limite)) + '</strong> · usado ' + esc(R.moeda(d.usado)) + ' · disponível <strong>' + esc(R.moeda(d.disponivel)) + '</strong>' + (d.prazo_max ? ' · até ' + d.prazo_max + ' dias' : '') : '') +
         (d.score ? '<br>score ' + d.score : '') + (d.analisado_em ? ' · analisado em ' + esc(R.dataBR(d.analisado_em)) : '') + (d.revisao_vencida ? ' ' + CRM.selo('revisão vencida', 'ambar') : '') +
@@ -287,13 +291,17 @@
     },
     'cred-consultar': id => consultar(id),
     'cred-analisar': id => { analisar(id).catch(CRM.falhou); },
+    'cred-analisar-site': id => { consultar(id); analisar(id, true).catch(CRM.falhou); },
     'cred-buscar': () => {
       const t = String((document.querySelector('#credBusca') || {}).value || '').trim();
       if (!t) return;
       const doc = (t.split('·').pop() || '').replace(/[^0-9A-Za-z]/g, '').toUpperCase(), nome = t.split('·')[0].trim().toLowerCase();
       const l = (CRM.estado.D.empresas || []).filter(e => (doc.length >= 8 && String(e.cnpj || '').replace(/[^0-9A-Za-z]/g, '').toUpperCase() === doc) || String(e.nome || '').toLowerCase() === nome);
       if (!l.length) { CRM.toast('Não achei esse cliente. Escolha da lista (nome · CNPJ).', true); return; }
-      analisar(l[0].id).catch(CRM.falhou);
+      // cliente sem ficha: abre o site junto (ainda dentro do clique, senão o navegador bloqueia a aba)
+      const semFicha = !((painel && painel.fichas) || []).some(f => f.empresa_id === l[0].id);
+      if (semFicha && linkConsulta()) { raiz.open(linkConsulta(), '_blank', 'noopener'); consultar(l[0].id); }
+      analisar(l[0].id, semFicha && !!linkConsulta()).catch(CRM.falhou);
     },
     'cred-pdf': async id => {
       const f = ((painel && painel.fichas) || []).find(x => x.empresa_id === id);
