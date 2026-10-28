@@ -1818,7 +1818,8 @@ begin
   values ('crm-notas-xml', 'crm-notas-xml', false, 2097152, array['text/xml','application/xml'])
   on conflict (id) do update set public = false, file_size_limit = 2097152, allowed_mime_types = excluded.allowed_mime_types;
   if not exists (select 1 from pg_policies where schemaname = 'storage' and tablename = 'objects' and policyname = 'crm_notas_xml_le') then
-    create policy crm_notas_xml_le on storage.objects for select to authenticated using (bucket_id = 'crm-notas-xml' and (select public.crm_eh_admin()));
+    -- 28/10/2026: também a gestão e a logística (consulta de notas: DANFE e XML das notas do FKN)
+    create policy crm_notas_xml_le on storage.objects for select to authenticated using (bucket_id = 'crm-notas-xml' and ((select public.crm_eh_gestor()) or (select public.crm_eh_logistica())));
     create policy crm_notas_xml_grava on storage.objects for insert to authenticated with check (bucket_id = 'crm-notas-xml' and (select public.crm_eh_admin()));
   end if;
 end $$;
@@ -7271,3 +7272,69 @@ revoke all on public.crm_credito_rekta from anon, public, authenticated;
 grant select on public.crm_credito_rekta to authenticated;
 drop policy if exists ler on public.crm_credito_rekta;
 create policy ler on public.crm_credito_rekta for select to authenticated using ((select public.crm_eh_admin()));
+
+-- ============================================================ Consultar notas (28/10/2026)
+-- Pedido do Anderson: "consultar pelo número da nota, pelo cliente… e a sequência da nota tem que continuar". Uma pesquisa só
+-- em crm_notas (as do FKN e as do CRM): número ("2791" ou "2-15"), chave (44), CNPJ/CPF, palavras do cliente/cidade/natureza;
+-- período, série e situação. A logística não lê crm_notas direto (RLS); aqui lê, como a gestão, para reimprimir e conferir.
+-- Vendedor(a): só as notas que já vê (carteira ou vendidas por ela).
+create or replace function public.crm_notas_buscar(p_texto text default '', p_de date default null, p_ate date default null,
+  p_serie text default '', p_situacao text default '', p_limite integer default 200, p_offset integer default 0)
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare
+  t text := coalesce(trim(p_texto), '');
+  d text := regexp_replace(t, '\D', '', 'g');
+  doc text := upper(regexp_replace(t, '[^0-9A-Za-z]', '', 'g'));
+  tudo boolean := public.crm_eh_gestor() or public.crm_eh_logistica() or public.crm_eh_comprador();
+  ser text := null; num bigint := null; ws text[]; r jsonb;
+begin
+  if not (tudo or public.crm_eh_membro()) then raise exception 'sem acesso às notas'; end if;
+  if t ~ '^\d{1,4}\s*-\s*\d{1,9}$' then ser := split_part(regexp_replace(t, '\s', '', 'g'), '-', 1); num := split_part(regexp_replace(t, '\s', '', 'g'), '-', 2)::bigint;
+  elsif t ~ '^\d{1,9}$' then num := t::bigint; end if;
+  ws := array_remove(string_to_array(translate(lower(t), 'áàâãäéèêëíìîïóòôõöúùûüç', 'aaaaaeeeeiiiiooooouuuuc'), ' '), '');
+  with base as (
+    select n.id, n.chave, n.serie, n.numero, n.emitida_em, n.empresa_id, e.nome empresa_nome, n.cliente_doc, n.cliente_nome, n.cidade, n.uf,
+           n.natureza, n.valor_total, n.cancelada, f.id nfe_id, f.situacao nfe_situacao
+      from public.crm_notas n
+      left join public.crm_empresas e on e.id = n.empresa_id
+      left join lateral (select x.id, x.situacao from public.crm_nfe x where x.chave = n.chave order by x.criado_em desc limit 1) f on true
+     where (tudo or n.empresa_id in (select public.crm_empresas_minhas()) or n.vendedor_id = auth.uid())
+       and (p_de is null or n.emitida_em >= (p_de::timestamp at time zone 'America/Sao_Paulo'))
+       and (p_ate is null or n.emitida_em < ((p_ate + 1)::timestamp at time zone 'America/Sao_Paulo'))
+       and (coalesce(p_serie, '') = '' or n.serie = p_serie)
+       and (coalesce(p_situacao, '') = '' or (p_situacao = 'cancelada') = n.cancelada)
+       and (t = ''
+         or (num is not null and n.numero = num and (ser is null or n.serie = ser))
+         or (length(d) = 44 and n.chave = d)
+         or (length(doc) in (11, 14) and t ~ '^[0-9A-Za-z./ -]+$' and upper(regexp_replace(coalesce(n.cliente_doc, ''), '[^0-9A-Za-z]', '', 'g')) = doc)
+         or (num is null and length(d) <> 44 and not (length(doc) in (11, 14) and t ~ '^[0-9./ -]+$')
+             and not exists (select 1 from unnest(ws) w where position(w in translate(lower(concat_ws(' ', n.cliente_nome, e.nome, n.cidade, n.natureza, n.cliente_doc)),
+               'áàâãäéèêëíìîïóòôõöúùûüç', 'aaaaaeeeeiiiiooooouuuuc')) = 0)))
+  )
+  select jsonb_build_object('total', (select count(*) from base), 'soma', coalesce((select sum(valor_total) filter (where not cancelada) from base), 0),
+    'notas', coalesce((select jsonb_agg(to_jsonb(b) order by b.emitida_em desc, b.numero desc)
+                         from (select * from base order by emitida_em desc, numero desc limit least(greatest(coalesce(p_limite, 200), 1), 5000) offset greatest(coalesce(p_offset, 0), 0)) b), '[]'))
+    into r;
+  return r;
+end;
+$$;
+grant execute on function public.crm_notas_buscar(text, date, date, text, text, integer, integer) to authenticated;
+
+-- A sequência de cada série: a próxima do CRM (crm_nfe_numeracao), a última autorizada e a última nota de cada série (FKN incluso).
+create or replace function public.crm_nfe_sequencia()
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare r jsonb;
+begin
+  if not (public.crm_eh_gestor() or public.crm_eh_logistica()) then raise exception 'só a gestão e a logística'; end if;
+  select jsonb_build_object(
+    'crm', coalesce((select jsonb_agg(jsonb_build_object('ambiente', q.ambiente, 'serie', q.serie, 'proximo', q.proximo,
+              'ultima', (select max(x.numero) from public.crm_nfe x where x.ambiente = q.ambiente and x.serie = q.serie and x.protocolo is not null),
+              'ultima_em', (select max(x.autorizada_em) from public.crm_nfe x where x.ambiente = q.ambiente and x.serie = q.serie and x.protocolo is not null))
+            order by q.ambiente desc, q.serie) from public.crm_nfe_numeracao q), '[]'),
+    'notas', coalesce((select jsonb_agg(jsonb_build_object('serie', s.serie, 'ultima', s.mx, 'ultima_em', s.em, 'quantas', s.n) order by s.serie)
+              from (select serie, max(numero) mx, max(emitida_em) em, count(*) n from public.crm_notas group by serie) s), '[]'))
+    into r;
+  return r;
+end;
+$$;
+grant execute on function public.crm_nfe_sequencia() to authenticated;

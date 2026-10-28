@@ -401,20 +401,83 @@
       (['rejeitada', 'denegada', 'pendente', 'bloqueada'].indexOf(s) !== -1 && n.motivo ? '<small>' + esc((n.cstat ? n.cstat + ' — ' : '') + n.motivo) + '</small>' : '') + (avisos.length ? '<small>' + esc(avisos.join(' · ')) + '</small>' : '') +
       (evs ? '<small>' + esc(evs) + '</small>' : '') + '</td><td>' + esc(quando(n.autorizada_em || n.atualizado_em || n.criado_em)) + '</td><td class="num">' + b.join(' ') + '</td></tr>';
   }
+  // ------------------------------------------------ Consultar notas (28/10/2026, pedido do Anderson: "consultar pelo número da
+  // nota, pelo cliente… e a sequência da nota tem que continuar"). Todas as notas que o CRM conhece (as do FKN, série 1, e as do
+  // CRM, série 2), pesquisadas no banco (crm_notas_buscar): número ("2791" ou "2-15"), chave, CNPJ/CPF, cliente, cidade.
+  const LS = 'nf-consulta';
+  let busca = null, buscando = false, seq = null, seqLendo = false;
+  const chaveBusca = st => [st.busca, st.de, st.ate, st.sel].join('|');
+  const filtrosRpc = st => ({ texto: st.busca || '', de: st.de || null, ate: st.ate || null, serie: /^\d+$/.test(st.sel) ? st.sel : '',
+    situacao: st.sel === 'cancelada' ? 'cancelada' : st.sel === 'valida' ? 'valida' : '' });
+  async function buscaNotas(maisUm) {
+    const st = CRM.Lista.estado(LS), k = chaveBusca(st), junta = maisUm && busca && busca.k === k;
+    buscando = true;
+    try {
+      const r = await CRM.store().notasBuscar(Object.assign(filtrosRpc(st), { limite: 100, offset: junta ? busca.notas.length : 0 }));
+      busca = junta ? Object.assign({}, busca, { notas: busca.notas.concat(r.notas || []) }) : { k, total: Number(r.total) || 0, soma: Number(r.soma) || 0, notas: r.notas || [] };
+    } catch (e) { CRM.falhou(e); busca = { k, total: 0, soma: 0, notas: [], erro: true }; }
+    buscando = false;
+    CRM.render();
+  }
+  const diaHora = v => (v ? new Date(v).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '');
+  function linhaConsulta(n) {
+    const b = n.nfe_id ? ['<button type="button" class="mini" data-acao="nf-danfe" data-id="' + esc(n.nfe_id) + '">DANFE</button>', '<button type="button" class="mini" data-acao="nf-xml" data-id="' + esc(n.nfe_id) + '">XML</button>']
+      : ['<button type="button" class="mini" data-acao="nf-danfe-chave" data-id="' + esc(n.chave) + '">DANFE</button>', '<button type="button" class="mini" data-acao="nf-xml-chave" data-id="' + esc(n.chave) + '">XML</button>'];
+    const cli = n.empresa_id ? '<button type="button" class="link" data-acao="abrir-empresa" data-id="' + esc(n.empresa_id) + '">' + esc(n.empresa_nome || n.cliente_nome || '') + '</button>' : esc(n.cliente_nome || '');
+    return '<tr><td><strong>' + esc((n.serie || '') + '-' + n.numero) + '</strong><small>' + (String(n.serie) === String(serie()) ? 'CRM' : 'FKN') + '</small></td>' +
+      '<td>' + esc(diaHora(n.emitida_em)) + '</td><td>' + cli + '<small>' + esc([n.cliente_doc, [n.cidade, n.uf].filter(Boolean).join('/')].filter(Boolean).join(' · ')) + '</small></td>' +
+      '<td><small>' + esc(n.natureza || '') + '</small></td><td class="num">' + moeda(n.valor_total) + '</td>' +
+      '<td>' + (n.cancelada ? CRM.selo('cancelada', 'vermelho') : CRM.selo('autorizada', 'verde')) + '</td><td class="num">' + b.join(' ') + '</td></tr>';
+  }
+  function telaSequencia() {
+    if (!seq && !seqLendo) { seqLendo = true; CRM.store().nfeSequencia().then(r => { seq = r || {}; CRM.render(); }).catch(() => { seq = {}; }); }
+    if (!seq) return '';
+    const l = [];
+    const crm = seq.crm || [], prod = crm.find(x => x.ambiente === 'producao' && Number(x.serie) === serie());
+    l.push(prod ? 'Série ' + prod.serie + ' (CRM): última autorizada ' + (prod.ultima ? '<strong>' + prod.serie + '-' + prod.ultima + '</strong> em ' + esc(diaHora(prod.ultima_em)) : '—') + ' · a próxima é a <strong>' + prod.serie + '-' + prod.proximo + '</strong>'
+      : 'Série ' + serie() + ' (CRM, produção): ainda não emitiu nenhuma; a primeira será a <strong>' + serie() + '-1</strong>');
+    (seq.notas || []).filter(x => String(x.serie) !== String(serie())).forEach(x => l.push('Série ' + esc(x.serie) + ' (FKN): última <strong>' + esc(x.serie + '-' + x.ultima) + '</strong> em ' + esc(diaHora(x.ultima_em)) +
+      ' · ' + Number(x.quantas).toLocaleString('pt-BR') + ' notas no CRM'));
+    const hom = crm.find(x => x.ambiente === 'homologacao');
+    return '<p class="nf-sequencia">' + l.join('<br>') + (hom ? '<br><small>Homologação (teste): próxima ' + hom.serie + '-' + hom.proximo + '</small>' : '') + '</p>';
+  }
+  function telaConsulta() {
+    const st = CRM.Lista.estado(LS);
+    if ((!busca || busca.k !== chaveBusca(st)) && !buscando) setTimeout(() => buscaNotas(false), 0);
+    const l = busca && busca.k === chaveBusca(st) ? busca.notas : null;
+    return '<section class="cartao"><h2>Consultar notas fiscais <small>todas: as do FKN e as do CRM</small></h2>' + telaSequencia() +
+      CRM.Lista.barra(LS, { periodo: true, rotuloPeriodo: 'Emitida de', placeholder: 'Número (2791 ou 2-15), cliente, CNPJ, cidade ou chave', csv: false,
+        sel: [['', 'Todas'], ['1', 'Série 1 (FKN)'], [String(serie()), 'Série ' + serie() + ' (CRM)'], ['valida', 'Só as válidas'], ['cancelada', 'Só as canceladas']],
+        extra: '<button type="button" class="btn sec" data-acao="nf-consulta-csv">Baixar planilha</button>' }) +
+      (!l ? '<p class="vazio">Procurando…</p>' : !l.length ? '<p class="vazio">Nenhuma nota com essa pesquisa.</p>' :
+        '<p class="dica">' + busca.total.toLocaleString('pt-BR') + ' nota(s) · ' + moeda(busca.soma) + ' (sem as canceladas)</p>' +
+        '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>NF</th><th>Emitida</th><th>Cliente</th><th>Natureza</th><th class="num">Valor</th><th>Situação</th><th></th></tr></thead><tbody>' +
+        l.map(linhaConsulta).join('') + '</tbody></table></div>' +
+        (busca.total > l.length ? '<p class="dica lista-mais">Mostrando ' + l.length + ' de ' + busca.total.toLocaleString('pt-BR') + '. <button type="button" class="mini" data-acao="nf-consulta-mais"' + (buscando ? ' disabled' : '') + '>Mostrar mais 100</button> · a planilha leva todas</p>' : '')) +
+      '</section>';
+  }
+
   function tela() {
     if (nfes === null) { setTimeout(carrega, 0); return '<div class="cartao"><p class="vazio">Carregando as notas…</p></div>'; }
     const amb = ambiente();
     // em produção a lista abre só nas notas que valem (as de teste da homologação ficam no filtro "Homologação")
     if (f.amb == null) f.amb = amb === 'producao' ? 'producao' : '';
-    const l = nfes.filter(n => !f.amb || n.ambiente === f.amb);
+    const l0 = nfes.filter(n => !f.amb || n.ambiente === f.amb);
+    const l = CRM.Lista.filtra('nf-crm', l0, { texto: n => [n.serie + '-' + n.numero, n.numero, CRM.nomeEmpresa(n.empresa_id), n.chave, pedidoNum(n), (M.SITUACAO[M.situacaoDe(n)] || [n.situacao])[0], n.motivo],
+      data: n => n.autorizada_em || n.criado_em, sel: (n, v) => M.situacaoDe(n) === v });
+    CRM.Lista.planilha('nf-crm', 'nfe-do-crm', ['Série', 'Número', 'Ambiente', 'Cliente', 'Pedido', 'Valor', 'Situação', 'Motivo', 'Quando', 'Chave'],
+      () => l.map(n => [n.serie, n.numero, n.ambiente, CRM.nomeEmpresa(n.empresa_id), pedidoNum(n) || '', n.valor, (M.SITUACAO[M.situacaoDe(n)] || [n.situacao])[0], n.motivo || '', quando(n.autorizada_em || n.atualizado_em || n.criado_em), n.chave || '']));
     const pend = nfes.filter(n => n.situacao === 'pendente' && !n.inutilizada_em);
     const chip = (v, t) => '<button type="button" class="chip-filtro' + (f.amb === v ? ' ativo' : '') + '" data-acao="nf-amb" data-id="' + v + '">' + esc(t) + '</button>';
-    return '<section class="cartao"><h2>NF-e emitidas pelo CRM <small>série ' + serie() + ' · últimos 90 dias</small></h2>' +
+    return telaConsulta() + '<section class="cartao"><h2>NF-e emitidas pelo CRM <small>série ' + serie() + ' · últimos 90 dias e as pendentes, com as ações (consultar, carta de correção, cancelar)</small></h2>' +
       '<p>' + seloAmb(amb) + ' ' + (fiscalCfg().emitente ? '' : '<strong>O emitente ainda não foi configurado</strong> (aba Fiscal, só o administrador).') + '</p>' +
       (pend.length ? '<p class="alerta"><strong>' + pend.length + ' nota(s) sem resposta da Sefaz.</strong> Clique em "Consultar": se a Sefaz não recebeu, o CRM reenvia o MESMO XML (nunca emita outra para o mesmo pedido antes disso).</p>' : '') +
       '<div class="chips">' + chip('', 'Todas') + chip('producao', 'Produção') + chip('homologacao', 'Homologação') + '</div>' +
+      (l0.length ? CRM.Lista.barra('nf-crm', { periodo: true, total: l0.length, achados: l.length, placeholder: 'Número, cliente, pedido, chave ou motivo',
+        sel: [['', 'Todas as situações']].concat(Object.keys(M.SITUACAO).map(k => [k, M.SITUACAO[k][0]])) }) : '') +
       (l.length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>NF</th><th>Cliente</th><th class="num">Valor</th><th>Situação</th><th>Quando</th><th></th></tr></thead><tbody>' +
-        l.map(linhaNfe).join('') + '</tbody></table></div>' : '<p class="vazio">Nenhuma nota emitida pelo CRM ainda. A nota sai do pedido: abra o pedido separado e clique em "Emitir NF-e".</p>') + '</section>' +
+        CRM.Lista.corta('nf-crm', l, 100).map(linhaNfe).join('') + '</tbody></table></div>' + CRM.Lista.mais('nf-crm', l, 100) +
+        (nfes.length >= 1000 ? '<p class="dica">A lista traz até 1.000 notas do CRM; as mais antigas estão em "Consultar notas fiscais", acima.</p>' : '') : l0.length ? '<p class="vazio">Nenhuma nota com essa pesquisa.</p>' : '<p class="vazio">Nenhuma nota emitida pelo CRM ainda. A nota sai do pedido: abra o pedido separado e clique em "Emitir NF-e".</p>') + '</section>' +
       (CRM.ehAdmin() ? '<section class="cartao"><h2>Fechamento do mês para o contador</h2>' +
         '<p>ZIP com os XML de saída emitidos pelo CRM (produção), os eventos de cancelamento e de correção, as inutilizações e a relação de canceladas e inutilizadas.' + (CRM.fknDesligado && CRM.fknDesligado() ? '' : ' As notas da série 1 o FKN continua mandando como sempre.') + '</p>' +
         '<p class="acoes"><input type="month" value="' + esc(f.mes) + '" data-nf-mes> <button type="button" class="btn" data-acao="nf-fechamento">Baixar o ZIP do mês</button></p></section>' : '') +
@@ -429,7 +492,7 @@
         (semUso.length ? '<p class="alerta"><strong>' + semUso.length + (semUso.length === 1 ? ' número da produção sem nota' : ' números da produção sem nota') + '.</strong> Se a nota não vai mais sair pelo CRM, inutilize até o dia 10 do mês seguinte.</p>' +
           '<ul class="lista">' + semUso.map(u => '<li>' + esc('NF ' + u.serie + '-' + u.numero + (u.pedido_numero ? ' · pedido ' + u.pedido_numero : '') + ' · ' + u.motivo + ' · até ' + String(u.prazo || '').split('-').reverse().join('/')) +
             ' <button type="button" class="mini" data-acao="nf-inutilizar" data-id="' + esc(u.serie + ':' + u.numero) + '">Inutilizar</button></li>').join('') + '</ul>' : '') +
-        (inuts.length ? '<ul class="lista">' + inuts.slice(0, 20).map(i => '<li>' + esc('Série ' + i.serie + ', ' + (i.de === i.ate ? 'nº ' + i.de : 'nº ' + i.de + ' a ' + i.ate) + ' · ' + (i.ambiente === 'producao' ? 'produção' : 'homologação') + ' · ' + quando(i.criado_em) + ' · ' + (i.cstat || '') + ' ' + (i.motivo || '')) + '</li>').join('') + '</ul>' : '') +
+        (inuts.length ? (inuts.length > 20 ? '<p class="dica">As 20 mais recentes de ' + inuts.length + ' (todas vão no ZIP do mês para o contador).</p>' : '') + '<ul class="lista">' + inuts.slice(0, 20).map(i => '<li>' + esc('Série ' + i.serie + ', ' + (i.de === i.ate ? 'nº ' + i.de : 'nº ' + i.de + ' a ' + i.ate) + ' · ' + (i.ambiente === 'producao' ? 'produção' : 'homologação') + ' · ' + quando(i.criado_em) + ' · ' + (i.cstat || '') + ' ' + (i.motivo || '')) + '</li>').join('') + '</ul>' : '') +
         '<p class="acoes"><button type="button" class="btn sec" data-acao="nf-inutilizar">Inutilizar números…</button></p></section>' : '');
   }
 
@@ -559,9 +622,9 @@
     if (!xml) throw new Error('esta nota não tem XML guardado');
     return xml;
   }
-  async function danfe(id) {
+  async function danfe(id, xmlPronto) {
     try {
-      const n = nfe(id), xml = await xmlDe(id);
+      const n = xmlPronto ? null : nfe(id), xml = xmlPronto || await xmlDe(id);
       await carregaJs('vendor/jspdf.umd.min.js');
       const Dn = raiz.CRMDanfe, d = Dn.ler(xml);
       if (!d) throw new Error('não consegui ler o XML da nota');
@@ -856,6 +919,33 @@
     'nf-lote': () => lote(),
     'nf-marcar-todos': () => { (CRM.pedidos.separados ? CRM.pedidos.separados() : []).filter(podeEmitir).forEach(p => marcados.add(p.id)); CRM.render(); },
     'nf-danfe': id => danfe(id),
+    // nota do FKN (sem crm_nfe): o XML guardado no bucket crm-notas-xml, pela chave
+    'nf-danfe-chave': async ch => {
+      let xml = null;
+      try { xml = await CRM.store().notaXml(ch); } catch (e) { xml = null; }
+      if (!xml) { CRM.toast('O XML desta nota não está guardado no CRM' + (CRM.ehAdmin() ? '' : ' (ou só o administrador abre o XML das notas do FKN)') + '.', true); return; }
+      danfe(ch, xml);
+    },
+    'nf-xml-chave': async ch => {
+      let xml = null;
+      try { xml = await CRM.store().notaXml(ch); } catch (e) { xml = null; }
+      if (!xml) { CRM.toast('O XML desta nota não está guardado no CRM' + (CRM.ehAdmin() ? '' : ' (ou só o administrador abre o XML das notas do FKN)') + '.', true); return; }
+      CRM.baixar('NFe' + ch + '-procNFe.xml', xml, 'application/xml');
+    },
+    'nf-consulta-mais': () => buscaNotas(true),
+    'nf-consulta-csv': async () => {
+      try {
+        const st = CRM.Lista.estado(LS), out = [];
+        for (let de = 0; de < 20000; de += 2000) {
+          const r = await CRM.store().notasBuscar(Object.assign(filtrosRpc(st), { limite: 2000, offset: de })), l = r.notas || [];
+          out.push(...l);
+          if (l.length < 2000) break;
+        }
+        if (!out.length) { CRM.toast('A pesquisa não achou nada para baixar.', true); return; }
+        CRM.baixarCSV('notas-fiscais', ['Série', 'Número', 'Emitida em', 'Cliente', 'CNPJ/CPF', 'Cidade', 'UF', 'Natureza', 'Valor', 'Situação', 'Chave'],
+          out.map(n => [n.serie, n.numero, diaHora(n.emitida_em), n.empresa_nome || n.cliente_nome || '', n.cliente_doc || '', n.cidade || '', n.uf || '', n.natureza || '', n.valor_total, n.cancelada ? 'cancelada' : 'autorizada', n.chave]));
+      } catch (e) { CRM.falhou(e); }
+    },
     'nf-xml': async id => {
       try { const n = nfe(id), xml = await xmlDe(id); CRM.baixar('NFe' + (n ? n.chave : id) + '-procNFe.xml', xml, 'application/xml'); } catch (e) { CRM.falhou(e); }
     },

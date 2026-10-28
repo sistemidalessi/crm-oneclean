@@ -1265,3 +1265,10 @@ a.btn, a.mini { text-decoration: none; display: inline-block; }
 .cred-filtros input { min-width: 260px; }
 button.ordena { appearance: none; border: 0; background: none; font: inherit; color: inherit; text-transform: inherit; letter-spacing: inherit; cursor: pointer; padding: 0; }
 button.ordena.ativo { color: var(--marinho); }
+
+/* barra de pesquisa das listas (listas.js, 28/10/2026): a mesma em todas as telas */
+.lista-barra { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 4px 0 10px; }
+.lista-barra .lista-busca { flex: 1 1 260px; max-width: 420px; }
+.lista-barra .lista-busca input { width: 100%; }
+.lista-barra .lista-conta { color: var(--texto-2, #667085); margin-left: auto; }
+.lista-mais { margin-top: 6px; }

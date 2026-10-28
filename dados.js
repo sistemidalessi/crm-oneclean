@@ -1325,6 +1325,13 @@
     const desde = new Date(Date.now() - 90 * 864e5).toISOString();
     return unwrap(await comTentativas(() => this.sb.from('crm_nfe').select(NFE_COLUNAS).or('criado_em.gte.' + desde + ',situacao.eq.pendente').order('criado_em', { ascending: false }).limit(1000)));
   };
+  // Consultar notas (28/10/2026): todas as notas do CRM (FKN e CRM), pesquisadas no banco; e a sequência de cada série
+  Supa.prototype.notasBuscar = async function (o) {
+    o = o || {};
+    return unwrap(await comTentativas(() => this.sb.rpc('crm_notas_buscar', { p_texto: o.texto || '', p_de: o.de || null, p_ate: o.ate || null, p_serie: o.serie || '',
+      p_situacao: o.situacao || '', p_limite: o.limite || 100, p_offset: o.offset || 0 }))) || { total: 0, soma: 0, notas: [] };
+  };
+  Supa.prototype.nfeSequencia = async function () { return unwrap(await this.sb.rpc('crm_nfe_sequencia')) || {}; };
   Supa.prototype.nfeXml = async function (id) { return unwrap(await this.sb.from('crm_nfe').select('chave, proc_xml, nfe_xml').eq('id', id).single()); };
   Supa.prototype.nfesDoMes = async function (mes) {
     const [a, m] = mes.split('-').map(Number), fim = (m === 12 ? (a + 1) + '-01' : a + '-' + String(m + 1).padStart(2, '0')) + '-01T00:00:00-03:00', out = [];
@@ -1471,6 +1478,18 @@
   Local.prototype.outraCriar = async function () { throw new Error('as outras notas só funcionam ligadas ao banco'); };
   Local.prototype.outras = async function () { return []; };
   Local.prototype.nfeSemUso = async function () { return []; };
+  // modo local: as notas que o app tem na memória, com a mesma pesquisa da tela
+  Local.prototype.notasBuscar = async function (o) {
+    o = o || {};
+    const L = raiz.CRMListas, est = (raiz.CRM && raiz.CRM.estado && raiz.CRM.estado.D) || {}, emp = id => ((est.empresas || []).find(e => e.id === id) || {}).nome;
+    let l = (est.notas || []).filter(n => (!o.serie || String(n.serie) === String(o.serie)) && (!o.situacao || (o.situacao === 'cancelada') === !!n.cancelada));
+    l = L ? L.aplica({ busca: o.texto || '', de: o.de || '', ate: o.ate || '' }, l, { texto: n => [n.serie + '-' + n.numero, n.cliente_nome, emp(n.empresa_id), n.cliente_doc, n.cidade, n.chave], data: n => n.emitida_em }) : l;
+    l = l.slice().sort((a, b) => String(b.emitida_em).localeCompare(String(a.emitida_em)));
+    const de = o.offset || 0;
+    return { total: l.length, soma: l.filter(n => !n.cancelada).reduce((s2, n) => s2 + (Number(n.valor_total) || 0), 0),
+      notas: l.slice(de, de + (o.limite || 100)).map(n => Object.assign({}, n, { empresa_nome: emp(n.empresa_id) || null })) };
+  };
+  Local.prototype.nfeSequencia = async function () { return { crm: [], notas: [] }; };
   Local.prototype.nfeInutilizacoes = async function () { return (this._inuts || []).slice(); };
 
   // ---------------------------------------------------------------- fotos e fichas técnicas dos produtos (19/10/2026)
