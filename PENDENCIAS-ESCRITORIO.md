@@ -20,6 +20,8 @@ A mesma lista resumida está no `PENDENCIAS-ESCRITORIO.md` do `agilite-sistema-g
       arquivo em produção no convênio, a faixa do nosso número a partir de 2000000001 e o 1º arquivo de teste; (3) só então
       Configurações → Integrações → "Ligar pelo arquivo de remessa". Detalhes no plano da Fase 5 (`sistemi-dalessi`,
       `docs/plano-sair-do-fkn.md`).
+      **28/10, noite:** perguntas mandadas ao gerente (arquivo liberado em produção e teste, faixa do nosso número a partir de
+      2000000001, retorno diário no Gerenciador, dias para baixa, protesto pela instrução 09, BB Pay por arquivo). Esperando a resposta.
 
 - [ ] **Estoque antes da virada (24/10):** parte das 36 diferenças era erro do CRM (fuso), já corrigido; Belaplast 9758 e
       Leal 23026 reabertas. Falta: (1) o **comprador** dar a ciência das notas sem XML completo (desde 27/10 as notas de compra são dele do começo ao fim) (Vigut ×2 e AJA de 23/10, Lotus de
