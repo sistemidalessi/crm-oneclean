@@ -416,13 +416,23 @@
     const st = CRM.store();
     if (carregandoBB || !st || !st.boletosBB) return;
     carregandoBB = true;
-    try { const [lista, remessas] = await Promise.all([st.boletosBB(), st.boletoRemessas()]); bb = { lista, remessas }; } finally { carregandoBB = false; }
+    try {
+      const [lista, remessas, nfes] = await Promise.all([st.boletosBB(), st.boletoRemessas(), st.nfes ? st.nfes().catch(() => []) : []]);
+      // as notas que o CRM emitiu (produção, autorizadas): desde 28/10/2026 a série é a 1 do FKN, então a duplicata não traz
+      // mais o "2-" na frente e a nota do CRM se reconhece pela emissão
+      const doCrm = new Set((nfes || []).filter(n => n.ambiente === 'producao' && n.situacao === 'autorizada').map(n => Number(n.serie) + '|' + Number(n.numero)));
+      bb = { lista, remessas, doCrm };
+    } finally { carregandoBB = false; }
     CRM.render();
   }
-  // parcelas das notas do CRM (duplicata "2-000012/01") a pagar por boleto, a vencer e sem boleto vivo
+  // parcelas das notas do CRM a pagar por boleto, a vencer e sem boleto vivo. A nota do CRM: a emitida por ele (bb.doCrm,
+  // série|número) ou, das notas de antes da série 1, a duplicata com a série na frente ("2-000012/01"). As notas do FKN ficam
+  // de fora: o boleto delas já sai pelo site do BB.
+  const serieDup = d => { const m = /^(\d+)-/.exec(d || ''); return m ? Number(m[1]) : 1; };
+  const doCrm = t => /^\d+-/.test(t.duplicata || '') || !!(bb && bb.doCrm && bb.doCrm.has(serieDup(t.duplicata) + '|' + Number(t.nota_numero)));
   function aRegistrar() {
     const vivos = new Set(((bb && bb.lista) || []).filter(b => VIVO.includes(b.situacao)).map(b => b.duplicata)), h = CRM.hoje();
-    return ((CRM.estado.D || {}).titulos || []).filter(t => /^\d+-/.test(t.duplicata || '') && (!t.portador || /BOLETO/i.test(t.portador)) &&
+    return ((CRM.estado.D || {}).titulos || []).filter(t => doCrm(t) && (!t.portador || /BOLETO/i.test(t.portador)) &&
       t.vencimento >= h && Number(t.valor) > 0 && !t.cartorio_em && !t.abono && !vivos.has(t.duplicata)).sort((a, b) => a.vencimento.localeCompare(b.vencimento));
   }
   const SITUACAO_BB = { preparado: ['preparado', 'cinza'], registrado: ['no banco', 'azul'], pago: ['pago', 'verde'], baixado: ['baixado', 'cinza'], cancelado: ['cancelado', 'cinza'], erro: ['rejeitado pelo banco', 'vermelho'] };
