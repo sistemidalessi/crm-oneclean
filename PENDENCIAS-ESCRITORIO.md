@@ -72,7 +72,7 @@ A mesma lista resumida está no `PENDENCIAS-ESCRITORIO.md` do `agilite-sistema-g
 - [ ] **Certificado A1 novo (renovado pelo Anderson em 28/10):** e-CNPJ A1 da OneClean do Brasil, CNPJ 63.237.702/0001-03,
       AC Safeweb RFB v5, **válido até 28/10/2027** (conferido pelo titular e pela validade; o arquivo não fica em lugar nenhum
       além da VPS e do computador do escritório). O da VPS hoje vale até 23/12/2026. **Instalar na VPS** (só do escritório, pelo
-      SSH): `servico-fiscal/INSTALAR.md` → "Dia a dia" → "Certificado renovado": 4a (`scp` do `.pfx` novo por cima de
+      SSH; passo a passo completo em `sistemi-dalessi`, `docs/oneclean/certificado-a1-2027.md`): `servico-fiscal/INSTALAR.md` → "Dia a dia" → "Certificado renovado": 4a (`scp` do `.pfx` novo por cima de
       `/etc/oneclean-fiscal/oneclean.pfx`), 4b (a senha nova, digitada, nunca no chat), `systemctl reload oneclean-fiscal` e
       conferir em Fiscal → "Conferir o serviço fiscal" a validade 28/10/2027. Também no FKN/UniNFe enquanto o FKN for o
       reserva (até 30/11). Sugestão: tirar a senha do nome do arquivo.
