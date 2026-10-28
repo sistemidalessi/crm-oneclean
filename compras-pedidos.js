@@ -171,7 +171,11 @@
       if (!pode()) return '<div class="cartao"><p class="vazio">Esta tela é do administrador e do comprador.</p></div>';
       if (dados === null) { setTimeout(carrega, 0); return '<div class="cabecalho"><div><h1>Pedidos ao fornecedor</h1></div></div><div class="cartao"><p class="vazio">Carregando…</p></div>'; }
       const l = dados.lista, ab = l.filter(p => p.aberto), atr = ab.filter(p => p.atrasado), fat = ab.filter(p => p.situacaoAtual === 'faturado');
-      const vis = l.filter(p => f.ver === 'todos' || (f.ver === 'abertos' ? p.aberto : f.ver === 'atrasados' ? p.atrasado : p.situacaoAtual === 'recebido'));
+      // pesquisa e período (28/10/2026): nº, fornecedor, produto (código ou nome) e observação; período pela data do pedido
+      const vis = CRM.Lista.filtra('cp-lista', l.filter(p => f.ver === 'todos' || (f.ver === 'abertos' ? p.aberto : f.ver === 'atrasados' ? p.atrasado : p.situacaoAtual === 'recebido')),
+        { texto: p => [p.id, p.fornecedor_nome, p.obs, (p.itens || []).map(i => (i.codigo || '') + ' ' + (i.descricao || '')).join(' ')], data: p => p.criado_em || p.pedido_em });
+      CRM.Lista.planilha('cp-lista', 'pedidos-ao-fornecedor', ['Nº', 'Fornecedor', 'Pedido em', 'Situação', 'Previsão', 'Itens', 'Unidades', 'Total', 'Observação'],
+        () => vis.map(p => [p.id, p.fornecedor_nome, R.dataBR(R.diaLocal(p.criado_em || p.pedido_em)), (SIT[p.situacaoAtual] || [p.situacaoAtual])[0], p.previsao ? R.dataBR(p.previsao) : '', (p.itens || []).length, p.unidades, p.total || '', p.obs || '']));
       const kpi = (t, v, s, cls) => '<div class="kpi ' + (cls || '') + '"><span>' + esc(t) + '</span><strong>' + v + '</strong>' + (s ? '<small>' + esc(s) + '</small>' : '') + '</div>';
       return '<div class="cabecalho"><div><h1>Pedidos ao fornecedor</h1><p class="sub">o que já foi comprado e ainda não entrou: a nota do fornecedor (Sefaz) e a entrada dão a baixa sozinhas</p></div>' +
         '<div class="acoes"><button type="button" class="btn" data-acao="cp-novo">+ Novo pedido</button> <button type="button" class="btn sec" data-acao="cp-ir-compras">Registrar pela sugestão (Compras)</button> <button type="button" class="btn sec" data-acao="cp-recarregar"' + (carregando ? ' disabled' : '') + '>Atualizar</button></div></div>' +
@@ -180,6 +184,7 @@
           kpi('Pendências só no FKN', String(dados.fknSemPedido || 0), 'produtos com pedido no FKN e sem pedido aqui (sem data)') + '</section>' +
         '<section class="cartao"><div class="chips">' + VER.map(v => '<button type="button" class="chip-filtro' + (f.ver === v[0] ? ' ativo' : '') + '" data-acao="cp-ver" data-id="' + v[0] + '" aria-pressed="' + (f.ver === v[0]) + '">' + esc(v[1]) +
             (v[0] === 'abertos' ? ' (' + ab.length + ')' : v[0] === 'atrasados' ? ' (' + atr.length + ')' : '') + '</button>').join('') + '</div>' +
+          CRM.Lista.barra('cp-lista', { periodo: true, rotuloPeriodo: 'Pedido de', placeholder: 'Nº, fornecedor, produto ou observação' }) +
           (vis.length ? '<div class="tabela-rolagem"><table class="tabela pc-tabela"><thead><tr><th>Nº</th><th>Fornecedor</th><th>Pedido em</th><th>Situação</th><th class="num">Chega</th></tr></thead><tbody>' +
             vis.map(linhaPedido).join('') + '</tbody></table></div>'
             : '<p class="vazio">' + (l.length ? 'Nenhum pedido aqui.' : 'Nenhum pedido registrado ainda. Use "+ Novo pedido" (do zero) ou, em Compras → "Pedido por fornecedor", "Registrar pedido" em cada fornecedor.') + '</p>') +

@@ -337,7 +337,7 @@
     try {
       const st = CRM.store();
       if (op()) {
-        [saldo, compras, nomesOp] = await Promise.all([st.estoqueSaldoOp(), st.comprasOp(200).catch(() => []), st.estoqueDisponivel ? st.estoqueDisponivel().catch(() => []) : []]);
+        [saldo, compras, nomesOp] = await Promise.all([st.estoqueSaldoOp(), st.comprasOp(1000).catch(() => []), st.estoqueDisponivel ? st.estoqueDisponivel().catch(() => []) : []]);
         fkn = []; fotos = []; difs = []; dfe = []; dfeEst = null; fornDocs = []; fornCad = [];
         const idsOp = compras.filter(c => c.situacao === 'pendente').map(c => c.id);
         itensProd = idsOp.length ? await st.comprasItensProduto().catch(() => []) : [];
@@ -346,7 +346,7 @@
         devolucoes = await leDevolucoes(st);
         carregando = false; CRM.render(); return;
       }
-      [saldo, fkn, fotos, compras, dfe, dfeEst] = await Promise.all([st.estoqueSaldo(), st.estoque(), st.estoqueFotos(60), st.compras ? st.compras(200).catch(() => []) : [],
+      [saldo, fkn, fotos, compras, dfe, dfeEst] = await Promise.all([st.estoqueSaldo(), st.estoque(), st.estoqueFotos(60), st.compras ? st.compras(1000).catch(() => []) : [],
         st.dfe ? st.dfe().catch(() => []) : [], st.dfeEstado ? st.dfeEstado().catch(() => null) : null]);
       [fornDocs, fornCad, itensProd] = await Promise.all([st.fornecedorDocs ? st.fornecedorDocs().catch(() => []) : [], st.fornecedores ? st.fornecedores().catch(() => []) : [],
         st.comprasItensProduto && compras.some(c => c.situacao === 'pendente') ? st.comprasItensProduto().catch(() => []) : []]);
@@ -459,6 +459,32 @@
     CRM.store().relVendasAno(ano).then(l => { if (ano === rel.ano) { rel.vendas = l || []; rel.vendasAno = ano; } })
       .catch(e => { rel.vendas = []; rel.vendasAno = ano; CRM.falhou(e); }).then(() => { rel.carregando = false; CRM.render(); });
   }
+  // Movimentos do período (28/10/2026): todas as entradas, saídas, ajustes e estornos entre duas datas, de todos os produtos
+  // (antes, só produto a produto, os 200 mais recentes). Administrador e comprador (a tabela tem o custo).
+  const movPer = { chave: '', l: null, lendo: false };
+  function telaMovsPeriodo() {
+    if (op()) return '';
+    const st = CRM.Lista.estado('es-movs-per', { de: R.somaDias(CRM.hoje(), -7), ate: CRM.hoje() }), k = st.de + '|' + st.ate;
+    if (movPer.chave !== k && !movPer.lendo && st.de) {
+      movPer.lendo = true;
+      CRM.store().estoqueMovsPeriodo(st.de, st.ate || CRM.hoje()).then(l => { movPer.l = l; movPer.chave = k; }).catch(e => { CRM.falhou(e); movPer.l = []; movPer.chave = k; })
+        .then(() => { movPer.lendo = false; CRM.render(); });
+    }
+    const nome = cod => { const x = (saldo || []).find(y => y.codigo === cod); return x ? R.nomeDeItem(x.descricao || cod) : cod; };
+    const base = movPer.chave === k ? movPer.l || [] : null;
+    const l = base ? CRM.Lista.filtra('es-movs-per', base, { texto: m => [m.codigo, nome(m.codigo), m.motivo], sel: (m, v) => m.tipo === v }) : [];
+    CRM.Lista.planilha('es-movs-per', 'movimentos-estoque', ['Quando', 'Código', 'Produto', 'Tipo', 'Quantidade', 'Custo unitário', 'Qtd. na nota', 'Unidade na nota', 'Fator', 'Motivo'],
+      () => l.map(m => [quando(m.quando), m.codigo, nome(m.codigo), S.TIPOS[m.tipo] || m.tipo, m.quantidade, m.custo_unit, m.qtd_doc, m.unidade_doc || '', m.fator, m.motivo || '']));
+    const soma = t => l.filter(m => m.tipo === t).length;
+    return '<section class="cartao"><h2>Movimentos do período <small>' + (base ? base.length + ' movimento(s)' : 'carregando…') + '</small></h2>' +
+      CRM.Lista.barra('es-movs-per', { periodo: true, placeholder: 'Código, produto ou motivo (ex.: NF 2791)', total: base ? base.length : null, achados: l.length,
+        sel: [['', 'Todos os tipos']].concat(Object.keys(S.TIPOS).map(t => [t, S.TIPOS[t]])) }) +
+      (!base ? '<p class="vazio">Carregando…</p>' : !l.length ? '<p class="vazio">Nenhum movimento nesse período.</p>' :
+        '<p class="dica">' + ['saida', 'entrada', 'ajuste', 'inventario', 'estorno'].filter(soma).map(t => soma(t) + ' ' + (S.TIPOS[t] || t).toLowerCase()).join(' · ') + '</p>' +
+        '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Quando</th><th>Produto</th><th>Tipo</th><th class="num">Qtd.</th><th>Detalhe</th></tr></thead><tbody>' +
+        CRM.Lista.corta('es-movs-per', l, 100).map(m => '<tr><td>' + esc(quando(m.quando)) + '</td><td>' + esc(nome(m.codigo)) + '<small>' + esc(m.codigo) + '</small></td><td>' + esc(S.TIPOS[m.tipo] || m.tipo) + '</td>' +
+          '<td class="num">' + (m.quantidade > 0 ? '+' : '') + qtd(m.quantidade) + '</td><td>' + esc(m.motivo || '') + '</td></tr>').join('') + '</tbody></table></div>' + CRM.Lista.mais('es-movs-per', l, 100)) + '</section>';
+  }
   function telaRelatorios(linhas) {
     const est = estoqueRel(linhas);
     if (rel.vendasAno !== rel.ano) setTimeout(carregaVendas, 0);
@@ -484,7 +510,7 @@
         : '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Código</th><th>Produto</th>' + MESES.map(m => '<th class="num">' + m + '</th>').join('') + '<th class="num">Total</th></tr></thead><tbody>' +
           vend.slice(0, mostra).map(x => '<tr><td>' + esc(x.codigo) + '</td><td>' + esc(R.nomeDeItem(x.descricao || x.codigo)) + (x.unidade ? '<small>' + esc(x.unidade) + '</small>' : '') + '</td>' +
             (x.meses || []).map(v => '<td class="num">' + (v == null ? '' : qtd(v)) + '</td>').join('') + '<td class="num"><strong>' + qtd(x.total) + '</strong></td></tr>').join('') +
-          '</tbody></table></div>' + (vend.length > mostra ? '<p class="dica">Mostrando ' + mostra + ' de ' + vend.length + '; a planilha leva todos.</p>' : '')) + '</section>';
+          '</tbody></table></div>' + (vend.length > mostra ? '<p class="dica">Mostrando ' + mostra + ' de ' + vend.length + '; a planilha leva todos.</p>' : '')) + '</section>' + telaMovsPeriodo();
   }
 
   function telaConferencia() {
@@ -522,6 +548,22 @@
     g.chegou_obs ? 'anotado na conferência: ' + g.chegou_obs : 'conferido pela logística') + (g.chegou_obs ? ' <small class="neg">⚠ ' + esc(g.chegou_obs) + '</small>' : '');
   const ORDEM_CHEGADA = { chegou: 0, provavel: 1, aguardando: 2, sem_dado: 3 };
   const HISTORICO = 'antes do início do estoque do CRM';
+  // Consultar notas de compra (28/10/2026, pedido do Anderson: pesquisa em todas as telas): todas as que o CRM tem (as 1.000
+  // mais recentes), por fornecedor, CNPJ, número, chave ou observação; período; situação; planilha. A logística não vê valor.
+  function consultaCompras() {
+    const comValor = !op(), SIT = { pendente: 'pendente', lancada: 'entrada dada', ignorada: 'deixada de lado' };
+    const l = CRM.Lista.filtra('es-compras', compras, { texto: c => [c.fornecedor_nome, c.fornecedor_doc, c.numero, c.chave, c.obs], data: c => c.emitida_em, sel: (c, v) => c.situacao === v });
+    CRM.Lista.planilha('es-compras', 'notas-de-compra', ['Fornecedor', 'CNPJ', 'NF', 'Emitida', 'Situação', 'Entrada em'].concat(comValor ? ['Valor'] : []).concat(['Observação', 'Chave']),
+      () => l.map(c => [c.fornecedor_nome || '', c.fornecedor_doc || '', c.numero, quando(c.emitida_em), SIT[c.situacao] || c.situacao, c.lancada_em ? quando(c.lancada_em) : ''].concat(comValor ? [c.valor_total] : []).concat([c.obs || '', c.chave || ''])));
+    return '<section class="cartao"><h2>Consultar notas de compra <small>' + compras.length + (compras.length >= 1000 ? ' (as 1.000 mais recentes)' : '') + '</small></h2>' +
+      CRM.Lista.barra('es-compras', { periodo: true, rotuloPeriodo: 'Emitida de', placeholder: 'Fornecedor, CNPJ, número da NF, chave ou observação', total: compras.length, achados: l.length,
+        sel: [['', 'Todas'], ['pendente', 'Pendentes'], ['lancada', 'Com entrada'], ['ignorada', 'Deixadas de lado']] }) +
+      (l.length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Fornecedor</th><th>NF</th><th>Emitida</th>' + (comValor ? '<th class="num">Valor</th>' : '') + '<th>Situação</th><th></th></tr></thead><tbody>' +
+        CRM.Lista.corta('es-compras', l, 50).map(c => '<tr><td><strong>' + esc(c.fornecedor_nome || '?') + '</strong><small>' + esc(c.fornecedor_doc || '') + '</small></td><td>' + esc(c.numero) + '</td><td>' + esc(quando(c.emitida_em)) + '</td>' +
+          (comValor ? '<td class="num">' + R.moeda(c.valor_total) + '</td>' : '') + '<td>' + esc(SIT[c.situacao] || c.situacao) + (c.lancada_em ? ' <small>' + esc(quando(c.lancada_em)) + '</small>' : '') + (c.obs ? '<small>' + esc(c.obs) + '</small>' : '') + '</td>' +
+          '<td class="num"><button type="button" class="mini" data-acao="es-compra" data-id="' + esc(c.id) + '" title="Ver os itens">☰</button></td></tr>').join('') + '</tbody></table></div>' + CRM.Lista.mais('es-compras', l, 50)
+        : '<p class="vazio">Nenhuma nota de compra com essa pesquisa.</p>') + '</section>';
+  }
   // Notas de compra para a logística: só fornecedor, número, data e situação (sem valor); dá entrada no que chegou.
   function telaComprasOp() {
     const pend = compras.filter(c => c.situacao === 'pendente').sort((a, b) => String(b.emitida_em).localeCompare(String(a.emitida_em))),
@@ -536,7 +578,7 @@
     return '<section class="cartao"><h2>Notas de compra para dar entrada <small>' + pend.length + '</small></h2>' +
       (pend.length ? '<p class="dica">As mais novas em cima. Quando a mercadoria chegar no galpão, confira com a nota (<strong>Ver os itens</strong>) e clique em <strong>✓ Chegou</strong>; ' +
         'se faltou ou veio a mais, anote ali. O comprador vê o aviso e dá a entrada pelo XML, que soma no estoque. Nota que não é mercadoria (combustível, serviço) fica com o comprador.</p>' + tabela(pend) : '<p class="vazio">Nenhuma nota esperando entrada.</p>') +
-      (lancadas.length ? '<details data-chave="es-compras-lancadas"><summary>Entradas dadas (' + lancadas.length + ')</summary>' + tabela(lancadas) + '</details>' : '') + '</section>';
+      (lancadas.length ? '<details data-chave="es-compras-lancadas"><summary>Entradas dadas (as 30 mais recentes; as outras em "Consultar notas de compra")</summary>' + tabela(lancadas) + '</details>' : '') + '</section>' + consultaCompras();
   }
   function telaCompras() {
     if (op()) return telaComprasOp();
@@ -573,10 +615,10 @@
         '(ex.: a caixa com 25 pacotes = 25); o CRM lembra a ligação para a próxima nota do mesmo fornecedor. O custo do item é valor + IPI + ST + frete e refaz o custo médio.</p>' +
         (lendoCompras ? '<p class="cob-lendo">' + esc(lendoCompras) + '</p>' : '<label class="btn sec arquivo">Escolher XML ou ZIP<input type="file" id="esCompraArq" multiple accept=".xml,.zip,text/xml,application/xml,application/zip"></label>') +
       '</details>' +
-      (lancadas.length ? '<details data-chave="es-compras-lancadas"><summary>Entradas dadas (' + lancadas.length + ')</summary>' + tabela(lancadas) + '</details>' : '') +
-      (deixadas.length ? '<details data-chave="es-compras-deixadas"><summary>Deixadas de lado (' + deixadas.length + ')</summary>' + tabela(deixadas) + '</details>' : '') +
+      (lancadas.length ? '<details data-chave="es-compras-lancadas"><summary>Entradas dadas (as 30 mais recentes; as outras em "Consultar notas de compra")</summary>' + tabela(lancadas) + '</details>' : '') +
+      (deixadas.length ? '<details data-chave="es-compras-deixadas"><summary>Deixadas de lado (as 30 mais recentes; as outras em "Consultar notas de compra")</summary>' + tabela(deixadas) + '</details>' : '') +
       (historico ? '<p class="dica">' + historico + ' nota(s) de antes do início do estoque do CRM ficam só como histórico de preço (já estão no saldo que veio do FKN).</p>' : '') +
-      '</section>' + blocoSefaz();
+      '</section>' + blocoSefaz() + consultaCompras();
   }
 
   // Grava cada XML de compra em crm_compras (pendente, para o comprador conferir). Nota de ANTES do início do estoque do
@@ -628,7 +670,7 @@
     const r = await gravaTextos(textos, nossoDoc() || String((CRM.estado.cfg.fiscal && CRM.estado.cfg.fiscal.emitente && CRM.estado.cfg.fiscal.emitente.cnpj) || '').replace(/\D/g, '') || null);
     lendoCompras = '';
     if (r.novas || !sozinho) CRM.toast(r.novas + ' nota(s) da Sefaz no CRM' + (r.historico ? ' (' + r.historico + ' de antes do estoque do CRM, só como histórico de preço)' : '') + (r.erros.length ? ' · ' + r.erros.length + ' com problema: ' + r.erros.slice(0, 2).join(' | ') : '') + '.', !!r.erros.length);
-    compras = await st.compras(200).catch(() => compras);
+    compras = await st.compras(1000).catch(() => compras);
   }
   // Busca da Sefaz sozinha (28/10/2026, Wellington: "foi dado entrada ontem, só apareceu hoje no CRM"): a consulta só
   // corria ao abrir o Estoque. Agora, com o CRM aberto por quem cuida das compras (administrador ou comprador), a cada 10
@@ -706,11 +748,11 @@
           esc(quando(ini).slice(0, 5)) + ' (a mercadoria já está no estoque)</button></p>' : '') +
         (podeSefaz() && semCiencia.length > antigas.length ? '<p class="dica">As mais novas: dê a ciência na nota (na lista abaixo) quando a mercadoria chegar; aí o XML vem e a nota fica pendente para a entrada.</p>' : '') : '') +
       (resumo.length ? '<details data-chave="es-sefaz-resumos"><summary>Só com o resumo (' + resumo.length + ')</summary><div class="tabela-rolagem"><table class="tabela"><tbody>' +
-        resumo.slice(0, 100).map(d => '<tr><td><strong>' + esc(d.emitente_nome || '?') + '</strong><small>' + esc(quando(d.emitida_em)) + '</small></td><td class="num">' + R.moeda(d.valor) + '</td><td>' +
+        CRM.Lista.corta('es-sefaz-res', resumo, 100).map(d => '<tr><td><strong>' + esc(d.emitente_nome || '?') + '</strong><small>' + esc(quando(d.emitida_em)) + '</small></td><td class="num">' + R.moeda(d.valor) + '</td><td>' +
           (d.manifestada_em ? CRM.selo('ciência dada', 'azul') : d.manifesto_motivo ? CRM.selo(d.manifesto_motivo.slice(0, 60), 'vermelho') : CRM.selo('falta ciência', 'ambar')) +
           (!d.manifestada_em && podeSefaz() ? ' <button type="button" class="mini" data-acao="es-sefaz-ciencia-uma" data-id="' + esc(d.chave) + '" title="Dar a Ciência da Operação desta nota (quando a mercadoria chegar)">dar ciência</button>' : '') +
           (d.conclusiva_tipo ? ' ' + CRM.selo(NOME_RESP[d.conclusiva_tipo], 'verde') : podeSefaz() ? ' <button type="button" class="mini" data-acao="es-dfe-resp" data-id="' + esc(d.chave + '|desconhecimento') + '" title="Responder Desconhecimento à Sefaz">desconheço</button>' : '') + '</td></tr>').join('') +
-        '</tbody></table></div></details>' : '') + '</section>' + blocoAvisosDfe();
+        '</tbody></table></div>' + CRM.Lista.mais('es-sefaz-res', resumo, 100) + '</details>' : '') + '</section>' + blocoAvisosDfe();
   }
 
   const inicioEstoque = () => (saldo || []).reduce((m, x) => (x.inicio && (!m || S.antesDe(x.inicio, m)) ? x.inicio : m), null);
@@ -741,7 +783,7 @@
       novas = r.novas; ja = r.ja; erros.push(...r.erros);
     } finally { lendoCompras = ''; }
     CRM.toast(novas + ' nota(s) de compra nova(s)' + (ja ? ', ' + ja + ' já estavam' : '') + (erros.length ? ' · ' + erros.length + ' com problema: ' + erros.slice(0, 3).join(' | ') : '') + '.', !!erros.length);
-    compras = await st.compras(200).catch(() => compras); CRM.render();
+    compras = await st.compras(1000).catch(() => compras); CRM.render();
   }
 
   function telaContagem() {
@@ -1077,7 +1119,7 @@
         aoSalvar: async v => {
           const nome = { despesa: 'despesa', uso: 'material de uso', repetida: 'nota repetida', outro: 'outro' }[v.motivo] || v.motivo;
           await CRM.store().compraIgnorar(id, nome + (v.obs ? ': ' + v.obs : ''));
-          compras = await CRM.store().compras(200); CRM.toast('Tirada da lista (' + nome + ').'); CRM.render();
+          compras = await CRM.store().compras(1000); CRM.toast('Tirada da lista (' + nome + ').'); CRM.render();
         } });
     },
     'es-avulsa': () => {

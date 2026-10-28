@@ -593,6 +593,11 @@
   Supa.prototype.estoqueMovs = async function (codigo, limite) {
     return unwrap(await this.sb.from('crm_estoque_mov').select('*').eq('codigo', codigo).order('quando', { ascending: false }).limit(limite || 200));
   };
+  // movimentos de todos os produtos entre duas datas (28/10/2026, relatório do Estoque); de 1.000 em 1.000
+  Supa.prototype.estoqueMovsPeriodo = async function (de, ate) {
+    const fim = R.somaDias(ate, 1) + 'T00:00:00-03:00';
+    return paginado((a, b) => this.sb.from('crm_estoque_mov').select('*').gte('quando', de + 'T00:00:00-03:00').lt('quando', fim).order('quando', { ascending: false }).order('id').range(a, b));
+  };
   Supa.prototype.estoqueFotos = async function (limite) { return unwrap(await this.sb.from('crm_estoque_fotos').select('*').order('gerado_em', { ascending: false }).limit(limite || 60)); };
   Supa.prototype.estoqueDifs = async function (fotoId) { return paginado((de, ate) => this.sb.from('crm_estoque_difs').select('*').eq('foto_id', fotoId).order('codigo').range(de, ate)); };
   Supa.prototype.estoqueUnidades = async function () { return paginado((de, ate) => this.sb.from('crm_estoque_unidades').select('*').order('codigo').order('unidade').range(de, ate)); };
@@ -684,6 +689,7 @@
   Local.prototype.compraLancar = async function () { throw new Error('a entrada no estoque só funciona ligada ao banco'); };
   Local.prototype.compraLancarManual = Local.prototype.compraLancar;
   Local.prototype.relVendasAno = async function () { return []; };
+  Local.prototype.estoqueMovsPeriodo = async function () { return []; };
   Local.prototype.compraIgnorar = async function (id, obs) { const c = (this._compras || []).find(x => x.id === id); if (c) Object.assign(c, { situacao: 'ignorada', obs }); return c; };
 
   // modo local (teste/demonstração): o livro fica na memória
