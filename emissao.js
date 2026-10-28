@@ -224,7 +224,7 @@
   const quando = iso => (iso ? new Date(iso).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—');
   const fiscalCfg = () => (E().cfg && E().cfg.fiscal) || {};
   const ambiente = () => (fiscalCfg().ambiente === 'producao' ? 'producao' : 'homologacao');
-  const serie = () => Number(fiscalCfg().serie == null ? 2 : fiscalCfg().serie);
+  const serie = () => Number(fiscalCfg().serie == null ? 1 : fiscalCfg().serie);   // 28/10/2026: série 1, continuando o FKN
   const ehOp = () => CRM.papel() === 'logistica' || CRM.ehGestor();
   const seloAmb = a => (a === 'producao' ? CRM.selo('PRODUÇÃO', 'verde') : CRM.selo('HOMOLOGAÇÃO (teste, sem valor fiscal)', 'ambar'));
   const seloNfe = n => { const s = M.SITUACAO[M.situacaoDe(n)] || [n.situacao, 'cinza']; return CRM.selo(s[0], s[1]); };
@@ -305,7 +305,7 @@
     const homAut = (nfes || []).filter(n => n.ambiente === 'homologacao' && (n.situacao === 'autorizada' || n.situacao === 'cancelada')).length;
     if (nfes === null) setTimeout(carrega, 0);
     const e = (em && em.endereco) || {};
-    return '<section class="cartao"><h2>4. Emissão de NF-e pelo CRM <small>Fase 4 · série ' + serie() + ' (o FKN segue na série 1)</small></h2>' +
+    return '<section class="cartao"><h2>4. Emissão de NF-e pelo CRM <small>Fase 4 · série ' + serie() + (serie() === 1 ? ' (continua a numeração do FKN; a 1ª nota pede a confirmação da última do FKN)' : ' (o FKN segue na série 1)') + '</small></h2>' +
       '<p>' + seloAmb(amb) + (amb === 'homologacao' ? ' A nota de teste vai à Sefaz de homologação, sai com "SEM VALOR FISCAL" e <strong>não entra no CRM</strong> (nem estoque, nem título, nem comissão).' : ' A nota autorizada entra no CRM como as do vigia: estoque, títulos, comissão e o pedido faturado.') + '</p>' +
       '<p class="acoes"><button type="button" class="btn sec" data-acao="nf-saude"' + (testando ? ' disabled' : '') + '>Conferir o serviço fiscal</button>' +
         '<button type="button" class="btn sec" data-acao="nf-sefaz"' + (testando ? ' disabled' : '') + '>Status da Sefaz</button>' +
@@ -424,7 +424,7 @@
     const b = n.nfe_id ? ['<button type="button" class="mini" data-acao="nf-danfe" data-id="' + esc(n.nfe_id) + '">DANFE</button>', '<button type="button" class="mini" data-acao="nf-xml" data-id="' + esc(n.nfe_id) + '">XML</button>']
       : ['<button type="button" class="mini" data-acao="nf-danfe-chave" data-id="' + esc(n.chave) + '">DANFE</button>', '<button type="button" class="mini" data-acao="nf-xml-chave" data-id="' + esc(n.chave) + '">XML</button>'];
     const cli = n.empresa_id ? '<button type="button" class="link" data-acao="abrir-empresa" data-id="' + esc(n.empresa_id) + '">' + esc(n.empresa_nome || n.cliente_nome || '') + '</button>' : esc(n.cliente_nome || '');
-    return '<tr><td><strong>' + esc((n.serie || '') + '-' + n.numero) + '</strong><small>' + (String(n.serie) === String(serie()) ? 'CRM' : 'FKN') + '</small></td>' +
+    return '<tr><td><strong>' + esc((n.serie || '') + '-' + n.numero) + '</strong><small>' + (n.nfe_id ? 'CRM' : 'FKN') + '</small></td>' +
       '<td>' + esc(diaHora(n.emitida_em)) + '</td><td>' + cli + '<small>' + esc([n.cliente_doc, [n.cidade, n.uf].filter(Boolean).join('/')].filter(Boolean).join(' · ')) + '</small></td>' +
       '<td><small>' + esc(n.natureza || '') + '</small></td><td class="num">' + moeda(n.valor_total) + '</td>' +
       '<td>' + (n.cancelada ? CRM.selo('cancelada', 'vermelho') : CRM.selo('autorizada', 'verde')) + '</td><td class="num">' + b.join(' ') + '</td></tr>';
@@ -434,9 +434,11 @@
     if (!seq) return '';
     const l = [];
     const crm = seq.crm || [], prod = crm.find(x => x.ambiente === 'producao' && Number(x.serie) === serie());
-    l.push(prod ? 'Série ' + prod.serie + ' (CRM): última autorizada ' + (prod.ultima ? '<strong>' + prod.serie + '-' + prod.ultima + '</strong> em ' + esc(diaHora(prod.ultima_em)) : '—') + ' · a próxima é a <strong>' + prod.serie + '-' + prod.proximo + '</strong>'
-      : 'Série ' + serie() + ' (CRM, produção): ainda não emitiu nenhuma; a primeira será a <strong>' + serie() + '-1</strong>');
-    (seq.notas || []).filter(x => String(x.serie) !== String(serie())).forEach(x => l.push('Série ' + esc(x.serie) + ' (FKN): última <strong>' + esc(x.serie + '-' + x.ultima) + '</strong> em ' + esc(diaHora(x.ultima_em)) +
+    const doFkn = (seq.notas || []).find(x => Number(x.serie || 1) === serie());
+    // a série do CRM continua a do FKN (28/10/2026): antes da 1ª nota, a próxima é "a seguinte da última do FKN, a confirmar"
+    l.push(prod ? 'Série ' + prod.serie + ' pelo CRM: ' + (prod.ultima ? 'última autorizada <strong>' + prod.serie + '-' + prod.ultima + '</strong> em ' + esc(diaHora(prod.ultima_em)) + ' · ' : '') + 'a próxima é a <strong>' + prod.serie + '-' + prod.proximo + '</strong>'
+      : 'Série ' + serie() + ' pelo CRM: ainda não emitiu nenhuma; ' + (serie() === 1 || doFkn ? 'continua a numeração do FKN — na 1ª nota o CRM pede para confirmar a última do FKN' + (doFkn ? ' (a mais recente que chegou: <strong>' + esc(serie() + '-' + doFkn.ultima) + '</strong>)' : '') : 'a primeira será a <strong>' + serie() + '-1</strong>'));
+    (seq.notas || []).forEach(x => l.push('Série ' + esc(x.serie) + ' no FKN: última <strong>' + esc(x.serie + '-' + x.ultima) + '</strong> em ' + esc(diaHora(x.ultima_em)) +
       ' · ' + Number(x.quantas).toLocaleString('pt-BR') + ' notas no CRM'));
     const hom = crm.find(x => x.ambiente === 'homologacao');
     return '<p class="nf-sequencia">' + l.join('<br>') + (hom ? '<br><small>Homologação (teste): próxima ' + hom.serie + '-' + hom.proximo + '</small>' : '') + '</p>';
@@ -447,7 +449,7 @@
     const l = busca && busca.k === chaveBusca(st) ? busca.notas : null;
     return '<section class="cartao"><h2>Consultar notas fiscais <small>todas: as do FKN e as do CRM</small></h2>' + telaSequencia() +
       CRM.Lista.barra(LS, { periodo: true, rotuloPeriodo: 'Emitida de', placeholder: 'Número (2791 ou 2-15), cliente, CNPJ, cidade ou chave', csv: false,
-        sel: [['', 'Todas'], ['1', 'Série 1 (FKN)'], [String(serie()), 'Série ' + serie() + ' (CRM)'], ['valida', 'Só as válidas'], ['cancelada', 'Só as canceladas']],
+        sel: [['', 'Todas']].concat(serie() === 1 ? [['1', 'Série 1']] : [['1', 'Série 1 (FKN)'], [String(serie()), 'Série ' + serie() + ' (CRM)']]).concat([['valida', 'Só as válidas'], ['cancelada', 'Só as canceladas']]),
         extra: '<button type="button" class="btn sec" data-acao="nf-consulta-csv">Baixar planilha</button>' }) +
       (!l ? '<p class="vazio">Procurando…</p>' : !l.length ? '<p class="vazio">Nenhuma nota com essa pesquisa.</p>' :
         '<p class="dica">' + busca.total.toLocaleString('pt-BR') + ' nota(s) · ' + moeda(busca.soma) + ' (sem as canceladas)</p>' +
@@ -537,7 +539,45 @@
     if (/PROGRAMAD/.test(t) && !/\d/.test(t)) return 'o pedido ' + p.numero + ' tem pagamento "programado" sem a data: escreva a data (ex.: PROGRAMADO 15/11/2026) ou o prazo (ex.: 28 DIAS).';
     return '';
   };
+  // Numeração contínua com o FKN (28/10/2026, Anderson: "melhor continuarmos a numeração sequencial. Quando formos emitir a
+  // primeira NF pelo CRM, peça a confirmação do número da última emitida pelo FKN e assim seguimos"). A série do CRM é a do
+  // FKN; antes da 1ª nota de produção, quem emite confirma a última do FKN (crm_nfe_numeracao_iniciar) e o CRM segue dela.
+  // O banco também recusa a reserva sem a confirmação (NUMERACAO_NAO_CONFIRMADA) e pula número que o FKN já usou.
+  async function garanteNumeracao() {
+    if (ambiente() !== 'producao') return true;
+    let sq;
+    try { sq = await CRM.store().nfeSequencia(); } catch (e) { CRM.falhou(e); return false; }
+    seq = sq || {};
+    if ((seq.crm || []).some(x => x.ambiente === 'producao' && Number(x.serie) === serie())) return true;
+    const ult = (seq.notas || []).find(x => Number(x.serie || 1) === serie()) || {};
+    return new Promise(ok => {
+      let feito = false;
+      CRM.abrirForm({
+        titulo: 'Primeira nota pelo CRM: confirme a numeração',
+        htmlAntes: '<p>O CRM <strong>continua a numeração do FKN</strong> (série ' + serie() + '). ' +
+          (ult.ultima ? 'A última nota do FKN que chegou ao CRM é a <strong>' + esc(serie() + '-' + ult.ultima) + '</strong>, de ' + esc(diaHora(ult.ultima_em)) + '. ' : '') +
+          '<strong>Confira no FKN</strong> o número da última NF-e emitida lá e digite abaixo: a primeira do CRM será a seguinte.</p>' +
+          '<p class="dica">Depois disso, se o FKN voltar a emitir (Plano B), o CRM pula o número que o FKN usar; mas o FKN não sabe dos números do CRM: ' +
+          'antes de emitir pelo FKN, acerte nele o próximo número.</p>',
+        campos: [{ nome: 'ultima', rotulo: 'Número da última NF-e emitida pelo FKN', tipo: 'numero', passo: '1', obrigatorio: true }],
+        valores: { ultima: ult.ultima || '' }, salvarTexto: 'Confirmar e seguir',
+        aoSalvar: async v => {
+          const u = Math.round(Number(v.ultima));
+          if (!(u > 0)) throw new Error('digite o número da última nota do FKN');
+          if (!confirm('Confirmar: a última nota do FKN foi a ' + serie() + '-' + u + ' e a primeira do CRM será a ' + serie() + '-' + (u + 1) + '?')) return false;
+          const r = await CRM.store().nfeNumeracaoIniciar(serie(), u);
+          feito = true; seq = null;
+          CRM.toast('Numeração confirmada: a próxima nota do CRM é a ' + serie() + '-' + r.proximo + '.');
+          setTimeout(() => ok(true), 0);
+        }
+      });
+      const dlg = document.querySelector('#dlgForm');
+      const fecha = () => { dlg.removeEventListener('close', fecha); if (!feito) ok(false); };
+      if (dlg) dlg.addEventListener('close', fecha);
+    });
+  }
   async function emitir(pedidoId) {
+    if (!(await garanteNumeracao())) return;
     const p = CRM.pedidos && CRM.pedidos.pedido ? CRM.pedidos.pedido(pedidoId) : null;
     const fp = faltaPagamento(p);
     if (fp) { CRM.toast('Antes da nota: ' + fp, true); return; }
@@ -576,6 +616,7 @@
   async function lote() {
     const ids = [...marcados].filter(id => { const p = CRM.pedidos.pedido(id); return p && podeEmitir(p); });
     if (!ids.length) { CRM.toast('Marque os pedidos.', true); return; }
+    if (!(await garanteNumeracao())) return;
     const amb = ambiente();
     if (!confirm('Emitir ' + ids.length + ' NF-e' + (amb === 'producao' ? ' em PRODUÇÃO (valem de verdade)' : ' em HOMOLOGAÇÃO (teste)') + '?\nOs que tiverem pendência (cadastro, regra fiscal) ficam de fora e aparecem no fim.')) return;
     const res = [];
@@ -744,7 +785,7 @@
         { nome: 'rt_email', rotulo: 'E-mail', tipo: 'email' }, { nome: 'rt_fone', rotulo: 'Telefone' }],
       valores: { razao: em.razao || '', fantasia: em.fantasia || '', cnpj: em.cnpj || '', ie: em.ie || '', crt: String(em.crt || 3), logradouro: e.logradouro || '', numero: e.numero || '',
         complemento: e.complemento || '', bairro: e.bairro || '', municipio: e.municipio || '', cMun: e.cMun || '', uf: e.uf || 'SP', cep: e.cep || '', fone: e.fone || '',
-        natOp: fc.natOp || 'VENDA NO ESTADO', indFinal: String(fc.indFinal == null ? 1 : fc.indFinal), indPres: String(fc.indPres == null ? 9 : fc.indPres), serie: fc.serie == null ? 2 : fc.serie,
+        natOp: fc.natOp || 'VENDA NO ESTADO', indFinal: String(fc.indFinal == null ? 1 : fc.indFinal), indPres: String(fc.indPres == null ? 9 : fc.indPres), serie: fc.serie == null ? 1 : fc.serie,
         rt_cnpj: rt.cnpj || '', rt_contato: rt.contato || '', rt_email: rt.email || '', rt_fone: rt.fone || '' },
       salvarTexto: 'Salvar',
       aoSalvar: async v => {
@@ -752,11 +793,11 @@
         const novo = { emitente: { cnpj: M.doc(v.cnpj), ie: d(v.ie), razao: String(v.razao).trim().toUpperCase(), fantasia: String(v.fantasia || '').trim().toUpperCase() || null, crt: Number(v.crt) || 3,
           endereco: { logradouro: String(v.logradouro).trim().toUpperCase(), numero: String(v.numero).trim(), complemento: String(v.complemento || '').trim().toUpperCase() || null, bairro: String(v.bairro).trim().toUpperCase(),
             cMun: d(v.cMun), municipio: String(v.municipio).trim().toUpperCase(), uf: String(v.uf).trim().toUpperCase(), cep: d(v.cep), fone: d(v.fone) || null } },
-          natOp: String(v.natOp || '').trim().toUpperCase() || 'VENDA NO ESTADO', indFinal: Number(v.indFinal), indPres: Number(v.indPres), serie: v.serie == null ? 2 : Number(v.serie),
+          natOp: String(v.natOp || '').trim().toUpperCase() || 'VENDA NO ESTADO', indFinal: Number(v.indFinal), indPres: Number(v.indPres), serie: v.serie == null ? 1 : Number(v.serie),
           respTec: M.doc(v.rt_cnpj) ? { cnpj: M.doc(v.rt_cnpj), contato: String(v.rt_contato || '').trim(), email: String(v.rt_email || '').trim(), fone: d(v.rt_fone) } : null };
         const falta = M.faltasEmitente(novo);
         if (falta.length) throw new Error('falta ' + falta.join(', '));
-        if (novo.serie === 1 && !confirm('A série 1 é a do FKN. Usar a mesma série no paralelo faz os números se chocarem. Usar assim mesmo?')) return false;
+        if (novo.serie !== 1 && !confirm('A decisão de 28/10/2026 é continuar a numeração do FKN na série 1. Usar a série ' + novo.serie + ' (começa do 1)?')) return false;
         await salvaFiscal(novo);
         CRM.toast('Emitente salvo.'); CRM.render();
       }
@@ -767,6 +808,7 @@
   const TIPOS = { devolucao_fornecedor: 'devolução a fornecedor', devolucao_cliente: 'devolução de cliente', bonificacao: 'bonificação',
     faturamento_futuro: 'entrega futura: faturamento', remessa_futura: 'entrega futura: remessa' };
   async function outraEmitir(outraId, titulo) {
+    if (!(await garanteNumeracao())) return;
     CRM.toast('Montando a prévia da nota…');
     let r;
     try { r = await chama({ acao: 'outra_previa', outra_id: outraId }); } catch (e) { CRM.falhou(e); return; }
@@ -880,7 +922,8 @@
     },
     'nf-cert-fkn': async () => {
       testando = 'Lendo o certificado das últimas notas do FKN…'; CRM.render();
-      const notas = (E().D.notas || []).filter(n => n.chave && !n.cancelada && Number(n.serie || 1) !== serie()).sort((a, b) => String(b.emitida_em).localeCompare(String(a.emitida_em)));
+      const doCrm = new Set((nfes || []).map(n => n.chave).filter(Boolean));
+      const notas = (E().D.notas || []).filter(n => n.chave && !n.cancelada && !doCrm.has(n.chave)).sort((a, b) => String(b.emitida_em).localeCompare(String(a.emitida_em)));
       const vistos = new Set(), out = [];
       for (const n of notas.slice(0, 8)) {
         let xml = null;
@@ -892,7 +935,8 @@
       certFkn = out; testando = ''; CRM.render();
     },
     'nf-do-xml': async () => {
-      const notas = (E().D.notas || []).filter(n => n.chave && !n.cancelada && Number(n.serie || 1) !== serie()).sort((a, b) => String(b.emitida_em).localeCompare(String(a.emitida_em)));
+      const doCrm = new Set((nfes || []).map(n => n.chave).filter(Boolean));
+      const notas = (E().D.notas || []).filter(n => n.chave && !n.cancelada && !doCrm.has(n.chave)).sort((a, b) => String(b.emitida_em).localeCompare(String(a.emitida_em)));
       for (const n of notas.slice(0, 5)) {
         let xml = null;
         try { xml = await CRM.store().notaXml(n.chave); } catch (e) { xml = null; }

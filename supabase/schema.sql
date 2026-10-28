@@ -3081,8 +3081,7 @@ begin
     update public.crm_nfe set tentativas = tentativas + 1, atualizado_em = now() where id = r.id returning * into r;
     return r;                                   -- rejeitada/bloqueada/reservada: o mesmo número
   end if;
-  insert into public.crm_nfe_numeracao (ambiente, serie) values (p_ambiente, p_serie) on conflict do nothing;
-  update public.crm_nfe_numeracao set proximo = proximo + 1 where ambiente = p_ambiente and serie = p_serie returning proximo - 1 into n;
+  n := public.crm_nfe_proximo(p_ambiente, p_serie);   -- 28/10/2026: em produção, só depois de confirmar a última do FKN; pula número já usado
   insert into public.crm_nfe (ambiente, serie, numero, pedido_id, empresa_id, situacao, tentativas)
   values (p_ambiente, p_serie, n, p_pedido, p_empresa, 'reservada', 1) returning * into r;
   return r;
@@ -4744,8 +4743,7 @@ begin
     update public.crm_nfe set tentativas = tentativas + 1, atualizado_em = now() where id = r.id returning * into r;
     return r;
   end if;
-  insert into public.crm_nfe_numeracao (ambiente, serie) values (p_ambiente, p_serie) on conflict do nothing;
-  update public.crm_nfe_numeracao set proximo = proximo + 1 where ambiente = p_ambiente and serie = p_serie returning proximo - 1 into n;
+  n := public.crm_nfe_proximo(p_ambiente, p_serie);   -- 28/10/2026: em produção, só depois de confirmar a última do FKN; pula número já usado
   insert into public.crm_nfe (ambiente, serie, numero, outra_id, tipo, pedido_id, empresa_id, situacao, tentativas)
   values (p_ambiente, p_serie, n, p_outra, o.tipo, case when o.tipo in ('remessa_futura', 'bonificacao') then o.pedido_id end, o.empresa_id, 'reservada', 1) returning * into r;
   return r;
@@ -7338,3 +7336,54 @@ begin
 end;
 $$;
 grant execute on function public.crm_nfe_sequencia() to authenticated;
+
+-- ============================================================ Numeração contínua com o FKN (28/10/2026)
+-- Decisão do Anderson: "melhor continuarmos a numeração sequencial. Quando formos emitir a primeira NF pelo CRM, peça a
+-- confirmação do número da última emitida pelo FKN e assim seguimos". O CRM emite na série 1, como o FKN. Em produção, a
+-- série só anda depois de alguém da gestão ou da logística confirmar a última nota do FKN (crm_nfe_numeracao_iniciar); antes
+-- disso a reserva recusa com NUMERACAO_NAO_CONFIRMADA e o app pergunta. O número que já existe numa nota conhecida (do FKN,
+-- pelo vigia, ou do próprio CRM) é pulado: no Plano B (o FKN emitindo de novo) o CRM não repete número.
+create or replace function public.crm_nfe_proximo(p_ambiente text, p_serie integer) returns integer
+language plpgsql security definer set search_path = public as $$
+declare n integer; achou boolean := false;
+begin
+  if coalesce(auth.role(), '') <> 'service_role' then raise exception 'só o serviço fiscal reserva número'; end if;
+  if not exists (select 1 from public.crm_nfe_numeracao where ambiente = p_ambiente and serie = p_serie) then
+    if p_ambiente = 'producao' then
+      raise exception 'NUMERACAO_NAO_CONFIRMADA: antes da primeira nota de produção da série %, confirme o número da última nota emitida pelo FKN', p_serie;
+    end if;
+    insert into public.crm_nfe_numeracao (ambiente, serie) values (p_ambiente, p_serie) on conflict do nothing;
+  end if;
+  loop
+    update public.crm_nfe_numeracao set proximo = proximo + 1 where ambiente = p_ambiente and serie = p_serie returning proximo - 1 into n;
+    select exists (select 1 from public.crm_nfe x where x.ambiente = p_ambiente and x.serie = p_serie and x.numero = n)
+        or (p_ambiente = 'producao' and exists (select 1 from public.crm_notas t where coalesce(nullif(regexp_replace(coalesce(t.serie, ''), '\D', '', 'g'), '')::int, 1) = p_serie and t.numero = n))
+      into achou;
+    exit when not achou;
+  end loop;
+  return n;
+end;
+$$;
+revoke all on function public.crm_nfe_proximo(text, integer) from public, anon, authenticated;
+
+-- A confirmação: a última nota emitida pelo FKN na série. Só enquanto o CRM não emitiu nada em produção nessa série.
+create or replace function public.crm_nfe_numeracao_iniciar(p_serie integer, p_ultima integer) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare conhecida integer;
+begin
+  if not (public.crm_eh_gestor() or public.crm_eh_logistica()) then raise exception 'só a gestão e a logística'; end if;
+  if p_serie is null or p_serie < 0 or p_serie > 999 then raise exception 'série inválida'; end if;
+  if p_ultima is null or p_ultima < 0 or p_ultima > 999999998 then raise exception 'número inválido'; end if;
+  if exists (select 1 from public.crm_nfe where ambiente = 'producao' and serie = p_serie) then
+    raise exception 'o CRM já emitiu nota de produção na série %: a numeração já está andando', p_serie;
+  end if;
+  select max(numero) into conhecida from public.crm_notas where coalesce(nullif(regexp_replace(coalesce(serie, ''), '\D', '', 'g'), '')::int, 1) = p_serie;
+  if conhecida is not null and p_ultima < conhecida then
+    raise exception 'a última nota que o CRM conhece nessa série é a %: confira o número', conhecida;
+  end if;
+  insert into public.crm_nfe_numeracao (ambiente, serie, proximo) values ('producao', p_serie, p_ultima + 1)
+    on conflict (ambiente, serie) do update set proximo = excluded.proximo;
+  return jsonb_build_object('serie', p_serie, 'ultima', p_ultima, 'proximo', p_ultima + 1, 'conhecida', conhecida);
+end;
+$$;
+grant execute on function public.crm_nfe_numeracao_iniciar(integer, integer) to authenticated;

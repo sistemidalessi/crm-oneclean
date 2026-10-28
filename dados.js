@@ -1339,6 +1339,7 @@
       p_situacao: o.situacao || '', p_limite: o.limite || 100, p_offset: o.offset || 0 }))) || { total: 0, soma: 0, notas: [] };
   };
   Supa.prototype.nfeSequencia = async function () { return unwrap(await this.sb.rpc('crm_nfe_sequencia')) || {}; };
+  Supa.prototype.nfeNumeracaoIniciar = async function (serie, ultima) { return unwrap(await this.sb.rpc('crm_nfe_numeracao_iniciar', { p_serie: serie, p_ultima: ultima })); };
   Supa.prototype.nfeXml = async function (id) { return unwrap(await this.sb.from('crm_nfe').select('chave, proc_xml, nfe_xml').eq('id', id).single()); };
   Supa.prototype.nfesDoMes = async function (mes) {
     const [a, m] = mes.split('-').map(Number), fim = (m === 12 ? (a + 1) + '-01' : a + '-' + String(m + 1).padStart(2, '0')) + '-01T00:00:00-03:00', out = [];
@@ -1428,7 +1429,7 @@
   Local.prototype._nfeGrava = function () { try { raiz.localStorage.setItem('crm_nfe_local', JSON.stringify(this._nfes)); } catch (e) { /* só na memória */ } };
   Local.prototype.fiscal = async function (b) {
     const l = this._nfeL(), fc = ((((this.ler().config || [])[0]) || {}).dados || {}).fiscal || {}, agora = new Date().toISOString();
-    const amb = fc.ambiente === 'producao' ? 'producao' : 'homologacao', serie = Number(fc.serie == null ? 2 : fc.serie), r2 = v => Math.round(v * 100) / 100;
+    const amb = fc.ambiente === 'producao' ? 'producao' : 'homologacao', serie = Number(fc.serie == null ? 1 : fc.serie), r2 = v => Math.round(v * 100) / 100;
     if (b.acao === 'saude') return { ok: true, versao: 'modo local (simulação)', certificado: { titular: 'ONECLEAN (simulação)', validoAte: new Date(Date.now() + 13 * 864e5).toISOString() } };
     if (b.acao === 'status') return { cStat: 107, xMotivo: 'Servico em Operacao (simulação do modo local)' };
     if (b.acao === 'aprender_st') return { notas: 0, lidas: 0, semXml: 0, produtos: 0 };
@@ -1497,6 +1498,7 @@
       notas: l.slice(de, de + (o.limite || 100)).map(n => Object.assign({}, n, { empresa_nome: emp(n.empresa_id) || null })) };
   };
   Local.prototype.nfeSequencia = async function () { return { crm: [], notas: [] }; };
+  Local.prototype.nfeNumeracaoIniciar = async function (serie, ultima) { return { serie, ultima, proximo: ultima + 1 }; };
   Local.prototype.nfeInutilizacoes = async function () { return (this._inuts || []).slice(); };
 
   // ---------------------------------------------------------------- fotos e fichas técnicas dos produtos (19/10/2026)
