@@ -70,7 +70,3 @@ A mesma lista resumida está no `PENDENCIAS-ESCRITORIO.md` do `agilite-sistema-g
 - [ ] **Certificado A1:** o da VPS (que emite pelo CRM) vale até **23/12/2026** — renovar e instalar na VPS na 1ª quinzena de
       dezembro. **Conferido em 27/10:** o FKN já assina com um certificado da OneClean válido até 23/12/2026 (NF 2780 de 26/10),
       o mesmo prazo do da VPS; o que vencia em 29/10 não está mais em uso. Nada a fazer até dezembro.
-- [ ] **Tabela do IBPT** (tributos aproximados na nota, vencida desde 30/09): token gratuito do De Olho no Imposto. Passo a passo:
-      deolhonoimposto.ibpt.org.br → Criar conta (confirma por e-mail e SMS) → Gerenciamento de Empresas → incluir a OneClean pelo
-      CNPJ → copiar o **Token** → Supabase → Edge Functions → Secrets → novo segredo `IBPT_TOKEN` com o token → no CRM, Fiscal →
-      4. Emissão → "Atualizar pelo IBPT agora". Depois disso o CRM atualiza sozinho.
