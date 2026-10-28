@@ -99,7 +99,73 @@
     return 'Crédito disponível: ' + R.moeda(v.disponivel || 0) + (v.prazo_max ? ' · prazo até ' + v.prazo_max + ' dias' : '');
   }
 
-  const C = { POLITICA, SITUACOES, BLOQUEIOS, propor, resumoFatos, textoEquipe };
+  // ---- a resposta da API da Rekta (RLT Avançado, 28/10/2026) nos mesmos FATOS que a IA tira do PDF (crm-caixa-ler, modo
+  // credito): o app lê aqui, sem IA. O guia da Rekta só traz exemplo de pessoa física; os nomes de campo de pessoa jurídica
+  // que não estão nele são procurados por nome parecido (acha) e, o que não aparece, fica como "não aparece" (-1 ou vazio),
+  // igual à leitura do PDF. A resposta inteira fica guardada (bucket crm-credito e crm_credito_rekta) para conferir.
+  const numBR = v => { if (v == null || v === '') return 0; if (typeof v === 'number') return v; const t = String(v).replace(/[^\d,.-]/g, ''); const n = Number(/,\d{1,2}$/.test(t) ? t.replace(/\./g, '').replace(',', '.') : t.replace(/,/g, '')); return isFinite(n) ? n : 0; };
+  const diaBR = v => { const m = String(v || '').match(/^(\d{2})\/(\d{2})\/(\d{4})/); if (m) return m[3] + '-' + m[2] + '-' + m[1]; const i = String(v || '').match(/^(\d{4})-(\d{2})-(\d{2})/); return i ? i[0] : ''; };
+  const lista = v => (Array.isArray(v) ? v : v && typeof v === 'object' ? [v] : []);
+  // procura a 1ª chave cujo nome casa com re (até 4 níveis), com valor não vazio
+  function acha(o, re, fundo) {
+    if (!o || typeof o !== 'object' || (fundo || 0) > 4) return null;
+    for (const k of Object.keys(o)) { const v = o[k]; if (re.test(k) && v != null && v !== '' && typeof v !== 'object') return v; }
+    for (const k of Object.keys(o)) { const v = o[k]; if (v && typeof v === 'object') { const r = acha(Array.isArray(v) ? v[0] : v, re, (fundo || 0) + 1); if (r != null) return r; } }
+    return null;
+  }
+  function daRekta(b, doc, hoje) {
+    b = b && typeof b === 'object' ? b : {};
+    const id = b.identificacao || {};
+    const scores = lista(b.score_classificacao_varios_modelos);
+    const sc = scores.find(x => /score|positivo|risco/i.test((x.descricaoNatureza || '') + ' ' + (x.nomeScore || '')) && !/renda|limite|faturamento/i.test(x.descricaoNatureza || '') && /^\d+$/.test(String(x.score || '').trim()));
+    const prob = sc && /^\d+$/.test(String(sc.probabilidade || '')) && Number(sc.probabilidade) > 0 ? Math.round(Number(sc.probabilidade)) / 100
+      : sc && /(\d{1,3})%\s*das/.exec(sc.texto || '') ? 100 - Number(/(\d{1,3})%\s*das/.exec(sc.texto)[1]) : -1;
+    const fat = scores.find(x => /faturamento/i.test(x.descricaoNatureza || '') || /faturamento/i.test(x.nomeScore || ''));
+    const lim = scores.find(x => /limite/i.test(x.descricaoNatureza || '') && /credito|crédito/i.test((x.descricaoNatureza || '') + ' ' + (x.nomeScore || '')));
+    const rd = b.resumo_ocorrencias_de_debitos || {}, deb = lista(b.debitos);
+    const rp = b.resumo_titulos_protestados || {}, prot = lista(b.titulos_protestados);
+    const cheques = lista(b.relacao_devolucoes_informadas_pelo_ccf).length + lista(b.devolucoes_informadas_pelo_usuario).length + lista(b.cheques_sustados_pelo_motivo_21).length;
+    const rc = b.resumo_devolucoes_informadas_pelo_ccf || {};
+    const acoes = lista(b.relacao_de_acoes_civeis).length || Number((b.resumo_de_acoes_civeis || {}).total || (b.resumo_de_acoes_civeis || {}).quantidade || 0) || 0;
+    const fal = lista(b.relacao_falencia_recuperacao_judicial).length > 0;
+    // pontualidade: das operações parceladas com pagamento informado, quantas foram pagas em dia ou até 5 dias depois
+    const itens = ((((b.painel_controle_positivo || {}).indicadores_positivos_comportamento_pagamento || {}).nota_pontualidade || {}).operacoes_parceladas || {}).item_painel_controle;
+    let pont = -1, atraso31 = 0;
+    if (Array.isArray(itens) && itens.length) {
+      const v = re => itens.filter(x => re.test(x.descricao || '')).reduce((a, x) => a + numBR(x.valor), 0);
+      const emDia = v(/antecipad|em dia|até 5 dias/i), depois = v(/^pagos (entre|após)/i);
+      atraso31 = v(/^pagos após 31/i);
+      if (emDia + depois > 0) pont = Math.round(emDia / (emDia + depois) * 1000) / 10;
+    }
+    const dec = b.decisao || {};
+    const situ = String(id.situacaoCadastral || acha(b, /^situacao(Cadastral|Receita|Cnpj)$/i) || '');
+    const alertas = [];
+    if (String(dec.aprova || '').toUpperCase() === 'N') alertas.push('a Rekta não recomenda: ' + (dec.texto || 'negociação não recomendada'));
+    if (atraso31 > 0 && pont >= 0) alertas.push(atraso31 + ' parcela(s) paga(s) depois de 31 dias (cadastro positivo)');
+    const consultas = Number((b.resumo_consultas_anteriores || {}).totalDeConsultas || 0) || 0;
+    return {
+      razao_social: String(id.razaoSocial || id.nome || acha(b, /^(razaoSocial|nomeEmpresarial|razao_social)$/i) || '').slice(0, 160),
+      documento: String(doc || id.documento || '').toUpperCase().replace(/[^0-9A-Z]/g, '').slice(0, 14),
+      emitido_em: hoje || new Date().toISOString().slice(0, 10),
+      fundacao: diaBR(id.dataFundacao || id.dataAbertura || acha(b, /^data(Fundacao|Abertura|Constituicao)$/i) || ''),
+      situacao_cadastral: /^\d+$/.test(situ) ? '' : situ.slice(0, 60),
+      score: sc ? Math.min(1000, Number(sc.score)) : 0,
+      prob_inadimplencia: prob,
+      recomendacao: String(dec.texto || '').slice(0, 160),
+      pendencias_qtd: Number(rd.totalDevedor) || deb.length, pendencias_valor: numBR(rd.valorAcomulado || rd.valorAcumulado) || deb.reduce((a, x) => a + numBR(x.valor), 0),
+      protestos_qtd: Number(rp.total) || prot.length, protestos_valor: numBR(rp.valorAcumulado || rp.valorAcomulado) || prot.reduce((a, x) => a + numBR(x.valor), 0),
+      cheques_qtd: cheques || Number(rc.total || rc.totalDevolucoes || 0) || 0,
+      acoes_qtd: acoes, falencia: fal, fraude: false,
+      pontualidade: pont, atraso_mais_60: false,
+      limite_sugerido: lim ? numBR(lim.valor) || numBR((String(lim.texto || '').match(/R\$\s*([\d.,]+)/) || [])[1]) : 0,
+      faturamento_presumido: fat ? String(fat.texto || '').slice(0, 120) : '',
+      mudanca_societaria: '', mudanca_em: '',
+      consultas_12m: consultas,
+      alertas
+    };
+  }
+
+  const C = { POLITICA, SITUACOES, BLOQUEIOS, propor, resumoFatos, textoEquipe, daRekta };
   raiz.CRMCredito = C;
   if (typeof module !== 'undefined' && module.exports) module.exports = C;
   if (typeof document === 'undefined' || !raiz.CRM) return;
@@ -109,7 +175,9 @@
   let painel = null, carregando = false, lidoEm = 0;
   const cacheVer = new Map();
   const cfg = () => (((CRM.estado && CRM.estado.cfg) || {}).credito) || {};
-  const linkConsulta = () => cfg().url || '';
+  // com a API da Rekta ligada (crm_config.dados.credito.api = true, depois do teste), o "Analisar" não abre mais o site:
+  // abre a análise, que consulta pela API
+  const linkConsulta = () => (cfg().api === true ? '' : cfg().url || '');
 
   async function carrega(forca) {
     if (carregando || (!forca && painel && Date.now() - lidoEm < 60000)) return;
@@ -243,8 +311,9 @@
       titulo: 'Crédito: ' + e.nome, largura: 'largo',
       htmlAntes: '<div class="cred-form"><p>' + esc(e.cnpj || 'sem CNPJ') + (ficha ? ' · ficha de ' + esc(R.dataBR(ficha.analisado_em)) + ' · usado hoje ' + esc(R.moeda(ficha.usado || 0)) : s ? ' · em aberto ' + esc(R.moeda(s.aberto)) : '') + '</p>' +
         (siteAberto ? '<p class="dica"><strong>O site da consulta abriu numa aba nova, com o CNPJ copiado:</strong> cole no Documento (Ctrl+V), clique em Consulta, baixe o PDF e solte aqui.</p>' : '') +
-        '<div class="cred-passos">' + linkConsultar(id, siteAberto ? 'Abrir o site de novo' : '1. Consultar crédito (copia o CNPJ)', 'btn sec') +
-        '<label class="btn sec arquivo">2. Soltar o PDF da consulta<input type="file" id="credArq" accept="application/pdf,image/png,image/jpeg,image/webp"></label>' +
+        '<div class="cred-passos">' + (CRM.store().creditoRekta ? '<button type="button" class="btn" id="credApi" title="A Rekta responde direto ao CRM (cada consulta é cobrada pela Rekta)">Consultar na Rekta pela API</button>' : '') +
+        (cfg().api === true ? '' : linkConsultar(id, siteAberto ? 'Abrir o site de novo' : 'Ou: abrir o site (copia o CNPJ)', 'btn sec')) +
+        '<label class="btn sec arquivo">' + (cfg().api === true ? 'Ou: soltar um PDF da consulta' : 'e soltar o PDF da consulta') + '<input type="file" id="credArq" accept="application/pdf,image/png,image/jpeg,image/webp"></label>' +
         '<span id="credLendo"></span></div>' + fatos() + prop(lida ? propor(lida, ctx) : null) + '</div>',
       campos: [
         { nome: 'compra', rotulo: 'Compra prevista por mês (R$)', tipo: 'numero', terco: true, ajuda: 'o que o cliente deve comprar por mês; sem isso, vale o histórico ou R$ 1.500' },
@@ -281,6 +350,23 @@
           } catch (err) { st.textContent = ''; CRM.falhou(err); }
         };
         arq.addEventListener('change', () => { const f = arq.files[0]; arq.value = ''; le(f); });
+        // Consulta pela API da Rekta (28/10/2026): a resposta vem inteira e o app lê os fatos (daRekta), sem IA
+        const api = form.querySelector('#credApi');
+        if (api) api.addEventListener('click', async () => {
+          const doc = R.chaveDoc ? R.chaveDoc(e.cnpj || '') : String(e.cnpj || '').replace(/\D/g, '');
+          if (doc.length !== 14 && doc.length !== 11) { CRM.toast('O cadastro não tem CNPJ (ou CPF) completo: preencha antes de consultar.', true); return; }
+          if (!confirm('Consultar ' + (e.cnpj || doc) + ' na Rekta agora?\n\nCada consulta é cobrada pela Rekta.' + (ficha && ficha.analisado_em ? '\nA última análise deste cliente é de ' + R.dataBR(ficha.analisado_em) + '.' : ''))) return;
+          api.disabled = true; st.textContent = 'Consultando a Rekta (pode levar até 1 minuto)…';
+          try {
+            const r = await CRM.store().creditoRekta(doc, id);
+            lida = daRekta(r.bruto, doc, CRM.hoje());
+            if (r.caminho) pdf = r.caminho;
+            form.querySelector('#credFatos').outerHTML = fatos();
+            st.textContent = 'Consulta da Rekta pela API' + (lida.razao_social ? ': ' + lida.razao_social : '') + (Object.keys(r.bruto || {}).length ? '' : ' (nada consta)') + '.';
+            aplica();
+          } catch (err) { st.textContent = ''; CRM.falhou(err); }
+          api.disabled = false;
+        });
         const zona = form.querySelector('.cred-passos');
         zona.addEventListener('dragover', ev => { if (ev.dataTransfer && [].slice.call(ev.dataTransfer.types || []).indexOf('Files') !== -1) { ev.preventDefault(); zona.classList.add('cx-solta'); } });
         zona.addEventListener('dragleave', () => zona.classList.remove('cx-solta'));

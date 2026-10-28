@@ -61,3 +61,44 @@ test('o que a equipe vê', () => {
   assert.match(C.textoEquipe({ ligado: true, situacao: 'prazo', disponivel: 1200, prazo_max: 28 }), /1\.200,00 · prazo até 28 dias/);
   assert.ok(C.resumoFatos(MBS).some(l => /Sem restrições/.test(l)));
 });
+
+// 28/10/2026: a resposta da API da Rekta (RLT Avançado) vira os mesmos fatos da leitura do PDF. Formato do guia da Rekta,
+// dados inventados (repositório público).
+test('daRekta: resposta da API nos fatos da consulta', () => {
+  const C2 = require('../credito.js');
+  const bruto = {
+    identificacao: { documento: '11222333000181', razaoSocial: 'EMPRESA FICTICIA LTDA', dataFundacao: '10/03/2015', situacaoCadastral: 'ATIVA' },
+    score_classificacao_varios_modelos: [
+      { score: '720', probabilidade: '00450', descricaoNatureza: 'POSITIVO PJ', nomeScore: 'P5', texto: 'É provável que 95% das empresas paguem' },
+      { score: '8', descricaoNatureza: 'FATURAMENTO PRESUMIDO', texto: 'De R$ 1 milhão a R$ 2 milhões' }
+    ],
+    titulos_protestados: [{ valor: '155,15', dataOcorrencia: '22/10/2020' }],
+    resumo_titulos_protestados: { total: '1', valorAcumulado: '155,15' },
+    debitos: [{ valor: '1.318,60' }, { valor: '2.024,90' }],
+    resumo_ocorrencias_de_debitos: { totalDevedor: '2', valorAcomulado: '3.343,50' },
+    resumo_consultas_anteriores: { totalDeConsultas: '00004' },
+    decisao: { aprova: 'N', texto: 'NEGOCIAÇÃO NÃO RECOMENDADA' },
+    painel_controle_positivo: { indicadores_positivos_comportamento_pagamento: { nota_pontualidade: { operacoes_parceladas: { item_painel_controle: [
+      { descricao: 'Pagos antecipadamente ou em dia', valor: '80' }, { descricao: 'Pagos em até 5 dias após o vencimento', valor: '10' },
+      { descricao: 'Pagos entre 6 a 30 dias após o vencimento', valor: '6' }, { descricao: 'Pagos após 31 dias do vencimento', valor: '4' },
+      { descricao: 'Sem informação de pagamento após 31 dias do vencimento', valor: '50' }] } } } }
+  };
+  const k = C2.daRekta(bruto, '11.222.333/0001-81', '2026-10-28');
+  assert.equal(k.razao_social, 'EMPRESA FICTICIA LTDA');
+  assert.equal(k.documento, '11222333000181');
+  assert.equal(k.fundacao, '2015-03-10');
+  assert.equal(k.situacao_cadastral, 'ATIVA');
+  assert.equal(k.score, 720);
+  assert.equal(k.prob_inadimplencia, 4.5);
+  assert.deepEqual([k.protestos_qtd, k.protestos_valor, k.pendencias_qtd, k.pendencias_valor], [1, 155.15, 2, 3343.5]);
+  assert.equal(k.pontualidade, 90);
+  assert.equal(k.consultas_12m, 4);
+  assert.equal(k.faturamento_presumido, 'De R$ 1 milhão a R$ 2 milhões');
+  assert.ok(k.alertas.some(a => /não recomenda/.test(a)));
+  // com restrição, a política manda para "só à vista"
+  assert.equal(C2.propor(k, { hoje: '2026-10-28' }).situacao, 'vista');
+  // resposta vazia (204: nada consta) não quebra e não inventa
+  const v = C2.daRekta({}, '11222333000181', '2026-10-28');
+  assert.deepEqual([v.score, v.prob_inadimplencia, v.pontualidade, v.protestos_qtd, v.pendencias_qtd], [0, -1, -1, 0, 0]);
+  assert.equal(C2.propor(v, { hoje: '2026-10-28' }).situacao, 'analise');
+});

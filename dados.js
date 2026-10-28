@@ -935,6 +935,12 @@
     if (r.error) throw await erroDaFuncao(r);
     return r.data;
   };
+  // consulta pela API da Rekta (28/10/2026): a Edge Function chama com o hash dos segredos e devolve a resposta inteira
+  Supa.prototype.creditoRekta = async function (documento, empresa) {
+    const r = await this.sb.functions.invoke('crm-credito-rekta', { body: { documento, empresa_id: empresa } });
+    if (r.error) throw await erroDaFuncao(r);
+    return r.data;
+  };
   Supa.prototype.creditoLink = async function (caminho) {
     const r = await this.sb.storage.from('crm-credito').createSignedUrl(caminho, 120);
     if (r.error) throw new Error('não consegui abrir a consulta: ' + r.error.message);

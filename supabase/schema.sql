@@ -7244,3 +7244,27 @@ end;
 $$;
 revoke all on function public.crm_rel_vendas_ano(integer) from public, anon;
 grant execute on function public.crm_rel_vendas_ano(integer) to authenticated;
+
+-- ============================================================ Consulta de crédito pela API da Rekta (28/10/2026)
+-- A Edge Function crm-credito-rekta chama a Rekta (RLT Avançado, FlexLote/Avancado) com o hash de integração (segredo
+-- REKTA_HASH, só no servidor; nunca no app, no repositório ou no chat) e guarda aqui cada consulta, com a resposta inteira
+-- (para conferir a leitura e para o histórico). Só o administrador lê; quem grava é a função (chave de serviço). A leitura
+-- dos fatos (score, protestos, pendências…) é do app: credito.js daRekta(), testado.
+create table if not exists public.crm_credito_rekta (
+  id bigserial primary key,
+  em timestamptz not null default now(),
+  por uuid,
+  empresa_id uuid,
+  documento text not null,
+  status integer,
+  ms integer,
+  caminho text,
+  erro text,
+  bruto jsonb
+);
+create index if not exists crm_credito_rekta_doc on public.crm_credito_rekta (documento, em desc);
+alter table public.crm_credito_rekta enable row level security;
+revoke all on public.crm_credito_rekta from anon, public, authenticated;
+grant select on public.crm_credito_rekta to authenticated;
+drop policy if exists ler on public.crm_credito_rekta;
+create policy ler on public.crm_credito_rekta for select to authenticated using ((select public.crm_eh_admin()));
