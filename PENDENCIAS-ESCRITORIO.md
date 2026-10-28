@@ -69,10 +69,9 @@ A mesma lista resumida está no `PENDENCIAS-ESCRITORIO.md` do `agilite-sistema-g
       é só o "fiquei sabendo" à Sefaz, não confirma nem recusa a compra.)
 - [ ] **Especialista no alto das telas** (18/10): conferir se ficou do jeito que você queria.
 - [ ] **Primeira pergunta real à IA** (clicar no Clean e perguntar): conferir se responde certo.
-- [ ] **Certificado A1 novo (renovado pelo Anderson em 28/10):** e-CNPJ A1 da OneClean do Brasil, CNPJ 63.237.702/0001-03,
-      AC Safeweb RFB v5, **válido até 28/10/2027** (conferido pelo titular e pela validade; o arquivo não fica em lugar nenhum
-      além da VPS e do computador do escritório). O da VPS hoje vale até 23/12/2026. **Instalar na VPS** (só do escritório, pelo
-      SSH; passo a passo completo em `sistemi-dalessi`, `docs/oneclean/certificado-a1-2027.md`): `servico-fiscal/INSTALAR.md` → "Dia a dia" → "Certificado renovado": 4a (`scp` do `.pfx` novo por cima de
-      `/etc/oneclean-fiscal/oneclean.pfx`), 4b (a senha nova, digitada, nunca no chat), `systemctl reload oneclean-fiscal` e
-      conferir em Fiscal → "Conferir o serviço fiscal" a validade 28/10/2027. Também no FKN/UniNFe enquanto o FKN for o
-      reserva (até 30/11). Sugestão: tirar a senha do nome do arquivo.
+- [ ] **Certificado A1 novo (válido até 28/10/2027):** **instalado na VPS em 28/10 e conferido no CRM** (Fiscal → 4. Emissão:
+      "válido até 28/10/2027"). Falta: (1) importar no Windows do computador do FKN e escolher no UniNFe (empresa
+      63.237.702/0001-03), enquanto o FKN for o reserva (até 30/11); (2) daqui a uns dias, apagar o antigo da VPS:
+      `rm /etc/oneclean-fiscal/oneclean-ate-2026-12-23.pfx /etc/oneclean-fiscal/senha-ate-2026-12-23.txt`; (3) tirar a senha
+      do nome dos `.pfx` em `\\servidor\Financeiro\00 - ONECLEAN\17 - Certificado Digital` e restringir a pasta (os antigos, de
+      10/02/2026 e 23/12/2025, podem ser apagados).
