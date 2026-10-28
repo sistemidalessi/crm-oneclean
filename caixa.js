@@ -12,6 +12,8 @@
   const { feriado, posterga, porqueNaoUtil, creditoTitulo, gerarMes, saldoAtual, itensGrade, saldosGrade, vencidas, receberVencido, baixadosPendentes, ancora, ligacoesTitulos, ligadasPorTitulo,
     CATEGORIAS_SAIDA, CATEGORIAS_ENTRADA, ENTRE_EMPRESAS } = C;
   const r2 = v => Math.round(Number(v || 0) * 100) / 100;
+  // etiqueta do reembolso à Agilité (benefícios, salários…): a regra mora em frases.js
+  const etqReemb = l => (raiz.CRMFrases && raiz.CRMFrases.etiquetaReembolso ? raiz.CRMFrases.etiquetaReembolso(l) : '');
   const semana = s => new Date(s + 'T12:00:00Z').getUTCDay();
   const dm = s => s ? s.slice(8, 10) + '/' + s.slice(5, 7) : '';
   const DIAS = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
@@ -216,7 +218,7 @@
     CRM.abrirForm({
       titulo: l.descricao,
       intro: [l.tipo === 'entrada' ? 'Entrada' : 'Saída', R.moeda(l.valor), (aberto ? 'vence ' : 'pago em ') + R.dataBR(aberto ? l.vencimento : l.pago_em),
-        l.categoria, l.entre_empresas ? 'entre empresas' : '', l.situacao === 'pago' && l.baixa === 'fora' ? 'pago fora do caixa do dia' : ''].filter(Boolean).join(' · ') +
+        l.categoria, etqReemb(l), l.entre_empresas ? 'entre empresas' : '', l.situacao === 'pago' && l.baixa === 'fora' ? 'pago fora do caixa do dia' : ''].filter(Boolean).join(' · ') +
         (l.frase ? '\nLançado pela frase: "' + l.frase + '"' : ''),
       campos: aberto ? [{ nome: 'valor', rotulo: 'Valor (R$)', tipo: 'numero', ajuda: 'a fatura chegou com outro valor?' }, { nome: 'vencimento', rotulo: 'Novo dia', tipo: 'data' }] : [],
       valores: { valor: l.valor, vencimento: l.vencimento },
@@ -584,7 +586,7 @@
     const k = x.chave + '|' + dia;
     return '<div class="cx-it ' + (x.secao === 'entrada' ? 'cx-ent' : 'cx-sai') + ' ' + x.estado + (naGrade.has(k) ? ' cx-sel' : '') + (x.atrasado ? ' atrasado' : '') + (x.adiantado ? ' adiantado' : '') + (x.emprestimo ? ' emprestimo' : '') + (ok ? ' comok' : '') + '"' + arrasta + '>' + ok +
       '<button type="button" class="cx-corpo" data-acao="cx-item" data-id="' + esc(x.chave) + '" data-dia="' + esc(dia) + '" data-k="' + esc(k) + '" data-valor="' + Number(x.valor || 0) + '" data-secao="' + esc(x.secao) + '" title="' + esc(x.titulo + (x.obs ? ' — ' + x.obs : '') + ' (Ctrl+clique soma)') + '">' +
-      '<span class="t">' + (x.adiantado ? '<span class="cx-adi">⏩ adiantado</span> ' : '') + (x.emprestimo ? '<span class="cx-etq-emp">🔁 ' + (x.ref && x.ref.categoria === 'Transferência entre empresas' ? 'entre empresas' : x.secao === 'entrada' ? 'empréstimo' : 'devolução') + '</span> ' : '') + (x.ref && x.ref.anexos && x.ref.anexos.length ? '📎 ' : '') + esc(x.titulo) + '</span>' + (x.obs ? '<span class="o">' + esc(x.obs) + '</span>' : '') + '<span class="v">' + esc(R.moeda(x.valor)) + '</span></button></div>';
+      '<span class="t">' + (x.adiantado ? '<span class="cx-adi">⏩ adiantado</span> ' : '') + (x.emprestimo ? '<span class="cx-etq-emp">🔁 ' + (x.ref && x.ref.categoria === 'Transferência entre empresas' ? 'entre empresas' : x.secao === 'entrada' ? 'empréstimo' : 'devolução') + '</span> ' : '') + (x.tipo === 'lanc' && etqReemb(x.ref) ? '<span class="cx-etq-reemb">↩ reembolso · ' + esc(etqReemb(x.ref)) + '</span> ' : '') + (x.ref && x.ref.anexos && x.ref.anexos.length ? '📎 ' : '') + esc(x.titulo) + '</span>' + (x.obs ? '<span class="o">' + esc(x.obs) + '</span>' : '') + '<span class="v">' + esc(R.moeda(x.valor)) + '</span></button></div>';
   }
   function grade(s) {
     const h = hoje();
@@ -796,7 +798,7 @@
         l.map(x => '<tr class="clicavel' + (marcados.has(x.id) ? ' cx-marcada' : '') + '" data-acao="cx-editar" data-id="' + esc(x.id) + '" tabindex="0"><td class="cx-marca" data-acao="cx-marca-celula" data-id="' + esc(x.id) + '" title="marcar para somar"><input type="checkbox" data-acao="cx-marca" data-id="' + esc(x.id) + '"' + (marcados.has(x.id) ? ' checked' : '') + ' aria-label="marcar para somar"></td><td>' + esc(R.dataBR(filtro.situacao === 'pagas' ? x.pago_em : x.vencimento)) + '</td>' +
           '<td><strong>' + esc(x.descricao) + '</strong>' + (x.fornecedor || x.entre_empresas || x.origem !== 'tela' ? '<small>' + esc([x.fornecedor, x.entre_empresas ? 'entre empresas' : '', x.origem === 'recorrente' ? 'recorrente' : x.origem === 'fkn' ? 'do FKN' : x.origem === 'planilha' ? 'da planilha' : '', x.titulo_duplicata ? (x.situacao === 'pago' ? 'recebida pelo título ' : 'ligada ao título ') + x.titulo_duplicata : '', x.emprestimo ? 'empréstimo recebido (não é receita)' : '', x.espelho_ref ? 'veio do Caixa da Agilité' : x.espelho_par ? 'espelhado no Caixa da Agilité' : '',
             Number(x.juros) > 0 ? 'juros ' + R.moeda(x.juros) : ''].filter(Boolean).join(' · ')) + '</small>' : '') + '</td>' +
-          '<td>' + esc(x.categoria || '') + '</td><td class="num ' + (x.tipo === 'entrada' ? 'cx-pos' : 'cx-neg') + '">' + (x.tipo === 'entrada' ? '+' : '−') + esc(R.moeda(x.valor)) + '</td><td>' + seloSituacao(x, h) + '</td>' +
+          '<td>' + esc(x.categoria || '') + (etqReemb(x) ? ' <span class="cx-etq-reemb">' + esc(etqReemb(x)) + '</span>' : '') + '</td><td class="num ' + (x.tipo === 'entrada' ? 'cx-pos' : 'cx-neg') + '">' + (x.tipo === 'entrada' ? '+' : '−') + esc(R.moeda(x.valor)) + '</td><td>' + seloSituacao(x, h) + '</td>' +
           '<td class="acoes-linha">' + (x.situacao === 'aberto' ? '<button type="button" class="mini" data-acao="cx-pagar" data-id="' + esc(x.id) + '">' + (x.tipo === 'entrada' ? 'Recebi' : 'Paguei') + ' hoje</button>' : x.situacao === 'pausado' ? '<button type="button" class="mini" data-acao="cx-voltar" data-id="' + esc(x.id) + '">Voltar para o caixa</button>' +
             '<button type="button" class="mini perigo" data-acao="cx-excluir" data-id="' + esc(x.id) + '">Excluir</button>' : '') + '</td></tr>').join('') +
         '</tbody><tfoot><tr><td colspan="4">' + l.length + ' lançamento(s)</td><td class="num"><strong>' + esc(R.moeda(tot)) + '</strong></td><td colspan="2"></td></tr></tfoot></table></div>'

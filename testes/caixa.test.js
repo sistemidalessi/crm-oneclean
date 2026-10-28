@@ -330,3 +330,18 @@ test('empréstimo de acerto do caixa: a entrada e a devolução vêm marcadas (a
   const m = Object.fromEntries(g.map(x => [x.ref.id, x.emprestimo]));
   assert.deepEqual(m, { e: true, d: true, x: false, t: true, v: true });
 });
+
+// 28/10/2026 (Anderson: "colocar mais um selinho aí dizendo que é benefício"): o reembolso da folha à Agilité ganha a
+// etiqueta do que é, com a mesma regra do crm_reembolso_grupo do schema.sql (a função mora em frases.js)
+test('reembolso à Agilité: etiqueta do que é (benefícios, salários, Cesta II, FGTS, 13º)', () => {
+  const F = require('../frases.js');
+  const R = (descricao) => F.etiquetaReembolso({ categoria: 'Reembolso da folha à Agilité', descricao });
+  assert.equal(R('Reembolso à Agilité — benefícios 11/2026 (Caju)'), 'benefícios');
+  assert.equal(R('Reembolso à Agilité — VR e VT 11/2026'), 'benefícios');
+  assert.equal(R('Reembolso à Agilité — salários 10/2026'), 'salários');
+  assert.equal(R('Reembolso à Agilité — Cesta II 10/2026'), 'Cesta II');
+  assert.equal(R('Reembolso à Agilité — FGTS + consignado'), 'FGTS');
+  assert.equal(R('Reembolso à Agilité — restante do 13º 2026 (2ª parcela, INSS e FGTS)'), '13º');
+  assert.equal(R('Reembolso à Agilité — material'), '');
+  assert.equal(F.etiquetaReembolso({ categoria: 'Aluguel', descricao: 'vale' }), '');
+});

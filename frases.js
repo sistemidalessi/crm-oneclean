@@ -728,7 +728,22 @@
     return out;
   }
 
-  const O = { CAT_TRANSF, interpretar, extrairData, extrairValor, pedacos, rotuloDe, baixo, semAcento, tokens, categoriaDe, chaveRegra, regraDe, nomeDe, classificar, gravacao, desfazer };
+  // Reembolso da folha à Agilité (28/10/2026, Anderson: "colocar mais um selinho aí dizendo que é benefício"): no caixa,
+  // o que a OneClean devolve à Agilité ganha a etiqueta do que é. Mesma regra do crm_reembolso_grupo do schema.sql (que
+  // agrupa as previsões do mês). Fica aqui e não no caixa-calculo.js porque aquele está fixado na Edge Function.
+  const ETIQUETA_REEMBOLSO = { beneficios: 'benefícios', salarios: 'salários', cesta2: 'Cesta II', fgts: 'FGTS', 13: '13º' };
+  function grupoReembolso(t) {
+    t = String(t || '');
+    if (/13[º°o]|d[eé]cimo/i.test(t)) return '13';
+    if (/cesta\s*(ii|2)\b|assiduidade/i.test(t)) return 'cesta2';
+    if (/fgts|consignado/i.test(t)) return 'fgts';
+    if (/benef|caju|\bv[rat]\b|vale|cesta|mobilidade|\bsat\b|alimenta|refei/i.test(t)) return 'beneficios';
+    if (/sal[aá]rio|l[ií]quido|folha/i.test(t)) return 'salarios';
+    return 'outro';
+  }
+  const etiquetaReembolso = l => (l && l.categoria === 'Reembolso da folha à Agilité' && ETIQUETA_REEMBOLSO[grupoReembolso(l.descricao)]) || '';
+
+  const O = { CAT_TRANSF, grupoReembolso, etiquetaReembolso, interpretar, extrairData, extrairValor, pedacos, rotuloDe, baixo, semAcento, tokens, categoriaDe, chaveRegra, regraDe, nomeDe, classificar, gravacao, desfazer };
   raiz.CRMFrases = O;
   if (typeof module !== 'undefined') module.exports = O;
 })(typeof window !== 'undefined' ? window : globalThis);

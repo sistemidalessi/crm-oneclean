@@ -763,6 +763,7 @@ table.cx-grade td.alvo { outline: 2px dashed var(--azul); outline-offset: -3px; 
 .cx-legenda .cx-it.emprestimo.feito .cx-corpo { color: #b9f5a0; }
 .cx-etq-emp { display: inline-block; font-size: .72em; font-weight: 700; color: #1d3f7d; background: #fff; border-radius: 4px; padding: 0 4px; margin-right: 2px; }
 .cx-legenda .cx-it.emprestimo .cx-corpo { color: #fff; }
+.cx-etq-reemb { display: inline-block; font-size: .72em; font-weight: 700; color: #6b3d00; background: #ffe8b3; border-radius: 4px; padding: 0 4px; margin-right: 2px; }
 .cx-adi { display: inline-block; font-size: .72em; font-weight: 700; color: #fff; background: var(--verde); border-radius: 4px; padding: 0 4px; margin-right: 2px; }
 .cx-it[draggable=true] { cursor: grab; }
 .cx-it.arrastando { opacity: .4; }
