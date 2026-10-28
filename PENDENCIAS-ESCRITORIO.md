@@ -72,6 +72,6 @@ A mesma lista resumida está no `PENDENCIAS-ESCRITORIO.md` do `agilite-sistema-g
 - [ ] **Certificado A1 novo (válido até 28/10/2027):** **instalado na VPS em 28/10 e conferido no CRM** (Fiscal → 4. Emissão:
       "válido até 28/10/2027"). Falta: (1) importar no Windows do computador do FKN e escolher no UniNFe (empresa
       63.237.702/0001-03), enquanto o FKN for o reserva (até 30/11); (2) daqui a uns dias, apagar o antigo da VPS:
-      `rm /etc/oneclean-fiscal/oneclean-ate-2026-12-23.pfx /etc/oneclean-fiscal/senha-ate-2026-12-23.txt`; (3) tirar a senha
-      do nome dos `.pfx` em `\\servidor\Financeiro\00 - ONECLEAN\17 - Certificado Digital` e restringir a pasta (os antigos, de
-      10/02/2026 e 23/12/2025, podem ser apagados).
+      `rm /etc/oneclean-fiscal/oneclean-ate-2026-12-23.pfx /etc/oneclean-fiscal/senha-ate-2026-12-23.txt`; (3) restringir a pasta
+      `\\servidor\Financeiro\00 - ONECLEAN\17 - Certificado Digital` a quem precisa (senha tirada do nome e antigos apagados
+      pelo Anderson em 28/10).
