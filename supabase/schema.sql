@@ -6626,6 +6626,18 @@ create table if not exists public.crm_ia_diretrizes_uso (
 );
 alter table public.crm_ia_diretrizes_uso enable row level security;
 create index if not exists crm_ia_diretrizes_uso_d on public.crm_ia_diretrizes_uso (diretriz_id, em desc);
+-- crm_ia_diretrizes_respostas (28/10/2026): o que a pessoa respondeu a uma diretriz de provocação ou pergunta, resumido pela
+-- IA na conversa (marca [[r:12|…]], tirada antes de a pessoa ler). Nenhum login lê (RLS sem política); sai só pela
+-- sincronização assinada da função crm-ceo-acao.
+create table if not exists public.crm_ia_diretrizes_respostas (
+  id          bigint generated always as identity primary key,
+  diretriz_id bigint not null,
+  user_id     uuid,
+  texto       text not null,
+  em          timestamptz not null default now()
+);
+alter table public.crm_ia_diretrizes_respostas enable row level security;
+create index if not exists crm_ia_diretrizes_respostas_d on public.crm_ia_diretrizes_respostas (diretriz_id, em desc);
 
 -- ============================================================ Diretor de Vendas: reforço (27/10/2026)
 -- Diretor de Vendas, reforço (27/10/2026; Anderson: "pode seguir com o reforço do Diretor de Vendas"). Mesmas regras de

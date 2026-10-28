@@ -112,7 +112,17 @@ async function diretrizes(db: any, lista: unknown) {
       uso.push({ id, vezes: l.length, ultima: l[0] ? l[0].em : null, pessoas: pessoas.slice(0, 10) });
     }
   }
-  return resposta(200, { ok: true, ativas: ids.length, pessoas: (us || []).map((x: { user_id: string; nome: string; papel: string }) => ({ id: x.user_id, nome: x.nome, papel: x.papel })), uso });
+  // (28/10/2026) o que as pessoas responderam às diretrizes enviadas (últimos 30 dias); o outro lado não repete pelo ref
+  // deno-lint-ignore no-explicit-any
+  let respostas: any[] = [];
+  if (ids.length) {
+    const desde = new Date(Date.now() - 30 * 86400e3).toISOString();
+    const { data: rs, error: e5 } = await db.from('crm_ia_diretrizes_respostas').select('id, diretriz_id, user_id, texto, em').in('diretriz_id', ids).gte('em', desde).order('em', { ascending: false }).limit(300);
+    if (e5) throw new Error(e5.message);
+    // deno-lint-ignore no-explicit-any
+    respostas = (rs || []).map((x: any) => ({ ref: String(x.id), id: x.diretriz_id, pessoa: (x.user_id ? nomes.get(x.user_id) : null) || null, texto: x.texto, em: x.em }));
+  }
+  return resposta(200, { ok: true, ativas: ids.length, pessoas: (us || []).map((x: { user_id: string; nome: string; papel: string }) => ({ id: x.user_id, nome: x.nome, papel: x.papel })), uso, respostas });
 }
 
 // deno-lint-ignore no-explicit-any
