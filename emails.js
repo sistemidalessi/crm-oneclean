@@ -116,16 +116,21 @@
 
   function blocoResultados() {
     const D = E().D, r = C.resultadosCadencia(D, E().ix, CRM.hoje(), 30);
-    const ult = (D.email_envios || []).filter(x => x.situacao !== 'pulado').slice().sort((a, b) => (a.criado_em < b.criado_em ? 1 : -1)).slice(0, 15);
+    // todos os enviados, com pesquisa e "mostrar mais" (28/10/2026; antes, só os 15 últimos)
+    const ult = CRM.Lista.filtra('em-ult', (D.email_envios || []).filter(x => x.situacao !== 'pulado').slice().sort((a, b) => (a.criado_em < b.criado_em ? 1 : -1)),
+      { texto: x => [CRM.nomeEmpresa(x.empresa_id), x.assunto, x.para, (TIPO[x.tipo] || [x.tipo])[0]], data: x => x.criado_em });
+    CRM.Lista.planilha('em-ult', 'emails-enviados', ['Quando', 'Cliente', 'Assunto', 'Tipo', 'Situação'], () => ult.map(x => [R.dataHoraBR(x.criado_em), CRM.nomeEmpresa(x.empresa_id), x.assunto || '', (TIPO[x.tipo] || [x.tipo])[0],
+      x.situacao === 'erro' ? 'não saiu' : x.erro ? 'devolvido' : x.clicado_em ? 'clicou' : x.aberto_em ? 'abriu' : 'enviado']));
     const kpi = (t, v, s) => '<div class="kpi"><span>' + esc(t) + '</span><strong>' + esc(v) + '</strong><small>' + esc(s) + '</small></div>';
     return '<section class="cartao"><h2>Resultado dos últimos 30 dias</h2><div class="kpis">' +
       kpi('Enviados', String(r.enviados), 'e-mails da cadência') + kpi('Abertos', r.enviados ? Math.round(100 * r.abertos / r.enviados) + '%' : '—', r.abertos + ' de ' + r.enviados) +
       kpi('Clicaram', String(r.clicados), 'em algum link') + kpi('Compraram até 15 dias depois', String(r.compraram), R.moeda(r.valor) + ' em notas') + '</div>' +
       '<p class="acoes"><button type="button" class="btn sec" data-acao="em-aberturas">Atualizar aberturas</button></p>' +
-      (ult.length ? '<details data-chave="em-ultimos"><summary>Últimos enviados</summary><div class="tabela-rolagem"><table class="tabela"><tbody>' + ult.map(x => '<tr><td>' + esc(R.dataHoraBR(x.criado_em)) + '</td>' +
+      ((D.email_envios || []).length ? '<details data-chave="em-ultimos"><summary>E-mails enviados</summary>' + CRM.Lista.barra('em-ult', { periodo: true, placeholder: 'Cliente, assunto ou e-mail' }) +
+        '<div class="tabela-rolagem"><table class="tabela"><tbody>' + CRM.Lista.corta('em-ult', ult, 30).map(x => '<tr><td>' + esc(R.dataHoraBR(x.criado_em)) + '</td>' +
         '<td><button type="button" class="linha" data-acao="abrir-empresa" data-id="' + esc(x.empresa_id) + '"><strong>' + esc(CRM.nomeEmpresa(x.empresa_id)) + '</strong><small>' + esc(x.assunto || '') + '</small></button></td>' +
         '<td>' + CRM.selo(TIPO[x.tipo][0], TIPO[x.tipo][1]) + '</td><td>' + (x.situacao === 'erro' ? CRM.selo('não saiu', 'vermelho') + '<small>' + esc(x.erro || '') + '</small>' : x.erro ? CRM.selo('devolvido', 'ambar') : x.clicado_em ? CRM.selo('clicou', 'verde') : x.aberto_em ? CRM.selo('abriu', 'verde') : CRM.selo('enviado', 'cinza')) + '</td></tr>').join('') +
-        '</tbody></table></div></details>' : '') + '</section>';
+        '</tbody></table></div>' + CRM.Lista.mais('em-ult', ult, 30) + '</details>' : '') + '</section>';
   }
 
   CRM.telas.emails = {

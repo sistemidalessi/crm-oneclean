@@ -455,7 +455,9 @@
           ' · ' + esc(r.boletos) + ' boleto(s), ' + esc(r.instrucoes) + ' instrução(ões) · ' + esc(R.moeda(r.valor)) +
           ' <button type="button" class="mini" data-acao="bb-remessa-de-novo" data-id="' + esc(r.seq) + '">Baixar de novo</button></li>').join('') + '</ul></details>' : '') +
       (lista.length ? '<details data-chave="bb-lista"' + (lista.some(b => b.situacao === 'erro') ? ' open' : '') + '><summary>Boletos dos últimos 120 dias (' + lista.length + ')</summary>' +
-        '<div class="tabela-rolagem"><table class="tabela"><tbody>' + lista.slice().reverse().slice(0, 60).map(linha).join('') + '</tbody></table></div></details>' : '') +
+        CRM.Lista.barra('bb-lista', { placeholder: 'Cliente, NF, nosso número ou situação', csv: false }) +
+        '<div class="tabela-rolagem"><table class="tabela"><tbody>' + CRM.Lista.corta('bb-lista', CRM.Lista.filtra('bb-lista', lista.slice().reverse(), { texto: b => [CRM.nomeEmpresa(b.empresa_id), b.nota_numero, b.duplicata, b.nosso_numero, b.situacao, b.valor] }), 60).map(linha).join('') +
+        '</tbody></table></div>' + CRM.Lista.mais('bb-lista', CRM.Lista.filtra('bb-lista', lista.slice().reverse(), { texto: b => [CRM.nomeEmpresa(b.empresa_id), b.nota_numero, b.duplicata, b.nosso_numero, b.situacao, b.valor] }), 60) + '</details>' : '') +
       '</section>';
   }
   function depoisBloco(el) {

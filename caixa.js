@@ -783,10 +783,16 @@
     else if (filtro.situacao === 'pagas') l = l.filter(x => x.situacao === 'pago');
     else if (filtro.situacao === 'pausadas') l = l.filter(x => x.situacao === 'pausado');
     if (busca) l = l.filter(x => R.normaliza([x.descricao, x.fornecedor, x.categoria].join(' ')).indexOf(busca) !== -1);
+    // período e categoria (28/10/2026, pesquisa em todas as telas): vencimento de/até (nas pagas, o dia do pagamento) e planilha
+    const cats = R.ordemAlfa([...new Set(l.map(x => x.categoria).filter(Boolean))], c => c);
+    l = CRM.Lista.filtra('cx-contas', l, { data: x => (filtro.situacao === 'pagas' ? x.pago_em : x.vencimento), sel: (x, v) => x.categoria === v });
     l.sort((a, b) => (filtro.situacao === 'pagas' ? String(b.pago_em).localeCompare(String(a.pago_em)) : a.vencimento.localeCompare(b.vencimento)) || b.valor - a.valor);
     const tot = l.reduce((t, x) => t + (x.tipo === 'entrada' ? 1 : -1) * Number(x.valor || 0), 0);
     ordemLista = l.map(x => x.id);
     const todos = l.length && l.every(x => marcados.has(x.id));
+    CRM.Lista.planilha('cx-contas', 'contas-' + (filtro.situacao || 'todas'), ['Vencimento', 'Pago em', 'Tipo', 'Descrição', 'Fornecedor', 'Categoria', 'Valor', 'Situação', 'Origem'],
+      () => l.map(x => [R.dataBR(x.vencimento), x.pago_em ? R.dataBR(x.pago_em) : '', x.tipo === 'entrada' ? 'entrada' : 'saída', x.descricao, x.fornecedor || '', x.categoria || '', (x.tipo === 'entrada' ? 1 : -1) * Number(x.valor || 0), x.situacao, x.origem || '']));
+    const stc = CRM.Lista.estado('cx-contas');
     const sel = (nome, ops, val) => '<select data-cx-filtro="' + nome + '">' + ops.map(o => '<option value="' + o[0] + '"' + (o[0] === val ? ' selected' : '') + '>' + esc(o[1]) + '</option>').join('') + '</select>';
     return '<section class="cartao"><div class="filtros-compras">' +
       '<input type="search" data-cx-filtro="busca" placeholder="Buscar descrição, fornecedor, categoria" value="' + esc(filtro.busca) + '">' +
@@ -794,6 +800,11 @@
       sel('tipo', [['', 'Saídas e entradas'], ['saida', 'Só saídas'], ['entrada', 'Só entradas']], filtro.tipo) +
       '<button type="button" class="btn" data-acao="cx-nova" data-id="saida">+ Conta a pagar</button><button type="button" class="btn sec" data-acao="cx-nova" data-id="entrada">+ Entrada</button>' +
       '<label class="btn sec arquivo" title="No FKN: Contas à Pagar por Conta/Fornecedor (Sifn083), Em aberto, salvar em CSV. O vigia também manda sozinho.">Atualizar do FKN<input type="file" id="cxPagarFkn" accept=".csv,.txt,text/csv"></label></div>' +
+      '<p class="acoes cx-periodo"><label class="filtro-inline">' + (filtro.situacao === 'pagas' ? 'Pago de' : 'Vencimento de') + ' <input type="date" id="cxDe" data-ls-de="cx-contas" value="' + esc(stc.de) + '"></label>' +
+        '<label class="filtro-inline">até <input type="date" id="cxAte" data-ls-ate="cx-contas" value="' + esc(stc.ate) + '"></label>' +
+        '<label class="filtro-inline">Categoria <select id="cxCat" data-ls-sel="cx-contas">' + CRM.opcoesHTML([['', 'Todas']].concat(cats.map(c => [c, c])), stc.sel) + '</select></label>' +
+        (stc.de || stc.ate || stc.sel ? '<button type="button" class="mini" data-acao="ls-limpa" data-id="cx-contas">limpar</button>' : '') +
+        '<button type="button" class="btn sec" data-acao="ls-csv" data-id="cx-contas">Baixar planilha</button></p>' +
       (l.length ? barraSoma() + '<div class="tabela-rolagem"><table class="tabela cx-contas"><thead><tr><th class="cx-marca" data-acao="cx-marca-todas-celula"><input type="checkbox" data-acao="cx-marca-todas" title="marcar todas as da lista"' + (todos ? ' checked' : '') + '></th><th>' + (filtro.situacao === 'pagas' ? 'Pago em' : 'Vencimento') + '</th><th>Descrição</th><th>Categoria</th><th class="num">Valor</th><th>Situação</th><th></th></tr></thead><tbody>' +
         l.map(x => '<tr class="clicavel' + (marcados.has(x.id) ? ' cx-marcada' : '') + '" data-acao="cx-editar" data-id="' + esc(x.id) + '" tabindex="0"><td class="cx-marca" data-acao="cx-marca-celula" data-id="' + esc(x.id) + '" title="marcar para somar"><input type="checkbox" data-acao="cx-marca" data-id="' + esc(x.id) + '"' + (marcados.has(x.id) ? ' checked' : '') + ' aria-label="marcar para somar"></td><td>' + esc(R.dataBR(filtro.situacao === 'pagas' ? x.pago_em : x.vencimento)) + '</td>' +
           '<td><strong>' + esc(x.descricao) + '</strong>' + (x.fornecedor || x.entre_empresas || x.origem !== 'tela' ? '<small>' + esc([x.fornecedor, x.entre_empresas ? 'entre empresas' : '', x.origem === 'recorrente' ? 'recorrente' : x.origem === 'fkn' ? 'do FKN' : x.origem === 'planilha' ? 'da planilha' : '', x.titulo_duplicata ? (x.situacao === 'pago' ? 'recebida pelo título ' : 'ligada ao título ') + x.titulo_duplicata : '', x.emprestimo ? 'empréstimo recebido (não é receita)' : '', x.espelho_ref ? 'veio do Caixa da Agilité' : x.espelho_par ? 'espelhado no Caixa da Agilité' : '',
@@ -803,6 +814,28 @@
             '<button type="button" class="mini perigo" data-acao="cx-excluir" data-id="' + esc(x.id) + '">Excluir</button>' : '') + '</td></tr>').join('') +
         '</tbody><tfoot><tr><td colspan="4">' + l.length + ' lançamento(s)</td><td class="num"><strong>' + esc(R.moeda(tot)) + '</strong></td><td colspan="2"></td></tr></tfoot></table></div>'
         : '<p class="vazio">Nada aqui.</p>') + '</section>';
+  }
+  // A receber (28/10/2026, pesquisa em todas as telas): todos os títulos em aberto, por cliente, CNPJ, NF ou duplicata, vencimento
+  // de/até, situação (a vencer, vencidos, em cartório, remarcados) e planilha. Antes, só resumos e os vencidos.
+  function listaReceber() {
+    const h = hoje(), todos = ((CRM.estado.D || {}).titulos || []).filter(t => !t.abono);
+    const sit = t => (t.cartorio_em ? 'cartorio' : t.previsao ? 'remarcado' : t.vencimento < h ? 'vencido' : 'avencer');
+    const ROT = { avencer: ['a vencer', 'verde'], vencido: ['vencido', 'vermelho'], cartorio: ['em cartório', 'roxo'], remarcado: ['remarcado', 'ambar'] };
+    const nome = t => (t.empresa_id && CRM.empresa(t.empresa_id) ? CRM.nomeEmpresa(t.empresa_id) : t.cliente_nome) || '';
+    const l = CRM.Lista.filtra('cx-receber', todos, { texto: t => [nome(t), t.cliente_nome, t.cliente_doc, t.duplicata, t.nota_numero ? 'NF ' + t.nota_numero : '', t.vendedor_nome, t.portador],
+      data: t => t.previsao || t.vencimento, sel: (t, v) => sit(t) === v }).sort((a, b) => String(a.previsao || a.vencimento).localeCompare(String(b.previsao || b.vencimento)));
+    const tot = l.reduce((a, t) => a + Number(t.valor || 0), 0), venc = l.filter(t => sit(t) === 'vencido').reduce((a, t) => a + Number(t.valor || 0), 0);
+    CRM.Lista.planilha('cx-receber', 'a-receber', ['Duplicata', 'NF', 'Cliente', 'CNPJ/CPF', 'Vendedor(a)', 'Emitida', 'Vencimento', 'Previsão', 'Valor', 'Situação', 'Portador'],
+      () => l.map(t => [t.duplicata, t.nota_numero || '', nome(t), t.cliente_doc || '', t.vendedor_nome || '', t.emitida_em ? R.dataBR(t.emitida_em) : '', R.dataBR(t.vencimento), t.previsao ? R.dataBR(t.previsao) : '', Number(t.valor || 0), ROT[sit(t)][0], t.portador || '']));
+    return '<section class="cartao"><h2>A receber <small>' + todos.length + ' título(s) em aberto</small></h2>' +
+      CRM.Lista.barra('cx-receber', { periodo: true, rotuloPeriodo: 'Vencimento de', placeholder: 'Cliente, CNPJ, NF, duplicata ou vendedor(a)', total: todos.length, achados: l.length,
+        sel: [['', 'Todos'], ['avencer', 'A vencer'], ['vencido', 'Vencidos'], ['remarcado', 'Remarcados'], ['cartorio', 'Em cartório']] }) +
+      '<p class="dica">' + l.length + ' título(s) · ' + esc(R.moeda(tot)) + (venc ? ' · vencido ' + esc(R.moeda(venc)) : '') + '</p>' +
+      (l.length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Vencimento</th><th>Cliente</th><th>Duplicata</th><th class="num">Valor</th><th>Situação</th></tr></thead><tbody>' +
+        CRM.Lista.corta('cx-receber', l, 100).map(t => '<tr><td>' + esc(R.dataBR(t.vencimento)) + (t.previsao ? '<small>espera ' + esc(R.dataBR(t.previsao)) + '</small>' : '') + '</td>' +
+          '<td>' + (t.empresa_id ? '<button type="button" class="link" data-acao="abrir-empresa" data-id="' + esc(t.empresa_id) + '">' + esc(nome(t)) + '</button>' : esc(nome(t))) + '<small>' + esc([t.cliente_doc, t.vendedor_nome].filter(Boolean).join(' · ')) + '</small></td>' +
+          '<td>' + esc(t.duplicata) + (t.nota_numero ? '<small>NF ' + esc(t.nota_numero) + '</small>' : '') + '</td><td class="num">' + esc(R.moeda(t.valor)) + '</td><td>' + CRM.selo(ROT[sit(t)][0], ROT[sit(t)][1]) + '</td></tr>').join('') +
+        '</tbody></table></div>' + CRM.Lista.mais('cx-receber', l, 100) : '<p class="vazio">Nenhum título com essa pesquisa.</p>') + '</section>';
   }
   function listaRecorrentes() {
     const h = hoje(), compet = h.slice(0, 7), prox = R.somaMeses(compet + '-01', 1).slice(0, 7);
@@ -840,9 +873,10 @@
         '<button type="button" class="btn sec" data-acao="cx-conferir">Conferir com o banco</button></div></div>' +
         '<nav class="cx-abas">' + aba('dia', 'Dia a dia') + aba('contas', 'Contas a pagar') + aba('recorrentes', 'Recorrentes') + aba('pausadas', 'Contas pausadas' + (pausadas ? ' (' + pausadas + ')' : '')) +
           (CRM.cobranca ? aba('cobranca', 'Cobrança' + (CRM.cobranca.contagem() ? ' (' + CRM.cobranca.contagem() + ')' : '')) : '') +
+          aba('receber', 'A receber') +
           (CRM.credito ? aba('credito', 'Crédito' + (CRM.credito.contagem() ? ' (' + CRM.credito.contagem() + ')' : '')) : '') + '</nav>' +
         (vista === 'dia' ? caixaFrases() + grade(s) + blocosVencidos() : vista === 'recorrentes' ? listaRecorrentes() : vista === 'cobranca' && CRM.cobranca ? CRM.cobranca.aba()
-          : vista === 'credito' && CRM.credito ? CRM.credito.aba() : listaContas());
+          : vista === 'credito' && CRM.credito ? CRM.credito.aba() : vista === 'receber' ? listaReceber() : listaContas());
     },
     depois(el) {
       if (vista === 'cobranca' && CRM.cobranca) CRM.cobranca.depoisAba(el);
