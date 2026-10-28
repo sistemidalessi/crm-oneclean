@@ -69,6 +69,10 @@ A mesma lista resumida está no `PENDENCIAS-ESCRITORIO.md` do `agilite-sistema-g
       é só o "fiquei sabendo" à Sefaz, não confirma nem recusa a compra.)
 - [ ] **Especialista no alto das telas** (18/10): conferir se ficou do jeito que você queria.
 - [ ] **Primeira pergunta real à IA** (clicar no Clean e perguntar): conferir se responde certo.
-- [ ] **Certificado A1:** o da VPS (que emite pelo CRM) vale até **23/12/2026** — renovar e instalar na VPS na 1ª quinzena de
-      dezembro. **Conferido em 27/10:** o FKN já assina com um certificado da OneClean válido até 23/12/2026 (NF 2780 de 26/10),
-      o mesmo prazo do da VPS; o que vencia em 29/10 não está mais em uso. Nada a fazer até dezembro.
+- [ ] **Certificado A1 novo (renovado pelo Anderson em 28/10):** e-CNPJ A1 da OneClean do Brasil, CNPJ 63.237.702/0001-03,
+      AC Safeweb RFB v5, **válido até 28/10/2027** (conferido pelo titular e pela validade; o arquivo não fica em lugar nenhum
+      além da VPS e do computador do escritório). O da VPS hoje vale até 23/12/2026. **Instalar na VPS** (só do escritório, pelo
+      SSH): `servico-fiscal/INSTALAR.md` → "Dia a dia" → "Certificado renovado": 4a (`scp` do `.pfx` novo por cima de
+      `/etc/oneclean-fiscal/oneclean.pfx`), 4b (a senha nova, digitada, nunca no chat), `systemctl reload oneclean-fiscal` e
+      conferir em Fiscal → "Conferir o serviço fiscal" a validade 28/10/2027. Também no FKN/UniNFe enquanto o FKN for o
+      reserva (até 30/11). Sugestão: tirar a senha do nome do arquivo.
