@@ -15,7 +15,8 @@
     scoreMinimo: 400,        // abaixo: só à vista
     scoreBom: 600,           // a partir daqui: 2 meses de compra e 28 dias
     pontualMinima: 80,       // pontualidade abaixo disso desce um degrau
-    tetoDoBureau: 0.10,      // nunca mais que 10% do limite sugerido pela consulta
+    tetoDoBureau: 1,         // nunca mais que o limite sugerido pela consulta (era 10%, que cortava demais o limite da API da Rekta;
+                             // 28/10/2026, decisão do Anderson depois da 2ª consulta real)
     arredonda: 500,
     revisarMeses: 6
   };
@@ -68,7 +69,7 @@
     if (k.limite_sugerido > 0) {
       const t = piso(k.limite_sugerido * P.tetoDoBureau, P.arredonda);
       if (t < P.arredonda) { motivos.push('limite da consulta baixo demais (' + R.moeda(k.limite_sugerido) + ')'); return fim('vista'); }
-      if (limite > t) { limite = t; motivos.push('limitado a 10% do limite da consulta: ' + R.moeda(t)); }
+      if (limite > t) { limite = t; motivos.push('limitado ao limite da consulta: ' + R.moeda(t)); }
     }
     return fim('prazo', limite, degrau === 2 ? 28 : 21);
   }

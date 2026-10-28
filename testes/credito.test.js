@@ -42,15 +42,18 @@ test('pontualidade baixa desce um degrau; empresa nova ou troca recente de sóci
   assert.strictEqual(C.propor(Object.assign({}, MBS, { fundacao: '2026-05-01' }), { compra_mensal: 1500, hoje }).limite, 1500);
 });
 
-test('teto de 10% do limite da consulta e arredondamento de 500 em 500', () => {
-  assert.strictEqual(C.propor(Object.assign({}, MBS, { limite_sugerido: 20000 }), { compra_mensal: 1800, hoje }).limite, 2000);
+test('teto no limite da consulta e arredondamento de 500 em 500', () => {
+  assert.strictEqual(C.propor(Object.assign({}, MBS, { limite_sugerido: 20000 }), { compra_mensal: 1800, hoje }).limite, 4000);
+  assert.strictEqual(C.propor(Object.assign({}, MBS, { limite_sugerido: 3200 }), { compra_mensal: 1800, hoje }).limite, 3000);
   assert.strictEqual(C.propor(Object.assign({}, MBS, { limite_sugerido: 0 }), { compra_mensal: 1800, hoje }).limite, 4000);
-  assert.strictEqual(C.propor(Object.assign({}, MBS, { limite_sugerido: 3000 }), { compra_mensal: 1500, hoje }).situacao, 'vista');
+  assert.strictEqual(C.propor(Object.assign({}, MBS, { limite_sugerido: 400 }), { compra_mensal: 1500, hoje }).situacao, 'vista');
+  // a consulta sugere pouco mais que 2 meses de compra: vale a compra (antes, 10% do limite dava R$ 500)
+  assert.strictEqual(C.propor(Object.assign({}, MBS, { limite_sugerido: 5300 }), { maior_mes: 1180, hoje }).limite, 2500);
 });
 
 test('sem compra prevista vale o histórico; título vencido com a OneClean: em análise', () => {
   assert.strictEqual(C.propor(Object.assign({}, MBS, { limite_sugerido: 0 }), { maior_mes: 2600, hoje }).limite, 5500);
-  assert.strictEqual(C.propor(MBS, { maior_mes: 2600, hoje }).limite, 4500);
+  assert.strictEqual(C.propor(MBS, { maior_mes: 2600, hoje }).limite, 5500);
   assert.strictEqual(C.propor(MBS, { hoje }).limite, 3000);
   assert.strictEqual(C.propor(MBS, { compra_mensal: 1500, vencido: 300, hoje }).situacao, 'analise');
 });
