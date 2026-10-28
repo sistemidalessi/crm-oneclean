@@ -113,8 +113,85 @@
     for (const k of Object.keys(o)) { const v = o[k]; if (v && typeof v === 'object') { const r = acha(Array.isArray(v) ? v[0] : v, re, (fundo || 0) + 1); if (r != null) return r; } }
     return null;
   }
+  // a 1ª resposta real (28/10/2026, pessoa jurídica) veio como TEXTO com o JSON dentro, e com nomes diferentes dos do guia
+  // (que só tem pessoa física): score.score_pj, identificacao_completo, protestos, pendencias_restricoes, "decisao:decisao",
+  // "pgtpont:pagamento_pontual", pagamento_atrasado, limite_credito, faturamento_presumido, consultas. Seções sem nada vêm null.
+  const chave = (o, re) => { if (!o || typeof o !== 'object') return undefined; const k = Object.keys(o).find(x => re.test(x)); return k == null ? undefined : o[k]; };
+  // quantas ocorrências e quanto somam, numa seção negativa (protestos, pendências, cheques, ações) de formato ainda não visto:
+  // null = nada; com conteúdo, conta os itens das listas (ou "quantidade"/"total") e soma os "valor". Seção com conteúdo que
+  // não deu para contar vale 1 (melhor parar para conferir do que liberar no escuro).
+  function ocorrencias(v) {
+    if (v == null || v === '' || (Array.isArray(v) && !v.length)) return { qtd: 0, valor: 0 };
+    if (typeof v !== 'object') return /nada consta|n[aã]o consta|sem ocorr/i.test(String(v)) || String(v).trim() === '0' ? { qtd: 0, valor: 0 } : { qtd: 1, valor: 0 };
+    let qtd = 0, valor = 0, total = null, vazio = true;
+    const anda = (o, f) => {
+      if (o == null || f > 6) return;
+      if (Array.isArray(o)) { o.forEach(x => { if (x && typeof x === 'object' && !Array.isArray(x)) { qtd++; vazio = false; } anda(x, f + 1); }); return; }
+      if (typeof o !== 'object') { if (o !== '' && o !== '-') vazio = false; return; }
+      Object.keys(o).forEach(k => {
+        const x = o[k];
+        if (/^(quantidade(_total)?|total|qtd)$/i.test(k) && /^\d+$/.test(String(x == null ? '' : x).trim())) total = Math.max(total || 0, Number(x));
+        else if (/valor/i.test(k) && x != null && typeof x !== 'object') valor += numBR(x);
+        anda(x, f + 1);
+      });
+    };
+    anda(v, 0);
+    if (total != null) return { qtd: total, valor };
+    return { qtd: qtd || (vazio ? 0 : 1), valor };
+  }
+  const meses12 = o => { const l = ((((o || {}).lista_indicador_comportamento) || {}).item_indicador); return Array.isArray(l) ? l.filter(x => !/pontua/i.test(x.mes_ano || '')) : []; };
+  function daRektaPJ(b, doc, hoje) {
+    const id = b.identificacao_completo || b.identificacao || {};
+    const spj = (b.score && (b.score.score_pj || b.score.score)) || {};
+    const score = /^\d+$/.test(String(spj.score || '').trim()) ? Math.min(1000, Number(spj.score)) : 0;
+    const p100 = /de cada 100[^,]*,[^\d]*(\d{1,3})/i.exec(spj.texto || '');
+    const pr = String(spj.probabilidade || '').trim();
+    const prob = p100 ? Number(p100[1]) : /^\d{4,}$/.test(pr) ? Number(pr) / 100 : /^\d{1,3}([.,]\d+)?$/.test(pr) ? Number(pr.replace(',', '.')) : -1;
+    const dec = chave(b, /(^|:)decisao$/i) || {};
+    const decTxt = String(chave(dec, /descricao|texto/i) || '');
+    const prot = ocorrencias(b.protestos), pend = ocorrencias(b.pendencias_restricoes);
+    const cheq = ['cheques_sem_fundo', 'cheques_sustados', 'cheques_devolvidos_informados_usuario'].reduce((a, k) => a + ocorrencias(b[k]).qtd, 0);
+    const acoes = ocorrencias(b.acoes_civeis).qtd;
+    const fal = ocorrencias(b.falencias_recuperacao_judicial).qtd > 0;
+    const fraude = ocorrencias(b.alerta_fraudes).qtd > 0;
+    // pontualidade: "pgtpont:pagamento_pontual" traz a % paga em dia (100 = tudo em dia); "-" = sem informação
+    const pp = chave(b, /pagamento_pontual$/i) || {};
+    const ppv = String(chave(pp, /pontuacao$/i) == null ? '' : chave(pp, /pontuacao$/i)).trim();
+    const pont = /^\d+([.,]\d+)?$/.test(ppv) ? Math.min(100, Number(ppv.replace(',', '.'))) : -1;
+    const atr = b.pagamento_atrasado || {};
+    const temNum = o => meses12(o).some(x => numBR(x.pontuacao_mensal) > 0);
+    const mais60 = temNum(atr.mais_de_60_dias);
+    const lim = numBR((b.limite_credito || {}).score || (b.limite_credito || {}).valor);
+    const alertas = [];
+    if (/n[aã]o recomend|reprov|negad/i.test(decTxt)) alertas.push('a Rekta não recomenda: ' + decTxt);
+    if (temNum(atr.periodo_31_a_60_dias)) alertas.push('pagamentos com 31 a 60 dias de atraso no último ano');
+    if (fraude) alertas.push('a consulta trouxe alerta de fraude: confira no relatório');
+    const mud = diaBR(id.data_alteracao_razao_social || '');
+    return {
+      razao_social: String(id.razao_social || id.razaoSocial || '').slice(0, 160),
+      documento: String(doc || id.cnpj || '').toUpperCase().replace(/[^0-9A-Z]/g, '').slice(0, 14),
+      emitido_em: hoje || new Date().toISOString().slice(0, 10),
+      fundacao: diaBR(id.data_fundacao || id.data_registro || ''),
+      situacao_cadastral: String(id.situacao_cnpj || '').slice(0, 60),
+      score, prob_inadimplencia: score ? prob : -1,
+      recomendacao: decTxt.slice(0, 160),
+      pendencias_qtd: pend.qtd, pendencias_valor: pend.valor,
+      protestos_qtd: prot.qtd, protestos_valor: prot.valor,
+      cheques_qtd: cheq, acoes_qtd: acoes, falencia: fal, fraude,
+      pontualidade: pont, atraso_mais_60: mais60,
+      limite_sugerido: lim,
+      faturamento_presumido: String((b.faturamento_presumido || {}).faturamento_anual || '').slice(0, 120),
+      mudanca_societaria: '', mudanca_em: mud && id.razao_social_anterior ? mud : '',
+      consultas_12m: Number((b.consultas || {}).quantidade_total || 0) || 0,
+      alertas
+    };
+  }
+
   function daRekta(b, doc, hoje) {
+    if (typeof b === 'string') { try { b = JSON.parse(b); } catch (e) { b = {}; } }
+    if (typeof b === 'string') { try { b = JSON.parse(b); } catch (e) { b = {}; } }
     b = b && typeof b === 'object' ? b : {};
+    if (b.identificacao_completo || (b.score && b.score.score_pj)) return daRektaPJ(b, doc, hoje);
     const id = b.identificacao || {};
     const scores = lista(b.score_classificacao_varios_modelos);
     const sc = scores.find(x => /score|positivo|risco/i.test((x.descricaoNatureza || '') + ' ' + (x.nomeScore || '')) && !/renda|limite|faturamento/i.test(x.descricaoNatureza || '') && /^\d+$/.test(String(x.score || '').trim()));
@@ -374,8 +451,20 @@
           } catch (err) { st.textContent = ''; CRM.falhou(err); }
           api.disabled = false;
         });
-        // "Analisar" de cliente sem ficha: a consulta começa sozinha (o confirm do preço continua)
-        if (api && consultaJa) setTimeout(() => api.click(), 0);
+        // "Analisar" de cliente sem ficha: a consulta começa sozinha (o confirm do preço continua). Se já houve consulta pela API
+        // nos últimos 30 dias, usa a resposta guardada, sem cobrar de novo (o botão continua para uma consulta nova).
+        if (api && consultaJa) setTimeout(async () => {
+          let ult = null;
+          try { ult = CRM.store().creditoRektaUltima ? await CRM.store().creditoRektaUltima(id) : null; } catch (err) { ult = null; }
+          if (ult && ult.bruto && (Date.now() - new Date(ult.em).getTime()) < 30 * 864e5) {
+            const doc = R.chaveDoc ? R.chaveDoc(e.cnpj || '') : String(e.cnpj || '').replace(/\D/g, '');
+            lida = daRekta(ult.bruto, doc, R.diaLocal ? R.diaLocal(ult.em) : String(ult.em).slice(0, 10));
+            if (ult.caminho) pdf = ult.caminho;
+            form.querySelector('#credFatos').outerHTML = fatos();
+            st.textContent = 'Consulta da Rekta de ' + R.dataBR(R.diaLocal ? R.diaLocal(ult.em) : String(ult.em).slice(0, 10)) + ' (já feita, sem nova cobrança)' + (lida.razao_social ? ': ' + lida.razao_social : '') + '.';
+            aplica();
+          } else api.click();
+        }, 0);
         const zona = form.querySelector('.cred-passos');
         zona.addEventListener('dragover', ev => { if (ev.dataTransfer && [].slice.call(ev.dataTransfer.types || []).indexOf('Files') !== -1) { ev.preventDefault(); zona.classList.add('cx-solta'); } });
         zona.addEventListener('dragleave', () => zona.classList.remove('cx-solta'));

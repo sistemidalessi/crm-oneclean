@@ -53,6 +53,8 @@ Deno.serve(async (req) => {
     const txt = await r.text();
     if (r.status === 204 || !txt.trim()) bruto = {};
     else { try { bruto = JSON.parse(txt); } catch { erro = 'a Rekta respondeu fora do formato (' + r.status + '): ' + txt.slice(0, 200); } }
+    // a Rekta responde um TEXTO com o JSON dentro (1ª consulta real, 28/10/2026): desembrulha (até duas vezes)
+    for (let i = 0; i < 2 && !erro && typeof bruto === 'string'; i++) { try { bruto = JSON.parse(bruto as string); } catch { break; } }
     if (!erro && r.status === 401) erro = 'a Rekta recusou o hash de integração (401): confira o REKTA_HASH nos segredos';
     else if (!erro && r.status === 400) erro = 'a Rekta recusou a consulta (400): ' + JSON.stringify(bruto).slice(0, 300);
     else if (!erro && r.status >= 500) erro = 'a Rekta está fora do ar agora (' + r.status + '); tente de novo em alguns minutos';
@@ -66,7 +68,7 @@ Deno.serve(async (req) => {
   if (!erro && empresa) {
     caminho = 'credito/' + empresa + '/' + new Date().toISOString().slice(0, 10) + '-rekta-' + crypto.randomUUID().slice(0, 8) + '.json';
     const up = await db.storage.from(BUCKET).upload(caminho, new Blob([JSON.stringify(bruto, null, 1)], { type: 'application/json' }), { contentType: 'application/json', upsert: false });
-    if (up.error) caminho = null;
+    if (up.error) { console.error('[crm-credito-rekta] guardar a resposta: ' + up.error.message); caminho = null; }
   }
   const { error: eLog } = await db.from('crm_credito_rekta').insert({ por: quem.user.id, empresa_id: empresa, documento: doc, status, ms, caminho, erro, bruto: erro ? null : bruto });
   if (eLog) console.error('[crm-credito-rekta] registro: ' + eLog.message);

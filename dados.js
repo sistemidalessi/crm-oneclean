@@ -941,6 +941,12 @@
     if (r.error) throw await erroDaFuncao(r);
     return r.data;
   };
+  // a última consulta da Rekta já feita para o cliente (só o administrador lê crm_credito_rekta): reabrir a análise não paga de novo
+  Supa.prototype.creditoRektaUltima = async function (empresa) {
+    const r = await this.sb.from('crm_credito_rekta').select('em, caminho, bruto').eq('empresa_id', empresa).is('erro', null).not('bruto', 'is', null).order('em', { ascending: false }).limit(1);
+    if (r.error) throw new Error(r.error.message);
+    return (r.data || [])[0] || null;
+  };
   Supa.prototype.creditoLink = async function (caminho) {
     const r = await this.sb.storage.from('crm-credito').createSignedUrl(caminho, 120);
     if (r.error) throw new Error('não consegui abrir a consulta: ' + r.error.message);

@@ -7006,8 +7006,11 @@ create policy le on public.crm_credito for select to authenticated using ((selec
 revoke insert, update, delete on public.crm_credito from anon, authenticated;
 
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-  values ('crm-credito', 'crm-credito', false, 10485760, array['image/png','image/jpeg','image/webp','application/pdf'])
+  values ('crm-credito', 'crm-credito', false, 10485760, array['image/png','image/jpeg','image/webp','application/pdf','application/json'])
   on conflict (id) do nothing;
+-- 28/10/2026: também a resposta da API da Rekta (JSON)
+update storage.buckets set allowed_mime_types = array['image/png','image/jpeg','image/webp','application/pdf','application/json']
+  where id = 'crm-credito' and not ('application/json' = any(allowed_mime_types));
 do $$ begin
   if not exists (select 1 from pg_policies where schemaname = 'storage' and tablename = 'objects' and policyname = 'crm_credito_le') then
     create policy crm_credito_le on storage.objects for select to authenticated using (bucket_id = 'crm-credito' and (select public.crm_eh_admin()));
