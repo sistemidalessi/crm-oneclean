@@ -846,6 +846,8 @@ create table if not exists public.crm_fin_lancamentos (
 -- apaga o lançamento que a frase criou).
 alter table public.crm_fin_lancamentos add column if not exists frase       text;
 alter table public.crm_fin_lancamentos add column if not exists frase_antes jsonb;
+-- Lançado pelo app do CEO (28/10/2026, crm-ceo-acao caixa_lancar): o "Desfazer" de lá só apaga estes, até 10 min.
+alter table public.crm_fin_lancamentos add column if not exists pelo_celular boolean not null default false;
 -- Empréstimo recebido (06/10/2026, frases iguais às da Agilité): a entrada é marcada (não é receita);
 -- a devolução em parcelas é uma recorrente com o valor contratado (ou a taxa) e cada parcela gerada
 -- leva a parte de juros da tabela Price (caixa-calculo.js, cronogramaPrice).
