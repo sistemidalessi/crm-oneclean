@@ -1141,8 +1141,9 @@
   // Pedido de venda (Fase 3, 16/10/2026): carregado à parte (a tela Pedidos e a ficha). Os em aberto, em separação
   // ou separados, e os faturados/cancelados dos últimos 60 dias. Tudo que grava é função do banco. Lidos pela função
   // crm_pedidos_ler (20/10/2026): para a vendedora, os itens vêm sem o custo.
-  Supa.prototype.pedidos = async function () {
-    const desde = new Date(Date.now() - 60 * 864e5).toISOString(), out = [];
+  // desde (28/10/2026): a pesquisa por período mais antigo traz também os faturados/cancelados de antes dos 60 dias
+  Supa.prototype.pedidos = async function (desdeDia) {
+    const desde = desdeDia ? desdeDia + 'T00:00:00-03:00' : new Date(Date.now() - 60 * 864e5).toISOString(), out = [];
     for (let de = 0; ; de += PAGINA) {
       const l = unwrap(await comTentativas(() => this.sb.rpc('crm_pedidos_ler', { p_desde: desde }).range(de, de + PAGINA - 1)));
       out.push(...l);

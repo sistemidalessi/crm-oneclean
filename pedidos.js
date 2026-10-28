@@ -247,7 +247,7 @@
   const veCusto = () => CRM.ehGestor() || CRM.ehComprador();
   const veMargem = () => CRM.ehGestor();
 
-  let peds = null, disp = [], faltas = [], boloes = [], carregando = false;
+  let peds = null, disp = [], faltas = [], boloes = [], carregando = false, desdeCarga = null;
   let porCod = new Map();
   const f = { ver: null, sit: 'abertos', vend: '', busca: '', est: '', bolao: null, marcados: new Set() };
   let ed = null, aberto = null, abaPed = 'produtos', listaProdutosHTML = '';
@@ -258,7 +258,7 @@
     try {
       const st = CRM.store();
       await st.pedidosAtualizar().catch(() => null);
-      [peds, disp, faltas, boloes] = await Promise.all([st.pedidos(), st.estoqueDisponivel().catch(() => []), st.pedidosFaltas().catch(() => []), st.boloes().catch(() => [])]);
+      [peds, disp, faltas, boloes] = await Promise.all([st.pedidos(desdeCarga), st.estoqueDisponivel().catch(() => []), st.pedidosFaltas().catch(() => []), st.boloes().catch(() => [])]);
       porCod = new Map(disp.map(d => [d.codigo, d]));
       if (CRM.aCaminho) { CRM.aCaminho.limpa(); await CRM.aCaminho.garante(); } // compras a caminho, com a data (compras-pedidos.js)
       listaProdutosHTML = '<datalist id="pdProdutos">' + R.ordemAlfa(disp.filter(d => d.situacao !== 'INATIVO'), d => d.descricao).map(d => '<option value="' + esc(d.codigo + ' — ' + d.descricao) + '">' +
@@ -309,50 +309,66 @@
 
   // ------------------------------------------------ lista (Sifn050)
   const SITS = [['abertos', 'Em andamento'], ['bloqueado', 'Bloqueados'], ['liberado', 'Liberados'], ['separacao', 'Em separação'], ['separado', 'A emitir NF'], ['faturado', 'Faturados'], ['cancelado', 'Cancelados'], ['todos', 'Todos']];
+  // pesquisa (28/10/2026): nº do pedido, cliente, NF, cidade, vendedor(a) e produto (código ou nome); período pela data do pedido
+  const textoPedido = p => [p.numero, nomeCliente(p), notaNumero(p) ? 'NF ' + notaNumero(p) : '', (p.dados && p.dados.entrega && p.dados.entrega.cidade) || '',
+    CRM.nomeUsuario(p.vendedor_id), (p.itens || []).map(i => (i.codigo || '') + ' ' + (i.descricao || '')).join(' ')];
   function filtrados() {
-    const q = R.normaliza(f.busca);
-    return (peds || []).filter(p => {
+    // pesquisando (texto ou período) em "Em andamento", procura também nos faturados e cancelados: quem procura uma NF quer achar
+    const st = CRM.Lista.estado('pd-lista'), sit = f.sit === 'abertos' && (st.busca || st.de || st.ate) ? 'todos' : f.sit;
+    return CRM.Lista.filtra('pd-lista', peds || [], { texto: textoPedido, data: p => p.criado_em }).filter(p => {
       const s = P.situacao(p).chave;
-      if (f.sit === 'abertos' && ['faturado', 'cancelado'].indexOf(s) !== -1) return false;
-      if (f.sit !== 'abertos' && f.sit !== 'todos' && s !== f.sit) return false;
+      if (sit === 'abertos' && ['faturado', 'cancelado'].indexOf(s) !== -1) return false;
+      if (sit !== 'abertos' && sit !== 'todos' && s !== sit) return false;
       if (f.vend && p.vendedor_id !== f.vend) return false;
-      return !q || R.normaliza(p.numero + ' ' + nomeCliente(p)).indexOf(q) !== -1;
+      return true;
     });
   }
   function telaLista() {
+    const st = CRM.Lista.estado('pd-lista'), corte = desdeCarga || R.somaDias(CRM.hoje(), -60);
+    // período antes dos 60 dias: busca no banco os faturados e cancelados desde lá
+    if (st.de && st.de < corte && !carregando) { desdeCarga = st.de; setTimeout(() => carrega(true), 0); }
     const l = filtrados();
+    CRM.Lista.planilha('pd-lista', 'pedidos', ['Pedido', 'Data', 'Situação', 'Cliente', 'Cidade', 'Vendedor(a)', 'Valor total', 'NF', 'Entrega'],
+      () => l.map(p => [p.numero, R.dataBR(R.diaLocal(p.criado_em)), P.situacao(p, notaNumero(p)).rotulo, nomeCliente(p), (p.dados && p.dados.entrega && p.dados.entrega.cidade) || '',
+        CRM.nomeUsuario(p.vendedor_id), p.valor_total, notaNumero(p) || '', p.entrega ? R.dataBR(p.entrega) : '']));
     const soma = arr => arr.reduce((s, p) => s + num(p.valor_total), 0);
     const marg = arr => { const its = [].concat(...arr.map(p => p.itens || [])); return P.totais(its, 0).margem; };
     const bloq = l.filter(p => P.situacao(p).chave === 'bloqueado'), lib = l.filter(p => P.situacao(p).chave === 'liberado');
     const tot = (rot, arr, cls) => '<div class="kpi ' + (cls || '') + '"><span>' + rot + '</span><strong>' + R.moeda(soma(arr)) + '</strong><small>' + arr.length + ' pedido(s)' + (veMargem() ? ' · margem ' + pct(marg(arr)) : '') + '</small></div>';
     return '<section class="cartao"><div class="filtro-linha">' + SITS.map(s => '<button type="button" class="chip-filtro' + (f.sit === s[0] ? ' ativo' : '') + '" data-acao="pd-sit" data-id="' + s[0] + '">' + s[1] + '</button>').join('') + '</div>' +
-      '<p class="acoes"><input type="search" placeholder="Pedido ou cliente" value="' + esc(f.busca) + '" data-pd-busca class="of-busca">' +
-      (CRM.ehGestor() || ehLog() ? ' <label class="filtro-inline">Vendedor(a) <select data-pd-vend>' + CRM.opcoesHTML([['', 'Todos']].concat(CRM.usuariosAtivos().map(u => [u.user_id, u.nome])), f.vend) + '</select></label>' : '') + '</p>' +
+      CRM.Lista.barra('pd-lista', { periodo: true, rotuloPeriodo: 'Pedido de', placeholder: 'Pedido, cliente, NF, cidade, vendedor(a) ou produto', total: (peds || []).length,
+        extra: CRM.ehGestor() || ehLog() ? '<label class="filtro-inline">Vendedor(a) <select data-pd-vend>' + CRM.opcoesHTML([['', 'Todos']].concat(CRM.usuariosAtivos().map(u => [u.user_id, u.nome])), f.vend) + '</select></label>' : '' }) +
+      '<p class="dica">' + l.length + ' pedido(s) · os em andamento e os faturados ou cancelados desde ' + esc(R.dataBR(desdeCarga || R.somaDias(CRM.hoje(), -60))) + ' (escolha um período mais antigo para buscar os de antes)</p>' +
       '<div class="kpis">' + tot('Geral', l) + tot('Bloqueado', bloq, bloq.length ? 'vermelho' : '') + tot('Liberado', lib, 'verde') + '</div>' +
       (l.length ? '<div class="tabela-rolagem"><table class="tabela pd-lista"><thead><tr><th>Pedido</th><th>Data</th><th>Situação</th><th>Cliente</th><th class="num">Valor total</th>' + (veMargem() ? '<th class="num">Margem</th>' : '') +
-        '<th>Vendedor(a)</th><th>Entrega</th></tr></thead><tbody>' + l.map(p => {
+        '<th>Vendedor(a)</th><th>Entrega</th></tr></thead><tbody>' + CRM.Lista.corta('pd-lista', l, 100).map(p => {
           const s = P.situacao(p, notaNumero(p)), d = p.dados || {}, ent = d.entrega || {};
           return '<tr class="clicavel pd-' + s.chave + '" data-acao="pd-abrir" data-id="' + esc(p.id) + '" tabindex="0"><td><strong>' + esc(p.numero) + '</strong>' + (p.tipo === 'programado' ? '<small>programado</small>' : '') + '</td>' +
             '<td>' + esc(R.dataBR(R.diaLocal(p.criado_em))) + '</td><td>' + CRM.selo(s.rotulo, s.cor) + (s.bloqueios ? '<small>' + esc(s.bloqueios.map(b => P.ROTULO_BLOQUEIO[b] || b).join(' · ')) + '</small>' : '') + '</td>' +
             '<td>' + esc(nomeCliente(p)) + '</td><td class="num">' + R.moeda(p.valor_total) + '</td>' + (veMargem() ? '<td class="num">' + pct(P.totais(p.itens, 0).margem) + '</td>' : '') +
             '<td>' + esc(R.primeiroNome(CRM.nomeUsuario(p.vendedor_id))) + '</td><td>' + esc([p.entrega ? R.dataBR(p.entrega) : '', ent.cidade].filter(Boolean).join(' · ') || '—') + '</td></tr>';
-        }).join('') + '</tbody></table></div>' : '<p class="vazio">Nenhum pedido aqui.' + (ehVenda() ? ' "+ Novo orçamento / pedido" começa um; um orçamento já feito vira pedido pela aba Orçamentos ou pela ficha do negócio.' : '') + '</p>') + '</section>';
+        }).join('') + '</tbody></table></div>' + CRM.Lista.mais('pd-lista', l, 100) : '<p class="vazio">Nenhum pedido aqui.' + (ehVenda() ? ' "+ Novo orçamento / pedido" começa um; um orçamento já feito vira pedido pela aba Orçamentos ou pela ficha do negócio.' : '') + '</p>') + '</section>';
   }
 
   // ------------------------------------------------ orçamentos abertos (propostas)
   function telaOrcamentos() {
     const comPedido = new Set((peds || []).filter(p => p.proposta_id && p.situacao !== 'cancelado').map(p => p.proposta_id));
-    const desde = R.somaDias(CRM.hoje(), -60);
-    const l = (E().D.propostas || []).filter(p => (p.status === 'rascunho' || p.status === 'enviada' || p.status === 'aprovada') && !comPedido.has(p.id) && String(p.criado_em).slice(0, 10) >= desde)
+    // pesquisa e período (28/10/2026): sem período, os dos últimos 60 dias; com período, desde a data escolhida
+    const st = CRM.Lista.estado('pd-orc'), desde = st.de || R.somaDias(CRM.hoje(), -60);
+    const l0 = (E().D.propostas || []).filter(p => (p.status === 'rascunho' || p.status === 'enviada' || p.status === 'aprovada') && !comPedido.has(p.id) && String(p.criado_em).slice(0, 10) >= desde)
       .map(p => ({ p, n: CRM.negocio(p.negocio_id) })).filter(x => x.n && (CRM.ehGestor() || x.n.responsavel_id === CRM.meuId() || CRM.empresa(x.n.empresa_id)))
       .sort((a, b) => String(b.p.criado_em).localeCompare(String(a.p.criado_em)));
-    return '<section class="cartao"><h2>Orçamentos sem pedido <small>' + l.length + ' · últimos 60 dias</small></h2>' +
+    const l = CRM.Lista.filtra('pd-orc', l0, { texto: x => [x.p.numero_fkn, x.p.numero, CRM.nomeEmpresa(x.n.empresa_id), CRM.nomeUsuario(x.n.responsavel_id), x.n.titulo], data: x => x.p.criado_em });
+    CRM.Lista.planilha('pd-orc', 'orcamentos-sem-pedido', ['Orçamento', 'Origem', 'Data', 'Cliente', 'Valor', 'Situação', 'Vendedor(a)'],
+      () => l.map(({ p, n }) => [p.numero_fkn || p.numero, p.numero_fkn ? 'FKN' : 'CRM', R.dataBR(R.diaLocal(p.criado_em)), CRM.nomeEmpresa(n.empresa_id), p.valor_total, p.status, CRM.nomeUsuario(n.responsavel_id)]));
+    return '<section class="cartao"><h2>Orçamentos sem pedido <small>' + (st.de ? 'desde ' + R.dataBR(st.de) : 'últimos 60 dias') + '</small></h2>' +
       '<p class="dica">O cliente aprovou? "Virar pedido" traz os itens e as condições, mostra o disponível de cada produto e reserva o estoque.</p>' +
+      CRM.Lista.barra('pd-orc', { periodo: true, rotuloPeriodo: 'Feito de', placeholder: 'Número, cliente, vendedor(a) ou negócio', total: l0.length, achados: l.length }) +
       (l.length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Orçamento</th><th>Data</th><th>Cliente</th><th class="num">Valor</th><th>Situação</th><th>Vendedor(a)</th><th></th></tr></thead><tbody>' +
-        l.map(({ p, n }) => '<tr><td><strong>' + esc(p.numero_fkn || p.numero) + '</strong><small>' + (p.numero_fkn ? 'do FKN' : 'do CRM') + '</small></td><td>' + esc(R.dataBR(R.diaLocal(p.criado_em))) + '</td>' +
+        CRM.Lista.corta('pd-orc', l, 100).map(({ p, n }) => '<tr><td><strong>' + esc(p.numero_fkn || p.numero) + '</strong><small>' + (p.numero_fkn ? 'do FKN' : 'do CRM') + '</small></td><td>' + esc(R.dataBR(R.diaLocal(p.criado_em))) + '</td>' +
           '<td>' + esc(CRM.nomeEmpresa(n.empresa_id)) + '</td><td class="num">' + R.moeda(p.valor_total) + '</td><td>' + CRM.seloProposta(p.status) + '</td><td>' + esc(R.primeiroNome(CRM.nomeUsuario(n.responsavel_id))) + '</td>' +
           '<td class="num"><button type="button" class="btn" data-acao="pd-de-proposta" data-id="' + esc(p.id) + '">Virar pedido</button> <button type="button" class="mini" data-acao="abrir-negocio" data-id="' + esc(n.id) + '">negócio</button></td></tr>').join('') +
-        '</tbody></table></div>' : '<p class="vazio">Nenhum orçamento esperando.</p>') + '</section>';
+        '</tbody></table></div>' + CRM.Lista.mais('pd-orc', l, 100) : '<p class="vazio">Nenhum orçamento esperando.</p>') + '</section>';
   }
 
   // ------------------------------------------------ consulta de estoque
@@ -759,6 +775,10 @@
     const meses = []; let m = mesAtual(); for (let i = 0; i < 13; i++) { meses.push([m, nomeMes(m)]); m = mesAnterior(m); }
     const fech = (com.fechadas || []).filter(c => c.fechado_em), fechado = fech.length > 0, reaberto = (com.fechadas || []).some(c => c.reaberto_em && !c.fechado_em);
     let corpo;
+    // planilha do mês (28/10/2026): fechado = o resumo por vendedor(a); prévia = nota a nota
+    CRM.Lista.planilha('pd-comissoes', 'comissoes-' + com.mes, fechado ? ['Vendedor(a)', 'Plano', 'Faturado', 'Comissão', 'Ajustes', 'A pagar'] : ['Vendedor(a)', 'Plano', 'NF', 'Data', 'Cliente', 'Faturado', 'Comissão'],
+      () => fechado ? (adm ? fech : fech.filter(c => c.user_id === CRM.meuId())).map(c => [CRM.nomeUsuario(c.user_id), c.plano || '', c.base, c.comissao, (c.ajustes || []).map(a => a.valor + ' ' + a.motivo).join(' · '), c.total])
+        : [].concat(...previa(com.mes).map(g => g.notas.map(n => [g.nome, g.planoNome, (n.devolucao ? 'devolução ' : '') + n.numero, R.dataBR(n.data), n.cliente, n.base, n.comissao]))));
     if (fechado) {
       const rows = adm ? fech : fech.filter(c => c.user_id === CRM.meuId());
       corpo = '<p class="dica">Mês <strong>fechado</strong> em ' + esc(quando(fech[0].fechado_em)) + ' por ' + esc(CRM.nomeUsuario(fech[0].fechado_por)) + '. Estes valores não mudam mais' + (adm ? ' (para mexer, reabra).' : '.') + '</p>' +
@@ -787,7 +807,8 @@
     }
     return '<section class="cartao"><h2>' + (adm ? 'Comissões' : 'Minha comissão') + '</h2>' +
       '<p class="acoes"><label class="filtro-inline">Mês <select data-pd-com-mes>' + CRM.opcoesHTML(meses, com.mes) + '</select></label>' +
-      (adm ? ' <button type="button" class="btn sec" data-acao="pd-com-config">Tabela de preços e planos de comissão</button>' : '') + '</p>' + corpo + '</section>';
+      (adm ? ' <button type="button" class="btn sec" data-acao="pd-com-config">Tabela de preços e planos de comissão</button>' : '') +
+      ' <button type="button" class="btn sec" data-acao="ls-csv" data-id="pd-comissoes">Baixar planilha</button></p>' + corpo + '</section>';
   }
   function formConfigComissao() {
     const cfg = E().cfg, tab = P.tabelaDe(cfg), planos = P.planosDe(cfg).map(p => ({ id: p.id, nome: p.nome, faixas: Object.assign({}, p.faixas) }));
