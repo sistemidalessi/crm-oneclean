@@ -291,8 +291,11 @@
       '<p><label class="cred-busca">Analisar um cliente: <input type="search" id="credBusca" list="credEmpresas" placeholder="nome ou CNPJ"></label>' +
         '<datalist id="credEmpresas">' + ((CRM.estado.D.empresas) || []).filter(e => e.cnpj).slice(0, 4000).map(e => '<option value="' + esc(e.nome + ' · ' + e.cnpj) + '">').join('') + '</datalist>' +
         ' <button type="button" class="btn" data-acao="cred-buscar">Analisar</button></p></section>' +
-      (pend.length ? '<section class="cartao"><h2>Para analisar <small>' + pend.length + '</small></h2><div class="tabela-rolagem"><table class="tabela"><tbody>' +
-        pend.map(p => '<tr><td><button type="button" class="link" data-acao="abrir-empresa" data-id="' + esc(p.empresa_id) + '">' + esc(p.nome) + '</button><small>' + esc(p.cnpj || '') + ' · cadastro ' + esc(R.dataBR(R.diaLocal(p.criado_em))) + '</small></td>' +
+      (pend.length ? '<section class="cartao"><h2>Para analisar <small>' + pend.length + '</small></h2>' +
+        (viaApi() ? '<p class="cred-lote"><label><input type="checkbox" id="credMarcaTodos"> marcar todos</label> <button type="button" class="btn" data-acao="cred-lote">Analisar os marcados</button>' +
+          ' <small>uma consulta à Rekta por cliente (' + esc(R.moeda(precoApi())) + ' cada; a já feita nos últimos 30 dias não paga de novo); depois é só dar OK em cada um</small></p>' : '') +
+        '<div class="tabela-rolagem"><table class="tabela"><tbody>' +
+        pend.map(p => '<tr>' + (viaApi() ? '<td class="cred-marca-td"><input type="checkbox" class="cred-marca" value="' + esc(p.empresa_id) + '" aria-label="marcar ' + esc(p.nome) + '"></td>' : '') + '<td><button type="button" class="link" data-acao="abrir-empresa" data-id="' + esc(p.empresa_id) + '">' + esc(p.nome) + '</button><small>' + esc(p.cnpj || '') + ' · cadastro ' + esc(R.dataBR(R.diaLocal(p.criado_em))) + '</small></td>' +
           '<td>' + ((p.pedidos || []).map(x => 'pedido ' + x.numero + ' · ' + R.moeda(x.valor) + ' · ' + (x.bloqueios || []).filter(b => BLOQUEIOS.indexOf(b) !== -1).join(', ')).map(esc).join('<br>') || '<small>cliente novo sem análise</small>') + '</td>' +
           '<td class="acoes-linha">' + linkConsultar(p.empresa_id, 'Analisar', 'mini', 'cred-analisar-site') + '</td></tr>').join('') +
         '</tbody></table></div></section>' : '') +
@@ -354,6 +357,8 @@
   }
   function depoisAba(el) {
     carrega();
+    const mt = el.querySelector('#credMarcaTodos');
+    if (mt) mt.addEventListener('change', () => el.querySelectorAll('.cred-marca').forEach(x => { x.checked = mt.checked; }));
     const b = el.querySelector('#credBusca');
     if (b) b.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); CRM.acoes['cred-buscar'](); } });
     // a busca redesenha só a tabela (redesenhar a tela tiraria o cursor da caixa)
@@ -482,6 +487,91 @@
     });
   }
 
+  // ANÁLISE EM LOTE (28/10/2026, Anderson: "marcar mais de um, e aí já faz uma análise só e depois eu só vou dando OK"):
+  // marca na lista Para analisar → uma confirmação com o custo total → consulta a Rekta de cada um (a consulta guardada dos
+  // últimos 30 dias é reaproveitada, sem pagar) → proposta pela política em cada linha, ajustável → OK grava a ficha.
+  async function analisarLote(ids) {
+    if (!ids.length) { CRM.toast('Marque os clientes na lista "Para analisar".', true); return; }
+    const st = CRM.store(), hoje = CRM.hoje();
+    const docDe = e => (R.chaveDoc ? R.chaveDoc((e && e.cnpj) || '') : String((e && e.cnpj) || '').replace(/\D/g, ''));
+    const itens = [];
+    for (const id of ids) {
+      const e = CRM.empresa(id);
+      if (!e) continue;
+      const doc = docDe(e);
+      let ult = null;
+      try { ult = st.creditoRektaUltima ? await st.creditoRektaUltima(id) : null; } catch (err) { ult = null; }
+      const s = (painel && (painel.sugestoes || []).find(x => x.empresa_id === id)) || null;
+      itens.push({ id, e, doc, valido: doc.length === 11 || doc.length === 14, guardada: ult && ult.bruto && (Date.now() - new Date(ult.em).getTime()) < 30 * 864e5 ? ult : null,
+        ctx: { maior_mes: s ? s.maior_mes : 0, vencido: s ? s.vencido : 0, hoje } });
+    }
+    const novas = itens.filter(i => i.valido && !i.guardada), guardadas = itens.filter(i => i.valido && i.guardada), invalidos = itens.filter(i => !i.valido);
+    if (!novas.length && !guardadas.length) { CRM.toast('Nenhum dos marcados tem CNPJ (ou CPF) completo no cadastro.', true); return; }
+    if (!confirm('Analisar ' + (novas.length + guardadas.length) + ' cliente(s) agora?\n\n' +
+      (novas.length ? novas.length + ' consulta(s) nova(s) à Rekta × ' + R.moeda(precoApi()) + ' = ' + R.moeda(novas.length * precoApi()) + ' (cobrado pela Rekta).\n' : '') +
+      (guardadas.length ? guardadas.length + ' já consultado(s) nos últimos 30 dias: sem nova cobrança.\n' : '') +
+      (invalidos.length ? invalidos.length + ' sem CNPJ completo no cadastro: fica(m) de fora.\n' : ''))) return;
+    const linha = i => '<tr data-lote="' + esc(i.id) + '"><td><strong>' + esc(i.e.nome) + '</strong><small>' + esc(i.e.cnpj || 'sem CNPJ') + '</small></td>' +
+      '<td class="cl-fatos">' + (i.valido ? '<small>' + (i.guardada ? 'lendo a consulta guardada…' : 'na fila da Rekta…') + '</small>' : '<span class="alerta">CNPJ incompleto no cadastro: corrija e analise de novo</span>') + '</td>' +
+      '<td class="cl-prop"></td><td class="cl-acao"></td></tr>';
+    const form = CRM.abrirForm({
+      titulo: 'Análise de crédito em lote', largura: 'largo', semFoco: true, campos: [], salvarTexto: 'OK em todos os que faltam',
+      htmlAntes: '<p class="dica">Confira cada linha: dá para trocar a situação, o limite e o prazo antes do OK. Revisão em 6 meses.</p>' +
+        '<div class="tabela-rolagem"><table class="tabela cred-lote-tab"><thead><tr><th>Cliente</th><th>Consulta</th><th>Proposta</th><th></th></tr></thead><tbody>' +
+        itens.map(linha).join('') + '</tbody></table></div>',
+      aoSalvar: async (v, f) => {
+        const prontas = [].slice.call(f.querySelectorAll('tr[data-pronta="1"]:not([data-ok])'));
+        if (!prontas.length) { if ([].slice.call(f.querySelectorAll('tr[data-lote]')).some(tr => !tr.dataset.ok && !tr.dataset.fim)) { CRM.toast('Ainda há consulta em andamento.', true); return false; } return; }
+        for (const tr of prontas) await aprovaLinha(tr);
+        carrega(true);
+      }
+    });
+    const dados = new Map();
+    const tr = id => form.querySelector('tr[data-lote="' + id + '"]');
+    async function aprovaLinha(t) {
+      const i = dados.get(t.dataset.lote);
+      if (!i || t.dataset.ok) return;
+      const situacao = t.querySelector('[name=sit]').value, limite = Number(String(t.querySelector('[name=lim]').value || '').replace(/\./g, '').replace(',', '.')) || 0;
+      const prazo = Number(t.querySelector('[name=prz]').value) || null;
+      if (situacao === 'prazo' && !(limite > 0)) { CRM.toast(i.e.nome + ': para liberar a prazo, diga o limite.', true); throw new Error('limite vazio'); }
+      await st.creditoGravar([{ empresa_id: i.id, situacao, limite: situacao === 'prazo' ? limite : 0, prazo_max: situacao === 'prazo' ? prazo : null,
+        revisar_em: i.prop.revisar_em, score: i.lida.score || null, origem: 'consulta', resumo: { consulta: i.lida, lote: true }, pdf: i.caminho || null, obs: '' }]);
+      cacheVer.delete(i.id);
+      t.dataset.ok = '1';
+      t.querySelector('.cl-acao').innerHTML = CRM.selo('✓ aprovado', 'verde');
+      t.querySelectorAll('select, input').forEach(x => { x.disabled = true; });
+    }
+    const mostra = (i, lida, caminho, aviso) => {
+      const t = tr(i.id);
+      if (!t) return;
+      const p = propor(lida, i.ctx);
+      dados.set(i.id, Object.assign({}, i, { lida, prop: p, caminho }));
+      t.querySelector('.cl-fatos').innerHTML = (aviso ? '<small>' + esc(aviso) + '</small>' : '') + '<ul>' + resumoFatos(lida).map(x => '<li>' + esc(x) + '</li>').join('') + '</ul>';
+      t.querySelector('.cl-prop').innerHTML = seloSit(p.situacao) + '<ul>' + p.motivos.map(m => '<li>' + esc(m) + '</li>').join('') + '</ul>' +
+        (p.atencao.length ? '<p class="alerta">' + esc(p.atencao.join(' · ')) + '</p>' : '') +
+        '<p><select name="sit">' + Object.keys(SITUACOES).map(k => '<option value="' + k + '"' + (k === p.situacao ? ' selected' : '') + '>' + esc(SITUACOES[k]) + '</option>').join('') + '</select> ' +
+        '<label>limite <input name="lim" inputmode="decimal" size="7" value="' + (p.limite || '') + '"></label> <label>prazo <input name="prz" inputmode="numeric" size="3" value="' + (p.prazo_max || '') + '"> dias</label></p>';
+      t.querySelector('.cl-acao').innerHTML = '<button type="button" class="btn" data-ok>OK</button>';
+      t.dataset.pronta = '1';
+      t.querySelector('[data-ok]').addEventListener('click', ev => { ev.target.disabled = true; aprovaLinha(t).catch(err => { ev.target.disabled = false; if (err.message !== 'limite vazio') CRM.falhou(err); }); });
+    };
+    invalidos.forEach(i => { const t = tr(i.id); if (t) t.dataset.fim = '1'; });
+    guardadas.forEach(i => mostra(i, daRekta(i.guardada.bruto, i.doc, R.diaLocal ? R.diaLocal(i.guardada.em) : String(i.guardada.em).slice(0, 10)), i.guardada.caminho,
+      'consulta de ' + R.dataBR(R.diaLocal ? R.diaLocal(i.guardada.em) : String(i.guardada.em).slice(0, 10)) + ', sem nova cobrança'));
+    // as novas, três de cada vez (a Rekta pode levar até 1 minuto em cada)
+    const fila = novas.slice();
+    const trabalha = async () => {
+      for (let i = fila.shift(); i; i = fila.shift()) {
+        const t = tr(i.id);
+        if (t) t.querySelector('.cl-fatos').innerHTML = '<small>consultando a Rekta…</small>';
+        try { const r = await st.creditoRekta(i.doc, i.id); mostra(i, daRekta(r.bruto, i.doc, hoje), r.caminho, ''); }
+        catch (err) { const t2 = tr(i.id); if (t2) { t2.dataset.fim = '1'; t2.querySelector('.cl-fatos').innerHTML = '<span class="alerta">' + esc(err.message || String(err)) + '</span>'; } }
+      }
+    };
+    await Promise.all([trabalha(), trabalha(), trabalha()]);
+    carrega(true);
+  }
+
   // Bloco na ficha do cliente: preenchido depois de abrir (a leitura é por função do banco).
   function blocoFicha(id) { return '<section class="credito" data-credito="' + esc(id) + '"></section>'; }
   async function preencheFicha(raizEl, id) {
@@ -516,6 +606,7 @@
     'cred-analisar': id => { analisar(id).catch(CRM.falhou); },
     'cred-analisar-site': id => { consultar(id); analisar(id, true).catch(CRM.falhou); },
     'cred-analisar-api': id => { analisar(id, false, true).catch(CRM.falhou); },
+    'cred-lote': () => { analisarLote([].slice.call(document.querySelectorAll('.cred-marca:checked')).map(x => x.value)).catch(CRM.falhou); },
     'cred-buscar': () => {
       const t = String((document.querySelector('#credBusca') || {}).value || '').trim();
       if (!t) return;
