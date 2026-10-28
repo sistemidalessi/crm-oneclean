@@ -169,6 +169,7 @@ const GENERICAS = new Set(('conta contas pagamento pagto boleto boletos nota not
   'compra compras mercadoria mercadorias produto produtos pedido pedidos material materiais venda vendas loja').split(' '));
 const tokens = (s: string) => [...new Set(baixo(s).replace(/[^a-z0-9]+/g, ' ').split(' ').filter(w => w.length >= 3 && !/^\d+$/.test(w) && !GENERICAS.has(w) && !/^(?:que|dos|das|com|pra|para|pro)$/.test(w)))];
 const casaPalavra = (a: string, b: string) => a === b || (Math.min(a.length, b.length) >= 4 && (a.indexOf(b) === 0 || b.indexOf(a) === 0));
+const emComum = (as: string[], bs: string[]) => as.filter(a => bs.some(b => casaPalavra(a, b))).length;
 function categoriaCx(texto: string, tipo: string) {
   const t = baixo(texto);
   if (tipo === 'entrada') return /duplicata|boleto|titulo/.test(t) ? 'Duplicatas recebidas' : 'Outras entradas';
@@ -211,10 +212,13 @@ async function caixaConferir(db: any, itens: unknown) {
     if (!(valor > 0 && valor <= 10000000) || !ehData(data)) return resposta(400, { erro: 'item inválido' });
     // deno-lint-ignore no-explicit-any
     const regra = regraCx(((regras || []) as any[]).filter(r => !r.entre_empresas && !PROIBIDA(r.categoria)), tipo, tokens(texto));
-    const tol = Math.max(60, valor * 0.08);
-    const { data: ab, error: e3 } = await db.from('crm_fin_lancamentos').select('descricao, fornecedor, valor, vencimento').eq('situacao', 'aberto').eq('tipo', tipo)
-      .gte('vencimento', dmais(data, -20)).lte('vencimento', dmais(data, 20)).gte('valor', r2(valor - tol)).lte('valor', r2(valor + tol)).order('vencimento').limit(5);
+    // conta em aberto parecida = a mesma regra do Caixa por frases (frases.js classificar, passo 1): valor ±8% ou R$ 60,
+    // vencimento ±20 dias E uma palavra em comum (28/10/2026: só valor e data pegava conta que não tinha nada a ver)
+    const tol = Math.max(60, valor * 0.08), tk = tokens(texto);
+    const { data: ab0, error: e3 } = await db.from('crm_fin_lancamentos').select('descricao, fornecedor, valor, vencimento').eq('situacao', 'aberto').eq('tipo', tipo)
+      .gte('vencimento', dmais(data, -20)).lte('vencimento', dmais(data, 20)).gte('valor', r2(valor - tol)).lte('valor', r2(valor + tol)).order('vencimento').limit(50);
     if (e3) throw new Error(e3.message);
+    const ab = (ab0 || []).filter((l: { descricao: string; fornecedor: string | null }) => tk.length && emComum(tokens(l.descricao + ' ' + (l.fornecedor || '')), tk) > 0).slice(0, 5);
     saida.push({ categoria: regra && regra.categoria ? regra.categoria : categoriaCx(texto, tipo), fornecedor: regra ? regra.fornecedor || null : null, regra: !!regra,
       parecidas: (ab || []).map((l: { descricao: string; fornecedor: string | null; valor: number; vencimento: string }) => ({ descricao: l.descricao, fornecedor: l.fornecedor, valor: Number(l.valor), vencimento: l.vencimento })) });
   }
