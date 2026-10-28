@@ -644,6 +644,10 @@
     return await r.data.text();
   };
   Supa.prototype.compraLancar = async function (id, itens) { return unwrap(await this.sb.rpc('crm_compra_lancar', { p_compra: id, p_itens: itens })); };
+  // nota lançada à mão (28/10/2026, Wellington): os itens do XML não batem; o comprador digita código, quantidade e valor
+  Supa.prototype.compraLancarManual = async function (id, linhas, motivo) { return unwrap(await this.sb.rpc('crm_compra_lancar_manual', { p_compra: id, p_linhas: linhas, p_motivo: motivo || '' })); };
+  // quantidade vendida de cada produto em cada mês do ano (Estoque → Relatórios)
+  Supa.prototype.relVendasAno = async function (ano) { return paginado((de, ate) => this.sb.rpc('crm_rel_vendas_ano', { p_ano: ano }).range(de, ate)); };
   Supa.prototype.compraIgnorar = async function (id, obs) {
     return unwrap(await this.sb.from('crm_compras').update({ situacao: 'ignorada', obs: obs || null, atualizado_em: new Date().toISOString() }).eq('id', id).eq('situacao', 'pendente').select().single());
   };
@@ -678,6 +682,8 @@
   Local.prototype.salvarFornecedorDoc = async function () { return null; };
   Local.prototype.dfeXml = async function () { return null; };
   Local.prototype.compraLancar = async function () { throw new Error('a entrada no estoque só funciona ligada ao banco'); };
+  Local.prototype.compraLancarManual = Local.prototype.compraLancar;
+  Local.prototype.relVendasAno = async function () { return []; };
   Local.prototype.compraIgnorar = async function (id, obs) { const c = (this._compras || []).find(x => x.id === id); if (c) Object.assign(c, { situacao: 'ignorada', obs }); return c; };
 
   // modo local (teste/demonstração): o livro fica na memória

@@ -1030,11 +1030,14 @@
         { nome: 'situacao', rotulo: 'Situação', tipo: 'select', opcoes: [['ATIVO', 'Ativo'], ['INATIVO', 'Inativo (não aparece para vender)']] },
         { nome: 'linha', rotulo: 'Linha', sugestoes: linhas0 }, { nome: 'familia', rotulo: 'Família' },
         { nome: 'localizacao', rotulo: 'Localização no galpão' },
-        { tipo: 'secao', rotulo: 'Preço e estoque' },
-        { nome: 'preco_venda', rotulo: 'Preço de venda (tabela A), R$', tipo: 'numero', obrigatorio: true, vazioNulo: true },
+        { tipo: 'secao', rotulo: 'Preço e estoque' }])
+      // precificação (28/10/2026, Wellington: "lançamento do valor com a opção de precificação para cálculo de porcentagem",
+      // como o Preços/Margem do FKN): custo + acréscimo % dá o preço; mudar o preço refaz o acréscimo; a margem aparece embaixo
+      .concat(comCusto ? [{ nome: 'custo_unit', rotulo: 'Custo (reposição), R$', tipo: 'numero', vazioNulo: true },
+        { nome: 'acrescimo', rotulo: 'Acréscimo sobre o custo, %', tipo: 'numero', vazioNulo: true, ajuda: 'digite o % e o preço se calcula; ou digite o preço e o % se acerta' }] : [])
+      .concat([{ nome: 'preco_venda', rotulo: 'Preço de venda (tabela A), R$', tipo: 'numero', obrigatorio: true, vazioNulo: true },
         { nome: 'estoque_min', rotulo: 'Estoque mínimo', tipo: 'numero', passo: '1', vazioNulo: true },
         { nome: 'estoque_max', rotulo: 'Estoque máximo', tipo: 'numero', passo: '1', vazioNulo: true }])
-      .concat(comCusto ? [{ nome: 'custo_unit', rotulo: 'Custo (reposição), R$', tipo: 'numero', vazioNulo: true }] : [])
       .concat(temForn ? [{ nome: 'fornecedor_cod', rotulo: 'Fornecedor', tipo: 'select', alfa: true, opcoes: [['', '—']].concat(fornLista.filter(z => z.ativo !== false || String(z.codigo) === String(v0.fornecedor_cod)).map(z => [String(z.codigo), R.nomeDeItem(z.nome)])) }] : [])
       .concat([{ tipo: 'secao', rotulo: 'Fiscal' },
         { nome: 'ncm', rotulo: 'NCM (8 números)', obrigatorio: true }, { nome: 'cest', rotulo: 'CEST (se tiver)' }, { nome: 'gtin', rotulo: 'Código de barras (EAN)' },
@@ -1044,12 +1047,33 @@
       .concat(novo ? [{ nome: 'modelo', rotulo: 'Mesma tributação que o produto (código)', obrigatorio: true, largo: true, dica: 'um produto parecido já vendido: o CRM copia dele CFOP, CST, PIS e COFINS' },
         { tipo: 'secao', rotulo: 'Embalagem de compra (se vier em caixa ou fardo)' },
         { nome: 'emb_unidade', rotulo: 'Embalagem (CX, FD, PCT)' }, { nome: 'emb_fator', rotulo: 'Quantas unidades vêm nela', tipo: 'numero', passo: '1', vazioNulo: true }] : []);
-    const valores = Object.assign({}, v0, { ncm: v0.ncm ? String(v0.ncm).replace(/^(\d{4})(\d{2})(\d{2})$/, '$1.$2.$3') : '', fornecedor_cod: v0.fornecedor_cod ? String(v0.fornecedor_cod) : '' });
+    const c0 = Number(v0.custo_unit) || 0, p0 = Number(v0.preco_venda) || 0;
+    const valores = Object.assign({}, v0, { ncm: v0.ncm ? String(v0.ncm).replace(/^(\d{4})(\d{2})(\d{2})$/, '$1.$2.$3') : '', fornecedor_cod: v0.fornecedor_cod ? String(v0.fornecedor_cod) : '',
+      acrescimo: c0 > 0 && p0 > 0 ? Math.round((p0 / c0 - 1) * 10000) / 100 : '' });
+    const margemMin = (CRM.estado.cfg && CRM.estado.cfg.margem_minima != null && CRM.estado.cfg.margem_minima !== '') ? Number(CRM.estado.cfg.margem_minima) : 23;
     CRM.abrirForm({
       titulo: novo ? 'Novo produto' : 'Cadastro de ' + R.nomeDeItem(v0.descricao || cod),
       intro: novo ? 'O produto entra no estoque com saldo zero; a primeira entrada de nota de compra soma. Fica guardado quem cadastrou e quando.'
         : 'Cada alteração fica guardada com quem fez e quando.' + (comCusto ? '' : ' O custo, só o administrador e o comprador mudam.'),
       campos, valores,
+      extras: comCusto ? form => {
+        const el = n => form.elements[n], num = n => Number(String(el(n).value).replace(',', '.')) || 0;
+        const aviso = form.querySelector('[data-aviso="preco_venda"]');
+        const margem = () => {
+          const c = num('custo_unit'), p = num('preco_venda');
+          if (!aviso) return;
+          if (!(c > 0 && p > 0)) { aviso.hidden = true; return; }
+          const m = (p - c) / p * 100;
+          aviso.textContent = 'Margem sobre o preço: ' + m.toFixed(1).replace('.', ',') + '% (mínima ' + margemMin + '%)' + (m < margemMin ? ' — abaixo da mínima: o pedido fica bloqueado até a gestora liberar' : '');
+          aviso.className = 'aviso-campo' + (m < margemMin ? ' neg' : ''); aviso.hidden = false;
+        };
+        const pelaPorcentagem = () => { const c = num('custo_unit'); if (c > 0 && el('acrescimo').value !== '') el('preco_venda').value = (Math.round(c * (1 + num('acrescimo') / 100) * 100) / 100).toFixed(2); margem(); };
+        const peloPreco = () => { const c = num('custo_unit'), p = num('preco_venda'); el('acrescimo').value = c > 0 && p > 0 ? (Math.round((p / c - 1) * 10000) / 100).toFixed(2) : ''; margem(); };
+        el('custo_unit').addEventListener('input', pelaPorcentagem);
+        el('acrescimo').addEventListener('input', pelaPorcentagem);
+        el('preco_venda').addEventListener('input', peloPreco);
+        margem();
+      } : null,
       aoSalvar: async v => {
         const d = {};
         ['descricao', 'unidade', 'situacao', 'linha', 'familia', 'localizacao', 'preco_venda', 'estoque_min', 'estoque_max', 'ncm', 'cest', 'gtin', 'origem'].forEach(k => { d[k] = v[k] == null ? '' : v[k]; });

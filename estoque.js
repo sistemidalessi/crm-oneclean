@@ -319,6 +319,8 @@
   let saldo = null, fkn = [], fotos = [], difs = [], fotoVista = null, carregando = false, compras = [], lendoCompras = '';
   let avulsas = null; // entradas avulsas (compra sem nota), só administrador e comprador
   const filtro = { ver: 'saldo', busca: '', soDif: false };
+  // Relatórios (28/10/2026, Wellington): estoque atual e vendas do ano mês a mês, só quantidades
+  const rel = { busca: '', soSaldo: true, ano: new Date().getFullYear(), vendas: null, vendasAno: null, carregando: false };
   let dfe = [], dfeEst = null, buscouDfe = false, buscandoDfe = '', fornDocs = [], fornCad = [], itensProd = [], itensPend = [], nomesOp = [];
   let chegadas = new Map(); // compra.id → { chegou_em, chegou_nome, chegou_obs }: o "Chegou" da logística (22/10/2026)
   let devolucoes = new Map(); // compra.id → { ref_chave, ref_numero, efeitos }: devolução emitida pelo cliente (22/10/2026)
@@ -389,6 +391,7 @@
       kpi('Produtos no estoque do CRM', (saldo || []).length, 'saldo de cada produto e os movimentos (☰)', '', 'saldo') +
       kpi('Notas de compra', compras.filter(c => c.situacao === 'pendente').length + ' pendente(s)', 'conferir o que chegou e dar entrada', compras.some(c => c.situacao === 'pendente') ? 'ambar' : '', 'compras') +
       kpi('Contagem e ajuste', '✎', 'inventário por contagem ou acerto de um produto', '', 'contagem') +
+      kpi('Relatórios', '📄', 'estoque atual e vendas do ano mês a mês (planilha e impressão)', '', 'relatorios') +
       (CRM.produtos ? kpi('Fotos e fichas', '📷', 'aprovar o que a IA achou e completar foto, ficha técnica e FISPQ', '', 'fotos') : '') + '</div>';
     const negativos = (saldo || []).filter(x => +x.saldo < 0).length;
     if (dono()) return '<div class="kpis">' +
@@ -396,6 +399,7 @@
       kpi('Saldo negativo', negativos, negativos ? 'vendido sem entrada: conferir a compra ou contar' : 'nenhum produto abaixo de zero', negativos ? 'vermelho' : 'verde', 'saldo') +
       kpi('Notas de compra', compras.filter(c => c.situacao === 'pendente').length + ' pendente(s)', 'dar entrada no que chegou (soma no estoque e lança no contas a pagar)', compras.some(c => c.situacao === 'pendente') ? 'ambar' : '', 'compras') +
       kpi('Contagem e ajuste', '✎', 'inventário por contagem ou acerto de um produto', '', 'contagem') +
+      kpi('Relatórios', '📄', 'estoque atual e vendas do ano mês a mês (planilha e impressão)', '', 'relatorios') +
       (CRM.produtos ? kpi('Fotos e fichas', '📷', 'foto, ficha técnica e FISPQ de cada produto (a IA procura, você aprova)', '', 'fotos') : '') + '</div>';
     return '<div class="kpis">' +
       kpi('Produtos no estoque do CRM', (saldo || []).length, 'valor a custo médio: ' + R.moeda(S.valor(linhas)), '', 'saldo') +
@@ -404,6 +408,7 @@
       kpi('Dias seguidos sem diferença sem explicação', seq.dias + ' de 15', seq.dias >= 15 ? 'pronto para a Fase 3 do plano' : 'a meta para confiar no estoque do CRM', seq.dias >= 15 ? 'verde' : '', 'conferencia') +
       kpi('Notas de compra', compras.filter(c => c.situacao === 'pendente').length + ' pendente(s)', 'subir o XML e dar entrada no estoque', compras.some(c => c.situacao === 'pendente') ? 'ambar' : '', 'compras') +
       kpi('Contagem e ajuste', '✎', 'inventário por contagem ou acerto de um produto', '', 'contagem') +
+      kpi('Relatórios', '📄', 'estoque atual e vendas do ano mês a mês (planilha e impressão)', '', 'relatorios') +
       (CRM.produtos ? kpi('Fotos e fichas', '📷', 'foto, ficha técnica e FISPQ de cada produto (a IA procura, você aprova)', '', 'fotos') : '') + '</div>';
   }
 
@@ -433,6 +438,53 @@
           '<td class="num">' + (x.saldo != null ? '<button type="button" class="mini" data-acao="es-movs" data-id="' + esc(x.codigo) + '" title="Movimentos">☰</button>' +
             '<button type="button" class="mini" data-acao="es-ajustar" data-id="' + esc(x.codigo) + '" title="Acertar o saldo">✎</button>' : '') + '</td></tr>').join('') +
         '</tbody></table></div>' + (l.length > 300 ? '<p class="dica">Mostrando 300 de ' + l.length + '; use a busca.</p>' : '') : '<p class="vazio">Nada aqui.</p>') + '</section>';
+  }
+
+  // ---- Relatórios (28/10/2026, Wellington): o estoque atual (código, nome, quantidade) e as vendas do ano mês a mês
+  const MESES = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+  const casa = (x, q) => !q || R.normaliza((x.descricao || '') + ' ' + x.codigo).indexOf(q) !== -1;
+  function estoqueRel(linhas) {
+    const q = R.normaliza(rel.busca);
+    return linhas.filter(x => x.saldo != null && casa(x, q) && (!rel.soSaldo || Number(x.saldo) !== 0))
+      .sort((a, b) => String(a.descricao || a.codigo).localeCompare(String(b.descricao || b.codigo), 'pt-BR'));
+  }
+  function vendasRel() {
+    const q = R.normaliza(rel.busca);
+    return (rel.vendas || []).filter(x => casa(x, q));
+  }
+  function carregaVendas() {
+    if (rel.carregando || rel.vendasAno === rel.ano) return;
+    rel.carregando = true;
+    const ano = rel.ano;
+    CRM.store().relVendasAno(ano).then(l => { if (ano === rel.ano) { rel.vendas = l || []; rel.vendasAno = ano; } })
+      .catch(e => { rel.vendas = []; rel.vendasAno = ano; CRM.falhou(e); }).then(() => { rel.carregando = false; CRM.render(); });
+  }
+  function telaRelatorios(linhas) {
+    const est = estoqueRel(linhas);
+    if (rel.vendasAno !== rel.ano) setTimeout(carregaVendas, 0);
+    const vend = rel.vendasAno === rel.ano ? vendasRel() : null;
+    const anoAtual = new Date().getFullYear(), anos = [];
+    for (let a = anoAtual; a >= 2025; a--) anos.push([a, String(a)]);
+    const mostra = 500;
+    return '<section class="cartao"><h2>Relatórios <small>só quantidades</small></h2>' +
+      '<p class="acoes"><input type="search" placeholder="Procurar produto ou código (vale para os dois)" value="' + esc(rel.busca) + '" data-rel-busca class="of-busca"> ' +
+      '<button type="button" class="btn sec" data-acao="imprimir">Imprimir</button></p></section>' +
+      '<section class="cartao"><h2>Estoque atual <small>' + est.length + ' produto(s)</small></h2>' +
+      '<p class="acoes"><label class="filtro-inline"><input type="checkbox" data-rel-so' + (rel.soSaldo ? ' checked' : '') + '> só os que têm saldo (tira os zerados)</label> ' +
+      '<button type="button" class="btn sec" data-acao="es-rel-estoque-csv">Baixar planilha</button></p>' +
+      (est.length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Código</th><th>Produto</th><th>Unidade</th><th class="num">Quantidade em estoque</th></tr></thead><tbody>' +
+        est.slice(0, mostra).map(x => '<tr><td>' + esc(x.codigo) + '</td><td>' + esc(R.nomeDeItem(x.descricao || x.codigo)) + '</td><td>' + esc(x.unidade || '') + '</td>' +
+          '<td class="num' + (+x.saldo < 0 ? ' neg' : '') + '">' + qtd(x.saldo) + '</td></tr>').join('') + '</tbody></table></div>' +
+        (est.length > mostra ? '<p class="dica">Mostrando ' + mostra + ' de ' + est.length + '; a planilha leva todos.</p>' : '') : '<p class="vazio">Nada aqui.</p>') + '</section>' +
+      '<section class="cartao"><h2>Vendas do ano, mês a mês <small>' + (vend ? vend.length + ' produto(s)' : 'carregando…') + '</small></h2>' +
+      '<p class="dica">Quantidade vendida de cada produto em cada mês, pelas notas de venda (sem as canceladas). A caixa vendida com o código da unidade conta em unidades.</p>' +
+      '<p class="acoes"><label class="filtro-inline">Ano <select data-rel-ano>' + CRM.opcoesHTML(anos, rel.ano) + '</select></label> ' +
+      '<button type="button" class="btn sec" data-acao="es-rel-vendas-csv"' + (vend ? '' : ' disabled') + '>Baixar planilha</button></p>' +
+      (!vend ? '<p class="vazio">Carregando…</p>' : !vend.length ? '<p class="vazio">Nenhuma venda neste ano.</p>'
+        : '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Código</th><th>Produto</th>' + MESES.map(m => '<th class="num">' + m + '</th>').join('') + '<th class="num">Total</th></tr></thead><tbody>' +
+          vend.slice(0, mostra).map(x => '<tr><td>' + esc(x.codigo) + '</td><td>' + esc(R.nomeDeItem(x.descricao || x.codigo)) + (x.unidade ? '<small>' + esc(x.unidade) + '</small>' : '') + '</td>' +
+            (x.meses || []).map(v => '<td class="num">' + (v == null ? '' : qtd(v)) + '</td>').join('') + '<td class="num"><strong>' + qtd(x.total) + '</strong></td></tr>').join('') +
+          '</tbody></table></div>' + (vend.length > mostra ? '<p class="dica">Mostrando ' + mostra + ' de ' + vend.length + '; a planilha leva todos.</p>' : '')) + '</section>';
   }
 
   function telaConferencia() {
@@ -578,6 +630,18 @@
     if (r.novas || !sozinho) CRM.toast(r.novas + ' nota(s) da Sefaz no CRM' + (r.historico ? ' (' + r.historico + ' de antes do estoque do CRM, só como histórico de preço)' : '') + (r.erros.length ? ' · ' + r.erros.length + ' com problema: ' + r.erros.slice(0, 2).join(' | ') : '') + '.', !!r.erros.length);
     compras = await st.compras(200).catch(() => compras);
   }
+  // Busca da Sefaz sozinha (28/10/2026, Wellington: "foi dado entrada ontem, só apareceu hoje no CRM"): a consulta só
+  // corria ao abrir o Estoque. Agora, com o CRM aberto por quem cuida das compras (administrador ou comprador), a cada 10
+  // minutos confere se a espera de 1 hora da Sefaz já passou e consulta; as notas completas entram sozinhas.
+  setInterval(() => {
+    try {
+      const st = CRM.store && CRM.store();
+      if (!st || st.modo !== 'supabase' || !st.dfeBuscar || buscandoDfe || !podeSefaz()) return;
+      if (dfeEst && dfeEst.proxima_em && Date.parse(dfeEst.proxima_em) > Date.now()) return;
+      if (saldo === null) { buscouDfe = false; carrega(); return; }   // o Estoque ainda não abriu: carrega (e a carga consulta)
+      buscaSefaz(true);
+    } catch (e) { /* sem login ainda */ }
+  }, 10 * 60000);
   // Fornecedor desconhecido e prazo da resposta definitiva (S.avisosDfe): os CNPJs conhecidos saem do cadastro de
   // fornecedores, das notas de compra que deram entrada e do que o comprador já marcou.
   const docDe = v => String(v || '').replace(/[^0-9A-Z]/gi, '').toUpperCase();
@@ -716,6 +780,7 @@
       const linhas = S.junta(saldo, fkn);
       return cabecalho() + quadros(linhas) +
         (filtro.ver === 'conferencia' && !op() ? telaConferencia() : filtro.ver === 'contagem' ? telaContagem() : filtro.ver === 'compras' ? telaCompras()
+          : filtro.ver === 'relatorios' ? telaRelatorios(linhas)
           : filtro.ver === 'fotos' && CRM.produtos ? CRM.produtos.telaFotos() : telaSaldo(linhas));
     },
     depois(c) {
@@ -726,6 +791,12 @@
       const arq = c.querySelector('#esCompraArq');
       if (arq) arq.addEventListener('change', () => lerCompras(arq.files).catch(CRM.falhou));
       if (filtro.ver === 'fotos' && CRM.produtos) CRM.produtos.depoisFotos(c);
+      const rb = c.querySelector('[data-rel-busca]');
+      if (rb) rb.addEventListener('input', () => { rel.busca = rb.value; CRM.render(); });
+      const rs = c.querySelector('[data-rel-so]');
+      if (rs) rs.addEventListener('change', () => { rel.soSaldo = rs.checked; CRM.render(); });
+      const ra = c.querySelector('[data-rel-ano]');
+      if (ra) ra.addEventListener('change', () => { rel.ano = Number(ra.value); rel.vendas = null; CRM.render(); });
       const f = c.querySelector('[data-es-foto]');
       if (f) f.addEventListener('change', async () => { fotoVista = Number(f.value); difs = await CRM.store().estoqueDifs(fotoVista).catch(() => []); CRM.render(); });
     }
@@ -860,6 +931,7 @@
           htmlDepois: '<datalist id="esProdutos">' + R.ordemAlfa(base.map(e => [e.codigo, e.descricao]), x => x[1] || x[0]).map(([k, v]) => '<option value="' + esc(k) + '">' + esc(v || '') + '</option>').join('') + '</datalist>' +
             '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Item da nota</th><th>Produto nosso</th><th title="Quantas unidades do nosso estoque vêm em 1 unidade da nota (o antigo &quot;fator&quot;)">Vem quantas na embalagem?</th><th></th></tr></thead><tbody>' + itens.map(linhaI).join('') + '</tbody></table></div>',
           salvarTexto: pend ? (dv ? 'Dar entrada da devolução' : 'Dar entrada no estoque') : 'Fechar',
+          rodape: pend && !dv && (CRM.ehAdmin() || CRM.ehComprador()) ? '<button type="button" class="btn sec" data-acao="es-compra-mao" data-id="' + esc(id) + '" title="Quando os itens do XML não batem com o que veio (ex.: uma linha só com &quot;diversos&quot;)">Os itens não batem: lançar à mão</button>' : '',
           extras: form => {
             const atualiza = it => {
               const cod = form.elements['c_' + it.id].value.trim(), fat = Number(form.elements['f_' + it.id].value) || 0;
@@ -897,6 +969,85 @@
           }
         });
       } catch (e) { CRM.falhou(e); }
+    },
+    // Nota lançada à mão (28/10/2026, Wellington: "Polar, Leal e Mavi mandam XML, porém não dá para importar, pois itens e
+    // valores não batem"): o comprador digita código, quantidade (na unidade do estoque) e valor de cada produto que veio.
+    'es-compra-mao': async id => {
+      const c = compras.find(x => x.id === id); if (!c) return;
+      try {
+        const st = CRM.store(), itens = await st.compraItens(id);
+        const base = (fkn || []).filter(e => !S.ehCaixa(e.codigo));
+        const nomeDe = new Map(base.map(e => [e.codigo, e.descricao])), unDe = new Map(base.map(e => [e.codigo, e.unidade]));
+        (saldo || []).forEach(x => { if (!nomeDe.has(x.codigo)) { nomeDe.set(x.codigo, x.descricao); unDe.set(x.codigo, x.unidade); } });
+        const cad = new Set(nomeDe.keys());
+        const total = Number(c.valor_total) || 0;
+        const linha = i => '<tr data-mlinha><td><input name="mc_' + i + '" list="esProdutosM" placeholder="código" class="es-cod" autocomplete="off"><small data-mnome="' + i + '"></small></td>' +
+          '<td><input name="mq_' + i + '" type="number" step="any" min="0" class="es-fator" placeholder="0"><small data-mun="' + i + '"></small></td>' +
+          '<td><input name="mv_' + i + '" type="number" step="0.01" min="0" class="es-fator" placeholder="0,00"><small data-mcusto="' + i + '"></small></td></tr>';
+        let n = Math.max(5, itens.length);
+        CRM.abrirForm({
+          titulo: 'Lançar à mão: NF ' + c.numero + ' · ' + (c.fornecedor_nome || ''), largura: 'extra',
+          intro: 'Digite cada produto que veio: o código nosso, a quantidade na unidade do estoque e o valor total pago nele (com IPI, ST e frete, se tiver). ' +
+            'O estoque soma essas quantidades e o custo de cada um sai do valor ÷ quantidade. A nota e as parcelas continuam as do XML; os itens do XML ficam guardados.',
+          campos: [{ nome: 'motivo', rotulo: 'Por que à mão', largo: true, dica: 'ex.: o XML vem com uma linha só, "sacos diversos"' }],
+          valores: { motivo: 'itens do XML não batem com o que veio' },
+          htmlAntes: '<p class="dica"><strong>O XML diz:</strong> ' + itens.map(it => esc(qtd(it.quantidade) + ' ' + (it.unidade || '') + ' ' + (it.descricao || '')) + ' (' + R.moeda(Number(it.valor_total) + Number(it.ipi) + Number(it.st) + Number(it.frete) + Number(it.outras)) + ')').join(' · ') +
+            ' · <strong>total da nota ' + R.moeda(total) + '</strong></p>',
+          htmlDepois: '<datalist id="esProdutosM">' + R.ordemAlfa([...nomeDe.entries()], x => x[1] || x[0]).map(([k, v]) => '<option value="' + esc(k) + '">' + esc(v || '') + '</option>').join('') + '</datalist>' +
+            '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Produto (código)</th><th>Quantidade (unidade do estoque)</th><th>Valor total, R$</th></tr></thead><tbody data-mcorpo>' +
+            Array.from({ length: n }, (_, i) => linha(i)).join('') + '</tbody></table></div>' +
+            '<p class="acoes"><button type="button" class="btn sec" data-mmais>+ mais 5 linhas</button> <span data-msoma></span></p>',
+          salvarTexto: 'Dar entrada no estoque',
+          extras: form => {
+            const corpo = form.querySelector('[data-mcorpo]'), soma = form.querySelector('[data-msoma]');
+            const atualiza = () => {
+              let t = 0;
+              for (let i = 0; i < n; i++) {
+                const cod = (form.elements['mc_' + i].value || '').trim().toUpperCase(), q = Number(form.elements['mq_' + i].value) || 0, v = Number(form.elements['mv_' + i].value) || 0;
+                const certo = cod && !cad.has(cod) ? S.codigoDoCadastro(cod, cad) : null;
+                form.querySelector('[data-mnome="' + i + '"]').textContent = cad.has(cod) ? nomeDe.get(cod) || '' : certo ? 'faltou o zero da frente: é o ' + certo + ' ' + (nomeDe.get(certo) || '') : cod ? 'código que o cadastro não tem' : '';
+                form.querySelector('[data-mun="' + i + '"]').textContent = unDe.get(certo || cod) || '';
+                form.querySelector('[data-mcusto="' + i + '"]').textContent = q > 0 && v > 0 ? R.moeda(v / q) + ' cada' : '';
+                t += v;
+              }
+              const dif = Math.round((t - total) * 100) / 100;
+              soma.innerHTML = 'Soma: <strong>' + R.moeda(t) + '</strong> · total da nota ' + R.moeda(total) + (t && Math.abs(dif) >= 0.01 ? ' · <span class="neg">diferença ' + R.moeda(dif) + '</span>' : t ? ' ✓' : '');
+            };
+            corpo.addEventListener('input', atualiza);
+            form.querySelector('[data-mmais]').addEventListener('click', () => { corpo.insertAdjacentHTML('beforeend', Array.from({ length: 5 }, (_, k) => linha(n + k)).join('')); n += 5; atualiza(); });
+            atualiza();
+          },
+          aoSalvar: async (v, form) => {
+            const linhas = [], trocados = [];
+            for (let i = 0; i < n; i++) {
+              let cod = (form.elements['mc_' + i].value || '').trim().toUpperCase();
+              const q = form.elements['mq_' + i].value, val = form.elements['mv_' + i].value;
+              if (!cod && !q && !val) continue;
+              if (cod && !cad.has(cod)) { const certo = S.codigoDoCadastro(cod, cad); if (certo) { trocados.push(cod + ' → ' + certo); cod = certo; form.elements['mc_' + i].value = certo; } }
+              if (!cad.has(cod)) throw new Error('linha ' + (i + 1) + ': ' + (cod ? 'o código ' + cod + ' não está no cadastro (se é produto novo, cadastre antes em Produtos)' : 'falta o código'));
+              if (!(Number(q) > 0)) throw new Error('linha ' + (i + 1) + ' (' + cod + '): falta a quantidade');
+              if (val === '' || !(Number(val) >= 0)) throw new Error('linha ' + (i + 1) + ' (' + cod + '): falta o valor');
+              linhas.push({ codigo: cod, quantidade: Number(q), valor: Number(val) });
+            }
+            if (!linhas.length) throw new Error('digite pelo menos um produto');
+            const t = linhas.reduce((a, x) => a + x.valor, 0), dif = Math.round((t - total) * 100) / 100;
+            if (Math.abs(dif) > Math.max(1, total * 0.005) && !confirm('A soma dos produtos (' + R.moeda(t) + ') é diferente do total da nota (' + R.moeda(total) + '): diferença de ' + R.moeda(dif) +
+              '.\n\nO estoque fica com os valores que você digitou; as parcelas continuam as da nota. Dar entrada assim mesmo?')) return false;
+            if (trocados.length && !confirm('Acertei o zero da frente: ' + trocados.join(', ') + '.\n\nDar entrada assim?')) return false;
+            const r = await st.compraLancarManual(id, linhas, v.motivo || '');
+            CRM.toast('Entrada dada à mão: ' + r.itens + ' produto(s) no estoque (' + R.moeda(r.soma) + ').');
+            saldo = null; carrega();
+          }
+        });
+      } catch (e) { CRM.falhou(e); }
+    },
+    'es-rel-estoque-csv': () => {
+      const l = estoqueRel(S.junta(saldo || [], fkn));
+      CRM.baixarCSV('estoque-atual', ['Código', 'Produto', 'Unidade', 'Quantidade em estoque'], l.map(x => [x.codigo, x.descricao || '', x.unidade || '', x.saldo]));
+    },
+    'es-rel-vendas-csv': () => {
+      CRM.baixarCSV('vendas-' + rel.ano + '-por-mes', ['Código', 'Produto', 'Unidade'].concat(MESES, ['Total']),
+        vendasRel().map(x => [x.codigo, x.descricao || '', x.unidade || ''].concat((x.meses || []).map(v => (v == null ? 0 : v)), [x.total])));
     },
     'es-chegou': id => {
       const c = compras.find(x => x.id === id); if (!c) return;

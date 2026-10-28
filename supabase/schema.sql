@@ -7151,3 +7151,84 @@ end;
 $$;
 revoke all on function public.crm_credito_painel() from public, anon;
 grant execute on function public.crm_credito_painel() to authenticated;
+
+-- ============================================================ Pedidos do Wellington (comprador, 28/10/2026)
+-- 1. Nota de compra lançada à mão: Polar, Leal e Mavi mandam o XML com itens que não batem com o que veio (a Leal põe
+--    "SACOS P/ LIXO DE DIVERSOS TAMANHOS" numa linha só, 480 FD). O comprador digita os produtos de verdade (código,
+--    quantidade na unidade do estoque e valor); os itens do XML ficam guardados em crm_compras.itens_xml e no lugar
+--    deles entram as linhas digitadas, que seguem pelo caminho de sempre (crm_compra_lancar, fator 1): estoque, custo
+--    médio, histórico de preço e, depois da virada, as parcelas da nota no contas a pagar. Só administrador e comprador
+--    (tem valor); devolução de cliente não (volta pelo custo médio, pelo XML).
+alter table public.crm_compras add column if not exists itens_xml jsonb;
+alter table public.crm_compras add column if not exists manual jsonb;
+create or replace function public.crm_compra_lancar_manual(p_compra uuid, p_linhas jsonb, p_motivo text) returns jsonb language plpgsql security definer set search_path = public as $$
+declare c record; l jsonb; cod text; q numeric; v numeric; e record; n integer := 0; soma numeric := 0; itens jsonb := '[]'::jsonb; r jsonb; idn uuid;
+begin
+  if not (public.crm_eh_admin() or public.crm_eh_comprador()) then raise exception 'só o administrador ou o comprador lançam a nota à mão'; end if;
+  select * into c from public.crm_compras where id = p_compra for update;
+  if c.id is null then raise exception 'nota de compra não encontrada'; end if;
+  if c.situacao <> 'pendente' then raise exception 'esta nota já foi %', case c.situacao when 'lancada' then 'lançada' else 'deixada de lado' end; end if;
+  if coalesce(c.devolucao, false) then raise exception 'devolução de cliente entra pelos itens do XML (volta pelo custo médio)'; end if;
+  if jsonb_typeof(p_linhas) <> 'array' or jsonb_array_length(p_linhas) = 0 then raise exception 'digite pelo menos um produto'; end if;
+  if jsonb_array_length(p_linhas) > 200 then raise exception 'no máximo 200 linhas'; end if;
+  -- confere tudo antes de mexer
+  for l in select value from jsonb_array_elements(p_linhas) loop
+    cod := upper(btrim(coalesce(l->>'codigo', '')));
+    begin q := (l->>'quantidade')::numeric; v := (l->>'valor')::numeric; exception when others then raise exception 'linha %: quantidade ou valor inválido', n + 1; end;
+    select codigo, descricao, unidade into e from public.crm_estoque where codigo = cod;
+    if e.codigo is null or cod ~ '\.\d+$' then raise exception 'linha %: o código % não está no cadastro de produtos (confira o zero da frente)', n + 1, cod; end if;
+    if q is null or q <= 0 then raise exception 'linha % (%): quantidade zerada', n + 1, cod; end if;
+    if v is null or v < 0 then raise exception 'linha % (%): valor inválido', n + 1, cod; end if;
+    n := n + 1; soma := soma + v;
+  end loop;
+  update public.crm_compras set itens_xml = coalesce(itens_xml, (select coalesce(jsonb_agg(to_jsonb(i) order by i.ordem), '[]'::jsonb) from public.crm_compra_itens i where i.compra_id = c.id)),
+    manual = jsonb_build_object('motivo', left(coalesce(nullif(btrim(p_motivo), ''), 'itens do XML não batem com o que veio'), 300), 'por', auth.uid(), 'em', now(),
+      'soma', round(soma, 2), 'total_nota', c.valor_total),
+    obs = left(coalesce(obs || ' · ', '') || 'lançada à mão: ' || coalesce(nullif(btrim(p_motivo), ''), 'itens do XML não batem'), 500), atualizado_em = now()
+   where id = c.id;
+  delete from public.crm_compra_itens where compra_id = c.id;
+  n := 0;
+  for l in select value from jsonb_array_elements(p_linhas) loop
+    n := n + 1; cod := upper(btrim(l->>'codigo'));
+    select codigo, descricao, unidade into e from public.crm_estoque where codigo = cod;
+    insert into public.crm_compra_itens (compra_id, ordem, cod_fornecedor, descricao, unidade, quantidade, valor_total, ipi, st, frete, outras)
+      values (c.id, n, null, e.descricao, public.crm_un(e.unidade), round((l->>'quantidade')::numeric, 4), round((l->>'valor')::numeric, 2), 0, 0, 0, 0) returning id into idn;
+    itens := itens || jsonb_build_array(jsonb_build_object('id', idn, 'codigo', cod, 'fator', 1));
+  end loop;
+  r := public.crm_compra_lancar(c.id, itens);
+  return r || jsonb_build_object('manual', true, 'soma', round(soma, 2), 'total_nota', c.valor_total);
+end;
+$$;
+revoke all on function public.crm_compra_lancar_manual(uuid, jsonb, text) from public, anon;
+grant execute on function public.crm_compra_lancar_manual(uuid, jsonb, text) to authenticated;
+
+-- 2. Relatório anual de vendas por produto (Estoque → Relatórios): quantidade vendida em cada mês do ano, pelas notas
+--    de venda (CFOP 5/6/7 x1 e x4, sem as canceladas). A caixa vendida com o código da unidade ("010284.1") vira
+--    unidades pelo fator de crm_estoque_unidades, como no comprador. Só quantidades (sem valor): administrador,
+--    gestora, comprador e logística.
+create or replace function public.crm_rel_vendas_ano(p_ano integer) returns table (codigo text, descricao text, unidade text, meses numeric[], total numeric)
+language plpgsql stable security definer set search_path = public as $$
+#variable_conflict use_column
+begin
+  if not (public.crm_eh_gestor() or public.crm_eh_comprador() or public.crm_eh_logistica()) then raise exception 'só o administrador, a gestora, o comprador e a logística'; end if;
+  if p_ano is null or p_ano < 2020 or p_ano > 2100 then raise exception 'ano inválido'; end if;
+  return query
+  with it as (
+    select regexp_replace(i.codigo, '\.\d+$', '') cod, extract(month from (n.emitida_em at time zone 'America/Sao_Paulo'))::int mes,
+           i.quantidade * coalesce((select u.fator from public.crm_estoque_unidades u where u.codigo = regexp_replace(i.codigo, '\.\d+$', '') and u.unidade = public.crm_un(i.unidade)), 1) q
+      from public.crm_nota_itens i join public.crm_notas n on n.id = i.nota_id
+     where not n.cancelada and i.codigo is not null and coalesce(i.cfop, '') ~ '^[567][14]'
+       and n.emitida_em >= make_timestamptz(p_ano, 1, 1, 0, 0, 0, 'America/Sao_Paulo') and n.emitida_em < make_timestamptz(p_ano + 1, 1, 1, 0, 0, 0, 'America/Sao_Paulo')
+  ), m as (select it.cod, it.mes, sum(it.q) q from it group by 1, 2)
+  select m.cod, coalesce(e.descricao, s.descricao, m.cod), coalesce(e.unidade, s.unidade),
+         array[sum(m.q) filter (where m.mes = 1), sum(m.q) filter (where m.mes = 2), sum(m.q) filter (where m.mes = 3), sum(m.q) filter (where m.mes = 4),
+               sum(m.q) filter (where m.mes = 5), sum(m.q) filter (where m.mes = 6), sum(m.q) filter (where m.mes = 7), sum(m.q) filter (where m.mes = 8),
+               sum(m.q) filter (where m.mes = 9), sum(m.q) filter (where m.mes = 10), sum(m.q) filter (where m.mes = 11), sum(m.q) filter (where m.mes = 12)],
+         sum(m.q)
+    from m left join public.crm_estoque e on e.codigo = m.cod left join public.crm_estoque_saldo s on s.codigo = m.cod
+   group by m.cod, e.descricao, s.descricao, e.unidade, s.unidade
+   order by 2;
+end;
+$$;
+revoke all on function public.crm_rel_vendas_ano(integer) from public, anon;
+grant execute on function public.crm_rel_vendas_ano(integer) to authenticated;
