@@ -1272,3 +1272,9 @@ button.ordena.ativo { color: var(--marinho); }
 .lista-barra .lista-busca input { width: 100%; }
 .lista-barra .lista-conta { color: var(--texto-2, #667085); margin-left: auto; }
 .lista-mais { margin-top: 6px; }
+
+/* Gestão → "Esconder números" (28/10/2026): os valores ficam borrados; nomes e títulos continuam legíveis */
+.numeros-ocultos .kpi strong, .numeros-ocultos .kpi small, .numeros-ocultos .num, .numeros-ocultos .col-valor,
+.numeros-ocultos dd, .numeros-ocultos .lista small, .numeros-ocultos .g-top small, .numeros-ocultos .selo,
+.numeros-ocultos .barra, .numeros-ocultos .barra-texto { filter: blur(7px); user-select: none; }
+@media print { .numeros-ocultos .kpi strong, .numeros-ocultos .num, .numeros-ocultos dd { visibility: hidden; } }
