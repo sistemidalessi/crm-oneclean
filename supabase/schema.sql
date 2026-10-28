@@ -1728,7 +1728,8 @@ returns table (empresa_id uuid, duplicata text, nota_numero integer, parcela int
 language sql stable security definer set search_path = public as $$
   select t.empresa_id, t.duplicata, t.nota_numero, t.parcela, t.vencimento, t.valor, t.abono, t.portador, t.cartorio_em
     from public.crm_titulos t
-   where t.empresa_id is not null and t.vencimento < (now() at time zone 'America/Sao_Paulo')::date
+   -- título remarcado pelo administrador no Caixa (previsao) só atrasa depois da data nova (28/10/2026, Anderson)
+   where t.empresa_id is not null and coalesce(t.previsao, t.vencimento) < (now() at time zone 'America/Sao_Paulo')::date
      and (public.crm_eh_gestor() or (public.crm_eh_membro() and t.empresa_id in (select public.crm_empresas_minhas())));
 $$;
 revoke all on function public.crm_atrasos() from public, anon;
@@ -2656,7 +2657,7 @@ begin
   b as (
     select p.id, array_remove(array[
       case when p.id in (select pedido_id from f) then 'ESTOQUE' end,
-      case when exists (select 1 from public.crm_titulos t where t.empresa_id = p.empresa_id and t.vencimento < hoje and not t.abono) then 'ATRASO' end,
+      case when exists (select 1 from public.crm_titulos t where t.empresa_id = p.empresa_id and coalesce(t.previsao, t.vencimento) < hoje and not t.abono) then 'ATRASO' end,
       case when not p.entrada_ok and coalesce(p.dados->>'pagamento', '') ~* '(vista|antecipad|pix|transfer|dep[oó]sito)' then 'SEM ENTRADA' end,
       case when trava and exists (select 1 from jsonb_array_elements(p.itens) i
         cross join lateral (select (i->>'preco')::numeric * (1 - coalesce((i->>'desconto')::numeric, 0) / 100) pl, coalesce((i->>'custo')::numeric, 0) c, coalesce((i->>'preco_tab')::numeric, 0) tb) v
@@ -7137,7 +7138,7 @@ begin
        and exists (select 1 from public.crm_nota_itens i where i.nota_id = n.id and (i.cfop ~ '^[56]10[1-9]$' or i.cfop ~ '^[56]40[1-5]$' or i.cfop in ('5922', '6922')))
      group by 1, 2),
   hist as (select empresa_id, max(v) maior_mes, count(*) meses, max(ult) ultima from vendas group by 1),
-  tit as (select empresa_id, sum(valor) filter (where not abono) aberto, sum(valor) filter (where not abono and vencimento < hoje) vencido,
+  tit as (select empresa_id, sum(valor) filter (where not abono) aberto, sum(valor) filter (where not abono and coalesce(previsao, vencimento) < hoje) vencido,
                  max(vencimento - emitida_em) prazo from public.crm_titulos where empresa_id is not null group by 1),
   fichas as (
     select jsonb_agg(to_jsonb(c) || jsonb_build_object('nome', e.nome, 'cnpj', e.cnpj, 'usado', public.crm_credito_usado(c.empresa_id, null),

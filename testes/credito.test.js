@@ -142,4 +142,20 @@ test('daRekta: resposta de pessoa jurídica (texto com JSON dentro)', () => {
   assert.deepEqual([r.protestos_qtd, r.protestos_valor, r.pendencias_qtd, r.pendencias_valor, r.atraso_mais_60], [2, 1500, 3, 4500, true]);
   assert.ok(r.alertas.some(a => /não recomenda/.test(a)));
   assert.equal(C2.propor(r, { hoje: '2026-10-28' }).situacao, 'vista');
+  // formato real das seções com restrição (28/10/2026): o total vem no topo e "ultimas_ocorrencias" traz só as 5 últimas
+  const cinco = (tipo, v) => ({ [tipo]: [1, 2, 3, 4, 5].map(i => ({ valor: v, data: '0' + i + '/07/2026' })) });
+  const real = Object.assign({}, pj, {
+    protestos: { valor: null, quantidade: null, valor_maior: '900.00', valor_primeiro: '120.00', valor_total: '15320.50', total_protestos: '37', ultimas_ocorrencias: cinco('protesto', '100.00') },
+    pendencias_restricoes: { valor: '2840.10', quantidade: null, valor_maior: '1500.00', total_credores: '3', total_pendencias: '9', ultimas_ocorrencias: cinco('pendencia_restricao', '50.00') },
+    acoes_civeis: { mensagem: null, total_acoes: '12', valor_maior: '7000.00', valor_total: '21000.00', ultimas_ocorrencias: cinco('acao_civel', '0.00') },
+    falencias_recuperacao_judicial: { valor: null, quantidade: null, quantidade_total: '2', ultimas_ocorrencias: { falencia_recuperacao_judicial: [{}, {}] } }
+  });
+  const q = C2.daRekta(real, '11222333000181', '2026-10-28');
+  assert.deepEqual([q.protestos_qtd, q.protestos_valor, q.pendencias_qtd, q.pendencias_valor, q.acoes_qtd, q.falencia], [37, 15320.5, 9, 2840.1, 12, true]);
+  const pouco = C2.daRekta(Object.assign({}, pj, { protestos: { valor: null, valor_maior: '300.00', valor_primeiro: '300.00', valor_total: '512.40', total_protestos: '2',
+    ultimas_ocorrencias: { protesto: [{ valor: '300.00' }, { valor: '212.40' }] } } }), '11222333000181', '2026-10-28');
+  assert.deepEqual([pouco.protestos_qtd, pouco.protestos_valor], [2, 512.4]);
+  // sem total no topo: conta os itens e soma só o valor de cada um
+  const semTotal = C2.daRekta(Object.assign({}, pj, { protestos: { valor_maior: '300.00', ultimas_ocorrencias: { protesto: [{ valor: '300.00' }, { valor: '212.40' }] } } }), '11222333000181');
+  assert.deepEqual([semTotal.protestos_qtd, semTotal.protestos_valor], [2, 512.4]);
 });

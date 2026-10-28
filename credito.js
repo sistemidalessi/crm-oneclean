@@ -118,26 +118,33 @@
   // (que só tem pessoa física): score.score_pj, identificacao_completo, protestos, pendencias_restricoes, "decisao:decisao",
   // "pgtpont:pagamento_pontual", pagamento_atrasado, limite_credito, faturamento_presumido, consultas. Seções sem nada vêm null.
   const chave = (o, re) => { if (!o || typeof o !== 'object') return undefined; const k = Object.keys(o).find(x => re.test(x)); return k == null ? undefined : o[k]; };
-  // quantas ocorrências e quanto somam, numa seção negativa (protestos, pendências, cheques, ações) de formato ainda não visto:
-  // null = nada; com conteúdo, conta os itens das listas (ou "quantidade"/"total") e soma os "valor". Seção com conteúdo que
-  // não deu para contar vale 1 (melhor parar para conferir do que liberar no escuro).
+  // quantas ocorrências e quanto somam, numa seção negativa (protestos, pendências, cheques, ações, falência). Formato real
+  // (28/10/2026, consultas com restrição): o TOTAL vem no topo ("total_protestos", "total_pendencias", "total_acoes",
+  // "quantidade_total") e o valor em "valor_total" (protestos, ações) ou "valor" (pendências); "ultimas_ocorrencias" traz só
+  // as 5 últimas. Por isso vale o total do topo; sem ele, conta os itens das listas e soma o "valor" de cada um (nunca
+  // valor_maior/valor_primeiro, que repetem um item). null = nada; com conteúdo que não deu para contar vale 1 (melhor parar
+  // para conferir do que liberar no escuro).
   function ocorrencias(v) {
     if (v == null || v === '' || (Array.isArray(v) && !v.length)) return { qtd: 0, valor: 0 };
     if (typeof v !== 'object') return /nada consta|n[aã]o consta|sem ocorr/i.test(String(v)) || String(v).trim() === '0' ? { qtd: 0, valor: 0 } : { qtd: 1, valor: 0 };
-    let qtd = 0, valor = 0, total = null, vazio = true;
-    const anda = (o, f) => {
+    const num = x => (x != null && x !== '' && typeof x !== 'object' && /\d/.test(String(x)) ? numBR(x) : null);
+    if (!Array.isArray(v)) {
+      const kt = Object.keys(v).find(k => /^(total_(?!credores)[a-z_]+|quantidade_total|quantidade|total|qtd)$/i.test(k) && /^\s*\d+\s*$/.test(String(v[k] == null ? '' : v[k])));
+      const vt = num(v.valor_total) != null ? num(v.valor_total) : num(v.valor);
+      if (kt) return { qtd: Number(v[kt]), valor: vt || 0 };
+    }
+    let qtd = 0, valor = 0, vazio = true;
+    const anda = (o, f, item) => {
       if (o == null || f > 6) return;
-      if (Array.isArray(o)) { o.forEach(x => { if (x && typeof x === 'object' && !Array.isArray(x)) { qtd++; vazio = false; } anda(x, f + 1); }); return; }
+      if (Array.isArray(o)) { o.forEach(x => { if (x && typeof x === 'object' && !Array.isArray(x)) { qtd++; vazio = false; anda(x, f + 1, true); } else anda(x, f + 1, false); }); return; }
       if (typeof o !== 'object') { if (o !== '' && o !== '-') vazio = false; return; }
       Object.keys(o).forEach(k => {
         const x = o[k];
-        if (/^(quantidade(_total)?|total|qtd)$/i.test(k) && /^\d+$/.test(String(x == null ? '' : x).trim())) total = Math.max(total || 0, Number(x));
-        else if (/valor/i.test(k) && x != null && typeof x !== 'object') valor += numBR(x);
-        anda(x, f + 1);
+        if (item && k === 'valor' && num(x) != null) valor += num(x);
+        if (x && typeof x === 'object') anda(x, f + 1, false); else if (x != null && x !== '' && x !== '-') vazio = false;
       });
     };
-    anda(v, 0);
-    if (total != null) return { qtd: total, valor };
+    anda(v, 0, false);
     return { qtd: qtd || (vazio ? 0 : 1), valor };
   }
   const meses12 = o => { const l = ((((o || {}).lista_indicador_comportamento) || {}).item_indicador); return Array.isArray(l) ? l.filter(x => !/pontua/i.test(x.mes_ano || '')) : []; };
@@ -419,6 +426,16 @@
       ],
       valores: v0, salvarTexto: 'Aprovar',
       extras: form => {
+        // o botão diz o que vai ser gravado (28/10/2026: "Aprovar" com a proposta "Só à vista" foi tomado por liberar)
+        const rotulo = () => {
+          const bt = form.querySelector('button[type=submit]');
+          if (!bt) return;
+          const sit = form.elements.situacao.value, lim = Number(String(form.elements.limite.value || '').replace(',', '.')) || 0;
+          bt.textContent = sit === 'prazo' ? 'Aprovar: a prazo' + (lim > 0 ? ', ' + R.moeda(lim) : '') : sit === 'vista' ? 'Aprovar: só à vista' : 'Aprovar: em análise';
+        };
+        form.elements.situacao.addEventListener('change', rotulo);
+        form.elements.limite.addEventListener('input', rotulo);
+        rotulo();
         const aplica = () => {
           if (!lida) return;
           const comp = Number(String(form.elements.compra.value || '').replace(',', '.')) || 0;
@@ -426,6 +443,7 @@
           form.querySelector('#credProposta').outerHTML = prop(p);
           form.elements.situacao.value = p.situacao; form.elements.limite.value = p.limite; form.elements.prazo_max.value = p.prazo_max == null ? '' : p.prazo_max;
           form.elements.revisar_em.value = p.revisar_em;
+          rotulo();
         };
         form.elements.compra.addEventListener('change', aplica);
         const arq = form.querySelector('#credArq'), st = form.querySelector('#credLendo');
@@ -557,6 +575,10 @@
         '<p><select name="sit">' + Object.keys(SITUACOES).map(k => '<option value="' + k + '"' + (k === p.situacao ? ' selected' : '') + '>' + esc(SITUACOES[k]) + '</option>').join('') + '</select> ' +
         '<label>limite <input name="lim" inputmode="decimal" size="7" value="' + (p.limite || '') + '"></label> <label>prazo <input name="prz" inputmode="numeric" size="3" value="' + (p.prazo_max || '') + '"> dias</label></p>';
       t.querySelector('.cl-acao').innerHTML = '<button type="button" class="btn" data-ok>OK</button>';
+      // o OK diz o que grava (a proposta "Só à vista" não libera nada)
+      const okRot = () => { const sit = t.querySelector('[name=sit]').value; t.querySelector('[data-ok]').textContent = sit === 'prazo' ? 'OK: a prazo' : sit === 'vista' ? 'OK: só à vista' : 'OK: em análise'; };
+      t.querySelector('[name=sit]').addEventListener('change', okRot);
+      okRot();
       t.dataset.pronta = '1';
       t.querySelector('[data-ok]').addEventListener('click', ev => { ev.target.disabled = true; aprovaLinha(t).catch(err => { ev.target.disabled = false; if (err.message !== 'limite vazio') CRM.falhou(err); }); });
     };
