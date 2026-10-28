@@ -175,9 +175,11 @@
   let painel = null, carregando = false, lidoEm = 0;
   const cacheVer = new Map();
   const cfg = () => (((CRM.estado && CRM.estado.cfg) || {}).credito) || {};
-  // com a API da Rekta ligada (crm_config.dados.credito.api = true, depois do teste), o "Analisar" não abre mais o site:
-  // abre a análise, que consulta pela API
-  const linkConsulta = () => (cfg().api === true ? '' : cfg().url || '');
+  // API da Rekta (28/10/2026, Anderson: "não é para a gente colocar, analisar… ele vai direto, pesquisa e traz a consulta já
+  // fazendo toda a análise"): com a consulta pela API no CRM, o "Analisar" não abre mais o site: abre a análise e já
+  // consulta a Rekta (depois de confirmar o preço). crm_config.dados.credito.api = false volta ao site + PDF.
+  const viaApi = () => !!(CRM.store() && CRM.store().creditoRekta) && cfg().api !== false;
+  const linkConsulta = () => (viaApi() ? '' : cfg().url || '');
   // preço da consulta RLT Avançado pela API (Rekta, 28/10/2026: R$ 12,80; extras que o CRM não pede: CNH e veículos R$ 4,50
   // cada, Judiciário R$ 5,12, Prospecção R$ 1,20). Muda em crm_config.dados.credito.preco_api.
   const precoApi = () => (Number(cfg().preco_api) > 0 ? Number(cfg().preco_api) : 12.8);
@@ -200,12 +202,14 @@
     const vencidas = fichas.filter(f => f.revisar_em && f.revisar_em < h);
     const perto = fichas.filter(f => f.situacao === 'prazo' && f.limite > 0 && f.usado >= f.limite * 0.8);
     return '<section class="cartao cred-topo"><h2>Crédito dos clientes</h2>' +
-      '<p>Cliente novo: <strong>1.</strong> "Analisar" abre o site de consulta com o CNPJ copiado (cole e consulte) · <strong>2.</strong> baixe o PDF e solte na janela que abriu no CRM · ' +
-      '<strong>3.</strong> confira a proposta (score, restrições, pontualidade) e aprove. A trava vale no pedido a prazo: SEM ANÁLISE, PRAZO e LIMITE, que só você libera.</p>' +
+      (viaApi() ? '<p>Cliente novo: <strong>1.</strong> "Analisar" consulta a Rekta direto (' + esc(R.moeda(precoApi())) + ' por consulta, o CRM pergunta antes) · ' +
+        '<strong>2.</strong> o CRM lê o score, os protestos, as pendências e a pontualidade e monta a proposta pela política · <strong>3.</strong> confira e aprove.'
+        : '<p>Cliente novo: <strong>1.</strong> "Analisar" abre o site de consulta com o CNPJ copiado (cole e consulte) · <strong>2.</strong> baixe o PDF e solte na janela que abriu no CRM · ' +
+      '<strong>3.</strong> confira a proposta (score, restrições, pontualidade) e aprove.') + ' A trava vale no pedido a prazo: SEM ANÁLISE, PRAZO e LIMITE, que só você libera.</p>' +
       '<p class="cred-liga">' + (lig ? CRM.selo('trava ligada', 'verde') + ' <button type="button" class="btn sec" data-acao="cred-ligar">Desligar a trava</button>'
         : CRM.selo('trava desligada', 'cinza') + ' <button type="button" class="btn" data-acao="cred-ligar">Ligar a trava nos pedidos</button>' +
           ' <small>antes, aplique as sugestões dos clientes que já compram (abaixo), senão todo pedido a prazo deles para em SEM ANÁLISE</small>') +
-      ' ' + linkConsultar('', 'Abrir o site de consulta', 'btn sec') + ' <button type="button" class="mini" data-acao="cred-endereco" title="trocar o endereço do site de consulta">✎ endereço</button>' +
+      (viaApi() ? ' ' + CRM.selo('consulta pela API da Rekta', 'verde') : ' ' + linkConsultar('', 'Abrir o site de consulta', 'btn sec') + ' <button type="button" class="mini" data-acao="cred-endereco" title="trocar o endereço do site de consulta">✎ endereço</button>') +
       ' <button type="button" class="btn sec" data-acao="cred-atualiza" title="atualizar">⟳</button></p>' +
       '<p><label class="cred-busca">Analisar um cliente: <input type="search" id="credBusca" list="credEmpresas" placeholder="nome ou CNPJ"></label>' +
         '<datalist id="credEmpresas">' + ((CRM.estado.D.empresas) || []).filter(e => e.cnpj).slice(0, 4000).map(e => '<option value="' + esc(e.nome + ' · ' + e.cnpj) + '">').join('') + '</datalist>' +
@@ -286,7 +290,7 @@
   // CNPJ copiado e a janela da análise no CRM, onde se solta o PDF.
   function linkConsultar(id, rotulo, cls, acao) {
     const u = linkConsulta();
-    if (!u) return '<button type="button" class="' + cls + '" data-acao="' + (acao ? 'cred-analisar' : 'cred-endereco') + '"' + (id ? ' data-id="' + esc(id) + '"' : '') + '>' + esc(rotulo) + '</button>';
+    if (!u) return '<button type="button" class="' + cls + '" data-acao="' + (acao ? (viaApi() ? 'cred-analisar-api' : 'cred-analisar') : 'cred-endereco') + '"' + (id ? ' data-id="' + esc(id) + '"' : '') + '>' + esc(rotulo) + '</button>';
     return '<a class="' + cls + '" href="' + esc(u) + '" target="_blank" rel="noopener noreferrer" data-acao="' + (acao || 'cred-consultar') + '"' + (id ? ' data-id="' + esc(id) + '"' : '') + '>' + esc(rotulo) + '</a>';
   }
   function consultar(id) {
@@ -296,7 +300,7 @@
   }
 
   // Formulário da análise: consulta (PDF lido pela IA) → proposta pela política → aprovar.
-  async function analisar(id, siteAberto) {
+  async function analisar(id, siteAberto, consultaJa) {
     const e = CRM.empresa(id);
     if (!e) { CRM.toast('Cliente não encontrado (fora da sua lista?).', true); return; }
     let atual = null;
@@ -315,8 +319,8 @@
       htmlAntes: '<div class="cred-form"><p>' + esc(e.cnpj || 'sem CNPJ') + (ficha ? ' · ficha de ' + esc(R.dataBR(ficha.analisado_em)) + ' · usado hoje ' + esc(R.moeda(ficha.usado || 0)) : s ? ' · em aberto ' + esc(R.moeda(s.aberto)) : '') + '</p>' +
         (siteAberto ? '<p class="dica"><strong>O site da consulta abriu numa aba nova, com o CNPJ copiado:</strong> cole no Documento (Ctrl+V), clique em Consulta, baixe o PDF e solte aqui.</p>' : '') +
         '<div class="cred-passos">' + (CRM.store().creditoRekta ? '<button type="button" class="btn" id="credApi" title="A Rekta responde direto ao CRM (cada consulta é cobrada pela Rekta: ' + R.moeda(precoApi()) + ')">Consultar na Rekta pela API (' + R.moeda(precoApi()) + ')</button>' : '') +
-        (cfg().api === true ? '' : linkConsultar(id, siteAberto ? 'Abrir o site de novo' : 'Ou: abrir o site (copia o CNPJ)', 'btn sec')) +
-        '<label class="btn sec arquivo">' + (cfg().api === true ? 'Ou: soltar um PDF da consulta' : 'e soltar o PDF da consulta') + '<input type="file" id="credArq" accept="application/pdf,image/png,image/jpeg,image/webp"></label>' +
+        (viaApi() ? '' : linkConsultar(id, siteAberto ? 'Abrir o site de novo' : 'Ou: abrir o site (copia o CNPJ)', 'btn sec')) +
+        '<label class="btn sec arquivo">' + (viaApi() ? 'Ou: soltar um PDF da consulta' : 'e soltar o PDF da consulta') + '<input type="file" id="credArq" accept="application/pdf,image/png,image/jpeg,image/webp"></label>' +
         '<span id="credLendo"></span></div>' + fatos() + prop(lida ? propor(lida, ctx) : null) + '</div>',
       campos: [
         { nome: 'compra', rotulo: 'Compra prevista por mês (R$)', tipo: 'numero', terco: true, ajuda: 'o que o cliente deve comprar por mês; sem isso, vale o histórico ou R$ 1.500' },
@@ -370,6 +374,8 @@
           } catch (err) { st.textContent = ''; CRM.falhou(err); }
           api.disabled = false;
         });
+        // "Analisar" de cliente sem ficha: a consulta começa sozinha (o confirm do preço continua)
+        if (api && consultaJa) setTimeout(() => api.click(), 0);
         const zona = form.querySelector('.cred-passos');
         zona.addEventListener('dragover', ev => { if (ev.dataTransfer && [].slice.call(ev.dataTransfer.types || []).indexOf('Files') !== -1) { ev.preventDefault(); zona.classList.add('cx-solta'); } });
         zona.addEventListener('dragleave', () => zona.classList.remove('cx-solta'));
@@ -420,6 +426,7 @@
     'cred-consultar': id => consultar(id),
     'cred-analisar': id => { analisar(id).catch(CRM.falhou); },
     'cred-analisar-site': id => { consultar(id); analisar(id, true).catch(CRM.falhou); },
+    'cred-analisar-api': id => { analisar(id, false, true).catch(CRM.falhou); },
     'cred-buscar': () => {
       const t = String((document.querySelector('#credBusca') || {}).value || '').trim();
       if (!t) return;
@@ -429,7 +436,7 @@
       // cliente sem ficha: abre o site junto (ainda dentro do clique, senão o navegador bloqueia a aba)
       const semFicha = !((painel && painel.fichas) || []).some(f => f.empresa_id === l[0].id);
       if (semFicha && linkConsulta()) { raiz.open(linkConsulta(), '_blank', 'noopener'); consultar(l[0].id); }
-      analisar(l[0].id, semFicha && !!linkConsulta()).catch(CRM.falhou);
+      analisar(l[0].id, semFicha && !!linkConsulta(), semFicha && viaApi()).catch(CRM.falhou);
     },
     'cred-pdf': async id => {
       const f = ((painel && painel.fichas) || []).find(x => x.empresa_id === id);
