@@ -24,7 +24,7 @@
 
   // ------------------------------------------------------------ leitura (a MESMA da Agilité)
   // Cópia de src/caixa/interpretar.js do agilite-sistema-gestao (commit b837d37, 06/10/2026 — conferido
-  // linha a linha; depois trazidos 1eea200 e b266421 e levado o f876978 = b1919ca de lá): a mesma frase dá o mesmo resultado nos dois caixas. Regra combinada: mudou lá, copiar
+  // linha a linha; depois trazidos 1eea200 e b266421 e levado o f876978 = b1919ca de lá; 28/10/2026, feito aqui e a levar: bloco de parcelas e número da nota): a mesma frase dá o mesmo resultado nos dois caixas. Regra combinada: mudou lá, copiar
   // para cá; mudou aqui, avisar a Agilité para levar (e rodar os testes dos dois lados).
   const MESES = { jan: 1, fev: 2, mar: 3, abr: 4, mai: 5, jun: 6, jul: 7, ago: 8, set: 9, out: 10, nov: 11, dez: 12 };
   const ENTRADA = /\b(entrada|entradas|entrou|entraram|entra|entrar|recebi|recebemos|recebido|recebida|receber|caiu|cairam|cai|credito|creditado|deposito|depositado|depositaram)\b/;
@@ -90,6 +90,9 @@
     // outro numero na frase (regra criada no CRM-OneClean em 06/10/2026, trazida pra ca' igual)
     const semQtd = t.replace(QUANTIDADE, ' ');
     if (semQtd !== t && /\d/.test(semQtd)) t = semQtd;
+    // "NF 8.429 … 382,67": o numero da nota nao e' valor quando sobra outro numero (28/10/2026)
+    const semNota = t.replace(NOTA_NUMERO, ' ');
+    if (semNota !== t && /\d/.test(semNota)) t = semNota;
     // "100,000,00" e "100,000" (virgula como milhar, 06/10/2026) vem antes de "100,00"
     const re = /(?:r\$\s*)?(\d{1,3}(?:,\d{3})+(?:[.,]\d{2})?(?!\d)|\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d+(?:,\d{1,2})?|\d+\.\d{1,2})(\s*(?:mil|k)\b)?/g;
     let m;
@@ -107,6 +110,7 @@
     return { valor: null, trecho: null };
   }
 
+  const NOTA_NUMERO = /\b(?:nf-?e?|nota\s+fiscal|n[º°])\s*[:#.]?\s*(?:n[º°.o]\s*)?\d[\d.\-\/]*/g;
   const QUANTIDADE = /\b\d{1,3}\s+(?:diarias?|fts?|folguistas?|horas?|plantoes?|pessoas?|funcionari[oa]s?|unidades?|un|caixas?|cx|fardos?|pacotes?|galoes?|litros?|kits?|pecas?|rolos?)\b/g;
   // (quantidade - "8 diárias" - tambem nao e' valor pra partir a frase no " e ")
   const temValor = (txt) => extrairValor(baixo(txt).replace(QUANTIDADE, ' ').replace(/\b\d{1,2}\/\d{1,2}(\/\d{2,4})?\b/g, ' ').replace(/\bdia\s+\d{1,2}\b/gi, ' ')).valor != null;
@@ -157,12 +161,89 @@
       .replace(/empréstimo/gi, 'emprestimo').replace(/devolução/gi, 'devolucao').replace(/será/gi, 'sera').replace(/serão/gi, 'serao').replace(/lanç/gi, 'lanc');
   }
 
+  // Bloco de parcelas (28/10/2026, Anderson): o nome numa linha, a nota e "dividido em 3 parcelas" noutra e
+  // uma linha por parcela, so' "valor - data" ("382,67 - 26/11/26", "1/3 - 382,67 - 26/11", "26/11/26 382,67",
+  // "1a parcela 382,67 venc 26/11"):
+  //     Manutenção Caminhão
+  //     NF: 8.429 - dividido em 3 parcelas
+  //     382,67 - 26/11/26
+  //     382,67 - 26/12/26
+  //     382,66 - 25/01/27
+  // vira 3 contas "Manutenção Caminhão · NF 8429 · parcela 1/3", cada uma no seu vencimento. Antes o 8.429 e o
+  // 3 viravam valores e as parcelas ficavam sem nome. As linhas sem valor logo acima (ate' 3) dao o nome.
+  const NOTA_CABECALHO = /\b(?:nf-?e?|nota(?:\s+fiscal)?|n[º°]|numero|pedido|doc(?:umento)?|boleto|fatura)\s*[:#.]?\s*(?:n[º°.o]\s*)?(\d[\d.\-\/]*)/;
+  const DIVIDIDO = /(?:\b(?:dividid[oa]s?|parcelad[oa]s?)\s+)?(?:\bem\s+)?\b(\d{1,2})\s*(?:x\b|vezes\b|parcelas?\b)(?!\s*(?:de\s*)?(?:r\$\s*)?\d)/;
+  const SOBRA_PARCELA = /\b(?:\d{1,2}\s*[ªaº°]|parcelas?|parc|prestac\w*|venc\w*|vence|em|dia|de|r\$|valor|no|para)(?![\p{L}\d])/giu;
+  function linhaDeParcela(linha) {
+    const b = baixo(linha);
+    const datas = [...b.matchAll(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2}|\d{4}))?\b/g)];
+    if (!datas.length) return null;
+    // "1/3 - 382,67 - 26/11": o vencimento e' a data com ano (ou a ultima); as outras sao "parcela k/N"
+    const venc = datas.filter(m => m[3]).pop() || datas[datas.length - 1];
+    let resto = b.slice(0, venc.index) + ' ' + b.slice(venc.index + venc[0].length);
+    let ordem = null;
+    resto = resto.replace(/\b(\d{1,2})\/(\d{1,2})\b/g, (x, k, n) => { if (+k >= 1 && +k <= +n) { ordem = { k: +k, n: +n }; return ' '; } return x; });
+    const tentar = r => { const v = extrairValor(r); if (v.valor == null) return null;
+      const sobra = (' ' + r + ' ').replace(v.trecho, ' ').replace(SOBRA_PARCELA, ' ').replace(/[\s\-–—:;,.()\[\]|]+/g, '');
+      return sobra ? null : v.valor; };
+    // "1 - 382,67 - 26/11": o 1 da frente e' a ordem da parcela
+    const m1 = resto.match(/^\s*(\d{1,2})\s*(?:[ªaº°)]|\.|-|–)\s*(?=\S)/);
+    let valor = m1 ? tentar(resto.slice(m1[0].length)) : null;
+    if (valor != null) ordem = ordem || { k: +m1[1], n: null };
+    else valor = tentar(resto);
+    if (valor == null) return null;
+    let a = venc[3] ? +venc[3] : null; if (a != null && a < 100) a += 2000;
+    return { valor, d: +venc[1], m: +venc[2], a, ordem };
+  }
+  function blocosDeParcelas(linhas, hoje, opts) {
+    const par = linhas.map(linhaDeParcela), usadas = new Map(), avisos = [];
+    const semValorNoCabecalho = l => !temValor(baixo(l).replace(NOTA_CABECALHO, ' ').replace(DIVIDIDO, ' '));
+    for (let i = 0; i < linhas.length; i++) {
+      if (!par[i] || usadas.has(i)) continue;
+      let f = i; while (f + 1 < linhas.length && par[f + 1]) f++;
+      let c = i; while (c > 0 && i - c < 3 && !par[c - 1] && !usadas.has(c - 1) && semValorNoCabecalho(linhas[c - 1])) c--;
+      if (c === i && f === i) continue;   // uma linha "valor - data" sozinha segue o caminho de sempre
+      const cab = linhas.slice(c, i).join(' ');
+      const bc = baixo(cab);
+      const mn = bc.match(NOTA_CABECALHO), md = bc.match(DIVIDIDO);
+      let nome = ' ' + cab + ' ';
+      for (const m of [mn, md].filter(Boolean)) { const k = baixo(nome).indexOf(m[0]); if (k >= 0) nome = nome.slice(0, k) + ' ' + nome.slice(k + m[0].length); }
+      nome = rotuloDe(nome.replace(/\s[-–—|:]\s/g, ' '), []);
+      const nota = mn ? mn[1].replace(/\./g, '').replace(/[-\/]+$/, '') : '';
+      const total = f - i + 1, n = md ? +md[1] : total;
+      if (md && n !== total) avisos.push(`Linha ${c + 1}: diz ${n} parcelas e achei ${total}; confira.`);
+      const tipo = ENTRADA.test(bc) ? 'entrada' : SAIDA.test(bc) ? 'saida' : opts.tipoPadrao || 'saida';
+      const sitCab = REALIZADO.test(bc) && !PREVISTO.test(bc) ? 'realizado' : PREVISTO.test(bc) ? 'previsto' : null;
+      const itens = [];
+      let anoAnt = +hoje.slice(0, 4), mesAnt = 0;
+      for (let k = i; k <= f; k++) {
+        const pc = par[k];
+        // sem ano: o do vencimento anterior (dezembro → janeiro vira o ano seguinte)
+        let a = pc.a; if (a == null) { a = pc.m < mesAnt ? anoAnt + 1 : anoAnt; }
+        anoAnt = a; mesAnt = pc.m;
+        if (pc.m < 1 || pc.m > 12 || pc.d < 1 || pc.d > diasNoMes(a, pc.m)) { avisos.push(`Linha ${k + 1}: data inválida em "${linhas[k]}".`); continue; }
+        const data = `${a}-${String(pc.m).padStart(2, '0')}-${String(pc.d).padStart(2, '0')}`;
+        const ord = (pc.ordem && pc.ordem.k) || (k - i + 1), de = (pc.ordem && pc.ordem.n) || Math.max(n, total);
+        const rotulo = [nome, nota ? 'NF ' + nota : '', 'parcela ' + ord + '/' + de].filter(Boolean).join(' · ');
+        itens.push({ linha: k + 1, frase: (cab ? cab + ' | ' : '') + linhas[k], trecho: linhas[k], valor: pc.valor, data, tipo,
+          situacao: data > hoje ? 'previsto' : sitCab || 'realizado', rotulo, contexto: '', dataPropria: true, sitPropria: true, bloco: { parcela: ord, de, nota } });
+      }
+      for (let k = c; k <= f; k++) usadas.set(k, k === c ? itens : null);
+      i = f;
+    }
+    return { usadas, avisos };
+  }
+
   // texto -> [{ linha, tipo, valor, data, situacao, rotulo, devolucaoPrevista }] + avisos
   // opts.dataPadrao / opts.tipoPadrao: digitado numa celula da grade (o dia e a
   // secao - entradas/saidas - valem quando a frase nao diz)
   function interpretar(texto, hoje, opts = {}) {
     const itens = [], avisos = [];
-    String(texto || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean).forEach((linha, nLinha) => {
+    const linhas = String(texto || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    const blocos = blocosDeParcelas(linhas, hoje, opts);
+    avisos.push(...blocos.avisos);
+    linhas.forEach((linha, nLinha) => {
+      if (blocos.usadas.has(nLinha)) { itens.push(...(blocos.usadas.get(nLinha) || [])); return; }
       const ps = pedacos(linha);
       const doLinha = [];
       const contextos = [];

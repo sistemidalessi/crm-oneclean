@@ -324,3 +324,28 @@ test('dia da semana: passado = o último, futuro = o próximo; "segunda via" nã
   assert.deepEqual([sv.data, sv.descricao], [H, 'Segunda via boleto']);
   assert.equal(um1('lancei 80 almoço segunda').descricao, 'Almoço');
 });
+
+// 28/10/2026 (Anderson): conta dividida em parcelas escrita em bloco — o nome numa linha, a nota e o
+// "dividido em N parcelas" noutra, uma linha "valor - data" por parcela. O número da nota não é valor.
+test('bloco de parcelas: nome, nota e uma linha por parcela', () => {
+  const H = '2026-10-28';
+  const v = Object.assign({}, vazio, { hoje: H });
+  const ler = t => F.classificar(F.interpretar(t, H).itens, v);
+  const l = ler('Manutenção Caminhão\nNF: 8.429 - dividido em 3 parcelas\n382,67 - 26/11/26\n382,67 - 26/12/26\n382,66 - 25/01/27');
+  assert.deepEqual(l.map(p => [p.tipo, p.valor, p.data, p.situacao, p.descricao, p.categoria, p.acao]), [
+    ['saida', 382.67, '2026-11-26', 'previsto', 'Manutenção Caminhão · NF 8429 · parcela 1/3', 'Frete e combustível', 'novo'],
+    ['saida', 382.67, '2026-12-26', 'previsto', 'Manutenção Caminhão · NF 8429 · parcela 2/3', 'Frete e combustível', 'novo'],
+    ['saida', 382.66, '2027-01-25', 'previsto', 'Manutenção Caminhão · NF 8429 · parcela 3/3', 'Frete e combustível', 'novo']]);
+  assert.deepEqual(F.interpretar('Manutenção Caminhão\nNF: 8.429 - dividido em 3 parcelas\n382,67 - 26/11/26', H).avisos, ['Linha 1: diz 3 parcelas e achei 1; confira.']);
+  // ordem escrita, sem ano (dezembro → janeiro vira o ano seguinte) e "1ª parcela … venc"
+  assert.deepEqual(ler('Pneus nota 552 em 2x\n1/2 - 900,00 - 10/12\n2/2 - 900,00 - 10/01').map(p => [p.data, p.descricao]),
+    [['2026-12-10', 'Pneus · NF 552 · parcela 1/2'], ['2027-01-10', 'Pneus · NF 552 · parcela 2/2']]);
+  assert.deepEqual(ler('pedágio 350 pago hoje\nConserto NF 123\n1ª parcela 200 venc 10/12\n2ª parcela 200 venc 10/01').map(p => [p.valor, p.data, p.descricao]),
+    [[350, H, 'Pedágio'], [200, '2026-12-10', 'Conserto · NF 123 · parcela 1/2'], [200, '2027-01-10', 'Conserto · NF 123 · parcela 2/2']]);
+  // entrada em parcelas; data antes do valor
+  assert.deepEqual(ler('Recebi da Cliente Fictícia em 2 parcelas\n05/11 1500\n05/12 1500').map(p => [p.tipo, p.situacao, p.data]),
+    [['entrada', 'previsto', '2026-11-05'], ['entrada', 'previsto', '2026-12-05']]);
+  // uma linha "valor - data" sozinha continua como sempre; a nota numa linha só não vira valor
+  assert.deepEqual(ler('382,67 - 26/11/26').map(p => [p.valor, p.data]), [[382.67, '2026-11-26']]);
+  assert.deepEqual(ler('manutenção caminhão NF 8429 382,67 dia 26/11').map(p => [p.valor, p.data]), [[382.67, '2026-11-26']]);
+});
