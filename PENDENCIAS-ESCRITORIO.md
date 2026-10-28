@@ -71,4 +71,3 @@ A mesma lista resumida está no `PENDENCIAS-ESCRITORIO.md` do `agilite-sistema-g
 - [ ] **Primeira pergunta real à IA** (clicar no Clean e perguntar): conferir se responde certo.
 - [ ] **Certificado A1 novo (válido até 28/10/2027):** instalado na VPS e no FKN/UniNFe em 28/10 e conferido. Falta só apagar o
       antigo da VPS **em 05/11** (o Claude avisa): `rm /etc/oneclean-fiscal/oneclean-ate-2026-12-23.pfx /etc/oneclean-fiscal/senha-ate-2026-12-23.txt`.
-      Se der, restringir a pasta `\\servidor\Financeiro\00 - ONECLEAN\17 - Certificado Digital` a quem precisa.
