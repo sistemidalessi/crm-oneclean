@@ -309,7 +309,7 @@
           '<td class="acoes-linha"><button type="button" class="mini" data-acao="cred-analisar" data-id="' + esc(s.empresa_id) + '">Ajustar</button></td></tr>').join('') +
         '</tbody></table></div>' + (sug.length > 60 ? '<p class="mais">mostrando os 60 que mais compram</p>' : '') + '</section>' : '') +
       '<section class="cartao"><h2>Fichas de crédito <small>' + fichas.length + (vencidas.length ? ' · ' + vencidas.length + ' com revisão vencida' : '') + (perto.length ? ' · ' + perto.length + ' perto do limite' : '') + '</small></h2>' +
-      (fichas.length ? filtrosFichas(fichas) + '<div id="credFichas">' + tabelaFichas(fichas) + '</div>' : '<p class="vazio">Nenhuma ficha ainda.</p>') + '</section>';
+      (fichas.length ? filtrosFichas(fichas) + '<p class="acoes"><button type="button" class="btn sec" data-acao="ls-csv" data-id="cred-fichas">Baixar planilha</button></p>' + '<div id="credFichas">' + tabelaFichas(fichas) + '</div>' : '<p class="vazio">Nenhuma ficha ainda.</p>') + '</section>';
   }
 
   // Fichas: busca por nome/CNPJ, filtro por situação e ordenação pela coluna (27/10/2026, pedido do Anderson:
@@ -340,6 +340,10 @@
     const chave = { nome: f => R.normaliza(String(f.nome || '')), situacao: f => ({ analise: 0, vista: 1, prazo: 2 }[f.situacao]) + R.normaliza(String(f.nome || '')),
       limite: f => Number(f.limite), usado: f => Number(f.usado), disp: f => (f.situacao === 'prazo' ? dispDe(f) : -1), prazo: f => Number(f.prazo_max || 0), revisar: f => f.revisar_em || '' }[vf.ordem];
     const l = fichas.filter(f => passa(f, h)).sort((a, b) => { const x = chave(a), y = chave(b); return (x < y ? -1 : x > y ? 1 : 0) * (vf.desc ? -1 : 1); });
+    // planilha das fichas (28/10/2026): o que o filtro mostra, todas as linhas
+    CRM.Lista.planilha('cred-fichas', 'fichas-de-credito', ['Cliente', 'CNPJ', 'Situação', 'Limite', 'Usado', 'Disponível', 'Prazo (dias)', 'Score', 'Analisado em', 'Revisar em', 'Vencido'],
+      () => l.map(f => [f.nome, f.cnpj || '', SITUACOES[f.situacao] || f.situacao, f.situacao === 'prazo' ? Number(f.limite) : '', Number(f.usado || 0), f.situacao === 'prazo' ? dispDe(f) : '', f.prazo_max || '', f.score || '',
+        f.analisado_em ? R.dataBR(f.analisado_em) : '', f.revisar_em ? R.dataBR(f.revisar_em) : '', Number(f.vencido || 0)]));
     const th = (k, rot, cls) => '<th' + (cls ? ' class="' + cls + '"' : '') + '><button type="button" class="ordena' + (vf.ordem === k ? ' ativo' : '') + '" data-acao="cred-ordem" data-id="' + k + '">' + esc(rot) + (vf.ordem === k ? (vf.desc ? ' ▼' : ' ▲') : '') + '</button></th>';
     if (!l.length) return '<p class="vazio">Nenhuma ficha com esse filtro.</p>';
     return '<div class="tabela-rolagem"><table class="tabela"><thead><tr>' + th('nome', 'Cliente') + th('situacao', 'Situação') + th('limite', 'Limite', 'num') + th('usado', 'Usado', 'num') +

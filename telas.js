@@ -590,7 +590,7 @@
         '<label class="check"><input type="checkbox" id="fFeitas"' + (f.feitas ? ' checked' : '') + '> mostrar feitas</label>' +
         '<button type="button" class="btn ouro" data-acao="nova-tarefa">+ Tarefa</button></div>' +
         (atrasadas.length ? '<section class="cartao alerta-atraso"><h2>Atrasadas de antes <small>' + atrasadas.length + '</small></h2><ul class="lista tarefas">' +
-          atrasadas.sort((a, b) => (a.data_hora < b.data_hora ? -1 : 1)).slice(0, 20).map(a => itemTarefa(a)).join('') + '</ul></section>' : '') +
+          CRM.Lista.corta('ag-atrasadas', atrasadas.sort((a, b) => (a.data_hora < b.data_hora ? -1 : 1)), 20).map(a => itemTarefa(a)).join('') + '</ul>' + CRM.Lista.mais('ag-atrasadas', atrasadas, 20) + '</section>' : '') +
         '<div class="semana">' + dias.map(d => {
           const l = daSemana.filter(a => R.diaLocal(a.data_hora) === d).sort((a, b) => (a.data_hora < b.data_hora ? -1 : 1));
           return '<section class="dia' + (d === hoje ? ' hoje' : '') + (d < hoje ? ' passado' : '') + '"><header>' + esc(nomeDia(d)) + '<button type="button" class="mini" data-acao="tarefa-no-dia" data-id="' + d + '" title="Nova tarefa neste dia">+</button></header>' +

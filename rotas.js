@@ -100,7 +100,37 @@
       (mots.length ? '' : '<p class="aviso-notas">Ainda não há nenhum usuário com o papel <strong>Motorista</strong>. O administrador cria em Configurações → Equipe (um login para cada motorista).</p>') +
       chaves.map(k => blocoMotorista(k, grupos.get(k), opMot)).join('') +
       (r.naoMandadas ? '<p class="acoes"><button type="button" class="btn" data-acao="rt-liberar">Mandar a rota aos motoristas (' + r.naoMandadas + ' parada(s) ainda não foram)</button></p>' : '') +
-      blocoCandidatas(opMot);
+      blocoCandidatas(opMot) + blocoRelatorio();
+  }
+  // Relatório de entregas (28/10/2026, pesquisa em todas as telas): as entregas de um período (até 62 dias, um dia por vez no
+  // banco), com pesquisa por cliente, nota, bairro, motorista ou observação, situação e planilha.
+  const rel = { chave: '', l: null, lendo: false };
+  function blocoRelatorio() {
+    const st = CRM.Lista.estado('rt-rel', { de: R.somaDias(hojeSP(), -7), ate: hojeSP() }), de = st.de || R.somaDias(hojeSP(), -7), ate = st.ate || hojeSP(), k = de + '|' + ate;
+    if (rel.chave !== k && !rel.lendo) {
+      rel.lendo = true;
+      const dias = []; for (let d = de; d <= ate && dias.length < 62; d = R.somaDias(d, 1)) dias.push(d);
+      (async () => {
+        const out = [];
+        for (let i = 0; i < dias.length; i += 6) out.push(...[].concat(...await Promise.all(dias.slice(i, i + 6).map(d => CRM.store().rotaDia(d).catch(() => [])))));
+        rel.l = out; rel.chave = k;
+      })().catch(e => { CRM.falhou(e); rel.l = []; rel.chave = k; }).then(() => { rel.lendo = false; CRM.render(); });
+    }
+    const base = rel.chave === k ? rel.l || [] : null;
+    const l = base ? CRM.Lista.filtra('rt-rel', base, { texto: x => [x.cliente, x.numero, x.bairro, x.cidade, x.endereco, nomeMot(x.motorista_id), x.obs, x.vendedor], sel: (x, v) => x.situacao === v })
+      .sort((a, b) => String(b.dia).localeCompare(String(a.dia)) || (a.ordem || 0) - (b.ordem || 0)) : [];
+    CRM.Lista.planilha('rt-rel', 'entregas', ['Dia', 'NF', 'Cliente', 'Bairro', 'Cidade', 'Motorista', 'Situação', 'Entregue em', 'Observação'],
+      () => l.map(x => [R.dataBR(x.dia), x.numero || '', x.cliente || '', x.bairro || '', x.cidade || '', nomeMot(x.motorista_id) || '', (SIT[x.situacao] || [x.situacao])[0], x.entregue_em ? hora(x.entregue_em) : '', x.obs || '']));
+    const conta = s2 => l.filter(x => x.situacao === s2).length;
+    return '<section class="cartao"><h2>Relatório de entregas <small>' + (base ? base.length + ' entrega(s) no período' : 'carregando…') + '</small></h2>' +
+      CRM.Lista.barra('rt-rel', { periodo: true, rotuloPeriodo: 'Dia de', placeholder: 'Cliente, NF, bairro, motorista ou observação', total: base ? base.length : null, achados: l.length,
+        sel: [['', 'Todas'], ['entregue', 'Entregues'], ['problema', 'Com problema'], ['pendente', 'Pendentes']] }) +
+      (!base ? '<p class="vazio">Carregando…</p>' : !l.length ? '<p class="vazio">Nenhuma entrega nesse período.</p>' :
+        '<p class="dica">' + conta('entregue') + ' entregue(s) · ' + conta('problema') + ' com problema · ' + conta('pendente') + ' pendente(s)' + (base.length && (R.somaDias(de, 61) < ate) ? ' · o período vai até 62 dias' : '') + '</p>' +
+        '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Dia</th><th>Cliente</th><th>NF</th><th>Motorista</th><th>Situação</th></tr></thead><tbody>' +
+        CRM.Lista.corta('rt-rel', l, 50).map(x => { const s2 = SIT[x.situacao] || [x.situacao, '']; return '<tr><td>' + esc(R.dataBR(x.dia)) + '</td><td><strong>' + esc(x.cliente || '—') + '</strong><small>' + esc([x.bairro, x.cidade].filter(Boolean).join(' · ')) + '</small></td>' +
+          '<td>' + esc(x.numero || '') + '</td><td>' + esc(nomeMot(x.motorista_id) || '—') + '</td><td>' + CRM.selo(s2[0] + (x.entregue_em ? ' ' + hora(x.entregue_em) : ''), s2[1]) + (x.obs ? '<small class="rt-obs">' + esc(x.obs) + '</small>' : '') + '</td></tr>'; }).join('') +
+        '</tbody></table></div>' + CRM.Lista.mais('rt-rel', l, 50)) + '</section>';
   }
   function cabRotas() {
     return '<div class="cabecalho"><div><h1>Rotas</h1><p class="sub">as notas emitidas entram aqui; escolha o motorista e a ordem e mande a rota: cada motorista vê as paradas dele no celular</p></div>' +

@@ -813,7 +813,8 @@
       '<label class="campo"><span>Ordem</span><select data-pc-ordem>' + CRM.opcoesHTML(ordens, pc.ordem) + '</select></label></div>' +
       '<div class="pc-barra2"><div class="chips" data-pc-atalhos>' + atalhosHTML() + '</div><span class="flex"></span><span class="dica" data-pc-conta></span>' +
       '<div class="pc-modo" role="group" aria-label="Como mostrar"><button type="button" class="mini' + (m === 'lista' ? ' ativo' : '') + '" data-acao="pc-modo" data-id="lista" aria-pressed="' + (m === 'lista') + '">☰ Lista</button>' +
-        '<button type="button" class="mini' + (m === 'grade' ? ' ativo' : '') + '" data-acao="pc-modo" data-id="grade" aria-pressed="' + (m === 'grade') + '">▦ Grade</button></div></div>';
+        '<button type="button" class="mini' + (m === 'grade' ? ' ativo' : '') + '" data-acao="pc-modo" data-id="grade" aria-pressed="' + (m === 'grade') + '">▦ Grade</button></div>' +
+        ' <button type="button" class="mini" data-acao="pc-csv" title="Planilha com todos os produtos desta pesquisa">Baixar planilha</button></div>';
   }
   function tabelaLista(l) {
     const cuida = podeFotos(), vc = veCusto();
@@ -1102,6 +1103,14 @@
     'pc-modo': id => { try { raiz.localStorage.setItem(chaveModo(), id); } catch (e) { /* fica só nesta sessão */ } pc.limite = 100; CRM.render(); },
     'pc-atalho': id => { pc.atalho = id; pc.limite = 100; CRM.render(); },
     'pc-mais': () => { pc.limite += 100; CRM.render(); },
+    // planilha da pesquisa (28/10/2026): todos os que o filtro acha; custo e margem só para quem vê custo
+    'pc-csv': () => {
+      const l = visiveis(), vc = veCusto(), cuida = podeFotos();
+      if (!l.length) { CRM.toast('A pesquisa não achou nenhum produto.', true); return; }
+      CRM.baixarCSV('produtos', ['Código', 'Descrição', 'Linha'].concat(cuida ? ['Fornecedor'] : []).concat(['Unidade', 'Disponível', 'Preço A']).concat(vc ? ['Custo', 'Margem %'] : []).concat(['Situação']),
+        l.map(x => [x.codigo, x.descricao || '', x.linha || ''].concat(cuida ? [x.forn ? x.forn.nome : ''] : []).concat([x.unidade || '', x.disponivel, x.preco || ''])
+          .concat(vc ? [x.custo || '', X.margemDe(x.preco, x.custo) == null ? '' : Math.round(X.margemDe(x.preco, x.custo) * 100) / 100] : []).concat([x.situacao || ''])));
+    },
     'pc-forn': id => formForn(id),
     'pc-emb': id => formEmb(id),
     'pc-ir-fiscal': () => { CRM.estado.aba = 'fiscal'; CRM.render(); }
