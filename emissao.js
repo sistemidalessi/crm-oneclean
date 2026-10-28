@@ -420,11 +420,16 @@
     CRM.render();
   }
   const diaHora = v => (v ? new Date(v).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '');
+  // Marcar várias notas (28/10/2026, Anderson: "às vezes é mais de uma nota para o mesmo cliente… selecionar as notas e
+  // emitir a DANFE de todas ou pegar o XML de todas"): a marca fica pela chave, mesmo trocando a pesquisa.
+  const marcadasNf = new Map();
   function linhaConsulta(n) {
     const b = n.nfe_id ? ['<button type="button" class="mini" data-acao="nf-danfe" data-id="' + esc(n.nfe_id) + '">DANFE</button>', '<button type="button" class="mini" data-acao="nf-xml" data-id="' + esc(n.nfe_id) + '">XML</button>']
       : ['<button type="button" class="mini" data-acao="nf-danfe-chave" data-id="' + esc(n.chave) + '">DANFE</button>', '<button type="button" class="mini" data-acao="nf-xml-chave" data-id="' + esc(n.chave) + '">XML</button>'];
     const cli = n.empresa_id ? '<button type="button" class="link" data-acao="abrir-empresa" data-id="' + esc(n.empresa_id) + '">' + esc(n.empresa_nome || n.cliente_nome || '') + '</button>' : esc(n.cliente_nome || '');
-    return '<tr><td><strong>' + esc((n.serie || '') + '-' + n.numero) + '</strong><small>' + (n.nfe_id ? 'CRM' : 'FKN') + '</small></td>' +
+    const m = marcadasNf.has(n.chave);
+    return '<tr' + (m ? ' class="cx-marcada"' : '') + '><td class="cx-marca"><input type="checkbox" data-acao="nf-marca" data-id="' + esc(n.chave) + '"' + (m ? ' checked' : '') + ' aria-label="marcar a NF ' + esc(n.numero) + '"></td>' +
+      '<td><strong>' + esc((n.serie || '') + '-' + n.numero) + '</strong><small>' + (n.nfe_id ? 'CRM' : 'FKN') + '</small></td>' +
       '<td>' + esc(diaHora(n.emitida_em)) + '</td><td>' + cli + '<small>' + esc([n.cliente_doc, [n.cidade, n.uf].filter(Boolean).join('/')].filter(Boolean).join(' · ')) + '</small></td>' +
       '<td><small>' + esc(n.natureza || '') + '</small></td><td class="num">' + moeda(n.valor_total) + '</td>' +
       '<td>' + (n.cancelada ? CRM.selo('cancelada', 'vermelho') : CRM.selo('autorizada', 'verde')) + '</td><td class="num">' + b.join(' ') + '</td></tr>';
@@ -453,7 +458,12 @@
         extra: '<button type="button" class="btn sec" data-acao="nf-consulta-csv">Baixar planilha</button>' }) +
       (!l ? '<p class="vazio">Procurando…</p>' : !l.length ? '<p class="vazio">Nenhuma nota com essa pesquisa.</p>' :
         '<p class="dica">' + busca.total.toLocaleString('pt-BR') + ' nota(s) · ' + moeda(busca.soma) + ' (sem as canceladas)</p>' +
-        '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>NF</th><th>Emitida</th><th>Cliente</th><th>Natureza</th><th class="num">Valor</th><th>Situação</th><th></th></tr></thead><tbody>' +
+        (marcadasNf.size ? '<p class="acoes nf-marcadas"><strong>' + marcadasNf.size + ' nota(s) marcada(s)</strong> · ' +
+          '<button type="button" class="btn" data-acao="nf-marcadas-danfe">DANFE de todas (um PDF)</button> ' +
+          '<button type="button" class="btn sec" data-acao="nf-marcadas-xml">XML de todas (ZIP)</button> ' +
+          '<button type="button" class="mini" data-acao="nf-marcadas-limpa">desmarcar</button></p>' : '') +
+        '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th class="cx-marca"><input type="checkbox" data-acao="nf-marca-todas" title="marcar todas as que estão na lista"' +
+          (l.length && l.every(n => marcadasNf.has(n.chave)) ? ' checked' : '') + '></th><th>NF</th><th>Emitida</th><th>Cliente</th><th>Natureza</th><th class="num">Valor</th><th>Situação</th><th></th></tr></thead><tbody>' +
         l.map(linhaConsulta).join('') + '</tbody></table></div>' +
         (busca.total > l.length ? '<p class="dica lista-mais">Mostrando ' + l.length + ' de ' + busca.total.toLocaleString('pt-BR') + '. <button type="button" class="mini" data-acao="nf-consulta-mais"' + (buscando ? ' disabled' : '') + '>Mostrar mais 100</button> · a planilha leva todas</p>' : '')) +
       '</section>';
@@ -662,6 +672,13 @@
     const xml = x && (x.proc_xml || x.nfe_xml);
     if (!xml) throw new Error('esta nota não tem XML guardado');
     return xml;
+  }
+  // o XML autorizado de uma nota da consulta: a do CRM pela crm_nfe; a do FKN pelo arquivo guardado (bucket crm-notas-xml)
+  async function xmlDaNota(n) {
+    try {
+      if (n.nfe_id) { const x = await CRM.store().nfeXml(n.nfe_id); return x && (x.proc_xml || x.nfe_xml); }
+      return await CRM.store().notaXml(n.chave);
+    } catch (e) { return null; }
   }
   async function danfe(id, xmlPronto) {
     try {
@@ -977,6 +994,47 @@
       CRM.baixar('NFe' + ch + '-procNFe.xml', xml, 'application/xml');
     },
     'nf-consulta-mais': () => buscaNotas(true),
+    'nf-marca': ch => {
+      if (marcadasNf.has(ch)) marcadasNf.delete(ch);
+      else { const n = ((busca && busca.notas) || []).find(x => x.chave === ch); if (n) marcadasNf.set(ch, n); }
+      CRM.render();
+    },
+    'nf-marca-todas': () => {
+      const l = (busca && busca.notas) || [], todas = l.length && l.every(n => marcadasNf.has(n.chave));
+      l.forEach(n => (todas ? marcadasNf.delete(n.chave) : marcadasNf.set(n.chave, n)));
+      CRM.render();
+    },
+    'nf-marcadas-limpa': () => { marcadasNf.clear(); CRM.render(); },
+    'nf-marcadas-danfe': async () => {
+      const l = [...marcadasNf.values()].sort((a, b) => String(a.serie).localeCompare(String(b.serie)) || a.numero - b.numero);
+      try {
+        await carregaJs('vendor/jspdf.umd.min.js');
+        const Dn = raiz.CRMDanfe, pdf = new raiz.jspdf.jsPDF({ unit: 'mm', format: 'a4', compress: true }), lg = await pegaLogo(), falta = [];
+        let k = 0;
+        for (const n of l) {
+          CRM.toast('Montando a DANFE ' + (k + 1) + ' de ' + l.length + '…');
+          const xml = await xmlDaNota(n), d = xml && Dn.ler(xml);
+          if (!d) { falta.push(n.serie + '-' + n.numero); continue; }
+          if (n.cancelada) Object.assign(d, { autorizada: false, marca: 'NF-e CANCELADA' });
+          if (k++) pdf.addPage('a4', 'portrait');
+          Dn.desenha(pdf, d, { logo: lg, cores: (raiz.CRM_CONFIG || {}).cores, aviso: CRM.avisoGolpe ? CRM.avisoGolpe() : '' });
+        }
+        if (k) pdf.save('DANFEs-' + l.map(n => n.numero).slice(0, 6).join('-') + (l.length > 6 ? '-e-mais' : '') + '.pdf');
+        CRM.toast(k + ' DANFE(s) no PDF' + (falta.length ? '. Sem XML guardado no CRM: NF ' + falta.join(', ') : '.'), !!falta.length);
+      } catch (e) { CRM.falhou(e); }
+    },
+    'nf-marcadas-xml': async () => {
+      const l = [...marcadasNf.values()].sort((a, b) => String(a.serie).localeCompare(String(b.serie)) || a.numero - b.numero), arquivos = [], falta = [];
+      try {
+        for (const n of l) {
+          const xml = await xmlDaNota(n);
+          if (xml) arquivos.push({ nome: 'NFe' + n.chave + '-procNFe.xml', conteudo: xml }); else falta.push(n.serie + '-' + n.numero);
+        }
+        if (!arquivos.length) { CRM.toast('Nenhuma das notas marcadas tem o XML guardado no CRM.', true); return; }
+        CRM.baixar('xml-notas-' + l.map(n => n.numero).slice(0, 6).join('-') + (l.length > 6 ? '-e-mais' : '') + '.zip', new Blob([M.zip(arquivos)], { type: 'application/zip' }));
+        CRM.toast(arquivos.length + ' XML no ZIP' + (falta.length ? '. Sem XML guardado no CRM: NF ' + falta.join(', ') : '.'), !!falta.length);
+      } catch (e) { CRM.falhou(e); }
+    },
     'nf-consulta-csv': async () => {
       try {
         const st = CRM.Lista.estado(LS), out = [];
