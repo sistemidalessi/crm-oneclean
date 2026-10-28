@@ -178,6 +178,9 @@
   // com a API da Rekta ligada (crm_config.dados.credito.api = true, depois do teste), o "Analisar" não abre mais o site:
   // abre a análise, que consulta pela API
   const linkConsulta = () => (cfg().api === true ? '' : cfg().url || '');
+  // preço da consulta RLT Avançado pela API (Rekta, 28/10/2026: R$ 12,80; extras que o CRM não pede: CNH e veículos R$ 4,50
+  // cada, Judiciário R$ 5,12, Prospecção R$ 1,20). Muda em crm_config.dados.credito.preco_api.
+  const precoApi = () => (Number(cfg().preco_api) > 0 ? Number(cfg().preco_api) : 12.8);
 
   async function carrega(forca) {
     if (carregando || (!forca && painel && Date.now() - lidoEm < 60000)) return;
@@ -311,7 +314,7 @@
       titulo: 'Crédito: ' + e.nome, largura: 'largo',
       htmlAntes: '<div class="cred-form"><p>' + esc(e.cnpj || 'sem CNPJ') + (ficha ? ' · ficha de ' + esc(R.dataBR(ficha.analisado_em)) + ' · usado hoje ' + esc(R.moeda(ficha.usado || 0)) : s ? ' · em aberto ' + esc(R.moeda(s.aberto)) : '') + '</p>' +
         (siteAberto ? '<p class="dica"><strong>O site da consulta abriu numa aba nova, com o CNPJ copiado:</strong> cole no Documento (Ctrl+V), clique em Consulta, baixe o PDF e solte aqui.</p>' : '') +
-        '<div class="cred-passos">' + (CRM.store().creditoRekta ? '<button type="button" class="btn" id="credApi" title="A Rekta responde direto ao CRM (cada consulta é cobrada pela Rekta)">Consultar na Rekta pela API</button>' : '') +
+        '<div class="cred-passos">' + (CRM.store().creditoRekta ? '<button type="button" class="btn" id="credApi" title="A Rekta responde direto ao CRM (cada consulta é cobrada pela Rekta: ' + R.moeda(precoApi()) + ')">Consultar na Rekta pela API (' + R.moeda(precoApi()) + ')</button>' : '') +
         (cfg().api === true ? '' : linkConsultar(id, siteAberto ? 'Abrir o site de novo' : 'Ou: abrir o site (copia o CNPJ)', 'btn sec')) +
         '<label class="btn sec arquivo">' + (cfg().api === true ? 'Ou: soltar um PDF da consulta' : 'e soltar o PDF da consulta') + '<input type="file" id="credArq" accept="application/pdf,image/png,image/jpeg,image/webp"></label>' +
         '<span id="credLendo"></span></div>' + fatos() + prop(lida ? propor(lida, ctx) : null) + '</div>',
@@ -355,7 +358,7 @@
         if (api) api.addEventListener('click', async () => {
           const doc = R.chaveDoc ? R.chaveDoc(e.cnpj || '') : String(e.cnpj || '').replace(/\D/g, '');
           if (doc.length !== 14 && doc.length !== 11) { CRM.toast('O cadastro não tem CNPJ (ou CPF) completo: preencha antes de consultar.', true); return; }
-          if (!confirm('Consultar ' + (e.cnpj || doc) + ' na Rekta agora?\n\nCada consulta é cobrada pela Rekta.' + (ficha && ficha.analisado_em ? '\nA última análise deste cliente é de ' + R.dataBR(ficha.analisado_em) + '.' : ''))) return;
+          if (!confirm('Consultar ' + (e.cnpj || doc) + ' na Rekta agora?\n\nEsta consulta custa ' + R.moeda(precoApi()) + ' (cobrada pela Rekta).' + (ficha && ficha.analisado_em ? '\nA última análise deste cliente é de ' + R.dataBR(ficha.analisado_em) + '.' : ''))) return;
           api.disabled = true; st.textContent = 'Consultando a Rekta (pode levar até 1 minuto)…';
           try {
             const r = await CRM.store().creditoRekta(doc, id);
