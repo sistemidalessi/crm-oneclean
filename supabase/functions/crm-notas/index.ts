@@ -133,7 +133,7 @@ async function arquivoFkn(db: any, integ: { id: string }, f: { nome?: string; ba
     try { lido = K.lerContasPagar(txt); } catch (e) { return recusa('pagar', [e instanceof Error ? e.message : String(e)]); }
     const conf = K.conferirContasPagar(txt, lido);
     if (conf.recusa.length) return recusa('pagar', conf.recusa);
-    const existentes = await tudo(db, 'crm_fin_lancamentos', 'id,chave_fkn,situacao,tipo,valor,vencimento,origem,descricao') as { chave_fkn: string; situacao: string }[];
+    const existentes = await tudo(db, 'crm_fin_lancamentos', 'id,chave_fkn,situacao,tipo,valor,vencimento,origem,descricao,baixa,observacoes') as { chave_fkn: string; situacao: string }[];
     const doFkn = existentes.filter(x => x.chave_fkn && x.situacao !== 'pago').length;
     if (doFkn >= 20 && lido.contas.length < doFkn * 0.4) return recusa('pagar', ['veio com ' + lido.contas.length + ' contas (o CRM tem ' + doFkn + ' do FKN em aberto): confira Conta 0 a 0, Situação GERAL e a filial']);
     // excluídas pelo administrador no Caixa (13/10/2026): não voltam a cada listagem
@@ -148,7 +148,9 @@ async function arquivoFkn(db: any, integ: { id: string }, f: { nome?: string; ba
       if (error) throw new Error('crm_fin_lancamentos: ' + error.message);
     }
     await registra('Contas a pagar do FKN: ' + lido.contas.length + ' contas (' + p.inserir.length + ' novas' + (p.antigas.qtd ? ', ' + p.antigas.qtd + ' antigas pausadas' : '') +
-      (p.ligar.length ? ', ' + p.ligar.length + ' já lançadas' : '') + (p.baixar.length ? ', ' + p.baixar.length + ' pagas' : '') + ')', lido.contas.length, lido.soma);
+      (p.ligar.length ? ', ' + p.ligar.length + ' já lançadas' : '') + (p.baixar.length ? ', ' + p.baixar.length + ' pagas' : '') +
+      (p.reabrir ? ', ' + p.reabrir + ' reabertas' : '') +
+      (p.baixaSuspensa ? '; atenção: ' + p.baixaSuspensa + ' contas do CRM não vieram (listagem incompleta?), nenhuma dada como paga' : '') + ')', lido.contas.length, lido.soma);
     return resposta(200, { ok: true, fkn: 'pagar', contas: lido.contas.length, novas: p.inserir.length, pagas: p.baixar.length });
   }
   return resposta(422, { erro: 'arquivo do FKN não reconhecido (só a listagem de produtos, o contas a receber e o contas a pagar, em CSV)' });

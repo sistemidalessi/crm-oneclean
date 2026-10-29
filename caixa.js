@@ -550,13 +550,15 @@
         (p.ligar.length ? '• ' + p.ligar.length + ' já estavam lançadas (recorrente/planilha): só ligadas ao FKN — ' + p.ligar.map(x => x.descricao).join(', ') + '\n' : '') +
         (p.atualizar.length ? '• ' + p.atualizar.length + ' com valor ou vencimento novo\n' : '') +
         (p.baixar.length ? '• ' + p.baixar.length + ' sumiram do FKN: dadas como pagas (fora do caixa)\n' : '') +
+        (p.reabrir ? '• ' + p.reabrir + ' voltaram na listagem depois de dadas como pagas por terem sumido: reabertas\n' : '') +
+        (p.baixaSuspensa ? '• ⚠ ' + p.baixaSuspensa + ' contas do CRM não vieram nesta listagem: parece incompleta (confira Conta 0 a 0, Situação GERAL e todas as filiais). Nenhuma foi dada como paga.\n' : '') +
         (p.excluidas ? '• ' + p.excluidas + ' excluída(s) por você no Caixa: ficam de fora\n' : ''),
       campos: [], salvarTexto: 'Aplicar',
       aoSalvar: async () => {
         if (p.inserir.length) await CRM.store().inserirVarios('fin_lancamentos', p.inserir);
         for (const a of [...p.atualizar, ...p.ligar, ...p.baixar]) await CRM.store().atualizar('fin_lancamentos', a.id, a.patch);
         lidoEm = 0; await carrega();
-        CRM.toast('Contas a pagar do FKN aplicado: ' + p.inserir.length + ' novas, ' + p.baixar.length + ' pagas.');
+        CRM.toast('Contas a pagar do FKN aplicado: ' + p.inserir.length + ' novas, ' + p.baixar.length + ' pagas' + (p.reabrir ? ', ' + p.reabrir + ' reabertas' : '') + '.');
       }
     });
   }

@@ -145,6 +145,23 @@ test('contas a pagar do FKN: novas, antigas pausadas, já lançadas ligadas e su
   const p2 = K.planoContasPagar(l, exist, { hoje: '2026-10-06', agora: 'x', excluidos: ['16001|OUT/26 - I'] });
   assert.deepEqual(p2.inserir.map(x => x.chave_fkn), ['00005|30468-2']);
   assert.equal(p2.excluidas, 1);
+  // a dada como paga por ter sumido leva a marca e reabre se voltar na listagem
+  assert.match(p.baixar[0].patch.observacoes, /sumiu da listagem do FKN/);
+  const volta = [{ id: 'f1', tipo: 'saida', situacao: 'pago', baixa: 'fora', origem: 'fkn', chave_fkn: '00005|000007022-2', valor: 1864.5, vencimento: '2026-10-13',
+    observacoes: 'Duplicata · dada como paga: sumiu da listagem do FKN de 01/10/2026' }];
+  const p3 = K.planoContasPagar(l, volta, { hoje: '2026-10-06', agora: 'x' });
+  assert.equal(p3.reabrir, 1);
+  assert.deepEqual(p3.atualizar, [{ id: 'f1', patch: { situacao: 'aberto', pago_em: null, baixa: null, baixado_em: null, observacoes: 'Duplicata' } }]);
+  // paga no Caixa (sem a marca) não reabre
+  const p4 = K.planoContasPagar(l, [Object.assign({}, volta[0], { baixa: 'caixa', observacoes: null })], { hoje: '2026-10-06', agora: 'x' });
+  assert.equal(p4.reabrir, 0); assert.deepEqual(p4.atualizar, []);
+  // pendência antiga que volta, volta pausada
+  const p6 = K.planoContasPagar(l, [Object.assign({}, volta[0], { observacoes: 'pendência antiga do FKN (venceu em 01/01/2024): conferir se já foi paga · dada como paga: sumiu da listagem do FKN de 19/10/2026' })], { hoje: '2026-10-06', agora: 'x' });
+  assert.equal(p6.atualizar[0].patch.situacao, 'pausado');
+  // listagem incompleta: muitas sumindo de uma vez → nenhuma dada como paga
+  const muitas = Array.from({ length: 30 }, (_, i) => ({ id: 'm' + i, tipo: 'saida', situacao: 'aberto', origem: 'fkn', chave_fkn: '00099|X' + i, valor: 10, vencimento: '2026-11-01' }));
+  const p5 = K.planoContasPagar(l, muitas, { hoje: '2026-10-06', agora: 'x' });
+  assert.equal(p5.baixar.length, 0); assert.equal(p5.baixaSuspensa, 30);
 });
 
 test('leitura do caixa (Agilité "Geral" e gestora): bate com a grade, sem nome de pessoa', () => {

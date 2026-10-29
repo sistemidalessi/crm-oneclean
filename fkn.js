@@ -254,6 +254,8 @@
   //   - conta que estava no retrato anterior e sumiu: paga fora do caixa (no dia do relatório);
   //   - conta EXCLUÍDA pelo administrador no Caixa (opc.excluidos: chaves de crm_fin_fkn_excluidos,
   //     13/10/2026): fica de fora — não volta a cada listagem.
+  // marca na observação da conta dada como paga por ter sumido da listagem (para reabrir se ela voltar)
+  const MARCA_SUMIU = 'dada como paga: sumiu da listagem do FKN';
   function planoContasPagar(lido, existentes, opc) {
     opc = opc || {};
     const pos = lido.posicao || opc.hoje;
@@ -261,14 +263,22 @@
     const porChave = new Map((existentes || []).filter(l => l.chave_fkn).map(l => [l.chave_fkn, l]));
     const livres = (existentes || []).filter(l => !l.chave_fkn && l.tipo === 'saida' && l.situacao === 'aberto' && l.origem !== 'titulo');
     const usados = new Set(), excluidos = new Set(opc.excluidos || []);
-    const out = { inserir: [], atualizar: [], ligar: [], baixar: [], excluidas: 0, antigas: { qtd: 0, valor: 0 }, novas: { qtd: 0, valor: 0 } };
+    const out = { inserir: [], atualizar: [], ligar: [], baixar: [], excluidas: 0, reabrir: 0, baixaSuspensa: 0, antigas: { qtd: 0, valor: 0 }, novas: { qtd: 0, valor: 0 } };
     lido.contas.forEach(c => {
       if (excluidos.has(c.chave)) { out.excluidas++; return; }
       const ja = porChave.get(c.chave);
       if (ja) {
         const patch = {};
+        // voltou na listagem depois de ter sido dada como paga só por ter sumido (29/10/2026: uma listagem incompleta de 19/10
+        // deu 176 contas como pagas e elas nunca reabriram): reabre como estava (a pendência antiga volta pausada)
+        if (ja.situacao === 'pago' && ja.baixa === 'fora' && String(ja.observacoes || '').indexOf(MARCA_SUMIU) !== -1) {
+          const antigaJa = c.vencimento < corte || String(ja.observacoes).indexOf('pendência antiga do FKN') !== -1;
+          Object.assign(patch, { situacao: antigaJa ? 'pausado' : 'aberto', pago_em: null, baixa: null, baixado_em: null,
+            observacoes: String(ja.observacoes).split(' · ').filter(t => t.indexOf(MARCA_SUMIU) === -1).join(' · ') || null });
+          out.reabrir++;
+        }
         if (Math.abs(Number(ja.valor) - c.valor) >= 0.01) patch.valor = c.valor;
-        if (ja.vencimento !== c.vencimento && ja.situacao !== 'pago') patch.vencimento = c.vencimento;
+        if (ja.vencimento !== c.vencimento && (ja.situacao !== 'pago' || patch.situacao)) patch.vencimento = c.vencimento;
         if (Object.keys(patch).length) out.atualizar.push({ id: ja.id, patch });
         return;
       }
@@ -284,10 +294,15 @@
       out.inserir.push(l);
     });
     const vistos = new Set(lido.contas.map(c => c.chave));
-    (existentes || []).forEach(x => {
-      if (x.chave_fkn && !vistos.has(x.chave_fkn) && (x.situacao === 'aberto' || x.situacao === 'pausado'))
-        out.baixar.push({ id: x.id, patch: { situacao: 'pago', pago_em: pos, baixa: 'fora', baixado_em: opc.agora || new Date().toISOString() } });
+    const abertos = (existentes || []).filter(x => x.chave_fkn && (x.situacao === 'aberto' || x.situacao === 'pausado'));
+    abertos.forEach(x => {
+      if (!vistos.has(x.chave_fkn))
+        out.baixar.push({ id: x.id, patch: { situacao: 'pago', pago_em: pos, baixa: 'fora', baixado_em: opc.agora || new Date().toISOString(),
+          observacoes: (x.observacoes ? x.observacoes + ' · ' : '') + MARCA_SUMIU + ' de ' + R.dataBR(pos) } });
     });
+    // muitas sumindo de uma vez é listagem incompleta (19/10/2026: 167 contas em vez de ~350, 179 dadas como pagas):
+    // nada é dado como pago; o resto (novas, valores, vencimentos) vale
+    if (out.baixar.length > Math.max(15, abertos.length * 0.1)) { out.baixaSuspensa = out.baixar.length; out.baixar = []; }
     return out;
   }
 
