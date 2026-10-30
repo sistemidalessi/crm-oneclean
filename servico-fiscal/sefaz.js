@@ -19,7 +19,8 @@ const SERV = {
   autorizacao: ['nfeautorizacao4.asmx', 'NFeAutorizacao4', 'nfeAutorizacaoLote'],
   consulta: ['nfeconsultaprotocolo4.asmx', 'NFeConsultaProtocolo4', 'nfeConsultaNF'],
   evento: ['nferecepcaoevento4.asmx', 'NFeRecepcaoEvento4', 'nfeRecepcaoEvento'],
-  inutilizacao: ['nfeinutilizacao4.asmx', 'NFeInutilizacao4', 'nfeInutilizacaoNF']
+  inutilizacao: ['nfeinutilizacao4.asmx', 'NFeInutilizacao4', 'nfeInutilizacaoNF'],
+  cadastro: ['cadconsultacadastro4.asmx', 'CadConsultaCadastro4', 'consultaCadastro']
 };
 const CUF_SP = '35';
 const tpAmb = amb => (amb === 'producao' ? '1' : '2');
@@ -119,9 +120,36 @@ function chama(servico, xml, cfg) {
   return posta(BASE[cfg.ambiente === 'producao' ? 'producao' : 'homologacao'] + s[0], 'http://www.portalfiscal.inf.br/nfe/wsdl/' + s[1] + '/' + s[2], envelope(servico, xml), cfg);
 }
 
+// ---------------------------------------------------------------- consulta cadastro (30/10/2026)
+// Cadastro de contribuintes da Sefaz (CCC da UF): pelo CNPJ (ou CPF, ou IE) devolve a inscrição estadual, se está
+// habilitada (cSit 1) e o endereço do cadastro estadual. Só a Sefaz-SP (os clientes de fora de SP só compram como não
+// contribuintes, pela regra do DIFAL). O leiaute do ConsCad continua na versão 2.00 dentro do serviço 4.00.
+const msgCadastro = q => {
+  const doc = String(q.cnpj || q.cpf || '').toUpperCase().replace(/[^0-9A-Z]/g, ''), ie = String(q.ie || '').replace(/\D/g, '');
+  const chave = ie ? '<IE>' + ie + '</IE>' : doc.length === 11 ? '<CPF>' + doc + '</CPF>' : doc.length === 14 ? '<CNPJ>' + doc + '</CNPJ>' : null;
+  if (!chave) throw new Error('informe o CNPJ, o CPF ou a inscrição estadual');
+  return '<ConsCad xmlns="' + NS + '" versao="2.00"><infCons><xServ>CONS-CAD</xServ><UF>' + String(q.uf || 'SP').toUpperCase() + '</UF>' + chave + '</infCons></ConsCad>';
+};
+const todos = (xml, t) => (String(xml || '').match(new RegExp('<(?:\\w+:)?' + t + '\\b[\\s\\S]*?</(?:\\w+:)?' + t + '>', 'g')) || []);
+// cStat 111 = uma ocorrência, 112 = mais de uma, 259 = CNPJ sem inscrição na UF, 264 = CPF sem inscrição
+function leCadastro(xmlResp) {
+  const corpo = pega(xmlResp, 'nfeResultMsg') || xmlResp, cons = pega(corpo, 'infCons') || corpo;
+  const cStat = Number(pega(cons, 'cStat')) || null;
+  const cadastros = todos(cons, 'infCad').map(c => {
+    const e = pega(c, 'ender') || '';
+    return { ie: pega(c, 'IE') || '', cnpj: pega(c, 'CNPJ') || '', cpf: pega(c, 'CPF') || '', uf: pega(c, 'UF') || '', habilitada: pega(c, 'cSit') === '1',
+      cSit: pega(c, 'cSit'), nome: pega(c, 'xNome') || '', fantasia: pega(c, 'xFant') || '', regime: pega(c, 'xRegApur') || '', cnae: pega(c, 'CNAE') || '',
+      inicio: pega(c, 'dIniAtiv') || '', ultimaSituacao: pega(c, 'dUltSit') || '', baixa: pega(c, 'dBaixa') || '', ieAtual: pega(c, 'IEAtual') || '',
+      endereco: { logradouro: pega(e, 'xLgr') || '', numero: pega(e, 'nro') || '', complemento: pega(e, 'xCpl') || '', bairro: pega(e, 'xBairro') || '',
+        codigo_municipio: pega(e, 'cMun') || '', cidade: pega(e, 'xMun') || '', cep: pega(e, 'CEP') || '' } };
+  });
+  return { cStat, motivo: pega(cons, 'xMotivo'), semInscricao: cStat === 259 || cStat === 264, cadastros };
+}
+
 // ---------------------------------------------------------------- operações
 async function status(cfg) { return leRetorno(await chama('status', msgStatus(cfg.ambiente), cfg)); }
 async function consulta(cfg, chave) { return leRetorno(await chama('consulta', msgConsulta(cfg.ambiente, chave), cfg)); }
+async function cadastro(cfg, q) { return leCadastro(await chama('cadastro', msgCadastro(q), cfg)); }
 
 // Autoriza uma NF-e já assinada (nfeXml = <NFe>…</NFe>). Sem resposta: consulta a chave e devolve o que a Sefaz sabe.
 async function autoriza(cfg, nfeXml, chave, idLote) {
@@ -156,4 +184,4 @@ async function inutiliza(cfg, dados) {
 }
 
 module.exports = { BASE, SERV, CUF_SP, tpAmb, pega, bloco, posta, msgStatus, msgConsulta, infEvento, cancelamento, cartaCorrecao, envEvento, montaEvento: evento, infInut, inutNFe, envelope, leRetorno, situacao,
-  status, consulta, autoriza, enviaEvento: evento_, inutiliza, COND_USO_CCE };
+  status, consulta, autoriza, enviaEvento: evento_, inutiliza, COND_USO_CCE, msgCadastro, leCadastro, cadastro };

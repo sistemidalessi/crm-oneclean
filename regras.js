@@ -1032,8 +1032,63 @@
       situacao_receita: j.descricao_situacao_cadastral || '' };
   }
 
+  // Inscrição estadual de SP (30/10/2026): 12 números, com dois dígitos verificadores (o 9º e o 12º), pela regra da
+  // Sefaz-SP (pesos 1,3,4,5,6,7,8,10 e 3,2,10,9,8,7,6,5,4,3,2; resto de 11, último algarismo). Produtor rural (P...) não
+  // é cliente da empresa: fica como inválido para conferir. De fora de SP só confere o tamanho (até 14 números).
+  function ieValida(ie, uf) {
+    const d = digitos(ie);
+    if (String(uf || 'SP').toUpperCase() !== 'SP') return d.length >= 8 && d.length <= 14;
+    if (d.length !== 12) return false;
+    const n = d.split('').map(Number), soma = (p, ate) => p.slice(0, ate).reduce((t, x, i) => t + x * n[i], 0);
+    return (soma([1, 3, 4, 5, 6, 7, 8, 10], 8) % 11) % 10 === n[8] && (soma([3, 2, 10, 9, 8, 7, 6, 5, 4, 3, 2], 11) % 11) % 10 === n[11];
+  }
+  const formataIE = ie => { const d = digitos(ie); return d.length === 12 ? d.replace(/(\d{3})(\d{3})(\d{3})(\d{3})/, '$1.$2.$3.$4') : d; };
+  // O que impede salvar o cadastro de quem tem CNPJ ou CPF (30/10/2026, pedido do Anderson: "não pode aceitar sem a
+  // inscrição, ou isento ou com a inscrição"). Lead sem documento passa; a nota fiscal confere o resto (faltasNota).
+  function errosInscricao(e) {
+    e = e || {};
+    const d = chaveDoc(e.cnpj), ind = String(e.ind_ie || ''), ie = digitos(e.ie), uf = String(e.uf || '').toUpperCase(), erros = [];
+    if (d.length !== 14 && d.length !== 11) return erros;
+    if (!ind) erros.push('Diga se o cliente é contribuinte do ICMS (com inscrição estadual), isento ou não contribuinte.');
+    else if (ind === '1' && !ie) erros.push('Contribuinte precisa da inscrição estadual.');
+    else if (ind === '1' && !ieValida(ie, uf || 'SP')) erros.push('A inscrição estadual ' + formataIE(ie) + ' não confere' + (uf && uf !== 'SP' ? '' : ' (dígito de SP)') + ': confira os números.');
+    else if (ind !== '1' && ie) erros.push('Tem inscrição estadual mas está como ' + (ind === '2' ? 'isento' : 'não contribuinte') + ': marque "Contribuinte" ou apague a inscrição.');
+    if (d.length === 11 && ind === '1') erros.push('CPF não é contribuinte do ICMS (marque "Não contribuinte").');
+    return erros;
+  }
+  // Resposta da consulta cadastro da Sefaz-SP (serviço fiscal → crm-fiscal, acao 'cadastro') → o que preencher e o aviso.
+  // ind_ie: '1' com a IE habilitada; '9' sem inscrição em SP; null quando a IE existe mas não está habilitada (a nota a
+  // contribuinte com IE irregular é denegada: quem decide é a pessoa, com o aviso).
+  function inscricaoDaSefaz(r) {
+    if (!r || !r.cStat) return null;
+    if (r.semInscricao) return { ind_ie: '9', ie: '', ok: true, texto: 'Sefaz-SP: sem inscrição estadual em SP — não contribuinte.' };
+    const l = r.cadastros || [], c = l.find(x => x.habilitada) || l[0];
+    if (!c) return { ok: false, texto: 'Sefaz-SP: ' + (r.motivo || 'não respondeu') + ' (cStat ' + r.cStat + ').' };
+    const en = c.endereco || {}, cep = digitos(en.cep).padStart(8, '0');
+    const endereco = { logradouro: en.logradouro || '', numero: en.numero || '', complemento: en.complemento || '', bairro: en.bairro || '',
+      cidade: en.cidade || '', codigo_municipio: digitos(en.codigo_municipio), cep: digitos(en.cep) ? cep.replace(/(\d{5})(\d{3})/, '$1-$2') : '', uf: c.uf || 'SP' };
+    if (c.habilitada) return { ind_ie: '1', ie: digitos(c.ie), ok: true, razao_social: c.nome, endereco, regime: c.regime,
+      texto: 'Sefaz-SP: inscrição estadual ' + formataIE(c.ie) + ' habilitada' + (c.regime ? ' (' + c.regime.toLowerCase() + ')' : '') + '.' };
+    return { ind_ie: null, ie: digitos(c.ie), ok: false, razao_social: c.nome, endereco,
+      texto: 'Sefaz-SP: a inscrição estadual ' + formataIE(c.ie) + ' está NÃO HABILITADA' + (c.ultimaSituacao ? ' desde ' + dataBR(c.ultimaSituacao) : '') +
+        (c.baixa ? ' (baixada em ' + dataBR(c.baixa) + ')' : '') + ': nota a contribuinte com inscrição irregular é recusada pela Sefaz. Confirme com o cliente antes de vender.' };
+  }
+  // O que está digitado e não bate com os dados oficiais (Receita e Sefaz). Vazio não conta (o preenchimento cuida).
+  const ROTULO_CADASTRO = { razao_social: 'Razão social', logradouro: 'Rua', numero: 'Número', bairro: 'Bairro', cidade: 'Cidade', uf: 'UF', cep: 'CEP',
+    codigo_municipio: 'Código do município', ie: 'Inscrição estadual' };
+  function diferencasCadastro(atual, oficial) {
+    const out = [], chave = t => normaliza(t).replace(/\b(rua|r|avenida|av|estrada|estr|alameda|al|travessa|tv|praca|pca)\b/g, '').replace(/[^a-z0-9]/g, '');
+    Object.keys(ROTULO_CADASTRO).forEach(k => {
+      const a = String((atual || {})[k] || '').trim(), o = String((oficial || {})[k] || '').trim();
+      if (!a || !o) return;
+      const ca = /^(cep|codigo_municipio|ie|numero)$/.test(k) ? digitos(a) || chave(a) : chave(a), co = /^(cep|codigo_municipio|ie|numero)$/.test(k) ? digitos(o) || chave(o) : chave(o);
+      if (ca && co && ca !== co && ca.indexOf(co) === -1 && co.indexOf(ca) === -1) out.push({ campo: k, rotulo: ROTULO_CADASTRO[k], atual: a, oficial: o });
+    });
+    return out;
+  }
+
   const api = {
-    IND_IE, faltasNota, enderecoDoCep, empresaDoCnpj,
+    IND_IE, faltasNota, enderecoDoCep, empresaDoCnpj, ieValida, formataIE, errosInscricao, inscricaoDaSefaz, diferencasCadastro,
     comparaAlfa, ordemAlfa, alfaOpcoes,
     TIPOS_ATIVIDADE, TIPOS_MANUAIS, SITUACOES, STATUS_NEGOCIO, STATUS_PROPOSTA, RECORRENCIAS, PAPEIS, UFS,
     ETAPAS_PADRAO, OPCOES_PADRAO, CONFIG_PADRAO, config, rotulo, num, moeda, numero, pct,

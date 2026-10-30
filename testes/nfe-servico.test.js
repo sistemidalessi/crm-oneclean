@@ -449,3 +449,28 @@ test('pagamento: data escrita vira o prazo; sem forma de pagamento ou programado
   assert.deepStrictEqual(data.nota.cobranca.duplicatas.map(x => x.vencimento), ['2026-11-15']);
 });
 
+
+test('consulta cadastro da Sefaz-SP: mensagem, leitura da resposta e rota do serviço (30/10/2026)', () => {
+  const S = require('../servico-fiscal/sefaz.js');
+  assert.strictEqual(S.SERV.cadastro[0], 'cadconsultacadastro4.asmx');
+  assert.strictEqual(S.msgCadastro({ cnpj: '11.222.333/0001-81' }),
+    '<ConsCad xmlns="http://www.portalfiscal.inf.br/nfe" versao="2.00"><infCons><xServ>CONS-CAD</xServ><UF>SP</UF><CNPJ>11222333000181</CNPJ></infCons></ConsCad>');
+  assert.match(S.msgCadastro({ cpf: '123.456.789-09' }), /<CPF>12345678909<\/CPF>/);
+  assert.throws(() => S.msgCadastro({ cnpj: '123' }), /informe o CNPJ/);
+  const um = '<soap:Envelope><soap:Body><nfeResultMsg><retConsCad versao="2.00"><infCons><cStat>111</cStat><xMotivo>Consulta cadastro com uma ocorrencia</xMotivo>' +
+    '<UF>SP</UF><CNPJ>11222333000181</CNPJ><infCad><IE>110220333007</IE><CNPJ>11222333000181</CNPJ><UF>SP</UF><cSit>1</cSit><xNome>EMPRESA DE TESTE LTDA</xNome>' +
+    '<xRegApur>NORMAL</xRegApur><IEAtual>110220333007</IEAtual><ender><xLgr>RUA DOS TESTES</xLgr><nro>10</nro><xBairro>CENTRO</xBairro><cMun>3548708</cMun>' +
+    '<xMun>SAO BERNARDO DO CAMPO</xMun><CEP>9750730</CEP></ender></infCad></infCons></retConsCad></nfeResultMsg></soap:Body></soap:Envelope>';
+  const r = S.leCadastro(um);
+  assert.strictEqual(r.cStat, 111);
+  assert.strictEqual(r.cadastros.length, 1);
+  assert.strictEqual(r.cadastros[0].ie, '110220333007');
+  assert.strictEqual(r.cadastros[0].ieAtual, '110220333007');
+  assert.strictEqual(r.cadastros[0].habilitada, true);
+  assert.strictEqual(r.cadastros[0].endereco.codigo_municipio, '3548708');
+  const sem = S.leCadastro('<retConsCad><infCons><cStat>259</cStat><xMotivo>CNPJ da consulta nao cadastrado como contribuinte na UF</xMotivo></infCons></retConsCad>');
+  assert.strictEqual(sem.semInscricao, true);
+  assert.deepStrictEqual(sem.cadastros, []);
+  const { ROTAS } = require('../servico-fiscal/servidor.js');
+  assert.strictEqual(typeof ROTAS['POST /cadastro'], 'function');
+});

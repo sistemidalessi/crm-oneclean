@@ -339,6 +339,9 @@ body.arrastando-card .zonas-fim { display: grid; grid-template-columns: 1fr 1fr;
 .campo > span { font-size: .78rem; font-weight: 600; color: var(--suave); }
 .campo small { color: var(--suave); font-size: .72rem; }
 .campo .aviso-campo { color: var(--ambar); font-size: .8rem; background: var(--ambar-fundo); padding: 4px 8px; border-radius: 6px; }
+.campo .aviso-campo .linha { display: block; }
+.campo .aviso-campo .dif-oficial { margin-top: 4px; }
+.campo .aviso-campo .dif-oficial ul { margin: 2px 0 6px 18px; padding: 0; }
 .campo.check { display: flex; align-self: end; padding-bottom: 6px; }
 .campos .secao { font-size: .72rem; text-transform: uppercase; letter-spacing: .6px; color: var(--ouro-escuro); border-bottom: 1px solid var(--borda); padding-bottom: 3px; margin-top: 6px; }
 .campos .info { margin: 0; color: var(--suave); font-size: .85rem; }

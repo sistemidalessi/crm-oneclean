@@ -6,6 +6,8 @@
 // Secrets: FISCAL_URL (https://fiscal.oneclean.com.br) e FISCAL_TOKEN (gerado na VPS; ver servico-fiscal/INSTALAR.md).
 // Notas de COMPRA (dfe_buscar, dfe_ciencia, dfe_manifestar): administrador e comprador, do começo ao fim (27/10/2026,
 // pedido do Anderson): busca, ciência e a resposta definitiva (confirmação, desconhecimento, operação não realizada).
+// Consulta cadastro (acao 'cadastro', 30/10/2026): a inscrição estadual do cliente pela Sefaz-SP, para o cadastro do cliente;
+// todo usuário ativo que cadastra cliente (não o motorista). Só leitura; o serviço fiscal consulta sempre em produção.
 // Deploy: verify_jwt LIGADO.
 import { createClient } from 'npm:@supabase/supabase-js@2.116.0';
 import { ibptUrl, ibptLinha, ibptPrecisa } from './ibpt.js';
@@ -357,6 +359,13 @@ Deno.serve(async (req) => {
   try { b = await req.json(); } catch { return resposta(400, { erro: 'corpo inválido' }); }
   const ehDfe = /^dfe_/.test(String(b.acao || ''));
   if (!eu || !eu.ativo) return resposta(403, { erro: 'usuário inativo' });
+  if (b.acao === 'cadastro') {
+    if (eu.papel === 'motorista') return resposta(403, { erro: 'o motorista não cadastra cliente' });
+    const doc = String(b.cnpj || '').toUpperCase().replace(/[^0-9A-Z]/g, '');
+    if (doc.length !== 14 && doc.length !== 11) return resposta(400, { erro: 'CNPJ ou CPF inválido' });
+    try { return resposta(200, await servico('/cadastro', doc.length === 14 ? { cnpj: doc } : { cpf: doc })); }
+    catch (e) { return resposta(502, { erro: e instanceof Error ? e.message : String(e) }); }
+  }
   if (ehDfe ? !DFE.includes(String(eu.papel)) : !EMITE.includes(String(eu.papel))) return resposta(403, { erro: ehDfe ? 'as notas de compra são do administrador e do comprador' : 'só a logística, a gestora e o administrador emitem nota' });
   try {
     const acao = String(b.acao || '');

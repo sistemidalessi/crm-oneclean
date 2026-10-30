@@ -346,3 +346,39 @@ test('dados da nota do cliente: o que falta, CEP (ViaCEP) e CNPJ (BrasilAPI) vir
     ['EMPRESA DE TESTE LTDA', '09750-730', 'RUA DOS TESTES', '3548708', '1140000000', 'contato@teste.com', 'ATIVA']);
   assert.strictEqual(R.empresaDoCnpj({ message: 'CNPJ não encontrado' }), null);
 });
+
+test('inscrição estadual: dígito de SP, trava ao salvar, resposta da Sefaz e diferenças (30/10/2026)', () => {
+  // IE inventada com os dígitos de SP certos
+  assert.equal(R.ieValida('110.220.333.007'), true);
+  assert.equal(R.ieValida('110220333008'), false);
+  assert.equal(R.ieValida('110220334007'), false);
+  assert.equal(R.ieValida('12345'), false);
+  assert.equal(R.ieValida('0012345678', 'RS'), true);
+  assert.equal(R.formataIE('110220333007'), '110.220.333.007');
+  const cli = { cnpj: '11.222.333/0001-81', uf: 'SP', ind_ie: '1', ie: '110220333007' };
+  assert.deepEqual(R.errosInscricao(cli), []);
+  assert.deepEqual(R.errosInscricao({ nome: 'Lead sem documento' }), []);
+  assert.match(R.errosInscricao(Object.assign({}, cli, { ind_ie: '' }))[0], /contribuinte do ICMS/);
+  assert.match(R.errosInscricao(Object.assign({}, cli, { ie: '' }))[0], /precisa da inscrição/);
+  assert.match(R.errosInscricao(Object.assign({}, cli, { ie: '110220333008' }))[0], /não confere/);
+  assert.match(R.errosInscricao(Object.assign({}, cli, { ind_ie: '9' }))[0], /como não contribuinte/);
+  assert.match(R.errosInscricao(Object.assign({}, cli, { ind_ie: '2' }))[0], /como isento/);
+  assert.deepEqual(R.errosInscricao(Object.assign({}, cli, { ind_ie: '2', ie: '' })), []);
+  assert.deepEqual(R.errosInscricao({ cnpj: '123.456.789-09', ind_ie: '9' }), []);
+  // Sefaz
+  const cad = (hab, extra) => ({ cStat: 111, cadastros: [Object.assign({ ie: '110220333007', uf: 'SP', habilitada: hab, nome: 'EMPRESA DE TESTE LTDA', regime: 'NORMAL',
+    ultimaSituacao: '2025-03-01', endereco: { logradouro: 'RUA DOS TESTES', numero: '10', bairro: 'CENTRO', cidade: 'SAO BERNARDO DO CAMPO', codigo_municipio: '3548708', cep: '9750730' } }, extra)] });
+  const h = R.inscricaoDaSefaz(cad(true));
+  assert.equal(h.ind_ie, '1'); assert.equal(h.ie, '110220333007'); assert.equal(h.ok, true); assert.equal(h.endereco.cep, '09750-730');
+  const n = R.inscricaoDaSefaz(cad(false));
+  assert.equal(n.ind_ie, null); assert.equal(n.ok, false); assert.match(n.texto, /NÃO HABILITADA desde 01\/03\/2025/);
+  assert.deepEqual(R.inscricaoDaSefaz({ cStat: 259, semInscricao: true, cadastros: [] }).ind_ie, '9');
+  assert.equal(R.inscricaoDaSefaz(null), null);
+  // a habilitada vem antes da baixada
+  const duas = { cStat: 112, cadastros: [cad(false, { ie: '110220333008' }).cadastros[0], cad(true).cadastros[0]] };
+  assert.equal(R.inscricaoDaSefaz(duas).ie, '110220333007');
+  // diferenças: ignora acento, "Rua"/"R.", maiúsculas e o que está vazio
+  const dif = R.diferencasCadastro({ razao_social: 'Empresa de Teste Ltda', logradouro: 'R. dos Testes', numero: '12', cidade: 'São Bernardo do Campo', cep: '09750-730', bairro: '' },
+    { razao_social: 'EMPRESA DE TESTE LTDA', logradouro: 'RUA DOS TESTES', numero: '10', cidade: 'SAO BERNARDO DO CAMPO', cep: '09750730', bairro: 'CENTRO' });
+  assert.deepEqual(dif.map(x => x.campo), ['numero']);
+});

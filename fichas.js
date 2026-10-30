@@ -404,7 +404,7 @@
     try { const r = await fetch(url, { signal: ctl.signal }); return r.ok ? await r.json() : { _status: r.status }; } finally { clearTimeout(t); }
   };
   const semAcento = t => R.normaliza(t).replace(/[^a-z0-9]/g, '');
-  function dadosDaNota(form) {
+  function dadosDaNota(form, existente) {
     const el = n => form.elements[n];
     const poe = (dados, sempre) => Object.keys(dados).forEach(k => {
       const f = el(k); if (!f || dados[k] == null || dados[k] === '') return;
@@ -432,26 +432,70 @@
     // contribuinte: com IE é contribuinte; CPF sem IE é não contribuinte
     el('ie').addEventListener('change', () => { if (R.digitos(el('ie').value) && !el('ind_ie').value) el('ind_ie').value = '1'; });
     el('cnpj').addEventListener('change', () => { if (R.ehCPF(R.chaveDoc(el('cnpj').value)) && !el('ind_ie').value && !R.digitos(el('ie').value)) el('ind_ie').value = '9'; });
-    // botão "Buscar pelo CNPJ"
+    // Receita (BrasilAPI) e Sefaz-SP (consulta cadastro: inscrição estadual e se está habilitada) pelo CNPJ (30/10/2026,
+    // pedido do Anderson): preenche o que está vazio, a inscrição e a situação do ICMS; o que já estava digitado e não bate com
+    // os dados oficiais aparece para conferir, com "Usar os dados oficiais". Sozinho ao digitar o CNPJ num cadastro novo (ou
+    // num que ainda não diz se é contribuinte); o botão refaz quando quiser.
     const b = document.createElement('button');
-    b.type = 'button'; b.className = 'btn sec mini'; b.textContent = '🔍 Buscar pelo CNPJ';
-    b.title = 'Preenche razão social, endereço e município com os dados públicos da Receita (não traz a inscrição estadual)';
-    b.addEventListener('click', async () => {
+    b.type = 'button'; b.className = 'btn sec mini'; b.textContent = '🔍 Buscar na Receita e na Sefaz';
+    b.title = 'Preenche razão social, endereço e município (Receita) e a inscrição estadual com a situação do ICMS (Sefaz-SP)';
+    const rotIE = v => (R.IND_IE.find(o => o[0] === v) || ['', '— (falta dizer)'])[1];
+    const mostra = (linhas, difs) => {
+      const html = linhas.map(l => '<span class="linha">' + l + '</span>').join('') + (difs.length ? '<span class="dif-oficial linha"><b>Não bate com os dados oficiais:</b><ul>' +
+        difs.map(x => '<li>' + esc(x.rotulo) + ': está "' + esc(x.mostraAtual || x.atual) + '", oficial "' + esc(x.mostraOficial || x.oficial) + '"</li>').join('') +
+        '</ul><button type="button" class="btn sec mini" data-usar-oficial>Usar os dados oficiais</button></span>' : '');
+      CRM.avisoCampo(form, 'cnpj', html);
+      const u = form.querySelector('[data-usar-oficial]');
+      if (u) u.addEventListener('click', () => { difs.forEach(x => { if (el(x.campo)) el(x.campo).value = x.oficial; }); mostra(linhas, []); });
+    };
+    const buscar = async () => {
       const d = R.chaveDoc(el('cnpj').value);
       if (!R.ehCNPJ(d) || !R.cnpjValido(d)) { CRM.avisoCampo(form, 'cnpj', 'Digite um CNPJ válido para buscar.'); return; }
       b.disabled = true; b.textContent = 'Buscando…';
       try {
-        const j = await busca('https://brasilapi.com.br/api/cnpj/v1/' + d, 12000);
-        const x = R.empresaDoCnpj(j);
-        if (!x) CRM.avisoCampo(form, 'cnpj', j && j._status === 404 ? 'CNPJ não encontrado na Receita.' : 'A busca do CNPJ não respondeu: preencha à mão.');
-        else {
+        const st = CRM.store();
+        const [rec, sef] = await Promise.all([
+          busca('https://brasilapi.com.br/api/cnpj/v1/' + d, 12000).catch(() => null),
+          st.consultaCadastro ? st.consultaCadastro(d).catch(e => ({ erro: e.message || String(e) })) : Promise.resolve(null)
+        ]);
+        const antes = {};
+        ['razao_social', 'logradouro', 'numero', 'bairro', 'cidade', 'uf', 'cep', 'codigo_municipio', 'ie', 'ind_ie'].forEach(k => { antes[k] = el(k) ? el(k).value : ''; });
+        const linhas = [], oficial = {};
+        const x = R.empresaDoCnpj(rec);
+        if (x) {
           const sit = x.situacao_receita; delete x.situacao_receita;
+          ['razao_social', 'logradouro', 'numero', 'bairro', 'cidade', 'uf', 'cep', 'codigo_municipio'].forEach(k => { oficial[k] = x[k]; });
           poe(x, ['codigo_municipio']);
-          CRM.avisoCampo(form, 'cnpj', sit && sit !== 'ATIVA' ? 'Atenção: na Receita o CNPJ está ' + esc(sit) + '.' : 'Dados da Receita preenchidos. Falta a inscrição estadual e se é contribuinte.');
+          linhas.push(sit && sit !== 'ATIVA' ? '⚠ <b>Receita: CNPJ ' + esc(sit) + '</b> — confirme com o cliente antes de vender.' : '✓ Receita: CNPJ ativo; razão social e endereço conferidos.');
+        } else linhas.push(rec && rec._status === 404 ? '⚠ CNPJ não encontrado na Receita.' : '⚠ A Receita não respondeu: confira o endereço à mão.');
+        const uf = String((x && x.uf) || el('uf').value || '').toUpperCase();
+        const difs = R.diferencasCadastro(antes, oficial);
+        if (uf && uf !== 'SP') linhas.push('Fora de SP: a inscrição estadual não é consultada (cliente de outro estado só compra como não contribuinte).');
+        else if (sef && sef.erro) linhas.push('⚠ A Sefaz não respondeu (' + esc(/rota desconhecida/.test(sef.erro) ? 'a consulta ainda não está ligada no serviço fiscal' : sef.erro) + '): preencha a inscrição e a situação à mão.');
+        else if (sef) {
+          const i = R.inscricaoDaSefaz(sef);
+          if (i) {
+            linhas.push((i.ok ? '✓ ' : '⚠ <b>') + esc(i.texto) + (i.ok ? '' : '</b>'));
+            if (i.ie) {
+              if (!R.digitos(antes.ie)) el('ie').value = i.ie;
+              else if (R.digitos(antes.ie) !== i.ie) difs.push({ campo: 'ie', rotulo: 'Inscrição estadual', atual: antes.ie, oficial: i.ie, mostraOficial: R.formataIE(i.ie) });
+            } else if (i.ind_ie === '9' && R.digitos(antes.ie)) difs.push({ campo: 'ie', rotulo: 'Inscrição estadual', atual: antes.ie, oficial: '', mostraOficial: 'sem inscrição em SP' });
+            if (i.ind_ie) {
+              if (!antes.ind_ie) el('ind_ie').value = i.ind_ie;
+              else if (antes.ind_ie !== i.ind_ie) difs.push({ campo: 'ind_ie', rotulo: 'Contribuinte do ICMS', atual: antes.ind_ie, oficial: i.ind_ie, mostraAtual: rotIE(antes.ind_ie), mostraOficial: rotIE(i.ind_ie) });
+            }
+            if (!x && i.endereco) poe(i.endereco, ['codigo_municipio']);
+          }
         }
-      } catch (e) { CRM.avisoCampo(form, 'cnpj', 'A busca do CNPJ não respondeu: preencha à mão.'); }
-      b.disabled = false; b.textContent = '🔍 Buscar pelo CNPJ';
-    });
+        if (R.digitos(el('ie').value) && el('ind_ie').value === '1' && !R.ieValida(el('ie').value, uf || 'SP')) linhas.push('⚠ <b>A inscrição estadual digitada não confere</b> (dígito de SP).');
+        mostra(linhas, difs);
+      } catch (e) { CRM.avisoCampo(form, 'cnpj', 'A busca não respondeu: preencha à mão.'); }
+      b.disabled = false; b.textContent = '🔍 Buscar na Receita e na Sefaz';
+    };
+    b.addEventListener('click', buscar);
+    // sozinho: cadastro novo, ou que ainda não diz se é contribuinte
+    el('cnpj').addEventListener('change', () => { const d = R.chaveDoc(el('cnpj').value); if (R.ehCNPJ(d) && R.cnpjValido(d) && (!existente || !el('ind_ie').value)) buscar(); });
+    if (existente && R.ehCNPJ(R.chaveDoc(existente.cnpj)) && R.cnpjValido(R.chaveDoc(existente.cnpj)) && !existente.ind_ie) setTimeout(buscar, 0);
     const rot = el('cnpj').closest('label');
     if (rot) rot.appendChild(b);
   }
@@ -469,10 +513,13 @@
           CRM.avisoCampo(form, 'cnpj', R.ehCNPJ(d) && !R.cnpjValido(d) ? 'CNPJ parece inválido (confira os dígitos).' : '');
         });
         form.elements.cep.addEventListener('blur', () => { const d = R.digitos(form.elements.cep.value); if (d.length === 8) form.elements.cep.value = d.replace(/(\d{5})(\d{3})/, '$1-$2'); });
-        dadosDaNota(form);
+        dadosDaNota(form, e);
       },
       aoSalvar: async v => {
         if (!g) delete v.responsavel_id;
+        // quem tem CNPJ ou CPF diz se é contribuinte (com a inscrição certa), isento ou não contribuinte (30/10/2026)
+        const errIE = R.errosInscricao(v);
+        if (errIE.length) throw new Error(errIE.join(' '));
         await CRM.barraDuplicado(v, e);
         if (!e) CRM.confereContatoCadastro([v.telefone, v.whatsapp], v.email);
         if (e) {

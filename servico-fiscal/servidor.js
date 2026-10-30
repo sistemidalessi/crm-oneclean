@@ -11,7 +11,8 @@
      FISCAL_PORTA               porta local (padrão 8787; o Caddy encaminha para 127.0.0.1)
    Rotas (POST com JSON): /status, /previa, /emitir, /consultar, /reenviar, /cancelar, /cce, /inutilizar, /dfe (notas de
    compra: distribuição pelo NSU ou pela chave), /ciencia (Ciência da Operação de uma nota de compra), /manifestar (resposta
-   definitiva: confirmação, desconhecimento, operação não realizada); GET /saude.
+   definitiva: confirmação, desconhecimento, operação não realizada), /cadastro (consulta cadastro da Sefaz-SP pelo CNPJ: inscrição
+   estadual e se está habilitada; sempre em produção, é só leitura); GET /saude.
    Certificado novo (renovação do A1): trocar o arquivo e mandar "systemctl reload oneclean-fiscal" (SIGHUP relê). */
 
 const http = require('http');
@@ -25,7 +26,7 @@ const PD = require('./pedido');
 const O = require('./outras');
 const D = require('./dfe');
 
-const VERSAO = '2026-10-27a';
+const VERSAO = '2026-10-30a';
 const env = process.env;
 let cert = null;   // { certPem, keyPem, dados }
 
@@ -126,6 +127,8 @@ const ROTAS = {
     r.docs.forEach(d => { if (d.tipo === 'nota' && d.chave && d.xml) guarda(d.chave + '-compra.xml', d.xml); });
     return r;
   },
+  // Consulta cadastro (30/10/2026): sempre na produção (é só leitura; a homologação tem cadastro de teste)
+  'POST /cadastro': async b => S.cadastro(cfgSefaz('producao'), { uf: 'SP', cnpj: b.cnpj, cpf: b.cpf, ie: b.ie }),
   'POST /ciencia': async b => D.daCiencia(cfgSefaz(b.ambiente), { cnpj: b.cnpj, chave: b.chave, quando: agoraSP() }),
   // resposta definitiva à nota de compra (confirmacao | desconhecimento | nao_realizada, esta com justificativa)
   'POST /manifestar': async b => D.manifesta(cfgSefaz(b.ambiente), { cnpj: b.cnpj, chave: b.chave, quando: agoraSP(), tipo: b.tipo, justificativa: b.justificativa })
