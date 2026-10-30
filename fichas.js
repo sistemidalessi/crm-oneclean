@@ -405,10 +405,20 @@
   };
   const semAcento = t => R.normaliza(t).replace(/[^a-z0-9]/g, '');
   // Receita (BrasilAPI) e Sefaz-SP (consulta cadastro pela crm-fiscal) ao mesmo tempo; o que não responder vem null/{erro}
+  // A Receita vai pelo servidor (crm-fiscal, acao 'receita': BrasilAPI e, se falhar, CNPJá); do navegador a BrasilAPI
+  // passava do tempo (30/10/2026). Sem o servidor (modo local), tenta a BrasilAPI direto.
+  const receita = async d => {
+    const st = CRM.store();
+    if (st.consultaReceita) {
+      try { const r = await st.consultaReceita(d); return r && r.dados ? r.dados : null; }
+      catch (e) { return /não encontrado/.test(e.message || '') ? { _status: 404 } : null; }   // o servidor já tentou as duas fontes
+    }
+    return busca('https://brasilapi.com.br/api/cnpj/v1/' + d, 12000).catch(() => null);
+  };
   const oficialPorCnpj = d => {
     const st = CRM.store();
     return Promise.all([
-      busca('https://brasilapi.com.br/api/cnpj/v1/' + d, 12000).catch(() => null),
+      receita(d),
       st.consultaCadastro ? st.consultaCadastro(d).catch(e => ({ erro: e.message || String(e) })) : Promise.resolve(null)
     ]);
   };
@@ -471,6 +481,8 @@
         if (x) {
           const sit = x.situacao_receita; delete x.situacao_receita;
           ['razao_social', 'logradouro', 'numero', 'bairro', 'cidade', 'uf', 'cep', 'codigo_municipio'].forEach(k => { oficial[k] = x[k]; });
+          // telefone e e-mail da Receita costumam ser os do contador da empresa (30/10/2026): não entram no cadastro
+          delete x.telefone; delete x.email;
           poe(x, ['codigo_municipio']);
           linhas.push(sit && sit !== 'ATIVA' ? '⚠ <b>Receita: CNPJ ' + esc(sit) + '</b> — confirme com o cliente antes de vender.' : '✓ Receita: CNPJ ativo; razão social e endereço conferidos.');
         } else linhas.push(rec && rec._status === 404 ? '⚠ CNPJ não encontrado na Receita.' : '⚠ A Receita não respondeu: confira o endereço à mão.');
@@ -604,10 +616,8 @@
               cidade: x.cidade, uf: x.uf, codigo_municipio: x.codigo_municipio };
             if (vazio('nome')) el('nome').value = x.nome || x.razao_social;
             if (vazio('cidade')) el('cidade').value = x.cidade;
-            if (vazio('telefone') && x.telefone) el('telefone').value = x.telefone;
-            if (vazio('email') && x.email) el('email').value = x.email;
             linhas.push(sit && sit !== 'ATIVA' ? '⚠ <b>Receita: CNPJ ' + esc(sit) + '</b> — confirme com o cliente antes de vender.'
-              : '✓ Receita: ' + esc(x.razao_social) + ' — endereço guardado no cadastro.');
+              : '✓ Receita: ' + esc(x.razao_social) + ' — endereço guardado no cadastro. Telefone e e-mail não vêm da Receita (costumam ser do contador): pergunte ao cliente.');
             checaDuplicado(form);
           } else linhas.push(rec && rec._status === 404 ? '⚠ CNPJ não encontrado na Receita.' : '⚠ A Receita não respondeu: o endereço fica para completar na ficha.');
           const uf = String((x && x.uf) || '').toUpperCase(), semSefaz = avisoSefaz(uf, sef);

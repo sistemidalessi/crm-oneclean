@@ -638,6 +638,8 @@
   Supa.prototype.dfeEstado = async function () { return unwrap(await this.sb.from('crm_dfe_estado').select('*').eq('id', 1).maybeSingle()); };
   // Inscrição estadual do cliente pela consulta cadastro da Sefaz-SP (crm-fiscal → serviço fiscal; 30/10/2026)
   Supa.prototype.consultaCadastro = async function (doc) { return this.fiscal({ acao: 'cadastro', cnpj: doc }); };
+  // Dados públicos da Receita pelo CNPJ, pelo servidor (BrasilAPI e, se falhar, CNPJá); { fonte, dados } no formato da BrasilAPI
+  Supa.prototype.consultaReceita = async function (doc) { return this.fiscal({ acao: 'receita', cnpj: doc }); };
   Supa.prototype.dfeBuscar = async function () { return this.fiscal({ acao: 'dfe_buscar' }); };
   Supa.prototype.dfeCiencia = async function (chave) { return this.fiscal({ acao: 'dfe_ciencia', chave: chave || null }); };
   // resposta definitiva (19/10/2026): confirmacao | desconhecimento | nao_realizada (com justificativa); só o administrador

@@ -359,6 +359,29 @@ Deno.serve(async (req) => {
   try { b = await req.json(); } catch { return resposta(400, { erro: 'corpo inválido' }); }
   const ehDfe = /^dfe_/.test(String(b.acao || ''));
   if (!eu || !eu.ativo) return resposta(403, { erro: 'usuário inativo' });
+  // Dados públicos da Receita pelo CNPJ (30/10/2026): do servidor, porque do navegador a BrasilAPI passava do tempo; se ela
+  // falhar, a CNPJá (open.cnpja.com) — a resposta sai no formato da BrasilAPI, que a tela já lê (regras.js empresaDoCnpj).
+  if (b.acao === 'receita') {
+    if (eu.papel === 'motorista') return resposta(403, { erro: 'o motorista não cadastra cliente' });
+    const doc = String(b.cnpj || '').replace(/\D/g, '');
+    if (doc.length !== 14) return resposta(400, { erro: 'CNPJ inválido' });
+    const pede = async (u: string) => { const r = await fetch(u, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(10000) }); return { st: r.status, j: await r.json().catch(() => null) }; };
+    let naoAchou = false;
+    try { const r = await pede('https://brasilapi.com.br/api/cnpj/v1/' + doc); if (r.st === 200 && r.j && r.j.cnpj) return resposta(200, { fonte: 'BrasilAPI', dados: r.j }); naoAchou = r.st === 404; } catch { /* tenta a outra */ }
+    try {
+      const r = await pede('https://open.cnpja.com/office/' + doc);
+      const j = r.j as Linha | null;
+      if (r.st === 200 && j && j.taxId) {
+        const ad = (j.address || {}) as Linha, co = (j.company || {}) as Linha, fone = (((j.phones || []) as Linha[])[0] || {}) as Linha;
+        return resposta(200, { fonte: 'CNPJá', dados: { cnpj: j.taxId, razao_social: co.name || '', nome_fantasia: j.alias || '', cep: ad.zip || '', descricao_tipo_de_logradouro: '',
+          logradouro: ad.street || '', numero: ad.number || '', complemento: ad.details || '', bairro: ad.district || '', municipio: ad.city || '', uf: ad.state || '',
+          codigo_municipio_ibge: ad.municipality || '', ddd_telefone_1: String(fone.area || '') + String(fone.number || ''), email: '',
+          descricao_situacao_cadastral: String(((j.status || {}) as Linha).text || '').toUpperCase() } });
+      }
+      naoAchou = naoAchou || r.st === 404;
+    } catch { /* sem resposta */ }
+    return resposta(naoAchou ? 404 : 502, { erro: naoAchou ? 'CNPJ não encontrado na Receita' : 'a Receita não respondeu (BrasilAPI e CNPJá)' });
+  }
   if (b.acao === 'cadastro') {
     if (eu.papel === 'motorista') return resposta(403, { erro: 'o motorista não cadastra cliente' });
     const doc = String(b.cnpj || '').toUpperCase().replace(/[^0-9A-Z]/g, '');
