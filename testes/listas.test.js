@@ -21,3 +21,12 @@ test('listas: período e seletor', () => {
   assert.deepEqual(L.aplica({ busca: '2' }, l, o).map(x => x.n), [2]);
   assert.deepEqual(L.aplica({}, l, o).map(x => x.n), [1, 2, 3]);
 });
+
+test('filtro nas colunas: cada coluna com filtro tem de casar', () => {
+  const linha = ['NF 2861', 'COLEGIO INTELLECTUS LTDA', 'PQ. BRASIL · SÃO PAULO', 'Alysson'];
+  assert.equal(L.casaColunas([], linha), true);
+  assert.equal(L.casaColunas(['', 'intellectus', 'sao paulo'], linha), true);
+  assert.equal(L.casaColunas(['2861', '', 'brasil'], linha), true);
+  assert.equal(L.casaColunas(['2862'], linha), false);
+  assert.equal(L.casaColunas(['', '', '', 'renata'], linha), false);
+});

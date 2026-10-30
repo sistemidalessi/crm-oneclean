@@ -50,7 +50,13 @@
     });
   }
 
-  const C = { casa, dia, aplica };
+  // filtro por coluna (30/10/2026): filtros = [texto por coluna]; textos = [texto de cada célula]. Casa se cada coluna com
+  // filtro casa (a mesma regra da pesquisa: palavras sem acento, número pelos dígitos)
+  function casaColunas(filtros, textos) {
+    return (filtros || []).every((f, i) => !f || casa(f, textos[i] == null ? '' : textos[i]));
+  }
+
+  const C = { casa, dia, aplica, casaColunas };
   raiz.CRMListas = C;
   if (typeof module !== 'undefined' && module.exports) module.exports = C;
   if (typeof document === 'undefined' || !raiz.CRM) return;
@@ -113,5 +119,96 @@
       CRM.baixarCSV(p.nome, p.cabecalho, l);
     }
   });
-  CRM.Lista = { estado, filtra, corta, mais, barra, planilha, casa, dia };
+
+  // ================================================================== filtro nas colunas de todas as tabelas
+  // 30/10/2026, Anderson (na tela de Rotas): "coloca um filtro nesses títulos, nota, cliente, bairro… E tudo no sistema, tudo,
+  // coloque um filtro". Toda tabela da casa (class "tabela") com mais de 5 linhas ganha, debaixo dos títulos, uma linha com
+  // uma caixa por coluna; o filtro esconde as linhas que não casam, sem ir ao banco, e volta ao redesenhar a tela. Filtra o
+  // que está na tela: onde há "Mostrar mais", a pesquisa de cima procura em tudo. Tabela que não quer: data-sem-filtro.
+  const filtrosCol = {};
+  const MIN_LINHAS = 6;
+  const hash = s => { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return (h >>> 0).toString(36); };
+  const textoTit = el => (el ? Array.from(el.childNodes).filter(n => n.nodeType === 3 || (n.nodeType === 1 && !/^(SMALL|BUTTON|SPAN)$/.test(n.tagName))).map(n => n.textContent).join(' ').replace(/\s+/g, ' ').trim() : '');
+  function linhasDe(t) { return Array.from((t.tBodies[0] || { rows: [] }).rows); }
+  // textos das células por coluna, contando colspan
+  function textosDa(tr, n) {
+    const out = new Array(n).fill('');
+    let k = 0;
+    Array.from(tr.cells).forEach(td => {
+      const txt = td.textContent + ' ' + Array.from(td.querySelectorAll('input:not([type=checkbox]):not([type=radio]), select')).map(x => x.tagName === 'SELECT' ? (x.options[x.selectedIndex] || {}).text || '' : x.value).join(' ');
+      for (let j = 0; j < (td.colSpan || 1) && k < n; j++) out[k++] = txt;
+    });
+    return out;
+  }
+  function aplicaFiltro(t) {
+    const st = filtrosCol[t.dataset.filtroCol] || [], n = (t.tHead.rows[0].cells || []).length, ativo = st.some(Boolean);
+    let vis = 0, tot = 0;
+    linhasDe(t).forEach(tr => {
+      // linha de aviso ("nenhum…") que ocupa a tabela toda fica sempre
+      if (tr.cells.length === 1 && (tr.cells[0].colSpan || 1) >= n) { tr.hidden = false; return; }
+      tot++;
+      const ok = !ativo || C.casaColunas(st, textosDa(tr, n));
+      tr.hidden = !ok;
+      if (ok) vis++;
+    });
+    let conta = t.parentNode && t.parentNode.querySelector(':scope > .filtro-col-conta');
+    if (ativo) {
+      if (!conta) { conta = document.createElement('p'); conta.className = 'dica filtro-col-conta'; t.insertAdjacentElement('afterend', conta); }
+      conta.innerHTML = '';
+      conta.append('Filtro nas colunas: ' + vis + ' de ' + tot + ' linha(s). ');
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'mini'; b.textContent = 'limpar filtro';
+      b.addEventListener('click', () => { delete filtrosCol[t.dataset.filtroCol]; t.querySelectorAll('input.filtro-col').forEach(i => { i.value = ''; }); aplicaFiltro(t); });
+      conta.append(b);
+    } else if (conta) conta.remove();
+  }
+  function preparaTabela(t) {
+    if (!t || t.dataset.filtroCol || t.hasAttribute('data-sem-filtro') || !t.tHead || t.tHead.rows.length !== 1) return;
+    const cab = t.tHead.rows[0], ths = Array.from(cab.cells);
+    if (ths.length < 2 || ths.some(th => (th.colSpan || 1) > 1)) return;
+    const sec = t.closest('section, .cartao, details, .ficha, dialog');
+    const tit = sec ? textoTit(sec.querySelector('h1, h2, h3, summary')) : '';
+    const nomes = ths.map(th => textoTit(th).replace(/[▲▼↑↓]/g, '').trim()); // sem a seta da ordenação: o filtro fica ao trocar a ordem
+    const chave = hash((CRM.estado && CRM.estado.aba || '') + '|' + tit + '|' + nomes.join('·'));
+    const st = filtrosCol[chave];
+    if (linhasDe(t).length < MIN_LINHAS && !(st && st.some(Boolean))) return;
+    t.dataset.filtroCol = chave;
+    const tr = document.createElement('tr');
+    tr.className = 'filtro-col-linha';
+    ths.forEach((th, i) => {
+      const c = document.createElement('th');
+      // coluna sem título (caixa de marcar, botões) fica sem filtro
+      if (nomes[i]) {
+        const inp = document.createElement('input');
+        inp.type = 'search'; inp.className = 'filtro-col'; inp.id = 'fc_' + chave + '_' + i;
+        inp.placeholder = 'filtrar'; inp.setAttribute('aria-label', 'Filtrar a coluna ' + nomes[i]);
+        inp.value = (st && st[i]) || '';
+        inp.addEventListener('input', () => {
+          const a = filtrosCol[chave] || (filtrosCol[chave] = []);
+          a[i] = inp.value;
+          aplicaFiltro(t);
+        });
+        c.appendChild(inp);
+      }
+      tr.appendChild(c);
+    });
+    t.tHead.appendChild(tr);
+    if (st && st.some(Boolean)) aplicaFiltro(t);
+  }
+  function filtraTabelas(raizEl) {
+    if (!raizEl || !raizEl.querySelectorAll) return;
+    if (raizEl.matches && raizEl.matches('table.tabela')) preparaTabela(raizEl);
+    raizEl.querySelectorAll('table.tabela').forEach(preparaTabela);
+  }
+  // tabelas que aparecem fora do redesenho da tela (fichas, janelas): o observador cuida
+  if (typeof MutationObserver !== 'undefined') {
+    const obs = new MutationObserver(l => l.forEach(m => m.addedNodes.forEach(n => { if (n.nodeType === 1 && !(n.closest && n.closest('tr'))) filtraTabelas(n); })));
+    const liga = () => obs.observe(document.body, { childList: true, subtree: true });
+    if (document.body) liga(); else document.addEventListener('DOMContentLoaded', liga);
+  }
+  // as linhas que o filtro deixou à vista (para "marcar todas" marcar só elas)
+  const escondido = sel => { const el = typeof document !== 'undefined' && document.querySelector(sel); return !!(el && el.closest('tr[hidden]')); };
+  const visiveis = (raizEl, sel) => Array.from((raizEl || document).querySelectorAll(sel)).filter(el => !el.closest('tr[hidden]'));
+  CRM.filtraTabelas = filtraTabelas;
+
+  CRM.Lista = { estado, filtra, corta, mais, barra, planilha, casa, dia, visiveis, escondido };
 })(typeof window !== 'undefined' ? window : globalThis);

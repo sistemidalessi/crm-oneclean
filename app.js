@@ -483,6 +483,7 @@
     c.innerHTML = tela.render(al);
     if (tela.depois) tela.depois(c);
     CRM.aplicaBarras(c);
+    if (CRM.filtraTabelas) CRM.filtraTabelas(c); // filtro nas colunas (listas.js), antes de devolver o cursor à caixa
     voltaLugar(c, lugar);
     if (foco && document.getElementById(foco)) {
       const el = document.getElementById(foco);

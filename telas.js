@@ -871,7 +871,7 @@
     'selecionar-todos': (tela, el) => {
       const lista = tela === 'empresas' ? empresasFiltradas() : negociosFiltrados();
       const lim = F(tela).limite || LIMITE;
-      lista.slice(0, lim).forEach(x => (el.checked ? selecao[tela].add(x.id) : selecao[tela].delete(x.id)));
+      lista.slice(0, lim).filter(x => !(CRM.Lista && CRM.Lista.escondido('[data-acao="selecionar"][data-id="' + tela + ':' + x.id + '"]'))).forEach(x => (el.checked ? selecao[tela].add(x.id) : selecao[tela].delete(x.id)));
       CRM.render();
     },
     'limpar-selecao': tela => { selecao[tela].clear(); CRM.render(); },

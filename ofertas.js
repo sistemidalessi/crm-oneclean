@@ -392,7 +392,7 @@
     'of-textos': id => { const o = acha(id); if (o) formTextos(o); },
     'of-ativa': async id => { const o = acha(id); if (!o) return; try { await CRM.atualizar('ofertas', id, { ativa: !o.ativa }); CRM.toast(o.ativa ? 'Oferta encerrada.' : 'Oferta reaberta.'); } catch (e) { CRM.falhou(e); } },
     'of-excluir': async id => { const o = acha(id); if (!o || !confirm('Excluir a oferta "' + o.titulo + '"? Os e-mails enviados ficam no histórico dos clientes.')) return; try { await CRM.remover('ofertas', id); aberta = null; CRM.toast('Oferta excluída.'); } catch (e) { CRM.falhou(e); } },
-    'of-marca-todos': id => { const o = acha(id); if (!o) return; publicoDe(o).filter(podeEmail).forEach(p => marcados.add(p.empresa_id)); CRM.render(); },
+    'of-marca-todos': id => { const o = acha(id); if (!o) return; publicoDe(o).filter(podeEmail).filter(p => !(CRM.Lista && CRM.Lista.escondido('[data-of-cli="' + p.empresa_id + '"]'))).forEach(p => marcados.add(p.empresa_id)); CRM.render(); },
     'of-marca-nenhum': () => { marcados = new Set(); CRM.render(); },
     'of-enviar': async id => {
       const o = acha(id); if (!o || enviando) return;

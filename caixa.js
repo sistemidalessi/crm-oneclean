@@ -950,7 +950,7 @@
       CRM.acoes['cx-marca'](id, c, ev);
     },
     'cx-marca-todas-celula': (id, el) => { const c = el.querySelector('input[type=checkbox]'); if (c) { c.checked = !c.checked; CRM.acoes['cx-marca-todas'](id, c); } },
-    'cx-marca-todas': (id, el) => { ordemLista.forEach(x => (el.checked ? marcados.add(x) : marcados.delete(x))); atualizaSoma(); },
+    'cx-marca-todas': (id, el) => { ordemLista.filter(x => !(CRM.Lista && CRM.Lista.escondido('[data-acao="cx-marca"][data-id="' + x + '"]'))).forEach(x => (el.checked ? marcados.add(x) : marcados.delete(x))); atualizaSoma(); },
     'cx-soma-limpar': qual => {
       if (qual === 'grade') { naGrade.clear(); atualizaSomaGrade(); return; }
       marcados.clear(); ultimoMarcado = null; atualizaSoma(); const t = document.querySelector('[data-acao="cx-marca-todas"]'); if (t) t.checked = false; },

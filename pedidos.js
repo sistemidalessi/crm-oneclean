@@ -987,7 +987,7 @@
     }),
     'pd-comentar': vivo(async id => { const t = document.querySelector('[data-pd-coment]'); if (!t || !t.value.trim()) return; troca(await CRM.store().pedidoComentar(id, t.value.trim())); CRM.render(); }),
     'pd-imprimir': id => { const p = ped(id); if (p) imprimir('<div class="sp-doc">' + htmlPedidoImpresso(p, false) + '</div>', 'Pedido ' + p.numero); },
-    'pd-marcar-todos': () => { (peds || []).filter(p => P.situacao(p).chave === 'liberado').forEach(p => f.marcados.add(p.id)); CRM.render(); },
+    'pd-marcar-todos': () => { (peds || []).filter(p => P.situacao(p).chave === 'liberado').filter(p => !(CRM.Lista && CRM.Lista.escondido('[data-pd-marca="' + p.id + '"]'))).forEach(p => f.marcados.add(p.id)); CRM.render(); },
     'pd-bolao-montar': vivo(async () => {
       const ids = [...f.marcados].filter(id => ped(id) && P.situacao(ped(id)).chave === 'liberado');
       if (!ids.length) { CRM.toast('Marque os pedidos que vão sair.', true); return; }

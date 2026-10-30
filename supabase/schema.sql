@@ -4024,7 +4024,7 @@ begin
       from public.crm_notas n
       left join public.crm_empresas e on e.id = n.empresa_id
       left join public.crm_usuarios u on u.user_id = n.vendedor_id
-     where not n.cancelada and n.emitida_em >= p_desde::timestamptz
+     where not n.cancelada and n.emitida_em >= (greatest(p_desde, coalesce(public.crm_logistica_desde(), p_desde))::timestamp at time zone 'America/Sao_Paulo')
        and not exists (select 1 from public.crm_entregas x where x.nota_id = n.id)
        -- simples faturamento da entrega futura (5922/6922) não leva mercadoria: quem vai na rota é a remessa (24/10/2026)
        and not exists (select 1 from public.crm_nota_itens i where i.nota_id = n.id and i.cfop in ('5922', '6922'))
@@ -5770,7 +5770,7 @@ begin
   -- entregas
   select jsonb_build_object('hoje', count(*) filter (where dia = hoje), 'atrasadas', count(*) filter (where dia < hoje and situacao = 'pendente'),
     'problemas_7_dias', count(*) filter (where situacao = 'problema' and dia > hoje - 7))
-    into x from public.crm_entregas;
+    into x from public.crm_entregas where dia >= coalesce(public.crm_logistica_desde(), dia);
   r := r || jsonb_build_object('entregas', x);
   -- vigia das notas do FKN (plano B depois da virada)
   r := r || jsonb_build_object('vigia_ultimo_sinal', (select max(ultimo_sinal) from public.crm_integracoes where ativo and coalesce(uso, 'notas') = 'notas'));
@@ -6095,6 +6095,15 @@ drop policy if exists le on public.crm_ia_analises_areas;
 create policy le on public.crm_ia_analises_areas for select to authenticated
   using ((area = 'logistica' and ((select public.crm_eh_gestor()) or (select public.crm_eh_logistica()))) or (select public.crm_eh_admin()));
 
+-- 30/10/2026 (Anderson: "dá uma zerada, porque agora que a gente vai começar realmente a rodar pelo sistema"): a logística
+-- conta a partir de crm_sistema.logistica_desde (rotas, atrasadas, notas sem rota, painel do Diretor e o resumo do CEO). O
+-- que ficou antes (rotas de teste e notas do tempo do FKN) sai das contas, sem apagar nada; o relatório de entregas mostra tudo.
+create or replace function public.crm_logistica_desde() returns date language sql stable security definer set search_path = public as $$
+  select coalesce((select nullif(btrim(valor), '')::date from public.crm_sistema where chave = 'logistica_desde'), (select min(dia) from public.crm_entregas));
+$$;
+revoke all on function public.crm_logistica_desde() from public, anon;
+grant execute on function public.crm_logistica_desde() to authenticated, service_role;
+
 create or replace function public.crm_dl_painel() returns jsonb language plpgsql stable security definer set search_path = public as $$
 declare
   hoje date := (now() at time zone 'America/Sao_Paulo')::date;
@@ -6102,13 +6111,13 @@ declare
   r jsonb;
 begin
   if not (public.crm_eh_gestor() or public.crm_eh_logistica()) then raise exception 'só a logística e a gestão'; end if;
-  select min(dia) into inicio from public.crm_entregas;
+  inicio := public.crm_logistica_desde(); -- 30/10/2026: a logística "zerada" começa aqui (crm_sistema.logistica_desde)
   with e as (
     select x.*, n.numero::int nf, coalesce(em.nome, n.cliente_nome) cliente, coalesce(em.cidade, n.cidade) cidade, em.bairro,
            coalesce(u.nome, 'sem motorista') motorista
       from public.crm_entregas x join public.crm_notas n on n.id = x.nota_id
       left join public.crm_empresas em on em.id = x.empresa_id left join public.crm_usuarios u on u.user_id = x.motorista_id
-     where x.dia >= hoje - 30)
+     where x.dia >= greatest(hoje - 30, coalesce(inicio, hoje - 30)))
   select jsonb_build_object(
     'hoje', hoje,
     'rota_desde', inicio,
@@ -6132,13 +6141,13 @@ begin
         'mais_antigas', coalesce((select jsonb_agg(z) from (select jsonb_build_object('emitida', t.d, 'dias', hoje - t.d, 'nf', t.numero, 'cliente', t.cliente, 'cidade', t.cidade) z
            from (select (n.emitida_em at time zone 'America/Sao_Paulo')::date d, n.numero::int numero, coalesce(em.nome, n.cliente_nome) cliente, coalesce(em.cidade, n.cidade) cidade
                    from public.crm_notas n left join public.crm_empresas em on em.id = n.empresa_id
-                  where inicio is not null and not n.cancelada and n.emitida_em >= inicio::timestamptz and (n.emitida_em at time zone 'America/Sao_Paulo')::date < hoje
+                  where inicio is not null and not n.cancelada and n.emitida_em >= (inicio::timestamp at time zone 'America/Sao_Paulo') and (n.emitida_em at time zone 'America/Sao_Paulo')::date < hoje
                     and not exists (select 1 from public.crm_entregas x where x.nota_id = n.id)
                     and not exists (select 1 from public.crm_nota_itens i where i.nota_id = n.id and i.cfop in ('5922', '6922'))
                   order by n.emitida_em limit 10) t) q), '[]'::jsonb),
         'observacao', 'pode ser retirada no balcão ou transportadora: conferir antes de cobrar a rota')
       from (select n.valor_total, (n.emitida_em at time zone 'America/Sao_Paulo')::date d from public.crm_notas n
-             where inicio is not null and not n.cancelada and n.emitida_em >= inicio::timestamptz and (n.emitida_em at time zone 'America/Sao_Paulo')::date < hoje
+             where inicio is not null and not n.cancelada and n.emitida_em >= (inicio::timestamp at time zone 'America/Sao_Paulo') and (n.emitida_em at time zone 'America/Sao_Paulo')::date < hoje
                and not exists (select 1 from public.crm_entregas x where x.nota_id = n.id)
                and not exists (select 1 from public.crm_nota_itens i where i.nota_id = n.id and i.cfop in ('5922', '6922'))) s),
     'pedidos', (select jsonb_build_object(

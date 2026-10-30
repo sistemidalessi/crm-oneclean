@@ -370,7 +370,7 @@
   function depoisAba(el) {
     carrega();
     const mt = el.querySelector('#credMarcaTodos');
-    if (mt) mt.addEventListener('change', () => el.querySelectorAll('.cred-marca').forEach(x => { x.checked = mt.checked; }));
+    if (mt) mt.addEventListener('change', () => el.querySelectorAll('.cred-marca').forEach(x => { if (!mt.checked || !x.closest('tr[hidden]')) x.checked = mt.checked; }));
     const b = el.querySelector('#credBusca');
     if (b) b.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); CRM.acoes['cred-buscar'](); } });
     // a busca redesenha só a tabela (redesenhar a tela tiraria o cursor da caixa)

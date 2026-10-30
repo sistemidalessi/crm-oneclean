@@ -258,6 +258,11 @@ td .barra { width: 110px; }
 .tabela th, .tabela td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--borda); vertical-align: middle; }
 .tabela th { font-size: .72rem; color: var(--suave); font-weight: 600; text-transform: uppercase; letter-spacing: .4px; white-space: nowrap; background: var(--papel); }
 .tabela th.num, .tabela td.num { text-align: right; }
+/* filtro nas colunas (listas.js, 30/10/2026) */
+.tabela tr[hidden] { display: none; }
+.tabela thead tr.filtro-col-linha th { padding-top: 0; padding-bottom: 6px; text-transform: none; letter-spacing: 0; }
+.tabela input.filtro-col { width: 100%; min-width: 64px; max-width: 220px; padding: 3px 6px; font-size: .78rem; border: 1px solid var(--borda); border-radius: 6px; background: var(--papel); color: inherit; font-weight: 400; }
+.filtro-col-conta { margin: 6px 0 0; }
 /* telas mais suaves (18/10/2026): linhas mais altas, listras leves e a linha sob o mouse destacada */
 .tabela th, .tabela td { padding: 10px 12px; }
 .tabela tbody tr:nth-child(even) > td { background: rgba(15, 35, 64, .022); }

@@ -258,7 +258,12 @@
   // ============================================================ ações e registro das telas
   Object.assign(CRM.acoes, {
     'rt-atualizar': () => recarrega(),
-    'rt-marcar-todas': () => { if (f.marcadas.size === dados.cand.length) f.marcadas.clear(); else dados.cand.forEach(n => f.marcadas.add(n.nota_id)); CRM.render(); },
+    // 30/10/2026: com o filtro nas colunas, marca (ou desmarca) só as notas que aparecem
+    'rt-marcar-todas': () => {
+      const vis = CRM.Lista.visiveis(document, '[data-rt-marca]').map(cb => cb.dataset.rtMarca), todas = vis.length && vis.every(id => f.marcadas.has(id));
+      vis.forEach(id => (todas ? f.marcadas.delete(id) : f.marcadas.add(id)));
+      CRM.render();
+    },
     'rt-por': () => {
       const l = dados.cand.filter(n => f.marcadas.has(n.nota_id));
       if (!l.length) return;

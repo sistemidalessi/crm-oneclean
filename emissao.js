@@ -978,7 +978,7 @@
     },
     'nf-emitir': id => emitir(id),
     'nf-lote': () => lote(),
-    'nf-marcar-todos': () => { (CRM.pedidos.separados ? CRM.pedidos.separados() : []).filter(podeEmitir).forEach(p => marcados.add(p.id)); CRM.render(); },
+    'nf-marcar-todos': () => { (CRM.pedidos.separados ? CRM.pedidos.separados() : []).filter(podeEmitir).filter(p => !(CRM.Lista && CRM.Lista.escondido('[data-nf-marca="' + p.id + '"]'))).forEach(p => marcados.add(p.id)); CRM.render(); },
     'nf-danfe': id => danfe(id),
     // nota do FKN (sem crm_nfe): o XML guardado no bucket crm-notas-xml, pela chave
     'nf-danfe-chave': async ch => {
@@ -1000,7 +1000,7 @@
       CRM.render();
     },
     'nf-marca-todas': () => {
-      const l = (busca && busca.notas) || [], todas = l.length && l.every(n => marcadasNf.has(n.chave));
+      const l = ((busca && busca.notas) || []).filter(n => !(CRM.Lista && CRM.Lista.escondido('[data-acao="nf-marca"][data-id="' + n.chave + '"]'))), todas = l.length && l.every(n => marcadasNf.has(n.chave));
       l.forEach(n => (todas ? marcadasNf.delete(n.chave) : marcadasNf.set(n.chave, n)));
       CRM.render();
     },
