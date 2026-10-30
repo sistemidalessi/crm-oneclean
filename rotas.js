@@ -135,7 +135,8 @@
   function cabRotas() {
     return '<div class="cabecalho"><div><h1>Rotas</h1><p class="sub">as notas emitidas entram aqui; escolha o motorista e a ordem e mande a rota: cada motorista vê as paradas dele no celular</p></div>' +
       '<div class="acoes"><label class="filtro-inline">Dia da entrega <input type="date" data-rt-dia value="' + esc(f.dia || hojeSP()) + '"></label> ' +
-      '<button type="button" class="btn sec" data-acao="rt-atualizar"' + (carregando ? ' disabled' : '') + '>Atualizar</button></div></div>';
+      '<button type="button" class="btn sec" data-acao="rt-atualizar"' + (carregando ? ' disabled' : '') + '>Atualizar</button>' +
+      (CRM.ehAdmin() ? ' <button type="button" class="mini" data-acao="rt-programada" title="clientes com entrega agendada: não contam como atrasados nem como nota sem rota">Entrega programada (' + programadas().length + ')</button>' : '') + '</div></div>';
   }
   function blocoMotorista(k, l, opMot) {
     l = l.slice().sort((a, b) => (a.ordem || 0) - (b.ordem || 0) || (a.numero || 0) - (b.numero || 0));
@@ -170,6 +171,10 @@
         '</tbody></table></div>' : '<p class="vazio">Nenhuma nota esperando entrega.</p>') + '</section>';
   }
 
+  // Entrega programada (30/10/2026, Anderson: "as notas da Uniserv são com entregas programadas… nem coloque aí que está
+  // atrasada"): a lista fica em crm_config.dados.entrega_programada e o banco (crm_entrega_programada) tira esses clientes das
+  // atrasadas e das notas sem rota do Diretor de Logística
+  const programadas = () => String((((CRM.estado.D.config || [])[0] || {}).dados || {}).entrega_programada || '').match(/\d[\d.\/-]{6,}\d/g) || [];
   async function regravaOrdem(lista) {
     for (const p of lista) await st().entregaAtualizar(p.id, { ordem: p.ordem });
     await recarrega();
@@ -258,6 +263,16 @@
   // ============================================================ ações e registro das telas
   Object.assign(CRM.acoes, {
     'rt-atualizar': () => recarrega(),
+    'rt-programada': () => {
+      const d = ((CRM.estado.D.config || [])[0] || {}).dados || {};
+      CRM.abrirForm({
+        titulo: 'Clientes com entrega programada',
+        intro: 'A entrega desses clientes é agendada (ex.: Uniserv): as notas deles não contam como entrega atrasada nem como nota sem rota no Diretor de Logística. Continuam podendo entrar na rota do dia agendado.',
+        campos: [{ nome: 'lista', rotulo: 'Um CNPJ por linha (8 primeiros números = todas as filiais); pode escrever o nome depois do número', tipo: 'textarea', largo: true }],
+        valores: { lista: d.entrega_programada || '' },
+        aoSalvar: async v => { await CRM.salvarConfig({ entrega_programada: v.lista || '' }); CRM.toast('Lista da entrega programada salva.'); }
+      });
+    },
     // 30/10/2026: com o filtro nas colunas, marca (ou desmarca) só as notas que aparecem
     'rt-marcar-todas': () => {
       const vis = CRM.Lista.visiveis(document, '[data-rt-marca]').map(cb => cb.dataset.rtMarca), todas = vis.length && vis.every(id => f.marcadas.has(id));

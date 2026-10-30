@@ -5770,7 +5770,8 @@ begin
     'compras_sem_entrada_5_dias', (select count(*) from public.crm_compras where situacao = 'pendente' and emitida_em < now() - interval '5 days'),
     'compras_chegaram_sem_entrada', (select count(*) from public.crm_compras where situacao = 'pendente' and chegou_em is not null)));
   -- entregas
-  select jsonb_build_object('hoje', count(*) filter (where dia = hoje), 'atrasadas', count(*) filter (where dia < hoje and situacao = 'pendente'),
+  select jsonb_build_object('hoje', count(*) filter (where dia = hoje), 'atrasadas', count(*) filter (where dia < hoje and situacao = 'pendente'
+      and not exists (select 1 from public.crm_notas nn where nn.id = nota_id and public.crm_entrega_programada(nn.cliente_doc))),
     'problemas_7_dias', count(*) filter (where situacao = 'problema' and dia > hoje - 7))
     into x from public.crm_entregas where dia >= coalesce(public.crm_logistica_desde(), dia);
   r := r || jsonb_build_object('entregas', x);
@@ -6148,6 +6149,20 @@ $$;
 revoke all on function public.crm_logistica_desde() from public, anon;
 grant execute on function public.crm_logistica_desde() to authenticated, service_role;
 
+-- Entrega programada (30/10/2026, Anderson: "as notas da Uniserv são com entregas programadas… nem coloque aí que está
+-- atrasada"): clientes da lista crm_config.dados.entrega_programada (um CNPJ por linha; 8 primeiros números = todas as
+-- filiais) não contam como entrega atrasada nem como nota sem rota (painel do Diretor de Logística e resumo do CEO).
+create or replace function public.crm_entrega_programada(p_doc text) returns boolean language sql stable security definer set search_path = public as $$
+  select coalesce((
+    select bool_or(d = x or (length(d) >= 8 and left(x, 8) = left(d, 8)))
+      from (select regexp_replace(m[1], '\D', '', 'g') d
+              from regexp_matches(coalesce((select dados ->> 'entrega_programada' from public.crm_config where id = 1), ''), '(\d[\d./-]{6,}\d)', 'g') m) l,
+           (select regexp_replace(coalesce(p_doc, ''), '\D', '', 'g') x) c
+     where x <> ''), false);
+$$;
+revoke all on function public.crm_entrega_programada(text) from public, anon;
+grant execute on function public.crm_entrega_programada(text) to authenticated, service_role;
+
 create or replace function public.crm_dl_painel() returns jsonb language plpgsql stable security definer set search_path = public as $$
 declare
   hoje date := (now() at time zone 'America/Sao_Paulo')::date;
@@ -6158,7 +6173,7 @@ begin
   inicio := public.crm_logistica_desde(); -- 30/10/2026: a logística "zerada" começa aqui (crm_sistema.logistica_desde)
   with e as (
     select x.*, n.numero::int nf, coalesce(em.nome, n.cliente_nome) cliente, coalesce(em.cidade, n.cidade) cidade, em.bairro,
-           coalesce(u.nome, 'sem motorista') motorista
+           coalesce(u.nome, 'sem motorista') motorista, public.crm_entrega_programada(n.cliente_doc) programada
       from public.crm_entregas x join public.crm_notas n on n.id = x.nota_id
       left join public.crm_empresas em on em.id = x.empresa_id left join public.crm_usuarios u on u.user_id = x.motorista_id
      where x.dia >= greatest(hoje - 30, coalesce(inicio, hoje - 30)))
@@ -6174,8 +6189,8 @@ begin
       from e where dia = hoje),
     'atrasadas', (select jsonb_build_object('quantidade', count(*), 'valor', coalesce(sum(valor_total_nf), 0), 'mais_antigas',
         coalesce((select jsonb_agg(z order by z->>'dia', z->>'nf') from (select jsonb_build_object('dia', a.dia, 'dias', hoje - a.dia, 'nf', a.nf, 'cliente', a.cliente, 'cidade', a.cidade,
-          'motorista', a.motorista, 'mandada_ao_celular', a.liberada) z from e a where a.dia < hoje and a.situacao = 'pendente' order by a.dia, a.nf limit 15) q), '[]'::jsonb))
-      from (select e.*, (select valor_total from public.crm_notas where id = e.nota_id) valor_total_nf from e where dia < hoje and situacao = 'pendente') p),
+          'motorista', a.motorista, 'mandada_ao_celular', a.liberada) z from e a where a.dia < hoje and a.situacao = 'pendente' and not a.programada order by a.dia, a.nf limit 15) q), '[]'::jsonb))
+      from (select e.*, (select valor_total from public.crm_notas where id = e.nota_id) valor_total_nf from e where dia < hoje and situacao = 'pendente' and not programada) p),
     'problemas_7_dias', coalesce((select jsonb_agg(jsonb_build_object('dia', p.dia, 'nf', p.nf, 'cliente', p.cliente, 'motorista', p.motorista, 'obs', left(coalesce(p.obs, ''), 200)) order by p.dia desc)
         from e p where p.situacao = 'problema' and p.dia > hoje - 7), '[]'::jsonb),
     'entregues_sem_canhoto', (select count(*) from e where situacao = 'entregue' and canhoto is null),
@@ -6188,12 +6203,14 @@ begin
                   where inicio is not null and not n.cancelada and n.emitida_em >= (inicio::timestamp at time zone 'America/Sao_Paulo') and (n.emitida_em at time zone 'America/Sao_Paulo')::date < hoje
                     and not exists (select 1 from public.crm_entregas x where x.nota_id = n.id)
                     and not exists (select 1 from public.crm_nota_itens i where i.nota_id = n.id and i.cfop in ('5922', '6922'))
+                    and not public.crm_entrega_programada(n.cliente_doc)
                   order by n.emitida_em limit 10) t) q), '[]'::jsonb),
-        'observacao', 'pode ser retirada no balcão ou transportadora: conferir antes de cobrar a rota')
+        'observacao', 'pode ser retirada no balcão ou transportadora: conferir antes de cobrar a rota; clientes com entrega programada (ex.: Uniserv) não entram aqui nem nas atrasadas: a entrega é agendada')
       from (select n.valor_total, (n.emitida_em at time zone 'America/Sao_Paulo')::date d from public.crm_notas n
              where inicio is not null and not n.cancelada and n.emitida_em >= (inicio::timestamp at time zone 'America/Sao_Paulo') and (n.emitida_em at time zone 'America/Sao_Paulo')::date < hoje
                and not exists (select 1 from public.crm_entregas x where x.nota_id = n.id)
-               and not exists (select 1 from public.crm_nota_itens i where i.nota_id = n.id and i.cfop in ('5922', '6922'))) s),
+               and not exists (select 1 from public.crm_nota_itens i where i.nota_id = n.id and i.cfop in ('5922', '6922'))
+               and not public.crm_entrega_programada(n.cliente_doc)) s),
     'pedidos', (select jsonb_build_object(
         'abertos', count(*) filter (where situacao = 'aberto'), 'em_separacao', count(*) filter (where situacao = 'separacao'),
         'separados_esperando_nfe', count(*) filter (where situacao = 'separado'),
