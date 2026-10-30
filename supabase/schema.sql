@@ -5558,7 +5558,7 @@ begin
     'dica', case when public.crm_produtos_do_crm() then 'O CRM é o dono do cadastro e do estoque.' else 'Ainda vem do FKN: na noite de 30/10, Produtos → "Passar o cadastro para o CRM".' end, 'lista', '[]'::jsonb);
   r := r || jsonb_build_object('chave', 'emissao', 'titulo', 'Emissão da NF-e', 'n', 0,
     'nivel', case when coalesce(cfg->'fiscal'->>'ambiente', '') = 'producao' then 'ok' else 'aviso' end,
-    'dica', case when coalesce(cfg->'fiscal'->>'ambiente', '') = 'producao' then 'Em produção, série 2.' else 'Em homologação: em 03/11, antes da 1ª nota, Fiscal → Emissão → "Passar para produção…".' end, 'lista', '[]'::jsonb);
+    'dica', case when coalesce(cfg->'fiscal'->>'ambiente', '') = 'producao' then 'Em produção (série 1, continuando a numeração do FKN).' else 'Em homologação: em 03/11, antes da 1ª nota, Fiscal → Emissão → "Passar para produção…".' end, 'lista', '[]'::jsonb);
 
   -- 12. vigia de notas
   select count(*) into n from public.crm_integracoes where ativo and ultimo_sinal > now() - interval '75 minutes';
@@ -5570,7 +5570,9 @@ begin
       'falta', coalesce(nullif(explicacao, ''), 'sem explicação'))) filter (where rn <= 30), '[]') into n, l
   from (select d2.*, row_number() over (order by abs(d2.diferenca) desc) rn from public.crm_estoque_difs d2
         where d2.foto_id = (select id from public.crm_estoque_fotos where conferida_em is not null order by gerado_em desc limit 1)
-          and (coalesce(d2.explicacao, '') = '' or d2.explicacao ilike '%sem entrada no CRM%')) y;
+          and (coalesce(d2.explicacao, '') = '' or d2.explicacao ilike '%sem entrada no CRM%')
+          -- 30/10/2026: diferença já acertada depois da foto (ajuste da virada) não conta mais
+          and coalesce((select s.saldo from public.crm_estoque_saldo s where s.codigo = d2.codigo), 0) <> d2.saldo_fkn) y;
   r := r || jsonb_build_object('chave', 'conferencia_fkn', 'titulo', 'Estoque: diferenças com o FKN sem explicação ou com compra sem entrada no CRM', 'n', n,
     'nivel', case when n = 0 then 'ok' else 'trava' end,
     'dica', 'Antes de "Passar o cadastro para o CRM": dar entrada nas notas de compra pendentes e contar o que sobrar; senão o estoque do CRM nasce errado.', 'lista', l);
