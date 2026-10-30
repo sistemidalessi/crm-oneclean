@@ -404,6 +404,16 @@
     try { const r = await fetch(url, { signal: ctl.signal }); return r.ok ? await r.json() : { _status: r.status }; } finally { clearTimeout(t); }
   };
   const semAcento = t => R.normaliza(t).replace(/[^a-z0-9]/g, '');
+  // Receita (BrasilAPI) e Sefaz-SP (consulta cadastro pela crm-fiscal) ao mesmo tempo; o que não responder vem null/{erro}
+  const oficialPorCnpj = d => {
+    const st = CRM.store();
+    return Promise.all([
+      busca('https://brasilapi.com.br/api/cnpj/v1/' + d, 12000).catch(() => null),
+      st.consultaCadastro ? st.consultaCadastro(d).catch(e => ({ erro: e.message || String(e) })) : Promise.resolve(null)
+    ]);
+  };
+  const avisoSefaz = (uf, sef) => uf && uf !== 'SP' ? 'Fora de SP: a inscrição estadual não é consultada (cliente de outro estado só compra como não contribuinte).'
+    : sef && sef.erro ? '⚠ A Sefaz não respondeu (' + esc(/rota desconhecida/.test(sef.erro) ? 'a consulta ainda não está ligada no serviço fiscal' : sef.erro) + '): preencha a inscrição e a situação à mão.' : null;
   function dadosDaNota(form, existente) {
     const el = n => form.elements[n];
     const poe = (dados, sempre) => Object.keys(dados).forEach(k => {
@@ -453,11 +463,7 @@
       if (!R.ehCNPJ(d) || !R.cnpjValido(d)) { CRM.avisoCampo(form, 'cnpj', 'Digite um CNPJ válido para buscar.'); return; }
       b.disabled = true; b.textContent = 'Buscando…';
       try {
-        const st = CRM.store();
-        const [rec, sef] = await Promise.all([
-          busca('https://brasilapi.com.br/api/cnpj/v1/' + d, 12000).catch(() => null),
-          st.consultaCadastro ? st.consultaCadastro(d).catch(e => ({ erro: e.message || String(e) })) : Promise.resolve(null)
-        ]);
+        const [rec, sef] = await oficialPorCnpj(d);
         const antes = {};
         ['razao_social', 'logradouro', 'numero', 'bairro', 'cidade', 'uf', 'cep', 'codigo_municipio', 'ie', 'ind_ie'].forEach(k => { antes[k] = el(k) ? el(k).value : ''; });
         const linhas = [], oficial = {};
@@ -470,8 +476,8 @@
         } else linhas.push(rec && rec._status === 404 ? '⚠ CNPJ não encontrado na Receita.' : '⚠ A Receita não respondeu: confira o endereço à mão.');
         const uf = String((x && x.uf) || el('uf').value || '').toUpperCase();
         const difs = R.diferencasCadastro(antes, oficial);
-        if (uf && uf !== 'SP') linhas.push('Fora de SP: a inscrição estadual não é consultada (cliente de outro estado só compra como não contribuinte).');
-        else if (sef && sef.erro) linhas.push('⚠ A Sefaz não respondeu (' + esc(/rota desconhecida/.test(sef.erro) ? 'a consulta ainda não está ligada no serviço fiscal' : sef.erro) + '): preencha a inscrição e a situação à mão.');
+        const semSefaz = avisoSefaz(uf, sef);
+        if (semSefaz) linhas.push(semSefaz);
         else if (sef) {
           const i = R.inscricaoDaSefaz(sef);
           if (i) {
@@ -539,6 +545,7 @@
   };
 
   fichas.formLead = () => {
+    let oficialLead = null;   // endereço da Receita/Sefaz, gravado junto com o lead
     const g = CRM.ehGestor();
     const exige = E().cfg.exigir_contato_cadastro !== false;
     const usuarios = CRM.opcoesUsuarios();
@@ -550,8 +557,10 @@
         { nome: 'nome', rotulo: 'Empresa (ou nome da pessoa)', obrigatorio: true, largo: true },
         { nome: 'telefone', rotulo: 'Telefone / WhatsApp (com DDD)', tipo: 'tel', obrigatorio: exige },
         { nome: 'email', rotulo: 'E-mail', tipo: 'email', obrigatorio: exige },
-        { nome: 'cnpj', rotulo: 'CNPJ ou CPF (se já souber)' },
+        { nome: 'cnpj', rotulo: 'CNPJ ou CPF (se já souber)', ajuda: 'Com o CNPJ, o CRM busca sozinho na Receita e na Sefaz.' },
         { nome: 'cidade', rotulo: 'Cidade' },
+        { nome: 'ind_ie', rotulo: 'Contribuinte do ICMS?', tipo: 'select', opcoes: [['', '— (obrigatório com CNPJ ou CPF)']].concat(R.IND_IE) },
+        { nome: 'ie', rotulo: 'Inscrição estadual', ajuda: 'Vem sozinha pela Sefaz-SP. Vazio se não tiver.' },
         { nome: 'segmento', rotulo: 'Segmento', sugestoes: CRM.opcoes('segmento') },
         { nome: 'origem', rotulo: 'Origem', tipo: 'select', opcoes: CRM.lista(CRM.opcoes('origem'), '—') },
         { nome: 'qualificacao', rotulo: 'Qualificação', tipo: 'estrelas' },
@@ -571,17 +580,60 @@
         form.elements.cnpj.addEventListener('blur', () => {
           const d = R.chaveDoc(form.elements.cnpj.value);
           if (d) form.elements.cnpj.value = R.formataCNPJ(d);
-          CRM.avisoCampo(form, 'cnpj', R.ehCNPJ(d) && !R.cnpjValido(d) ? 'CNPJ parece inválido (confira os dígitos).' : '');
+          if (R.ehCNPJ(d) && !R.cnpjValido(d)) CRM.avisoCampo(form, 'cnpj', 'CNPJ parece inválido (confira os dígitos).');
+        });
+        // CNPJ digitado: Receita e Sefaz-SP preenchem o que está vazio (nome, cidade, telefone, e-mail, IE e situação) e o
+        // endereço vai junto para o cadastro (30/10/2026)
+        const el = n => form.elements[n];
+        el('cnpj').addEventListener('change', async () => {
+          const d = R.chaveDoc(el('cnpj').value);
+          oficialLead = null;
+          if (R.ehCPF(d) && !el('ind_ie').value && !R.digitos(el('ie').value)) el('ind_ie').value = '9';
+          if (!R.ehCNPJ(d) || !R.cnpjValido(d)) return;
+          CRM.avisoCampo(form, 'cnpj', 'Buscando na Receita e na Sefaz…');
+          const [rec, sef] = await oficialPorCnpj(d);
+          if (R.chaveDoc(el('cnpj').value) !== d) return;   // mudou o CNPJ no meio da busca
+          const linhas = [], x = R.empresaDoCnpj(rec), vazio = n => !String(el(n).value || '').trim();
+          if (x) {
+            const sit = x.situacao_receita;
+            oficialLead = { razao_social: x.razao_social, cep: x.cep, logradouro: x.logradouro, numero: x.numero, complemento: x.complemento, bairro: x.bairro,
+              cidade: x.cidade, uf: x.uf, codigo_municipio: x.codigo_municipio };
+            if (vazio('nome')) el('nome').value = x.nome || x.razao_social;
+            if (vazio('cidade')) el('cidade').value = x.cidade;
+            if (vazio('telefone') && x.telefone) el('telefone').value = x.telefone;
+            if (vazio('email') && x.email) el('email').value = x.email;
+            linhas.push(sit && sit !== 'ATIVA' ? '⚠ <b>Receita: CNPJ ' + esc(sit) + '</b> — confirme com o cliente antes de vender.'
+              : '✓ Receita: ' + esc(x.razao_social) + ' — endereço guardado no cadastro.');
+            checaDuplicado(form);
+          } else linhas.push(rec && rec._status === 404 ? '⚠ CNPJ não encontrado na Receita.' : '⚠ A Receita não respondeu: o endereço fica para completar na ficha.');
+          const uf = String((x && x.uf) || '').toUpperCase(), semSefaz = avisoSefaz(uf, sef);
+          if (semSefaz) linhas.push(semSefaz);
+          else if (sef) {
+            const i = R.inscricaoDaSefaz(sef);
+            if (i) {
+              linhas.push((i.ok ? '✓ ' : '⚠ <b>') + esc(i.texto) + (i.ok ? '' : '</b>'));
+              if (i.ie && !R.digitos(el('ie').value)) el('ie').value = i.ie;
+              if (i.ind_ie && !el('ind_ie').value) el('ind_ie').value = i.ind_ie;
+              if (!oficialLead && i.endereco) oficialLead = Object.assign({ razao_social: i.razao_social }, i.endereco);
+            }
+          }
+          CRM.avisoCampo(form, 'cnpj', linhas.map(l => '<span class="linha">' + l + '</span>').join(''));
         });
       },
       aoSalvar: async v => {
+        const errIE = R.errosInscricao({ cnpj: v.cnpj, ind_ie: v.ind_ie, ie: v.ie, uf: (oficialLead && oficialLead.uf) || 'SP' });
+        if (errIE.length) throw new Error(errIE.join(' '));
         await CRM.barraDuplicado({ cnpj: v.cnpj, telefone: v.telefone, email: v.email });
         CRM.confereContatoCadastro([v.telefone], v.email);
         const resp = await CRM.responsavelParaLead(v.responsavel_id);
         const tel = v.telefone;
         const emp = await CRM.inserir('empresas', {
           nome: v.nome, cnpj: v.cnpj ? R.formataCNPJ(v.cnpj) : null, telefone: tel, whatsapp: tel && R.digitos(tel).length >= 10 && /^\(?\d{2}\)?\s*9/.test(tel.trim()) ? tel : null, email: v.email,
-          cidade: v.cidade, segmento: v.segmento, origem: v.origem, qualificacao: v.qualificacao || 0, situacao: v.situacao || 'lead', responsavel_id: resp, observacoes: v.observacoes
+          cidade: v.cidade, segmento: v.segmento, origem: v.origem, qualificacao: v.qualificacao || 0, situacao: v.situacao || 'lead', responsavel_id: resp, observacoes: v.observacoes,
+          ind_ie: v.ind_ie || null, ie: R.digitos(v.ie) || null,
+          ...(oficialLead && R.chaveDoc(v.cnpj) ? { razao_social: oficialLead.razao_social || null, cep: oficialLead.cep || null, logradouro: oficialLead.logradouro || null,
+            numero: oficialLead.numero || null, complemento: oficialLead.complemento || null, bairro: oficialLead.bairro || null, uf: oficialLead.uf || null,
+            codigo_municipio: oficialLead.codigo_municipio || null, cidade: v.cidade || oficialLead.cidade || null } : {})
         });
         if (v.contato_nome) await CRM.inserir('contatos', { empresa_id: emp.id, nome: v.contato_nome, cargo: v.contato_cargo, whatsapp: v.contato_telefone, email: v.contato_email, principal: true });
         if (v.negocio_titulo || v.negocio_valor) {
