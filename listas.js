@@ -180,7 +180,8 @@
       if (nomes[i]) {
         const inp = document.createElement('input');
         inp.type = 'search'; inp.className = 'filtro-col'; inp.id = 'fc_' + chave + '_' + i;
-        inp.placeholder = 'filtrar'; inp.setAttribute('aria-label', 'Filtrar a coluna ' + nomes[i]);
+        inp.placeholder = '🔍 ' + nomes[i].toLowerCase(); inp.setAttribute('aria-label', 'Filtrar a coluna ' + nomes[i]);
+        if (th.classList.contains('num')) c.className = 'num';
         inp.value = (st && st[i]) || '';
         inp.addEventListener('input', () => {
           const a = filtrosCol[chave] || (filtrosCol[chave] = []);
@@ -191,7 +192,8 @@
       }
       tr.appendChild(c);
     });
-    t.tHead.appendChild(tr);
+    // 30/10/2026 (Anderson): a barra de filtrar em cima e os títulos embaixo
+    t.tHead.insertBefore(tr, cab);
     if (st && st.some(Boolean)) aplicaFiltro(t);
   }
   function filtraTabelas(raizEl) {

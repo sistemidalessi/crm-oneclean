@@ -431,25 +431,37 @@
     const T = { faturado: soma('faturado'), notas: soma('notas'), sem: soma('sem_nota'), semN: soma('sem_nota_n'), antes: soma('sem_nota_antes'), antesN: soma('sem_nota_antes_n'),
       fechado: soma('fechado'), fechadoN: soma('fechado_n') };
     const kp = (t, v, s, cls) => '<div class="kpi ' + (cls || '') + '"><span>' + esc(t) + '</span><strong>' + esc(v) + '</strong><small>' + esc(s) + '</small></div>';
-    const linha = x => '<td class="num">' + esc(R.moeda(x.faturado)) + ' <small>' + x.notas + ' NF</small></td>' +
-      '<td class="num">' + (x.sem ? esc(R.moeda(x.sem)) + ' <small>' + x.semN + ' ped.</small>' : '—') + '</td>' +
-      '<td class="num"><strong>' + esc(R.moeda(x.faturado + x.sem)) + '</strong></td>' +
-      '<td class="num">' + (x.fechadoN ? esc(R.moeda(x.fechado)) + ' <small>' + x.fechadoN + ' ped.</small>' : '—') + '</td>' +
-      '<td class="num">' + (x.antesN ? esc(R.moeda(x.antes)) + ' <small>' + x.antesN + ' ped.</small>' : '—') + '</td>';
+    const temAntes = T.antesN > 0;
+    const maxBarra = Math.max(1, ...l.map(x => Math.max(n(x.fechado), n(x.faturado) + n(x.sem_nota))));
+    const pct = v => (v / maxBarra * 100).toFixed(1);
+    // as 4 colunas com a cor do quadro de cima (pedido do Anderson: "bater o olho e visualizar melhor") e uma barra por vendedor(a):
+    // verde = já faturado, âmbar = fechado sem nota; o traço é o total de pedidos fechados no período
+    const linha = x => '<td class="num ff-c-ped"><strong>' + esc(R.moeda(x.fechado)) + '</strong><small>' + x.fechadoN + ' pedido(s)</small></td>' +
+      '<td class="num ff-c-fat">' + esc(R.moeda(x.faturado)) + '<small>' + x.notas + ' NF</small></td>' +
+      '<td class="num ff-c-sem">' + (x.sem ? esc(R.moeda(x.sem)) + '<small>' + x.semN + ' pedido(s)</small>' : '<span class="ff-zero">—</span>') + '</td>' +
+      '<td class="num ff-c-acu"><strong>' + esc(R.moeda(x.faturado + x.sem)) + '</strong></td>' +
+      (temAntes ? '<td class="num">' + (x.antesN ? esc(R.moeda(x.antes)) + '<small>' + x.antesN + ' pedido(s)</small>' : '—') + '</td>' : '') +
+      '<td class="ff-barra-td"><div class="ff-barra" title="' + esc('faturado ' + R.moeda(x.faturado) + ' · sem nota ' + R.moeda(x.sem) + ' · pedidos ' + R.moeda(x.fechado)) + '">' +
+        '<i class="ff-b-fat" data-largura="' + pct(x.faturado) + '"></i><i class="ff-b-sem" data-largura="' + pct(x.sem) + '"></i>' +
+        (x.fechado ? '<b class="ff-b-ped" data-esquerda="' + pct(x.fechado) + '"></b>' : '') + '</div></td>';
     const conv = x => ({ faturado: n(x.faturado), notas: n(x.notas), sem: n(x.sem_nota), semN: n(x.sem_nota_n), antes: n(x.sem_nota_antes), antesN: n(x.sem_nota_antes_n), fechado: n(x.fechado), fechadoN: n(x.fechado_n) });
+    const th = (cls, t) => '<th class="num ' + cls + '"><span class="ff-ponto"></span>' + esc(t) + '</th>';
     return '<section class="cartao fechado-faturado"><h2>' + esc(titulo) + ' <small>' + esc(R.dataBR(de)) + ' a ' + esc(R.dataBR(ate)) + '</small></h2>' +
       '<div class="kpis">' +
+        kp('Pedidos fechados', R.moeda(T.fechado), T.fechadoN + ' pedido(s) no período', 'roxo') +
         kp('Faturado (já tem nota)', R.moeda(T.faturado), T.notas + ' nota(s) no período', 'verde') +
-        kp('Fechado sem nota ainda', R.moeda(T.sem), T.semN + ' pedido(s) do período esperando a NF-e', T.sem ? 'ambar' : '') +
+        kp('Fechado sem nota ainda', R.moeda(T.sem), T.semN + ' pedido(s) esperando a NF-e', T.sem ? 'ambar' : '') +
         kp('Acumulado do período', R.moeda(T.faturado + T.sem), 'faturado + fechado sem nota', 'azul') +
-        (T.antesN ? kp('De antes, ainda sem nota', R.moeda(T.antes), T.antesN + ' pedido(s) fechados antes do período', 'alerta') : '') +
+        (temAntes ? kp('De antes, ainda sem nota', R.moeda(T.antes), T.antesN + ' pedido(s) fechados antes do período', 'alerta') : '') +
       '</div>' +
-      (l.length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Vendedor(a)</th><th class="num">Faturado</th><th class="num">Fechado sem nota</th><th class="num">Acumulado</th>' +
-        '<th class="num">Pedidos fechados no período</th><th class="num">De antes, sem nota</th></tr></thead><tbody>' +
+      (l.length ? '<div class="tabela-rolagem"><table class="tabela ff-tabela"><thead><tr><th>Vendedor(a)</th>' +
+        th('ff-c-ped', 'Pedidos fechados') + th('ff-c-fat', 'Faturado') + th('ff-c-sem', 'Fechado sem nota') + th('ff-c-acu', 'Acumulado') +
+        (temAntes ? '<th class="num">De antes, sem nota</th>' : '') +
+        '<th class="ff-barra-td"><span class="ff-legenda"><i class="ff-b-fat"></i>faturado <i class="ff-b-sem"></i>sem nota <b class="ff-b-ped"></b>pedidos</span></th></tr></thead><tbody>' +
         l.map(x => '<tr><td><strong>' + esc(x.vend) + '</strong></td>' + linha(conv(x)) + '</tr>').join('') +
-        '</tbody>' + (l.length > 1 ? '<tfoot><tr class="total"><td><strong>Total</strong></td>' + linha(T) + '</tr></tfoot>' : '') + '</table></div>' : '<p class="vazio">Nada no período.</p>') +
-      '<p class="dica">"Fechado" é todo pedido feito no período, sem os cancelados: até 31/10 pela listagem de pedidos do FKN, a partir ' +
-        'de 03/11 os do CRM. "Faturado" são as notas emitidas no período, pelo(a) vendedor(a) da nota (inclui pedido fechado no mês ' +
+        '</tbody>' + (l.length > 1 ? '<tfoot><tr class="total"><td><strong>Total</strong></td>' + linha(Object.assign({}, T, { notas: T.notas })).replace(/<td class="ff-barra-td">[\s\S]*<\/td>$/, '<td></td>') + '</tr></tfoot>' : '') + '</table></div>' : '<p class="vazio">Nada no período.</p>') +
+      '<p class="dica">"Pedidos fechados" é todo pedido feito no período, sem os cancelados: até 31/10 pela listagem de pedidos do FKN, a ' +
+        'partir de 03/11 os do CRM. "Faturado" são as notas emitidas no período, pelo(a) vendedor(a) da nota (inclui pedido fechado no mês ' +
         'anterior e faturado agora; por isso os dois não batem exatamente).</p></section>';
   }
   CRM.fechado = { bloco: blocoFechado };

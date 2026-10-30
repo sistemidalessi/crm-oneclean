@@ -256,12 +256,14 @@ td .barra { width: 110px; }
 .tabela-rolagem { overflow-x: auto; }
 .tabela { width: 100%; border-collapse: collapse; }
 .tabela th, .tabela td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--borda); vertical-align: middle; }
-.tabela th { font-size: .72rem; color: var(--suave); font-weight: 600; text-transform: uppercase; letter-spacing: .4px; white-space: nowrap; background: var(--papel); }
+.tabela th { font-size: .74rem; color: var(--texto); font-weight: 700; text-transform: uppercase; letter-spacing: .4px; white-space: nowrap; background: var(--papel); }
 .tabela th.num, .tabela td.num { text-align: right; }
 /* filtro nas colunas (listas.js, 30/10/2026) */
 .tabela tr[hidden] { display: none; }
-.tabela thead tr.filtro-col-linha th { padding-top: 0; padding-bottom: 6px; text-transform: none; letter-spacing: 0; }
-.tabela input.filtro-col { width: 100%; min-width: 64px; max-width: 220px; padding: 3px 6px; font-size: .78rem; border: 1px solid var(--borda); border-radius: 6px; background: var(--papel); color: inherit; font-weight: 400; }
+.tabela thead tr.filtro-col-linha th { padding-top: 8px; padding-bottom: 2px; text-transform: none; letter-spacing: 0; border-bottom: 0; }
+.tabela input.filtro-col { display: block; width: 100%; min-width: 70px; padding: 4px 7px; font-size: .78rem; border: 1px solid var(--borda); border-radius: 6px; background: var(--fundo); color: inherit; font-weight: 400; }
+.tabela th.num input.filtro-col { text-align: right; }
+.tabela input.filtro-col:focus { background: var(--papel); border-color: var(--azul); outline: none; }
 .filtro-col-conta { margin: 6px 0 0; }
 /* telas mais suaves (18/10/2026): linhas mais altas, listras leves e a linha sob o mouse destacada */
 .tabela th, .tabela td { padding: 10px 12px; }
@@ -1286,3 +1288,22 @@ button.ordena.ativo { color: var(--marinho); }
 .numeros-ocultos dd, .numeros-ocultos .lista small, .numeros-ocultos .g-top small, .numeros-ocultos .selo,
 .numeros-ocultos .barra, .numeros-ocultos .barra-texto { filter: blur(7px); user-select: none; }
 @media print { .numeros-ocultos .kpi strong, .numeros-ocultos .num, .numeros-ocultos dd { visibility: hidden; } }
+
+/* Fechado × faturado (gestao.js, 30/10/2026): cada coluna com a cor do seu quadro e uma barra por vendedor(a) */
+.ff-tabela td small { display: block; color: var(--suave); font-size: .74rem; font-weight: 400; }
+.ff-tabela .ff-ponto { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: 0; }
+.ff-tabela th.ff-c-ped .ff-ponto { background: var(--roxo); } .ff-tabela th.ff-c-fat .ff-ponto { background: var(--verde); }
+.ff-tabela th.ff-c-sem .ff-ponto { background: var(--ambar); } .ff-tabela th.ff-c-acu .ff-ponto { background: var(--azul); }
+.ff-tabela td.ff-c-ped strong { color: var(--roxo); } .ff-tabela td.ff-c-fat { color: var(--verde); font-weight: 600; }
+.ff-tabela td.ff-c-sem { color: var(--ambar); font-weight: 600; } .ff-tabela td.ff-c-acu strong { color: var(--azul); font-size: 1.02rem; }
+.ff-tabela td.ff-c-acu, .ff-tabela th.ff-c-acu { background: var(--azul-fundo); }
+.ff-tabela .ff-zero { color: var(--suave); font-weight: 400; }
+.ff-tabela .ff-barra-td { width: 26%; min-width: 160px; }
+.ff-barra { position: relative; display: flex; height: 14px; border-radius: 7px; background: var(--cinza-fundo); overflow: visible; }
+.ff-barra i { display: block; height: 100%; }
+.ff-barra .ff-b-fat { background: var(--verde); border-radius: 7px 0 0 7px; } .ff-barra .ff-b-sem { background: var(--ambar); }
+.ff-barra .ff-b-ped { position: absolute; top: -3px; bottom: -3px; width: 3px; margin-left: -1px; background: var(--roxo); border-radius: 2px; }
+.ff-legenda { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--suave); white-space: nowrap; }
+.ff-legenda i, .ff-legenda b { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin: 0 4px 0 8px; vertical-align: -1px; }
+.ff-legenda .ff-b-fat { background: var(--verde); } .ff-legenda .ff-b-sem { background: var(--ambar); } .ff-legenda .ff-b-ped { background: var(--roxo); width: 3px; }
+.fechado-faturado .kpi.azul { border-top-color: var(--azul); } .fechado-faturado .kpi.roxo { border-top-color: var(--roxo); }

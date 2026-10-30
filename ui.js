@@ -55,6 +55,7 @@
   }
   function aplicaBarras(el) {
     $$('[data-largura]', el).forEach(b => { b.style.width = b.dataset.largura + '%'; });
+    $$('[data-esquerda]', el).forEach(b => { b.style.left = b.dataset.esquerda + '%'; });
     $$('[data-altura]', el).forEach(b => { b.style.height = b.dataset.altura + '%'; });
   }
 
