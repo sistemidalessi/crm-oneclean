@@ -588,7 +588,11 @@
         el('cnpj').addEventListener('change', async () => {
           const d = R.chaveDoc(el('cnpj').value);
           oficialLead = null;
-          if (R.ehCPF(d) && !el('ind_ie').value && !R.digitos(el('ie').value)) el('ind_ie').value = '9';
+          if (R.ehCPF(d)) {
+            if (!el('ind_ie').value && !R.digitos(el('ie').value)) el('ind_ie').value = '9';
+            CRM.avisoCampo(form, 'cnpj', 'CPF: a Receita não informa dados de pessoa física (LGPD) — preencha nome, cidade e contato à mão. Marcado como não contribuinte.');
+            return;
+          }
           if (!R.ehCNPJ(d) || !R.cnpjValido(d)) return;
           CRM.avisoCampo(form, 'cnpj', 'Buscando na Receita e na Sefaz…');
           const [rec, sef] = await oficialPorCnpj(d);
