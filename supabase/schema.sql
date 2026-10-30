@@ -5945,6 +5945,31 @@ language sql stable security invoker set search_path = public as $$
           or (not public.crm_eh_gestor() and d.dono = (select auth.uid())));
 $$;
 
+-- Pedidos do FKN (30/10/2026, para o "Fechado × faturado" dos meses antes da virada: Anderson mandou a listagem SIFN157,
+-- "Pedido de venda por data", de outubro). Um retrato: os não faturados no FKN não viram nota lá (são relançados no CRM),
+-- então entram no "fechado sem nota" do próprio mês e nunca no "de antes, ainda sem nota" dos meses seguintes.
+create table if not exists public.crm_pedidos_fkn (
+  numero        integer primary key,
+  emitido       date not null,
+  filial        text,
+  situacao      text not null,                -- FAT (faturado), BLO (bloqueado), LIB (liberado), como no FKN
+  nf            integer,                      -- número da NF quando FAT
+  nop           text,
+  cliente_cod   text,
+  cliente_nome  text,
+  vendedor      text,                         -- como no FKN (ISABELA, DIRETO…)
+  vendedor_id   uuid references public.crm_usuarios(user_id) on delete set null,
+  prazo         text,
+  valor         numeric(14,2) not null,
+  importado_em  timestamptz not null default now()
+);
+create index if not exists crm_pedidos_fkn_emitido on public.crm_pedidos_fkn (emitido);
+alter table public.crm_pedidos_fkn enable row level security;
+revoke all on public.crm_pedidos_fkn from anon, public;
+grant select on public.crm_pedidos_fkn to authenticated;
+drop policy if exists ler on public.crm_pedidos_fkn;
+create policy ler on public.crm_pedidos_fkn for select to authenticated using ((select public.crm_eh_admin()));
+
 -- Fechado × faturado (30/10/2026, pedido da Isabela pelo Anderson: "os que já tirou nota e os pedidos que fechou, mas não
 -- emitiu nota… a gente precisa saber o quanto que eles fecharam de pedido aquele mês"). Por vendedor(a), no período:
 -- faturado (as notas, a mesma conta de crm_gv_notas), pedidos fechados no período (criados, sem os cancelados), quanto
@@ -5961,20 +5986,28 @@ begin
        and coalesce((select c.dados->'comissao_usuarios'->>u.user_id::text from public.crm_config c where c.id = 1), '') <> 'externo')),
   ped as (
     select p.vendedor_id dono, coalesce(eq.nome, 'Sem vendedor(a)') vend, p.valor_total v, p.situacao,
-           (p.criado_em at time zone 'America/Sao_Paulo')::date dia
+           (p.criado_em at time zone 'America/Sao_Paulo')::date dia, 'crm' fonte
       from public.crm_pedidos p left join eq on eq.user_id = p.vendedor_id
      where p.situacao <> 'cancelado' and (adm or eq.user_id is not null)
-       and (p.criado_em at time zone 'America/Sao_Paulo')::date <= p_ate),
+       and (p.criado_em at time zone 'America/Sao_Paulo')::date <= p_ate
+    -- antes da virada, os pedidos do FKN (crm_pedidos_fkn, listagem SIFN157): os não faturados lá contam no próprio mês e
+    -- nunca no "de antes, ainda sem nota" (não viram nota no FKN; são relançados no CRM)
+    union all
+    select f.vendedor_id, coalesce(eq.nome, case when upper(f.vendedor) = 'DIRETO' then 'Direto (sem vendedor)' else initcap(lower(f.vendedor)) end),
+           f.valor, case when f.situacao = 'FAT' then 'faturado' else 'aberto' end, f.emitido, 'fkn'
+      from public.crm_pedidos_fkn f left join eq on eq.user_id = f.vendedor_id
+     where (adm or eq.user_id is not null) and f.emitido <= p_ate),
   fat as (select coalesce(dono::text, 'n:' || vend) k, min(dono::text)::uuid dono, min(vend) vend, sum(valor) v, count(*) n from public.crm_gv_notas(p_de) where dia <= p_ate group by 1),
   pp as (
     select coalesce(dono::text, 'n:' || vend) k, min(dono::text)::uuid dono, min(vend) vend,
            coalesce(sum(v) filter (where dia >= p_de), 0) fechado, count(*) filter (where dia >= p_de) fechado_n,
            coalesce(sum(v) filter (where dia >= p_de and situacao = 'faturado'), 0) fechado_faturado,
            coalesce(sum(v) filter (where dia >= p_de and situacao <> 'faturado'), 0) sem_nota, count(*) filter (where dia >= p_de and situacao <> 'faturado') sem_nota_n,
-           coalesce(sum(v) filter (where dia < p_de and situacao <> 'faturado'), 0) sem_nota_antes, count(*) filter (where dia < p_de and situacao <> 'faturado') sem_nota_antes_n
+           coalesce(sum(v) filter (where dia < p_de and situacao <> 'faturado' and fonte = 'crm'), 0) sem_nota_antes,
+           count(*) filter (where dia < p_de and situacao <> 'faturado' and fonte = 'crm') sem_nota_antes_n
       from ped group by 1),
   j as (
-    select coalesce(f.dono, pp.dono) dono, coalesce(u.nome, f.vend, pp.vend, 'Sem vendedor(a)') vend,
+    select coalesce(f.dono, pp.dono) dono, coalesce(case when u.papel = 'admin' then 'Direto (' || u.nome || ')' end, u.nome, f.vend, pp.vend, 'Sem vendedor(a)') vend,
            coalesce(f.v, 0) faturado, coalesce(f.n, 0) notas, coalesce(pp.fechado, 0) fechado, coalesce(pp.fechado_n, 0) fechado_n,
            coalesce(pp.fechado_faturado, 0) fechado_faturado, coalesce(pp.sem_nota, 0) sem_nota, coalesce(pp.sem_nota_n, 0) sem_nota_n,
            coalesce(pp.sem_nota_antes, 0) sem_nota_antes, coalesce(pp.sem_nota_antes_n, 0) sem_nota_antes_n

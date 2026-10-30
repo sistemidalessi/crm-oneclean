@@ -448,9 +448,9 @@
         '<th class="num">Pedidos fechados no período</th><th class="num">De antes, sem nota</th></tr></thead><tbody>' +
         l.map(x => '<tr><td><strong>' + esc(x.vend) + '</strong></td>' + linha(conv(x)) + '</tr>').join('') +
         '</tbody>' + (l.length > 1 ? '<tfoot><tr class="total"><td><strong>Total</strong></td>' + linha(T) + '</tr></tfoot>' : '') + '</table></div>' : '<p class="vazio">Nada no período.</p>') +
-      '<p class="dica">"Fechado" é o pedido gravado no CRM (sem os cancelados); vira "faturado" quando a NF-e sai. ' +
-        (T.fechadoN + T.antesN ? '' : 'Os pedidos pelo CRM começam na virada (03/11): até lá esta coluna fica zerada e o faturado vem das notas do FKN. ') +
-        'O faturado é pelo(a) vendedor(a) da nota.</p></section>';
+      '<p class="dica">"Fechado" é todo pedido feito no período, sem os cancelados: até 31/10 pela listagem de pedidos do FKN, a partir ' +
+        'de 03/11 os do CRM. "Faturado" são as notas emitidas no período, pelo(a) vendedor(a) da nota (inclui pedido fechado no mês ' +
+        'anterior e faturado agora; por isso os dois não batem exatamente).</p></section>';
   }
   CRM.fechado = { bloco: blocoFechado };
 
