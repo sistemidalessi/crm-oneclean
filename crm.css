@@ -1307,3 +1307,9 @@ button.ordena.ativo { color: var(--marinho); }
 .ff-legenda i, .ff-legenda b { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin: 0 4px 0 8px; vertical-align: -1px; }
 .ff-legenda .ff-b-fat { background: var(--verde); } .ff-legenda .ff-b-sem { background: var(--ambar); } .ff-legenda .ff-b-ped { background: var(--roxo); width: 3px; }
 .fechado-faturado .kpi.azul { border-top-color: var(--azul); } .fechado-faturado .kpi.roxo { border-top-color: var(--roxo); }
+.fechado-faturado .kpi.ff-acumulado { background: var(--azul); border-top-color: var(--azul); color: #fff; box-shadow: 0 4px 14px rgba(30, 80, 160, .25); }
+.fechado-faturado .kpi.ff-acumulado span { color: #fff; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; opacity: .95; }
+.fechado-faturado .kpi.ff-acumulado strong { color: #fff; font-size: 1.75rem; }
+.fechado-faturado .kpi.ff-acumulado small { color: #fff; opacity: .9; }
+.ff-tabela tfoot tr.total td { background: var(--azul-fundo); border-top: 2px solid var(--azul); font-size: .98rem; }
+.ff-tabela tfoot tr.total td.ff-c-acu strong { font-size: 1.15rem; }

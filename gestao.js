@@ -451,7 +451,9 @@
         kp('Pedidos fechados', R.moeda(T.fechado), T.fechadoN + ' pedido(s) no período', 'roxo') +
         kp('Faturado (já tem nota)', R.moeda(T.faturado), T.notas + ' nota(s) no período', 'verde') +
         kp('Fechado sem nota ainda', R.moeda(T.sem), T.semN + ' pedido(s) esperando a NF-e', T.sem ? 'ambar' : '') +
-        kp('Acumulado do período', R.moeda(T.faturado + T.sem), 'faturado + fechado sem nota', 'azul') +
+        // o total que importa (Anderson: "tem que chamar atenção… não ter erro de interpretação"): a conta escrita no quadro
+        '<div class="kpi ff-acumulado"><span>= Acumulado do período</span><strong>' + esc(R.moeda(T.faturado + T.sem)) + '</strong>' +
+          '<small>' + esc(R.moeda(T.faturado)) + ' faturado + ' + esc(R.moeda(T.sem)) + ' fechado sem nota</small></div>' +
         (temAntes ? kp('De antes, ainda sem nota', R.moeda(T.antes), T.antesN + ' pedido(s) fechados antes do período', 'alerta') : '') +
       '</div>' +
       (l.length ? '<div class="tabela-rolagem"><table class="tabela ff-tabela"><thead><tr><th>Vendedor(a)</th>' +
