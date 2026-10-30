@@ -712,6 +712,8 @@
         k('Clientes', d.clientesNovos + ' novos', d.clientesRecorrentes + ' recorrentes compraram', '', 'clientes') +
         k('Atividades', String(d.atividadesRealizadas), d.atividadesPendentes + ' pendentes · ' + d.atividadesAtrasadas + ' atrasadas', d.atividadesAtrasadas ? 'alerta' : '', 'atividades') +
         '</section>' +
+        // Fechado × faturado (30/10/2026, pedido da Isabela): o período escolhido, da equipe dela ou de quem está no filtro
+        (CRM.ehGestor() && CRM.fechado ? CRM.fechado.bloco(p.de > '0001' ? p.de : '2000-01-01', p.ate, 'Fechado × faturado', resp || null) : '') +
         (base ? '<section class="cartao"><h2>Base de clientes <small>hoje' + esc(quem) + ' · clique para ver quais são</small></h2><div class="kpis">' +
           k('Clientes', String(base.clientes), 'cadastrados como cliente', '', 'base-clientes') +
           k('Compraram nos últimos 90 dias', String(base.ativos), 'clientes com nota nos últimos 90 dias', 'verde', 'base-ativos') +

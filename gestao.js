@@ -409,6 +409,51 @@
     '<span>' + esc(t) + '</span><strong>' + esc(v) + '</strong><small>' + s + '</small>' + (acao ? '</button>' : '</div>');
   const seta = v => (v == null ? '' : v >= 0 ? '<span class="g-sobe">▲ ' + esc(pct(v)) + '</span>' : '<span class="g-desce">▼ ' + esc(pct(v)) + '</span>');
 
+  // Fechado × faturado (30/10/2026, a Isabela pelo Anderson: "os que já tirou nota e os pedidos que fechou, mas não emitiu
+  // nota… o quanto que eles fecharam de pedido aquele mês"). Por vendedor(a): o que já virou nota no período, os pedidos
+  // fechados que ainda não viraram e a soma dos dois (o acumulado). A conta é do banco (crm_gv_fechado, com o login de quem
+  // abre: a gestora vê só a equipe dela). Na Gestão (o mês) e nos Relatórios da gestão (o período escolhido).
+  const fech = { k: '', r: null, lendo: false, em: 0 };
+  function blocoFechado(de, ate, titulo, so) {
+    const st = CRM.store();
+    if (!st || !st.gvFechado) return '';
+    const k = de + '|' + ate;
+    if ((fech.k !== k || Date.now() - fech.em > 120000) && !fech.lendo) {
+      fech.lendo = true;
+      st.gvFechado(de, ate).then(r => { fech.r = r; }).catch(() => { fech.r = null; })
+        .then(() => { fech.k = k; fech.em = Date.now(); fech.lendo = false; CRM.render(); });
+    }
+    if (fech.k !== k) return '<section class="cartao"><h2>' + esc(titulo) + '</h2><p class="vazio">Carregando…</p></section>';
+    if (!fech.r) return '';
+    const l = (fech.r.vendedores || []).filter(x => !so || x.dono === so);
+    const n = v => Number(v || 0);
+    const soma = c => l.reduce((s, x) => s + n(x[c]), 0);
+    const T = { faturado: soma('faturado'), notas: soma('notas'), sem: soma('sem_nota'), semN: soma('sem_nota_n'), antes: soma('sem_nota_antes'), antesN: soma('sem_nota_antes_n'),
+      fechado: soma('fechado'), fechadoN: soma('fechado_n') };
+    const kp = (t, v, s, cls) => '<div class="kpi ' + (cls || '') + '"><span>' + esc(t) + '</span><strong>' + esc(v) + '</strong><small>' + esc(s) + '</small></div>';
+    const linha = x => '<td class="num">' + esc(R.moeda(x.faturado)) + ' <small>' + x.notas + ' NF</small></td>' +
+      '<td class="num">' + (x.sem ? esc(R.moeda(x.sem)) + ' <small>' + x.semN + ' ped.</small>' : '—') + '</td>' +
+      '<td class="num"><strong>' + esc(R.moeda(x.faturado + x.sem)) + '</strong></td>' +
+      '<td class="num">' + (x.fechadoN ? esc(R.moeda(x.fechado)) + ' <small>' + x.fechadoN + ' ped.</small>' : '—') + '</td>' +
+      '<td class="num">' + (x.antesN ? esc(R.moeda(x.antes)) + ' <small>' + x.antesN + ' ped.</small>' : '—') + '</td>';
+    const conv = x => ({ faturado: n(x.faturado), notas: n(x.notas), sem: n(x.sem_nota), semN: n(x.sem_nota_n), antes: n(x.sem_nota_antes), antesN: n(x.sem_nota_antes_n), fechado: n(x.fechado), fechadoN: n(x.fechado_n) });
+    return '<section class="cartao fechado-faturado"><h2>' + esc(titulo) + ' <small>' + esc(R.dataBR(de)) + ' a ' + esc(R.dataBR(ate)) + '</small></h2>' +
+      '<div class="kpis">' +
+        kp('Faturado (já tem nota)', R.moeda(T.faturado), T.notas + ' nota(s) no período', 'verde') +
+        kp('Fechado sem nota ainda', R.moeda(T.sem), T.semN + ' pedido(s) do período esperando a NF-e', T.sem ? 'ambar' : '') +
+        kp('Acumulado do período', R.moeda(T.faturado + T.sem), 'faturado + fechado sem nota', 'azul') +
+        (T.antesN ? kp('De antes, ainda sem nota', R.moeda(T.antes), T.antesN + ' pedido(s) fechados antes do período', 'alerta') : '') +
+      '</div>' +
+      (l.length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Vendedor(a)</th><th class="num">Faturado</th><th class="num">Fechado sem nota</th><th class="num">Acumulado</th>' +
+        '<th class="num">Pedidos fechados no período</th><th class="num">De antes, sem nota</th></tr></thead><tbody>' +
+        l.map(x => '<tr><td><strong>' + esc(x.vend) + '</strong></td>' + linha(conv(x)) + '</tr>').join('') +
+        '</tbody>' + (l.length > 1 ? '<tfoot><tr class="total"><td><strong>Total</strong></td>' + linha(T) + '</tr></tfoot>' : '') + '</table></div>' : '<p class="vazio">Nada no período.</p>') +
+      '<p class="dica">"Fechado" é o pedido gravado no CRM (sem os cancelados); vira "faturado" quando a NF-e sai. ' +
+        (T.fechadoN + T.antesN ? '' : 'Os pedidos pelo CRM começam na virada (03/11): até lá esta coluna fica zerada e o faturado vem das notas do FKN. ') +
+        'O faturado é pelo(a) vendedor(a) da nota.</p></section>';
+  }
+  CRM.fechado = { bloco: blocoFechado };
+
   CRM.telas.gestao = {
     render() {
       if (!CRM.ehAdmin()) return '<div class="cartao"><p class="vazio">Esta tela é só do administrador.</p></div>';
@@ -444,6 +489,7 @@
         '<section class="kpis kpis-linha2">' +
           kpi('Faturamento do mês · Geral (com o Direto)', R.moeda(m.atual.valor), seta(m.variacao) + ' vs. mesmo ponto de ' + esc(R.mesCurto(R.somaMeses(m.de, -1))) + ' (' + esc(R.moeda(m.anteriorMesmoDia.valor)) + ')', 'azul', 'gestao-lista', 'mes') +
         '</section>' +
+        blocoFechado(m.de, hoje, 'Fechado × faturado no mês') +
         // ---- 12 meses + base
         '<div class="g-duas">' +
           '<section class="cartao"><h2>Faturamento por mês <small>12 meses</small></h2><div class="grafico-colunas">' + p.porMes.map(x => '<div class="col" title="' + esc(R.mesCurto(x.mes) + ': ' + R.moeda(x.valor) + ' (' + x.qtd + ' notas)') + '">' +

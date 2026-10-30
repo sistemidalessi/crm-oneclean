@@ -1398,6 +1398,8 @@
   Local.prototype.analiseVendasHoje = async function (dia) { return this._analiseV && this._analiseV.dia === dia ? this._analiseV : null; };
   // Análise de logística do dia (Diretor de Logística, 24/10/2026): uma só para a gestão e a logística (crm_ia_analises_areas).
   Supa.prototype.analiseLogistica = async function (refazer) { return this.assistente({ acao: 'analise_logistica', refazer: !!refazer }); };
+  // Fechado × faturado por vendedor(a) no período (30/10/2026; só gestão; a gestora vê a equipe dela): crm_gv_fechado
+  Supa.prototype.gvFechado = async function (de, ate) { return unwrap(await this.sb.rpc('crm_gv_fechado', { p_de: de, p_ate: ate })); };
   Supa.prototype.analiseLogisticaHoje = async function (dia) { return unwrap(await this.sb.from('crm_ia_analises_areas').select('dia, texto, em').eq('dia', dia).eq('area', 'logistica').maybeSingle()); };
   Local.prototype.analiseLogistica = async function () { const a = { dia: R.hojeISO(), texto: '(modo local: sem IA) Aqui aparece a análise de logística do dia: **a rota de hoje**, as entregas sem confirmação, os problemas de entrega e as notas que não entraram em rota.', em: new Date().toISOString(), nova: true }; this._analiseL = a; return a; };
   Local.prototype.analiseLogisticaHoje = async function (dia) { return this._analiseL && this._analiseL.dia === dia ? this._analiseL : null; };

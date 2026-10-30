@@ -5942,6 +5942,48 @@ language sql stable security invoker set search_path = public as $$
           or (not public.crm_eh_gestor() and d.dono = (select auth.uid())));
 $$;
 
+-- Fechado × faturado (30/10/2026, pedido da Isabela pelo Anderson: "os que já tirou nota e os pedidos que fechou, mas não
+-- emitiu nota… a gente precisa saber o quanto que eles fecharam de pedido aquele mês"). Por vendedor(a), no período:
+-- faturado (as notas, a mesma conta de crm_gv_notas), pedidos fechados no período (criados, sem os cancelados), quanto
+-- desses ainda está sem nota, e os pedidos de antes do período que seguem sem nota. A gestora vê só a equipe dela (a mesma
+-- regra de crm_gv_notas: gestora e vendedores(as) internos, sem o Direto nem externo(a)); o administrador vê tudo.
+create or replace function public.crm_gv_fechado(p_de date, p_ate date) returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare adm boolean := public.crm_eh_admin(); r jsonb;
+begin
+  if not (adm or public.crm_eh_gestor()) then raise exception 'só a gestão'; end if;
+  with eq as (
+    select u.user_id, u.nome from public.crm_usuarios u
+     where adm or (u.papel in ('gestor', 'vendedor')
+       and coalesce((select c.dados->'comissao_usuarios'->>u.user_id::text from public.crm_config c where c.id = 1), '') <> 'externo')),
+  ped as (
+    select p.vendedor_id dono, coalesce(eq.nome, 'Sem vendedor(a)') vend, p.valor_total v, p.situacao,
+           (p.criado_em at time zone 'America/Sao_Paulo')::date dia
+      from public.crm_pedidos p left join eq on eq.user_id = p.vendedor_id
+     where p.situacao <> 'cancelado' and (adm or eq.user_id is not null)
+       and (p.criado_em at time zone 'America/Sao_Paulo')::date <= p_ate),
+  fat as (select coalesce(dono::text, 'n:' || vend) k, min(dono::text)::uuid dono, min(vend) vend, sum(valor) v, count(*) n from public.crm_gv_notas(p_de) where dia <= p_ate group by 1),
+  pp as (
+    select coalesce(dono::text, 'n:' || vend) k, min(dono::text)::uuid dono, min(vend) vend,
+           coalesce(sum(v) filter (where dia >= p_de), 0) fechado, count(*) filter (where dia >= p_de) fechado_n,
+           coalesce(sum(v) filter (where dia >= p_de and situacao = 'faturado'), 0) fechado_faturado,
+           coalesce(sum(v) filter (where dia >= p_de and situacao <> 'faturado'), 0) sem_nota, count(*) filter (where dia >= p_de and situacao <> 'faturado') sem_nota_n,
+           coalesce(sum(v) filter (where dia < p_de and situacao <> 'faturado'), 0) sem_nota_antes, count(*) filter (where dia < p_de and situacao <> 'faturado') sem_nota_antes_n
+      from ped group by 1),
+  j as (
+    select coalesce(f.dono, pp.dono) dono, coalesce(u.nome, f.vend, pp.vend, 'Sem vendedor(a)') vend,
+           coalesce(f.v, 0) faturado, coalesce(f.n, 0) notas, coalesce(pp.fechado, 0) fechado, coalesce(pp.fechado_n, 0) fechado_n,
+           coalesce(pp.fechado_faturado, 0) fechado_faturado, coalesce(pp.sem_nota, 0) sem_nota, coalesce(pp.sem_nota_n, 0) sem_nota_n,
+           coalesce(pp.sem_nota_antes, 0) sem_nota_antes, coalesce(pp.sem_nota_antes_n, 0) sem_nota_antes_n
+      from fat f full join pp on pp.k = f.k
+      left join public.crm_usuarios u on u.user_id = coalesce(f.dono, pp.dono))
+  select jsonb_build_object('de', p_de, 'ate', p_ate,
+    'vendedores', coalesce(jsonb_agg(to_jsonb(j) order by (j.faturado + j.sem_nota + j.sem_nota_antes) desc, j.vend), '[]'::jsonb)) into r from j;
+  return r;
+end $$;
+revoke all on function public.crm_gv_fechado(date, date) from public, anon;
+grant execute on function public.crm_gv_fechado(date, date) to authenticated;
+
 -- ritmo do mês: até hoje × o mesmo período do mês passado, o mês passado inteiro, a meta e a projeção linear
 create or replace function public.crm_gv_ritmo() returns jsonb language plpgsql stable security invoker set search_path = public as $$
 declare hoje date := (now() at time zone 'America/Sao_Paulo')::date; ini date; ini_ant date; fim_ant date; dc int; dm int; r jsonb;
