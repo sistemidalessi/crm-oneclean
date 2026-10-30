@@ -5723,6 +5723,11 @@ begin
                (select round(sum(m.valor), 2) from public.crm_metas m where m.usuario_id = max(v2.vendedor_id::text)::uuid and m.mes::text like mes_txt || '%') meta
           from v v2 where v2.dia >= ini group by v2.vend) z))
     into x from v;
+  -- (30/10/2026) faturamento do ano até hoje, para o topo do app do CEO (o Anderson: "o faturamento anual, até o momento")
+  x := x || jsonb_build_object('ano', (select jsonb_build_object('valor', coalesce(round(sum(n.valor_total), 2), 0), 'notas', count(*))
+      from public.crm_notas n where not n.cancelada and n.emitida_em >= (date_trunc('year', hoje)::timestamp at time zone 'America/Sao_Paulo')
+       and (exists (select 1 from public.crm_nota_itens i where i.nota_id = n.id and i.cfop ~ '^[567][14]')
+            or not exists (select 1 from public.crm_nota_itens i where i.nota_id = n.id))));
   r := r || jsonb_build_object('vendas', x);
   -- funil
   select jsonb_build_object(
