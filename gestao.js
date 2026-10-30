@@ -28,6 +28,28 @@
     return { valor, notas: reais.length, clientes: clientes.size, ticket: reais.length ? valor / reais.length : 0, lista: l, devolvido: Math.abs(somaValor(l.filter(n => n.devolucao))) };
   }
 
+  // Base de clientes (Gestão; e nos Relatórios da gestora, 30/10/2026, pedido do Anderson): clientes, quem comprou nos
+  // últimos 90 dias, leads e os fiéis que sumiram (têm ritmo e passaram de 2 ciclos sem comprar; "em risco" = o que
+  // costumavam comprar por mês). daCarteira(e) escolhe as empresas que contam (a gestora vê só a equipe dela).
+  function baseClientes(D, ix, cfg, hoje, daCarteira) {
+    const conta = daCarteira || (() => true);
+    const empresas = (D.empresas || []).filter(conta);
+    const de90 = R.somaDias(hoje, -90), ativos = new Set();
+    vendas(D, ix, de90, hoje).forEach(n => { if (n.empresa_id) ativos.add(n.empresa_id); });
+    const sumidos = empresas.map(e => {
+      const r = ix.resumo.get(e.id);
+      if (!r || !r.ritmo || !r.ultimaCompra) return null;
+      const ciclo = R.cicloRecompra(e, r, cfg), dias = R.diasEntre(r.ultimaCompra, hoje);
+      if (dias <= 2 * ciclo) return null;
+      const meses = Math.max(1, R.diasEntre(r.primeiraCompra || r.ultimaCompra, r.ultimaCompra) / 30);
+      return { empresa: e, dias, ciclo, porMes: r.totalComprado / meses, ultima: r.ultimaCompra };
+    }).filter(Boolean).sort((a, b) => b.porMes - a.porMes);
+    const clientes = empresas.filter(e => e.situacao === 'cliente'), leads = empresas.filter(e => e.situacao === 'lead');
+    const compraram = empresas.filter(e => ativos.has(e.id));
+    return { clientes: clientes.length, ativos: daCarteira ? compraram.length : ativos.size, leads: leads.length, sumidos, emRisco: sumidos.reduce((s, x) => s + x.porMes, 0),
+      listas: { clientes, compraram, leads } };
+  }
+
   // ------------------------------------------------------------ painel
   function painel(D, ix, cfg, hoje) {
     const mes = hoje.slice(0, 8) + '01';
@@ -88,14 +110,7 @@
 
     // Clientes fiéis sumidos: têm ritmo, passaram de 2 ciclos sem comprar. "Em risco" = o que
     // costumavam comprar por mês.
-    const sumidos = (D.empresas || []).map(e => {
-      const r = ix.resumo.get(e.id);
-      if (!r || !r.ritmo || !r.ultimaCompra) return null;
-      const ciclo = R.cicloRecompra(e, r, cfg), dias = R.diasEntre(r.ultimaCompra, hoje);
-      if (dias <= 2 * ciclo) return null;
-      const meses = Math.max(1, R.diasEntre(r.primeiraCompra || r.ultimaCompra, r.ultimaCompra) / 30);
-      return { empresa: e, dias, ciclo, porMes: r.totalComprado / meses, ultima: r.ultimaCompra };
-    }).filter(Boolean).sort((a, b) => b.porMes - a.porMes);
+    const bc = baseClientes(D, ix, cfg, hoje), sumidos = bc.sumidos;
 
     const fat = R.faturamento(D, ix, hoje, { periodo: R.periodo('ano', hoje) });
     const fat12 = R.faturamento(D, ix, hoje, { periodo: R.periodo('12meses', hoje) });
@@ -106,10 +121,9 @@
         equipe: { valor: somaValor(eqAtual), notas: eqAtual.filter(n => !n.devolucao).length, lista: eqAtual, anteriorMesmoDia: somaValor(eqAntes), anterior: somaValor(eqMesPassado),
           variacao: variacao(somaValor(eqAtual), somaValor(eqAntes)) } },
       ano, porMes: fat12.porMes, equipe, equipeTotal, funil, funilVendas,
-      base: { clientes: (D.empresas || []).filter(e => e.situacao === 'cliente').length, ativos: compraram90.size,
-        leads: (D.empresas || []).filter(e => e.situacao === 'lead').length },
+      base: { clientes: bc.clientes, ativos: bc.ativos, leads: bc.leads },
       topClientes: fat.topClientes.slice(0, 10), topProdutos: fat.topProdutosValor.slice(0, 10),
-      sumidos, emRisco: sumidos.reduce((s, x) => s + x.porMes, 0)
+      sumidos, emRisco: bc.emRisco
     };
   }
 
@@ -347,7 +361,7 @@
   }
 
   const PRAZO_PADRAO = 7; // dias de entrega quando o fornecedor ainda não tem cadastro (pedido do Anderson)
-  const G = { PRAZO_PADRAO, painel, compras, lerEstoque, lerListagemProdutos, lerArquivoEstoque, ehListagemProdutos, juntaVariantes, fatorCaixa, codigoFKN };
+  const G = { PRAZO_PADRAO, painel, baseClientes, compras, lerEstoque, lerListagemProdutos, lerArquivoEstoque, ehListagemProdutos, juntaVariantes, fatorCaixa, codigoFKN };
   raiz.CRMGestao = G;
   if (typeof module !== 'undefined') module.exports = G;
 

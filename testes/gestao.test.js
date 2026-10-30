@@ -225,3 +225,18 @@ test('faturamento do mês da equipe de vendas: tudo menos o Direto', () => {
   assert.equal(p.mes.equipe.valor, 200, 'equipe: sem o Direto');
   assert.equal(p.mes.equipe.notas, 1);
 });
+
+test('base de clientes da carteira (Relatórios da gestora, 30/10/2026)', () => {
+  const D = base(), ix = R.indexa(D), cfg = R.config({});
+  D.empresas.push({ id: 'X', nome: 'Lead de Outra Exemplo', situacao: 'lead', responsavel_id: 'adm' });
+  const ix2 = R.indexa(D);
+  const todos = G.baseClientes(D, ix2, cfg, HOJE);
+  assert.deepEqual([todos.clientes, todos.ativos, todos.leads, todos.sumidos.length], [2, 1, 2, 1]);
+  const daU1 = G.baseClientes(D, ix2, cfg, HOJE, e => e.responsavel_id === 'u1');
+  assert.deepEqual([daU1.clientes, daU1.ativos, daU1.leads, daU1.sumidos.length], [2, 1, 1, 1]);
+  assert.deepEqual(daU1.listas.leads.map(e => e.id), ['L']);
+  assert.equal(daU1.sumidos[0].empresa.id, 'S');
+  assert.ok(daU1.emRisco > 0);
+  const nada = G.baseClientes(D, ix, cfg, HOJE, e => e.responsavel_id === 'ninguem');
+  assert.deepEqual([nada.clientes, nada.ativos, nada.leads, nada.sumidos.length], [0, 0, 0, 0]);
+});

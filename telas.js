@@ -628,7 +628,13 @@
       leads: () => ({ titulo: 'Leads novos (empresas cadastradas)', sub, tipo: 'empresas', itens: L.leads }),
       clientes: () => ({ titulo: 'Clientes que compraram', sub, tipo: 'empresas', itens: emp(L.clientesNovos.concat(L.clientesRecorrentes)), marca: e => (novos.has(e.id) ? 'novo' : 'recorrente') }),
       atividades: () => Object.assign(ativ('Atividades realizadas', L.realizadas), { outras: outrasAtiv }),
-      notas: () => ({ titulo: 'Notas fiscais do período', sub, tipo: 'notas', itens: r.fat.lista || [], vendedor: r.fat.vendedorDe, cliente: r.fat.clienteDe })
+      notas: () => ({ titulo: 'Notas fiscais do período', sub, tipo: 'notas', itens: r.fat.lista || [], vendedor: r.fat.vendedorDe, cliente: r.fat.clienteDe }),
+      // Base de clientes (30/10/2026): a fotografia de hoje, não depende do período
+      'base-clientes': () => ({ titulo: 'Clientes', sub: r.quandoBase, tipo: 'empresas', itens: r.base.listas.clientes }),
+      'base-ativos': () => ({ titulo: 'Compraram nos últimos 90 dias', sub: r.quandoBase, tipo: 'empresas', itens: r.base.listas.compraram }),
+      'base-leads': () => ({ titulo: 'Leads na base', sub: r.quandoBase, tipo: 'empresas', itens: r.base.listas.leads }),
+      'base-sumidos': () => ({ titulo: 'Clientes fiéis que sumiram', sub: r.quandoBase + ' · passaram de 2 ciclos sem comprar', tipo: 'empresas', itens: r.base.sumidos.map(x => x.empresa),
+        marca: e => { const x = r.base.sumidos.find(y => y.empresa.id === e.id); return x ? R.moeda(x.porMes) + '/mês · ' + x.dias + ' dias sem comprar' : ''; } })
     }[id];
   }
   // Gestora (27/10/2026, pedido do Anderson: "deixar ela ver só a equipe dela, nem a Silmara; o geral só eu"): os
@@ -664,7 +670,12 @@
       if (f.funil == null || (f.funil && funis.indexOf(f.funil) === -1)) f.funil = funis.length > 1 ? funis[0] : '';
       const d = R.dashboard(V.D, V.ix, E().cfg, hoje, { periodo: p, responsavel_id: resp, funil: f.funil });
       const fat = ultimoFat = R.faturamento(V.D, V.ix, hoje, { periodo: p, responsavel_id: resp });
-      ultimoRel = { d, fat, quando: (p.de > '0001' ? R.dataBR(p.de) + ' a ' + R.dataBR(p.ate) : 'todo o histórico') + (resp ? ' · ' + CRM.nomeUsuario(resp) : V.eq ? ' · sua equipe de vendas' : ' · equipe toda') };
+      // Base de clientes (30/10/2026, pedido do Anderson: a gestora ver clientes, ativos, leads e fiéis que sumiram): a carteira
+      // da equipe dela, ou de quem está escolhido no filtro; o administrador vê tudo
+      const base = CRM.ehGestor() && window.CRMGestao ? window.CRMGestao.baseClientes(V.D, V.ix, E().cfg, hoje,
+        resp ? e => e.responsavel_id === resp : V.eq ? e => V.eq.has(e.responsavel_id) : null) : null;
+      const quem = resp ? ' · ' + CRM.nomeUsuario(resp) : V.eq ? ' · sua equipe de vendas' : ' · equipe toda';
+      ultimoRel = { d, fat, base, quandoBase: 'hoje' + quem, quando: (p.de > '0001' ? R.dataBR(p.de) + ' a ' + R.dataBR(p.ate) : 'todo o histórico') + quem };
       // Quadro com "id" vira botão: clicar abre a lista do que ele conta (CRM.mostraLista).
       const k = (t, v, s, cls, id) => (id ? '<button type="button" class="kpi clicavel ' + (cls || '') + '" data-acao="rel-lista" data-id="' + id + '" title="Ver quais são">' : '<div class="kpi ' + (cls || '') + '">') +
         '<span>' + esc(t) + '</span><strong>' + esc(v) + '</strong><small>' + esc(s || '') + '</small>' + (id ? '</button>' : '</div>');
@@ -701,6 +712,12 @@
         k('Clientes', d.clientesNovos + ' novos', d.clientesRecorrentes + ' recorrentes compraram', '', 'clientes') +
         k('Atividades', String(d.atividadesRealizadas), d.atividadesPendentes + ' pendentes · ' + d.atividadesAtrasadas + ' atrasadas', d.atividadesAtrasadas ? 'alerta' : '', 'atividades') +
         '</section>' +
+        (base ? '<section class="cartao"><h2>Base de clientes <small>hoje' + esc(quem) + ' · clique para ver quais são</small></h2><div class="kpis">' +
+          k('Clientes', String(base.clientes), 'cadastrados como cliente', '', 'base-clientes') +
+          k('Compraram nos últimos 90 dias', String(base.ativos), 'clientes com nota nos últimos 90 dias', 'verde', 'base-ativos') +
+          k('Leads na base', String(base.leads), 'ainda não compraram', '', 'base-leads') +
+          k('Fiéis que sumiram', String(base.sumidos.length), R.moeda(base.emRisco) + '/mês em risco', base.sumidos.length ? 'alerta' : '', 'base-sumidos') +
+          '</div></section>' : '') +
         '<div class="colunas">' +
         '<section class="cartao"><h2>Vendas por mês <small>12 meses</small></h2><div class="grafico-colunas">' + d.porMes.map(m => '<div class="col" title="' + esc(R.mesCurto(m.mes) + ': ' + R.moeda(m.valor) + ' (' + m.qtd + ')') + '">' +
           '<span class="col-valor">' + (m.valor ? esc(abrevia(m.valor)) : '') + '</span><span class="col-barra"><span data-altura="' + (m.valor / maxMes * 100).toFixed(1) + '"></span></span><span class="col-rot">' + esc(R.mesCurto(m.mes)) + '</span></div>').join('') + '</div></section>' +
