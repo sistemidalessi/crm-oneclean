@@ -382,3 +382,23 @@ test('inscrição estadual: dígito de SP, trava ao salvar, resposta da Sefaz e 
     { razao_social: 'EMPRESA DE TESTE LTDA', logradouro: 'RUA DOS TESTES', numero: '10', cidade: 'SAO BERNARDO DO CAMPO', cep: '09750730', bairro: 'CENTRO' });
   assert.deepEqual(dif.map(x => x.campo), ['numero']);
 });
+
+test('máscaras: dinheiro pela direita, telefone, CPF/CNPJ e CEP (30/10/2026)', () => {
+  assert.deepEqual(R.mascaraMoeda('110344'), { texto: '1.103,44', numero: 1103.44 });
+  assert.deepEqual(R.mascaraMoeda('1.103,4'), { texto: '110,34', numero: 110.34 });   // apagou o último número
+  assert.deepEqual(R.mascaraMoeda('-5000'), { texto: '-50,00', numero: -50 });
+  assert.deepEqual(R.mascaraMoeda('abc'), { texto: '', numero: '' });
+  assert.equal(R.moedaTexto(1234567.8), '1.234.567,80');
+  assert.equal(R.moedaTexto(''), '');
+  assert.equal(R.lerMoeda('1.103,44'), 1103.44);
+  assert.equal(R.lerMoeda('1103.44'), 1103.44);
+  assert.equal(R.lerMoeda(1103.44), 1103.44);
+  assert.equal(R.lerMoeda(''), '');
+  assert.equal(R.mascaraTel('11988887777'), '(11) 98888-7777');
+  assert.equal(R.mascaraTel('1140001234'), '(11) 4000-1234');
+  assert.equal(R.mascaraTel('+55 11 98888'), '+55 11 98888');
+  assert.equal(R.mascaraDoc('12345678909'), '123.456.789-09');
+  assert.equal(R.mascaraDoc('11222333000181'), '11.222.333/0001-81');
+  assert.equal(R.mascaraDoc('12abc34501de35'), '12ABC34501DE35');
+  assert.equal(R.mascaraCep('09750730'), '09750-730');
+});

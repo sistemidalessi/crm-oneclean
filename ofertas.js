@@ -202,7 +202,7 @@
       '<td><strong>' + esc(R.nomeDeItem(x.descricao)) + '</strong><small>' + esc(x.codigo) + (x.familia ? ' · ' + esc(x.familia) : '') + '</small></td>' +
       '<td class="num">' + esc(String(+x.saldo.toFixed(1)).replace('.', ',')) + ' <small>' + esc(x.unidade) + '</small></td>' +
       '<td class="num">' + esc(R.moeda(x.custo)) + '</td><td class="num">' + (x.preco_tabela ? esc(R.moeda(x.preco_tabela)) : '—') + '</td>' +
-      '<td class="num"><input type="number" step="0.01" min="0" class="of-preco" data-of-preco="' + i + '" value="' + x.preco.toFixed(2) + '"></td>' +
+      '<td class="num"><input type="text" data-moeda class="of-preco" data-of-preco="' + i + '" value="' + x.preco.toFixed(2) + '"></td>' +
       '<td class="num" data-of-sobra="' + i + '"></td><td class="num">' + (x.compradores || '—') + '</td><td class="num">' + esc(R.moeda(x.valor)) + '</td></tr>';
     CRM.abrirForm({
       titulo: 'Oferta de queima de estoque', largura: 'extra',

@@ -1025,7 +1025,7 @@
         const total = Number(c.valor_total) || 0;
         const linha = i => '<tr data-mlinha><td><input name="mc_' + i + '" list="esProdutosM" placeholder="código" class="es-cod" autocomplete="off"><small data-mnome="' + i + '"></small></td>' +
           '<td><input name="mq_' + i + '" type="number" step="any" min="0" class="es-fator" placeholder="0"><small data-mun="' + i + '"></small></td>' +
-          '<td><input name="mv_' + i + '" type="number" step="0.01" min="0" class="es-fator" placeholder="0,00"><small data-mcusto="' + i + '"></small></td></tr>';
+          '<td><input name="mv_' + i + '" type="text" data-moeda class="es-fator" placeholder="0,00"><small data-mcusto="' + i + '"></small></td></tr>';
         let n = Math.max(5, itens.length);
         CRM.abrirForm({
           titulo: 'Lançar à mão: NF ' + c.numero + ' · ' + (c.fornecedor_nome || ''), largura: 'extra',

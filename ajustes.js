@@ -319,7 +319,7 @@
     const meta = id => { const m = E().D.metas.find(x => x.usuario_id === id && x.mes === mesMeta); return m ? m.valor : ''; };
     return '<form id="formMetas" class="form-plano"><p>Mês: <select id="mesMeta">' + CRM.opcoesHTML(meses.map(m => [m, R.mesCurto(m)]), mesMeta) + '</select></p>' +
       '<table class="tabela"><thead><tr><th>Vendedor</th><th class="num">Meta de vendas (R$)</th><th class="num">Vendido no mês</th><th>Atingido</th></tr></thead><tbody>' +
-      vend.map(u => { const mt = meta(u.user_id), vd = vendido(u.user_id); return '<tr><td>' + esc(u.nome) + '</td><td class="num"><input type="number" min="0" step="100" name="m_' + esc(u.user_id) + '" value="' + esc(mt) + '" class="curto"></td>' +
+      vend.map(u => { const mt = meta(u.user_id), vd = vendido(u.user_id); return '<tr><td>' + esc(u.nome) + '</td><td class="num"><input type="text" data-moeda name="m_' + esc(u.user_id) + '" value="' + esc(mt) + '" class="curto"></td>' +
         '<td class="num">' + esc(R.moeda(vd)) + '</td><td>' + (mt ? CRM.barra(vd, mt, R.pct(vd / mt * 100)) : '—') + '</td></tr>'; }).join('') +
       '</tbody></table><p><button type="submit" class="btn">Salvar metas</button></p></form>';
   };

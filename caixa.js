@@ -428,7 +428,7 @@
       '<div class="campos">' +
       campo('O que fazer', '<select name="a' + i + '">' + op(p.opcoes.map(o => [o.acao, o.rotulo]), p.acao) + '</select>', 'largo') +
       campo('Tipo', '<select name="t' + i + '">' + op([['saida', 'Saída'], ['entrada', 'Entrada']], p.tipo) + '</select>', 'cx-n') +
-      campo('Valor (R$)', '<input type="number" name="v' + i + '" step="0.01" min="0.01" inputmode="decimal" value="' + esc(p.valor) + '">', 'cx-vd') +
+      campo('Valor (R$)', '<input type="text" data-moeda name="v' + i + '" value="' + esc(p.valor) + '">', 'cx-vd') +
       campo('Dia', '<input type="date" name="d' + i + '" value="' + esc(p.data) + '">', 'cx-vd') +
       campo('Situação', '<select name="s' + i + '">' + op([['realizado', p.tipo === 'entrada' ? 'Aconteceu (recebido)' : 'Aconteceu (pago)'], ['previsto', 'Previsto']], p.situacao) + '</select>', 'cx-n') +
       campo('Descrição', '<input type="text" name="x' + i + '" value="' + esc(p.descricao) + '" autocomplete="off">', 'largo cx-n') +
@@ -436,7 +436,7 @@
       campo(p.tipo === 'entrada' ? 'De quem' : 'Fornecedor', '<input type="text" name="f' + i + '" value="' + esc(p.fornecedor) + '" list="cxForn" autocomplete="off">', 'cx-n') +
       '<label class="campo check cx-n"><input type="checkbox" name="e' + i + '"' + (p.entre_empresas ? ' checked' : '') + '> Entre empresas (OneClean ↔ Agilité)</label>' +
       (p.transferencia ? campo(p.tipo === 'entrada' ? 'Devolve à Agilité em' : 'A Agilité devolve em', '<input type="date" name="tv' + i + '" value="' + esc(p.transferencia.volta || '') + '">', 'cx-n') +
-        campo('o valor de (R$)', '<input type="number" name="tw' + i + '" step="0.01" min="0" inputmode="decimal" value="' + esc(p.transferencia.valor || '') + '" placeholder="o mesmo">', 'cx-n')
+        campo('o valor de (R$)', '<input type="text" data-moeda name="tw' + i + '" value="' + esc(p.transferencia.valor || '') + '" placeholder="o mesmo">', 'cx-n')
         : p.tipo === 'entrada' ? emprestimoHTML(p, i) : '') +
       (p.chave && p.podeLembrar ? '<label class="campo check largo cx-n" title="Grava uma regra: da próxima vez que aparecer &quot;' + esc(p.rotulo || p.chave) + '&quot;, o CRM já classifica igual a esta linha — categoria, fornecedor e entre empresas.">' +
         '<input type="checkbox" name="l' + i + '"> da próxima vez, classificar "' + esc(p.rotulo || p.chave) + '" igual</label>' : '') +
@@ -446,9 +446,9 @@
       const e = p.emprestimo || {}, pc = e.parcelas || {};
       return '<label class="campo check largo cx-n"><input type="checkbox" name="m' + i + '"' + (p.emprestimo ? ' checked' : '') + '> É empréstimo recebido (não é receita)</label>' +
         campo('Se for empréstimo, devolve em', '<input type="date" name="md' + i + '" value="' + esc(e.em || '') + '">', 'cx-n cx-emp') +
-        campo('o valor de (R$)', '<input type="number" name="mv' + i + '" step="0.01" min="0" inputmode="decimal" value="' + esc(e.devolve != null ? e.devolve : '') + '" placeholder="o mesmo">', 'cx-n cx-emp') +
+        campo('o valor de (R$)', '<input type="text" data-moeda name="mv' + i + '" value="' + esc(e.devolve != null ? e.devolve : '') + '" placeholder="o mesmo">', 'cx-n cx-emp') +
         campo('— ou em quantas parcelas', '<input type="number" name="mn' + i + '" step="1" min="0" value="' + esc(pc.n || '') + '">', 'cx-n cx-emp') +
-        campo('de (R$)', '<input type="number" name="mp' + i + '" step="0.01" min="0" inputmode="decimal" value="' + esc(pc.valor || '') + '">', 'cx-n cx-emp') +
+        campo('de (R$)', '<input type="text" data-moeda name="mp' + i + '" value="' + esc(pc.valor || '') + '">', 'cx-n cx-emp') +
         campo('a 1ª em', '<input type="date" name="m1' + i + '" value="' + esc(pc.primeira || '') + '">', 'cx-n cx-emp') +
         campo('todo dia', '<input type="number" name="mdia' + i + '" step="1" min="1" max="31" value="' + esc(pc.dia || '') + '">', 'cx-n cx-emp');
     }

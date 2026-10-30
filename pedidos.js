@@ -617,7 +617,7 @@
         '<label class="campo"><span>Forma de pagamento</span><input data-ed="dados.pagamento" list="pdPags" value="' + esc(d.pagamento) + '" autocomplete="off"></label><datalist id="pdPags">' + R.ordemAlfa(pags).map(s => '<option value="' + esc(s) + '">').join('') + '</datalist>' +
         inp('Transportadora', 'dados.transportadora', d.transportadora) +
         '<label class="campo"><span>Frete por conta</span><select data-ed="dados.frete_conta">' + CRM.opcoesHTML(P.FRETE_CONTA, d.frete_conta) + '</select></label>' +
-        inp('Valor do frete (R$)', 'frete', x.frete || '', ' type="number" step="0.01" min="0" inputmode="decimal"') + inp('Qtde de volumes', 'dados.volumes', d.volumes, ' type="number" min="0"') +
+        inp('Valor do frete (R$)', 'frete', x.frete || '', ' type="text" data-moeda') + inp('Qtde de volumes', 'dados.volumes', d.volumes, ' type="number" min="0"') +
         inp('Seu pedido', 'dados.seu_pedido', d.seu_pedido) + inp('A/C Sr(a)', 'dados.ac', d.ac) + inp('Referente', 'dados.referente', d.referente) +
         inp('Validade do orçamento (dias)', 'dados.validade_dias', d.validade_dias, ' type="number" min="1"') + inp('Prazo de entrega', 'dados.prazo_entrega', d.prazo_entrega) +
         '<h3 class="largo">Local de entrega</h3>' + inp('Endereço', 'dados.entrega.endereco', d.entrega.endereco) + inp('Nº', 'dados.entrega.numero', d.entrega.numero) + inp('Compl.', 'dados.entrega.compl', d.entrega.compl) +

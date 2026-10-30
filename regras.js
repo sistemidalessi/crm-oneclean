@@ -1087,7 +1087,56 @@
     return out;
   }
 
+  // Máscaras dos campos (30/10/2026, pedido do Anderson: "o valor deveria ser 1.103,44" e telefone, CPF/CNPJ e CEP já no
+  // formato clássico enquanto se digita). Dinheiro como no app do banco: os números entram pela direita (110344 → 1.103,44);
+  // um "-" em qualquer lugar deixa negativo (saldo no banco). Devolvem o texto da tela e, no dinheiro, o número puro.
+  function moedaTexto(n) {
+    if (n === '' || n == null || !isFinite(Number(n))) return '';
+    const v = Math.round(Number(n) * 100) / 100, a = Math.abs(v).toFixed(2).split('.');
+    return (v < 0 ? '-' : '') + a[0].replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ',' + a[1];
+  }
+  function mascaraMoeda(texto) {
+    const t = String(texto == null ? '' : texto), d = t.replace(/\D/g, '').replace(/^0+(?=\d)/, '');
+    if (!d) return { texto: '', numero: '' };
+    const n = (t.indexOf('-') !== -1 ? -1 : 1) * Number(d) / 100;
+    return { texto: moedaTexto(n), numero: n };
+  }
+  // "1.103,44", "1103,44", "1103.44" ou 1103.44 → 1103.44 ('' quando vazio)
+  function lerMoeda(t) {
+    if (typeof t === 'number') return t;
+    let s = String(t == null ? '' : t).trim();
+    if (!/\d/.test(s)) return '';
+    if (s.indexOf(',') !== -1) s = s.replace(/\./g, '').replace(',', '.');
+    else if ((s.match(/\./g) || []).length > 1) s = s.replace(/\./g, '');
+    const n = Number(s.replace(/[^0-9.-]/g, ''));
+    return isFinite(n) ? n : '';
+  }
+  function mascaraTel(texto) {
+    const t = String(texto == null ? '' : texto);
+    if (/^\s*\+/.test(t)) return t;                     // internacional: como digitado
+    const d = t.replace(/\D/g, '');
+    if (!d || d.length > 11) return d.length > 11 ? t : '';
+    if (d.length <= 2) return '(' + d;
+    if (d.length <= 6) return '(' + d.slice(0, 2) + ') ' + d.slice(2);
+    if (d.length <= 10) return '(' + d.slice(0, 2) + ') ' + d.slice(2, 6) + '-' + d.slice(6);
+    return '(' + d.slice(0, 2) + ') ' + d.slice(2, 7) + '-' + d.slice(7);
+  }
+  // CPF (até 11 números) ou CNPJ; o CNPJ com letras (alfanumérico, a partir de 2026) fica como digitado
+  function mascaraDoc(texto) {
+    const t = String(texto == null ? '' : texto);
+    if (/[A-Za-z]/.test(t)) return t.toUpperCase();
+    const d = t.replace(/\D/g, '').slice(0, 14);
+    if (d.length <= 11) return d.replace(/(\d{3})(?=\d)/, '$1.').replace(/^(\d{3}\.\d{3})(?=\d)/, '$1.').replace(/^(\d{3}\.\d{3}\.\d{3})(?=\d)/, '$1-');
+    return d.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{0,2})$/, (m, a, b, c, e, f) => a + '.' + b + '.' + c + '/' + e + (f ? '-' + f : ''))
+      .replace(/^(\d{2})(\d{3})(\d{3})(\d{1,3})$/, '$1.$2.$3/$4');
+  }
+  function mascaraCep(texto) {
+    const d = String(texto == null ? '' : texto).replace(/\D/g, '').slice(0, 8);
+    return d.length > 5 ? d.slice(0, 5) + '-' + d.slice(5) : d;
+  }
+
   const api = {
+    moedaTexto, mascaraMoeda, lerMoeda, mascaraTel, mascaraDoc, mascaraCep,
     IND_IE, faltasNota, enderecoDoCep, empresaDoCnpj, ieValida, formataIE, errosInscricao, inscricaoDaSefaz, diferencasCadastro,
     comparaAlfa, ordemAlfa, alfaOpcoes,
     TIPOS_ATIVIDADE, TIPOS_MANUAIS, SITUACOES, STATUS_NEGOCIO, STATUS_PROPOSTA, RECORRENCIAS, PAPEIS, UFS,

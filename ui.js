@@ -110,15 +110,60 @@
       const lista = Array.isArray(val) ? val.join(', ') : val;
       input = '<input type="text" id="' + id + '" name="' + nome + '" value="' + esc(lista) + '" list="dl_' + nome + '"' + dis + attr('placeholder', c.dica || 'separe por vírgula') + '>' +
         '<datalist id="dl_' + nome + '">' + R.ordemAlfa(c.sugestoes || []).map(s => '<option value="' + esc(s) + '">').join('') + '</datalist>';
+    } else if (ehMoeda(c)) {
+      // dinheiro (30/10/2026): texto com máscara 1.103,44; o .value do campo continua o número puro (aplicaMascaras)
+      input = '<input type="text" id="' + id + '" name="' + nome + '" value="' + esc(val) + '"' + dis + ' inputmode="numeric" data-moeda autocomplete="off"' + attr('placeholder', c.dica || '0,00') + '>';
     } else {
       const tipo = { numero: 'number', data: 'date', hora: 'time', email: 'email', tel: 'tel' }[c.tipo] || 'text';
+      const masc = c.tipo === 'tel' ? 'tel' : c.nome === 'cep' ? 'cep' : /^(cnpj|cpf|documento)$/.test(c.nome) || /CNPJ|CPF/.test(c.rotulo || '') ? 'doc' : null;
       input = '<input type="' + tipo + '" id="' + id + '" name="' + nome + '" value="' + esc(val) + '"' + dis +
         (c.tipo === 'numero' ? ' step="' + (c.passo || '0.01') + '" min="' + (c.min == null ? 0 : c.min) + '"' + (c.max != null ? ' max="' + c.max + '"' : '') + ' inputmode="decimal"' : '') +
-        attr('placeholder', c.dica) + (c.sugestoes ? ' list="dl_' + nome + '"' : '') + ' autocomplete="off">' +
+        attr('placeholder', c.dica) + (c.sugestoes ? ' list="dl_' + nome + '"' : '') + attr('data-mascara', masc) + ' autocomplete="off">' +
         (c.sugestoes ? '<datalist id="dl_' + nome + '">' + R.ordemAlfa([...new Set(c.sugestoes)]).map(s => '<option value="' + esc(s) + '">').join('') + '</datalist>' : '');
     }
     return '<label class="' + cls + '"' + attr('for', c.tipo === 'datahora' ? id : null) + '><span>' + esc(c.rotulo) + (c.obrigatorio ? ' *' : '') + '</span>' + input +
       (c.ajuda ? '<small>' + esc(c.ajuda) + '</small>' : '') + '<small class="aviso-campo" data-aviso="' + nome + '" hidden></small></label>';
+  }
+
+  // Campo de dinheiro: tipo 'moeda', ou número com "R$" ou "Valor" no rótulo (os mais de 30 valores do sistema)
+  const ehMoeda = c => c.tipo === 'moeda' || c.moeda === true || (c.tipo === 'numero' && c.moeda !== false && /R\$|^valor/i.test(c.rotulo || ''));
+
+  // Máscaras (30/10/2026, pedido do Anderson): dinheiro (data-moeda), telefone, CPF/CNPJ e CEP (data-mascara). No dinheiro, a
+  // tela mostra 1.103,44 e o .value do campo continua devolvendo o número puro ("1103.44") e aceitando número — assim todo o
+  // código que já lia e escrevia esses campos segue igual. Vale nos formulários e em qualquer campo da tela (observador).
+  const nativo = typeof HTMLInputElement !== 'undefined' ? Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value') : null;
+  function mascaraMoedaEm(el) {
+    if (el.dataset.mascarado) return;
+    el.dataset.mascarado = '1';
+    const bruto = nativo.get.call(el);
+    Object.defineProperty(el, 'value', { configurable: true,
+      get() { const n = R.lerMoeda(nativo.get.call(el)); return n === '' ? '' : String(n); },
+      set(v) { const n = R.lerMoeda(v); nativo.set.call(el, n === '' ? '' : R.moedaTexto(n)); } });
+    el.value = bruto;
+    if (el.type !== 'text') el.type = 'text';
+    el.setAttribute('inputmode', 'numeric');
+    el.addEventListener('input', () => { nativo.set.call(el, R.mascaraMoeda(nativo.get.call(el)).texto); }, true);
+  }
+  const MASCARAS = { tel: R.mascaraTel, doc: R.mascaraDoc, cep: R.mascaraCep };
+  function mascaraTextoEm(el) {
+    const f = MASCARAS[el.dataset.mascara];
+    if (!f || el.dataset.mascarado) return;
+    el.dataset.mascarado = '1';
+    if (el.value) el.value = f(el.value);
+    el.addEventListener('input', ev => { if (ev.inputType && /^delete/.test(ev.inputType)) return; el.value = f(el.value); }, true);
+  }
+  function aplicaMascaras(raiz) {
+    if (!raiz || !raiz.querySelectorAll) return;
+    $$('input[data-moeda]', raiz).forEach(mascaraMoedaEm);
+    $$('input[data-mascara]', raiz).forEach(mascaraTextoEm);
+  }
+  if (typeof MutationObserver !== 'undefined' && typeof document !== 'undefined') {
+    const obs = new MutationObserver(l => l.forEach(m => m.addedNodes.forEach(n => {
+      if (n.nodeType !== 1) return;
+      if (n.matches && n.matches('input[data-moeda]')) mascaraMoedaEm(n); else if (n.matches && n.matches('input[data-mascara]')) mascaraTextoEm(n); else aplicaMascaras(n);
+    })));
+    const liga = () => obs.observe(document.body, { childList: true, subtree: true });
+    if (document.body) liga(); else document.addEventListener('DOMContentLoaded', liga);
   }
 
   function lerForm(form, campos) {
@@ -202,6 +247,7 @@
         try { await o.aoExcluir(); fechaSeMeu(); } catch (e) { mostraErro('Não foi possível excluir: ' + e.message); }
       });
     }
+    aplicaMascaras(form);   // antes das extras: a máscara corre antes de quem escuta o campo
     if (o.extras) o.extras(form, dlg);
     if (!dlg.open) dlg.showModal();
     const primeiro = $('.campos input:not([type=checkbox]):not([disabled]), .campos select:not([disabled]), .campos textarea:not([disabled])', form);
@@ -245,6 +291,6 @@
 
   Object.assign(CRM, {
     $, $$, esc, attr, toast, falhou, selo, seloSituacao, seloStatus, seloProposta, estrelas, avatar, iconeTipo,
-    barra, aplicaBarras, baixar, baixarCSV, opcoesHTML, campoHTML, lerForm, abrirForm, avisoCampo, menuFlutuante, fechaMenus
+    barra, aplicaBarras, baixar, baixarCSV, opcoesHTML, campoHTML, lerForm, abrirForm, avisoCampo, aplicaMascaras, menuFlutuante, fechaMenus
   });
 })();
