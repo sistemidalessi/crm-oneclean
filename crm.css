@@ -1313,3 +1313,10 @@ button.ordena.ativo { color: var(--marinho); }
 .fechado-faturado .kpi.ff-acumulado small { color: #fff; opacity: .9; }
 .ff-tabela tfoot tr.total td { background: var(--azul-fundo); border-top: 2px solid var(--azul); font-size: .98rem; }
 .ff-tabela tfoot tr.total td.ff-c-acu strong { font-size: 1.15rem; }
+/* faixa dos títulos (30/10/2026, Anderson: "uma barrinha… para eu saber: essa coluna é de vendedor, essa é pedidos fechados"):
+   a linha dos títulos ganha fundo e um traço embaixo que a separa das linhas de dados, em todas as tabelas */
+.tabela thead tr:not(.filtro-col-linha) th { background: var(--cinza-fundo); border-bottom: 2px solid var(--suave); padding-top: 9px; padding-bottom: 9px; }
+.tabela thead tr:not(.filtro-col-linha) th:first-child { border-top-left-radius: 6px; } .tabela thead tr:not(.filtro-col-linha) th:last-child { border-top-right-radius: 6px; }
+/* no Fechado × faturado, o traço de cada título tem a cor da coluna */
+.ff-tabela thead th.ff-c-ped { border-bottom-color: var(--roxo) !important; } .ff-tabela thead th.ff-c-fat { border-bottom-color: var(--verde) !important; }
+.ff-tabela thead th.ff-c-sem { border-bottom-color: var(--ambar) !important; } .ff-tabela thead th.ff-c-acu { border-bottom-color: var(--azul) !important; background: var(--azul-fundo); }
