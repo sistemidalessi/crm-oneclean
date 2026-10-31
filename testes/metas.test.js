@@ -11,19 +11,22 @@ test('dias úteis do mês (sábado, domingo e feriado fora)', () => {
   assert.strictEqual(M.diasUteis('2026-11', util, '2026-11-06'), 4);
 });
 
-test('sugestão: faturamento por dia útil com peso maior no mês mais recente, mais o crescimento', () => {
+test('sugestão: média ponderada dos 3 meses (50/30/20), nunca menos que o mês anterior, mais o crescimento', () => {
   const v = { meses: { '2026-10': { fat: 22000, novos: 3 }, '2026-09': { fat: 21000, novos: 2 }, '2026-08': { fat: 21000, novos: 1 } } };
   const s = M.sugestao(v, '2026-11', util, 10);
-  const du = { o: M.diasUteis('2026-10', util), s: M.diasUteis('2026-09', util), a: M.diasUteis('2026-08', util) };
-  const porDia = 0.5 * 22000 / du.o + 0.3 * 21000 / du.s + 0.2 * 21000 / du.a;
-  assert.strictEqual(s.valor, Math.round(porDia * 19 * 1.1 / 100) * 100);
+  assert.strictEqual(s.media, 21500);                   // 0,5×22.000 + 0,3×21.000 + 0,2×21.000
+  assert.strictEqual(s.pelo, 'ultimo');                 // outubro (22.000) é maior que a média
+  assert.strictEqual(s.valor, 24200);                   // 22.000 + 10%
   assert.strictEqual(s.novos, 3);                       // média 2 × 1,1 = 2,2 → 3
-  assert.strictEqual(s.duMes, 19);
+  // mês anterior fraco: vale a média (não castiga a meta por um mês ruim)
+  const r = M.sugestao({ meses: { '2026-10': { fat: 18000, novos: 3 }, '2026-09': { fat: 33000, novos: 5 }, '2026-08': { fat: 30000, novos: 2 } } }, '2026-11', util, 0);
+  assert.strictEqual(r.pelo, 'media');
+  assert.strictEqual(r.valor, Math.round((0.5 * 18000 + 0.3 * 33000 + 0.2 * 30000) / 100) * 100);
 });
 
 test('sugestão: quem começou há pouco não é puxado para baixo pelos meses sem venda', () => {
   const s = M.sugestao({ meses: { '2026-10': { fat: 12000, novos: 7 } } }, '2026-11', util, 0);
-  assert.strictEqual(s.valor, Math.round(12000 / M.diasUteis('2026-10', util) * 19 / 100) * 100);
+  assert.strictEqual(s.valor, 12000);
   assert.strictEqual(s.novos, 7);
   assert.strictEqual(M.sugestao({ meses: {} }, '2026-11', util, 8).semHistorico, true);
 });

@@ -3,9 +3,11 @@
    comissão). A meta de cada vendedor(a) tem duas partes: o valor faturado no mês e a quantidade de clientes novos.
 
    Como a sugestão é feita (fica escrita na tela, para quem decide entender a conta):
-   - base = o faturamento por dia útil dos 3 meses anteriores, com mais peso no mais recente (50%, 30%, 20%), vezes os dias
-     úteis do mês da meta (dias úteis bancários de São Bernardo, os mesmos do Caixa);
+   - base = a média do faturamento dos 3 meses anteriores, com mais peso no mais recente (50%, 30%, 20%), e nunca menos que
+     o faturamento do mês anterior (31/10/2026, Anderson: "não faz sentido novembro ser menos do que outubro… ainda tem
+     13º"; antes a conta era por dia útil e novembro, com 19 dias, saía abaixo de outubro);
    - meta = base + o crescimento escolhido (padrão 8%), arredondada para R$ 100;
+   - os dias úteis (bancários de São Bernardo, os do Caixa) ficam só no acompanhamento: quanto falta por dia;
    - clientes novos = a média de clientes novos (1ª compra) dos 3 meses anteriores, com o mesmo crescimento, no mínimo 1.
    O mínimo da empresa (só o administrador vê) é o faturamento que paga as contas do mês:
      custos fixos do Caixa ÷ (margem bruta − impostos sobre a venda − despesas variáveis − comissões).
@@ -33,17 +35,16 @@
   // sugestão de meta de um(a) vendedor(a): v.meses = { 'AAAA-MM': { fat, novos } }; mes = mês da meta
   function sugestao(v, mes, util, crescimento) {
     const g = 1 + num(crescimento) / 100;
-    const base = [1, 2, 3].map(i => { const m = somaMes(mes, -i), x = (v.meses || {})[m] || {}; return { mes: m, fat: num(x.fat), novos: num(x.novos), du: diasUteis(m, util) }; });
+    const base = [1, 2, 3].map(i => { const m = somaMes(mes, -i), x = (v.meses || {})[m] || {}; return { mes: m, fat: num(x.fat), novos: num(x.novos) }; });
     const com = base.filter(b => b.fat > 0);
-    const duMes = diasUteis(mes, util);
-    if (!com.length) return { base, duMes, porDia: 0, valor: 0, novos: 1, semHistorico: true };
+    if (!com.length) return { base, media: 0, ultimo: 0, valor: 0, novos: 1, semHistorico: true };
     // pesos só dos meses com venda (quem começou há pouco não é puxado para baixo pelo mês em que ainda não vendia)
     let soma = 0, pesos = 0;
-    base.forEach((b, i) => { if (b.fat > 0 && b.du > 0) { soma += PESOS[i] * b.fat / b.du; pesos += PESOS[i]; } });
-    const porDia = pesos ? soma / pesos : 0;
-    const valor = Math.round(porDia * duMes * g / 100) * 100;
+    base.forEach((b, i) => { if (b.fat > 0) { soma += PESOS[i] * b.fat; pesos += PESOS[i]; } });
+    const media = pesos ? soma / pesos : 0, ultimo = base[0].fat;
+    const valor = Math.round(Math.max(media, ultimo) * g / 100) * 100;
     const mediaNovos = com.reduce((s, b) => s + b.novos, 0) / com.length;
-    return { base, duMes, porDia: r2(porDia), valor, novos: Math.max(1, Math.ceil(mediaNovos * g - 0.0001)), mediaNovos: r2(mediaNovos) };
+    return { base, media: r2(media), ultimo, pelo: ultimo > media ? 'ultimo' : 'media', valor, novos: Math.max(1, Math.ceil(mediaNovos * g - 0.0001)), mediaNovos: r2(mediaNovos) };
   }
 
   // mínimo da empresa: emp = crm_metas_dados().empresa; mesesBase = ['AAAA-MM'…] (os meses completos usados); p = parâmetros
@@ -144,7 +145,7 @@
       const s = M.sugestao(v, mesTela, util, cfg.crescimento), mt = v.meta || {};
       const hist = s.base.slice().reverse().map(b => R.mesCurto(b.mes + '-01') + ': ' + moeda(b.fat) + ' (' + b.novos + ' novo' + (b.novos === 1 ? '' : 's') + ')').join(' · ');
       return '<tr><td><strong>' + esc(v.nome) + '</strong>' + (v.externo ? ' <small>externa</small>' : '') + '<small>' + esc(hist) + '</small></td>' +
-        '<td class="num">' + (s.semHistorico ? '<small>sem histórico</small>' : moeda(s.valor) + '<small>' + moeda(s.porDia) + '/dia útil × ' + s.duMes + ' dias</small>') + '</td>' +
+        '<td class="num">' + (s.semHistorico ? '<small>sem histórico</small>' : moeda(s.valor) + '<small>' + (s.pelo === 'ultimo' ? 'pelo mês anterior (' + moeda(s.ultimo) + ')' : 'pela média dos 3 meses (' + moeda(s.media) + ')') + ' + ' + esc(cfg.crescimento) + '%</small>') + '</td>' +
         '<td class="num"><input type="text" data-moeda name="m_' + esc(v.user_id) + '" value="' + esc(mt.valor != null ? mt.valor : '') + '" class="curto" data-sug="' + esc(s.valor) + '"></td>' +
         '<td class="num">' + s.novos + '<small>média ' + String(s.mediaNovos == null ? 0 : s.mediaNovos).replace('.', ',') + '</small></td>' +
         '<td class="num"><input type="number" min="0" step="1" name="n_' + esc(v.user_id) + '" value="' + esc(mt.clientes_novos != null ? mt.clientes_novos : '') + '" class="curto" data-sug="' + esc(s.novos) + '"></td></tr>';
@@ -153,8 +154,8 @@
     const totMeta = vs.reduce((t, v) => t + Number((v.meta && v.meta.valor) || 0), 0);
     return cab +
       '<p class="dica">A meta mede o <strong>faturamento das notas</strong> do mês (o que já tem nota, mais os pedidos fechados que ainda vão virar nota) e a ' +
-        'quantidade de <strong>clientes novos</strong> (1ª compra). A sugestão usa o faturamento por dia útil dos 3 meses anteriores (50% o mais recente, ' +
-        '30% o anterior, 20% o mais antigo), vezes os dias úteis do mês, mais o crescimento. O Direto fica de fora.</p>' +
+        'quantidade de <strong>clientes novos</strong> (1ª compra). A sugestão parte da média dos 3 meses anteriores (50% o mais recente, ' +
+        '30% o anterior, 20% o mais antigo), nunca menos que o mês anterior, mais o crescimento. O Direto fica de fora.</p>' +
       '<div class="tabela-rolagem"><table class="tabela" data-sem-filtro><thead><tr><th>Vendedor(a) <small>últimos 3 meses</small></th><th class="num">Sugestão</th><th class="num">Meta de faturamento</th>' +
         '<th class="num">Sugestão</th><th class="num">Meta de clientes novos</th></tr></thead><tbody>' + linhas + '</tbody>' +
         '<tfoot><tr class="total"><td><strong>Total</strong></td><td class="num">' + moeda(totSug) + '</td><td class="num">' + moeda(totMeta) + '</td><td></td><td></td></tr></tfoot></table></div>' +
@@ -182,7 +183,9 @@
           (chega >= mn.valor ? ' · cobre o mínimo' : ' · não cobre o mínimo') + '</small></div></div>') +
       '<div class="colunas"><div><h3>De cada R$ 100 vendidos</h3><table class="tabela" data-sem-filtro><tbody>' +
         linha('Margem bruta', pct(mn.margem), 'venda − custo médio dos produtos, ' + base.map(m => R.mesCurto(m + '-01')).join(', ')) +
-        linha('− Impostos sobre a venda', pct(mn.impostos), 'estimativa: ' + pct(mn.destacado) + ' de ICMS, PIS e COFINS destacados nas notas, sobre a margem (débito − crédito); o contador confirma') +
+        linha('− Impostos sobre a venda', pct(mn.impostos), cfg.impostos_pct != null && cfg.impostos_pct !== ''
+          ? 'informado por você' + (cfg.impostos_obs ? ': ' + esc(cfg.impostos_obs) : '') + ' (calculado pelas notas daria ' + pct(mn.impostosCalc) + ')'
+          : 'estimativa: ' + pct(mn.destacado) + ' de ICMS, PIS e COFINS destacados nas notas, sobre a margem (débito − crédito); o contador confirma') +
         linha('− Despesas variáveis', pct(mn.variaveis), mn.mesesVariaveis ? 'frete, combustível, tarifas e outras saídas avulsas do Caixa ÷ faturamento' : 'o Caixa ainda não tem um mês inteiro') +
         linha('− Comissões', pct(mn.comissao), 'estimativa sobre o faturamento total (o Direto não tem comissão)') +
         '<tr class="total"><td><strong>= Sobra para pagar os custos fixos</strong></td><td class="num"><strong>' + pct(mn.contribuicao) + '</strong></td></tr></tbody></table>' +
