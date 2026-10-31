@@ -16,6 +16,10 @@
 //        pagamento de V cabe no caixa (o saldo do fim de cada dia, dali até o fim da previsão, fica >= o colchão de
 //        Configurações, `caixa_colchao_compras`, padrão R$ 0). Devolve SÓ a data e uma frase, nunca saldo ou valor: o
 //        comprador recebe só o sinal ("melhor vencer a partir de 15/11"). Com a chave de serviço, nenhuma outra parte.
+//   GET …/crm-caixa-leitura?parte=pessoal&de=AAAA-MM-DD&ate=AAAA-MM-DD   (31/10/2026, aba "Minha vida" do app do CEO, só o
+//        administrador da Agilité): as saídas do Caixa (pagas, pela data do pagamento; em aberto, pelo vencimento) entre
+//        `de` e `ate` (no máximo 500 dias), com id, data, descrição, fornecedor, categoria e valor. A Agilité separa lá o
+//        que é gasto pessoal do sócio (pró-labore, retiradas, convênio, contas da casa). Mesma senha.
 // As contas NÃO são copiadas para cá: a função baixa caixa-calculo.js (o mesmo arquivo da tela do
 // Caixa) do GitHub num commit FIXO e confere o SHA-256 antes de usar. Depois de mexer nele: commit +
 // push, `node ferramentas/fixa-motor-notas.js` (fixa as duas funções) e publicar esta de novo.
@@ -114,6 +118,25 @@ async function montar(db: any, dias: number) {
     return { r, dados };
 }
 
+// parte=pessoal (31/10/2026): as saídas pagas no período (pela data do pagamento) e as em aberto (pelo vencimento)
+// deno-lint-ignore no-explicit-any
+async function saidasPessoal(db: any, de: string, ate: string) {
+  // deno-lint-ignore no-explicit-any
+  const out: any[] = [];
+  for (let i = 0; ; i += PAGINA) {
+    const { data, error } = await db.from('crm_fin_lancamentos').select('id, descricao, fornecedor, categoria, valor, vencimento, pago_em, situacao')
+      .eq('tipo', 'saida').in('situacao', ['pago', 'aberto']).gte('vencimento', '2000-01-01').order('id').range(i, i + PAGINA - 1);
+    if (error) throw new Error('saídas: ' + error.message);
+    for (const l of data ?? []) {
+      const pago = l.situacao === 'pago', dia = String((pago ? l.pago_em || l.vencimento : l.vencimento) || '').slice(0, 10);
+      if (dia < de || dia > ate) continue;
+      out.push({ id: l.id, data: dia, descricao: l.descricao || '', fornecedor: l.fornecedor || '', categoria: l.categoria || '', valor: Number(l.valor) || 0, previsto: !pago });
+    }
+    if (!data || data.length < PAGINA) break;
+  }
+  return out;
+}
+
 // o sinal do vencimento (só data e frase): o primeiro dia útil entre de e ate dias a partir do qual o saldo do fim de
 // cada dia, até o fim da previsão, menos o valor, fica >= o colchão
 // deno-lint-ignore no-explicit-any
@@ -170,6 +193,12 @@ Deno.serve(async (req) => {
       if (fisc.error) console.error('[crm-caixa-leitura] crm_ceo_fiscal: ' + fisc.error.message);
       return resposta(200, Object.assign({}, data, { fiscal: Object.assign({}, fisc.data || {}, { certificado_a1: cert }),
         analises: { dia: hoje, vendas: corta(av.data), compras: corta(ac.data), logistica: corta(al.data) } }));
+    }
+    if (url.searchParams.get('parte') === 'pessoal') {
+      const de = String(url.searchParams.get('de') || ''), ate = String(url.searchParams.get('ate') || '');
+      const data = /^\d{4}-\d{2}-\d{2}$/;
+      if (!data.test(de) || !data.test(ate) || ate < de || (Date.parse(ate) - Date.parse(de)) / 864e5 > 500) return resposta(400, { erro: 'de ou ate inválidos' });
+      return resposta(200, { de, ate, saidas: await saidasPessoal(db, de, ate) });
     }
     const dias = Math.min(90, Math.max(1, parseInt(url.searchParams.get('dias') ?? '30', 10) || 30));
     const { r } = await montar(db, dias);
