@@ -310,36 +310,9 @@
   }
 
   // ================================================================ Metas
-  let mesMeta = null;
-  TELAS.metas = () => {
-    mesMeta = mesMeta || CRM.hoje().slice(0, 8) + '01';
-    const vend = CRM.usuariosAtivos();
-    const meses = [-1, 0, 1, 2, 3].map(i => R.somaMeses(CRM.hoje().slice(0, 8) + '01', i));
-    const vendido = id => E().D.negocios.filter(n => n.status === 'ganho' && n.responsavel_id === id && n.fechado_em && n.fechado_em.slice(0, 7) === mesMeta.slice(0, 7)).reduce((s, n) => s + R.num(n.valor), 0);
-    const meta = id => { const m = E().D.metas.find(x => x.usuario_id === id && x.mes === mesMeta); return m ? m.valor : ''; };
-    return '<form id="formMetas" class="form-plano"><p>Mês: <select id="mesMeta">' + CRM.opcoesHTML(meses.map(m => [m, R.mesCurto(m)]), mesMeta) + '</select></p>' +
-      '<table class="tabela"><thead><tr><th>Vendedor</th><th class="num">Meta de vendas (R$)</th><th class="num">Vendido no mês</th><th>Atingido</th></tr></thead><tbody>' +
-      vend.map(u => { const mt = meta(u.user_id), vd = vendido(u.user_id); return '<tr><td>' + esc(u.nome) + '</td><td class="num"><input type="text" data-moeda name="m_' + esc(u.user_id) + '" value="' + esc(mt) + '" class="curto"></td>' +
-        '<td class="num">' + esc(R.moeda(vd)) + '</td><td>' + (mt ? CRM.barra(vd, mt, R.pct(vd / mt * 100)) : '—') + '</td></tr>'; }).join('') +
-      '</tbody></table><p><button type="submit" class="btn">Salvar metas</button></p></form>';
-  };
-  DEPOIS.metas = () => {
-    $('#mesMeta').addEventListener('change', ev => { mesMeta = ev.target.value; CRM.render(); });
-    $('#formMetas').addEventListener('submit', async ev => {
-      ev.preventDefault();
-      try {
-        for (const u of CRM.usuariosAtivos()) {
-          const el = ev.target.elements['m_' + u.user_id];
-          const v = el.value === '' ? null : Number(el.value);
-          const ex = E().D.metas.find(x => x.usuario_id === u.user_id && x.mes === mesMeta);
-          if (ex && v == null) await CRM.remover('metas', ex.id);
-          else if (ex && R.num(ex.valor) !== v) await CRM.atualizar('metas', ex.id, { valor: v });
-          else if (!ex && v != null) await CRM.inserir('metas', { usuario_id: u.user_id, mes: mesMeta, valor: v });
-        }
-        CRM.toast('Metas salvas.');
-      } catch (e) { CRM.falhou(e); }
-    });
-  };
+  // 31/10/2026: a tela (sugestão pelo histórico, clientes novos e o mínimo da empresa) fica em metas.js
+  TELAS.metas = () => (CRM.metas ? CRM.metas.telaConfig() : '<p class="vazio">Carregando…</p>');
+  DEPOIS.metas = el => { if (CRM.metas) CRM.metas.depoisConfig(el); };
 
   // ================================================================ Modelos
   TELAS.modelos = () => {

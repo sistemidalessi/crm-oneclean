@@ -504,6 +504,7 @@
           kpi('Faturamento do mês · Geral (com o Direto)', R.moeda(m.atual.valor), seta(m.variacao) + ' vs. mesmo ponto de ' + esc(R.mesCurto(R.somaMeses(m.de, -1))) + ' (' + esc(R.moeda(m.anteriorMesmoDia.valor)) + ')', 'azul', 'gestao-lista', 'mes') +
         '</section>' +
         blocoFechado(m.de, hoje, 'Fechado × faturado no mês') +
+        (CRM.metas ? CRM.metas.bloco() : '') +
         // ---- 12 meses + base
         '<div class="g-duas">' +
           '<section class="cartao"><h2>Faturamento por mês <small>12 meses</small></h2><div class="grafico-colunas">' + p.porMes.map(x => '<div class="col" title="' + esc(R.mesCurto(x.mes) + ': ' + R.moeda(x.valor) + ' (' + x.qtd + ' notas)') + '">' +
@@ -514,16 +515,16 @@
           '</dl></section>' +
         '</div>' +
         // ---- equipe
-        '<section class="cartao"><h2>Equipe <small>faturamento pela carteira do cliente</small></h2><div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Vendedor(a)</th><th class="num">Mês</th><th class="num">Meta</th><th class="num">Ano</th><th class="num">Clientes ativos</th><th class="num">Contatos no mês</th><th class="num">Hoje</th><th class="num">Atrasadas</th></tr></thead><tbody>' +
-          p.equipe.map(u => '<tr><td><strong>' + esc(u.nome) + '</strong>' + (u.direto ? ' <small>Venda sem vendedor(a)</small>' : '') + '</td><td class="num">' + esc(R.moeda(u.valorMes)) + '</td><td class="num">' + (u.meta ? CRM.barra(u.valorMes, u.meta, R.pct(u.pctMeta)) : '—') + '</td>' +
+        '<section class="cartao"><h2>Equipe <small>faturamento pela carteira do cliente</small></h2><div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Vendedor(a)</th><th class="num">Mês</th><th class="num">Ano</th><th class="num">Clientes ativos</th><th class="num">Contatos no mês</th><th class="num">Hoje</th><th class="num">Atrasadas</th></tr></thead><tbody>' +
+          p.equipe.map(u => '<tr><td><strong>' + esc(u.nome) + '</strong>' + (u.direto ? ' <small>Venda sem vendedor(a)</small>' : '') + '</td><td class="num">' + esc(R.moeda(u.valorMes)) + '</td>' +
             '<td class="num">' + esc(R.moeda(u.valorAno)) + '</td>' +
             (u.direto ? '<td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">—</td>'
               : '<td class="num">' + u.clientesAtivos + '</td><td class="num">' + u.contatos + '</td><td class="num">' + u.contatosHoje + '</td>' +
                 '<td class="num">' + (u.atrasadas ? CRM.selo(String(u.atrasadas), u.atrasadas > 10 ? 'vermelho' : 'ambar') : '0') + '</td>') + '</tr>').join('') +
           (Math.abs(p.equipeTotal.outros.mes) >= 0.01 || Math.abs(p.equipeTotal.outros.ano) >= 0.01
-            ? '<tr><td><strong>Ex-vendedores(as)</strong> <small>e clientes sem carteira</small></td><td class="num">' + esc(R.moeda(p.equipeTotal.outros.mes)) + '</td><td class="num">—</td><td class="num">' + esc(R.moeda(p.equipeTotal.outros.ano)) + '</td>' +
+            ? '<tr><td><strong>Ex-vendedores(as)</strong> <small>e clientes sem carteira</small></td><td class="num">' + esc(R.moeda(p.equipeTotal.outros.mes)) + '</td><td class="num">' + esc(R.moeda(p.equipeTotal.outros.ano)) + '</td>' +
               '<td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">—</td></tr>' : '') +
-          '</tbody><tfoot><tr class="total"><td><strong>Total</strong></td><td class="num">' + esc(R.moeda(p.equipeTotal.valorMes)) + '</td><td class="num">' + (p.equipeTotal.meta ? esc(R.moeda(p.equipeTotal.meta)) : '—') + '</td>' +
+          '</tbody><tfoot><tr class="total"><td><strong>Total</strong></td><td class="num">' + esc(R.moeda(p.equipeTotal.valorMes)) + '</td>' +
             '<td class="num">' + esc(R.moeda(p.equipeTotal.valorAno)) + '</td><td class="num">' + p.equipeTotal.clientesAtivos + '</td><td class="num">' + p.equipeTotal.contatos + '</td><td class="num">' + p.equipeTotal.contatosHoje + '</td>' +
             '<td class="num">' + p.equipeTotal.atrasadas + '</td></tr></tfoot></table></div></section>' +
         // ---- tops

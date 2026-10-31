@@ -78,8 +78,6 @@
       const mes = hoje.slice(0, 8) + '01';
       const metas = (E().D.metas || []).filter(m => m.mes === mes && (!cart || m.usuario_id === cart));
       const meta = metas.reduce((s, m) => s + R.num(m.valor), 0);
-      const vendido = E().D.negocios.filter(n => n.status === 'ganho' && n.fechado_em && n.fechado_em.slice(0, 7) === hoje.slice(0, 7) && (!cart || n.responsavel_id === cart))
-        .reduce((s, n) => s + R.num(n.valor), 0);
 
       const cards = [
         ['Atrasadas', al.atrasadas.length, 'vermelho', 'tarefas-atrasadas'],
@@ -103,8 +101,8 @@
         '</section>' +
         '<div class="pilha">' +
           (CRM.gerenteVendas ? CRM.gerenteVendas.bloco() : '') +
-          (meta ? '<section class="cartao"><h2>Meta do mês</h2><div class="meta">' + CRM.barra(vendido, meta) +
-            '<p><strong>' + esc(R.moeda(vendido)) + '</strong> de ' + esc(R.moeda(meta)) + ' · ' + esc(R.pct(vendido / meta * 100)) + '</p></div></section>' : '') +
+          // meta do mês (31/10/2026): pelo faturamento das notas, como a meta é definida (metas.js)
+          (meta && CRM.metas ? CRM.metas.bloco({ so: cart || null, titulo: cart && cart === CRM.meuId() ? 'Minha meta do mês' : null }) : '') +
           '<section class="cartao" id="alerta-leads-sem-atendimento"><h2>Leads sem atendimento <small>nenhum contato registrado</small></h2>' +
             listaEmpresasCurta(al.leadsSemAtendimento, e => esc(CRM.nomeUsuario(e.responsavel_id)) + ' · chegou ' + esc(R.dataBR(e.criado_em)) + (e.origem ? ' · ' + esc(e.origem) : '')) + '</section>' +
           '<section class="cartao" id="alerta-negocios-parados"><h2>Negócios parados <small>sem movimento há ' + E().cfg.dias_parado +
@@ -683,7 +681,6 @@
       const maxPrev = Math.max(1, ...d.previsao.map(m => m.valor));
       const tabela = (id, cab, linhas, vaziaTxt) => linhas.length ? '<div class="tabela-rolagem"><table class="tabela" id="' + id + '"><thead><tr>' + cab.map(c => '<th' + (c[1] ? ' class="num"' : '') + '>' + esc(c[0]) + '</th>').join('') + '</tr></thead><tbody>' +
         linhas.map(l => '<tr>' + l.map((c, i) => '<td' + (cab[i][1] ? ' class="num"' : '') + '>' + c + '</td>').join('') + '</tr>').join('') + '</tbody></table></div>' : vazio(vaziaTxt || 'Sem dados no período.');
-      const maxVend = Math.max(1, ...d.porVendedor.map(v => Math.max(v.valor, v.meta)));
       const maxOrig = Math.max(1, ...d.porOrigem.map(o => o.leads));
       const maxMot = Math.max(1, ...d.motivosPerda.map(o => o.qtd));
       const maxProd = Math.max(1, ...d.porProduto.map(o => o.valor));
@@ -713,6 +710,8 @@
         k('Atividades', String(d.atividadesRealizadas), d.atividadesPendentes + ' pendentes · ' + d.atividadesAtrasadas + ' atrasadas', d.atividadesAtrasadas ? 'alerta' : '', 'atividades') +
         '</section>' +
         // Fechado × faturado (30/10/2026, pedido da Isabela): o período escolhido, da equipe dela ou de quem está no filtro
+        // Metas do mês (31/10/2026): faturamento das notas + pedidos sem nota, de quem está no filtro ou da equipe
+        (CRM.ehGestor() && CRM.metas ? CRM.metas.bloco({ so: resp || null }) : '') +
         (CRM.ehGestor() && CRM.fechado ? CRM.fechado.bloco(p.de > '0001' ? p.de : '2000-01-01', p.ate, 'Fechado × faturado', resp || null) : '') +
         (base ? '<section class="cartao"><h2>Base de clientes <small>hoje' + esc(quem) + ' · clique para ver quais são</small></h2><div class="kpis">' +
           k('Clientes', String(base.clientes), 'cadastrados como cliente', '', 'base-clientes') +
@@ -727,9 +726,8 @@
           '<span class="col-valor">' + (m.valor ? esc(abrevia(m.ponderado)) : '') + '</span><span class="col-barra"><span data-altura="' + (m.valor / maxPrev * 100).toFixed(1) + '"></span></span><span class="col-rot">' + esc(R.mesCurto(m.mes)) + '</span></div>').join('') + '</div>' +
           '<p class="dica">Número em cima = valor ponderado pela chance da etapa.</p></section>' +
         '</div>' +
-        '<section class="cartao"><h2>Vendas por vendedor ' + exp('tVend') + '</h2>' + tabela('tVend', [['Vendedor'], ['Vendido', 1], ['Meta', 1], ['Atingido'], ['Ganhos', 1], ['Perdidos', 1], ['Conversão', 1], ['Em aberto', 1], ['Atividades', 1], ['Carteira', 1]],
-          d.porVendedor.sort((a, b) => b.valor - a.valor).map(v => [esc(v.usuario.nome), esc(R.moeda(v.valor)), v.meta ? esc(R.moeda(v.meta)) : '—',
-            CRM.barra(v.valor, v.meta || maxVend, v.atingido == null ? '' : R.pct(v.atingido)), v.ganhos, v.perdidos, esc(R.pct(v.conversao)), esc(R.moeda(v.valorAberto)) + ' (' + v.abertos + ')', v.atividades, v.carteira])
+        '<section class="cartao"><h2>Vendas por vendedor ' + exp('tVend') + '</h2>' + tabela('tVend', [['Vendedor'], ['Vendido', 1], ['Ganhos', 1], ['Perdidos', 1], ['Conversão', 1], ['Em aberto', 1], ['Atividades', 1], ['Carteira', 1]],
+          d.porVendedor.sort((a, b) => b.valor - a.valor).map(v => [esc(v.usuario.nome), esc(R.moeda(v.valor)), v.ganhos, v.perdidos, esc(R.pct(v.conversao)), esc(R.moeda(v.valorAberto)) + ' (' + v.abertos + ')', v.atividades, v.carteira])
             .concat(d.porVendedor.length > 1 ? [linhaTotal(d.porVendedor)] : [])) + '</section>' +
         secaoFaturamento(fat, exp, tabela) +
         '<div class="colunas">' +
@@ -763,7 +761,7 @@
       abertos: a.abertos + v.abertos, valorAberto: a.valorAberto + v.valorAberto, atividades: a.atividades + v.atividades, carteira: a.carteira + v.carteira }),
     { valor: 0, meta: 0, ganhos: 0, perdidos: 0, abertos: 0, valorAberto: 0, atividades: 0, carteira: 0 });
     const b = x => '<strong>' + x + '</strong>';
-    return [b('Total da equipe'), b(esc(R.moeda(t.valor))), t.meta ? b(esc(R.moeda(t.meta))) : '—', t.meta ? CRM.barra(t.valor, t.meta, R.pct(t.valor / t.meta * 100)) : '',
+    return [b('Total da equipe'), b(esc(R.moeda(t.valor))),
       b(t.ganhos), b(t.perdidos), b(esc(R.pct(t.ganhos + t.perdidos ? t.ganhos / (t.ganhos + t.perdidos) * 100 : null))),
       b(esc(R.moeda(t.valorAberto)) + ' (' + t.abertos + ')'), b(t.atividades), b(t.carteira)];
   }

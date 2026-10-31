@@ -1320,3 +1320,11 @@ button.ordena.ativo { color: var(--marinho); }
 /* no Fechado × faturado, o traço de cada título tem a cor da coluna */
 .ff-tabela thead th.ff-c-ped { border-bottom-color: var(--roxo) !important; } .ff-tabela thead th.ff-c-fat { border-bottom-color: var(--verde) !important; }
 .ff-tabela thead th.ff-c-sem { border-bottom-color: var(--ambar) !important; } .ff-tabela thead th.ff-c-acu { border-bottom-color: var(--azul) !important; background: color-mix(in srgb, var(--azul) 24%, var(--papel)) !important; }
+/* metas (metas.js, 31/10/2026): o quadro principal em azul cheio, como o Acumulado do Fechado × faturado */
+.metas-acomp .kpi.ff-acumulado, .metas-minimo .kpi.ff-acumulado { background: var(--azul); border-top-color: var(--azul); color: #fff; box-shadow: 0 4px 14px rgba(30, 80, 160, .25); }
+.metas-acomp .kpi.ff-acumulado span, .metas-minimo .kpi.ff-acumulado span { color: #fff; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; }
+.metas-acomp .kpi.ff-acumulado strong, .metas-minimo .kpi.ff-acumulado strong { color: #fff; font-size: 1.6rem; }
+.metas-acomp .kpi.ff-acumulado small, .metas-minimo .kpi.ff-acumulado small { color: #fff; opacity: .9; }
+.metas-acomp td small, .metas-minimo td small, #formMetas td small { display: block; color: var(--suave); font-size: .74rem; font-weight: 400; }
+.metas-minimo .colunas > div { min-width: 0; }
+.metas-minimo h3 small { font-weight: 400; color: var(--suave); }

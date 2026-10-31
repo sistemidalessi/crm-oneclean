@@ -7498,3 +7498,99 @@ begin
 end;
 $$;
 grant execute on function public.crm_nfe_numeracao_iniciar(integer, integer) to authenticated;
+
+-- Metas de vendas (31/10/2026, Anderson: a meta mede o FATURAMENTO DAS NOTAS; a Silmara também tem; o Direto fica de fora; o
+-- mínimo da empresa sai do Caixa; por enquanto é só acompanhamento, sem mexer na comissão). Além do valor, a meta tem a
+-- quantidade de clientes novos (1ª compra) do mês.
+alter table public.crm_metas add column if not exists clientes_novos integer;
+
+-- Os números que a tela de metas usa: por vendedor(a), o faturamento das notas, os clientes e os clientes novos de cada mês
+-- (os 6 meses antes de p_mes e o próprio p_mes), e a meta gravada; para o administrador, também a empresa (faturamento
+-- total, margem bruta pelo custo médio, impostos destacados nas notas e os custos do Caixa). Quem vê o quê é a mesma regra
+-- de crm_gv_notas: o administrador, todos (sem o Direto, que é dele); a gestora, a equipe dela (sem externo); a
+-- vendedora, só ela. Cliente novo = a 1ª nota de venda do cliente cai no mês (contando todas as notas da OneClean).
+create or replace function public.crm_metas_dados(p_mes date) returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare
+  adm boolean := public.crm_eh_admin(); ges boolean := public.crm_eh_gestor();
+  ini date := date_trunc('month', p_mes)::date; de date := (date_trunc('month', p_mes) - interval '6 months')::date;
+  fim date := (date_trunc('month', p_mes) + interval '1 month')::date;
+  r jsonb; emp jsonb := null;
+begin
+  if auth.uid() is null or not public.crm_eh_ativo() then raise exception 'sem acesso'; end if;
+  with eq as (
+    select u.user_id, u.nome, u.papel,
+           coalesce((select c.dados->'comissao_usuarios'->>u.user_id::text from public.crm_config c where c.id = 1), '') = 'externo' externo
+      from public.crm_usuarios u
+     where u.ativo is not false and u.papel in ('gestor', 'vendedor')),
+  vis as (select * from eq where adm or (ges and not externo) or user_id = auth.uid()),
+  venda as (
+    select n.id, n.valor_total v, (n.emitida_em at time zone 'America/Sao_Paulo')::date dia, coalesce(n.empresa_id::text, n.cliente_doc) cli,
+           coalesce(n.vendedor_id, case when nullif(btrim(coalesce(n.vendedor_nome, '')), '') is null then e.responsavel_id end) dono
+      from public.crm_notas n left join public.crm_empresas e on e.id = n.empresa_id
+     where not n.cancelada
+       and (exists (select 1 from public.crm_nota_itens i where i.nota_id = n.id and i.cfop ~ '^[567][14]')
+            or not exists (select 1 from public.crm_nota_itens i where i.nota_id = n.id))),
+  primeira as (select cli, min(dia) d0 from venda group by cli),
+  mv as (
+    select v.dono, to_char(date_trunc('month', v.dia), 'YYYY-MM') mes, round(sum(v.v), 2) fat, count(distinct v.cli) clientes,
+           count(distinct v.cli) filter (where date_trunc('month', p.d0) = date_trunc('month', v.dia)) novos,
+           round(sum(v.v) filter (where date_trunc('month', p.d0) = date_trunc('month', v.dia)), 2) fat_novos
+      from venda v join primeira p using (cli)
+     where v.dia >= de and v.dia < fim and v.dono in (select user_id from vis)
+     group by 1, 2)
+  select jsonb_build_object('mes', ini, 'hoje', (now() at time zone 'America/Sao_Paulo')::date,
+    'vendedores', coalesce((select jsonb_agg(jsonb_build_object('user_id', x.user_id, 'nome', x.nome, 'papel', x.papel, 'externo', x.externo,
+        'meses', coalesce((select jsonb_object_agg(m.mes, jsonb_build_object('fat', m.fat, 'clientes', m.clientes, 'novos', m.novos, 'fat_novos', coalesce(m.fat_novos, 0)))
+                             from mv m where m.dono = x.user_id), '{}'::jsonb),
+        'meta', (select jsonb_build_object('id', mt.id, 'valor', mt.valor, 'clientes_novos', mt.clientes_novos) from public.crm_metas mt
+                  where mt.usuario_id = x.user_id and mt.mes = ini limit 1),
+        -- pedidos fechados no mês que ainda não viraram nota (os do CRM e, antes da virada, os do FKN), como no Fechado × faturado
+        'sem_nota', (select coalesce(sum(p.valor_total), 0) from public.crm_pedidos p where p.vendedor_id = x.user_id and p.situacao in ('aberto', 'separacao', 'separado')
+                       and p.criado_em >= (ini::timestamp at time zone 'America/Sao_Paulo') and p.criado_em < (fim::timestamp at time zone 'America/Sao_Paulo'))
+                  + (select coalesce(sum(f.valor), 0) from public.crm_pedidos_fkn f where f.vendedor_id = x.user_id and f.situacao <> 'FAT' and f.emitido >= ini and f.emitido < fim)
+        ) order by x.nome) from vis x), '[]'::jsonb))
+    into r;
+
+  if adm then
+    with venda as (
+      select n.id, n.valor_total v, (n.emitida_em at time zone 'America/Sao_Paulo')::date dia, upper(btrim(coalesce(n.vendedor_nome, ''))) = 'DIRETO' direto
+        from public.crm_notas n
+       where not n.cancelada and n.emitida_em >= (de::timestamp at time zone 'America/Sao_Paulo') and n.emitida_em < (fim::timestamp at time zone 'America/Sao_Paulo')
+         and (exists (select 1 from public.crm_nota_itens i where i.nota_id = n.id and i.cfop ~ '^[567][14]')
+              or not exists (select 1 from public.crm_nota_itens i where i.nota_id = n.id))),
+    it as (
+      select to_char(date_trunc('month', (n.emitida_em at time zone 'America/Sao_Paulo')), 'YYYY-MM') mes, i.valor_total, i.quantidade,
+             coalesce(s.custo_medio, e.custo_unit) custo, f.v_icms, f.v_pis, f.v_cofins
+        from public.crm_notas n join public.crm_nota_itens i on i.nota_id = n.id
+        left join public.crm_estoque_saldo s on s.codigo = i.codigo left join public.crm_estoque e on e.codigo = i.codigo
+        left join public.crm_fiscal_itens f on f.nota_item_id = i.id
+       where not n.cancelada and i.cfop ~ '^[567][14]'
+         and n.emitida_em >= (de::timestamp at time zone 'America/Sao_Paulo') and n.emitida_em < (fim::timestamp at time zone 'America/Sao_Paulo'))
+    select jsonb_build_object(
+      'meses', coalesce((select jsonb_object_agg(q.mes, jsonb_build_object('fat', q.fat, 'direto', q.direto)) from (
+          select to_char(date_trunc('month', dia), 'YYYY-MM') mes, round(sum(v), 2) fat, round(sum(v) filter (where direto), 2) direto from venda group by 1) q), '{}'::jsonb),
+      -- margem bruta pelo custo médio de hoje (o custo de cada venda não é guardado); impostos destacados nas notas de venda
+      'margem', coalesce((select jsonb_object_agg(q.mes, jsonb_build_object('venda', q.venda, 'cmv', q.cmv, 'icms', q.icms, 'pis', q.pis, 'cofins', q.cofins, 'venda_trib', q.venda_trib)) from (
+          select mes, round(sum(valor_total) filter (where custo is not null), 2) venda, round(sum(quantidade * custo) filter (where custo is not null), 2) cmv,
+                 round(sum(v_icms), 2) icms, round(sum(v_pis), 2) pis, round(sum(v_cofins), 2) cofins, round(sum(valor_total) filter (where v_icms is not null or v_pis is not null), 2) venda_trib
+            from it group by mes) q), '{}'::jsonb),
+      -- custos fixos: as contas recorrentes de saída ativas (sem compra de mercadoria e sem transferência entre as empresas)
+      'fixos', coalesce((select jsonb_agg(jsonb_build_object('categoria', coalesce(categoria, 'Sem categoria'), 'descricao', descricao, 'valor', valor,
+            'parcelas', parcelas) order by valor desc)
+          from public.crm_fin_recorrentes where ativo and tipo = 'saida' and coalesce(categoria, '') not in ('Fornecedores', 'Transferência entre empresas')), '[]'::jsonb),
+      -- as outras saídas do mês que não são recorrentes (frete, combustível, tarifas…), sem fornecedor, transferência e empréstimo
+      'avulsas', coalesce((select jsonb_object_agg(q.mes, q.v) from (
+          select to_char(date_trunc('month', coalesce(pago_em, vencimento)), 'YYYY-MM') mes, round(sum(valor), 2) v from public.crm_fin_lancamentos
+           where tipo = 'saida' and recorrente_id is null and situacao <> 'pausado' and coalesce(pago_em, vencimento) >= de and coalesce(pago_em, vencimento) < fim
+             and coalesce(categoria, '') not in ('Fornecedores', 'Transferência entre empresas', 'Empréstimos e giro', 'Retiradas dos sócios')
+             and not coalesce(entre_empresas, false) and not coalesce(emprestimo, false) group by 1) q), '{}'::jsonb),
+      'caixa_desde', (select min(criado_em at time zone 'America/Sao_Paulo')::date from public.crm_fin_lancamentos))
+      into emp;
+    r := r || jsonb_build_object('empresa', emp);
+  end if;
+  return r;
+end $$;
+revoke all on function public.crm_metas_dados(date) from public, anon;
+grant execute on function public.crm_metas_dados(date) to authenticated;
+

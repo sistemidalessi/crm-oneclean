@@ -1394,11 +1394,32 @@
   // deixa a vendedora ler só a dela.
   Supa.prototype.analiseVendas = async function (refazer) { return this.assistente({ acao: 'analise_vendas', refazer: !!refazer }); };
   Supa.prototype.analiseVendasHoje = async function (dia, chave) { return unwrap(await this.sb.from('crm_ia_analises_vendas').select('dia, texto, em').eq('dia', dia).eq('chave', chave).maybeSingle()); };
+  // modo local (demonstração): o mesmo formato de crm_metas_dados, pelas notas e metas guardadas no navegador
+  Local.prototype.metasDados = async function (mes) {
+    const D = this.ler(), ini = String(mes).slice(0, 7), mesDe = n => (R.diaLocal(n.emitida_em) || '').slice(0, 7);
+    const de = (() => { const [a, m] = ini.split('-').map(Number); const d = new Date(Date.UTC(a, m - 7, 1)); return d.toISOString().slice(0, 7); })();
+    const emp = id => (D.empresas || []).find(e => e.id === id) || {};
+    const notas = (D.notas || []).filter(n => !n.cancelada).map(n => ({ n, mes: mesDe(n), cli: n.empresa_id || n.cliente_doc, dono: n.vendedor_id || emp(n.empresa_id).responsavel_id }));
+    const primeira = {}; notas.forEach(x => { if (!primeira[x.cli] || x.mes < primeira[x.cli]) primeira[x.cli] = x.mes; });
+    const vend = (D.usuarios || []).filter(u => u.ativo !== false && (u.papel === 'gestor' || u.papel === 'vendedor'));
+    return { mes: ini + '-01', hoje: R.hojeISO(), vendedores: vend.map(u => {
+      const meses = {};
+      notas.filter(x => x.dono === u.user_id && x.mes >= de && x.mes <= ini).forEach(x => {
+        const m = meses[x.mes] || (meses[x.mes] = { fat: 0, clientes: new Set(), novos: new Set(), fat_novos: 0 });
+        m.fat += R.num(x.n.valor_total); m.clientes.add(x.cli); if (primeira[x.cli] === x.mes) { m.novos.add(x.cli); m.fat_novos += R.num(x.n.valor_total); }
+      });
+      Object.keys(meses).forEach(k => { meses[k] = { fat: meses[k].fat, clientes: meses[k].clientes.size, novos: meses[k].novos.size, fat_novos: meses[k].fat_novos }; });
+      const mt = (D.metas || []).find(x => x.usuario_id === u.user_id && String(x.mes).slice(0, 7) === ini);
+      return { user_id: u.user_id, nome: u.nome, papel: u.papel, externo: false, meses, meta: mt ? { id: mt.id, valor: mt.valor, clientes_novos: mt.clientes_novos } : null, sem_nota: 0 };
+    }) };
+  };
   Local.prototype.analiseVendas = async function () { const a = { dia: R.hojeISO(), texto: '(modo local: sem IA) Aqui aparece a análise de vendas do dia: **o mês contra o mesmo período do mês passado**, a meta, os clientes sumidos e as propostas esquecidas.', em: new Date().toISOString(), nova: true }; this._analiseV = a; return a; };
   Local.prototype.analiseVendasHoje = async function (dia) { return this._analiseV && this._analiseV.dia === dia ? this._analiseV : null; };
   // Análise de logística do dia (Diretor de Logística, 24/10/2026): uma só para a gestão e a logística (crm_ia_analises_areas).
   Supa.prototype.analiseLogistica = async function (refazer) { return this.assistente({ acao: 'analise_logistica', refazer: !!refazer }); };
   // Fechado × faturado por vendedor(a) no período (30/10/2026; só gestão; a gestora vê a equipe dela): crm_gv_fechado
+  // Metas de vendas (31/10/2026): histórico por vendedor(a), metas do mês e, para o administrador, a conta do mínimo da empresa
+  Supa.prototype.metasDados = async function (mes) { return unwrap(await this.sb.rpc('crm_metas_dados', { p_mes: mes })); };
   Supa.prototype.gvFechado = async function (de, ate) { return unwrap(await this.sb.rpc('crm_gv_fechado', { p_de: de, p_ate: ate })); };
   Supa.prototype.analiseLogisticaHoje = async function (dia) { return unwrap(await this.sb.from('crm_ia_analises_areas').select('dia, texto, em').eq('dia', dia).eq('area', 'logistica').maybeSingle()); };
   Local.prototype.analiseLogistica = async function () { const a = { dia: R.hojeISO(), texto: '(modo local: sem IA) Aqui aparece a análise de logística do dia: **a rota de hoje**, as entregas sem confirmação, os problemas de entrega e as notas que não entraram em rota.', em: new Date().toISOString(), nova: true }; this._analiseL = a; return a; };
