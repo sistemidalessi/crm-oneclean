@@ -686,7 +686,7 @@
     for (const id of ids) {
       const x = await CRM.store().nfeXml(id), xml = x && (x.proc_xml || x.nfe_xml), d = xml && Dn.ler(xml);
       if (!d) continue;
-      desenhaVias(pdf, Dn, d, { logo: lg, cores: (raiz.CRM_CONFIG || {}).cores, aviso: CRM.avisoGolpe ? CRM.avisoGolpe() : '' }, !n++);
+      desenhaVias(pdf, Dn, d, { logo: lg, cores: (raiz.CRM_CONFIG || {}).cores }, !n++);
       const nf = nfe(id);
       if (nf && nf.situacao !== 'cancelada' && B && B.paginasNota) nb += await B.paginasNota(pdf, nf, { semCiclo: true, ciclo, faltas }).catch(() => 0);
     }
@@ -715,7 +715,7 @@
       if (!d) throw new Error('não consegui ler o XML da nota');
       if (n && n.situacao === 'cancelada') Object.assign(d, { autorizada: false, marca: 'NF-e CANCELADA' });
       const pdf = new raiz.jspdf.jsPDF({ unit: 'mm', format: 'a4', compress: true });
-      const op = { logo: await pegaLogo(), cores: (raiz.CRM_CONFIG || {}).cores, aviso: CRM.avisoGolpe ? CRM.avisoGolpe() : '' };
+      const op = { logo: await pegaLogo(), cores: (raiz.CRM_CONFIG || {}).cores };   // aviso de golpe só no boleto (02/11/2026)
       // nota do CRM: as vias do costume (3, a do cliente por último); nota do FKN (xmlPronto) ou cancelada: uma folha só
       if (n && n.situacao !== 'cancelada') desenhaVias(pdf, Dn, d, op, true); else Dn.desenha(pdf, d, op);
       // boleto do BB pelo arquivo (26/10/2026): as parcelas da nota com boleto do CRM vão no mesmo PDF, uma por página
@@ -1050,7 +1050,7 @@
           if (!d) { falta.push(n.serie + '-' + n.numero); continue; }
           if (n.cancelada) Object.assign(d, { autorizada: false, marca: 'NF-e CANCELADA' });
           if (k++) pdf.addPage('a4', 'portrait');
-          Dn.desenha(pdf, d, { logo: lg, cores: (raiz.CRM_CONFIG || {}).cores, aviso: CRM.avisoGolpe ? CRM.avisoGolpe() : '' });
+          Dn.desenha(pdf, d, { logo: lg, cores: (raiz.CRM_CONFIG || {}).cores });
         }
         if (k) pdf.save('DANFEs-' + l.map(n => n.numero).slice(0, 6).join('-') + (l.length > 6 ? '-e-mais' : '') + '.pdf');
         CRM.toast(k + ' DANFE(s) no PDF' + (falta.length ? '. Sem XML guardado no CRM: NF ' + falta.join(', ') : '.'), !!falta.length);

@@ -346,14 +346,15 @@
   }
 
   // Aviso contra boleto falso (27/10/2026): cartão em Configurações → Integrações. O texto gravado (fiscal.aviso_golpe) vai
-  // na nota (serviço fiscal) e no e-mail de atraso; enquanto não gravar, boleto, DANFE e resumo usam o padrão de regras.js.
+  // no boleto, no resumo, nas mensagens e no e-mail de atraso. Desde 02/11/2026 NÃO vai na nota nem na DANFE (Anderson:
+  // "muita poluição visual na nota"); fiscal.aviso_na_nota = true faria voltar ao texto da nota.
   function cartaoGolpe() {
     const f = (CRM.estado.cfg && CRM.estado.cfg.fiscal) || {}, t = CRM.avisoGolpe ? CRM.avisoGolpe() : '';
     const sit = f.aviso_golpe === '' ? CRM.selo('desligado', 'ambar') : f.aviso_golpe ? CRM.selo('ligado', 'verde')
-      : CRM.selo('ligado no boleto, na DANFE e no resumo; falta gravar para ir na nota e no e-mail', 'ambar');
+      : CRM.selo('ligado no boleto e no resumo; falta gravar para ir no e-mail', 'ambar');
     return '<section class="cartao"><h2>Aviso contra boleto falso</h2>' +
-      '<p>Sai grifado em amarelo no boleto, na DANFE, na folha de resumo que vai com o boleto, no texto da nota fiscal (só nas notas com parcelas), ' +
-        'no fim da mensagem do WhatsApp com o boleto e no e-mail de atraso. Situação: ' + sit + '</p>' +
+      '<p>Sai grifado em amarelo no boleto e na folha de resumo que vai com ele, no fim da mensagem do WhatsApp com o boleto e no e-mail de atraso. ' +
+        'Na nota fiscal e na DANFE não vai (é no boleto que o cliente paga). Situação: ' + sit + '</p>' +
       (t ? '<p style="background:#fff176;border:2px solid #c81e1e;border-radius:8px;padding:8px 12px;color:#7a0000;font-weight:600">' + esc(t) + '</p>' : '') +
       '<p class="acoes"><button type="button" class="btn sec" data-acao="bol-golpe">Editar o aviso</button></p></section>';
   }

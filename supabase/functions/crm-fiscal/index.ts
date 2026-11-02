@@ -100,7 +100,7 @@ async function dadosDoPedido(db: ReturnType<typeof createClient>, pedidoId: stri
   const { data: tib } = ncms.length ? await db.from('crm_ibpt').select('codigo, nac_fed, imp_fed, estadual, municipal, vig_fim, chave, versao, fonte').eq('ex', '').in('codigo', ncms) : { data: [] };
   const ibpt: Record<string, Linha> = {}; (tib || []).forEach((t: Linha) => { ibpt[String(t.codigo)] = t; });
   const { data: cfgRow } = await db.from('crm_config').select('dados').eq('id', 1).maybeSingle();
-  const fiscal = ((cfgRow as Linha | null)?.dados as Linha | undefined)?.fiscal as Linha | undefined || {};
+  const fiscal = semAvisoNaNota(((cfgRow as Linha | null)?.dados as Linha | undefined)?.fiscal as Linha | undefined || {});
   if (!fiscal.emitente) throw new Error('falta configurar o emitente (aba Fiscal → Emissão)');
   const { data: vend } = p.vendedor_id ? await db.from('crm_usuarios').select('nome, nomes_nota, papel').eq('user_id', p.vendedor_id).maybeSingle() : { data: null };
   const v = vend as Linha | null;
@@ -221,6 +221,10 @@ async function aprenderSt(db: ReturnType<typeof createClient>) {
   return { notas: chaves.length, lidas, semXml, produtos: gravados };
 }
 
+// Aviso contra boleto falso (02/11/2026, Anderson: "muita poluição visual na nota… só no boleto"): o texto gravado em
+// fiscal.aviso_golpe continua no boleto, nas mensagens e no e-mail de cobrança, mas NÃO vai mais para o XML da nota (o serviço
+// fiscal o punha nas informações complementares). Para voltar a pôr na nota: fiscal.aviso_na_nota = true.
+const semAvisoNaNota = (f: Linha): Linha => { const c = Object.assign({}, f); if (c.aviso_na_nota !== true) delete c.aviso_golpe; return c; };
 const ambienteDe = (fiscal: Linha) => (fiscal.ambiente === 'producao' ? 'producao' : 'homologacao');
 
 // ------------------------------------------------------------------ notas de COMPRA pela Sefaz (servico-fiscal/dfe.js)
@@ -394,7 +398,7 @@ Deno.serve(async (req) => {
     const acao = String(b.acao || '');
     if (acao === 'saude') return resposta(200, await servico('/saude', null, 'GET'));
     const { data: cfgRow } = await db.from('crm_config').select('dados').eq('id', 1).maybeSingle();
-    const fiscal = ((cfgRow as Linha | null)?.dados as Linha | undefined)?.fiscal as Linha | undefined || {};
+    const fiscal = semAvisoNaNota(((cfgRow as Linha | null)?.dados as Linha | undefined)?.fiscal as Linha | undefined || {});
     const amb = ambienteDe(fiscal), serie = Number(fiscal.serie ?? 2);
     // status: o da emissão atual, ou o da produção antes da virada (só consulta; nada é emitido)
     if (acao === 'status') {

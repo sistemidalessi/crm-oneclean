@@ -390,7 +390,7 @@
       const d = xml && Dn && Dn.ler(xml);
       if (!d) { semNota.push(n); continue; }
       pdf.addPage('a4', 'portrait');
-      Dn.desenha(pdf, d, { logo, cores: (raiz.CRM_CONFIG || {}).cores, aviso: CRM.avisoGolpe ? CRM.avisoGolpe() : '' });
+      Dn.desenha(pdf, d, { logo, cores: (raiz.CRM_CONFIG || {}).cores });   // aviso de golpe só no boleto (02/11/2026)
       danfes.push({ numero: n });
     }
     const pagBoleto = pdf.getNumberOfPages() + 1;
