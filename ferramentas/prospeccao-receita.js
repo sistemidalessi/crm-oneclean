@@ -65,7 +65,7 @@ function linhasDoZip(arquivo, aCada) {
 }
 
 const data = s => (/^\d{8}$/.test(s) && s !== '00000000' ? s.slice(0, 4) + '-' + s.slice(4, 6) + '-' + s.slice(6, 8) : null);
-const tel = (ddd, n) => { const d = String(ddd || '').replace(/\D/g, ''), t = String(n || '').replace(/\D/g, ''); return t.length >= 8 ? (d ? d.slice(-2) : '') + t : null; };
+const tel = (ddd, n) => { const d = String(ddd || '').replace(/\D/g, ''), t = String(n || '').replace(/\D/g, ''); return t.length >= 8 && !/^0+$/.test(t) ? (d ? d.slice(-2) : '') + t : null; };
 const limpa = s => { const v = String(s || '').replace(/\s+/g, ' ').trim(); return v || null; };
 
 async function separar(pasta, saida) {

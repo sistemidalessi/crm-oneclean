@@ -7799,14 +7799,14 @@ begin
     select left(public.crm_doc(nn.cliente_doc), 8), '', '', '', public.crm_prospec_nome(nn.cliente_nome), null
       from public.crm_notas nn where nn.cliente_doc is not null;
 
-  create temp table _cep on commit drop as select cep5, count(*)::int n from _cli where cep5 <> '' group by 1;
+  create temp table _cep on commit drop as select cep5, count(*)::int qtd from _cli where cep5 <> '' group by 1;
   create temp table _jbas on commit drop as select distinct basico from _ja where length(basico) = 8;
   create temp table _jtel on commit drop as select distinct t from (select tel t from _ja union select zap from _ja) x where length(t) >= 10;
   create temp table _jmail on commit drop as select distinct email from _ja where email like '%@%';
-  create temp table _jnome on commit drop as select distinct n from (select nome n from _ja union select razao from _ja) x where length(n) >= 6;
+  create temp table _jnome on commit drop as select distinct nm from (select nome nm from _ja union select razao from _ja) x where length(nm) >= 6;
   create temp table _cand on commit drop as
     select b.*, sg.segmento seg, left(coalesce(b.cep, ''), 5) cep5,
-           coalesce(cp.n, 0) viz,
+           coalesce(cp.qtd, 0) viz,
            (b.abertura >= v_dia - make_interval(months => meses_rec)) recente
       from public.crm_prospec_base b
       cross join lateral (select s.segmento from _seg s where b.cnae like s.prefixo || '%' order by length(s.prefixo) desc limit 1) sg
@@ -7820,7 +7820,7 @@ begin
              or (x.situacao = 'expirada' and x.dia > v_dia - 30)));
   -- mesmo telefone, e-mail ou nome de quem já está no CRM (lead do Agendor sem CNPJ)
   delete from _cand c where c.tel1 in (select t from _jtel) or c.tel2 in (select t from _jtel) or c.email in (select email from _jmail)
-     or public.crm_prospec_nome(c.fantasia) in (select n from _jnome) or public.crm_prospec_nome(c.razao) in (select n from _jnome);
+     or public.crm_prospec_nome(c.fantasia) in (select nm from _jnome) or public.crm_prospec_nome(c.razao) in (select nm from _jnome);
 
   -- pontos de base: perto de quem já recebe, aberta há pouco, com e-mail, matriz; um pouco de sorte para variar
   alter table _cand add column base numeric;
@@ -7850,7 +7850,7 @@ begin
       insert into public.crm_prospec_sugestoes (dia, vendedor_id, cnpj, ordem, segmento, pontos, motivos)
       values (v_dia, v, k.cnpj, r, k.seg, round(k.pts, 2), array_remove(array[
         'Parecida com ' || (select count(*) from _cli c where c.segmento = k.seg) || ' clientes de ' || lower(k.seg),
-        case when k.viz > 0 then k.viz || case when k.viz = 1 then ' cliente recebe' else ' clientes recebem' end || ' no ' || coalesce(initcap(lower(k.bairro)), 'mesmo bairro') end,
+        case when k.viz > 0 then k.viz || case when k.viz = 1 then ' cliente já recebe' else ' clientes já recebem' end || ' perto daqui' || coalesce(' (' || initcap(lower(k.bairro)) || ')', '') end,
         case when k.recente then 'Aberta há ' || case when (v_dia - k.abertura) < 60 then (v_dia - k.abertura) || ' dias'
              when (v_dia - k.abertura) < 730 then ((v_dia - k.abertura) / 30) || ' meses' else ((v_dia - k.abertura) / 365) || ' anos' end end,
         (select d.descricao from public.crm_prospec_cnae d where d.codigo = k.cnae)

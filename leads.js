@@ -43,11 +43,11 @@
   }
 
   // Mensagem pronta para o WhatsApp da vendedora (ou roteiro da ligação), pelo segmento.
-  function mensagem(l, vendedora, hora) {
+  function mensagem(l, vendedora, hora, empresa) {
     const nome = String(vendedora || '').trim().split(/\s+/)[0] || 'equipe';
     const oi = (hora == null ? 9 : hora) < 12 ? 'Bom dia!' : 'Boa tarde!';
     const cid = l.cidade === 'SAO BERNARDO DO CAMPO' ? 'aqui de São Bernardo' : 'de São Bernardo, com entrega em ' + cidadeBonita(l.cidade);
-    const eu = oi + ' Meu nome é ' + nome + ', sou da OneClean, distribuidora de produtos de limpeza e descartáveis ' + cid + '. ';
+    const eu = oi + ' Meu nome é ' + nome + ', sou da ' + (empresa || 'OneClean') + ', distribuidora de produtos de limpeza e descartáveis ' + cid + '. ';
     const seg = {
       'Condomínio': 'Atendemos vários condomínios da região, com entrega no nosso caminhão. Posso mandar uma cotação dos itens que o condomínio mais usa, como cloro, aromatizante e sacos de lixo? Com quem falo sobre as compras?',
       'Serviços': 'Atendemos empresas de limpeza e facilities do ABC com material para os postos: sacos de lixo, água sanitária, sabonete e papel, com entrega no nosso caminhão. Posso mandar a tabela dos itens que vocês mais usam nos contratos?',
@@ -113,7 +113,7 @@
   function cartao(l) {
     const aberta = l.situacao === 'nova' || l.situacao === 'amanha';
     const vend = CRM.nomeUsuario(l.vendedor_id);
-    const msg = mensagem(l, vend, new Date().getHours());
+    const msg = mensagem(l, vend, new Date().getHours(), CRM.nomeInstalacao());
     const cs = contatos(l);
     const zap = cs.map(x => celular(x.valor)).find(Boolean);
     const comp = (parecidos || []).filter(p => p.segmento === l.segmento);
@@ -258,7 +258,7 @@
     'lead-aba': id => { aba = id; CRM.render(); },
     'lead-copiar': async id => {
       const l = achar(id); if (!l) return;
-      const msg = mensagem(l, CRM.nomeUsuario(l.vendedor_id), new Date().getHours());
+      const msg = mensagem(l, CRM.nomeUsuario(l.vendedor_id), new Date().getHours(), CRM.nomeInstalacao());
       try { await navigator.clipboard.writeText(msg); CRM.toast('Mensagem copiada. Cole no seu WhatsApp.'); } catch (e) { CRM.toast('Não consegui copiar: selecione o texto da mensagem.', true); }
     },
     'lead-amanha': id => tratar(id, 'amanha'),
