@@ -1082,7 +1082,7 @@
   // Boleto do BB pelo arquivo CNAB 240 (26/10/2026): lê os boletos dos últimos 120 dias (administrador, gestora e logística — RLS)
   // e as remessas (só o administrador); o resto é por função do banco (preparar, remessa, instrução, retorno, reenviar).
   const BB_COLUNAS = 'id, convenio, seq, nosso_numero, duplicata, documento, nota_numero, parcela, empresa_id, valor, vencimento, emissao, situacao, ' +
-    'remessa_seq, remessa_em, instrucao, instrucao_remessa, motivo, pago_em, valor_pago, registrado_em, criado_em';
+    'remessa_seq, remessa_em, instrucao, instrucao_remessa, motivo, pago_em, valor_pago, registrado_em, criado_em, retorno';
   Supa.prototype.boletosBB = async function () {
     const desde = new Date(Date.now() - 120 * 864e5).toISOString();
     return paginado((de, ate) => this.sb.from('crm_boletos_bb').select(BB_COLUNAS).gte('criado_em', desde).order('criado_em').order('id').range(de, ate));

@@ -107,3 +107,25 @@ test('avisoGolpe: padrão com nome, CNPJ, banco e telefone; texto gravado vence;
   assert.strictEqual(B.avisoGolpe(e, ''), '');
   assert.strictEqual(B.avisoGolpe({}, undefined), '');
 });
+
+test('QR do Pix: desenha os módulos do EMV no boleto e sem EMV não desenha', () => {
+  const lib = require('../vendor/qrcode.js');
+  const emv = '00020101021226870014br.gov.bcb.pix2565qrpix.bb.com.br/pix/v2/cobv/0000000000000000000000000000520400005303986540594520580' +
+    '2BR5923ONECLEAN BRASIL LTDA6009SAO PAULO62070503***6304ABCD';
+  assert.equal(B.qrDesenhador(lib, ''), null);
+  assert.equal(B.qrDesenhador(null, emv), null);
+  const qr = B.qrDesenhador(lib, emv);
+  let pretos = 0;
+  const falso = { setFillColor() {}, rect(x, y, w, h, f) { if (w < 5) pretos++; } };
+  qr(falso, 10, 14, 30);
+  assert.ok(pretos > 200, 'desenhou os módulos escuros');
+  assert.equal(B.pixDe({ retorno: [{ api: 'registro', pix: 'A' }, { api: 'baixa' }] }), 'A');
+  assert.equal(B.pixDe({ retorno: [] }), null);
+  // o boleto inteiro com o QR no alto cabe numa folha
+  const pdf = new jsPDF({ unit: 'mm', format: 'a4' });
+  const d = B.montar(CFG, EMIT, { valor: 945.2, vencimento: '2026-12-01', seq: 2000000001, documento: '002862/01', emissao: '2026-11-03', pix: emv },
+    { nome: 'Cliente Exemplo', doc: '98765432000155', endereco: { logradouro: 'Av B', numero: '2', cidade: 'Santo André', uf: 'SP', cep: '09000000' } }, { hoje: '2026-11-03' });
+  const fim = B.desenha(pdf, d, { qr });
+  assert.ok(fim < 297, 'cabe na folha A4');
+  assert.equal(pdf.getNumberOfPages(), 1);
+});

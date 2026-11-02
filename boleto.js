@@ -307,7 +307,21 @@
       (tel ? ' Na dúvida, ligue para ' + tel + ' antes de pagar.' : '') +
       ' Pagamento de boleto que não foi emitido por nós não quita esta cobrança.';
   }
-  const B = { fatorDe, avisoGolpe, foneBR, nossoNumero, campoLivre, codigoBarras, itf, instrucoes, dvNossoNumero, nossoImpresso, faltaNoConvenio, montar, desenha, docFmt, enderecoTexto, enderecoLinhas };
+  // QR Code do Pix do boleto (02/11/2026): o banco devolve, no registro pela API, o "Pix copia e cola" (EMV) do boleto; o QR
+  // sai no alto do boleto, como no boleto do BB. lib = qrcode-generator (vendor/qrcode.js, MIT); devolve o op.qr do desenha.
+  function qrDesenhador(lib, emv) {
+    if (!lib || !emv) return null;
+    const qr = lib(0, 'M'); qr.addData(String(emv)); qr.make();
+    const n = qr.getModuleCount();
+    return (pdf, x, y, lado) => {
+      const m = lado / (n + 2);   // 1 módulo de margem branca
+      pdf.setFillColor(255); pdf.rect(x, y, lado, lado, 'F'); pdf.setFillColor(0);
+      for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (qr.isDark(r, c)) pdf.rect(x + (c + 1) * m, y + (r + 1) * m, m + 0.02, m + 0.02, 'F');
+    };
+  }
+  // o EMV do Pix gravado no registro do boleto (crm_boletos_bb.retorno, item { api: 'registro', pix })
+  const pixDe = bol => { const r = ((bol && bol.retorno) || []).filter(x => x && x.api === 'registro' && x.pix); return r.length ? r[r.length - 1].pix : null; };
+  const B = { qrDesenhador, pixDe, fatorDe, avisoGolpe, foneBR, nossoNumero, campoLivre, codigoBarras, itf, instrucoes, dvNossoNumero, nossoImpresso, faltaNoConvenio, montar, desenha, docFmt, enderecoTexto, enderecoLinhas };
   raiz.CRMBoleto = B;
   if (typeof module !== 'undefined') module.exports = B;
 
@@ -535,14 +549,20 @@
     const b = ((bb && bb.lista) || []).find(x => x.id === id);
     if (!b) return;
     const e = b.empresa_id ? CRM.empresa(b.empresa_id) : null;
-    const d = montar(cfgB(), emitente(), { valor: b.valor, vencimento: b.vencimento, nosso_numero: b.nosso_numero, documento: b.documento, emissao: b.emissao },
+    const d = montar(cfgB(), emitente(), { valor: b.valor, vencimento: b.vencimento, nosso_numero: b.nosso_numero, documento: b.documento, emissao: b.emissao, pix: pixDe(b) },
       { nome: (e && (e.razao_social || e.nome)) || '', doc: e && e.cnpj, endereco: e ? { logradouro: e.logradouro, numero: e.numero, complemento: e.complemento, bairro: e.bairro, cidade: e.cidade, uf: e.uf, cep: e.cep } : '' },
       { hoje: CRM.hoje() });
     await carregaJsPdf();
     const pdf = new raiz.jspdf.jsPDF({ unit: 'mm', format: 'a4' });
-    desenha(pdf, d, { aviso: CRM.avisoGolpe ? CRM.avisoGolpe() : '' });
+    desenha(pdf, d, { aviso: CRM.avisoGolpe ? CRM.avisoGolpe() : '', qr: await opQr(b) });
     pdf.save('Boleto ' + (b.documento || b.duplicata).replace(/[\\/]/g, '-') + '.pdf');
   }
+  async function carregaQr() {
+    if (raiz.qrcode) return raiz.qrcode;
+    await new Promise(ok => { const sc = document.createElement('script'); sc.src = 'vendor/qrcode.js'; sc.onload = ok; sc.onerror = ok; document.head.appendChild(sc); });
+    return raiz.qrcode || null;   // sem a lib (sem internet), o boleto sai sem o QR: a linha digitável continua valendo
+  }
+  async function opQr(bol) { const pix = pixDe(bol); return pix ? qrDesenhador(await carregaQr(), pix) : null; }
   async function carregaJsPdf() {
     if (raiz.jspdf) return;
     await new Promise((ok, falha) => { const sc = document.createElement('script'); sc.src = 'vendor/jspdf.umd.min.js'; sc.onload = ok; sc.onerror = () => falha(new Error('não consegui carregar o gerador de PDF (sem internet?)')); document.head.appendChild(sc); });
@@ -567,11 +587,11 @@
     else if (faltas.length) CRM.toast('Atenção, NF ' + n.numero + ': ' + faltas.join('; ') + '. Não faça o boleto no site do BB: avise o administrador.', true);
     for (const b of l) {
       const e = b.empresa_id ? CRM.empresa(b.empresa_id) : null;
-      const d = montar(cfgB(), emitente(), { valor: b.valor, vencimento: b.vencimento, nosso_numero: b.nosso_numero, documento: b.documento, emissao: b.emissao },
+      const d = montar(cfgB(), emitente(), { valor: b.valor, vencimento: b.vencimento, nosso_numero: b.nosso_numero, documento: b.documento, emissao: b.emissao, pix: pixDe(b) },
         { nome: (e && (e.razao_social || e.nome)) || '', doc: e && e.cnpj, endereco: e ? { logradouro: e.logradouro, numero: e.numero, complemento: e.complemento, bairro: e.bairro, cidade: e.cidade, uf: e.uf, cep: e.cep } : '' },
         { hoje: CRM.hoje() });
       pdf.addPage('a4', 'portrait');
-      desenha(pdf, d, { aviso: CRM.avisoGolpe ? CRM.avisoGolpe() : '' });
+      desenha(pdf, d, { aviso: CRM.avisoGolpe ? CRM.avisoGolpe() : '', qr: await opQr(b) });
     }
     return l.length;
   }
