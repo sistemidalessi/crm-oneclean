@@ -6,8 +6,9 @@
 //   POST { acao: 'maior_numero' }    o maior nosso número já usado no convênio (só o número), para começar a faixa do CRM
 //   POST { acao: 'registrar', ids? } registra no banco os boletos preparados (caminho 'api')
 //   POST { acao: 'pagos', dias? }    lê os boletos liquidados e dá a baixa (crm_boleto_bb_retorno: título, Caixa no dia do crédito)
+//   POST { acao: 'baixar_canceladas' } baixa no banco o boleto de nota cancelada (02/11/2026): o cliente não consegue mais pagar
 //   POST { acao: 'ciclo' }           o do agendador (pg_cron crm-bb-ciclo, a cada 10 min das 7h às 20h50): prepara as parcelas
-//                                    das notas do CRM, registra e lê os pagos
+//                                    das notas do CRM, registra, baixa os das notas canceladas e lê os pagos
 // Chaves só nos Secrets: BB_CLIENT_ID, BB_CLIENT_SECRET, BB_APP_KEY (developer_application_key).
 // Quem chama: o administrador logado, ou o banco (crm_bb_chamar, senha que nasce em crm_interno.bb_cfg).
 // Deploy: verify_jwt DESLIGADO (o banco chama sem login; a função confere a senha ou o login).
@@ -177,6 +178,48 @@ Deno.serve(async (req) => {
       return { liquidados: (data?.liquidados || []).length, resumo: data };
     }
 
+    // ------------------------------------------------------------ nota cancelada → boleto baixado no banco
+    // O boleto da nota cancelada não pode continuar valendo (o cliente pagaria uma nota que não existe). Registrado: pede a
+    // baixa ao BB (POST /boletos/{id}/baixar); preparado ou com erro (nunca foi ao banco): só marca "cancelado" aqui.
+    async function baixarCanceladas() {
+      if (!b.ligado || b.caminho !== 'api') return { pulado: 'boleto pela API desligado' };
+      const { data: vivos } = await db.from('crm_boletos_bb').select('id, nosso_numero, duplicata, documento, nota_numero, situacao, retorno')
+        .in('situacao', ['preparado', 'registrado', 'erro']).eq('caminho', 'api').limit(500);
+      if (!vivos || !vivos.length) return { baixados: 0 };
+      // a série vem da duplicata: "002862/01" é a série 1; "2-000012/01", a série 2
+      const serieDe = (d: string) => { const m = /^(\d+)-/.exec(String(d || '')); return m ? Number(m[1]) : 1; };
+      const nums = [...new Set(vivos.map((v: any) => Number(v.nota_numero)).filter(Boolean))];
+      const { data: canc } = nums.length ? await db.from('crm_nfe').select('serie, numero').eq('ambiente', 'producao').eq('situacao', 'cancelada').in('numero', nums) : { data: [] };
+      const cancSet = new Set((canc || []).map((n: any) => Number(n.serie) + '-' + Number(n.numero)));
+      const alvo = vivos.filter((v: any) => cancSet.has(serieDe(v.duplicata) + '-' + Number(v.nota_numero)));
+      if (!alvo.length) return { baixados: 0 };
+      let tk = '', baixados = 0, cancelados = 0, erros = 0; const detalhes: string[] = [];
+      const agora = () => new Date().toISOString();
+      for (const bo of alvo) {
+        if (bo.situacao !== 'registrado') {
+          await db.from('crm_boletos_bb').update({ situacao: 'cancelado', motivo: 'nota cancelada (o boleto não chegou ao banco)', atualizado_em: agora() }).eq('id', bo.id);
+          cancelados++; continue;
+        }
+        if (!tk) tk = await token('cobrancas.boletos-requisicao cobrancas.boletos-info');
+        const r = await fetch(COBRANCA + '/boletos/000' + bo.nosso_numero + '/baixar?gw-dev-app-key=' + APP(), { method: 'POST',
+          headers: { Authorization: 'Bearer ' + tk, 'Content-Type': 'application/json' }, body: JSON.stringify({ numeroConvenio: Number(b.convenio) }) });
+        const t = await r.text(); let j: any = null; try { j = JSON.parse(t); } catch { /* texto */ }
+        const m = msgBB(j, t);
+        // já baixado ou liquidado no banco: não insiste (o "pagos" cuida do liquidado)
+        if (r.ok || /baixad/i.test(m)) {
+          await db.from('crm_boletos_bb').update({ situacao: 'baixado', motivo: 'nota cancelada: boleto baixado no banco', atualizado_em: agora(),
+            retorno: (bo.retorno || []).concat([{ api: 'baixa', em: agora(), motivo: 'nota cancelada', resposta: r.ok ? (j?.dataBaixa || 'ok') : m }]) }).eq('id', bo.id);
+          baixados++;
+        } else {
+          erros++; detalhes.push((bo.documento || bo.duplicata) + ': ' + m);
+          await db.from('crm_boletos_bb').update({ motivo: ('nota cancelada, o banco recusou a baixa: ' + m).slice(0, 300), atualizado_em: agora() }).eq('id', bo.id);
+          console.error('[crm-bb] baixa ' + (bo.documento || bo.duplicata) + ' ' + r.status + ' ' + m);
+        }
+      }
+      return { baixados, cancelados, erros, detalhes };
+    }
+
+    if (c.acao === 'baixar_canceladas') return resposta(200, await baixarCanceladas());
     if (c.acao === 'registrar') return resposta(200, await registrar(Array.isArray(c.ids) ? c.ids : undefined));
     if (c.acao === 'pagos') return resposta(200, await pagos(Math.min(30, Math.max(1, Number(c.dias) || 5))));
     if (c.acao === 'ciclo') {
@@ -184,9 +227,10 @@ Deno.serve(async (req) => {
       const { data: dups } = await db.rpc('crm_boleto_bb_a_registrar');
       let prep: any = null;
       if (dups && dups.length) { const { data, error } = await db.rpc('crm_boleto_bb_preparar', { p_duplicatas: dups }); if (error) throw new Error('preparar: ' + error.message); prep = data; }
+      const bx = await baixarCanceladas();
       const reg = await registrar();
       const pg = await pagos(5);
-      return resposta(200, { preparados: prep?.preparados || 0, pulados: prep?.pulados || [], registro: reg, pagos: pg });
+      return resposta(200, { preparados: prep?.preparados || 0, pulados: prep?.pulados || [], baixas: bx, registro: reg, pagos: pg });
     }
     return resposta(400, { erro: 'ação desconhecida' });
   } catch (e) {

@@ -1106,7 +1106,12 @@
           await recarrega();
           if (CRM.pedidos && CRM.pedidos.recarregar) await CRM.pedidos.recarregar();
           if (!r.ok) throw new Error('a Sefaz não aceitou o cancelamento: ' + ((r.evento && (r.evento.cstat + ' — ' + r.evento.motivo)) || ''));
-          CRM.toast('NF ' + n.numero + ' cancelada. Protocolo ' + (r.evento && r.evento.protocolo || '') + '.');
+          // boleto do BB da nota cancelada: baixado no banco na hora (o ciclo também faz, a cada 10 minutos)
+          const bx = n.ambiente === 'producao' && CRM.boletoBB && CRM.boletoBB.cicloAgora ? await CRM.boletoBB.cicloAgora() : null;
+          const nb = bx && bx.baixas ? (bx.baixas.baixados || 0) + (bx.baixas.cancelados || 0) : 0, eb = bx && bx.baixas ? bx.baixas.erros || 0 : 0;
+          CRM.toast('NF ' + n.numero + ' cancelada. Protocolo ' + (r.evento && r.evento.protocolo || '') + '.' +
+            (nb ? ' Boleto' + (nb > 1 ? 's' : '') + ' da nota baixado' + (nb > 1 ? 's' : '') + ' no banco.' : '') +
+            (eb ? ' ATENÇÃO: o banco não baixou ' + eb + ' boleto(s): avise o administrador.' : ''), !!eb);
         } });
     },
     'nf-cce': id => {
