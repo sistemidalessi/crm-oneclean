@@ -649,22 +649,28 @@
     const aut = res.filter(r => r.sit === 'autorizada');
     const cor = { autorizada: 'verde', bloqueada: 'ambar', rejeitada: 'vermelho', denegada: 'vermelho', pendente: 'ambar', parado: 'vermelho', erro: 'vermelho' };
     CRM.abrirForm({ titulo: 'Emissão em lote: ' + aut.length + ' de ' + ids.length + ' autorizada(s)', largura: 'largo', campos: [],
-      intro: aut.length ? 'Baixe as DANFEs das autorizadas num PDF só, para imprimir e mandar com a entrega.' : 'Nenhuma nota autorizada.',
+      intro: aut.length ? 'Baixe as DANFEs das autorizadas num PDF só, para imprimir e mandar com a entrega' +
+        (CRM.boletoBB && CRM.boletoBB.ligado && CRM.boletoBB.ligado() ? ': cada nota a prazo vem seguida do boleto do BB, já registrado.' : '.') : 'Nenhuma nota autorizada.',
       htmlDepois: '<ul class="lista">' + res.map(r => '<li>' + CRM.selo((M.SITUACAO[r.sit] || [r.sit])[0], cor[r.sit] || 'cinza') + ' <strong>' + esc(r.rot) + '</strong> ' + esc(r.txt) + '</li>').join('') + '</ul>',
-      salvarTexto: aut.length ? 'Baixar as ' + aut.length + ' DANFE(s)' : 'Fechar',
+      salvarTexto: aut.length ? 'Baixar as ' + aut.length + ' DANFE(s)' + (CRM.boletoBB && CRM.boletoBB.ligado && CRM.boletoBB.ligado() ? ' e os boletos' : '') : 'Fechar',
       aoSalvar: async () => { if (aut.length) await danfes(aut.map(r => r.nfe.id)); } });
   }
   async function danfes(ids) {
     await carregaJs('vendor/jspdf.umd.min.js');
     const Dn = raiz.CRMDanfe, pdf = new raiz.jspdf.jsPDF({ unit: 'mm', format: 'a4', compress: true }), lg = await pegaLogo();
-    let n = 0;
+    let n = 0, nb = 0;
+    // boleto do BB: cada nota seguida dos boletos dela (um ciclo só no começo, que registra o que falta no banco)
+    const B = CRM.boletoBB, faltas = [], ciclo = B && B.cicloAgora ? await B.cicloAgora() : null;
     for (const id of ids) {
       const x = await CRM.store().nfeXml(id), xml = x && (x.proc_xml || x.nfe_xml), d = xml && Dn.ler(xml);
       if (!d) continue;
       if (n++) pdf.addPage('a4', 'portrait');
       Dn.desenha(pdf, d, { logo: lg, cores: (raiz.CRM_CONFIG || {}).cores, aviso: CRM.avisoGolpe ? CRM.avisoGolpe() : '' });
+      const nf = nfe(id);
+      if (nf && nf.situacao !== 'cancelada' && B && B.paginasNota) nb += await B.paginasNota(pdf, nf, { semCiclo: true, ciclo, faltas }).catch(() => 0);
     }
-    if (n) pdf.save('DANFEs-' + new Date().toISOString().slice(0, 10) + '.pdf');
+    if (n) pdf.save((nb ? 'DANFEs e boletos-' : 'DANFEs-') + new Date().toISOString().slice(0, 10) + '.pdf');
+    if (faltas.length) alert('Atenção, boleto que não entrou no PDF:\n\n' + faltas.join('\n') + '\n\nNão faça o boleto no site do BB: avise o administrador.');
   }
 
   async function xmlDe(id) {

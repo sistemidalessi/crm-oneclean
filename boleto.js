@@ -546,14 +546,24 @@
     if (raiz.jspdf) return;
     await new Promise((ok, falha) => { const sc = document.createElement('script'); sc.src = 'vendor/jspdf.umd.min.js'; sc.onload = ok; sc.onerror = () => falha(new Error('não consegui carregar o gerador de PDF (sem internet?)')); document.head.appendChild(sc); });
   }
-  // páginas de boleto no PDF da nota (DANFE): as parcelas da nota com boleto preparado ou no banco
-  async function paginasNota(pdf, n) {
+  // páginas de boleto no PDF da nota (DANFE): as parcelas da nota com boleto preparado ou no banco.
+  // Pela API, só vai ao PDF o boleto que o banco já REGISTROU (o "preparado" ainda não vale para pagar); o que ficou de fora
+  // volta em `faltas` (texto para o aviso). opc.semCiclo: quem chama já rodou o ciclo (emissão em lote: um ciclo só).
+  async function paginasNota(pdf, n, opc) {
+    opc = opc || {};
     if (!n || !ligadoBB() || !CRM.store().boletosBBdaNota) return 0;
     // a duplicata da nota do CRM: "002862/01" na série 1 (a do FKN, desde 28/10/2026) e "2-000012/01" nas outras
     const pre = (Number(n.serie) === 1 ? '' : (n.serie || '') + '-') + String(n.numero).padStart(6, '0') + '/';
     // pela API: registra na hora o que ainda não foi ao banco (o agendador também faz, a cada 10 minutos)
-    if (ligadoApi() && CRM.store().bb) await CRM.store().bb({ acao: 'ciclo' }).catch(() => null);
-    const l = await CRM.store().boletosBBdaNota(pre);
+    let ciclo = opc.ciclo || null;
+    if (ligadoApi() && !opc.semCiclo && CRM.store().bb) ciclo = await CRM.store().bb({ acao: 'ciclo' }).catch(() => null);
+    const todos = await CRM.store().boletosBBdaNota(pre);
+    const l = ligadoApi() ? todos.filter(b => b.situacao === 'registrado') : todos;
+    const faltas = [];
+    todos.filter(b => !l.includes(b)).forEach(b => faltas.push('parcela ' + (b.parcela || b.duplicata) + ' ainda não registrada no banco'));
+    ((ciclo && ciclo.pulados) || []).filter(x => String(x.duplicata || '').startsWith(pre)).forEach(x => faltas.push('parcela ' + x.duplicata + ' sem boleto: ' + x.motivo));
+    if (opc.faltas) opc.faltas.push(...faltas.map(f => 'NF ' + n.numero + ': ' + f));
+    else if (faltas.length) CRM.toast('Atenção, NF ' + n.numero + ': ' + faltas.join('; ') + '. Não faça o boleto no site do BB: avise o administrador.', true);
     for (const b of l) {
       const e = b.empresa_id ? CRM.empresa(b.empresa_id) : null;
       const d = montar(cfgB(), emitente(), { valor: b.valor, vencimento: b.vencimento, nosso_numero: b.nosso_numero, documento: b.documento, emissao: b.emissao },
@@ -564,6 +574,8 @@
     }
     return l.length;
   }
+  // um ciclo só antes de um lote de DANFEs (registra o que falta e devolve os pulados)
+  async function cicloAgora() { return ligadoApi() && CRM.store().bb ? CRM.store().bb({ acao: 'ciclo' }).catch(() => null) : null; }
   // instrução ao banco (cobranca.js: cartório → '09' protestar; tirar do cartório → '10' sustar). Devolve quantas foram marcadas.
   async function instrucao(dups, mov) {
     if (!CRM.ehAdmin() || !ligadoArquivo()) return 0;   // pela API, o cartório segue pelo site do BB por enquanto
@@ -573,7 +585,7 @@
     return n;
   }
 
-  CRM.boletoBB = { cartao, cartaoGolpe, exemplo, remessaTeste, blocoArquivo, depoisBloco, paginasNota, instrucao };
+  CRM.boletoBB = { cartao, cartaoGolpe, exemplo, remessaTeste, blocoArquivo, depoisBloco, paginasNota, cicloAgora, ligado: ligadoBB, instrucao };
   Object.assign(CRM.acoes, {
     'bol-convenio': () => {
       const c = cfgB();

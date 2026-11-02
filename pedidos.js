@@ -424,7 +424,9 @@
         return '<li><div><strong>SP ' + esc(b) + '</strong> ' + ps.length + ' pedido(s): ' + esc(ps.map(p => p.numero).join(', ')) + '<small>' + esc(bo.criado_em ? quando(bo.criado_em) : '') + (bo.observacao ? ' · ' + bo.observacao : '') + '</small></div>' +
           '<span class="acoes-rapidas"><button type="button" class="btn" data-acao="pd-bolao" data-id="' + esc(b) + '">Abrir</button></span></li>'; }).join('') + '</ul>' : '<p class="vazio">Nenhuma lista aberta.</p>') + '</section>' +
       '<section class="cartao"><h2>Separados — a emitir NF <small>' + sep.length + '</small></h2>' +
-      '<p class="dica">A nota emitida no FKN chega ao CRM pelo vigia e fatura o pedido sozinha (mesmo cliente, os mesmos produtos). Se não casar, use "Faturar…".</p>' +
+      '<p class="dica">Emita a nota pelo CRM: <strong>Emitir NF-e</strong> em cada pedido, ou marque vários e use <strong>Emitir NF-e dos marcados</strong>. ' +
+        'Venda a prazo sai com o <strong>boleto do BB já registrado</strong>, no mesmo PDF da DANFE: não faça boleto no site do banco. ' +
+        '"Faturar (FKN)…" só se a nota tiver saído pelo FKN (plano B).</p>' +
       (sep.length ? '<div class="tabela-rolagem"><table class="tabela"><tbody>' + sep.map(p => '<tr><td>' + (CRM.nfe && CRM.nfe.podeEmitir(p) ? '<input type="checkbox" data-nf-marca="' + esc(p.id) + '"' + (CRM.nfe.marcado(p.id) ? ' checked' : '') + '>' : '') + '</td>' +
         linhaP(p, false).slice(4) + '<td class="num">' + (CRM.nfe && CRM.nfe.podeEmitir(p) ? '<button type="button" class="mini" data-acao="nf-emitir" data-id="' + esc(p.id) + '">Emitir NF-e</button> ' : '') +
         '<button type="button" class="mini" data-acao="pd-faturar" data-id="' + esc(p.id) + '" title="ligar a nota que o FKN emitiu">Faturar (FKN)…</button></td></tr>').join('') + '</tbody></table></div>' +
