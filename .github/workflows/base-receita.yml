@@ -1,0 +1,57 @@
+# Leads sugeridos (01/11/2026): baixa a base aberta de CNPJ da Receita Federal, separa as empresas que interessam à
+# prospecção (ferramentas/prospeccao-receita.js) e manda para o banco pela Edge Function crm-prospeccao.
+# Roda sozinho todo mês (a Receita publica a pasta nova por volta da metade do mês) e pode ser chamado à mão
+# (Actions → "Base da Receita" → Run workflow). A senha de carga fica nos Secrets do repositório (CRM_CARGA_SENHA),
+# gerada pelo administrador no CRM (Vendas → Leads sugeridos → Configuração); sem ela, só separa e mostra os números.
+# Nada da base aparece no log: só contagens.
+name: Base da Receita (leads sugeridos)
+on:
+  workflow_dispatch:
+    inputs:
+      mes:
+        description: 'Pasta da Receita (AAAA-MM). Vazio = a mais nova.'
+        required: false
+        default: ''
+  schedule:
+    - cron: '17 9 22 * *'
+permissions:
+  contents: read
+concurrency:
+  group: base-receita
+  cancel-in-progress: false
+jobs:
+  carga:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Baixar a base da Receita
+        env:
+          MES: ${{ inputs.mes }}
+        run: |
+          set -euo pipefail
+          export T=YggdBLfdninEJX9
+          export B=https://arquivos.receitafederal.gov.br/public.php/webdav
+          if [ -z "${MES:-}" ]; then
+            MES=$(curl -sS --retry 5 -u "$T:" -X PROPFIND -H "Depth: 1" "$B/" | grep -oE '/webdav/[0-9]{4}-[0-9]{2}/' | grep -oE '[0-9]{4}-[0-9]{2}' | sort | tail -1)
+          fi
+          echo "Pasta: $MES"
+          echo "MES=$MES" >> "$GITHUB_ENV"
+          export MES
+          mkdir -p rf
+          cd rf
+          printf '%s\n' Cnaes.zip Simples.zip $(printf 'Estabelecimentos%d.zip ' 0 1 2 3 4 5 6 7 8 9) $(printf 'Empresas%d.zip ' 0 1 2 3 4 5 6 7 8 9) |
+            xargs -P 4 -n 1 bash -c 'for i in 1 2 3 4; do curl -sS --retry 5 -C - -u "$T:" -o "$0" "$B/$MES/$0" || true; if unzip -tq "$0" >/dev/null 2>&1; then echo "ok $0"; exit 0; fi; sleep 20; done; echo "falhou $0"; exit 1'
+          du -sh .
+      - name: Separar as empresas
+        run: node ferramentas/prospeccao-receita.js separar rf base.jsonl
+      - name: Mandar para o CRM
+        env:
+          CRM_CARGA_SENHA: ${{ secrets.CRM_CARGA_SENHA }}
+          URL: https://udhigavckigciqnicgyy.supabase.co/functions/v1/crm-prospeccao
+        run: |
+          if [ -z "${CRM_CARGA_SENHA:-}" ]; then echo "Sem a senha de carga (Secret CRM_CARGA_SENHA): só separei."; exit 0; fi
+          node ferramentas/prospeccao-receita.js enviar base.jsonl "$URL" "$MES"

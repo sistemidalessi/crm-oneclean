@@ -556,13 +556,16 @@
     });
   };
 
-  fichas.formLead = () => {
+  // pre (01/11/2026, Leads sugeridos): { valores } já preenchidos (o CNPJ dispara a busca na Receita e na Sefaz) e
+  // aoCriar(empresa), chamado depois de o lead ser gravado.
+  fichas.formLead = pre => {
+    pre = pre || {};
     let oficialLead = null;   // endereço da Receita/Sefaz, gravado junto com o lead
     const g = CRM.ehGestor();
     const exige = E().cfg.exigir_contato_cadastro !== false;
     const usuarios = CRM.opcoesUsuarios();
     CRM.abrirForm({
-      titulo: 'Novo lead', largura: 'largo',
+      titulo: 'Novo lead', largura: 'largo', valores: pre.valores,
       intro: exige ? 'Obrigatórios: nome, telefone e e-mail — é por eles (e pelo CNPJ, se tiver) que o CRM não deixa o mesmo cliente ser cadastrado duas vezes. O resto dá para completar depois.'
         : 'Só o nome é obrigatório. O resto dá para completar depois.',
       campos: [
@@ -633,6 +636,7 @@
           }
           CRM.avisoCampo(form, 'cnpj', linhas.map(l => '<span class="linha">' + l + '</span>').join(''));
         });
+        if (pre.valores && pre.valores.cnpj) setTimeout(() => el('cnpj').dispatchEvent(new Event('change')), 0);
       },
       aoSalvar: async v => {
         const errIE = R.errosInscricao({ cnpj: v.cnpj, ind_ie: v.ind_ie, ie: v.ie, uf: (oficialLead && oficialLead.uf) || 'SP' });
@@ -656,6 +660,7 @@
             responsavel_id: resp, origem: v.origem, contato_id: null });
         }
         await CRM.auto.aoCriarEmpresa(emp);
+        if (pre.aoCriar) await pre.aoCriar(emp);
         CRM.toast('Lead cadastrado' + (resp !== CRM.meuId() ? ' para ' + CRM.nomeUsuario(resp) : '') + '.');
         fichas.abrirEmpresa(emp.id);
       }

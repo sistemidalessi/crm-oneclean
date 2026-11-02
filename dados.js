@@ -1421,6 +1421,36 @@
   // Metas de vendas (31/10/2026): histórico por vendedor(a), metas do mês e, para o administrador, a conta do mínimo da empresa
   Supa.prototype.metasDados = async function (mes) { return unwrap(await this.sb.rpc('crm_metas_dados', { p_mes: mes })); };
   Supa.prototype.gvFechado = async function (de, ate) { return unwrap(await this.sb.rpc('crm_gv_fechado', { p_de: de, p_ate: ate })); };
+  // Leads sugeridos (01/11/2026, leads.js): a lista de cada vendedor(a), tratar, o que os parecidos compram, resultado e a
+  // Edge Function crm-prospeccao (procurar o contato, gerar a lista, senha da carga mensal)
+  Supa.prototype.prospecMinhas = async function (vend) { return unwrap(await this.sb.rpc('crm_prospec_minhas', { p_vendedor: vend || null })); };
+  Supa.prototype.prospecTratar = async function (id, situacao, motivo, empresa) { return unwrap(await this.sb.rpc('crm_prospec_tratar', { p_id: id, p_situacao: situacao, p_motivo: motivo || null, p_empresa: empresa || null })); };
+  Supa.prototype.prospecParecidos = async function () { return unwrap(await this.sb.rpc('crm_prospec_parecidos')); };
+  Supa.prototype.prospecResultado = async function (desde) { return unwrap(await this.sb.rpc('crm_prospec_resultado', { p_desde: desde })); };
+  Supa.prototype.prospecBaseResumo = async function () { return unwrap(await this.sb.rpc('crm_prospec_base_resumo')); };
+  Supa.prototype.prospeccao = async function (corpo) {
+    const r = await this.sb.functions.invoke('crm-prospeccao', { body: corpo });
+    if (r.error) throw await erroDaFuncao(r);
+    return r.data;
+  };
+  // modo local (demonstração): uma lista de exemplo guardada no navegador
+  Local.prototype.prospecMinhas = async function (vend) {
+    const eu = vend || (this.ler().usuarios || [])[0]?.user_id || 'local';
+    const l = lsLe('crm_prospec_local', null) || [
+      { id: 1, dia: R.hojeISO(), vendedor_id: eu, situacao: 'nova', segmento: 'Condomínio', ordem: 1, cnpj: '00000000000191', razao: 'CONDOMINIO RESIDENCIAL EXEMPLO', fantasia: 'Residencial Exemplo',
+        motivos: ['Parecida com 28 clientes de condomínio', '4 clientes recebem no Centro', 'Aberta há 4 meses', 'Condomínios prediais'], atividade: 'Condomínios prediais', abertura: null,
+        endereco: 'RUA EXEMPLO, 100', bairro: 'CENTRO', cep: '09700000', cidade: 'SAO BERNARDO DO CAMPO', tel1: '1140000001', email: null, porte: null,
+        contato: { achou: true, site: 'https://exemplo.com.br', telefone: '1140000002', email: 'administracao@exemplo.com.br', fonte_telefone: 'site', fonte_email: 'site' } }];
+    return l.filter(x => x.vendedor_id === eu || !vend);
+  };
+  Local.prototype.prospecTratar = async function (id, situacao, motivo, empresa) {
+    const l = await this.prospecMinhas();
+    lsGrava('crm_prospec_local', l.map(x => (x.id === id ? Object.assign({}, x, { situacao, motivo_descarte: motivo, empresa_id: empresa, tratado_em: situacao === 'nova' ? null : new Date().toISOString() }) : x)));
+  };
+  Local.prototype.prospecParecidos = async function () { return [{ segmento: 'Condomínio', descricao: 'HIPOCLORITO 5 LTS (CLORO 5%)', clientes: 12, total: 28 }]; };
+  Local.prototype.prospecResultado = async function () { return []; };
+  Local.prototype.prospecBaseResumo = async function () { return []; };
+  Local.prototype.prospeccao = async function (corpo) { return corpo && corpo.acao === 'situacao' ? { ligado: false, ia: false, gasto_mes: 0 } : Promise.reject(new Error('os leads sugeridos só funcionam com o Supabase ligado')); };
   Supa.prototype.analiseLogisticaHoje = async function (dia) { return unwrap(await this.sb.from('crm_ia_analises_areas').select('dia, texto, em').eq('dia', dia).eq('area', 'logistica').maybeSingle()); };
   Local.prototype.analiseLogistica = async function () { const a = { dia: R.hojeISO(), texto: '(modo local: sem IA) Aqui aparece a análise de logística do dia: **a rota de hoje**, as entregas sem confirmação, os problemas de entrega e as notas que não entraram em rota.', em: new Date().toISOString(), nova: true }; this._analiseL = a; return a; };
   Local.prototype.analiseLogisticaHoje = async function (dia) { return this._analiseL && this._analiseL.dia === dia ? this._analiseL : null; };

@@ -7594,3 +7594,378 @@ end $$;
 revoke all on function public.crm_metas_dados(date) from public, anon;
 grant execute on function public.crm_metas_dados(date) to authenticated;
 
+
+-- =====================================================================================================================
+-- Leads sugeridos (01/11/2026, pedido do Anderson a partir de um reel: "o Claude acha cliente pra você"). Simulação
+-- aprovada; decisões dele: os 5 segmentos (Serviços, Condomínio, Escola, Indústria e Saúde), 5 por dia para cada
+-- vendedor(a), a Silmara junto, só em dia útil ("vamos analisar o resultado e aumentamos quando for viável").
+--   crm_prospec_base        empresas da base aberta de CNPJ da Receita (ferramentas/prospeccao-receita.js), já filtradas
+--   crm_prospec_cnae        descrição das atividades (CNAE)
+--   crm_prospec_sugestoes   as 5 do dia de cada vendedor(a) e o que ela fez (lead, descartada, amanhã)
+--   crm_config.dados.prospeccao   segmentos, cidades, quantidade, quem recebe e as regras (tela da gestão)
+-- A base não é lida direto por ninguém: a vendedora vê só as empresas sugeridas a ela (crm_prospec_minhas).
+-- Agendador: pg_cron, dias úteis 6h30 de São Paulo, chama a Edge Function crm-prospeccao (ela confere o feriado, gera a
+-- lista e manda a IA procurar site e contato de cada empresa).
+-- =====================================================================================================================
+create table if not exists public.crm_prospec_base (
+  cnpj        text primary key,
+  basico      text not null,
+  matriz      boolean,
+  razao       text,
+  fantasia    text,
+  cnae        text,
+  cnaes_sec   text[],
+  abertura    date,
+  endereco    text,
+  bairro      text,
+  cep         text,
+  cidade      text,
+  uf          text,
+  tel1        text,
+  tel2        text,
+  email       text,
+  porte       text,
+  capital     numeric,
+  natureza    text,
+  mei         boolean not null default false,
+  carga       text not null,                 -- mês da base da Receita (AAAA-MM)
+  atualizado_em timestamptz not null default now()
+);
+create index if not exists crm_prospec_base_cnae on public.crm_prospec_base (cnae);
+create index if not exists crm_prospec_base_basico on public.crm_prospec_base (basico);
+create index if not exists crm_prospec_base_cidade on public.crm_prospec_base (cidade);
+alter table public.crm_prospec_base enable row level security;
+revoke all on public.crm_prospec_base from anon, authenticated, public;
+
+create table if not exists public.crm_prospec_cnae (codigo text primary key, descricao text not null);
+alter table public.crm_prospec_cnae enable row level security;
+revoke all on public.crm_prospec_cnae from anon, public;
+grant select on public.crm_prospec_cnae to authenticated;
+drop policy if exists ler on public.crm_prospec_cnae;
+create policy ler on public.crm_prospec_cnae for select to authenticated using (true);
+
+create table if not exists public.crm_prospec_sugestoes (
+  id            bigint generated always as identity primary key,
+  dia           date not null,
+  vendedor_id   uuid not null references public.crm_usuarios(user_id) on delete cascade,
+  cnpj          text not null,
+  ordem         integer not null default 0,
+  segmento      text,
+  pontos        numeric,
+  motivos       text[] not null default '{}',
+  contato       jsonb,                       -- o que a IA achou: site, telefone, e-mail, fontes, observação, custo
+  situacao      text not null default 'nova' check (situacao in ('nova', 'amanha', 'lead', 'descartada', 'expirada')),
+  motivo_descarte text,
+  tratado_em    timestamptz,
+  empresa_id    uuid references public.crm_empresas(id) on delete set null,
+  criado_em     timestamptz not null default now(),
+  unique (dia, cnpj)
+);
+create index if not exists crm_prospec_sug_vend on public.crm_prospec_sugestoes (vendedor_id, dia);
+create index if not exists crm_prospec_sug_cnpj on public.crm_prospec_sugestoes (cnpj);
+alter table public.crm_prospec_sugestoes enable row level security;
+revoke all on public.crm_prospec_sugestoes from anon, public;
+revoke insert, update, delete on public.crm_prospec_sugestoes from authenticated;
+grant select on public.crm_prospec_sugestoes to authenticated;
+
+-- Quem vê as sugestões de quem: a própria pessoa; o administrador, todas; a gestora, as da equipe de vendas dela
+-- (gestora e vendedores internos, sem externo — mesma regra do crm_gv_notas, 27/10/2026).
+create or replace function public.crm_prospec_ve(p_vendedor uuid) returns boolean
+language sql stable security definer set search_path = public as $$
+  select p_vendedor = (select auth.uid()) or public.crm_eh_admin()
+      or (public.crm_eh_gestor() and exists (select 1 from public.crm_usuarios u where u.user_id = p_vendedor and u.papel in ('gestor', 'vendedor')
+           and coalesce((select c.dados->'comissao_usuarios'->>u.user_id::text from public.crm_config c where c.id = 1), '') <> 'externo'));
+$$;
+revoke all on function public.crm_prospec_ve(uuid) from public, anon;
+grant execute on function public.crm_prospec_ve(uuid) to authenticated, service_role;
+drop policy if exists ler on public.crm_prospec_sugestoes;
+create policy ler on public.crm_prospec_sugestoes for select to authenticated using ((select public.crm_prospec_ve(vendedor_id)));
+
+-- Senha do agendador e da carga (fora do alcance de quem faz login)
+create schema if not exists crm_interno;
+create table if not exists crm_interno.prospeccao_cfg (
+  id         integer primary key default 1 check (id = 1),
+  senha      text not null default encode(extensions.gen_random_bytes(32), 'hex'),
+  url        text,              -- https://<projeto>.supabase.co/functions/v1/crm-prospeccao
+  carga_hash text               -- sha256 (hex) da senha de carga da base (a senha fica só nos Secrets do GitHub)
+);
+revoke all on crm_interno.prospeccao_cfg from public, anon, authenticated;
+insert into crm_interno.prospeccao_cfg (id) values (1) on conflict (id) do nothing;
+
+create or replace function public.crm_prospec_senha(p text) returns text
+language sql stable security definer set search_path = public as $$
+  -- 'agendador', 'carga' ou null (a Edge Function confere quem chama sem login)
+  select case when length(coalesce(p, '')) < 32 then null
+              when c.senha = p then 'agendador'
+              when c.carga_hash is not null and c.carga_hash = encode(extensions.digest(p, 'sha256'), 'hex') then 'carga' end
+    from crm_interno.prospeccao_cfg c where c.id = 1;
+$$;
+revoke all on function public.crm_prospec_senha(text) from public, anon, authenticated;
+
+-- Carga terminada: apaga o que não veio nesta carga (empresa que fechou ou mudou de atividade).
+create or replace function public.crm_prospec_carga_fim(p_carga text) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare n_apagadas integer; n_total integer;
+begin
+  if coalesce(auth.role(), '') <> 'service_role' then raise exception 'só a função de carga'; end if;
+  select count(*) into n_total from public.crm_prospec_base where carga = p_carga;
+  if n_total < 1000 then raise exception 'carga % com só % empresas: nada foi apagado', p_carga, n_total; end if;
+  delete from public.crm_prospec_base where carga <> p_carga;
+  get diagnostics n_apagadas = row_count;
+  return jsonb_build_object('carga', p_carga, 'empresas', n_total, 'apagadas', n_apagadas);
+end;
+$$;
+revoke all on function public.crm_prospec_carga_fim(text) from public, anon, authenticated;
+
+-- Senha nova da carga (o administrador gera no CRM e cola nos Secrets do GitHub; aqui só o hash).
+create or replace function public.crm_prospec_senha_carga(p_hash text) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  if coalesce(auth.role(), '') <> 'service_role' then raise exception 'só a função de carga'; end if;
+  if p_hash !~ '^[0-9a-f]{64}$' then raise exception 'hash inválido'; end if;
+  update crm_interno.prospeccao_cfg set carga_hash = p_hash where id = 1;
+end;
+$$;
+revoke all on function public.crm_prospec_senha_carga(text) from public, anon, authenticated;
+grant execute on function public.crm_prospec_senha_carga(text) to service_role;
+
+-- Segmento de uma atividade pela configuração (o prefixo mais longo vence). Indústria ("clientes": true) = as atividades
+-- industriais (CNAE 05 a 33) dos clientes que já compram com esse segmento.
+create or replace function public.crm_prospec_segmentos() returns table (segmento text, prefixo text)
+language sql stable security definer set search_path = public as $$
+  select s->>'nome', p
+    from public.crm_config c, jsonb_array_elements(c.dados->'prospeccao'->'segmentos') s, jsonb_array_elements_text(coalesce(s->'cnaes', '[]'::jsonb)) p
+   where c.id = 1 and coalesce((s->>'ligado')::boolean, true)
+  union
+  select distinct s->>'nome', b.cnae
+    from public.crm_config c, jsonb_array_elements(c.dados->'prospeccao'->'segmentos') s
+    join public.crm_empresas e on e.segmento = s->>'nome'
+    join public.crm_prospec_base b on b.basico = left(public.crm_doc(e.cnpj), 8)
+   where c.id = 1 and coalesce((s->>'clientes')::boolean, false) and coalesce((s->>'ligado')::boolean, true)
+     and length(public.crm_doc(e.cnpj)) = 14 and b.cnae ~ '^(0[5-9]|[12][0-9]|3[0-3])';
+$$;
+revoke all on function public.crm_prospec_segmentos() from public, anon;
+grant execute on function public.crm_prospec_segmentos() to authenticated, service_role;
+
+-- texto sem acento, minúsculo, só letras e números (nome de empresa para comparar)
+create or replace function public.crm_prospec_nome(t text) returns text language sql immutable as $$
+  select nullif(regexp_replace(lower(translate(coalesce(t, ''), 'ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÇÑáàâãäéèêëíìîïóòôõöúùûüçñ', 'AAAAAEEEEIIIIOOOOOUUUUCNaaaaaeeeeiiiiooooouuuucn')),
+    '[^a-z0-9]+', '', 'g'), '');
+$$;
+
+-- A lista do dia. Idempotente (se o dia já tem lista, só devolve o resumo). Quem chama: o agendador (service_role) ou o
+-- administrador ("Gerar a lista de hoje agora", na tela da gestão).
+create or replace function public.crm_prospec_gerar(p_dia date default null) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare
+  cfg jsonb; v_dia date := coalesce(p_dia, (now() at time zone 'America/Sao_Paulo')::date);
+  n integer; vends uuid[]; v uuid; r integer; k record; total integer := 0; expiradas integer := 0;
+  cidades text[]; meses_rec integer; desc_meses integer;
+begin
+  if coalesce(auth.role(), '') <> 'service_role' and not public.crm_eh_admin() then raise exception 'só o agendador ou o administrador'; end if;
+  select c.dados->'prospeccao' into cfg from public.crm_config c where c.id = 1;
+  if cfg is null or not coalesce((cfg->>'ligado')::boolean, false) then return jsonb_build_object('ok', false, 'motivo', 'desligado'); end if;
+  if exists (select 1 from public.crm_prospec_sugestoes s where s.dia = v_dia) then
+    return jsonb_build_object('ok', true, 'dia', v_dia, 'ja_tinha', (select count(*) from public.crm_prospec_sugestoes s where s.dia = v_dia));
+  end if;
+  perform pg_advisory_xact_lock(hashtext('crm_prospec_gerar'));
+  n := greatest(1, least(50, coalesce((cfg->>'por_dia')::int, 5)));
+  cidades := array(select jsonb_array_elements_text(coalesce(cfg->'cidades', '[]'::jsonb)));
+  meses_rec := coalesce((cfg->>'recentes_meses')::int, 24);
+  desc_meses := coalesce((cfg->>'descarte_meses')::int, 6);
+  select array_agg(u.user_id order by u.nome) into vends
+    from public.crm_usuarios u where u.ativo and u.user_id in (select (jsonb_array_elements_text(coalesce(cfg->'vendedores', '[]'::jsonb)))::uuid);
+  if vends is null then return jsonb_build_object('ok', false, 'motivo', 'ninguém para receber'); end if;
+
+  -- o que ficou 3 listas sem ser tratado volta para a base
+  update public.crm_prospec_sugestoes s set situacao = 'expirada'
+   where s.situacao in ('nova', 'amanha')
+     and (select count(distinct x.dia) from public.crm_prospec_sugestoes x where x.dia > s.dia and x.dia < v_dia) >= 2;
+  get diagnostics expiradas = row_count;
+
+  create temp table _seg on commit drop as select * from public.crm_prospec_segmentos();
+  -- clientes: quem comprou nos últimos 12 meses (pelas notas), com carteira, segmento e CEP
+  create temp table _cli on commit drop as
+    select distinct e.id, e.responsavel_id dono, e.segmento, left(regexp_replace(coalesce(e.cep, ''), '\D', '', 'g'), 5) cep5
+      from public.crm_empresas e
+     where exists (select 1 from public.crm_notas nn where nn.empresa_id = e.id and not nn.cancelada and nn.emitida_em >= now() - interval '12 months');
+  -- tudo o que já está no CRM (qualquer situação), para nunca sugerir de novo: raiz do CNPJ, telefones, e-mails e nome
+  create temp table _ja on commit drop as
+    select left(public.crm_doc(e.cnpj), 8) basico, regexp_replace(coalesce(e.telefone, ''), '\D', '', 'g') tel,
+           regexp_replace(coalesce(e.whatsapp, ''), '\D', '', 'g') zap, lower(btrim(coalesce(e.email, ''))) email,
+           public.crm_prospec_nome(e.nome) nome, public.crm_prospec_nome(e.razao_social) razao
+      from public.crm_empresas e
+    union all
+    select left(public.crm_doc(nn.cliente_doc), 8), '', '', '', public.crm_prospec_nome(nn.cliente_nome), null
+      from public.crm_notas nn where nn.cliente_doc is not null;
+
+  create temp table _cep on commit drop as select cep5, count(*)::int n from _cli where cep5 <> '' group by 1;
+  create temp table _jbas on commit drop as select distinct basico from _ja where length(basico) = 8;
+  create temp table _jtel on commit drop as select distinct t from (select tel t from _ja union select zap from _ja) x where length(t) >= 10;
+  create temp table _jmail on commit drop as select distinct email from _ja where email like '%@%';
+  create temp table _jnome on commit drop as select distinct n from (select nome n from _ja union select razao from _ja) x where length(n) >= 6;
+  create temp table _cand on commit drop as
+    select b.*, sg.segmento seg, left(coalesce(b.cep, ''), 5) cep5,
+           coalesce(cp.n, 0) viz,
+           (b.abertura >= v_dia - make_interval(months => meses_rec)) recente
+      from public.crm_prospec_base b
+      cross join lateral (select s.segmento from _seg s where b.cnae like s.prefixo || '%' order by length(s.prefixo) desc limit 1) sg
+      left join _cep cp on cp.cep5 = left(coalesce(b.cep, ''), 5)
+     where b.uf = 'SP' and b.cidade = any(cidades)
+       and (not coalesce((cfg->>'sem_mei')::boolean, true) or not b.mei)
+       and (not coalesce((cfg->>'so_com_contato')::boolean, true) or b.tel1 is not null or b.email is not null)
+       and b.basico not in (select basico from _jbas)
+       and not exists (select 1 from public.crm_prospec_sugestoes x where x.cnpj = b.cnpj and (x.situacao in ('nova', 'amanha', 'lead')
+             or (x.situacao = 'descartada' and x.tratado_em > now() - make_interval(months => desc_meses))
+             or (x.situacao = 'expirada' and x.dia > v_dia - 30)));
+  -- mesmo telefone, e-mail ou nome de quem já está no CRM (lead do Agendor sem CNPJ)
+  delete from _cand c where c.tel1 in (select t from _jtel) or c.tel2 in (select t from _jtel) or c.email in (select email from _jmail)
+     or public.crm_prospec_nome(c.fantasia) in (select n from _jnome) or public.crm_prospec_nome(c.razao) in (select n from _jnome);
+
+  -- pontos de base: perto de quem já recebe, aberta há pouco, com e-mail, matriz; um pouco de sorte para variar
+  alter table _cand add column base numeric;
+  update _cand set base = (case when viz > 0 then 3 + least(viz, 6) * 0.5 else 0 end) + (case when recente then 2 else 0 end)
+    + (case when email is not null then 1 else 0 end) + (case when matriz then 0.5 else 0 end) + random() * 1.5;
+  create temp table _pool on commit drop as select * from _cand order by base desc limit 4000;
+  alter table _pool add column escolhido boolean not null default false;
+
+  -- parecença com a carteira de cada vendedor(a): fatia dos clientes dela em cada segmento e os CEPs onde ela já entrega
+  create temp table _vs on commit drop as
+    select c.dono, c.segmento, count(*)::numeric / nullif(sum(count(*)) over (partition by c.dono), 0) fatia
+      from _cli c where c.segmento is not null group by 1, 2;
+  create temp table _vc on commit drop as select distinct dono, cep5 from _cli where cep5 <> '';
+
+  for r in 1..n loop
+    foreach v in array vends loop
+      select p.cnpj, p.seg, p.base + coalesce(vs.fatia, 0) * 4 + case when vc.cep5 is not null then 2 else 0 end pts,
+             p.viz, p.recente, p.abertura, p.bairro, p.cnae
+        into k
+        from _pool p
+        left join _vs vs on vs.dono = v and vs.segmento = p.seg
+        left join _vc vc on vc.dono = v and vc.cep5 = p.cep5
+       where not p.escolhido
+       order by 3 desc limit 1;
+      exit when k.cnpj is null;
+      update _pool set escolhido = true where cnpj = k.cnpj;
+      insert into public.crm_prospec_sugestoes (dia, vendedor_id, cnpj, ordem, segmento, pontos, motivos)
+      values (v_dia, v, k.cnpj, r, k.seg, round(k.pts, 2), array_remove(array[
+        'Parecida com ' || (select count(*) from _cli c where c.segmento = k.seg) || ' clientes de ' || lower(k.seg),
+        case when k.viz > 0 then k.viz || case when k.viz = 1 then ' cliente recebe' else ' clientes recebem' end || ' no ' || coalesce(initcap(lower(k.bairro)), 'mesmo bairro') end,
+        case when k.recente then 'Aberta há ' || case when (v_dia - k.abertura) < 60 then (v_dia - k.abertura) || ' dias'
+             when (v_dia - k.abertura) < 730 then ((v_dia - k.abertura) / 30) || ' meses' else ((v_dia - k.abertura) / 365) || ' anos' end end,
+        (select d.descricao from public.crm_prospec_cnae d where d.codigo = k.cnae)
+      ], null));
+      total := total + 1;
+    end loop;
+  end loop;
+  return jsonb_build_object('ok', true, 'dia', v_dia, 'geradas', total, 'expiradas', expiradas, 'pessoas', array_length(vends, 1));
+end;
+$$;
+revoke all on function public.crm_prospec_gerar(date) from public, anon;
+grant execute on function public.crm_prospec_gerar(date) to authenticated, service_role;
+
+-- O que a pessoa vê: as dela (ou de quem a gestão escolher) ainda abertas e as tratadas no dia, com os dados da empresa.
+create or replace function public.crm_prospec_minhas(p_vendedor uuid default null, p_dia date default null)
+returns table (id bigint, dia date, vendedor_id uuid, situacao text, motivo_descarte text, tratado_em timestamptz, empresa_id uuid,
+               segmento text, motivos text[], contato jsonb, ordem integer, cnpj text, razao text, fantasia text, cnae text, atividade text,
+               abertura date, endereco text, bairro text, cep text, cidade text, tel1 text, tel2 text, email text, porte text, capital numeric)
+language sql stable security definer set search_path = public as $$
+  select s.id, s.dia, s.vendedor_id, s.situacao, s.motivo_descarte, s.tratado_em, s.empresa_id, s.segmento, s.motivos, s.contato, s.ordem,
+         b.cnpj, b.razao, b.fantasia, b.cnae, d.descricao, b.abertura, b.endereco, b.bairro, b.cep, b.cidade, b.tel1, b.tel2, b.email, b.porte, b.capital
+    from public.crm_prospec_sugestoes s
+    join public.crm_prospec_base b on b.cnpj = s.cnpj
+    left join public.crm_prospec_cnae d on d.codigo = b.cnae
+   where s.vendedor_id = coalesce(p_vendedor, (select auth.uid())) and public.crm_prospec_ve(s.vendedor_id)
+     and (s.situacao in ('nova', 'amanha') or (s.tratado_em at time zone 'America/Sao_Paulo')::date = coalesce(p_dia, (now() at time zone 'America/Sao_Paulo')::date))
+   order by (s.situacao in ('nova', 'amanha')) desc, s.dia, s.ordem;
+$$;
+revoke all on function public.crm_prospec_minhas(uuid, date) from public, anon;
+grant execute on function public.crm_prospec_minhas(uuid, date) to authenticated;
+
+-- Tratar uma sugestão: virou lead (com a empresa criada), descartada (com o motivo), amanhã, ou desfazer (volta a "nova").
+create or replace function public.crm_prospec_tratar(p_id bigint, p_situacao text, p_motivo text default null, p_empresa uuid default null)
+returns void language plpgsql security definer set search_path = public as $$
+declare s record;
+begin
+  select * into s from public.crm_prospec_sugestoes where id = p_id;
+  if s.id is null or not (s.vendedor_id = (select auth.uid()) or public.crm_prospec_ve(s.vendedor_id)) then raise exception 'sugestão não encontrada'; end if;
+  if p_situacao not in ('nova', 'amanha', 'lead', 'descartada') then raise exception 'situação inválida'; end if;
+  if p_situacao = 'descartada' and nullif(btrim(coalesce(p_motivo, '')), '') is null then raise exception 'diga o motivo do descarte'; end if;
+  update public.crm_prospec_sugestoes set situacao = p_situacao,
+         motivo_descarte = case when p_situacao = 'descartada' then left(btrim(p_motivo), 200) end,
+         empresa_id = case when p_situacao = 'lead' then p_empresa end,
+         tratado_em = case when p_situacao = 'nova' then null else now() end
+   where id = p_id;
+end;
+$$;
+revoke all on function public.crm_prospec_tratar(bigint, text, text, uuid) from public, anon;
+grant execute on function public.crm_prospec_tratar(bigint, text, text, uuid) to authenticated;
+
+-- O que os clientes de cada segmento mais compram (12 meses): os 4 produtos que mais clientes do segmento levam.
+create or replace function public.crm_prospec_parecidos() returns table (segmento text, descricao text, clientes integer, total integer)
+language sql stable security definer set search_path = public as $$
+  with n as (select nn.id, nn.empresa_id, e.segmento from public.crm_notas nn join public.crm_empresas e on e.id = nn.empresa_id
+              where not nn.cancelada and nn.emitida_em >= now() - interval '12 months' and e.segmento is not null
+                and exists (select 1 from public.crm_nota_itens i where i.nota_id = nn.id and i.cfop ~ '^[567][14]')),
+       t as (select n.segmento, count(distinct n.empresa_id)::int total from n group by 1),
+       r as (select n.segmento, i.descricao, count(distinct n.empresa_id)::int cli,
+                    row_number() over (partition by n.segmento order by count(distinct n.empresa_id) desc, sum(i.valor_total) desc) rk
+               from n join public.crm_nota_itens i on i.nota_id = n.id group by 1, 2)
+  select r.segmento, r.descricao, r.cli, t.total from r join t using (segmento) where r.rk <= 4 and (select auth.uid()) is not null order by 1, r.rk;
+$$;
+revoke all on function public.crm_prospec_parecidos() from public, anon;
+grant execute on function public.crm_prospec_parecidos() to authenticated;
+
+-- Resultado por vendedor(a) desde uma data: sugeridos, tratados, leads, descartes (motivo mais comum), 1ª compra e faturado
+-- nas notas dos leads depois de tratados. Gestão (a gestora vê a equipe dela; o administrador, todos).
+create or replace function public.crm_prospec_resultado(p_desde date)
+returns table (vendedor_id uuid, nome text, sugeridos integer, tratados integer, leads integer, descartadas integer, compraram integer, faturado numeric, motivo text)
+language sql stable security definer set search_path = public as $$
+  select u.user_id, u.nome, count(s.id)::int, count(s.id) filter (where s.situacao in ('lead', 'descartada'))::int,
+         count(s.id) filter (where s.situacao = 'lead')::int, count(s.id) filter (where s.situacao = 'descartada')::int,
+         count(distinct s.empresa_id) filter (where f.valor > 0)::int, coalesce(sum(f.valor), 0),
+         (select x.motivo_descarte from public.crm_prospec_sugestoes x where x.vendedor_id = u.user_id and x.dia >= p_desde and x.situacao = 'descartada'
+           group by 1 order by count(*) desc limit 1)
+    from public.crm_usuarios u
+    join public.crm_prospec_sugestoes s on s.vendedor_id = u.user_id and s.dia >= p_desde
+    left join lateral (select sum(nn.valor_total) valor from public.crm_notas nn where s.empresa_id is not null and nn.empresa_id = s.empresa_id
+                        and not nn.cancelada and nn.emitida_em >= s.tratado_em) f on true
+   where public.crm_eh_gestor() and public.crm_prospec_ve(u.user_id)
+   group by u.user_id, u.nome order by u.nome;
+$$;
+revoke all on function public.crm_prospec_resultado(date) from public, anon;
+grant execute on function public.crm_prospec_resultado(date) to authenticated;
+
+-- Quantas empresas há na base para cada segmento ligado nas cidades ligadas (tela da gestão).
+create or replace function public.crm_prospec_base_resumo() returns table (segmento text, empresas integer, carga text)
+language sql stable security definer set search_path = public as $$
+  select sg.segmento, count(*)::int, max(b.carga)
+    from public.crm_prospec_base b
+    cross join lateral (select s.segmento from public.crm_prospec_segmentos() s where b.cnae like s.prefixo || '%' order by length(s.prefixo) desc limit 1) sg
+   where public.crm_eh_gestor() and not b.mei
+     and b.cidade in (select jsonb_array_elements_text(c.dados->'prospeccao'->'cidades') from public.crm_config c where c.id = 1)
+   group by 1 order by 1;
+$$;
+revoke all on function public.crm_prospec_base_resumo() from public, anon;
+grant execute on function public.crm_prospec_base_resumo() to authenticated;
+
+-- Agendador: dias úteis às 6h30 de São Paulo (9h30 UTC); a função confere o feriado e se está ligado.
+create or replace function public.crm_prospec_tick() returns void language plpgsql security definer set search_path = public as $$
+declare c record;
+begin
+  select * into c from crm_interno.prospeccao_cfg where id = 1;
+  if c.url is null then return; end if;
+  perform net.http_post(url := c.url, body := jsonb_build_object('acao', 'rodar', 'origem', 'agendador'),
+    headers := jsonb_build_object('Content-Type', 'application/json', 'Authorization', 'Bearer ' || c.senha), timeout_milliseconds := 300000);
+end;
+$$;
+revoke all on function public.crm_prospec_tick() from public, anon, authenticated;
+do $$ begin
+  if exists (select 1 from pg_roles where rolname = 'service_role') then
+    grant execute on function public.crm_prospec_senha(text), public.crm_prospec_carga_fim(text) to service_role;
+  end if;
+  if exists (select 1 from pg_extension where extname = 'pg_cron') then
+    perform cron.unschedule(jobid) from cron.job where jobname = 'crm-leads-sugeridos';
+    perform cron.schedule('crm-leads-sugeridos', '30 9 * * 1-5', 'select public.crm_prospec_tick()');
+  end if;
+end $$;

@@ -1328,3 +1328,28 @@ button.ordena.ativo { color: var(--marinho); }
 .metas-acomp td small, .metas-minimo td small, #formMetas td small { display: block; color: var(--suave); font-size: .74rem; font-weight: 400; }
 .metas-minimo .colunas > div { min-width: 0; }
 .metas-minimo h3 small { font-weight: 400; color: var(--suave); }
+
+/* Leads sugeridos (01/11/2026, leads.js) */
+.lead-contador { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
+.lead-abas { margin: 0; }
+.lead-sug { display: grid; gap: 12px; }
+.lead-sug.lead-feito { opacity: .6; }
+.lead-topo { display: flex; gap: 8px 14px; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; }
+.lead-topo h3 { margin: 0; font-size: 1.05rem; }
+.lead-topo small { color: var(--suave); }
+.lead-porque { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.lead-porque span { font-size: .76rem; border: 1px solid var(--borda); border-radius: 6px; padding: 1px 8px; background: var(--realce); }
+.lead-porque .lead-ontem { background: var(--ambar-fundo); color: var(--ambar); border-color: transparent; font-weight: 600; }
+.lead-corpo { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 14px 22px; }
+.lead-lado { display: grid; gap: 12px; align-content: start; min-width: 0; }
+.lead-rot { text-transform: uppercase; letter-spacing: .05em; font-size: .7rem; color: var(--suave); font-weight: 700; margin: 0 0 6px; }
+.lead-dados { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 3px 12px; margin: 0; font-size: .88rem; }
+.lead-dados dt { color: var(--suave); }
+.lead-dados dd { margin: 0; overflow-wrap: anywhere; }
+.lead-dados small { color: var(--suave); }
+.lead-dados .lead-alerta { color: var(--ambar); }
+.lead-compram { margin: 0; padding-left: 18px; font-size: .86rem; }
+.lead-msg { background: var(--realce); border-radius: 8px; padding: 10px 12px; font-size: .86rem; white-space: pre-wrap; margin: 0; }
+.lead-acoes { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; border-top: 1px solid var(--borda); padding-top: 10px; }
+.lead-h2 { font-size: 1rem; margin: 18px 0 8px; color: var(--suave); }
+@media (max-width: 800px) { .lead-corpo { grid-template-columns: minmax(0, 1fr); } }

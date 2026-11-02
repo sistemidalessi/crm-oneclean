@@ -335,14 +335,14 @@
   // ------------------------------------------------------------ render
   const ABAS = [
     ['inicio', 'Início', '⌂'], ['fila', 'Fila do dia', '▶'], ['funil', 'Funil', '▥'], ['empresas', 'Empresas', '▦'], ['pessoas', 'Pessoas', '☺'],
-    ['negocios', 'Negócios', '$'], ['pedidos', 'Pedidos', '☰'], ['agenda', 'Atividades', '▣'], ['relatorios', 'Relatórios', '▲'], ['ajustes', 'Configurações', '⚙'], ['compras', 'Compras', '▤'], ['estoque', 'Estoque', '▦'], ['gestao', 'Gestão', '◆'], ['caixa', 'Caixa', '◈'], ['emails', 'E-mails', '✉'], ['ofertas', 'Ofertas', '✦'], ['fiscal', 'Fiscal', '§'], ['concorrentes', 'Concorrentes', '⚖'], ['produtos', 'Produtos', '▦'], ['pedcompra', 'Pedidos ao fornecedor', '⇢'], ['rotas', 'Rotas', '⛟'], ['rota', 'Minha rota', '⛟']
+    ['negocios', 'Negócios', '$'], ['pedidos', 'Pedidos', '☰'], ['agenda', 'Atividades', '▣'], ['relatorios', 'Relatórios', '▲'], ['ajustes', 'Configurações', '⚙'], ['compras', 'Compras', '▤'], ['estoque', 'Estoque', '▦'], ['gestao', 'Gestão', '◆'], ['caixa', 'Caixa', '◈'], ['emails', 'E-mails', '✉'], ['ofertas', 'Ofertas', '✦'], ['fiscal', 'Fiscal', '§'], ['concorrentes', 'Concorrentes', '⚖'], ['produtos', 'Produtos', '▦'], ['pedcompra', 'Pedidos ao fornecedor', '⇢'], ['rotas', 'Rotas', '⛟'], ['rota', 'Minha rota', '⛟'], ['leads', 'Leads sugeridos', '✚']
   ];
   CRM.ABAS = ABAS;
   // Os grupos do menu de cima (cada tela num grupo só; a ordem é a do menu). Produtos (20/10/2026) fica em Vendas para
   // quem vende e em Compras e estoque para quem tem aquela área (administrador e comprador).
   const GRUPOS = [
     { id: 'inicio', nome: 'Início', telas: ['inicio'] },
-    { id: 'vendas', nome: 'Vendas', telas: ['fila', 'funil', 'negocios', 'empresas', 'pessoas', 'produtos', 'agenda'] },
+    { id: 'vendas', nome: 'Vendas', telas: ['fila', 'leads', 'funil', 'negocios', 'empresas', 'pessoas', 'produtos', 'agenda'] },
     { id: 'pedidos', nome: 'Pedidos', telas: ['pedidos'] },
     { id: 'logistica', nome: 'Logística', telas: ['rotas'] },
     { id: 'rota', nome: 'Minha rota', telas: ['rota'] },
