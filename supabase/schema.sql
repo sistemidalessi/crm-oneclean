@@ -6625,7 +6625,7 @@ create or replace function public.crm_boleto_bb_retorno(p_assinatura text, p_cab
 declare cfg jsonb; conv text; it jsonb; b public.crm_boletos_bb; mov text; dia date; pago numeric; tar numeric; lid uuid; t public.crm_titulos;
   nome text; out_liq jsonb := '[]'; out_rej jsonb := '[]'; nreg integer := 0; ndes integer := 0; nja integer := 0; tarifas jsonb := '{}'; k text; motivos text;
 begin
-  if not public.crm_eh_admin() then raise exception 'só o administrador lê o retorno'; end if;
+  if not (public.crm_eh_admin() or coalesce(auth.jwt() ->> 'role', '') = 'service_role') then raise exception 'só o administrador lê o retorno'; end if;
   if coalesce(p_assinatura, '') !~ '^[0-9a-f]{64}$' then raise exception 'assinatura do arquivo inválida'; end if;
   if exists (select 1 from public.crm_boleto_retornos where assinatura = p_assinatura) then
     raise exception 'este arquivo de retorno já foi lido em %', (select to_char(lido_em at time zone 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI') from public.crm_boleto_retornos where assinatura = p_assinatura);
@@ -7969,3 +7969,121 @@ do $$ begin
     perform cron.schedule('crm-leads-sugeridos', '30 9 * * 1-5', 'select public.crm_prospec_tick()');
   end if;
 end $$;
+
+-- =====================================================================================================================
+-- Boleto e conciliação pela API do Banco do Brasil (02/11/2026). Aplicação "CRM OneClean" (ID 301956) no Portal Developers BB,
+-- aprovada pelo Anderson sem o gerente (Cobranças v2 e Extratos v2; chaves só nos Secrets BB_CLIENT_ID, BB_CLIENT_SECRET,
+-- BB_APP_KEY). Cobranças funciona sem certificado; Extratos pede o A1 (mTLS). Edge Function crm-bb.
+-- =====================================================================================================================
+create schema if not exists crm_interno;
+create table if not exists crm_interno.bb_cfg (
+  id    integer primary key default 1 check (id = 1),
+  senha text not null default encode(extensions.gen_random_bytes(32), 'hex'),
+  url   text
+);
+revoke all on crm_interno.bb_cfg from public, anon, authenticated;
+insert into crm_interno.bb_cfg (id) values (1) on conflict (id) do nothing;   -- url: gravar na instalação
+
+create or replace function public.crm_bb_senha_ok(p text) returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from crm_interno.bb_cfg where id = 1 and length(coalesce(p, '')) >= 32 and senha = p);
+$$;
+revoke all on function public.crm_bb_senha_ok(text) from public, anon, authenticated;
+do $$ begin if exists (select 1 from pg_roles where rolname = 'service_role') then grant execute on function public.crm_bb_senha_ok(text) to service_role; end if; end $$;
+
+create or replace function public.crm_bb_chamar(p_corpo jsonb) returns bigint language plpgsql security definer set search_path = public as $$
+declare c record;
+begin
+  select * into c from crm_interno.bb_cfg where id = 1;
+  return net.http_post(url := c.url, body := p_corpo,
+    headers := jsonb_build_object('Content-Type', 'application/json', 'Authorization', 'Bearer ' || c.senha), timeout_milliseconds := 120000);
+end;
+$$;
+revoke all on function public.crm_bb_chamar(jsonb) from public, anon, authenticated;
+
+-- (Substitui as versões de crm_boleto_bb_preparar e crm_boleto_bb_reenviar mais acima: caminho 'api' ou 'remessa'.)
+create or replace function public.crm_boleto_cfg_ativo() returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare cfg jsonb;
+begin
+  if not (public.crm_eh_admin() or coalesce(auth.jwt() ->> 'role', '') = 'service_role') then raise exception 'só o administrador'; end if;
+  select dados -> 'boleto' into cfg from public.crm_config where id = 1;
+  if coalesce((cfg ->> 'ligado')::boolean, false) is not true then raise exception 'o boleto pelo BB ainda não está ligado'; end if;
+  if coalesce(cfg ->> 'caminho', '') not in ('api', 'remessa') then raise exception 'o caminho do boleto (api ou remessa) não está definido'; end if;
+  if coalesce(cfg ->> 'convenio', '') !~ '^[0-9]{7}$' then raise exception 'convênio do boleto inválido'; end if;
+  return cfg;
+end;
+$$;
+revoke all on function public.crm_boleto_cfg_ativo() from public, anon, authenticated;
+
+create or replace function public.crm_boleto_bb_preparar(p_duplicatas text[]) returns jsonb language plpgsql security definer set search_path = public as $$
+declare cfg jsonb; conv text; t record; e record; n bigint; feitos integer := 0; pulados jsonb := '[]'; hoje date := (now() at time zone 'America/Sao_Paulo')::date;
+begin
+  if not (public.crm_eh_admin() or coalesce(auth.jwt() ->> 'role', '') = 'service_role') then raise exception 'só o administrador prepara boleto'; end if;
+  cfg := public.crm_boleto_cfg_ativo(); conv := cfg ->> 'convenio';
+  for t in select * from public.crm_titulos where duplicata = any(coalesce(p_duplicatas, '{}')) order by vencimento, duplicata loop
+    if exists (select 1 from public.crm_boletos_bb b where b.duplicata = t.duplicata and b.situacao in ('preparado', 'registrado', 'pago')) then
+      pulados := pulados || jsonb_build_object('duplicata', t.duplicata, 'motivo', 'já tem boleto'); continue; end if;
+    if t.valor <= 0 or t.abono or t.cartorio_em is not null then
+      pulados := pulados || jsonb_build_object('duplicata', t.duplicata, 'motivo', 'título sem valor, abonado ou em cartório'); continue; end if;
+    if t.vencimento < hoje then pulados := pulados || jsonb_build_object('duplicata', t.duplicata, 'motivo', 'vencido'); continue; end if;
+    select cnpj, cep into e from public.crm_empresas where id = t.empresa_id;
+    if length(regexp_replace(coalesce(e.cnpj, ''), '\D', '', 'g')) not in (11, 14) or length(regexp_replace(coalesce(e.cep, ''), '\D', '', 'g')) <> 8 then
+      pulados := pulados || jsonb_build_object('duplicata', t.duplicata, 'motivo', 'cadastro do cliente sem CPF/CNPJ ou CEP'); continue; end if;
+    n := public.crm_boleto_proximo_int(conv, cfg);
+    insert into public.crm_boletos_bb (convenio, seq, nosso_numero, titulo_id, nota_numero, parcela, empresa_id, valor, vencimento, emissao, duplicata, documento, situacao, caminho)
+    values (conv, n, conv || lpad(n::text, 10, '0'), t.id, t.nota_numero, t.parcela, t.empresa_id, t.valor, t.vencimento,
+            least(coalesce(t.emitida_em, hoje), t.vencimento), t.duplicata, left(t.duplicata, 15), 'preparado', cfg ->> 'caminho');
+    feitos := feitos + 1;
+  end loop;
+  return jsonb_build_object('preparados', feitos, 'pulados', pulados);
+end;
+$$;
+revoke all on function public.crm_boleto_bb_preparar(text[]) from public, anon;
+grant execute on function public.crm_boleto_bb_preparar(text[]) to authenticated, service_role;
+
+-- As parcelas a pagar por boleto das notas emitidas pelo CRM (produção, autorizadas), a vencer, sem boleto vivo (o mesmo
+-- critério de aRegistrar em boleto.js). As notas do FKN ficam de fora: o boleto delas saiu pelo site do BB.
+create or replace function public.crm_boleto_bb_a_registrar() returns text[] language sql stable security definer set search_path = public as $$
+  select coalesce(array_agg(t.duplicata order by t.vencimento, t.duplicata), '{}')
+    from public.crm_titulos t
+   where (coalesce(auth.jwt() ->> 'role', '') = 'service_role' or public.crm_eh_admin())
+     and (t.duplicata ~ '^[0-9]+-' or exists (select 1 from public.crm_nfe n where n.ambiente = 'producao' and n.situacao = 'autorizada'
+            and n.serie = coalesce(nullif(substring(t.duplicata from '^([0-9]+)-'), '')::int, 1) and n.numero = t.nota_numero))
+     and (t.portador is null or t.portador ~* 'BOLETO')
+     and t.vencimento >= (now() at time zone 'America/Sao_Paulo')::date and t.valor > 0 and t.cartorio_em is null and not coalesce(t.abono, false)
+     and not exists (select 1 from public.crm_boletos_bb b where b.duplicata = t.duplicata and b.situacao in ('preparado', 'registrado', 'pago'));
+$$;
+revoke all on function public.crm_boleto_bb_a_registrar() from public, anon;
+grant execute on function public.crm_boleto_bb_a_registrar() to authenticated, service_role;
+
+-- o retorno (arquivo ou API) também pelo serviço (a checagem de quem chama está na própria função, mais acima)
+grant execute on function public.crm_boleto_bb_retorno(text, jsonb, jsonb) to service_role;
+
+-- agendador: a cada 10 minutos das 7h às 20h50 (São Paulo); a função só trabalha com o boleto ligado no caminho 'api'
+create or replace function public.crm_bb_tick() returns void language plpgsql security definer set search_path = public as $$
+begin
+  if coalesce((select dados -> 'boleto' ->> 'caminho' from public.crm_config where id = 1), '') = 'api'
+     and coalesce((select (dados -> 'boleto' ->> 'ligado')::boolean from public.crm_config where id = 1), false) then
+    perform public.crm_bb_chamar(jsonb_build_object('acao', 'ciclo', 'origem', 'agendador'));
+  end if;
+end;
+$$;
+revoke all on function public.crm_bb_tick() from public, anon, authenticated;
+do $$ begin
+  if exists (select 1 from pg_extension where extname = 'pg_cron') then
+    perform cron.unschedule(jobid) from cron.job where jobname = 'crm-bb-ciclo';
+    perform cron.schedule('crm-bb-ciclo', '*/10 10-23 * * *', 'select public.crm_bb_tick()');
+  end if;
+end $$;
+
+create or replace function public.crm_boleto_bb_reenviar(p_id uuid) returns void language plpgsql security definer set search_path = public as $$
+begin
+  if not public.crm_eh_admin() then raise exception 'só o administrador'; end if;
+  perform public.crm_boleto_cfg_ativo();
+  update public.crm_boletos_bb b set situacao = 'preparado', remessa_seq = null, remessa_em = null, motivo = null, atualizado_em = now()
+   where b.id = p_id and b.situacao = 'erro'
+     and not exists (select 1 from public.crm_boletos_bb o where o.duplicata = b.duplicata and o.id <> p_id and o.situacao in ('preparado', 'registrado', 'pago'));
+  if not found then raise exception 'só boleto rejeitado, sem outro boleto vivo da mesma parcela'; end if;
+end;
+$$;
+revoke all on function public.crm_boleto_bb_reenviar(uuid) from public, anon;
+grant execute on function public.crm_boleto_bb_reenviar(uuid) to authenticated;

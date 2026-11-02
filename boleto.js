@@ -336,7 +336,8 @@
         '<button type="button" class="btn" data-acao="bol-exemplo"' + (falta.length ? ' disabled title="preencha o convênio primeiro"' : '') + '>Ver um boleto de exemplo</button> ' +
         '<button type="button" class="btn sec" data-acao="bol-remessa-teste"' + (falta.length || !raiz.CRMCnab240 ? ' disabled title="preencha o convênio primeiro"' : '') + '>Baixar arquivo de teste (Validador do BB)</button> ' +
         (c.ligado ? '<button type="button" class="btn sec" data-acao="bol-desligar">Desligar</button>'
-          : '<button type="button" class="btn sec" data-acao="bol-ligar-remessa"' + (falta.length || !raiz.CRMCnab240 ? ' disabled title="preencha o convênio primeiro"' : '') + '>Ligar pelo arquivo de remessa</button>') + '</p>' +
+          : '<button type="button" class="btn" data-acao="bol-ligar-api"' + (falta.length ? ' disabled title="preencha o convênio primeiro"' : '') + '>Ligar pela API do BB</button> ' +
+            '<button type="button" class="btn sec" data-acao="bol-ligar-remessa"' + (falta.length || !raiz.CRMCnab240 ? ' disabled title="preencha o convênio primeiro"' : '') + '>Ligar pelo arquivo de remessa</button>') + '</p>' +
       '<p class="dica">O arquivo de teste é a remessa CNAB 240 com até 3 títulos em aberto, marcada como TESTE. Use só no <strong>Validador de Leiautes</strong> ' +
         'do Gerenciador Financeiro (Troca de arquivos e APIs → Leiautes → "CNAB240 - Cobrança Segmento P/Q/R/S" → Analisar). Não suba em Remessa/retorno: ' +
         'o envio de verdade só depois do teste combinado com o gerente.</p>' +
@@ -411,6 +412,9 @@
   const R = raiz.CRMRegras;
   let bb = null, carregandoBB = false, lendoRetorno = false;
   const ligadoArquivo = () => { const c = cfgB(); return !!c.ligado && c.caminho === 'remessa'; };
+  // 02/11/2026: o caminho da API (aplicação "CRM OneClean" no Portal Developers BB): registro e baixa pela Edge Function crm-bb
+  const ligadoApi = () => { const c = cfgB(); return !!c.ligado && c.caminho === 'api'; };
+  const ligadoBB = () => ligadoArquivo() || ligadoApi();
   const VIVO = ['preparado', 'registrado', 'pago'];
   async function carregaBB() {
     const st = CRM.store();
@@ -437,7 +441,8 @@
   }
   const SITUACAO_BB = { preparado: ['preparado', 'cinza'], registrado: ['no banco', 'azul'], pago: ['pago', 'verde'], baixado: ['baixado', 'cinza'], cancelado: ['cancelado', 'cinza'], erro: ['rejeitado pelo banco', 'vermelho'] };
   function blocoArquivo() {
-    if (!CRM.ehAdmin() || !ligadoArquivo() || !raiz.CRMCnab240) return '';
+    if (!CRM.ehAdmin() || !ligadoBB() || (ligadoArquivo() && !raiz.CRMCnab240)) return '';
+    if (ligadoApi()) return blocoApi();
     if (!bb) return '<section class="cartao"><h2>Boleto do BB pelo arquivo</h2><p class="vazio">Carregando os boletos…</p></section>';
     const lista = bb.lista || [], novos = aRegistrar();
     const prontos = lista.filter(b => b.situacao === 'preparado' && !b.remessa_seq), instr = lista.filter(b => b.instrucao && !b.instrucao_remessa);
@@ -470,8 +475,30 @@
         '</tbody></table></div>' + CRM.Lista.mais('bb-lista', CRM.Lista.filtra('bb-lista', lista.slice().reverse(), { texto: b => [CRM.nomeEmpresa(b.empresa_id), b.nota_numero, b.duplicata, b.nosso_numero, b.situacao, b.valor] }), 60) + '</details>' : '') +
       '</section>';
   }
+  // Boleto pela API do BB (02/11/2026): o CRM prepara as parcelas das notas do CRM, registra no banco e lê os pagos sozinho,
+  // a cada 10 minutos das 7h às 20h50 (crm-bb-ciclo) e na hora de gerar a DANFE; aqui o administrador acompanha e força.
+  function blocoApi() {
+    if (!bb) return '<section class="cartao"><h2>Boleto do BB pela API</h2><p class="vazio">Carregando os boletos…</p></section>';
+    const lista = bb.lista || [], novos = aRegistrar(), erros = lista.filter(b => b.situacao === 'erro');
+    const nomeDe = b => CRM.nomeEmpresa(b.empresa_id) || '';
+    const linha = b => { const st = SITUACAO_BB[b.situacao] || [b.situacao, 'cinza'];
+      return '<tr><td><strong>' + esc(b.documento || b.duplicata) + '</strong><small>' + esc(nomeDe(b)) + '</small></td><td class="num">' + esc(R.moeda(b.valor)) +
+        '<small>vence ' + esc(R.dataBR(b.vencimento)) + '</small></td><td>' + CRM.selo(st[0], st[1]) +
+        (b.pago_em ? '<small>crédito ' + esc(R.dataBR(b.pago_em)) + ' · ' + esc(R.moeda(b.valor_pago)) + '</small>' : '') + (b.motivo ? '<small>' + esc(b.motivo) + '</small>' : '') + '</td>' +
+        '<td class="num acoes-linha">' + (b.situacao === 'erro' ? '<button type="button" class="mini" data-acao="bb-reenviar" data-id="' + esc(b.id) + '" title="depois de corrigir o cadastro do cliente">Mandar de novo</button> ' : '') +
+        (['preparado', 'registrado'].includes(b.situacao) ? '<button type="button" class="mini" data-acao="bb-pdf" data-id="' + esc(b.id) + '">PDF</button>' : '') + '</td></tr>'; };
+    return '<section class="cartao"><h2>Boleto do BB pela API <small>convênio ' + esc(cfgB().convenio || '') + '</small></h2>' +
+      '<p>As parcelas a pagar por boleto das notas emitidas pelo CRM são registradas no banco sozinhas (a cada 10 minutos, das 7h às 20h50, e ' +
+        'na hora de gerar a DANFE). Quando o cliente paga, o CRM dá a baixa no título e lança no Caixa no dia do crédito.</p>' +
+      '<p>' + (novos.length ? CRM.selo(novos.length + ' parcela(s) esperando o registro', 'ambar') + ' ' : '') + (erros.length ? CRM.selo(erros.length + ' rejeitado(s) pelo banco', 'vermelho') + ' ' : '') +
+        '<button type="button" class="btn" data-acao="bb-ciclo">Registrar e conferir os pagos agora</button></p>' +
+      (lista.length ? '<details data-chave="bb-lista"' + (erros.length ? ' open' : '') + '><summary>Boletos dos últimos 120 dias (' + lista.length + ')</summary>' +
+        '<div class="tabela-rolagem"><table class="tabela"><tbody>' + lista.slice().reverse().slice(0, 200).map(linha).join('') + '</tbody></table></div></details>'
+        : '<p class="dica">Nenhum boleto registrado pelo CRM ainda: o primeiro sai com a primeira nota a prazo emitida pelo CRM.</p>') +
+      '<p class="dica">Rejeitado: o motivo do banco aparece na linha (quase sempre CPF/CNPJ, CEP ou endereço do cliente). Corrija o cadastro e use "Mandar de novo".</p></section>';
+  }
   function depoisBloco(el) {
-    if (!CRM.ehAdmin() || !ligadoArquivo()) return;
+    if (!CRM.ehAdmin() || !ligadoBB()) return;
     if (!bb) carregaBB().catch(CRM.falhou);
     const arq = el.querySelector('#bbRetorno');
     if (arq) arq.addEventListener('change', () => { const f = arq.files && arq.files[0]; arq.value = ''; if (f) lerRetorno(f).catch(e => { lendoRetorno = false; CRM.render(); CRM.falhou(e); }); });
@@ -521,8 +548,12 @@
   }
   // páginas de boleto no PDF da nota (DANFE): as parcelas da nota com boleto preparado ou no banco
   async function paginasNota(pdf, n) {
-    if (!n || !ligadoArquivo() || !CRM.store().boletosBBdaNota) return 0;
-    const l = await CRM.store().boletosBBdaNota((n.serie || '') + '-' + String(n.numero).padStart(6, '0') + '/');
+    if (!n || !ligadoBB() || !CRM.store().boletosBBdaNota) return 0;
+    // a duplicata da nota do CRM: "002862/01" na série 1 (a do FKN, desde 28/10/2026) e "2-000012/01" nas outras
+    const pre = (Number(n.serie) === 1 ? '' : (n.serie || '') + '-') + String(n.numero).padStart(6, '0') + '/';
+    // pela API: registra na hora o que ainda não foi ao banco (o agendador também faz, a cada 10 minutos)
+    if (ligadoApi() && CRM.store().bb) await CRM.store().bb({ acao: 'ciclo' }).catch(() => null);
+    const l = await CRM.store().boletosBBdaNota(pre);
     for (const b of l) {
       const e = b.empresa_id ? CRM.empresa(b.empresa_id) : null;
       const d = montar(cfgB(), emitente(), { valor: b.valor, vencimento: b.vencimento, nosso_numero: b.nosso_numero, documento: b.documento, emissao: b.emissao },
@@ -535,7 +566,7 @@
   }
   // instrução ao banco (cobranca.js: cartório → '09' protestar; tirar do cartório → '10' sustar). Devolve quantas foram marcadas.
   async function instrucao(dups, mov) {
-    if (!CRM.ehAdmin() || !ligadoArquivo()) return 0;
+    if (!CRM.ehAdmin() || !ligadoArquivo()) return 0;   // pela API, o cartório segue pelo site do BB por enquanto
     let n = 0;
     for (const d of dups) { const r = await CRM.store().boletoBBInstrucao(d, mov); if (r && r.ok) n++; }
     if (n) carregaBB().catch(() => {});
@@ -608,6 +639,28 @@
         CRM.toast('Boleto ligado pelo arquivo de remessa. Veja em Caixa → Cobrança.');
       } catch (e) { CRM.falhou(e); }
     },
+    'bol-ligar-api': async () => {
+      try {
+        const c = cfgB(), f = faltaNoConvenio(c, emitente());
+        if (f.length) throw new Error('falta: ' + f.join(', '));
+        const ini = c.inicio_numeracao || '2000000001';
+        if (!confirm('Ligar o boleto pela API do Banco do Brasil?\n\nAs parcelas a pagar por boleto das notas emitidas pelo CRM passam a ser registradas no banco sozinhas ' +
+          '(a cada 10 minutos e na hora de gerar a DANFE), com o nosso número do CRM a partir de ' + ini + ' (os do site do BB vão até 1.000.001.643). ' +
+          'As notas do FKN continuam com o boleto do site.')) return;
+        await CRM.salvarConfig({ boleto: Object.assign({}, c, { ligado: true, caminho: 'api', inicio_numeracao: ini }) });
+        CRM.toast('Boleto ligado pela API do BB. Acompanhe em Caixa → Cobrança.');
+      } catch (e) { CRM.falhou(e); }
+    },
+    'bb-ciclo': async () => {
+      try {
+        CRM.toast('Falando com o banco…');
+        const r = await CRM.store().bb({ acao: 'ciclo' });
+        await carregaBB();
+        const reg = r.registro || {}, pg = r.pagos || {}, pul = r.pulados || [];
+        CRM.toast((reg.registrados || 0) + ' boleto(s) registrado(s)' + (reg.erros ? ', ' + reg.erros + ' rejeitado(s)' : '') + '; ' + (pg.liquidados || 0) + ' pago(s) baixado(s)' +
+          (pul.length ? '; ' + pul.length + ' parcela(s) de fora: ' + pul.slice(0, 3).map(x => x.duplicata + ' (' + x.motivo + ')').join(', ') : '') + '.');
+      } catch (e) { CRM.falhou(e); }
+    },
     'bol-desligar': async () => {
       try {
         if (!confirm('Desligar o boleto do BB? Os boletos já mandados ao banco continuam valendo lá; o CRM só para de preparar novos e de mostrar o bloco em Caixa → Cobrança.')) return;
@@ -638,8 +691,11 @@
     'bb-pdf': id => { pdfBoleto(id).catch(CRM.falhou); },
     'bb-reenviar': async id => {
       try {
-        if (!confirm('Mandar este boleto de novo na próxima remessa? Corrija antes o cadastro do cliente (CPF/CNPJ, endereço, CEP).')) return;
-        await CRM.store().boletoBBReenviar(id); await carregaBB(); CRM.toast('Volta na próxima remessa.');
+        if (!confirm(ligadoApi() ? 'Mandar este boleto de novo ao banco? Corrija antes o cadastro do cliente (CPF/CNPJ, endereço, CEP).'
+          : 'Mandar este boleto de novo na próxima remessa? Corrija antes o cadastro do cliente (CPF/CNPJ, endereço, CEP).')) return;
+        await CRM.store().boletoBBReenviar(id);
+        if (ligadoApi()) { const r = await CRM.store().bb({ acao: 'registrar', ids: [id] }); await carregaBB(); CRM.toast(r.registrados ? 'Registrado no banco.' : 'O banco recusou de novo: ' + ((r.detalhes || [])[0] || '')); }
+        else { await carregaBB(); CRM.toast('Volta na próxima remessa.'); }
       } catch (e) { CRM.falhou(e); }
     }
   });

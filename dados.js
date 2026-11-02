@@ -1097,6 +1097,13 @@
   Supa.prototype.boletoBBInstrucao = async function (dup, mov) { return unwrap(await this.sb.rpc('crm_boleto_bb_instrucao', { p_duplicata: dup, p_mov: mov })); };
   Supa.prototype.boletoBBRetorno = async function (assinatura, cab, itens) { return unwrap(await this.sb.rpc('crm_boleto_bb_retorno', { p_assinatura: assinatura, p_cab: cab, p_itens: itens })); };
   Supa.prototype.boletoBBReenviar = async function (id) { return unwrap(await this.sb.rpc('crm_boleto_bb_reenviar', { p_id: id })); };
+  // boleto e conciliação pela API do BB (02/11/2026): Edge Function crm-bb (registrar, pagos, ciclo)
+  Supa.prototype.bb = async function (corpo) {
+    const r = await this.sb.functions.invoke('crm-bb', { body: corpo });
+    if (r.error) throw await erroDaFuncao(r);
+    return r.data;
+  };
+  Local.prototype.bb = async function () { return Promise.reject(new Error('o boleto pela API do BB só funciona com o Supabase ligado')); };
   Local.prototype.boletosBB = async function () { return []; };
   Local.prototype.boletosBBdaNota = async function () { return []; };
   Local.prototype.boletoRemessas = async function () { return []; };
