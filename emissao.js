@@ -655,6 +655,28 @@
       salvarTexto: aut.length ? 'Baixar as ' + aut.length + ' DANFE(s)' + (CRM.boletoBB && CRM.boletoBB.ligado && CRM.boletoBB.ligado() ? ' e os boletos' : '') : 'Fechar',
       aoSalvar: async () => { if (aut.length) await danfes(aut.map(r => r.nfe.id)); } });
   }
+  // Vias da DANFE (02/11/2026, Anderson): o costume da OneClean é imprimir 3 vias de cada nota — 1ª para a contabilidade,
+  // 2ª para o cliente assinar e voltar ao escritório (no lugar do canhoto, que rasgava a nota), 3ª fica com o cliente,
+  // grampeada com o boleto. O PDF sai já com as vias, uma etiqueta pequena no alto de cada folha, e o boleto no fim.
+  const VIAS_PADRAO = ['Contabilidade', 'Assinatura do cliente: volta ao escritório', 'Cliente'];
+  const viasCfg = () => { const v = fiscalCfg().danfe || {}; const n = Math.max(1, Math.min(5, Number(v.vias) || 3));
+    const nomes = Array.isArray(v.nomes) && v.nomes.length ? v.nomes : VIAS_PADRAO; return Array.from({ length: n }, (_, i) => nomes[i] || ''); };
+  function desenhaVias(pdf, Dn, d, op, primeira) {
+    const vias = viasCfg();
+    vias.forEach((nome, i) => {
+      if (i || !primeira) pdf.addPage('a4', 'portrait');
+      const ini = pdf.getNumberOfPages();
+      Dn.desenha(pdf, d, op);
+      if (vias.length < 2 && !nome) return;
+      const fim = pdf.getNumberOfPages();
+      for (let pg = ini; pg <= fim; pg++) {
+        pdf.setPage(pg); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(7); pdf.setTextColor(60);
+        pdf.text((i + 1) + 'ª VIA' + (nome ? ' · ' + String(nome).toUpperCase() : ''), 205, 3.6, { align: 'right' });
+        pdf.setTextColor(0);
+      }
+      pdf.setPage(fim);
+    });
+  }
   async function danfes(ids) {
     await carregaJs('vendor/jspdf.umd.min.js');
     const Dn = raiz.CRMDanfe, pdf = new raiz.jspdf.jsPDF({ unit: 'mm', format: 'a4', compress: true }), lg = await pegaLogo();
@@ -664,8 +686,7 @@
     for (const id of ids) {
       const x = await CRM.store().nfeXml(id), xml = x && (x.proc_xml || x.nfe_xml), d = xml && Dn.ler(xml);
       if (!d) continue;
-      if (n++) pdf.addPage('a4', 'portrait');
-      Dn.desenha(pdf, d, { logo: lg, cores: (raiz.CRM_CONFIG || {}).cores, aviso: CRM.avisoGolpe ? CRM.avisoGolpe() : '' });
+      desenhaVias(pdf, Dn, d, { logo: lg, cores: (raiz.CRM_CONFIG || {}).cores, aviso: CRM.avisoGolpe ? CRM.avisoGolpe() : '' }, !n++);
       const nf = nfe(id);
       if (nf && nf.situacao !== 'cancelada' && B && B.paginasNota) nb += await B.paginasNota(pdf, nf, { semCiclo: true, ciclo, faltas }).catch(() => 0);
     }
@@ -694,7 +715,9 @@
       if (!d) throw new Error('não consegui ler o XML da nota');
       if (n && n.situacao === 'cancelada') Object.assign(d, { autorizada: false, marca: 'NF-e CANCELADA' });
       const pdf = new raiz.jspdf.jsPDF({ unit: 'mm', format: 'a4', compress: true });
-      Dn.desenha(pdf, d, { logo: await pegaLogo(), cores: (raiz.CRM_CONFIG || {}).cores, aviso: CRM.avisoGolpe ? CRM.avisoGolpe() : '' });
+      const op = { logo: await pegaLogo(), cores: (raiz.CRM_CONFIG || {}).cores, aviso: CRM.avisoGolpe ? CRM.avisoGolpe() : '' };
+      // nota do CRM: as vias do costume (3, a do cliente por último); nota do FKN (xmlPronto) ou cancelada: uma folha só
+      if (n && n.situacao !== 'cancelada') desenhaVias(pdf, Dn, d, op, true); else Dn.desenha(pdf, d, op);
       // boleto do BB pelo arquivo (26/10/2026): as parcelas da nota com boleto do CRM vão no mesmo PDF, uma por página
       const nb = n && n.situacao !== 'cancelada' && CRM.boletoBB && CRM.boletoBB.paginasNota ? await CRM.boletoBB.paginasNota(pdf, n).catch(() => 0) : 0;
       pdf.save((nb ? 'DANFE e boleto-NF' : 'DANFE-NF') + (n ? n.serie + '-' + n.numero : d.numero) + '.pdf');
@@ -803,12 +826,15 @@
         { tipo: 'secao', rotulo: 'Opções da nota' }, { nome: 'natOp', rotulo: 'Natureza da operação', largo: true },
         { nome: 'indFinal', rotulo: 'Consumidor final', tipo: 'select', opcoes: [['1', '1 — sim (cliente usa/consome)'], ['0', '0 — não (revenda ou industrialização)']] },
         { nome: 'indPres', rotulo: 'Presença do comprador', tipo: 'select', opcoes: [['9', '9 — outros (vendedor, WhatsApp, e-mail)'], ['1', '1 — presencial'], ['2', '2 — internet'], ['3', '3 — telefone'], ['0', '0 — não se aplica']] },
-        { nome: 'serie', rotulo: 'Série das notas do CRM', tipo: 'numero', passo: '1', min: 0, max: 889, ajuda: 'O FKN usa a 1; no paralelo o CRM usa a 2, para os números nunca se chocarem.' },
+        { nome: 'vias', rotulo: 'Vias da DANFE no PDF', tipo: 'numero', passo: '1', min: 1, max: 5, ajuda: 'Padrão 3: contabilidade, assinatura do cliente (volta ao escritório) e a do cliente, com o boleto no fim.' },
+        { nome: 'vias_nomes', rotulo: 'Nome de cada via (separe com ;)', largo: true, ajuda: 'Sai pequeno no alto de cada folha. Vazio = os nomes padrão.' },
+        { nome: 'serie', rotulo: 'Série das notas do CRM', tipo: 'numero', passo: '1', min: 0, max: 889, ajuda: 'A 1, continuando a numeração do FKN (decisão de 28/10/2026).' },
         { tipo: 'secao', rotulo: 'Responsável técnico pelo sistema (exigido pela Sefaz-SP)' }, { nome: 'rt_cnpj', rotulo: 'CNPJ' }, { nome: 'rt_contato', rotulo: 'Nome do contato' },
         { nome: 'rt_email', rotulo: 'E-mail', tipo: 'email' }, { nome: 'rt_fone', rotulo: 'Telefone' }],
       valores: { razao: em.razao || '', fantasia: em.fantasia || '', cnpj: em.cnpj || '', ie: em.ie || '', crt: String(em.crt || 3), logradouro: e.logradouro || '', numero: e.numero || '',
         complemento: e.complemento || '', bairro: e.bairro || '', municipio: e.municipio || '', cMun: e.cMun || '', uf: e.uf || 'SP', cep: e.cep || '', fone: e.fone || '',
         natOp: fc.natOp || 'VENDA NO ESTADO', indFinal: String(fc.indFinal == null ? 1 : fc.indFinal), indPres: String(fc.indPres == null ? 9 : fc.indPres), serie: fc.serie == null ? 1 : fc.serie,
+        vias: (fc.danfe && fc.danfe.vias) || 3, vias_nomes: ((fc.danfe && fc.danfe.nomes) || VIAS_PADRAO).join('; '),
         rt_cnpj: rt.cnpj || '', rt_contato: rt.contato || '', rt_email: rt.email || '', rt_fone: rt.fone || '' },
       salvarTexto: 'Salvar',
       aoSalvar: async v => {
@@ -816,6 +842,7 @@
         const novo = { emitente: { cnpj: M.doc(v.cnpj), ie: d(v.ie), razao: String(v.razao).trim().toUpperCase(), fantasia: String(v.fantasia || '').trim().toUpperCase() || null, crt: Number(v.crt) || 3,
           endereco: { logradouro: String(v.logradouro).trim().toUpperCase(), numero: String(v.numero).trim(), complemento: String(v.complemento || '').trim().toUpperCase() || null, bairro: String(v.bairro).trim().toUpperCase(),
             cMun: d(v.cMun), municipio: String(v.municipio).trim().toUpperCase(), uf: String(v.uf).trim().toUpperCase(), cep: d(v.cep), fone: d(v.fone) || null } },
+          danfe: { vias: Math.max(1, Math.min(5, Number(v.vias) || 3)), nomes: String(v.vias_nomes || '').split(';').map(x => x.trim()).filter(Boolean) },
           natOp: String(v.natOp || '').trim().toUpperCase() || 'VENDA NO ESTADO', indFinal: Number(v.indFinal), indPres: Number(v.indPres), serie: v.serie == null ? 1 : Number(v.serie),
           respTec: M.doc(v.rt_cnpj) ? { cnpj: M.doc(v.rt_cnpj), contato: String(v.rt_contato || '').trim(), email: String(v.rt_email || '').trim(), fone: d(v.rt_fone) } : null };
         const falta = M.faltasEmitente(novo);
