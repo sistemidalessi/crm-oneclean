@@ -1430,10 +1430,11 @@
   Supa.prototype.gvFechado = async function (de, ate) { return unwrap(await this.sb.rpc('crm_gv_fechado', { p_de: de, p_ate: ate })); };
   // Leads sugeridos (01/11/2026, leads.js): a lista de cada vendedor(a), tratar, o que os parecidos compram, resultado e a
   // Edge Function crm-prospeccao (procurar o contato, gerar a lista, senha da carga mensal)
-  Supa.prototype.prospecMinhas = async function (vend) { return unwrap(await this.sb.rpc('crm_prospec_minhas', { p_vendedor: vend || null })); };
+  Supa.prototype.prospecMinhas = async function (vend) { return unwrap(await this.sb.rpc('crm_prospec_minhas2', { p_vendedor: vend || null })); };
+  Supa.prototype.prospecMarcar = async function (id, marca, liga) { return unwrap(await this.sb.rpc('crm_prospec_marcar', { p_id: id, p_marca: marca, p_liga: liga !== false })); };
   Supa.prototype.prospecTratar = async function (id, situacao, motivo, empresa) { return unwrap(await this.sb.rpc('crm_prospec_tratar', { p_id: id, p_situacao: situacao, p_motivo: motivo || null, p_empresa: empresa || null })); };
   Supa.prototype.prospecParecidos = async function () { return unwrap(await this.sb.rpc('crm_prospec_parecidos')); };
-  Supa.prototype.prospecResultado = async function (desde) { return unwrap(await this.sb.rpc('crm_prospec_resultado', { p_desde: desde })); };
+  Supa.prototype.prospecResultado = async function (desde) { return unwrap(await this.sb.rpc('crm_prospec_resultado2', { p_desde: desde })); };
   Supa.prototype.prospecBaseResumo = async function () { return unwrap(await this.sb.rpc('crm_prospec_base_resumo')); };
   Supa.prototype.prospeccao = async function (corpo) {
     const r = await this.sb.functions.invoke('crm-prospeccao', { body: corpo });
@@ -1453,6 +1454,16 @@
   Local.prototype.prospecTratar = async function (id, situacao, motivo, empresa) {
     const l = await this.prospecMinhas();
     lsGrava('crm_prospec_local', l.map(x => (x.id === id ? Object.assign({}, x, { situacao, motivo_descarte: motivo, empresa_id: empresa, tratado_em: situacao === 'nova' ? null : new Date().toISOString() }) : x)));
+  };
+  Local.prototype.prospecMarcar = async function (id, marca, liga) {
+    const l = await this.prospecMinhas(), agora = new Date().toISOString();
+    lsGrava('crm_prospec_local', l.map(x => {
+      if (x.id !== id) return x;
+      const y = Object.assign({}, x);
+      if (marca === 'mandei') { y.mandou_em = liga ? (x.mandou_em || agora) : null; if (!liga) y.respondeu_em = null; }
+      if (marca === 'respondeu') { y.respondeu_em = liga ? (x.respondeu_em || agora) : null; if (liga) y.mandou_em = x.mandou_em || agora; }
+      return y;
+    }));
   };
   Local.prototype.prospecParecidos = async function () { return [{ segmento: 'Condomínio', descricao: 'HIPOCLORITO 5 LTS (CLORO 5%)', clientes: 12, total: 28 }]; };
   Local.prototype.prospecResultado = async function () { return []; };

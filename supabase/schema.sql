@@ -8087,3 +8087,88 @@ end;
 $$;
 revoke all on function public.crm_boleto_bb_reenviar(uuid) from public, anon;
 grant execute on function public.crm_boleto_bb_reenviar(uuid) to authenticated;
+
+-- ===================================================================== 02/11/2026: leads, "mandei" e "respondeu"
+-- Leads sugeridos: "mandei" e "respondeu" (02/11/2026, pedido do Anderson, ideia do vídeo do Harvey): para a análise da
+-- 1ª semana mostrar quantas mensagens a equipe mandou e quantas responderam, e não só quantas viraram lead.
+alter table public.crm_prospec_sugestoes add column if not exists mandou_em timestamptz;
+alter table public.crm_prospec_sugestoes add column if not exists respondeu_em timestamptz;
+
+-- Marcar/desmarcar (a pessoa dona da sugestão ou a gestão dela). "Respondeu" também marca "mandei".
+create or replace function public.crm_prospec_marcar(p_id bigint, p_marca text, p_liga boolean default true)
+returns void language plpgsql security definer set search_path = public as $$
+declare s record;
+begin
+  select * into s from public.crm_prospec_sugestoes where id = p_id;
+  if s.id is null or not (s.vendedor_id = (select auth.uid()) or public.crm_prospec_ve(s.vendedor_id)) then raise exception 'sugestão não encontrada'; end if;
+  if p_marca = 'mandei' then
+    update public.crm_prospec_sugestoes set mandou_em = case when p_liga then coalesce(mandou_em, now()) end,
+           respondeu_em = case when p_liga then respondeu_em end where id = p_id;
+  elsif p_marca = 'respondeu' then
+    update public.crm_prospec_sugestoes set respondeu_em = case when p_liga then coalesce(respondeu_em, now()) end,
+           mandou_em = case when p_liga then coalesce(mandou_em, now()) else mandou_em end where id = p_id;
+  else raise exception 'marca inválida';
+  end if;
+end;
+$$;
+revoke all on function public.crm_prospec_marcar(bigint, text, boolean) from public, anon;
+grant execute on function public.crm_prospec_marcar(bigint, text, boolean) to authenticated;
+
+-- A lista da pessoa, agora com as duas datas (função nova: a antiga muda o formato da resposta).
+create or replace function public.crm_prospec_minhas2(p_vendedor uuid default null, p_dia date default null)
+returns table (id bigint, dia date, vendedor_id uuid, situacao text, motivo_descarte text, tratado_em timestamptz, empresa_id uuid,
+               segmento text, motivos text[], contato jsonb, ordem integer, cnpj text, razao text, fantasia text, cnae text, atividade text,
+               abertura date, endereco text, bairro text, cep text, cidade text, tel1 text, tel2 text, email text, porte text, capital numeric,
+               mandou_em timestamptz, respondeu_em timestamptz)
+language sql stable security definer set search_path = public as $$
+  select s.id, s.dia, s.vendedor_id, s.situacao, s.motivo_descarte, s.tratado_em, s.empresa_id, s.segmento, s.motivos, s.contato, s.ordem,
+         b.cnpj, b.razao, b.fantasia, b.cnae, d.descricao, b.abertura, b.endereco, b.bairro, b.cep, b.cidade, b.tel1, b.tel2, b.email, b.porte, b.capital,
+         s.mandou_em, s.respondeu_em
+    from public.crm_prospec_sugestoes s
+    join public.crm_prospec_base b on b.cnpj = s.cnpj
+    left join public.crm_prospec_cnae d on d.codigo = b.cnae
+   where s.vendedor_id = coalesce(p_vendedor, (select auth.uid())) and public.crm_prospec_ve(s.vendedor_id)
+     and (s.situacao in ('nova', 'amanha') or (s.tratado_em at time zone 'America/Sao_Paulo')::date = coalesce(p_dia, (now() at time zone 'America/Sao_Paulo')::date))
+   order by (s.situacao in ('nova', 'amanha')) desc, (s.mandou_em is not null), s.dia, s.ordem;
+$$;
+revoke all on function public.crm_prospec_minhas2(uuid, date) from public, anon;
+grant execute on function public.crm_prospec_minhas2(uuid, date) to authenticated;
+
+-- Resultado com mandadas e responderam (função nova, mesmo motivo).
+create or replace function public.crm_prospec_resultado2(p_desde date)
+returns table (vendedor_id uuid, nome text, sugeridos integer, mandadas integer, responderam integer, tratados integer, leads integer,
+               descartadas integer, compraram integer, faturado numeric, motivo text)
+language sql stable security definer set search_path = public as $$
+  select u.user_id, u.nome, count(s.id)::int, count(s.id) filter (where s.mandou_em is not null)::int, count(s.id) filter (where s.respondeu_em is not null)::int,
+         count(s.id) filter (where s.situacao in ('lead', 'descartada'))::int,
+         count(s.id) filter (where s.situacao = 'lead')::int, count(s.id) filter (where s.situacao = 'descartada')::int,
+         count(distinct s.empresa_id) filter (where f.valor > 0)::int, coalesce(sum(f.valor), 0),
+         (select x.motivo_descarte from public.crm_prospec_sugestoes x where x.vendedor_id = u.user_id and x.dia >= p_desde and x.situacao = 'descartada'
+           group by 1 order by count(*) desc limit 1)
+    from public.crm_usuarios u
+    join public.crm_prospec_sugestoes s on s.vendedor_id = u.user_id and s.dia >= p_desde
+    left join lateral (select sum(nn.valor_total) valor from public.crm_notas nn where s.empresa_id is not null and nn.empresa_id = s.empresa_id
+                        and not nn.cancelada and nn.emitida_em >= s.tratado_em) f on true
+   where public.crm_eh_gestor() and public.crm_prospec_ve(u.user_id)
+   group by u.user_id, u.nome order by u.nome;
+$$;
+revoke all on function public.crm_prospec_resultado2(date) from public, anon;
+grant execute on function public.crm_prospec_resultado2(date) to authenticated;
+
+-- A lista do dia não some com quem já recebeu a mensagem: a mandada espera a resposta por 7 dias; a que respondeu fica
+-- até a pessoa virar lead ou descartar. (Troca só o trecho da expiração em crm_prospec_gerar.)
+do $do$
+declare def text;
+begin
+  def := pg_get_functiondef('public.crm_prospec_gerar(date)'::regprocedure);
+  if position('s.respondeu_em is null' in def) = 0 then
+    def := replace(def, $a$   where s.situacao in ('nova', 'amanha')
+     and (select count(distinct x.dia) from public.crm_prospec_sugestoes x where x.dia > s.dia and x.dia < v_dia) >= 2;$a$,
+      $b$   where s.situacao in ('nova', 'amanha') and s.respondeu_em is null
+     and (s.mandou_em is null or s.mandou_em < now() - interval '7 days')
+     and (select count(distinct x.dia) from public.crm_prospec_sugestoes x where x.dia > s.dia and x.dia < v_dia) >= 2;$b$);
+    if position('s.respondeu_em is null' in def) = 0 then raise exception 'trecho da expiração não encontrado em crm_prospec_gerar'; end if;
+    execute def;
+  end if;
+end;
+$do$;

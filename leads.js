@@ -121,7 +121,10 @@
     const c = l.contato || {};
     const estado = !aberta ? (l.situacao === 'lead' ? CRM.selo('Virou lead', 'verde') + (l.empresa_id ? ' <button type="button" class="link" data-acao="abrir-empresa" data-id="' + esc(l.empresa_id) + '">abrir a ficha</button>' : '')
       : l.situacao === 'descartada' ? CRM.selo('Descartada: ' + (l.motivo_descarte || ''), 'vermelho') : CRM.selo('Expirou', 'cinza')) : '';
-    return '<article class="cartao lead-sug' + (aberta ? '' : ' lead-feito') + '">' +
+    // 02/11/2026: "mandei" e "respondeu" (para medir a abordagem, não só a lista)
+    const marcas = (l.respondeu_em ? CRM.selo('💬 Respondeu em ' + R().dataBR(R().diaLocal(l.respondeu_em)), 'verde') + ' '
+      : l.mandou_em ? CRM.selo('✓ Mensagem mandada em ' + R().dataBR(R().diaLocal(l.mandou_em)) + ' · esperando resposta', 'azul') + ' ' : '');
+    return '<article class="cartao lead-sug' + (aberta ? '' : ' lead-feito') + (l.mandou_em && !l.respondeu_em && aberta ? ' lead-esperando' : '') + '">' +
       '<div class="lead-topo"><div><h3>' + esc(nomeDe(l)) + '</h3><small>' + esc(titulo(l.razao || '')) + ' · CNPJ ' + esc(cnpjBR(l.cnpj)) + '</small>' +
         '<div class="lead-porque">' + (deOntem ? '<span class="lead-ontem">de ' + esc(R().dataBR(l.dia)) + '</span>' : '') + (l.situacao === 'amanha' ? '<span class="lead-ontem">deixado para hoje</span>' : '') +
         (l.motivos || []).map(m => '<span>' + esc(m) + '</span>').join('') + '</div></div>' +
@@ -143,10 +146,13 @@
           comp.map(p => '<li>' + esc(R().nomeDeItem(p.descricao)) + ' <small>(' + p.clientes + ')</small></li>').join('') + '</ul></div>' : '') +
         '<div><p class="lead-rot">Mensagem pronta (para o seu WhatsApp ou para a ligação)</p><p class="lead-msg">' + esc(msg) + '</p></div>' +
       '</div></div>' +
+      (marcas ? '<div class="lead-marcas">' + marcas + '</div>' : '') +
       '<div class="lead-acoes">' + (aberta
         ? '<button type="button" class="btn" data-acao="lead-virar" data-id="' + l.id + '">Virar lead</button>' +
-          (zap ? '<a class="btn sec" href="https://wa.me/55' + zap + '?text=' + encodeURIComponent(msg) + '" target="_blank" rel="noopener">Abrir no meu WhatsApp</a>' : '') +
+          (zap ? '<button type="button" class="btn sec" data-acao="lead-zap" data-id="' + l.id + '" data-url="' + esc('https://wa.me/55' + zap + '?text=' + encodeURIComponent(msg)) + '">Abrir no meu WhatsApp</button>' : '') +
           '<button type="button" class="btn sec" data-acao="lead-copiar" data-id="' + l.id + '">Copiar mensagem</button>' +
+          '<button type="button" class="btn sec' + (l.mandou_em ? ' ativo' : '') + '" data-acao="lead-mandei" data-id="' + l.id + '" title="Marque quando mandar a mensagem ou ligar">' + (l.mandou_em ? '✓ Mandei' : 'Mandei a mensagem') + '</button>' +
+          '<button type="button" class="btn sec' + (l.respondeu_em ? ' ativo' : '') + '" data-acao="lead-respondeu" data-id="' + l.id + '" title="Marque quando a empresa responder (mesmo que seja um não)">' + (l.respondeu_em ? '💬 Respondeu' : 'Respondeu') + '</button>' +
           '<button type="button" class="btn sec" data-acao="lead-descartar" data-id="' + l.id + '">Descartar</button>' +
           (l.situacao !== 'amanha' ? '<button type="button" class="btn sec" data-acao="lead-amanha" data-id="' + l.id + '">Deixar para amanhã</button>' : '') +
           (!l.contato || c.erro || !c.achou ? '<button type="button" class="btn sec" data-acao="lead-contato" data-id="' + l.id + '">Procurar o contato de novo</button>' : '')
@@ -159,32 +165,37 @@
     if (gest && !vendSel) { const vs = vendedores(); vendSel = (vs.find(u => u.user_id === CRM.meuId()) || vs[0] || {}).user_id || null; }
     if (!dados) { setTimeout(carrega, 0); return '<div class="cartao"><p class="vazio">Carregando…</p></div>'; }
     const abertas = dados.filter(l => l.situacao === 'nova' || l.situacao === 'amanha'), feitas = dados.filter(l => !(l.situacao === 'nova' || l.situacao === 'amanha'));
-    const leads = feitas.filter(l => l.situacao === 'lead').length;
+    const leads = feitas.filter(l => l.situacao === 'lead').length, esperando = abertas.filter(l => l.mandou_em && !l.respondeu_em).length;
     const ligado = cfgP().ligado;
     return '<div class="lead-contador">' + CRM.selo(abertas.length + (abertas.length === 1 ? ' para tratar' : ' para tratar'), abertas.length ? 'azul' : 'cinza') + ' ' +
-        CRM.selo(feitas.length + ' tratada(s) hoje', 'cinza') + ' ' + CRM.selo(leads + (leads === 1 ? ' virou lead hoje' : ' viraram lead hoje'), 'verde') + '</div>' +
+        CRM.selo(feitas.length + ' tratada(s) hoje', 'cinza') + ' ' + CRM.selo(leads + (leads === 1 ? ' virou lead hoje' : ' viraram lead hoje'), 'verde') +
+        (esperando ? ' ' + CRM.selo(esperando + ' esperando resposta', 'azul') : '') + '</div>' +
       (!dados.length ? '<section class="cartao"><p class="vazio">' + (ligado ? 'Nenhuma empresa sugerida agora. A lista nova chega às 7h de cada dia útil.' : 'Os leads sugeridos ainda estão desligados. Quando o administrador ligar, a lista chega às 7h de cada dia útil.') + '</p></section>' : '') +
       abertas.map(cartao).join('') +
       (feitas.length ? '<h2 class="lead-h2">Tratadas hoje</h2>' + feitas.map(cartao).join('') : '') +
-      '<p class="dica">O que não for tratado hoje continua aqui amanhã. Depois de 3 listas sem ser tratado, volta para a base e pode ir para outra pessoa. A primeira conversa é pela sua linha (ligação ou o seu WhatsApp); o WhatsApp da empresa não fala com quem ainda não é cliente.</p>';
+      '<p class="dica">Mandou a mensagem? Marque <strong>Mandei</strong> (abrir pelo botão do WhatsApp já marca). A empresa respondeu, mesmo que seja um não? Marque <strong>Respondeu</strong>. ' +
+        'A mandada fica aqui 7 dias esperando a resposta; a que respondeu fica até você virar lead ou descartar. ' +
+        'O que não for tratado continua aqui amanhã. Depois de 3 listas sem ser tratado, volta para a base e pode ir para outra pessoa. A primeira conversa é pela sua linha (ligação ou o seu WhatsApp); o WhatsApp da empresa não fala com quem ainda não é cliente.</p>';
   }
 
   function telaGestao() {
     if (!gestao) { setTimeout(carregaGestao, 0); return '<div class="cartao"><p class="vazio">Carregando…</p></div>'; }
     const cfg = cfgP(), adm = CRM.ehAdmin();
-    const t = gestao.res.reduce((a, r) => { ['sugeridos', 'tratados', 'leads', 'descartadas', 'compraram'].forEach(k => { a[k] = (a[k] || 0) + (r[k] || 0); }); a.faturado = (a.faturado || 0) + Number(r.faturado || 0); return a; }, {});
+    const t = gestao.res.reduce((a, r) => { ['sugeridos', 'mandadas', 'responderam', 'tratados', 'leads', 'descartadas', 'compraram'].forEach(k => { a[k] = (a[k] || 0) + (r[k] || 0); }); a.faturado = (a.faturado || 0) + Number(r.faturado || 0); return a; }, {});
     const pct = (a, b) => (b ? Math.round(a / b * 100) + '%' : '—');
     const kpi = (v, rot) => '<div class="kpi"><span>' + esc(rot) + '</span><strong>' + esc(String(v)) + '</strong></div>';
     const segs = (cfg.segmentos || []), base = new Map(gestao.base.map(b => [b.segmento, b]));
     const vendIds = new Set(cfg.vendedores || []);
-    return '<section class="kpis">' + kpi(t.sugeridos || 0, 'Sugeridos (4 semanas)') + kpi((t.tratados || 0) + ' (' + pct(t.tratados, t.sugeridos) + ')', 'Tratados') +
+    return '<section class="kpis">' + kpi(t.sugeridos || 0, 'Sugeridos (4 semanas)') + kpi((t.mandadas || 0) + ' (' + pct(t.mandadas, t.sugeridos) + ')', 'Mensagens mandadas') +
+        kpi((t.responderam || 0) + ' (' + pct(t.responderam, t.mandadas) + ' das mandadas)', 'Responderam') + kpi((t.tratados || 0) + ' (' + pct(t.tratados, t.sugeridos) + ')', 'Tratados') +
         kpi(t.leads || 0, 'Viraram lead') + kpi(t.compraram || 0, '1ª compra') + kpi(R().moeda(t.faturado || 0), 'Faturado com eles') + '</section>' +
       '<section class="cartao"><h2>Por vendedor(a) · desde ' + esc(R().dataBR(gestao.desde)) + '</h2>' +
-        (gestao.res.length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Vendedor(a)</th><th class="num">Sugeridos</th><th class="num">Tratados</th><th class="num">Viraram lead</th><th class="num">1ª compra</th><th class="num">Faturado</th><th>Descarte mais comum</th></tr></thead><tbody>' +
-          gestao.res.map(r => '<tr><td>' + esc(r.nome) + '</td><td class="num">' + r.sugeridos + '</td><td class="num">' + r.tratados + ' <small>(' + pct(r.tratados, r.sugeridos) + ')</small></td><td class="num">' + r.leads + '</td><td class="num">' + r.compraram + '</td><td class="num">' +
+        (gestao.res.length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Vendedor(a)</th><th class="num">Sugeridos</th><th class="num">Mandadas</th><th class="num">Responderam</th><th class="num">Tratados</th><th class="num">Viraram lead</th><th class="num">1ª compra</th><th class="num">Faturado</th><th>Descarte mais comum</th></tr></thead><tbody>' +
+          gestao.res.map(r => '<tr><td>' + esc(r.nome) + '</td><td class="num">' + r.sugeridos + '</td><td class="num">' + (r.mandadas || 0) + '</td><td class="num">' + (r.responderam || 0) +
+            ' <small>(' + pct(r.responderam || 0, r.mandadas || 0) + ')</small></td><td class="num">' + r.tratados + ' <small>(' + pct(r.tratados, r.sugeridos) + ')</small></td><td class="num">' + r.leads + '</td><td class="num">' + r.compraram + '</td><td class="num">' +
             esc(R().moeda(r.faturado || 0)) + '</td><td>' + esc(r.motivo || '—') + '</td></tr>').join('') + '</tbody></table></div>'
           : '<p class="vazio">Ainda não há sugestões nas últimas 4 semanas.</p>') +
-        '<p class="dica">1ª compra e faturado: notas dos leads emitidas depois de a sugestão virar lead.</p></section>' +
+        '<p class="dica">Mandadas e responderam: o que cada um marcou nos cartões (abrir o WhatsApp pelo botão já marca "mandei"). 1ª compra e faturado: notas dos leads emitidas depois de a sugestão virar lead.</p></section>' +
       '<section class="cartao"><h2>Configuração</h2>' +
         '<p>' + (cfg.ligado ? CRM.selo('Ligado', 'verde') + ' a lista sai às 7h de cada dia útil.' : CRM.selo('Desligado', 'cinza') + ' nenhuma lista sai enquanto estiver desligado.') + '</p>' +
         '<div class="tabela-rolagem"><table class="tabela" data-sem-filtro><thead><tr><th>Segmento</th><th>Atividades na Receita (CNAE)</th><th class="num">Empresas na base</th></tr></thead><tbody>' +
@@ -219,6 +230,9 @@
   };
 
   const achar = id => (dados || []).find(l => String(l.id) === String(id));
+  async function marcar(id, marca, liga, aviso) {
+    try { await CRM.store().prospecMarcar(Number(id), marca, liga); if (aviso) CRM.toast(aviso); dados = null; CRM.render(); } catch (e) { CRM.falhou(e); }
+  }
   async function tratar(id, sit, motivo, empresa) {
     try { await CRM.store().prospecTratar(Number(id), sit, motivo || null, empresa || null); dados = null; CRM.render(); } catch (e) { CRM.falhou(e); }
   }
@@ -261,6 +275,15 @@
       const msg = mensagem(l, CRM.nomeUsuario(l.vendedor_id), new Date().getHours(), CRM.nomeInstalacao());
       try { await navigator.clipboard.writeText(msg); CRM.toast('Mensagem copiada. Cole no seu WhatsApp.'); } catch (e) { CRM.toast('Não consegui copiar: selecione o texto da mensagem.', true); }
     },
+    // abre a conversa no WhatsApp da pessoa e já marca "mandei" (ela desmarca se não mandou)
+    'lead-zap': (id, el) => {
+      const url = el && el.dataset ? el.dataset.url : '';
+      if (url) window.open(url, '_blank', 'noopener');
+      const l = achar(id);
+      if (l && !l.mandou_em) marcar(id, 'mandei', true, 'Marquei "mandei". Se não mandou, clique em "✓ Mandei" para desmarcar.');
+    },
+    'lead-mandei': id => { const l = achar(id); if (l) marcar(id, 'mandei', !l.mandou_em); },
+    'lead-respondeu': id => { const l = achar(id); if (l) marcar(id, 'respondeu', !l.respondeu_em); },
     'lead-amanha': id => tratar(id, 'amanha'),
     'lead-desfazer': id => tratar(id, 'nova'),
     'lead-descartar': id => {
