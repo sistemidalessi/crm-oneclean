@@ -517,7 +517,9 @@
     }
     return '<section class="cartao pd-janela"><header class="pd-topo"><button type="button" class="btn sec" data-acao="pd-fechar">← Voltar</button><h2>Pedido ' + esc(p.numero) + ' · ' + esc(nomeCliente(p)) + '</h2>' + CRM.selo(s.rotulo, s.cor) + '</header>' +
       (bAbertos.length ? '<p class="alerta">Bloqueado por: <strong>' + esc(bAbertos.map(b => P.ROTULO_BLOQUEIO[b] || b).join(', ')) + '</strong>.' + (gest ? ' Confira e clique em "Liberar".' : ' Quem libera é a gestora ou a logística.') +
-        (bAbertos.some(b => ['SEM ANÁLISE', 'PRAZO', 'LIMITE'].indexOf(b) !== -1) ? ' O crédito (' + esc(bAbertos.filter(b => ['SEM ANÁLISE', 'PRAZO', 'LIMITE'].indexOf(b) !== -1).map(b => P.ROTULO_BLOQUEIO[b]).join(', ')) + ') só o administrador libera' + (CRM.ehAdmin() ? ' — ou ajuste a ficha em Caixa → Crédito' : '') + '.' + avisoCredito(p, bAbertos, t) : '') + '</p>' : '') +
+        (bAbertos.some(b => ['SEM ANÁLISE', 'PRAZO', 'LIMITE'].indexOf(b) !== -1) ? ' O crédito (' + esc(bAbertos.filter(b => ['SEM ANÁLISE', 'PRAZO', 'LIMITE'].indexOf(b) !== -1).map(b => P.ROTULO_BLOQUEIO[b]).join(', ')) + ') só o administrador libera.' + (CRM.ehAdmin() && CRM.credito && CRM.credito.analisar ?
+          ' <button type="button" class="btn" data-acao="pd-credito" data-id="' + esc(p.id) + '" title="Abre a análise de crédito deste cliente aqui mesmo; ao aprovar, a trava do crédito sai do pedido">💳 Analisar o crédito do cliente</button>' : '') +
+          avisoCredito(p, bAbertos, t) : '') + '</p>' : '') +
       '<p class="acoes">' + botoes.join(' ') + '</p>' + (CRM.nfe ? CRM.nfe.doPedido(p) : '') +
       '<div class="chips">' + abas.map(a => '<button type="button" class="chip-filtro' + (abaPed === a[0] ? ' ativo' : '') + '" data-acao="pd-aba-ped" data-id="' + a[0] + '">' + esc(a[1]) + '</button>').join('') + '</div>' + corpo + '</section>';
   }
@@ -957,6 +959,21 @@
     'pd-recarregar': () => recarrega(),
     'pd-abrir': id => { aberto = id; abaPed = 'produtos'; CRM.render(); },
     'pd-fechar': () => { aberto = null; CRM.render(); },
+    // 03/11/2026 (Anderson: "entrei pelo número do pedido para desbloquear o crédito… senão tenho que ir no Caixa → Crédito e
+    // procurar o cliente"): a mesma análise de Caixa → Crédito, aberta do pedido; ao aprovar, o banco recalcula as travas
+    // (crm_credito_gravar → crm_pedidos_atualizar) e o pedido volta à tela já sem a trava do crédito (ou com o que sobrou).
+    'pd-credito': id => {
+      const p = (peds || []).find(x => x.id === id); if (!p || !p.empresa_id) return;
+      const semFicha = (p.bloqueios || []).indexOf('SEM ANÁLISE') !== -1;
+      CRM.credito.analisar(p.empresa_id, false, semFicha, async () => {
+        await recarrega();
+        const q = (peds || []).find(x => x.id === id), resto = q ? (q.bloqueios || []).filter(b => !(q.liberado || []).includes(b)) : [];
+        const cred = resto.filter(b => ['SEM ANÁLISE', 'PRAZO', 'LIMITE'].indexOf(b) !== -1);
+        CRM.toast(!q ? 'Crédito gravado.' : cred.length ? 'Crédito gravado, mas o pedido ' + q.numero + ' continua travado em: ' + cred.map(b => P.ROTULO_BLOQUEIO[b] || b).join(', ') + ' (confira limite e prazo).'
+          : resto.length ? 'Crédito liberado. O pedido ' + q.numero + ' ainda tem: ' + resto.map(b => P.ROTULO_BLOQUEIO[b] || b).join(', ') + ' — confira e clique em "Liberar".'
+          : 'Crédito liberado: o pedido ' + q.numero + ' está livre.', cred.length > 0);
+      }).catch(CRM.falhou);
+    },
     'pd-aba-ped': id => { abaPed = id; CRM.render(); },
     'pd-novo': () => { aberto = null; ed = novoEd(); CRM.render(); },
     'pd-de-proposta': id => CRM.pedidos.deProposta(id),

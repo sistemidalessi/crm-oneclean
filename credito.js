@@ -394,7 +394,8 @@
   }
 
   // Formulário da análise: consulta (PDF lido pela IA) → proposta pela política → aprovar.
-  async function analisar(id, siteAberto, consultaJa) {
+  // depois (03/11/2026): chamado depois de aprovar — o pedido que abriu a análise recarrega e diz o que sobrou da trava.
+  async function analisar(id, siteAberto, consultaJa, depois) {
     const e = CRM.empresa(id);
     if (!e) { CRM.toast('Cliente não encontrado (fora da sua lista?).', true); return; }
     let atual = null;
@@ -506,6 +507,7 @@
         cacheVer.delete(id);
         CRM.toast('Crédito de ' + e.nome + ' aprovado: ' + (SITUACOES[v.situacao] || v.situacao) + (v.situacao === 'prazo' ? ' · ' + R.moeda(v.limite) : '') + '.');
         carrega(true);
+        if (depois) setTimeout(() => { Promise.resolve(depois()).catch(CRM.falhou); }, 300);
       }
     });
   }
