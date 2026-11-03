@@ -642,15 +642,26 @@
   // Locais de entrega (03/11/2026, vendedora: "aonde eu vejo o nome do condomínio?" — terceirizada como a Agilité compra num
   // CNPJ e entrega em vários condomínios): o pedido tem o "Nome do local" e o CRM lembra os locais já usados com o cliente
   // (pedidos anteriores) para escolher de novo. A rota, o celular do motorista e a nota usam sempre o local do pedido.
-  const chaveLocal = en => [en.local, en.endereco, en.numero, en.compl].map(s => R.semAcento ? R.semAcento(String(s || '')).toUpperCase().trim() : String(s || '').toUpperCase().trim()).join('|');
+  const chaveLocal = en => [en.endereco, en.numero].map(s => R.semAcento ? R.semAcento(String(s || '')).toUpperCase().trim() : String(s || '').toUpperCase().trim()).join('|');
   function locaisDe(empresaId) {
     if (!empresaId) return [];
     const e = CRM.empresa(empresaId), vistos = new Map();
     const poe = en => { if (en && String(en.endereco || '').trim()) { const k = chaveLocal(en); if (!vistos.has(k)) vistos.set(k, en); } };
     (peds || []).filter(p => p.empresa_id === empresaId && p.situacao !== 'cancelado').sort((a, b) => String(b.criado_em).localeCompare(String(a.criado_em)))
       .forEach(p => poe(p.dados && p.dados.entrega));
+    // os locais de entrega que o FKN tinha no cadastro do cliente (lidos das notas: crm_empresa_locais, 03/11/2026)
+    const fkn = locaisFkn.get(empresaId);
+    if (fkn === undefined) garanteLocais(empresaId);
+    (fkn || []).forEach(x => poe({ local: x.local || '', endereco: x.endereco || '', numero: x.numero || '', compl: x.compl || '', bairro: x.bairro || '', cidade: x.cidade || '', uf: x.uf || '', cep: x.cep || '' }));
     if (e) poe(Object.assign({ local: 'Endereço do cadastro (CNPJ)' }, P.entregaDoCliente(e)));
     return [...vistos.values()];
+  }
+  const locaisFkn = new Map();
+  function garanteLocais(empresaId) {
+    if (!empresaId || locaisFkn.has(empresaId) || !CRM.store().empresaLocais) return;
+    locaisFkn.set(empresaId, null);
+    CRM.store().empresaLocais(empresaId).then(l => { locaisFkn.set(empresaId, l || []); if ((l || []).length && ed && ed.empresa_id === empresaId) CRM.render(); })
+      .catch(() => locaisFkn.set(empresaId, []));
   }
   function seletorLocais(empresaId, atual) {
     const l = locaisDe(empresaId);
@@ -695,9 +706,17 @@
       titulo: '✎ Dados do pedido ' + p.numero, largura: 'largo',
       intro: 'Dá para mudar até a nota ser emitida. Os produtos não mudam aqui (para isso, "Voltar ao aberto"). A mudança fica nos comentários do pedido.',
       campos, valores: vals, salvarTexto: 'Gravar',
+      htmlDepois: (() => { const l = locaisDe(p.empresa_id); return l.some(x => x.local !== 'Endereço do cadastro (CNPJ)') ? '<label class="campo largo"><span>📍 Preencher o local de entrega com um já usado (' + l.length + ')</span><select data-pd-local-form><option value="">— escolher —</option>' +
+        l.map((x, i) => '<option value="' + i + '">' + esc(P.entregaTexto(x)) + '</option>').join('') + '</select></label>' : ''; })(),
       extras: form => {
         const prog = form.elements.prog, pg = form.elements.pagamento;
         if (prog && pg) prog.addEventListener('change', () => { if (prog.value) pg.value = pagProgramado(pg.value, prog.value); });
+        const sl = form.querySelector('[data-pd-local-form]');
+        if (sl) sl.addEventListener('change', () => {
+          const x = locaisDe(p.empresa_id)[Number(sl.value)]; if (sl.value === '' || !x) return;
+          ['endereco', 'numero', 'compl', 'bairro', 'cidade', 'uf', 'cep'].forEach(k => { if (form.elements[k]) form.elements[k].value = x[k] || ''; });
+          if (form.elements.local) form.elements.local.value = x.local === 'Endereço do cadastro (CNPJ)' ? '' : (x.local || '');
+        });
       },
       aoSalvar: async v => {
         const mud = {};

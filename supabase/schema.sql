@@ -8772,3 +8772,26 @@ end;
 $$;
 revoke all on function public.crm_fin_fornecedor_editar(uuid, jsonb, text) from public, anon;
 grant execute on function public.crm_fin_fornecedor_editar(uuid, jsonb, text) to authenticated;
+
+-- Locais de entrega dos clientes trazidos das notas do FKN (03/11/2026, Anderson: "os locais de entrega que já tinha cadastrado
+-- na Agilité Service como cliente não estão aparecendo"). O FKN guardava os locais de entrega no cadastro do cliente e os
+-- mandava na NF-e (grupo <entrega>: nome, CNPJ, endereço) e no infCpl ("LOCAL DE ENTREGA: …"). Lidos os XML das 2.773 notas
+-- (Edge Function temporária, desligada depois): 1.437 com o grupo, 56 clientes. O pedido do CRM mostra esses locais em
+-- "📍 Locais já usados com este cliente", junto com os dos pedidos anteriores.
+-- Migração crm_empresa_locais (aplicada em 03/11/2026).
+create table if not exists public.crm_empresa_locais (
+  id bigserial primary key,
+  empresa_id uuid not null references public.crm_empresas(id) on delete cascade,
+  local text, cnpj text,
+  endereco text not null, numero text, compl text, bairro text, cidade text, uf text, cep text, cmun text,
+  vezes int not null default 1, ultima_em timestamptz, origem text not null default 'fkn',
+  criado_em timestamptz not null default now()
+);
+create index if not exists crm_empresa_locais_emp on public.crm_empresa_locais (empresa_id);
+alter table public.crm_empresa_locais enable row level security;
+drop policy if exists ler on public.crm_empresa_locais;
+create policy ler on public.crm_empresa_locais for select to authenticated
+  using (public.crm_eh_gestor() or public.crm_eh_logistica() or exists (select 1 from public.crm_empresas e where e.id = empresa_id));
+revoke all on public.crm_empresa_locais from anon;
+grant select on public.crm_empresa_locais to authenticated;
+

@@ -1197,6 +1197,10 @@
   Supa.prototype.pedidoLiberar = async function (id, liberar, entrada) {
     return unwrap(await this.sb.rpc('crm_pedido_liberar', { p_id: id, p_liberar: liberar == null ? null : !!liberar, p_entrada: entrada == null ? null : !!entrada }));
   };
+  // locais de entrega do cliente que vieram do FKN (03/11/2026)
+  Supa.prototype.empresaLocais = async function (empresaId) {
+    return unwrap(await this.sb.from('crm_empresa_locais').select('local, endereco, numero, compl, bairro, cidade, uf, cep, vezes, ultima_em').eq('empresa_id', empresaId).order('ultima_em', { ascending: false }));
+  };
   // contas a pagar de fornecedor do comprador (03/11/2026)
   Supa.prototype.fornecedoresPagar = async function (pagosDesde) { return unwrap(await this.sb.rpc('crm_fin_fornecedores_ler', { p_pagos_desde: pagosDesde || null })); };
   Supa.prototype.fornecedorPagarEditar = async function (id, p, motivo) { return unwrap(await this.sb.rpc('crm_fin_fornecedor_editar', { p_id: id, p, p_motivo: motivo })); };
