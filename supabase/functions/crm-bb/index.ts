@@ -5,7 +5,7 @@
 //   POST { acao: 'situacao' }        confere as chaves (token e uma leitura; sem dados de clientes na resposta)
 //   POST { acao: 'maior_numero' }    o maior nosso número já usado no convênio (só o número), para começar a faixa do CRM
 //   POST { acao: 'registrar', ids? } registra no banco os boletos preparados (caminho 'api')
-//   POST { acao: 'pagos', dias? }    lê os boletos liquidados e dá a baixa (crm_boleto_bb_retorno: título, Caixa no dia do crédito)
+//   POST { acao: 'pagos', dias? }    lê os boletos liquidados e dá a baixa (crm_boleto_bb_retorno: título, Caixa no dia do pagamento)
 //                                    e, desde 03/11/2026, também os feitos no site do BB (crm_bb_site_casar: título certo pelo seu
 //                                    número ou por CNPJ + valor + vencimento; o resto fica em crm_bb_site para o administrador)
 //   POST { acao: 'baixar_canceladas' } baixa no banco o boleto de nota cancelada (02/11/2026): o cliente não consegue mais pagar
@@ -178,7 +178,9 @@ Deno.serve(async (req) => {
       const { data: meus } = await db.from('crm_boletos_bb').select('nosso_numero').in('nosso_numero', nossos).neq('situacao', 'pago');
       const set = new Set((meus || []).map((m: any) => m.nosso_numero));
       const itens = l.filter(x => set.has(dig(x.numeroBoletoBB).slice(3))).map(x => ({
-        nosso_numero: dig(x.numeroBoletoBB).slice(3), movimento: '06', credito: iso(x.dataCredito) || iso(x.dataMovimento), ocorrencia: iso(x.dataMovimento),
+        // no Caixa vale o dia do pagamento (03/11/2026, Anderson: "já pagaram hoje… tinha que ter trazido para o dia 3"), não o
+        // dia do crédito que o BB informa (um dia útil depois)
+        nosso_numero: dig(x.numeroBoletoBB).slice(3), movimento: '06', credito: iso(x.dataMovimento) || iso(x.dataCredito), ocorrencia: iso(x.dataMovimento),
         pago: x.valorPago ?? x.valorAtual ?? null, tarifa: null, origem: 'api'
       }));
       if (!itens.length) return { liquidados: 0, site };
@@ -211,10 +213,11 @@ Deno.serve(async (req) => {
           nome: String(d.nomeSacadoCobranca ?? pg.nome ?? '').trim(),
           valor: d.valorOriginalTituloCobranca ?? x.valorOriginal ?? null,
           vencimento: iso(d.dataVencimentoTituloCobranca) || iso(x.dataVencimento),
-          credito: iso(x.dataCredito) || iso(d.dataCreditoLiquidacao) || iso(x.dataMovimento), ocorrencia: iso(x.dataMovimento),
+          credito: iso(x.dataMovimento) || iso(d.dataRecebimentoTitulo) || iso(x.dataCredito), ocorrencia: iso(x.dataMovimento),
           pago: x.valorPago ?? d.valorPagoSacado ?? x.valorAtual ?? null,
           // o que o banco mandou (sem o texto livre), para conferir o casamento
-          dados: { chaves: Object.keys(d).slice(0, 80), erro: d.erro || null, vencimento: x.dataVencimento || null, valor: x.valorOriginal ?? null, pago: x.valorPago ?? null }
+          dados: { erro: d.erro || null, vencimento: x.dataVencimento || null, valor: x.valorOriginal ?? null, pago: x.valorPago ?? null,
+            movimento: x.dataMovimento || null, credito: x.dataCredito || null, recebimento: d.dataRecebimentoTitulo || null, credito_liq: d.dataCreditoLiquidacao || null }
         });
       }
       const { data, error } = await db.rpc('crm_bb_site_casar', { p_itens: itens });
@@ -263,6 +266,12 @@ Deno.serve(async (req) => {
       return { baixados, cancelados, erros, detalhes };
     }
 
+    // as datas de cada liquidado (pagamento × crédito), sem dados do cliente: para conferir em que dia o dinheiro entra
+    if (c.acao === 'datas') {
+      const tk = await token('cobrancas.boletos-info');
+      const l = await lista(tk, b, 'B', maisDias(hojeSP(), -Math.min(30, Math.max(1, Number(c.dias) || 3))), hojeSP(), '&codigoEstadoTituloCobranca=6');
+      return resposta(200, l.map(x => ({ n: dig(x.numeroBoletoBB).slice(3), movimento: x.dataMovimento || null, credito: x.dataCredito || null, vencimento: x.dataVencimento || null, pago: x.valorPago ?? null })));
+    }
     if (c.acao === 'baixar_canceladas') return resposta(200, await baixarCanceladas());
     if (c.acao === 'registrar') return resposta(200, await registrar(Array.isArray(c.ids) ? c.ids : undefined));
     if (c.acao === 'pagos') return resposta(200, await pagos(Math.min(30, Math.max(1, Number(c.dias) || 5))));
