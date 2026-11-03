@@ -677,6 +677,11 @@
       pdf.setPage(fim);
     });
   }
+  // 03/11/2026 (a logística reimprimiu a NF 1-2862 e o boleto não veio): todo caminho de DANFE traz os boletos da nota, e uma
+  // falha ao montar o boleto não some mais em silêncio (antes um .catch(() => 0) escondia o erro e o PDF saía sem boleto).
+  const avisoBoleto = (nf, e) => { CRM.toast('Atenção: o boleto da NF ' + (nf && nf.numero || '') + ' não entrou no PDF (' + ((e && e.message) || e) + '). Não faça o boleto no site do BB: avise o administrador.', true); return 0; };
+  // a nota que veio pelo XML (Consultar notas, sem a linha na lista de NF-e): o suficiente para achar os boletos dela
+  const notaDoXml = d => (d && d.numero ? { serie: Number(d.serie) || 1, numero: Number(d.numero), situacao: d.marca ? 'cancelada' : 'autorizada' } : null);
   async function danfes(ids) {
     await carregaJs('vendor/jspdf.umd.min.js');
     const Dn = raiz.CRMDanfe, pdf = new raiz.jspdf.jsPDF({ unit: 'mm', format: 'a4', compress: true }), lg = await pegaLogo();
@@ -688,7 +693,8 @@
       if (!d) continue;
       desenhaVias(pdf, Dn, d, { logo: lg, cores: (raiz.CRM_CONFIG || {}).cores }, !n++);
       const nf = nfe(id);
-      if (nf && nf.situacao !== 'cancelada' && B && B.paginasNota) nb += await B.paginasNota(pdf, nf, { semCiclo: true, ciclo, faltas }).catch(() => 0);
+      const alvo = nf || notaDoXml(d);
+      if (alvo && alvo.situacao !== 'cancelada' && B && B.paginasNota) nb += await B.paginasNota(pdf, alvo, { semCiclo: true, ciclo, faltas }).catch(e => avisoBoleto(alvo, e));
     }
     if (n) pdf.save((nb ? 'DANFEs e boletos-' : 'DANFEs-') + new Date().toISOString().slice(0, 10) + '.pdf');
     if (faltas.length) alert('Atenção, boleto que não entrou no PDF:\n\n' + faltas.join('\n') + '\n\nNão faça o boleto no site do BB: avise o administrador.');
@@ -717,9 +723,10 @@
       const pdf = new raiz.jspdf.jsPDF({ unit: 'mm', format: 'a4', compress: true });
       const op = { logo: await pegaLogo(), cores: (raiz.CRM_CONFIG || {}).cores };   // aviso de golpe só no boleto (02/11/2026)
       // nota do CRM: as vias do costume (3, a do cliente por último); nota do FKN (xmlPronto) ou cancelada: uma folha só
-      if (n && n.situacao !== 'cancelada') desenhaVias(pdf, Dn, d, op, true); else Dn.desenha(pdf, d, op);
+      if (!xmlPronto && !(n && n.situacao === 'cancelada')) desenhaVias(pdf, Dn, d, op, true); else Dn.desenha(pdf, d, op);
       // boleto do BB pelo arquivo (26/10/2026): as parcelas da nota com boleto do CRM vão no mesmo PDF, uma por página
-      const nb = n && n.situacao !== 'cancelada' && CRM.boletoBB && CRM.boletoBB.paginasNota ? await CRM.boletoBB.paginasNota(pdf, n).catch(() => 0) : 0;
+      const alvo = n || notaDoXml(d);
+      const nb = alvo && alvo.situacao !== 'cancelada' && CRM.boletoBB && CRM.boletoBB.paginasNota ? await CRM.boletoBB.paginasNota(pdf, alvo).catch(e => avisoBoleto(alvo, e)) : 0;
       pdf.save((nb ? 'DANFE e boleto-NF' : 'DANFE-NF') + (n ? n.serie + '-' + n.numero : d.numero) + '.pdf');
     } catch (e) { CRM.falhou(e); }
   }
@@ -1043,7 +1050,9 @@
       try {
         await carregaJs('vendor/jspdf.umd.min.js');
         const Dn = raiz.CRMDanfe, pdf = new raiz.jspdf.jsPDF({ unit: 'mm', format: 'a4', compress: true }), lg = await pegaLogo(), falta = [];
-        let k = 0;
+        // cada nota seguida dos boletos dela (03/11/2026: daqui saía só a DANFE); um ciclo só no começo
+        const B = CRM.boletoBB, faltas = [], ciclo = B && B.cicloAgora ? await B.cicloAgora() : null;
+        let k = 0, nb = 0;
         for (const n of l) {
           CRM.toast('Montando a DANFE ' + (k + 1) + ' de ' + l.length + '…');
           const xml = await xmlDaNota(n), d = xml && Dn.ler(xml);
@@ -1051,9 +1060,11 @@
           if (n.cancelada) Object.assign(d, { autorizada: false, marca: 'NF-e CANCELADA' });
           if (k++) pdf.addPage('a4', 'portrait');
           Dn.desenha(pdf, d, { logo: lg, cores: (raiz.CRM_CONFIG || {}).cores });
+          if (!n.cancelada && B && B.paginasNota) nb += await B.paginasNota(pdf, { serie: n.serie, numero: n.numero, situacao: 'autorizada' }, { semCiclo: true, ciclo, faltas }).catch(e => avisoBoleto(n, e));
         }
-        if (k) pdf.save('DANFEs-' + l.map(n => n.numero).slice(0, 6).join('-') + (l.length > 6 ? '-e-mais' : '') + '.pdf');
-        CRM.toast(k + ' DANFE(s) no PDF' + (falta.length ? '. Sem XML guardado no CRM: NF ' + falta.join(', ') : '.'), !!falta.length);
+        if (k) pdf.save((nb ? 'DANFEs e boletos-' : 'DANFEs-') + l.map(n => n.numero).slice(0, 6).join('-') + (l.length > 6 ? '-e-mais' : '') + '.pdf');
+        CRM.toast(k + ' DANFE(s)' + (nb ? ' e ' + nb + ' boleto(s)' : '') + ' no PDF' + (falta.length ? '. Sem XML guardado no CRM: NF ' + falta.join(', ') : '.'), !!falta.length);
+        if (faltas.length) alert('Atenção, boleto que não entrou no PDF:\n\n' + faltas.join('\n') + '\n\nNão faça o boleto no site do BB: avise o administrador.');
       } catch (e) { CRM.falhou(e); }
     },
     'nf-marcadas-xml': async () => {
