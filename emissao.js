@@ -382,9 +382,17 @@
   }
 
   // ------------------------------------------------ Pedidos → NF-e
+  // Impressão em três jeitos (03/11/2026, Anderson: "o cliente pede 2ª via do boleto… não precisa reimprimir tudo"):
+  // DANFE e boleto (o normal), só a DANFE (as vias) e só o boleto. Sem boleto pelo BB ligado, só o DANFE.
+  function botoesDanfe(id, autorizada) {
+    const bb = autorizada && CRM.boletoBB && CRM.boletoBB.ligado && CRM.boletoBB.ligado();
+    const bt = (modo, txt, tit) => '<button type="button" class="mini" data-acao="nf-danfe' + modo + '" data-id="' + esc(id) + '" title="' + esc(tit) + '">' + esc(txt) + '</button>';
+    return bb ? [bt('', 'DANFE e boleto', 'As vias da DANFE e, no fim, o boleto do BB'), bt('-so-nota', 'Só a DANFE', 'Só as vias da nota, sem o boleto'),
+      bt('-so-boleto', 'Só o boleto', '2ª via do boleto, sem a nota')] : [bt('', 'DANFE', 'A DANFE da nota')];
+  }
   function linhaNfe(n) {
     const s = M.situacaoDe(n), pn = pedidoNum(n), b = [];
-    if (n.chave && (s === 'autorizada' || s === 'cancelada' || s === 'denegada')) b.push('<button type="button" class="mini" data-acao="nf-danfe" data-id="' + esc(n.id) + '">DANFE</button>', '<button type="button" class="mini" data-acao="nf-xml" data-id="' + esc(n.id) + '">XML</button>');
+    if (n.chave && (s === 'autorizada' || s === 'cancelada' || s === 'denegada')) b.push(...botoesDanfe(n.id, s === 'autorizada'), '<button type="button" class="mini" data-acao="nf-xml" data-id="' + esc(n.id) + '">XML</button>');
     if (n.chave && (s === 'pendente' || s === 'reservada' || s === 'rejeitada' || s === 'autorizada')) b.push('<button type="button" class="mini" data-acao="nf-consultar" data-id="' + esc(n.id) + '">Consultar</button>');
     if (s === 'autorizada') {
       b.push('<button type="button" class="mini" data-acao="nf-cce" data-id="' + esc(n.id) + '">Carta de correção</button>');
@@ -424,7 +432,7 @@
   // emitir a DANFE de todas ou pegar o XML de todas"): a marca fica pela chave, mesmo trocando a pesquisa.
   const marcadasNf = new Map();
   function linhaConsulta(n) {
-    const b = n.nfe_id ? ['<button type="button" class="mini" data-acao="nf-danfe" data-id="' + esc(n.nfe_id) + '">DANFE</button>', '<button type="button" class="mini" data-acao="nf-xml" data-id="' + esc(n.nfe_id) + '">XML</button>']
+    const b = n.nfe_id ? [...botoesDanfe(n.nfe_id, !n.cancelada), '<button type="button" class="mini" data-acao="nf-xml" data-id="' + esc(n.nfe_id) + '">XML</button>']
       : ['<button type="button" class="mini" data-acao="nf-danfe-chave" data-id="' + esc(n.chave) + '">DANFE</button>', '<button type="button" class="mini" data-acao="nf-xml-chave" data-id="' + esc(n.chave) + '">XML</button>'];
     const cli = n.empresa_id ? '<button type="button" class="link" data-acao="abrir-empresa" data-id="' + esc(n.empresa_id) + '">' + esc(n.empresa_nome || n.cliente_nome || '') + '</button>' : esc(n.cliente_nome || '');
     const m = marcadasNf.has(n.chave);
@@ -713,7 +721,8 @@
       return await CRM.store().notaXml(n.chave);
     } catch (e) { return null; }
   }
-  async function danfe(id, xmlPronto) {
+  // modo: 'nota' (só as vias), 'boleto' (só o boleto, 2ª via) ou vazio (DANFE e boleto)
+  async function danfe(id, xmlPronto, modo) {
     try {
       const n = xmlPronto ? null : nfe(id), xml = xmlPronto || await xmlDe(id);
       await carregaJs('vendor/jspdf.umd.min.js');
@@ -723,11 +732,17 @@
       const pdf = new raiz.jspdf.jsPDF({ unit: 'mm', format: 'a4', compress: true });
       const op = { logo: await pegaLogo(), cores: (raiz.CRM_CONFIG || {}).cores };   // aviso de golpe só no boleto (02/11/2026)
       // nota do CRM: as vias do costume (3, a do cliente por último); nota do FKN (xmlPronto) ou cancelada: uma folha só
-      if (!xmlPronto && !(n && n.situacao === 'cancelada')) desenhaVias(pdf, Dn, d, op, true); else Dn.desenha(pdf, d, op);
+      if (modo !== 'boleto') { if (!xmlPronto && !(n && n.situacao === 'cancelada')) desenhaVias(pdf, Dn, d, op, true); else Dn.desenha(pdf, d, op); }
       // boleto do BB pelo arquivo (26/10/2026): as parcelas da nota com boleto do CRM vão no mesmo PDF, uma por página
-      const alvo = n || notaDoXml(d);
-      const nb = alvo && alvo.situacao !== 'cancelada' && CRM.boletoBB && CRM.boletoBB.paginasNota ? await CRM.boletoBB.paginasNota(pdf, alvo).catch(e => avisoBoleto(alvo, e)) : 0;
-      pdf.save((nb ? 'DANFE e boleto-NF' : 'DANFE-NF') + (n ? n.serie + '-' + n.numero : d.numero) + '.pdf');
+      const alvo = n || notaDoXml(d), num = n ? n.serie + '-' + n.numero : d.numero;
+      const nb = modo !== 'nota' && alvo && alvo.situacao !== 'cancelada' && CRM.boletoBB && CRM.boletoBB.paginasNota ? await CRM.boletoBB.paginasNota(pdf, alvo).catch(e => avisoBoleto(alvo, e)) : 0;
+      if (modo === 'boleto') {
+        if (!nb) { CRM.toast('A NF ' + num + ' não tem boleto registrado no BB (nota à vista, ou boleto feito no site do BB).', true); return; }
+        pdf.deletePage(1);   // a 1ª folha ficou em branco: cada boleto entra numa folha nova
+        pdf.save('Boleto-NF' + num + '.pdf');
+        return;
+      }
+      pdf.save((nb ? 'DANFE e boleto-NF' : 'DANFE-NF') + num + '.pdf');
     } catch (e) { CRM.falhou(e); }
   }
 
@@ -1020,6 +1035,8 @@
     'nf-lote': () => lote(),
     'nf-marcar-todos': () => { (CRM.pedidos.separados ? CRM.pedidos.separados() : []).filter(podeEmitir).filter(p => !(CRM.Lista && CRM.Lista.escondido('[data-nf-marca="' + p.id + '"]'))).forEach(p => marcados.add(p.id)); CRM.render(); },
     'nf-danfe': id => danfe(id),
+    'nf-danfe-so-nota': id => danfe(id, null, 'nota'),
+    'nf-danfe-so-boleto': id => danfe(id, null, 'boleto'),
     // nota do FKN (sem crm_nfe): o XML guardado no bucket crm-notas-xml, pela chave
     'nf-danfe-chave': async ch => {
       let xml = null;
