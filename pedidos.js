@@ -562,7 +562,7 @@
       .sort((a, b) => String(b.criado_em || b.atualizado_em || '').localeCompare(String(a.criado_em || a.atualizado_em || '')));
     return l.length ? String(l[0].dados.pagamento).trim() : '';
   };
-  const PAGAMENTOS = ['28 DIAS BOLETO', '30 DIAS BOLETO', '30/60 DIAS BOLETO', '30/60/90 DIAS BOLETO', 'A VISTA BOLETO', 'A VISTA PIX', 'A VISTA TRANSFERENCIA', 'CARTAO DE CREDITO'];
+  const PAGAMENTOS = ['28 DIAS BOLETO', '28/35/42 DIAS BOLETO', '30 DIAS BOLETO', '30/60 DIAS BOLETO', '30/60/90 DIAS BOLETO', 'A VISTA BOLETO', 'A VISTA PIX', 'A VISTA TRANSFERENCIA', 'CARTAO DE CREDITO'];
   function novoEd(o) {
     o = o || {};
     const e = o.empresa_id ? CRM.empresa(o.empresa_id) : null;
