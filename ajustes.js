@@ -144,12 +144,13 @@
   }
 
   // ================================================================ Listas
-  TELAS.listas = () => [['origem', 'Origens de lead'], ['segmento', 'Segmentos'], ['motivo_perda', 'Motivos de perda']].map(([tipo, titulo]) => {
+  TELAS.listas = () => [['origem', 'Origens de lead'], ['segmento', 'Segmentos'], ['motivo_perda', 'Motivos de perda'], ['forma_pagamento', 'Formas de pagamento (sugestões no pedido e no orçamento)']].map(([tipo, titulo]) => {
     const l = R.ordemAlfa(E().D.opcoes.filter(o => o.tipo === tipo), o => o.nome);
     return '<section class="cartao"><h2>' + esc(titulo) + ' <small>' + l.length + '</small></h2><div class="etiquetas">' +
       l.map(o => '<span class="etiqueta-edit">' + esc(o.nome) + '<button type="button" class="mini" data-acao="opcao-editar" data-id="' + esc(o.id) + '" title="Editar">✎</button></span>').join('') +
       '</div><p><button type="button" class="btn sec" data-acao="opcao-nova" data-id="' + tipo + '">+ Adicionar</button>' +
       (tipo === 'segmento' ? ' <button type="button" class="btn sec" data-acao="segmentos-sugerir">Preencher pelo nome das empresas</button>' : '') + '</p>' +
+      (tipo === 'forma_pagamento' ? '<p class="dica">Escreva os prazos em dias separados por "/" e a palavra DIAS, e depois como o cliente paga (ex.: <strong>28/35/42 DIAS BOLETO</strong>, A VISTA PIX): o CRM divide a nota e os boletos por esses prazos. Sem "DIAS", "28/11" vira uma data. A vendedora também pode digitar outra forma no pedido; a lista é só sugestão.</p>' : '') +
       (tipo === 'segmento' ? '<p class="dica">Sugere o segmento de quem está sem (escola, indústria, condomínio, saúde…) pelo nome e pela razão social. Mostra quantas de cada antes de gravar; quem já tem segmento não muda.</p>' : '') +
       '</section>';
   }).join('');
@@ -175,6 +176,11 @@
       campos: [{ nome: 'nome', rotulo: 'Nome', obrigatorio: true, largo: true }, { nome: 'ordem', rotulo: 'Ordem na lista', tipo: 'numero', passo: '1' }],
       valores: o || { ordem: 50 },
       aoSalvar: async v => {
+        if ((o ? o.tipo : tipo) === 'forma_pagamento') {
+          v.nome = String(v.nome || '').toUpperCase().replace(/\s+/g, ' ').trim();
+          if (/\d/.test(v.nome) && !/\bDIAS?\b|\bDDL\b/.test(v.nome) && !confirm('"' + v.nome + '" não tem a palavra DIAS: números com "/" podem ser lidos como data (ex.: 28/11). Gravar assim mesmo?')) throw new Error('acrescente DIAS depois dos prazos (ex.: 28/35/42 DIAS BOLETO)');
+        }
+        if (o && o.tipo === 'forma_pagamento') { await CRM.atualizar('opcoes', o.id, v); return; } // é só sugestão: pedidos já feitos ficam como estão
         if (o) {
           await CRM.atualizar('opcoes', o.id, v);
           if (v.nome !== o.nome) {

@@ -28,7 +28,9 @@
     origem: ['Indicação', 'Site', 'Google', 'Instagram', 'WhatsApp', 'Prospecção ativa', 'Feira/Evento', 'Cliente antigo'],
     segmento: [],
     motivo_perda: ['Preço', 'Comprou do concorrente', 'Prazo de entrega', 'Sem orçamento', 'Sem retorno do cliente',
-      'Produto não atende', 'Não era o momento']
+      'Produto não atende', 'Não era o momento'],
+    forma_pagamento: ['28 DIAS BOLETO', '28/35/42 DIAS BOLETO', '30 DIAS BOLETO', '30/60 DIAS BOLETO', '30/60/90 DIAS BOLETO', 'A VISTA BOLETO',
+      'A VISTA PIX', 'A VISTA TRANSFERENCIA', 'CARTAO DE CREDITO']
   };
 
   const CONFIG_PADRAO = {

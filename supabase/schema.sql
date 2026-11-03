@@ -8244,3 +8244,15 @@ begin
   end if;
 end;
 $do$;
+
+-- =====================================================================================================================
+-- Formas de pagamento como lista editável (03/11/2026, pedido do Anderson: "eu mesmo cadastrar"): Configurações → Listas →
+-- Formas de pagamento. São só sugestões no pedido e no orçamento (o campo continua livre); o CRM lê os prazos do texto.
+-- =====================================================================================================================
+alter table public.crm_opcoes drop constraint if exists crm_opcoes_tipo_check;
+alter table public.crm_opcoes add constraint crm_opcoes_tipo_check check (tipo in ('origem','segmento','motivo_perda','forma_pagamento'));
+insert into public.crm_opcoes (tipo, nome, ordem)
+select 'forma_pagamento', x.nome, x.ordem from (values
+  ('28 DIAS BOLETO', 10), ('28/35/42 DIAS BOLETO', 20), ('30 DIAS BOLETO', 30), ('30/60 DIAS BOLETO', 40), ('30/60/90 DIAS BOLETO', 50),
+  ('A VISTA BOLETO', 60), ('A VISTA PIX', 70), ('A VISTA TRANSFERENCIA', 80), ('CARTAO DE CREDITO', 90)) x(nome, ordem)
+on conflict (tipo, nome) do nothing;

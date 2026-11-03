@@ -618,7 +618,10 @@
     const x = ed, e = x.empresa_id ? CRM.empresa(x.empresa_id) : null, d = x.dados, ctx = ctxDe(x.vendedor_id), t = P.totais(x.itens, x.frete, ctx);
     const abas = [['dados', 'Dados cadastrais'], ['produtos', 'Produtos (' + x.itens.length + ')']];
     const inp = (rot, chave, v, extra) => '<label class="campo"><span>' + esc(rot) + '</span><input data-ed="' + chave + '" value="' + esc(v == null ? '' : v) + '"' + (extra || '') + ' autocomplete="off"></label>';
-    const pags = [...new Set(PAGAMENTOS.concat((E().D.propostas || []).map(p => p.dados && p.dados.pagamento).filter(Boolean)))].slice(0, 60);
+    // Sugestões da forma de pagamento: a lista de Configurações → Listas → Formas de pagamento (03/11/2026, o Anderson cadastra);
+    // sem a lista, as de sempre e as já usadas nos orçamentos.
+    const lista = (E().D.opcoes || []).filter(o => o.tipo === 'forma_pagamento').map(o => o.nome);
+    const pags = lista.length ? [...new Set(lista)] : [...new Set(PAGAMENTOS.concat((E().D.propostas || []).map(p => p.dados && p.dados.pagamento).filter(Boolean)))].slice(0, 60);
     let corpo;
     if (x.aba === 'dados') {
       const emps = R.ordemAlfa(E().D.empresas || [], c => c.nome);   // em ordem alfabética (pedido do Anderson)
