@@ -2655,7 +2655,7 @@ begin
       from public.crm_pedidos p
       cross join lateral (select public.crm_credito_prazo(p.dados->>'pagamento', (p.criado_em at time zone 'America/Sao_Paulo')::date) d) pz
       left join public.crm_credito c on c.empresa_id = p.empresa_id
-     where cred and p.situacao = 'aberto' and pz.d is not null),
+     where cred and p.situacao = 'aberto' and pz.d is not null and not (p.dados ? 'remessa_futura')),
   mg as (
     select p.id,
            bool_or(v.pl <= 0) sem_preco,
@@ -2665,7 +2665,7 @@ begin
       cross join lateral jsonb_array_elements(p.itens) i
       cross join lateral (select (i->>'preco')::numeric * (1 - coalesce((i->>'desconto')::numeric, 0) / 100) pl, coalesce((i->>'custo')::numeric, 0) c,
                                  coalesce((i->>'preco_tab')::numeric, 0) tb, coalesce((i->>'quantidade')::numeric, 0) q) v
-     where p.situacao = 'aberto'
+     where p.situacao = 'aberto' and not (p.dados ? 'remessa_futura')   -- remessa de entrega futura não é venda nova (03/11/2026)
      group by p.id),
   b as (
     select p.id, array_remove(array[
@@ -6005,7 +6005,7 @@ begin
     select p.vendedor_id dono, coalesce(eq.nome, 'Sem vendedor(a)') vend, p.valor_total v, p.situacao,
            (p.criado_em at time zone 'America/Sao_Paulo')::date dia, 'crm' fonte
       from public.crm_pedidos p left join eq on eq.user_id = p.vendedor_id
-     where p.situacao <> 'cancelado' and (adm or eq.user_id is not null)
+     where p.situacao <> 'cancelado' and (adm or eq.user_id is not null) and not (p.dados ? 'remessa_futura')
        and (p.criado_em at time zone 'America/Sao_Paulo')::date <= p_ate
     -- antes da virada, os pedidos do FKN (crm_pedidos_fkn, listagem SIFN157): os não faturados lá contam no próprio mês e
     -- nunca no "de antes, ainda sem nota" (não viram nota no FKN; são relançados no CRM)

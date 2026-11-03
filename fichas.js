@@ -308,6 +308,7 @@
             (pode && p.status === 'rascunho' ? '<button type="button" class="mini" data-acao="proposta-status" data-id="' + esc(p.id) + ':enviada">Marcar enviada</button>' : '') +
             (pode && p.status === 'enviada' ? '<button type="button" class="mini verde" data-acao="proposta-status" data-id="' + esc(p.id) + ':aprovada">Aprovada</button><button type="button" class="mini" data-acao="proposta-status" data-id="' + esc(p.id) + ':recusada">Recusada</button>' : '') +
             (pode && CRM.pedidos && p.status !== 'recusada' ? '<button type="button" class="mini verde" data-acao="pd-de-proposta" data-id="' + esc(p.id) + '" title="O cliente aprovou: vira pedido e reserva o estoque">Virar pedido</button>' : '') +
+            (pode && (p.status === 'rascunho' || p.status === 'enviada') ? '<button type="button" class="mini" data-acao="atualizar-proposta" data-id="' + esc(p.id) + '" title="Troca os itens e o valor desta proposta pelos itens do negócio de agora e baixa o PDF, sem criar outra proposta">Atualizar e baixar PDF</button>' : '') +
             (pode ? '<button type="button" class="mini" data-acao="editar-proposta" data-id="' + esc(p.id) + '">editar</button>' : '') + '</span></li>').join('') + '</ul>'
             : '<p class="vazio">Nenhuma proposta. "Gerar proposta" usa os itens acima e fica numerada; "importar do FKN" traz o orçamento feito lá.</p>') + '</section>' +
       '</div>' +
@@ -890,8 +891,7 @@
           if (antes !== r.status) await aoMudarProposta(r, antes, n);
           return;
         }
-        const snap = itens.length ? itens.map(it => ({ descricao: it.descricao, quantidade: R.num(it.quantidade), preco: R.num(it.preco), desconto: R.num(it.desconto), total: R.totalItem(it) }))
-          : [{ descricao: n.titulo, quantidade: 1, preco: R.num(n.valor), desconto: 0, total: R.num(n.valor) }];
+        const snap = snapItens(n, itens);
         const nova = await CRM.inserir('propostas', Object.assign({ negocio_id: n.id, itens: snap, valor_total: R.totalItens(snap) }, v));
         if (nova.status !== 'rascunho') await aoMudarProposta(nova, 'rascunho', n);
         CRM.toast('Proposta #' + nova.numero + ' gerada.');
@@ -899,6 +899,33 @@
       },
       aoExcluir: p ? () => CRM.remover('propostas', p.id) : null
     });
+  };
+
+  // Os itens do negócio como estão agora, para a proposta (código e unidade do produto do catálogo ou, no orçamento que veio do
+  // FKN, do item de mesmo nome nas propostas anteriores).
+  function snapItens(n, itens, base) {
+    const antes = new Map();
+    (base || []).concat(...CRM.doNegocio('propostas', n.id).map(x => x.itens || [])).forEach(it => { const k = String(it.descricao || '').trim().toUpperCase(); if (k && !antes.has(k)) antes.set(k, it); });
+    return itens.length ? itens.map(it => {
+      const pr = it.produto_id && CRM.produto ? CRM.produto(it.produto_id) : null, a = antes.get(String(it.descricao || '').trim().toUpperCase()) || {};
+      const x = { descricao: it.descricao, quantidade: R.num(it.quantidade), preco: R.num(it.preco), desconto: R.num(it.desconto), total: R.totalItem(it) };
+      const cod = (pr && pr.codigo) || a.codigo, un = (pr && pr.unidade) || a.unidade;
+      if (cod) x.codigo = cod; if (un) x.unidade = un;
+      return x;
+    }) : [{ descricao: n.titulo, quantidade: 1, preco: R.num(n.valor), desconto: 0, total: R.num(n.valor) }];
+  }
+  // 03/11/2026 (Anderson, orçamento 22.667 com quatro propostas "todas do mesmo atendimento"): mudar produto ou valor e emitir o
+  // PDF de novo sem criar outra proposta — a MESMA proposta recebe os itens de agora (número, validade e condições ficam) e o PDF
+  // sai na hora; o histórico do negócio não ganha registro novo.
+  fichas.atualizarProposta = async p => {
+    const n = CRM.negocio(p.negocio_id); if (!n) return;
+    const itens = CRM.doNegocio('negocio_itens', n.id);
+    if (!itens.length) { CRM.toast('O negócio não tem itens: acerte os itens acima antes de atualizar a proposta.', true); return; }
+    const snap = snapItens(n, itens, p.itens), tot = R.totalItens(snap);
+    if (!confirm('Atualizar a proposta #' + p.numero + ' com os ' + snap.length + ' itens de agora (' + R.moeda(tot) + '; antes ' + R.moeda(p.valor_total) + ') e baixar o PDF?\n\nNão cria outra proposta.')) return;
+    const r = await CRM.atualizar('propostas', p.id, { itens: snap, valor_total: tot });
+    CRM.toast('Proposta #' + r.numero + ' atualizada: ' + R.moeda(tot) + '.');
+    await fichas.baixarPdfProposta(r);
   };
 
   async function aoMudarProposta(p, antes, n) {
@@ -1562,6 +1589,7 @@
     'editar-proposta': id => fichas.formProposta(E().ix.porId.propostas.get(id), CRM.negocio(abertoNegocio)),
     'imprimir-proposta': id => fichas.imprimirProposta(E().ix.porId.propostas.get(id)),
     'pdf-proposta': id => fichas.baixarPdfProposta(E().ix.porId.propostas.get(id)).catch(CRM.falhou),
+    'atualizar-proposta': id => fichas.atualizarProposta(E().ix.porId.propostas.get(id)).catch(CRM.falhou),
     'enviar-proposta': (id, el) => { const [pid, canal] = id.split(':'); fichas.enviarProposta(pid, canal, el).catch(CRM.falhou); },
     'proposta-status': async id => {
       const [pid, st] = id.split(':');
