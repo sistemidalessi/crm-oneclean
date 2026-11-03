@@ -464,6 +464,8 @@ body.arrastando-card .zonas-fim { display: grid; grid-template-columns: 1fr 1fr;
 /* ---------- impressão ---------- */
 .impressao { display: none; }
 @media print {
+  /* sem isto, o 100% de altura da tela vira uma folha a mais, em branco, em toda impressão (03/11/2026) */
+  html, body { height: auto !important; min-height: 0 !important; }
   body { background: #fff; color: #000; }
   .lateral, .barra-topo, .topo, .faixa, .toast, dialog, .cabecalho button, .cabecalho select, .filtros, .barra-selecao, .mini { display: none !important; }
   .app, .principal, .conteudo { display: block; height: auto; overflow: visible; }
