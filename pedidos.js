@@ -25,7 +25,7 @@
     { id: 'externo', nome: 'Externo', faixas: { ABAIXO: 0, NEG: 5, A: 5, B: 6, C: 7, D: 8, E: 9, F: 10 } }
   ];
   // Margem mínima (a da tabela A: 23%). A vendedora vê a margem para saber se tem espaço quando o cliente negocia;
-  // abaixo dela o pedido fica bloqueado (PREÇO) até a gestora ou a logística liberar.
+  // a MARGEM GERAL do pedido abaixo dela bloqueia (PREÇO) até a gestora ou a logística liberar (03/11/2026: antes era item a item).
   const MARGEM_MINIMA = 23;
   const margemMinima = cfg => (cfg && cfg.margem_minima != null && cfg.margem_minima !== '' ? Number(cfg.margem_minima) : MARGEM_MINIMA);
   const planosDe = cfg => ((cfg && Array.isArray(cfg.comissao_planos) && cfg.comissao_planos.length) ? cfg.comissao_planos : PLANOS_PADRAO);
@@ -82,7 +82,7 @@
 
   // Bloqueios que ainda seguram (os liberados à mão não contam; um novo volta a segurar).
   const bloqueiosAbertos = p => (p.bloqueios || []).filter(b => (p.liberado || []).indexOf(b) === -1);
-  const ROTULO_BLOQUEIO = { ESTOQUE: 'estoque', ATRASO: 'duplicata em atraso', 'SEM ENTRADA': 'sem entrada (pagamento antecipado)', 'PREÇO': 'margem abaixo do mínimo',
+  const ROTULO_BLOQUEIO = { ESTOQUE: 'estoque', ATRASO: 'duplicata em atraso', 'SEM ENTRADA': 'sem entrada (pagamento antecipado)', 'PREÇO': 'margem geral abaixo do mínimo',
     'SEM ANÁLISE': 'sem análise de crédito', PRAZO: 'prazo além do crédito', LIMITE: 'acima do limite de crédito' };
   // Situação como no Sifn050: BLOQUEADO / LIBERADO / EM SEPARAÇÃO (SP n) / A EMITIR NF / FATURADO / CANCELADO.
   function situacao(p, notaNumero) {
@@ -531,7 +531,7 @@
         const l = P.linha(it, o.ctx), fa = falta(i), d = porCod.get(it.codigo);
         return '<tr' + (o.sel === i ? ' class="sel"' : '') + '><td>' + String(i + 1).padStart(3, '0') + '</td><td>' + esc(it.codigo || '') + '</td><td>' + (it.codigo && CRM.produtos ? CRM.produtos.miniatura(it.codigo, 'pequena') : '') + esc(it.descricao) + (it.obs ? '<small>' + esc(it.obs) + '</small>' : '') + '</td><td>' + esc(it.unidade || '') + '</td>' +
           '<td class="num">' + qtd(it.quantidade) + '</td><td class="num">' + (fa > 0 ? '<strong class="neg">' + qtd(fa) + '</strong>' : '0') + '</td><td class="num">' + preco(it.preco) + '</td><td class="num">' + preco(it.desconto) + '</td>' +
-          (gest ? '<td class="num">' + (l.margem == null ? '—' : l.abaixoMinimo ? '<strong class="neg" title="abaixo da margem mínima: precisa da liberação da gestora">' + pct(l.margem) + '</strong>' : pct(l.margem)) + '</td>' : '') + '<td class="num">' + preco(l.total) + '</td><td>' + esc(P.rotuloFaixa(l.faixa)) + '</td><td class="num">' + (l.comissao == null ? '—' : preco(l.comissao)) + '</td>' +
+          (gest ? '<td class="num">' + (l.margem == null ? '—' : l.abaixoMinimo ? '<strong class="neg" title="este item está abaixo da margem mínima; o que trava é a margem geral do pedido">' + pct(l.margem) + '</strong>' : pct(l.margem)) + '</td>' : '') + '<td class="num">' + preco(l.total) + '</td><td>' + esc(P.rotuloFaixa(l.faixa)) + '</td><td class="num">' + (l.comissao == null ? '—' : preco(l.comissao)) + '</td>' +
           '<td class="num">' + (l.sobreTab == null ? '—' : preco(l.sobreTab)) + '</td>' +
           (o.ler ? '' : '<td class="num">' + (d ? qtd(Math.floor(num(d.disponivel) * 1000) / 1000) : '—') + '</td><td class="num"><button type="button" class="mini" data-acao="pd-item-editar" data-id="' + i + '" title="Alterar o item">✎</button>' +
             '<button type="button" class="mini" data-acao="pd-item-excluir" data-id="' + i + '" title="Excluir o item">×</button></td>') + '</tr>';
@@ -539,7 +539,7 @@
   }
   function rodapeTotais(t) {
     return '<div class="pd-totais"><span>Total dos produtos <strong>' + R.moeda(t.produtos) + '</strong></span><span>Frete <strong>' + R.moeda(t.frete) + '</strong></span>' +
-      (veMargem() ? '<span>Margem <strong>' + pct(t.margem) + '</strong></span>' : '') + '<span>Comissão <strong>' + R.moeda(t.comissao) + (t.comissaoPct != null ? ' (' + pct(t.comissaoPct) + ')' : '') + '</strong></span>' +
+      (veMargem() ? '<span>Margem geral <strong' + (t.margem != null && t.margem < P.margemMinima(E().cfg) - 0.005 ? ' class="neg" title="abaixo da margem mínima: o pedido fica bloqueado até a gestora ou a logística liberar"' : '') + '>' + pct(t.margem) + '</strong></span>' : '') + '<span>Comissão <strong>' + R.moeda(t.comissao) + (t.comissaoPct != null ? ' (' + pct(t.comissaoPct) + ')' : '') + '</strong></span>' +
       '<span class="geral">Total geral <strong>' + R.moeda(t.geral) + '</strong></span></div>';
   }
 
@@ -655,7 +655,7 @@
         '<div class="pd-info" id="pdInfo">' + (dd && CRM.produtos ? '<button type="button" class="pd-info-foto" data-acao="pf-ficha" data-id="' + esc(dd.codigo) + '" title="Ver a ficha do produto">' + CRM.produtos.miniatura(dd.codigo) + '</button>' : '') + (dd ? 'Disponível <strong class="' + (num(dd.disponivel) < num(l.quantidade) ? 'neg' : '') + '">' + qtd(Math.floor(num(dd.disponivel) * 1000) / 1000) + ' ' + esc(dd.unidade || '') + '</strong>' +
           (CRM.aCaminho && CRM.aCaminho.texto(dd.codigo, dd.unidade) ? ' · <strong>' + esc(CRM.aCaminho.texto(dd.codigo, dd.unidade)) + '</strong>' : dd.a_caminho ? ' · a caminho ' + qtd(dd.a_caminho) + ' (FKN, sem data)' : '') + ' · preço tabela R$ ' + preco(dd.preco_venda) + ' · líquido R$ ' + preco(lin.precoLiq) + ' · total R$ ' + preco(lin.total) +
           ' · faixa ' + esc(P.rotuloFaixa(lin.faixa)) + (lin.comissao != null ? ' · comissão ' + preco(lin.comissao) + '%' : '') + (veCusto() && dd.custo != null ? ' · custo R$ ' + preco(dd.custo) : '') + (veMargem() && lin.margem != null ? ' · margem <strong class="' + (lin.abaixoMinimo ? 'neg' : '') + '">' + pct(lin.margem) + '</strong>' +
-            (lin.abaixoMinimo ? ' <strong class="neg">abaixo da margem mínima de ' + pct(P.margemMinima(E().cfg)) + ': o pedido fica bloqueado até a gestora ou a logística liberar</strong>' : '') : '') +
+            (lin.abaixoMinimo ? ' <strong class="neg">abaixo de ' + pct(P.margemMinima(E().cfg)) + ' neste item: o que trava é a margem geral do pedido</strong>' : '') : '') +
           (!veMargem() && P.abaixoDaTabela(lin) ? ' <strong class="neg">abaixo da tabela A: o pedido pode ficar bloqueado até a gestora ou a logística liberar</strong>' : '') : 'Escolha o produto: o CRM mostra o disponível e o preço da tabela.') + '</div>' +
         (dd && num(dd.preco_venda) > 0 ? '<div class="pd-faixas">Tabela: ' + P.FAIXAS.slice().reverse().map(fx => '<button type="button" class="mini" data-acao="pd-faixa" data-id="' + fx + '" title="' + (tab[fx] >= 0 ? '+' : '') + tab[fx] + '%">' + P.rotuloFaixa(fx) + ' ' + preco(P.precoDaFaixa(dd.preco_venda, fx, tab)) + '</button>').join('') + '</div>' : '') +
         '<p class="acoes"><button type="button" class="btn" data-acao="pd-item-salvar">' + (x.sel != null ? 'Salvar item' : 'Inserir item') + '</button> ' + (x.sel != null || l.codigo ? '<button type="button" class="btn sec" data-acao="pd-item-cancelar">Cancelar item</button> ' : '') +

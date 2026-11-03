@@ -2631,8 +2631,10 @@ revoke all on function public.crm_pedido_itens_norm(jsonb) from public, anon, au
 
 -- Bloqueios de todos os pedidos em aberto (e o casamento com as notas que chegaram). Barato: roda ao abrir as telas.
 create or replace function public.crm_pedidos_atualizar() returns integer language plpgsql security definer set search_path = public as $$
--- PREÇO (16/10, Anderson): item com margem abaixo da mínima (cfg.margem_minima, padrão 23% = tabela A) ou sem preço;
--- sem custo conhecido, abaixo da faixa negativa da tabela. cfg.pedido_trava_preco = false desliga.
+-- PREÇO (16/10, Anderson; regra trocada em 03/11/2026, também do Anderson): vale a MARGEM GERAL do pedido ("às vezes a
+-- gente tira um pouco de um item para ganhar no outro"), não item a item. Bloqueia se: algum item sem preço; a margem dos
+-- itens com custo conhecido, somados, fica abaixo da mínima (cfg.margem_minima, padrão 23%); ou os itens sem custo, somados,
+-- ficam abaixo da faixa negativa da tabela. cfg.pedido_trava_preco = false desliga.
 -- Crédito (27/10/2026): com crm_config.dados.credito.ligado, o pedido a prazo ganha SEM ANÁLISE, PRAZO e LIMITE (ver a
 -- seção "Crédito do cliente"); no limite contam os títulos em aberto e os pedidos a prazo do cliente feitos ANTES deste.
 declare n integer; neg numeric; mmin numeric; trava boolean; cred boolean; hoje date := (now() at time zone 'America/Sao_Paulo')::date;
@@ -2654,19 +2656,29 @@ begin
       cross join lateral (select public.crm_credito_prazo(p.dados->>'pagamento', (p.criado_em at time zone 'America/Sao_Paulo')::date) d) pz
       left join public.crm_credito c on c.empresa_id = p.empresa_id
      where cred and p.situacao = 'aberto' and pz.d is not null),
+  mg as (
+    select p.id,
+           bool_or(v.pl <= 0) sem_preco,
+           sum(v.pl * v.q) filter (where v.c > 0) rec_c, sum(v.c * v.q) filter (where v.c > 0) cus_c,
+           sum(v.pl * v.q) filter (where v.c <= 0 and v.tb > 0) rec_t, sum(v.tb * v.q) filter (where v.c <= 0 and v.tb > 0) tab_t
+      from public.crm_pedidos p
+      cross join lateral jsonb_array_elements(p.itens) i
+      cross join lateral (select (i->>'preco')::numeric * (1 - coalesce((i->>'desconto')::numeric, 0) / 100) pl, coalesce((i->>'custo')::numeric, 0) c,
+                                 coalesce((i->>'preco_tab')::numeric, 0) tb, coalesce((i->>'quantidade')::numeric, 0) q) v
+     where p.situacao = 'aberto'
+     group by p.id),
   b as (
     select p.id, array_remove(array[
       case when p.id in (select pedido_id from f) then 'ESTOQUE' end,
       case when exists (select 1 from public.crm_titulos t where t.empresa_id = p.empresa_id and coalesce(t.previsao, t.vencimento) < hoje and not t.abono) then 'ATRASO' end,
       case when not p.entrada_ok and coalesce(p.dados->>'pagamento', '') ~* '(vista|antecipad|pix|transfer|dep[oó]sito)' then 'SEM ENTRADA' end,
-      case when trava and exists (select 1 from jsonb_array_elements(p.itens) i
-        cross join lateral (select (i->>'preco')::numeric * (1 - coalesce((i->>'desconto')::numeric, 0) / 100) pl, coalesce((i->>'custo')::numeric, 0) c, coalesce((i->>'preco_tab')::numeric, 0) tb) v
-        where case when v.c > 0 then v.pl <= 0 or (v.pl - v.c) / v.pl * 100 < mmin - 0.005
-                   else v.tb > 0 and v.pl < round(v.tb * (1 + neg / 100), 4) - 0.00005 end) then 'PREÇO' end,
+      case when trava and (coalesce(mg.sem_preco, false)
+             or (coalesce(mg.rec_c, 0) > 0 and (mg.rec_c - mg.cus_c) / mg.rec_c * 100 < mmin - 0.005)
+             or (coalesce(mg.tab_t, 0) > 0 and mg.rec_t < round(mg.tab_t * (1 + neg / 100), 2) - 0.005)) then 'PREÇO' end,
       case when cr.id is not null and (cr.tem is null or cr.situacao = 'analise') then 'SEM ANÁLISE' end,
       case when cr.id is not null and (cr.situacao = 'vista' or (cr.situacao = 'prazo' and cr.prazo_max is not null and cr.prazo > cr.prazo_max)) then 'PRAZO' end,
       case when cr.id is not null and cr.situacao = 'prazo' and cr.usado > cr.limite + 0.005 then 'LIMITE' end
-    ], null) bl from public.crm_pedidos p left join cr on cr.id = p.id where p.situacao = 'aberto')
+    ], null) bl from public.crm_pedidos p left join cr on cr.id = p.id left join mg on mg.id = p.id where p.situacao = 'aberto')
   update public.crm_pedidos p set bloqueios = b.bl from b where p.id = b.id and p.bloqueios is distinct from b.bl;
   get diagnostics n = row_count;
   return n;
