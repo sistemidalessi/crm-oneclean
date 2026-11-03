@@ -8657,3 +8657,52 @@ begin
      order by n.emitida_em desc
      limit 300;
 end $function$;
+
+-- Pedido PAUSADO e nome do cliente no pedido (03/11/2026). Aplicado pelo conector (migração pedido_pausado_e_nome_do_cliente).
+-- (1) Anderson: as entregas futuras da Santa Casa ficavam "liberadas" e a logística podia emitir a nota sem querer. Pausado
+--     (logística ou gestão; data opcional para voltar sozinho) não vai à separação nem à nota e desce para o fim da lista.
+--     Os 16 da Santa Casa (pedidos 48–63) foram pausados em 03/11, sem data (backup crm_backup.pedidos_pausa_santa_casa_20261103).
+-- (2) A lista de pedidos mostrava "—" no cliente para quem não lê o cadastro (logística; gestora com os clientes da Silmara):
+--     o pedido agora sai do banco com cliente_nome.
+create or replace function public.crm_pedido_pausado(r public.crm_pedidos) returns boolean language sql stable set search_path = public as $$
+  select r.dados ? 'pausado' and (nullif(r.dados->'pausado'->>'ate', '') is null
+    or (r.dados->'pausado'->>'ate')::date > (now() at time zone 'America/Sao_Paulo')::date);
+$$;
+
+create or replace function public.crm_pedido_pausar(p_id uuid, p_pausar boolean, p_ate date default null, p_motivo text default null)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare r public.crm_pedidos; nome text; txt text;
+begin
+  if not (public.crm_eh_gestor() or public.crm_eh_logistica()) then raise exception 'quem pausa é a logística ou a gestão'; end if;
+  select * into r from public.crm_pedidos where id = p_id for update;
+  if r.id is null then raise exception 'pedido não encontrado'; end if;
+  if r.situacao not in ('aberto', 'separacao', 'separado') then raise exception 'o pedido já está %', r.situacao; end if;
+  if p_pausar and p_ate is not null and p_ate <= (now() at time zone 'America/Sao_Paulo')::date then raise exception 'a data para voltar tem de ser depois de hoje'; end if;
+  select u.nome into nome from public.crm_usuarios u where u.user_id = auth.uid();
+  txt := case when p_pausar then 'Pedido pausado' || coalesce(' até ' || to_char(p_ate, 'DD/MM/YYYY'), '') || coalesce(': ' || nullif(btrim(p_motivo), ''), '')
+              else 'Pedido retomado (saiu da pausa)' end;
+  update public.crm_pedidos set
+    dados = case when p_pausar then coalesce(dados, '{}'::jsonb) || jsonb_build_object('pausado', jsonb_build_object('ate', p_ate, 'motivo', nullif(btrim(coalesce(p_motivo, '')), ''), 'por', coalesce(nome, ''), 'em', now()))
+                 else coalesce(dados, '{}'::jsonb) - 'pausado' end,
+    comentarios = coalesce(comentarios, '[]'::jsonb) || jsonb_build_array(jsonb_build_object('nome', coalesce(nome, ''), 'quando', now(), 'texto', txt)),
+    atualizado_por = auth.uid(), atualizado_em = now()
+  where id = r.id returning * into r;
+  return public.crm_pedido_saida(r);
+end;
+$$;
+revoke all on function public.crm_pedido_pausar(uuid, boolean, date, text) from public, anon;
+grant execute on function public.crm_pedido_pausar(uuid, boolean, date, text) to authenticated;
+
+-- crm_bolao_montar: dentro do laço, depois de "o pedido % não está em aberto":
+--   if r.pausado then raise exception 'o pedido % está pausado: retome antes de separar', r.numero; end if;
+-- (o select do laço ganhou "public.crm_pedido_pausado(crm_pedidos) pausado"; aplicado por replace no banco).
+
+create or replace function public.crm_pedido_saida(r public.crm_pedidos) returns jsonb
+language plpgsql stable security definer set search_path to 'public' as $function$
+declare cli jsonb := jsonb_build_object('cliente_nome', (select e.nome from public.crm_empresas e where e.id = r.empresa_id));
+begin
+  if public.crm_eh_gestor() or public.crm_eh_comprador() then return to_jsonb(r) || cli; end if;
+  return to_jsonb(r) || cli || jsonb_build_object('itens',
+    coalesce((select jsonb_agg(o.i - 'custo' order by o.n) from jsonb_array_elements(r.itens) with ordinality o(i, n)), '[]'::jsonb));
+end;
+$function$;

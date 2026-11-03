@@ -85,7 +85,12 @@
   const ROTULO_BLOQUEIO = { ESTOQUE: 'estoque', ATRASO: 'duplicata em atraso', 'SEM ENTRADA': 'sem entrada (pagamento antecipado)', 'PREÇO': 'margem geral abaixo do mínimo',
     'SEM ANÁLISE': 'sem análise de crédito', PRAZO: 'prazo além do crédito', LIMITE: 'acima do limite de crédito' };
   // Situação como no Sifn050: BLOQUEADO / LIBERADO / EM SEPARAÇÃO (SP n) / A EMITIR NF / FATURADO / CANCELADO.
+  // Pausado (03/11/2026, Anderson: entregas futuras da Santa Casa ficavam "liberadas" e a logística podia emitir sem querer):
+  // não vai à separação nem à nota; com data, volta sozinho no dia ("até" = o dia em que volta).
+  const hojeSP = () => new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
+  const pausado = p => { const z = p && p.dados && p.dados.pausado; return !!z && ['aberto', 'separacao', 'separado'].indexOf(p.situacao) !== -1 && (!z.ate || String(z.ate).slice(0, 10) > hojeSP()); };
   function situacao(p, notaNumero) {
+    if (pausado(p)) { const ate = p.dados.pausado.ate; return { rotulo: 'PAUSADO' + (ate ? ' ATÉ ' + String(ate).slice(8, 10) + '/' + String(ate).slice(5, 7) : ''), cor: 'cinza', chave: 'pausado' }; }
     if (p.situacao === 'cancelado') return { rotulo: 'CANCELADO', cor: 'cinza', chave: 'cancelado' };
     if (p.situacao === 'faturado') return { rotulo: 'FATURADO' + (notaNumero ? ' NF ' + notaNumero : ''), cor: 'azul', chave: 'faturado' };
     if (p.situacao === 'separado') return { rotulo: 'A EMITIR NF', cor: 'verde', chave: 'separado' };
@@ -109,8 +114,8 @@
       x.pedidos.push({ numero: p.numero, quantidade: num(it.quantidade) });
     }));
     const vazioPorUltimo = (a, b) => (a && !b ? -1 : !a && b ? 1 : String(a).localeCompare(String(b), 'pt-BR', { numeric: true }));
-    return [...m.values()].sort((a, b) => vazioPorUltimo(a.localizacao, b.localizacao) || vazioPorUltimo(a.linha, b.linha) || vazioPorUltimo(a.familia, b.familia) ||
-      String(a.descricao).localeCompare(String(b.descricao), 'pt-BR'));
+    // 03/11/2026 (logística): sem localização no galpão, em ordem alfabética do produto (antes agrupava por linha e família)
+    return [...m.values()].sort((a, b) => vazioPorUltimo(a.localizacao, b.localizacao) || sem(a.descricao).localeCompare(sem(b.descricao), 'pt-BR', { numeric: true }));
   }
 
   // "Últimas compras (F3)" e "Importar últimas compras": o que o cliente comprou nas notas, do mais recente.
@@ -221,7 +226,7 @@
   const FRETE_CONTA = [['0', '0-Remetente (CIF)'], ['1', '1-Destinatário (FOB)'], ['2', '2-Terceiros'], ['9', '9-Sem frete']];
 
   const P = { TABELA_PADRAO, PLANOS_PADRAO, MARGEM_MINIMA, margemMinima, apuraComissao, totalComAjustes, itensParaRepetir, ehVendaCfop, FAIXAS, FRETE_CONTA, ROTULO_BLOQUEIO, tabelaDe, planosDe, planoDoUsuario, precoLiq, totalItem, precoDaFaixa, faixaDoPreco, rotuloFaixa,
-    margem, sobreTabela, abaixoDaTabela, linha, totais, bloqueiosAbertos, situacao, bolao, ultimasCompras, procura, itensDaProposta, entregaDoCliente, entregaTexto };
+    margem, sobreTabela, abaixoDaTabela, linha, totais, bloqueiosAbertos, situacao, pausado, bolao, ultimasCompras, procura, itensDaProposta, entregaDoCliente, entregaTexto };
   raiz.CRMPedidos = P;
   if (typeof module !== 'undefined') module.exports = P;
 })(typeof window !== 'undefined' ? window : globalThis);
@@ -273,7 +278,7 @@
   }
   const recarrega = () => { carregando = false; return carrega(true); };
   const ped = id => (peds || []).find(p => p.id === id);
-  const nomeCliente = p => (CRM.empresa(p.empresa_id) || {}).nome || (p.dados || {}).cliente_nome || '—';
+  const nomeCliente = p => (CRM.empresa(p.empresa_id) || {}).nome || p.cliente_nome || (p.dados || {}).cliente_nome || '—';   // cliente_nome vem do banco (logística e gestora sem o cadastro)
   const notaNumero = p => { if (!p.nota_id) return null; const n = (E().D.notas || []).find(x => x.id === p.nota_id); return n ? n.numero : null; };
   const faltasDe = id => faltas.filter(x => x.pedido_id === id);
   const ctxDe = vendedorId => ({ tabela: P.tabelaDe(E().cfg), plano: P.planoDoUsuario(E().cfg, vendedorId), margemMinima: P.margemMinima(E().cfg) });
@@ -312,7 +317,7 @@
   }
 
   // ------------------------------------------------ lista (Sifn050)
-  const SITS = [['abertos', 'Em andamento'], ['bloqueado', 'Bloqueados'], ['liberado', 'Liberados'], ['separacao', 'Em separação'], ['separado', 'A emitir NF'], ['faturado', 'Faturados'], ['cancelado', 'Cancelados'], ['todos', 'Todos']];
+  const SITS = [['abertos', 'Em andamento'], ['bloqueado', 'Bloqueados'], ['liberado', 'Liberados'], ['separacao', 'Em separação'], ['separado', 'A emitir NF'], ['pausado', 'Pausados'], ['faturado', 'Faturados'], ['cancelado', 'Cancelados'], ['todos', 'Todos']];
   // pesquisa (28/10/2026): nº do pedido, cliente, NF, cidade, vendedor(a) e produto (código ou nome); período pela data do pedido
   const textoPedido = p => [p.numero, nomeCliente(p), notaNumero(p) ? 'NF ' + notaNumero(p) : '', (p.dados && p.dados.entrega && p.dados.entrega.cidade) || '',
     CRM.nomeUsuario(p.vendedor_id), (p.itens || []).map(i => (i.codigo || '') + ' ' + (i.descricao || '')).join(' ')];
@@ -325,7 +330,7 @@
       if (sit !== 'abertos' && sit !== 'todos' && s !== sit) return false;
       if (f.vend && p.vendedor_id !== f.vend) return false;
       return true;
-    });
+    }).map((p, i) => [p, i]).sort((a, b) => (P.pausado(a[0]) ? 1 : 0) - (P.pausado(b[0]) ? 1 : 0) || a[1] - b[1]).map(x => x[0]);   // pausados descem para o fim
   }
   function telaLista() {
     const st = CRM.Lista.estado('pd-lista'), corte = desdeCarga || R.somaDias(CRM.hoje(), -60);
@@ -473,7 +478,7 @@
       '<p>' + esc([P.entregaTexto(d.entrega), d.telefone, p.entrega ? 'Entrega ' + R.dataBR(p.entrega) : '', d.transportadora ? 'Transporte: ' + d.transportadora : '', d.volumes ? d.volumes + ' volume(s)' : ''].filter(Boolean).join(' · ')) + '</p>' +
       (d.texto_nota ? '<p><strong>Texto da nota:</strong> ' + esc(d.texto_nota) + '</p>' : '') + (d.observacoes ? '<p><strong>Obs.:</strong> ' + esc(d.observacoes) + '</p>' : '') +
       '<table><thead><tr><th>✓</th><th>Item</th><th>Código</th><th>Produto</th><th>Qtde</th><th>Un</th></tr></thead><tbody>' +
-      (p.itens || []).map((it, i) => '<tr><td class="cx"></td><td>' + (i + 1) + '</td><td>' + esc(it.codigo || '') + '</td><td>' + esc(it.descricao) + '</td><td class="n">' + qtd(it.quantidade) + '</td><td>' + esc(it.unidade || '') + '</td></tr>').join('') +
+      (p.itens || []).map((it, i) => [it, i]).sort((a, b) => sem(a[0].descricao).localeCompare(sem(b[0].descricao), 'pt-BR', { numeric: true })).map(([it, i]) => '<tr><td class="cx"></td><td>' + (i + 1) + '</td><td>' + esc(it.codigo || '') + '</td><td>' + esc(it.descricao) + '</td><td class="n">' + qtd(it.quantidade) + '</td><td>' + esc(it.unidade || '') + '</td></tr>').join('') +
       '</tbody></table><p class="ass">Separado por: ____________________ &nbsp; Conferido por: ____________________</p></section>';
   }
 
@@ -487,13 +492,17 @@
     if (gest && p.situacao === 'aberto' && (p.bloqueios || []).length) botoes.push(bAbertos.length ? '<button type="button" class="btn verde" data-acao="pd-liberar" data-id="' + esc(p.id) + '">Liberar</button>'
       : '<button type="button" class="btn sec" data-acao="pd-desliberar" data-id="' + esc(p.id) + '">Desfazer liberação</button>');
     if (gest && p.situacao === 'aberto' && ((p.bloqueios || []).indexOf('SEM ENTRADA') !== -1 || p.entrada_ok)) botoes.push('<button type="button" class="btn sec" data-acao="pd-entrada" data-id="' + esc(p.id) + '">' + (p.entrada_ok ? 'Desfazer "entrada recebida"' : 'Entrada recebida') + '</button>');
-    if (ehOp() && p.situacao === 'aberto' && !bAbertos.length) botoes.push('<button type="button" class="btn" data-acao="pd-bolao-um" data-id="' + esc(p.id) + '">Mandar para separação</button>');
+    const pz = P.pausado(p);
+    if (ehOp() && ['aberto', 'separacao', 'separado'].indexOf(p.situacao) !== -1) botoes.push(pz
+      ? '<button type="button" class="btn verde" data-acao="pd-retomar" data-id="' + esc(p.id) + '">▶ Retomar</button>'
+      : '<button type="button" class="btn sec" data-acao="pd-pausar" data-id="' + esc(p.id) + '" title="Entrega futura ou com data marcada: não vai à separação nem à nota até retomar">⏸ Pausar</button>');
+    if (ehOp() && p.situacao === 'aberto' && !bAbertos.length && !pz) botoes.push('<button type="button" class="btn" data-acao="pd-bolao-um" data-id="' + esc(p.id) + '">Mandar para separação</button>');
     if (!podeEditar(p) && ['aberto', 'separacao', 'separado'].indexOf(p.situacao) !== -1 && (ehOp() || (p.situacao === 'aberto' && p.vendedor_id === CRM.meuId())))
       botoes.push('<button type="button" class="btn sec" data-acao="pd-editar-dados" data-id="' + esc(p.id) + '" title="Forma de pagamento, data, endereço de entrega e textos — até a nota ser emitida">✎ Editar dados</button>');
-    if (ehOp() && p.situacao === 'separacao') botoes.push('<button type="button" class="btn verde" data-acao="pd-separado" data-id="' + esc(p.id) + '">Separado ✓</button>');
+    if (ehOp() && p.situacao === 'separacao' && !pz) botoes.push('<button type="button" class="btn verde" data-acao="pd-separado" data-id="' + esc(p.id) + '">Separado ✓</button>');
     if (ehOp() && (p.situacao === 'separacao' || p.situacao === 'separado')) botoes.push('<button type="button" class="btn sec" data-acao="pd-voltar-aberto" data-id="' + esc(p.id) + '">Voltar ao aberto</button>');
-    if (CRM.nfe && CRM.nfe.podeEmitir(p)) botoes.push('<button type="button" class="btn' + (p.situacao === 'separado' ? ' verde' : '') + '" data-acao="nf-emitir" data-id="' + esc(p.id) + '">Emitir NF-e</button>');
-    if (CRM.nfe && CRM.nfe.podeEmitir(p) && CRM.nfe.outraDoPedido) botoes.push('<button type="button" class="btn sec" data-acao="nf-outra-pedido" data-id="' + esc(p.id) + '" title="bonificação ou entrega futura">Outra operação…</button>');
+    if (CRM.nfe && CRM.nfe.podeEmitir(p) && !pz) botoes.push('<button type="button" class="btn' + (p.situacao === 'separado' ? ' verde' : '') + '" data-acao="nf-emitir" data-id="' + esc(p.id) + '">Emitir NF-e</button>');
+    if (CRM.nfe && CRM.nfe.podeEmitir(p) && !pz && CRM.nfe.outraDoPedido) botoes.push('<button type="button" class="btn sec" data-acao="nf-outra-pedido" data-id="' + esc(p.id) + '" title="bonificação ou entrega futura">Outra operação…</button>');
     if (ehOp() && ['aberto', 'separacao', 'separado'].indexOf(p.situacao) !== -1) botoes.push('<button type="button" class="btn sec" data-acao="pd-faturar" data-id="' + esc(p.id) + '" title="ligar a nota que o FKN emitiu">Faturar (nota do FKN)…</button>');
     if (CRM.ehGestor() && p.situacao === 'faturado') botoes.push('<button type="button" class="btn sec" data-acao="pd-desfaturar" data-id="' + esc(p.id) + '">Desfazer faturado</button>');
     if ((p.situacao === 'aberto' && ehVenda()) || (ehOp() && ['separacao', 'separado'].indexOf(p.situacao) !== -1)) botoes.push('<button type="button" class="btn perigo" data-acao="pd-cancelar" data-id="' + esc(p.id) + '">Cancelar pedido</button>');
@@ -518,6 +527,8 @@
       corpo = gradeProdutos(p.itens || [], { ctx, faltas: fs, ler: true }) + rodapeTotais(t);
     }
     return '<section class="cartao pd-janela"><header class="pd-topo"><button type="button" class="btn sec" data-acao="pd-fechar">← Voltar</button><h2>Pedido ' + esc(p.numero) + ' · ' + esc(nomeCliente(p)) + '</h2>' + CRM.selo(s.rotulo, s.cor) + '</header>' +
+      (pz ? '<p class="aviso-notas">⏸ <strong>Pausado</strong>' + (p.dados.pausado.ate ? ' até ' + esc(R.dataBR(String(p.dados.pausado.ate).slice(0, 10))) + ' (volta sozinho nesse dia)' : ' até alguém clicar em "Retomar"') +
+        (p.dados.pausado.motivo ? ' · ' + esc(p.dados.pausado.motivo) : '') + (p.dados.pausado.por ? ' · por ' + esc(p.dados.pausado.por) : '') + '. Não vai à separação nem à nota.</p>' : '') +
       (bAbertos.length ? '<p class="alerta">Bloqueado por: <strong>' + esc(bAbertos.map(b => P.ROTULO_BLOQUEIO[b] || b).join(', ')) + '</strong>.' + (gest ? ' Confira e clique em "Liberar".' : ' Quem libera é a gestora ou a logística.') +
         (bAbertos.some(b => ['SEM ANÁLISE', 'PRAZO', 'LIMITE'].indexOf(b) !== -1) ? ' O crédito (' + esc(bAbertos.filter(b => ['SEM ANÁLISE', 'PRAZO', 'LIMITE'].indexOf(b) !== -1).map(b => P.ROTULO_BLOQUEIO[b]).join(', ')) + ') só o administrador libera.' + (CRM.ehAdmin() && CRM.credito && CRM.credito.analisar ?
           ' <button type="button" class="btn" data-acao="pd-credito" data-id="' + esc(p.id) + '" title="Abre a análise de crédito deste cliente aqui mesmo; ao aprovar, a trava do crédito sai do pedido">💳 Analisar o crédito do cliente</button>' : '') +
@@ -1079,6 +1090,15 @@
     'pd-novo': () => { aberto = null; ed = novoEd(); CRM.render(); },
     'pd-de-proposta': id => CRM.pedidos.deProposta(id),
     'pd-novo-negocio': id => { const n = CRM.negocio(id); if (n) CRM.pedidos.novo({ empresa_id: n.empresa_id, negocio_id: n.id, vendedor_id: n.responsavel_id || CRM.meuId() }); },
+    'pd-pausar': id => {
+      const p = ped(id); if (!p) return;
+      CRM.abrirForm({ titulo: '⏸ Pausar o pedido ' + p.numero,
+        intro: 'Pausado, o pedido não vai à separação nem à nota e desce para o fim da lista. Com data, ele volta sozinho nesse dia; sem data, fica pausado até alguém clicar em "Retomar".',
+        campos: [{ nome: 'ate', rotulo: 'Volta sozinho em (opcional)', tipo: 'data', ajuda: 'ex.: o dia combinado da entrega futura' }, { nome: 'motivo', rotulo: 'Motivo', largo: true, dica: 'ex.: entrega futura, cliente pediu para segurar' }],
+        valores: { motivo: p.dados && p.dados.remessa_futura ? 'Entrega futura' : '' }, salvarTexto: 'Pausar',
+        aoSalvar: async v => { troca(await CRM.store().pedidoPausar(id, true, v.ate || null, v.motivo || null)); CRM.toast('Pedido ' + p.numero + ' pausado.'); CRM.render(); } });
+    },
+    'pd-retomar': vivo(async id => { const p = ped(id); troca(await CRM.store().pedidoPausar(id, false)); CRM.toast('Pedido ' + (p && p.numero) + ' retomado.'); CRM.render(); }),
     'pd-editar-dados': id => { const p = ped(id); if (p) formEditarDados(p); },
     'pd-editar': id => { const p = ped(id); if (p) { ed = edDePedido(p); aberto = null; CRM.render(); } },
     'pd-ed-sair': () => {

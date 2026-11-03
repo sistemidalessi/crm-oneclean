@@ -517,7 +517,7 @@
   }
 
   // Botão e notas do pedido (tela do pedido em pedidos.js).
-  const podeEmitir = p => ehOp() && !!fiscalCfg().emitente && (p.situacao === 'separado' || p.situacao === 'separacao' ||
+  const podeEmitir = p => ehOp() && !!fiscalCfg().emitente && !((globalThis.CRMPedidos || {}).pausado || (() => false))(p) && (p.situacao === 'separado' || p.situacao === 'separacao' ||
     (p.situacao === 'aberto' && !(p.bloqueios || []).some(b => (p.liberado || []).indexOf(b) === -1)));
   function doPedido(p) {
     if (!ehOp()) return '';
