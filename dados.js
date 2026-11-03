@@ -1805,6 +1805,12 @@
   Supa.prototype.entregasCriar = async function (linhas) { return unwrap(await this.sb.from('crm_entregas').insert(linhas).select('id')); };
   Supa.prototype.entregaAtualizar = async function (id, patch) { return unwrap(await this.sb.from('crm_entregas').update(patch).eq('id', id).select('id').single()); };
   // caminhões (03/11/2026): cadastro e o caminhão de cada motorista no dia
+  // boletos feitos no site do BB lidos como pagos (03/11/2026; só o administrador lê)
+  Supa.prototype.bbSite = async function (desde) {
+    return unwrap(await this.sb.from('crm_bb_site').select('nosso_numero, situacao, titulo_duplicata, cliente, seu_numero, valor, pago, vencimento, credito, motivo')
+      .or('situacao.in.(duvida,sem_titulo),and(situacao.eq.baixado,credito.gte.' + desde + ')').order('credito', { ascending: false }).limit(300)) || [];
+  };
+  Supa.prototype.bbSiteResolver = async function (nn, obs) { return unwrap(await this.sb.rpc('crm_bb_site_resolver', { p_nosso: nn, p_obs: obs })); };
   Supa.prototype.veiculos = async function () { return unwrap(await this.sb.from('crm_veiculos').select('*').order('nome')) || []; };
   Supa.prototype.veiculoGravar = async function (v) {
     const d = { nome: String(v.nome || '').trim(), placa: String(v.placa || '').trim().toUpperCase() || null, ativo: v.ativo !== false };

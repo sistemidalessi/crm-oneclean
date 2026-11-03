@@ -8923,3 +8923,124 @@ begin
 end $function$;
 revoke all on function public.crm_rota_dia(date) from public, anon;
 grant execute on function public.crm_rota_dia(date) to authenticated;
+
+-- ============================================================ Boletos feitos no site do BB (03/11/2026)
+-- Baixa dos boletos feitos no SITE do BB (03/11/2026, Anderson: "pode começar pelos boletos do site"). As notas antigas do FKN
+-- têm boleto feito à mão no site do banco; o CRM já lia todos os liquidados do convênio (crm-bb, a cada 10 min) mas só baixava
+-- os que ele registrou. Agora, para cada liquidado que não é do CRM, a crm-bb busca no BB o pagador (CNPJ) e o "seu número" e
+-- esta função acha o título: pelo seu número (= duplicata, sem a barra) e, se não der, por CNPJ + valor + vencimento. Só baixa
+-- quando há UM título certo; o resto fica em crm_bb_site para o administrador olhar (dúvida / sem título / já recebido).
+-- A baixa é igual à do boleto do CRM: entrada "Recebido" paga no Caixa no dia do crédito, ligada à duplicata.
+-- Migração boletos_do_site_bb (aplicada) + 2 ajustes no mesmo dia (já recebido pela duplicata do seu número). 1ª rodada real
+-- (03/11, 19h30): 60 boletos do site lidos — 28 baixados (R$ 23.986,75), 31 já recebidos antes da virada, 1 para o administrador.
+create table if not exists public.crm_bb_site (
+  nosso_numero text primary key,
+  situacao text not null check (situacao in ('baixado', 'ja_recebido', 'duvida', 'sem_titulo')),
+  titulo_duplicata text, empresa_id uuid, cliente text, doc text, seu_numero text,
+  valor numeric, pago numeric, vencimento date, credito date, motivo text, caixa_lancamento uuid,
+  dados jsonb, visto_em timestamptz not null default now(), criado_em timestamptz not null default now()
+);
+alter table public.crm_bb_site enable row level security;
+drop policy if exists ler_admin on public.crm_bb_site;
+create policy ler_admin on public.crm_bb_site for select to authenticated using ((select public.crm_eh_admin()));
+revoke all on public.crm_bb_site from anon;
+grant select on public.crm_bb_site to authenticated;
+
+create or replace function public.crm_bb_site_casar(p_itens jsonb) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare it jsonb; nn text; doc text; seu text; vl numeric; venc date; dia date; pago numeric; t public.crm_titulos; n integer; como text;
+  ja public.crm_bb_site; lid uuid; nome text; sit text; mot text; out jsonb := '[]'::jsonb; nb integer := 0;
+begin
+  if not (public.crm_eh_admin() or coalesce(auth.jwt() ->> 'role', '') = 'service_role') then raise exception 'só o administrador'; end if;
+  for it in select * from jsonb_array_elements(coalesce(p_itens, '[]'::jsonb)) loop
+    nn := regexp_replace(coalesce(it ->> 'nosso_numero', ''), '\D', '', 'g');
+    if nn = '' then continue; end if;
+    select * into ja from public.crm_bb_site where nosso_numero = nn;
+    if ja.situacao in ('baixado', 'ja_recebido') then continue; end if;
+    if exists (select 1 from public.crm_boletos_bb where nosso_numero = nn) then continue; end if;   -- boleto do CRM: a outra rotina cuida
+    doc := nullif(regexp_replace(coalesce(it ->> 'doc', ''), '\D', '', 'g'), '');
+    seu := nullif(regexp_replace(coalesce(it ->> 'seu', ''), '\D', '', 'g'), '');
+    vl := nullif(it ->> 'valor', '')::numeric; venc := nullif(it ->> 'vencimento', '')::date;
+    dia := coalesce(nullif(it ->> 'credito', '')::date, nullif(it ->> 'ocorrencia', '')::date, (now() at time zone 'America/Sao_Paulo')::date);
+    pago := round(coalesce(nullif(it ->> 'pago', '')::numeric, vl), 2);
+    t := null; como := null; sit := null; mot := null; nome := null;
+    -- 1) pelo seu número (o do site costuma ser a duplicata do FKN), conferindo o CNPJ quando o banco manda
+    if seu is not null then
+      select count(*) into n from public.crm_titulos x where not x.abono
+         and (regexp_replace(x.duplicata, '\D', '', 'g') = seu or ltrim(regexp_replace(x.duplicata, '\D', '', 'g'), '0') = ltrim(seu, '0'))
+         and (doc is null or regexp_replace(coalesce(x.cliente_doc, ''), '\D', '', 'g') = doc);
+      if n = 1 then
+        select * into t from public.crm_titulos x where not x.abono
+           and (regexp_replace(x.duplicata, '\D', '', 'g') = seu or ltrim(regexp_replace(x.duplicata, '\D', '', 'g'), '0') = ltrim(seu, '0'))
+           and (doc is null or regexp_replace(coalesce(x.cliente_doc, ''), '\D', '', 'g') = doc);
+        como := 'seu número';
+      end if;
+    end if;
+    -- 2) por CNPJ + valor + vencimento (um título só)
+    if t.id is null and doc is not null and vl is not null and venc is not null then
+      select count(*) into n from public.crm_titulos x where not x.abono and regexp_replace(coalesce(x.cliente_doc, ''), '\D', '', 'g') = doc
+         and abs(x.valor - vl) < 0.005 and x.vencimento = venc;
+      if n = 1 then
+        select * into t from public.crm_titulos x where not x.abono and regexp_replace(coalesce(x.cliente_doc, ''), '\D', '', 'g') = doc
+           and abs(x.valor - vl) < 0.005 and x.vencimento = venc;
+        como := 'CNPJ, valor e vencimento';
+      elsif n > 1 then sit := 'duvida'; mot := n || ' títulos do mesmo cliente com o mesmo valor e vencimento';
+      end if;
+    end if;
+    -- sem título em aberto, mas a duplicata (nota do seu número + valor) já tem entrada paga no Caixa: título que saiu com a
+    -- última listagem do FKN e já foi recebido (03/11/2026: os 31 pagos de 27 a 30/10)
+    if t.id is null and sit is null and seu is not null and exists (select 1 from public.crm_fin_lancamentos l where l.tipo = 'entrada' and l.situacao = 'pago'
+         and ltrim(split_part(coalesce(l.titulo_duplicata, ''), '/', 1), '0') = ltrim(regexp_replace(split_part(replace(coalesce(it ->> 'seu', ''), '/', '-'), '-', 1), '\D', '', 'g'), '0')
+         and (abs(l.valor - coalesce(vl, -1)) < 0.01 or abs(l.valor - coalesce(pago, -1)) < 0.01)) then
+      sit := 'ja_recebido'; mot := 'o título já tinha saído com a listagem do FKN e tem entrada paga no Caixa';
+    end if;
+    if t.id is null and sit is distinct from 'ja_recebido' then
+      if sit is null then
+        sit := case when doc is null then 'duvida' else 'sem_titulo' end;
+        mot := case when doc is null then 'o banco não mandou o CNPJ do pagador' else 'nenhum título em aberto com esse CNPJ, valor e vencimento' end;
+      end if;
+    elsif t.id is null then null;
+    elsif exists (select 1 from public.crm_fin_lancamentos l where l.titulo_duplicata = t.duplicata and l.tipo = 'entrada' and l.situacao = 'pago') then
+      sit := 'ja_recebido'; mot := 'o título já tinha entrada no Caixa (achado pelo ' || como || ')';
+    elsif exists (select 1 from public.crm_boletos_bb b where b.duplicata = t.duplicata and b.situacao in ('preparado', 'registrado', 'pago')) then
+      sit := 'duvida'; mot := 'o título também tem boleto do CRM (' || t.duplicata || ')';
+    else
+      nome := coalesce((select e.nome from public.crm_empresas e where e.id = t.empresa_id), t.cliente_nome, 'Cliente');
+      lid := null;
+      update public.crm_fin_lancamentos set situacao = 'pago', pago_em = dia, baixa = 'caixa', baixado_em = now(), valor = pago,
+          observacoes = concat_ws(' ', observacoes, 'Boleto BB (feito no site) pago (nosso número ' || nn || ').'), atualizado_em = now()
+       where id = (select l.id from public.crm_fin_lancamentos l where l.titulo_duplicata = t.duplicata and l.situacao = 'aberto' and l.tipo = 'entrada' order by l.vencimento limit 1)
+       returning id into lid;
+      if lid is null then
+        insert into public.crm_fin_lancamentos (tipo, descricao, categoria, valor, vencimento, situacao, pago_em, baixa, baixado_em, origem, titulo_duplicata, entre_empresas, observacoes)
+        values ('entrada', 'Recebido: ' || nome || ' · ' || t.duplicata, 'Duplicatas recebidas', pago, t.vencimento, 'pago', dia, 'caixa', now(), 'titulo', t.duplicata,
+                nome ~* 'agilit', 'Boleto BB (feito no site) pago (nosso número ' || nn || '; achado pelo ' || como || ')' ||
+                case when pago <> t.valor then '; título de ' || to_char(t.valor, 'FM999G999G990D00') || ', entrou ' || to_char(pago, 'FM999G999G990D00') else '' end || '.')
+        returning id into lid;
+      end if;
+      sit := 'baixado'; mot := 'achado pelo ' || como; nb := nb + 1;
+    end if;
+    insert into public.crm_bb_site (nosso_numero, situacao, titulo_duplicata, empresa_id, cliente, doc, seu_numero, valor, pago, vencimento, credito, motivo, caixa_lancamento, dados, visto_em)
+    values (nn, sit, t.duplicata, t.empresa_id, coalesce(nome, t.cliente_nome, nullif(it ->> 'nome', '')), doc, nullif(it ->> 'seu', ''), vl, pago, venc, dia, mot, lid, it -> 'dados', now())
+    on conflict (nosso_numero) do update set situacao = excluded.situacao, titulo_duplicata = excluded.titulo_duplicata, empresa_id = excluded.empresa_id,
+      cliente = excluded.cliente, doc = excluded.doc, seu_numero = excluded.seu_numero, valor = excluded.valor, pago = excluded.pago, vencimento = excluded.vencimento,
+      credito = excluded.credito, motivo = excluded.motivo, caixa_lancamento = excluded.caixa_lancamento, dados = excluded.dados, visto_em = now();
+    out := out || jsonb_build_object('nosso_numero', nn, 'situacao', sit, 'duplicata', t.duplicata, 'motivo', mot);
+  end loop;
+  return jsonb_build_object('baixados', nb, 'itens', out);
+end;
+$$;
+revoke all on function public.crm_bb_site_casar(jsonb) from public, anon, authenticated;
+grant execute on function public.crm_bb_site_casar(jsonb) to service_role;
+
+-- o administrador resolve à mão o que ficou em dúvida ou sem título (depois de dar o "Recebi" ou de ver que não é da OneClean)
+create or replace function public.crm_bb_site_resolver(p_nosso text, p_obs text) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  if not public.crm_eh_admin() then raise exception 'só o administrador'; end if;
+  update public.crm_bb_site set situacao = 'ja_recebido', motivo = concat_ws(' · ', motivo, 'resolvido à mão: ' || coalesce(nullif(btrim(p_obs), ''), 'ok')), visto_em = now()
+   where nosso_numero = p_nosso and situacao in ('duvida', 'sem_titulo');
+end;
+$$;
+revoke all on function public.crm_bb_site_resolver(text, text) from public, anon;
+grant execute on function public.crm_bb_site_resolver(text, text) to authenticated;

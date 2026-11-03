@@ -36,11 +36,24 @@
   // titulos() (o "Recebi" e a frase acham ele) e no bloco "Em cartório".
   const titulosCaixa = () => titulos().filter(t => !t.cartorio_em);
 
+  let bbSite = null;
+  function blocoSite(b, tot) {
+    const l = bbSite || [], pend = l.filter(x => x.situacao === 'duvida' || x.situacao === 'sem_titulo'), feitos = l.filter(x => x.situacao === 'baixado');
+    const tp = arr => arr.reduce((t, x) => t + Number(x.pago || 0), 0);
+    return (pend.length ? '<details class="cartao cx-venc" data-chave="bb-site" open><summary><strong>Boletos do site do BB pagos, sem título certo: ' + pend.length + ' (' + esc(R.moeda(tp(pend))) + ')</strong> <small>o banco diz que foi pago, mas o CRM não achou um título só para dar a baixa. Veja e dê o "Recebi" no título certo (ou lance a entrada); depois "Já resolvi".</small></summary>' +
+        '<div class="tabela-rolagem"><table class="tabela"><tbody>' + pend.map(x => '<tr><td>' + esc(x.cliente || '—') + '<small>seu número ' + esc(x.seu_numero || '—') + (x.vencimento ? ' · vencia ' + esc(R.dataBR(x.vencimento)) : '') + ' · ' + esc(x.motivo || '') + '</small></td>' +
+          '<td>crédito ' + esc(dm(x.credito)) + '</td><td class="num">' + esc(R.moeda(x.pago)) + '</td><td class="acoes-linha">' + b('cx-bbsite-ok', x.nosso_numero, 'Já resolvi') + '</td></tr>').join('') + '</tbody></table></div></details>' : '') +
+      (feitos.length ? '<details class="cartao cx-venc" data-chave="bb-site-feitos"><summary><strong>Boletos do site do BB baixados sozinhos (7 dias): ' + feitos.length + ' (' + esc(R.moeda(tp(feitos))) + ')</strong> <small>pagos no banco: o CRM achou o título (pelo seu número ou por CNPJ, valor e vencimento) e lançou a entrada no dia do crédito.</small></summary>' +
+        '<div class="tabela-rolagem"><table class="tabela"><tbody>' + feitos.map(x => '<tr><td>' + esc(x.cliente || '—') + '<small>duplicata ' + esc(x.titulo_duplicata || '') + ' · ' + esc(x.motivo || '') + '</small></td><td>crédito ' + esc(dm(x.credito)) + '</td><td class="num">' + esc(R.moeda(x.pago)) + '</td></tr>').join('') +
+        '</tbody></table></div></details>' : '');
+  }
   async function carrega() {
     if (lendo) return;
     lendo = true;
     lidoEm = Date.now();
     try { F = await CRM.store().carregarFin(); } catch (e) { if (!F) F = { recorrentes: [], lancamentos: [], saldos: [], regras: [], baixados: [], excluidos: [] }; CRM.falhou(e); }
+    // boletos feitos no site do BB que o CRM leu como pagos (03/11/2026): os baixados sozinhos e os que pedem um olhar
+    try { bbSite = CRM.store().bbSite ? await CRM.store().bbSite(R.somaDias(hoje(), -7)) : []; } catch (e) { bbSite = bbSite || []; }
     // previsão (ex.: material vendido à Agilité) que tem título igual do FKN: grava a ligação, para o
     // ✓ do título baixar a previsão em vez de criar outra entrada (caixa-calculo.js, ligacoesTitulos)
     try {
@@ -657,10 +670,10 @@
     const antigos = rvTodos.length - rv.length;
     const tot = l => l.reduce((t, x) => t + Number(x.valor || 0), 0);
     const b = (acao, id, rot, cls, dica) => '<button type="button" class="mini' + (cls ? ' ' + cls : '') + '" data-acao="' + acao + '" data-id="' + esc(id) + '"' + (dica ? ' title="' + esc(dica) + '"' : '') + '>' + esc(rot) + '</button>';
-    const bx = baixados();
+    const bx = baixados(), site = blocoSite(b, tot);
     const recebidosJa = new Set(F.lancamentos.filter(l => l.titulo_duplicata && l.situacao === 'pago').map(l => l.titulo_duplicata));
     const cart = titulos().filter(t => t.cartorio_em && !recebidosJa.has(t.duplicata)).sort((a, b) => a.cartorio_em.localeCompare(b.cartorio_em));
-    return (bx.length ? '<details class="cartao cx-venc cx-baixados" data-chave="baixados-fkn" open><summary><strong>Baixados no FKN, sem entrada no caixa: ' + bx.length + ' (' + esc(R.moeda(tot(bx))) + ')</strong> <small>saíram do contas a receber do FKN sem "Recebi" aqui — fora do saldo até você dizer. Entrou no banco? "Entrou". Abatimento, devolução ou cancelamento? "Não entrou".</small></summary>' +
+    return site + (bx.length ? '<details class="cartao cx-venc cx-baixados" data-chave="baixados-fkn" open><summary><strong>Baixados no FKN, sem entrada no caixa: ' + bx.length + ' (' + esc(R.moeda(tot(bx))) + ')</strong> <small>saíram do contas a receber do FKN sem "Recebi" aqui — fora do saldo até você dizer. Entrou no banco? "Entrou". Abatimento, devolução ou cancelamento? "Não entrou".</small></summary>' +
       '<div class="tabela-rolagem"><table class="tabela"><tbody>' + bx.map(x => '<tr><td>' + esc(nomeTitulo(x)) + '<small>duplicata ' + esc(x.duplicata) + (x.vencimento ? ' · venceu ' + esc(R.dataBR(x.vencimento)) : '') + '</small></td><td>baixado no FKN ' + esc(dm(String(x.sumiu_em || '').slice(0, 10))) + '</td>' +
         '<td class="num">' + esc(R.moeda(x.valor)) + '</td><td class="acoes-linha">' + b('cx-bx-entrou', x.id, 'Entrou…') + b('cx-bx-nao', x.id, 'Não entrou') + '</td></tr>').join('') + '</tbody></table></div></details>' : '') +
       (v.length ? '<details class="cartao cx-venc"><summary><strong>Contas vencidas sem baixa: ' + v.length + ' (' + esc(R.moeda(tot(v))) + ')</strong> <small>fora do saldo da grade. Pagou no vencimento e não deu baixa? "Paguei em …" (desconta do saldo). Já descontada no saldo do banco que você informou? "Já estava paga" (não mexe no saldo). Vai negociar? "Pausar".</small></summary>' +
@@ -1046,6 +1059,14 @@
     },
     'cx-pagar': (id, el) => { fecha(); const l = lanc(id); if (l) pagar(l, diaDaBaixa(el && el.dataset.dia)).catch(CRM.falhou); },
     'cx-bx-entrou': id => { const x = baixados().find(y => y.id === id); if (x) formBaixado(x); },
+    'cx-bbsite-ok': nn => {
+      const x = (bbSite || []).find(y => y.nosso_numero === nn);
+      if (!x) return;
+      CRM.abrirForm({ titulo: 'Boleto do site · ' + (x.cliente || x.seu_numero || ''), intro: 'Pago em ' + R.dataBR(x.credito) + ': ' + R.moeda(x.pago) + '. ' + (x.motivo || '') +
+          '\nSe o dinheiro precisa entrar no Caixa, dê o "Recebi" no título (ou lance a entrada) antes. Aqui só tira o boleto da lista.',
+        campos: [{ nome: 'obs', rotulo: 'O que foi feito', tipo: 'textarea', largo: true, dica: 'ex.: juros do boleto da NF 2559, lancei como entrada avulsa' }], salvarTexto: 'Tirar da lista',
+        aoSalvar: async v => { await CRM.store().bbSiteResolver(nn, v.obs || ''); bbSite = await CRM.store().bbSite(R.somaDias(hoje(), -7)); CRM.toast('Tirado da lista.'); CRM.render(); } });
+    },
     'cx-bx-nao': id => { const x = baixado(id); if (x) naoEntrouBaixado(x).catch(CRM.falhou); },
     // Pagou no vencimento e não deu baixa (08/10/2026, Anderson: "paguei ontem, só não dei baixa"): baixa
     // no caixa com a data do vencimento — conta no saldo se for depois do último saldo do BB informado.

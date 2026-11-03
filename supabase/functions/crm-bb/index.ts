@@ -6,6 +6,8 @@
 //   POST { acao: 'maior_numero' }    o maior nosso número já usado no convênio (só o número), para começar a faixa do CRM
 //   POST { acao: 'registrar', ids? } registra no banco os boletos preparados (caminho 'api')
 //   POST { acao: 'pagos', dias? }    lê os boletos liquidados e dá a baixa (crm_boleto_bb_retorno: título, Caixa no dia do crédito)
+//                                    e, desde 03/11/2026, também os feitos no site do BB (crm_bb_site_casar: título certo pelo seu
+//                                    número ou por CNPJ + valor + vencimento; o resto fica em crm_bb_site para o administrador)
 //   POST { acao: 'baixar_canceladas' } baixa no banco o boleto de nota cancelada (02/11/2026): o cliente não consegue mais pagar
 //   POST { acao: 'ciclo' }           o do agendador (pg_cron crm-bb-ciclo, a cada 10 min das 7h às 20h50): prepara as parcelas
 //                                    das notas do CRM, registra, baixa os das notas canceladas e lê os pagos
@@ -169,17 +171,55 @@ Deno.serve(async (req) => {
       const l = await lista(tk, b, 'B', maisDias(hojeSP(), -dias), hojeSP(), '&codigoEstadoTituloCobranca=6');
       const nossos = l.map(x => dig(x.numeroBoletoBB).slice(3)).filter(n => n.length === 17);
       if (!nossos.length) return { liquidados: 0 };
+      // boletos feitos no SITE do BB (notas antigas do FKN; 03/11/2026): o que não é do CRM vai à crm_bb_site_casar com o
+      // pagador e o "seu número" do detalhe do boleto; ela só baixa quando acha UM título certo (o resto fica para o administrador)
+      let site: any = null;
+      try { site = await doSite(tk, l, nossos); } catch (e) { site = { erro: String((e as Error).message || e).slice(0, 200) }; console.error('[crm-bb] site', e); }
       const { data: meus } = await db.from('crm_boletos_bb').select('nosso_numero').in('nosso_numero', nossos).neq('situacao', 'pago');
       const set = new Set((meus || []).map((m: any) => m.nosso_numero));
       const itens = l.filter(x => set.has(dig(x.numeroBoletoBB).slice(3))).map(x => ({
         nosso_numero: dig(x.numeroBoletoBB).slice(3), movimento: '06', credito: iso(x.dataCredito) || iso(x.dataMovimento), ocorrencia: iso(x.dataMovimento),
         pago: x.valorPago ?? x.valorAtual ?? null, tarifa: null, origem: 'api'
       }));
-      if (!itens.length) return { liquidados: 0 };
+      if (!itens.length) return { liquidados: 0, site };
       const ass = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode('api|' + JSON.stringify(itens))))].map(x => x.toString(16).padStart(2, '0')).join('');
       const { data, error } = await db.rpc('crm_boleto_bb_retorno', { p_assinatura: ass, p_cab: { convenio: String(b.convenio), origem: 'api' }, p_itens: itens });
       if (error) throw new Error('baixa: ' + error.message);
-      return { liquidados: (data?.liquidados || []).length, resumo: data };
+      return { liquidados: (data?.liquidados || []).length, resumo: data, site };
+    }
+    async function doSite(tk: string, l: any[], nossos: string[]) {
+      const { data: doCrm } = await db.from('crm_boletos_bb').select('nosso_numero').in('nosso_numero', nossos);
+      const crm = new Set((doCrm || []).map((m: any) => m.nosso_numero));
+      const { data: vistos } = await db.from('crm_bb_site').select('nosso_numero, situacao, visto_em').in('nosso_numero', nossos);
+      // já resolvidos ficam de fora; dúvida e sem título voltam a ser conferidos a cada 6 horas (o título pode ter entrado)
+      const pula = new Set((vistos || []).filter((v: any) => ['baixado', 'ja_recebido'].includes(v.situacao) || Date.now() - Date.parse(v.visto_em) < 6 * 3600e3).map((v: any) => v.nosso_numero));
+      const alvo = l.filter(x => { const n = dig(x.numeroBoletoBB).slice(3); return n.length === 17 && !crm.has(n) && !pula.has(n); }).slice(0, 30);
+      if (!alvo.length) return { vistos: 0 };
+      const itens: any[] = [];
+      for (const x of alvo) {
+        let d: any = {};
+        try {
+          const r = await fetch(COBRANCA + '/boletos/' + dig(x.numeroBoletoBB) + '?numeroConvenio=' + encodeURIComponent(String(b.convenio)) + '&gw-dev-app-key=' + APP(), { headers: { Authorization: 'Bearer ' + tk } });
+          const t = await r.text(); try { d = JSON.parse(t) || {}; } catch { d = {}; }
+          if (!r.ok) d = { erro: r.status + ' ' + msgBB(d, t) };
+        } catch (e) { d = { erro: String((e as Error).message || e).slice(0, 120) }; }
+        const pg = d.pagador || {};
+        itens.push({
+          nosso_numero: dig(x.numeroBoletoBB).slice(3),
+          doc: dig(d.numeroInscricaoSacadoCobranca ?? pg.numeroInscricao ?? pg.numeroInscricaoPagador ?? d.numeroInscricaoPagador ?? ''),
+          seu: String(d.numeroTituloCedenteCobranca ?? d.numeroTituloBeneficiario ?? x.numeroTituloBeneficiario ?? '').trim(),
+          nome: String(d.nomeSacadoCobranca ?? pg.nome ?? '').trim(),
+          valor: d.valorOriginalTituloCobranca ?? x.valorOriginal ?? null,
+          vencimento: iso(d.dataVencimentoTituloCobranca) || iso(x.dataVencimento),
+          credito: iso(x.dataCredito) || iso(d.dataCreditoLiquidacao) || iso(x.dataMovimento), ocorrencia: iso(x.dataMovimento),
+          pago: x.valorPago ?? d.valorPagoSacado ?? x.valorAtual ?? null,
+          // o que o banco mandou (sem o texto livre), para conferir o casamento
+          dados: { chaves: Object.keys(d).slice(0, 80), erro: d.erro || null, vencimento: x.dataVencimento || null, valor: x.valorOriginal ?? null, pago: x.valorPago ?? null }
+        });
+      }
+      const { data, error } = await db.rpc('crm_bb_site_casar', { p_itens: itens });
+      if (error) throw new Error('site: ' + error.message);
+      return { vistos: itens.length, baixados: data?.baixados || 0, itens: (data?.itens || []).map((i: any) => i.situacao) };
     }
 
     // ------------------------------------------------------------ nota cancelada → boleto baixado no banco
