@@ -586,9 +586,13 @@
     if (opc.faltas) opc.faltas.push(...faltas.map(f => 'NF ' + n.numero + ': ' + f));
     else if (faltas.length) CRM.toast('Atenção, NF ' + n.numero + ': ' + faltas.join('; ') + '. Não faça o boleto no site do BB: avise o administrador.', true);
     for (const b of l) {
+      // pagador: o destinatário da nota (opc.pagador, do XML) e, sem ele, o cadastro do cliente (quem enxerga o cadastro)
       const e = b.empresa_id ? CRM.empresa(b.empresa_id) : null;
+      const pg = opc.pagador && opc.pagador.nome ? opc.pagador
+        : { nome: (e && (e.razao_social || e.nome)) || '', doc: e && e.cnpj, endereco: e ? { logradouro: e.logradouro, numero: e.numero, complemento: e.complemento, bairro: e.bairro, cidade: e.cidade, uf: e.uf, cep: e.cep } : '' };
+      if (!pg.nome) { const m = 'NF ' + n.numero + ', parcela ' + (b.parcela || b.duplicata) + ': boleto sem o nome do pagador'; if (opc.faltas) opc.faltas.push(m); else CRM.toast(m + ' (avise o administrador).', true); }
       const d = montar(cfgB(), emitente(), { valor: b.valor, vencimento: b.vencimento, nosso_numero: b.nosso_numero, documento: b.documento, emissao: b.emissao, pix: pixDe(b) },
-        { nome: (e && (e.razao_social || e.nome)) || '', doc: e && e.cnpj, endereco: e ? { logradouro: e.logradouro, numero: e.numero, complemento: e.complemento, bairro: e.bairro, cidade: e.cidade, uf: e.uf, cep: e.cep } : '' },
+        pg,
         { hoje: CRM.hoje() });
       pdf.addPage('a4', 'portrait');
       desenha(pdf, d, { aviso: CRM.avisoGolpe ? CRM.avisoGolpe() : '', qr: await opQr(b) });

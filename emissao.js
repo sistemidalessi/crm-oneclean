@@ -689,6 +689,9 @@
   // falha ao montar o boleto não some mais em silêncio (antes um .catch(() => 0) escondia o erro e o PDF saía sem boleto).
   const avisoBoleto = (nf, e) => { CRM.toast('Atenção: o boleto da NF ' + (nf && nf.numero || '') + ' não entrou no PDF (' + ((e && e.message) || e) + '). Não faça o boleto no site do BB: avise o administrador.', true); return 0; };
   // a nota que veio pelo XML (Consultar notas, sem a linha na lista de NF-e): o suficiente para achar os boletos dela
+  // o pagador do boleto vem do destinatário da própria nota (03/11/2026: o boleto da logística saiu com o pagador em branco —
+  // a logística não lê o cadastro de clientes; o XML da nota tem razão social, CNPJ e endereço, e todo caminho da DANFE o lê)
+  const pagadorDe = d => (d && d.destinatario && d.destinatario.nome ? { nome: d.destinatario.nome, doc: d.destinatario.doc, endereco: d.destinatario.endereco } : null);
   const notaDoXml = d => (d && d.numero ? { serie: Number(d.serie) || 1, numero: Number(d.numero), situacao: d.marca ? 'cancelada' : 'autorizada' } : null);
   async function danfes(ids) {
     await carregaJs('vendor/jspdf.umd.min.js');
@@ -702,7 +705,7 @@
       desenhaVias(pdf, Dn, d, { logo: lg, cores: (raiz.CRM_CONFIG || {}).cores }, !n++);
       const nf = nfe(id);
       const alvo = nf || notaDoXml(d);
-      if (alvo && alvo.situacao !== 'cancelada' && B && B.paginasNota) nb += await B.paginasNota(pdf, alvo, { semCiclo: true, ciclo, faltas }).catch(e => avisoBoleto(alvo, e));
+      if (alvo && alvo.situacao !== 'cancelada' && B && B.paginasNota) nb += await B.paginasNota(pdf, alvo, { semCiclo: true, ciclo, faltas, pagador: pagadorDe(d) }).catch(e => avisoBoleto(alvo, e));
     }
     if (n) pdf.save((nb ? 'DANFEs e boletos-' : 'DANFEs-') + new Date().toISOString().slice(0, 10) + '.pdf');
     if (faltas.length) alert('Atenção, boleto que não entrou no PDF:\n\n' + faltas.join('\n') + '\n\nNão faça o boleto no site do BB: avise o administrador.');
@@ -735,7 +738,7 @@
       if (modo !== 'boleto') { if (!xmlPronto && !(n && n.situacao === 'cancelada')) desenhaVias(pdf, Dn, d, op, true); else Dn.desenha(pdf, d, op); }
       // boleto do BB pelo arquivo (26/10/2026): as parcelas da nota com boleto do CRM vão no mesmo PDF, uma por página
       const alvo = n || notaDoXml(d), num = n ? n.serie + '-' + n.numero : d.numero;
-      const nb = modo !== 'nota' && alvo && alvo.situacao !== 'cancelada' && CRM.boletoBB && CRM.boletoBB.paginasNota ? await CRM.boletoBB.paginasNota(pdf, alvo).catch(e => avisoBoleto(alvo, e)) : 0;
+      const nb = modo !== 'nota' && alvo && alvo.situacao !== 'cancelada' && CRM.boletoBB && CRM.boletoBB.paginasNota ? await CRM.boletoBB.paginasNota(pdf, alvo, { pagador: pagadorDe(d) }).catch(e => avisoBoleto(alvo, e)) : 0;
       if (modo === 'boleto') {
         if (!nb) { CRM.toast('A NF ' + num + ' não tem boleto registrado no BB (nota à vista, ou boleto feito no site do BB).', true); return; }
         pdf.deletePage(1);   // a 1ª folha ficou em branco: cada boleto entra numa folha nova
@@ -1077,7 +1080,7 @@
           if (n.cancelada) Object.assign(d, { autorizada: false, marca: 'NF-e CANCELADA' });
           if (k++) pdf.addPage('a4', 'portrait');
           Dn.desenha(pdf, d, { logo: lg, cores: (raiz.CRM_CONFIG || {}).cores });
-          if (!n.cancelada && B && B.paginasNota) nb += await B.paginasNota(pdf, { serie: n.serie, numero: n.numero, situacao: 'autorizada' }, { semCiclo: true, ciclo, faltas }).catch(e => avisoBoleto(n, e));
+          if (!n.cancelada && B && B.paginasNota) nb += await B.paginasNota(pdf, { serie: n.serie, numero: n.numero, situacao: 'autorizada' }, { semCiclo: true, ciclo, faltas, pagador: pagadorDe(d) }).catch(e => avisoBoleto(n, e));
         }
         if (k) pdf.save((nb ? 'DANFEs e boletos-' : 'DANFEs-') + l.map(n => n.numero).slice(0, 6).join('-') + (l.length > 6 ? '-e-mais' : '') + '.pdf');
         CRM.toast(k + ' DANFE(s)' + (nb ? ' e ' + nb + ' boleto(s)' : '') + ' no PDF' + (falta.length ? '. Sem XML guardado no CRM: NF ' + falta.join(', ') : '.'), !!falta.length);
