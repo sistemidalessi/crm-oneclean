@@ -607,10 +607,10 @@
     // Outro computador pode ter mexido: ao voltar para a janela, recarrega
     // (se passou 1 min e não há formulário aberto, para não atropelar o que se digita).
     window.addEventListener('focus', () => {
-      if (store && store.modo === 'supabase' && E.eu && Date.now() - E.carregadoEm > 60000 && !$('#dlgForm').open) CRM.recarregar(true);
+      if (store && store.modo === 'supabase' && E.eu && Date.now() - E.carregadoEm > 60000 && !$('#dlgForm').open && !telaOcupada()) CRM.recarregar(true);
     });
     setInterval(() => {
-      if (store && store.modo === 'supabase' && E.eu && document.visibilityState === 'visible' && Date.now() - E.carregadoEm > 300000 && !$('dialog[open]')) CRM.recarregar(true);
+      if (store && store.modo === 'supabase' && E.eu && document.visibilityState === 'visible' && Date.now() - E.carregadoEm > 300000 && !$('dialog[open]') && !telaOcupada()) CRM.recarregar(true);
       verificaLembretes();
       if (versaoNova) atualizaSePuder(); else confereVersao();
     }, 60000);
@@ -633,14 +633,25 @@
     } catch (e) { /* sem rede agora: confere na próxima */ }
     if (versaoNova) atualizaSePuder();
   }
-  // Janela aberta (ficha, formulário) ou campo com texto: espera a próxima volta.
+  // Janela aberta (ficha, formulário), campo com texto ou uma tela no meio de um trabalho (pedido/orçamento sendo digitado,
+  // 03/11/2026: a tela piscava e o orçamento voltava do zero): espera a próxima volta. Cada tela diz se está ocupada por
+  // CRM.ocupadoSe(fn); ao gravar, ela chama CRM.versao.agoraSePuder() e a versão nova entra na hora.
+  const ocupadores = [];
+  CRM.ocupadoSe = fn => { ocupadores.push(fn); };
+  const telaOcupada = () => ocupadores.some(f => { try { return !!f(); } catch (e) { return false; } });
+  CRM.telaOcupada = telaOcupada;
   function ocupado() {
-    if ($('dialog[open]')) return true;
+    if ($('dialog[open]') || telaOcupada()) return true;
     const a = document.activeElement;
     return !!(a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && a.value);
   }
   function atualizaSePuder() {
-    if (!versaoNova || ocupado()) return;
+    if (!versaoNova) return;
+    if (ocupado()) {
+      const f = $('#faixaVersao');
+      if (f && f.hidden && telaOcupada()) { f.textContent = 'Há uma versão nova do CRM: ela entra sozinha quando você gravar ou sair do que está fazendo.'; f.hidden = false; }
+      return;
+    }
     // Sem laço: se já recarregou para esta versão e o navegador insistiu na antiga, só avisa.
     let tentou = '';
     try { tentou = sessionStorage.getItem('sd-crm-recarregou') || ''; } catch (e) { /* ok */ }
@@ -653,7 +664,7 @@
     CRM.toast('Versão nova do CRM: atualizando…');
     setTimeout(() => location.reload(), 1500);
   }
-  CRM.versao = { minha: () => minhaVersao, confere: () => { ultimaConsulta = 0; return confereVersao(); } };
+  CRM.versao = { minha: () => minhaVersao, confere: () => { ultimaConsulta = 0; return confereVersao(); }, agoraSePuder: () => setTimeout(atualizaSePuder, 2500) };
 
   // ------------------------------------------------------------ app no celular (21/10/2026)
   // O CRM vira app na tela inicial (manifest.webmanifest + sw.js, sem cache). Android e computador (Chrome/Edge): o

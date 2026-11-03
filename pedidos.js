@@ -251,6 +251,10 @@
   let porCod = new Map();
   const f = { ver: null, sit: 'abertos', vend: '', busca: '', est: '', bolao: null, marcados: new Set() };
   let ed = null, aberto = null, abaPed = 'produtos', listaProdutosHTML = '';
+  // Orçamento ou pedido sendo digitado: a versão nova do CRM e a recarga dos dados esperam (03/11/2026: a tela piscava
+  // e o orçamento voltava do zero). Ao gravar ou sair, a versão nova entra (CRM.versao.agoraSePuder).
+  if (CRM.ocupadoSe) CRM.ocupadoSe(() => !!ed);
+  const versaoAgora = () => { if (CRM.versao && CRM.versao.agoraSePuder) CRM.versao.agoraSePuder(); };
 
   async function carrega(silencio) {
     if (carregando) return;
@@ -720,6 +724,7 @@
     if (pr && eraNovo && pr.status !== 'aprovada') await CRM.atualizar('propostas', pr.id, { status: 'aprovada', respondida_em: CRM.hoje() }).catch(() => null);
     ed = null; aberto = r.id; abaPed = 'produtos';
     await recarrega();
+    versaoAgora();
     const b = P.bloqueiosAbertos(r);
     CRM.toast('Pedido ' + r.numero + ' gravado' + (b.length ? ' — BLOQUEADO por ' + b.map(x => P.ROTULO_BLOQUEIO[x] || x).join(', ') + ' (a gestora ou a logística libera)' : ' e liberado para a separação') + '.', !!b.length);
     const neg = n && CRM.negocio(n.id);
@@ -954,7 +959,7 @@
     'pd-ed-sair': () => {
       const msg = ed && ed.proposta_id && !ed.id ? 'Sair? O orçamento ' + (ed.dados.numero_orcamento || '') + ' está salvo no negócio; o pedido não foi gravado (dá para virar pedido depois, na aba Orçamentos).'
         : 'Sair sem gravar? O que foi digitado se perde.';
-      if (ed && ed.itens.length && !confirm(msg)) return; ed = null; CRM.render();
+      if (ed && ed.itens.length && !confirm(msg)) return; ed = null; CRM.render(); versaoAgora();
     },
     'pd-aba-ed': id => { const c = document.querySelector('.pd-janela'); if (c) leLinha(c); ed.aba = id; CRM.render(); },
     'pd-faixa': fx => { const c = document.querySelector('.pd-janela'); leLinha(c); const d = porCod.get(ed.linha.codigo); if (d) { ed.linha.preco = P.precoDaFaixa(d.preco_venda, fx, P.tabelaDe(E().cfg)); ed.linha.desconto = 0; } CRM.render(); },
