@@ -1804,6 +1804,15 @@
   Supa.prototype.minhaRota = async function (dia) { return unwrap(await this.sb.rpc('crm_minha_rota', { p_dia: dia })) || []; };
   Supa.prototype.entregasCriar = async function (linhas) { return unwrap(await this.sb.from('crm_entregas').insert(linhas).select('id')); };
   Supa.prototype.entregaAtualizar = async function (id, patch) { return unwrap(await this.sb.from('crm_entregas').update(patch).eq('id', id).select('id').single()); };
+  // caminhões (03/11/2026): cadastro e o caminhão de cada motorista no dia
+  Supa.prototype.veiculos = async function () { return unwrap(await this.sb.from('crm_veiculos').select('*').order('nome')) || []; };
+  Supa.prototype.veiculoGravar = async function (v) {
+    const d = { nome: String(v.nome || '').trim(), placa: String(v.placa || '').trim().toUpperCase() || null, ativo: v.ativo !== false };
+    return unwrap(v.id ? await this.sb.from('crm_veiculos').update(d).eq('id', v.id).select('id').single() : await this.sb.from('crm_veiculos').insert(d).select('id').single());
+  };
+  Supa.prototype.entregasVeiculo = async function (dia, motoristaId, veiculoId) {
+    return unwrap(await this.sb.from('crm_entregas').update({ veiculo_id: veiculoId || null }).eq('dia', dia).eq('motorista_id', motoristaId).select('id'));
+  };
   Supa.prototype.entregaApagar = async function (id) { unwrap(await this.sb.from('crm_entregas').delete().eq('id', id).eq('situacao', 'pendente')); };
   Supa.prototype.rotaLiberar = async function (dia) { return unwrap(await this.sb.from('crm_entregas').update({ liberada: true }).eq('dia', dia).eq('liberada', false).not('motorista_id', 'is', null).select('id')); };
   Supa.prototype.canhotoSubir = async function (blob, entregaId, dia) {
@@ -1837,7 +1846,8 @@
       const n = nts.get(x.nota_id) || {}, e = emp.get(x.empresa_id || n.empresa_id), u = us.get(n.vendedor_id);
       const c = d.contatos.filter(k => e && k.empresa_id === e.id).sort((a, b) => (b.principal ? 1 : 0) - (a.principal ? 1 : 0))[0];
       const en = this.entregaDaNota(x.nota_id);
-      return Object.assign({}, x, { numero: n.numero, cliente: comLocal((e && e.nome) || n.cliente_nome, en), endereco: en ? entregaLocalTexto(en) : enderecoLocal(e),
+      const vc = x.veiculo_id ? lsLe('crm_veiculos', []).find(v => v.id === x.veiculo_id) : null;
+      return Object.assign({}, x, { veiculo: vc ? vc.nome + (vc.placa ? ' ' + vc.placa : '') : (x.veiculo_id ? 'Caminhão ' + x.veiculo_id : null), numero: n.numero, cliente: comLocal((e && e.nome) || n.cliente_nome, en), endereco: en ? entregaLocalTexto(en) : enderecoLocal(e),
         bairro: en ? en.bairro : e && e.bairro, cidade: (en && en.cidade) || (e && e.cidade) || n.cidade,
         valor: n.valor_total, vendedor: vendedorRota(n, u), contato: c && c.nome,
         telefone: (c && (c.celular || c.whatsapp || c.telefone)) || (e && (e.whatsapp || e.telefone)) || '' });
@@ -1860,6 +1870,13 @@
     return this.entregaMuda(l => linhas.map(x => { const r = Object.assign({ id: uuid(), ordem: 0, liberada: false, situacao: 'pendente', criado_em: new Date().toISOString() }, x); l.push(r); return { id: r.id }; }));
   };
   Local.prototype.entregaAtualizar = async function (id, patch) { return this.entregaMuda(l => { const x = l.find(y => y.id === id); if (x) Object.assign(x, patch); return x; }); };
+  Local.prototype.veiculos = async function () { return lsLe('crm_veiculos', [{ id: 1, nome: 'Caminhão 1', placa: null, ativo: true }, { id: 2, nome: 'Caminhão 2', placa: null, ativo: true }]); };
+  Local.prototype.veiculoGravar = async function (v) {
+    const l = await this.veiculos(), d = { nome: String(v.nome || '').trim(), placa: String(v.placa || '').trim().toUpperCase() || null, ativo: v.ativo !== false };
+    if (v.id) Object.assign(l.find(x => x.id === v.id) || {}, d); else l.push(Object.assign({ id: l.reduce((m, x) => Math.max(m, x.id), 0) + 1 }, d));
+    lsGrava('crm_veiculos', l); return { id: v.id };
+  };
+  Local.prototype.entregasVeiculo = async function (dia, motoristaId, veiculoId) { return this.entregaMuda(l => l.filter(x => x.dia === dia && x.motorista_id === motoristaId).map(x => { x.veiculo_id = veiculoId || null; return { id: x.id }; })); };
   Local.prototype.entregaApagar = async function (id) { this.entregaMuda(l => { const i = l.findIndex(y => y.id === id && y.situacao === 'pendente'); if (i >= 0) l.splice(i, 1); }); };
   Local.prototype.rotaLiberar = async function (dia) { return this.entregaMuda(l => l.filter(x => x.dia === dia && x.motorista_id && !x.liberada).map(x => { x.liberada = true; return { id: x.id }; })); };
   Local.prototype.canhotoSubir = async function (blob, entregaId, dia) {

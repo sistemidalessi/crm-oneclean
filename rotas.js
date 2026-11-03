@@ -69,13 +69,18 @@
 
   // ============================================================ logística
   const f = { dia: null, marcadas: new Set(), mot: '' };
-  let dados = null, carregando = false, lidoEm = 0;
+  let dados = null, carregando = false, lidoEm = 0, veics = null;
+  // Caminhão de cada motorista no dia (03/11/2026, Anderson: "igual a gente escolhe o motorista, eu preciso escolher o caminhão
+  // para saber, quando toma multa aquele dia, quem estava com qual"): um caminhão por motorista no dia, gravado em cada entrega.
+  const nomeVeic = id => { const v = (veics || []).find(x => x.id === id); return v ? v.nome + (v.placa ? ' ' + v.placa : '') : ''; };
+  const veicDoMot = k => ((dados && dados.rota || []).find(x => (x.motorista_id || '') === (k || '') && x.veiculo_id) || {}).veiculo_id || null;
   async function carrega(silencio) {
     if (carregando) return;
     carregando = true;
     try {
       const dia = f.dia || (f.dia = hojeSP());
-      const [rota, cand] = await Promise.all([st().rotaDia(dia), st().rotaCandidatas(somaDias(dia, -10))]);
+      const [rota, cand, vs] = await Promise.all([st().rotaDia(dia), st().rotaCandidatas(somaDias(dia, -10)), st().veiculos ? st().veiculos().catch(() => []) : []]);
+      veics = vs || [];
       dados = { dia, rota: rota || [], cand: cand || [] };
       lidoEm = Date.now();
     } catch (e) { dados = dados || { dia: f.dia, rota: [], cand: [] }; if (!silencio) CRM.falhou(e); }
@@ -117,25 +122,49 @@
       })().catch(e => { CRM.falhou(e); rel.l = []; rel.chave = k; }).then(() => { rel.lendo = false; CRM.render(); });
     }
     const base = rel.chave === k ? rel.l || [] : null;
-    const l = base ? CRM.Lista.filtra('rt-rel', base, { texto: x => [x.cliente, x.numero, x.bairro, x.cidade, x.endereco, nomeMot(x.motorista_id), x.obs, x.vendedor], sel: (x, v) => x.situacao === v })
+    const l = base ? CRM.Lista.filtra('rt-rel', base, { texto: x => [x.cliente, x.numero, x.bairro, x.cidade, x.endereco, nomeMot(x.motorista_id), x.veiculo, x.obs, x.vendedor], sel: (x, v) => x.situacao === v })
       .sort((a, b) => String(b.dia).localeCompare(String(a.dia)) || (a.ordem || 0) - (b.ordem || 0)) : [];
-    CRM.Lista.planilha('rt-rel', 'entregas', ['Dia', 'NF', 'Cliente', 'Bairro', 'Cidade', 'Motorista', 'Situação', 'Entregue em', 'Observação'],
-      () => l.map(x => [R.dataBR(x.dia), x.numero || '', x.cliente || '', x.bairro || '', x.cidade || '', nomeMot(x.motorista_id) || '', (SIT[x.situacao] || [x.situacao])[0], x.entregue_em ? hora(x.entregue_em) : '', x.obs || '']));
+    CRM.Lista.planilha('rt-rel', 'entregas', ['Dia', 'NF', 'Cliente', 'Bairro', 'Cidade', 'Motorista', 'Caminhão', 'Situação', 'Entregue em', 'Observação'],
+      () => l.map(x => [R.dataBR(x.dia), x.numero || '', x.cliente || '', x.bairro || '', x.cidade || '', nomeMot(x.motorista_id) || '', x.veiculo || '', (SIT[x.situacao] || [x.situacao])[0], x.entregue_em ? hora(x.entregue_em) : '', x.obs || '']));
     const conta = s2 => l.filter(x => x.situacao === s2).length;
     return '<section class="cartao"><h2>Relatório de entregas <small>' + (base ? base.length + ' entrega(s) no período' : 'carregando…') + '</small></h2>' +
-      CRM.Lista.barra('rt-rel', { periodo: true, rotuloPeriodo: 'Dia de', placeholder: 'Cliente, NF, bairro, motorista ou observação', total: base ? base.length : null, achados: l.length,
+      CRM.Lista.barra('rt-rel', { periodo: true, rotuloPeriodo: 'Dia de', placeholder: 'Cliente, NF, bairro, motorista, caminhão ou observação', total: base ? base.length : null, achados: l.length,
         sel: [['', 'Todas'], ['entregue', 'Entregues'], ['problema', 'Com problema'], ['pendente', 'Pendentes']] }) +
       (!base ? '<p class="vazio">Carregando…</p>' : !l.length ? '<p class="vazio">Nenhuma entrega nesse período.</p>' :
         '<p class="dica">' + conta('entregue') + ' entregue(s) · ' + conta('problema') + ' com problema · ' + conta('pendente') + ' pendente(s)' + (base.length && (R.somaDias(de, 61) < ate) ? ' · o período vai até 62 dias' : '') + '</p>' +
-        '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Dia</th><th>Cliente</th><th>NF</th><th>Motorista</th><th>Situação</th></tr></thead><tbody>' +
+        '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Dia</th><th>Cliente</th><th>NF</th><th>Motorista</th><th>Caminhão</th><th>Situação</th></tr></thead><tbody>' +
         CRM.Lista.corta('rt-rel', l, 50).map(x => { const s2 = SIT[x.situacao] || [x.situacao, '']; return '<tr><td>' + esc(R.dataBR(x.dia)) + '</td><td><strong>' + esc(x.cliente || '—') + '</strong><small>' + esc([x.bairro, x.cidade].filter(Boolean).join(' · ')) + '</small></td>' +
-          '<td>' + esc(x.numero || '') + '</td><td>' + esc(nomeMot(x.motorista_id) || '—') + '</td><td>' + CRM.selo(s2[0] + (x.entregue_em ? ' ' + hora(x.entregue_em) : ''), s2[1]) + (x.obs ? '<small class="rt-obs">' + esc(x.obs) + '</small>' : '') + '</td></tr>'; }).join('') +
+          '<td>' + esc(x.numero || '') + '</td><td>' + esc(nomeMot(x.motorista_id) || '—') + '</td><td>' + esc(x.veiculo || '—') + '</td><td>' + CRM.selo(s2[0] + (x.entregue_em ? ' ' + hora(x.entregue_em) : ''), s2[1]) + (x.obs ? '<small class="rt-obs">' + esc(x.obs) + '</small>' : '') + '</td></tr>'; }).join('') +
         '</tbody></table></div>' + CRM.Lista.mais('rt-rel', l, 50)) + '</section>';
+  }
+  function formVeiculos() {
+    CRM.abrirForm({
+      titulo: '🚚 Caminhões',
+      intro: 'Os caminhões que a logística escolhe na rota de cada motorista. Fica guardado em cada entrega: no relatório de entregas, pesquise o dia de uma multa para ver quem estava com qual.',
+      htmlAntes: '<table class="tabela"><thead><tr><th>Caminhão</th><th>Placa</th><th>Situação</th><th></th></tr></thead><tbody>' +
+        (veics || []).map(v => '<tr><td>' + esc(v.nome) + '</td><td>' + esc(v.placa || '—') + '</td><td>' + (v.ativo === false ? CRM.selo('fora de uso', 'cinza') : CRM.selo('em uso', 'verde')) + '</td>' +
+          '<td><button type="button" class="mini" data-acao="rt-veic-editar" data-id="' + v.id + '">✎</button></td></tr>').join('') + '</tbody></table>' +
+        '<p class="acoes"><button type="button" class="btn sec" data-acao="rt-veic-novo">+ Cadastrar caminhão</button></p>',
+      campos: [], salvarTexto: 'Fechar', aoSalvar: async () => {}
+    });
+  }
+  function formVeiculo(v) {
+    CRM.abrirForm({
+      titulo: v ? 'Caminhão · ' + v.nome : 'Cadastrar caminhão',
+      campos: [{ nome: 'nome', rotulo: 'Caminhão (modelo)', obrigatorio: true, dica: 'ex.: Kia Bongo' }, { nome: 'placa', rotulo: 'Placa', dica: 'ex.: ABC1D23 (para achar o da multa)' },
+        { nome: 'ativo', rotulo: 'Situação', tipo: 'select', opcoes: [['1', 'Em uso'], ['0', 'Fora de uso (não aparece para escolher)']] }],
+      valores: { nome: v ? v.nome : '', placa: v ? v.placa || '' : '', ativo: v && v.ativo === false ? '0' : '1' },
+      aoSalvar: async d => {
+        await st().veiculoGravar({ id: v ? v.id : null, nome: d.nome, placa: d.placa, ativo: d.ativo !== '0' });
+        veics = await st().veiculos(); CRM.toast('Caminhão gravado.'); CRM.render();
+      }
+    });
   }
   function cabRotas() {
     return '<div class="cabecalho"><div><h1>Rotas</h1><p class="sub">as notas emitidas entram aqui; escolha o motorista e a ordem e mande a rota: cada motorista vê as paradas dele no celular</p></div>' +
       '<div class="acoes"><label class="filtro-inline">Dia da entrega <input type="date" data-rt-dia value="' + esc(f.dia || hojeSP()) + '"></label> ' +
       '<button type="button" class="btn sec" data-acao="rt-atualizar"' + (carregando ? ' disabled' : '') + '>Atualizar</button>' +
+      ' <button type="button" class="btn sec" data-acao="rt-veiculos" title="cadastro dos caminhões (nome e placa)">🚚 Caminhões</button>' +
       (CRM.ehAdmin() ? ' <button type="button" class="mini" data-acao="rt-programada" title="clientes com entrega agendada: não contam como atrasados nem como nota sem rota">Entrega programada (' + programadas().length + ')</button>' : '') + '</div></div>';
   }
   function blocoMotorista(k, l, opMot) {
@@ -143,6 +172,9 @@
     const r = X.resumo(l);
     return '<section class="cartao"><div class="cabecalho-cartao"><h2>' + (k ? esc(nomeMot(k) || 'Motorista') : 'Sem motorista') + ' <small>' + l.length + ' parada(s)' +
         (k ? ' · ' + r.entregues + ' entregue(s)' + (r.problemas ? ' · ' + r.problemas + ' com problema' : '') : '') + '</small></h2>' +
+        (k ? (vid => '<label class="filtro-inline">🚚 Caminhão <select data-rt-veic="' + esc(k) + '"><option value="">— escolher —</option>' +
+          (veics || []).filter(v => v.ativo !== false || v.id === vid).map(v => '<option value="' + v.id + '"' + (v.id === vid ? ' selected' : '') + '>' + esc(v.nome + (v.placa ? ' · ' + v.placa : '')) + '</option>').join('') +
+          '</select></label>' + (vid ? '' : ' <small class="neg">sem caminhão</small>'))(veicDoMot(k)) : '') +
         (l.length > 1 && l.some(x => !X.feita(x)) ? '<button type="button" class="mini" data-acao="rt-bairro" data-id="' + esc(k) + '">Ordenar por bairro</button>' : '') + '</div>' +
       '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Ordem</th><th>Cliente e endereço</th><th>Nota</th><th>Motorista</th><th>Situação</th></tr></thead><tbody>' +
       l.map((x, i) => {
@@ -279,12 +311,15 @@
       vis.forEach(id => (todas ? f.marcadas.delete(id) : f.marcadas.add(id)));
       CRM.render();
     },
+    'rt-veiculos': () => formVeiculos(),
+    'rt-veic-editar': id => formVeiculo((veics || []).find(v => v.id === Number(id))),
+    'rt-veic-novo': () => formVeiculo(null),
     'rt-por': () => {
       const l = dados.cand.filter(n => f.marcadas.has(n.nota_id));
       if (!l.length) return;
       (async () => {
         const base = doMotorista(f.mot).length;
-        await st().entregasCriar(X.porBairro(l).map((n, i) => ({ dia: f.dia, nota_id: n.nota_id, empresa_id: n.empresa_id || null, motorista_id: f.mot || null, ordem: base + i + 1 })));
+        await st().entregasCriar(X.porBairro(l).map((n, i) => ({ dia: f.dia, nota_id: n.nota_id, empresa_id: n.empresa_id || null, motorista_id: f.mot || null, veiculo_id: f.mot ? veicDoMot(f.mot) : null, ordem: base + i + 1 })));
         f.marcadas.clear();
         await recarrega();
         CRM.toast(l.length + ' nota(s) na rota de ' + diaLongo(f.dia) + (f.mot ? ' com ' + nomeMot(f.mot) : '') + '. Confira a ordem e mande a rota.');
@@ -331,7 +366,11 @@
         const x = daRota(s.dataset.rtMot);
         if (!x) return;
         const ordem = s.value ? doMotorista(s.value).length + 1 : 0;
-        st().entregaAtualizar(x.id, { motorista_id: s.value || null, ordem, liberada: false }).then(recarrega).catch(CRM.falhou);
+        st().entregaAtualizar(x.id, { motorista_id: s.value || null, ordem, liberada: false, veiculo_id: s.value ? veicDoMot(s.value) : null }).then(recarrega).catch(CRM.falhou);
+      }));
+      c.querySelectorAll('[data-rt-veic]').forEach(s => s.addEventListener('change', () => {
+        st().entregasVeiculo(f.dia, s.dataset.rtVeic, s.value ? Number(s.value) : null)
+          .then(() => { CRM.toast(s.value ? '🚚 ' + nomeVeic(Number(s.value)) + ' com ' + nomeMot(s.dataset.rtVeic) + ' em ' + diaLongo(f.dia) + '.' : 'Caminhão tirado.'); return recarrega(); }).catch(CRM.falhou);
       }));
     }
   };

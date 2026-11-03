@@ -8867,3 +8867,59 @@ end;
 $$;
 revoke all on function public.crm_pedido_sinal(jsonb) from public, anon;
 grant execute on function public.crm_pedido_sinal(jsonb) to authenticated;
+
+-- ============================================================ Caminhão na rota (03/11/2026)
+-- Caminhão na rota (03/11/2026, Anderson: "igual a gente escolhe o motorista, eu preciso escolher o caminhão para saber,
+-- quando toma multa aquele dia, quem estava com qual… um Kia Bongo e uma Iveco Daily"). Cadastro dos caminhões (logística e
+-- gestão cadastram; placa opcional) e o caminhão de cada entrega (a tela escolhe um por motorista no dia). O relatório de
+-- entregas mostra e pesquisa o caminhão. Migração caminhoes_na_rota (aplicada).
+create table if not exists public.crm_veiculos (
+  id bigserial primary key,
+  nome text not null,
+  placa text,
+  ativo boolean not null default true,
+  criado_em timestamptz not null default now()
+);
+alter table public.crm_veiculos enable row level security;
+drop policy if exists ler on public.crm_veiculos;
+create policy ler on public.crm_veiculos for select to authenticated using ((select public.crm_eh_ativo()));
+drop policy if exists grava on public.crm_veiculos;
+create policy grava on public.crm_veiculos for insert to authenticated with check ((select public.crm_eh_gestor()) or (select public.crm_eh_logistica()));
+drop policy if exists muda on public.crm_veiculos;
+create policy muda on public.crm_veiculos for update to authenticated
+  using ((select public.crm_eh_gestor()) or (select public.crm_eh_logistica())) with check ((select public.crm_eh_gestor()) or (select public.crm_eh_logistica()));
+revoke all on public.crm_veiculos from anon;
+grant select, insert, update on public.crm_veiculos to authenticated;
+grant usage on sequence public.crm_veiculos_id_seq to authenticated;
+insert into public.crm_veiculos (nome) select v from unnest(array['Kia Bongo', 'Iveco Daily']) v
+ where not exists (select 1 from public.crm_veiculos);
+
+alter table public.crm_entregas add column if not exists veiculo_id bigint references public.crm_veiculos(id) on delete set null;
+
+drop function if exists public.crm_rota_dia(date);
+create function public.crm_rota_dia(p_dia date)
+ returns table(id uuid, nota_id uuid, numero integer, empresa_id uuid, cliente text, endereco text, bairro text, cidade text, valor numeric, vendedor text,
+   motorista_id uuid, ordem integer, liberada boolean, situacao text, obs text, canhoto text, entregue_em timestamptz, cli_status text, cli_erro text,
+   cli_em timestamptz, cli_proximo_em timestamptz, veiculo_id bigint, veiculo text)
+ language plpgsql stable security definer set search_path to 'public' as $function$
+begin
+  if not (public.crm_eh_gestor() or public.crm_eh_logistica()) then raise exception 'só a logística'; end if;
+  return query
+    select x.id, x.nota_id, n.numero::integer, x.empresa_id,
+      coalesce(e.nome, n.cliente_nome) || coalesce(' — ' || nullif(btrim(coalesce(en.v->>'local', '')), ''), ''),
+      coalesce(public.crm_entrega_texto(en.v), public.crm_endereco_texto(e)),
+      case when en.v is not null then nullif(btrim(en.v->>'bairro'), '') else e.bairro end,
+      coalesce(case when en.v is not null then nullif(btrim(en.v->>'cidade'), '') end, e.cidade, n.cidade), n.valor_total,
+      case when upper(n.vendedor_nome) = 'DIRETO' then 'Venda direta' else coalesce(u.nome, n.vendedor_nome) end, x.motorista_id, x.ordem, x.liberada, x.situacao, x.obs, x.canhoto, x.entregue_em, x.cli_status, x.cli_erro, x.cli_em, x.cli_proximo_em,
+      x.veiculo_id, v.nome || coalesce(' ' || nullif(btrim(v.placa), ''), '')
+      from public.crm_entregas x
+      join public.crm_notas n on n.id = x.nota_id
+      left join public.crm_empresas e on e.id = x.empresa_id
+      left join lateral (select public.crm_entrega_da_nota(n.id) v) en on true
+      left join public.crm_usuarios u on u.user_id = n.vendedor_id
+      left join public.crm_veiculos v on v.id = x.veiculo_id
+     where x.dia = p_dia
+     order by x.motorista_id nulls last, x.ordem, n.numero;
+end $function$;
+revoke all on function public.crm_rota_dia(date) from public, anon;
+grant execute on function public.crm_rota_dia(date) to authenticated;
