@@ -8459,3 +8459,35 @@ select 'forma_pagamento', x.nome, x.ordem from (values
   ('28 DIAS BOLETO', 10), ('28/35/42 DIAS BOLETO', 20), ('30 DIAS BOLETO', 30), ('30/60 DIAS BOLETO', 40), ('30/60/90 DIAS BOLETO', 50),
   ('A VISTA BOLETO', 60), ('A VISTA PIX', 70), ('A VISTA TRANSFERENCIA', 80), ('CARTAO DE CREDITO', 90)) x(nome, ordem)
 on conflict (tipo, nome) do nothing;
+
+-- Regra do nome do cliente pelo CNPJ (03/11/2026, Anderson: "em vários locais do sistema, até em títulos, sempre nomear
+-- pelo nome que está no CNPJ, não pelo nome fantasia ou nome do comprador; vamos deixar como regra").
+-- Cadastro com CNPJ/CPF e razão social: o nome é a razão social; a filial (CNPJ que não termina em 0001) leva a cidade entre
+-- parênteses, para não confundir as unidades. O nome antigo (fantasia, contato do Agendor) vai para "apelido", que entra na
+-- busca. Vale para toda gravação (tela, notas, orçamento do FKN, Edge Functions): gatilho antes de gravar.
+-- Aplicado em 03/11/2026 (migração crm_empresa_nome_pelo_cnpj); SQL também em sistemi-dalessi/docs/oneclean/sql/2026-11-03-nome-pelo-cnpj.sql.
+
+alter table public.crm_empresas add column if not exists apelido text;
+
+create or replace function public.crm_empresa_nome_pelo_cnpj() returns trigger
+language plpgsql set search_path = public as $$
+declare d text := regexp_replace(coalesce(new.cnpj, ''), '\D', '', 'g'); razao text := upper(btrim(coalesce(new.razao_social, ''))); alvo text; velho text;
+begin
+  if length(d) not in (11, 14) or razao = '' then return new; end if;
+  alvo := razao;
+  if length(d) = 14 and substr(d, 9, 4) <> '0001' and btrim(coalesce(new.cidade, '')) <> '' then alvo := razao || ' (' || upper(btrim(new.cidade)) || ')'; end if;
+  if new.nome is distinct from alvo then
+    velho := btrim(coalesce(new.nome, ''));
+    -- guarda o nome antigo como apelido (sem repetir, e sem guardar o que já é a própria razão social)
+    if velho <> '' and upper(velho) <> razao and upper(velho) not like razao || ' (%'
+       and position(upper(velho) in upper(coalesce(new.apelido, ''))) = 0 then
+      new.apelido := left(concat_ws(' · ', nullif(btrim(coalesce(new.apelido, '')), ''), velho), 300);
+    end if;
+    new.nome := alvo;
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists crm_empresa_nome_pelo_cnpj on public.crm_empresas;
+create trigger crm_empresa_nome_pelo_cnpj before insert or update on public.crm_empresas
+  for each row execute function public.crm_empresa_nome_pelo_cnpj();

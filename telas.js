@@ -386,7 +386,7 @@
       if (f.semTarefa && r.proxima) return false;
       if (f.busca) {
         const cs = CRM.doEmpresa('contatos', e.id);
-        if (!R.casaBusca(f.busca, [e.nome, e.razao_social, e.cnpj, e.telefone, e.whatsapp, e.email, e.cidade, e.bairro].concat(...cs.map(c => [c.nome, c.email, c.telefone, c.celular, c.whatsapp])))) return false;
+        if (!R.casaBusca(f.busca, [e.nome, e.razao_social, e.apelido, e.cnpj, e.telefone, e.whatsapp, e.email, e.cidade, e.bairro].concat(...cs.map(c => [c.nome, c.email, c.telefone, c.celular, c.whatsapp])))) return false;
       }
       return true;
     });

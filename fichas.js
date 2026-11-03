@@ -124,7 +124,7 @@
       // ---- coluna 1: dados + contatos
       '<div class="ficha-col">' +
         '<section><dl class="dados">' +
-          dado('Grupo', grupo) + dado('Razão social', esc(e.razao_social)) + dado('CNPJ/CPF', esc(e.cnpj) + (e.cnpj && R.ehCNPJ(R.chaveDoc(e.cnpj)) && !R.cnpjValido(e.cnpj) ? ' ' + CRM.selo('inválido?', 'ambar') : '')) +
+          dado('Grupo', grupo) + dado('Razão social', esc(e.razao_social)) + (e.apelido ? dado('Apelido', esc(e.apelido)) : '') + dado('CNPJ/CPF', esc(e.cnpj) + (e.cnpj && R.ehCNPJ(R.chaveDoc(e.cnpj)) && !R.cnpjValido(e.cnpj) ? ' ' + CRM.selo('inválido?', 'ambar') : '')) +
           dado('Telefone', esc(e.telefone)) + dado('WhatsApp', esc(e.whatsapp)) +
           dado('E-mail', e.email ? (separaEmails(e.email).length ? separaEmails(e.email).map(m => '<a href="mailto:' + esc(m) + '">' + esc(m) + '</a>').join('<br>') : esc(e.email)) : '') +
           dado('Site', e.site ? '<a href="' + esc(/^https?:/i.test(e.site) ? e.site : 'https://' + e.site) + '" target="_blank" rel="noopener noreferrer">' + esc(e.site) + '</a>' : '') +
@@ -364,8 +364,11 @@
   function camposEmpresa(e, completo) {
     const g = CRM.ehGestor();
     const c = [
-      { nome: 'nome', rotulo: 'Nome / nome fantasia', obrigatorio: true, largo: true },
+      // 03/11/2026 (regra do Anderson): com CNPJ/CPF e razão social, o nome é sempre a razão social (o banco acerta sozinho;
+      // filial leva a cidade); o nome do dia a dia (fantasia, contato) fica em "Apelido", que também entra na busca
+      { nome: 'nome', rotulo: 'Nome', obrigatorio: true, largo: true, ajuda: 'Com CNPJ e razão social, o nome passa a ser a razão social (regra da empresa). O nome do dia a dia vai em "Apelido".' },
       { nome: 'razao_social', rotulo: 'Razão social' },
+      { nome: 'apelido', rotulo: 'Apelido (nome fantasia, contato)' },
       { nome: 'cnpj', rotulo: 'CNPJ ou CPF' },
       { nome: 'situacao', rotulo: 'Situação', tipo: 'select', opcoes: opcoesSituacao(), padrao: 'lead' },
       { nome: 'qualificacao', rotulo: 'Qualificação', tipo: 'estrelas' },
