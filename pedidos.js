@@ -517,7 +517,7 @@
     }
     return '<section class="cartao pd-janela"><header class="pd-topo"><button type="button" class="btn sec" data-acao="pd-fechar">← Voltar</button><h2>Pedido ' + esc(p.numero) + ' · ' + esc(nomeCliente(p)) + '</h2>' + CRM.selo(s.rotulo, s.cor) + '</header>' +
       (bAbertos.length ? '<p class="alerta">Bloqueado por: <strong>' + esc(bAbertos.map(b => P.ROTULO_BLOQUEIO[b] || b).join(', ')) + '</strong>.' + (gest ? ' Confira e clique em "Liberar".' : ' Quem libera é a gestora ou a logística.') +
-        (bAbertos.some(b => ['SEM ANÁLISE', 'PRAZO', 'LIMITE'].indexOf(b) !== -1) ? ' O crédito (' + esc(bAbertos.filter(b => ['SEM ANÁLISE', 'PRAZO', 'LIMITE'].indexOf(b) !== -1).map(b => P.ROTULO_BLOQUEIO[b]).join(', ') + ') só o administrador libera' + (CRM.ehAdmin() ? ' — ou ajuste a ficha em Caixa → Crédito' : '') + '.' + avisoCredito(p, bAbertos, t)) : '') + '</p>' : '') +
+        (bAbertos.some(b => ['SEM ANÁLISE', 'PRAZO', 'LIMITE'].indexOf(b) !== -1) ? ' O crédito (' + esc(bAbertos.filter(b => ['SEM ANÁLISE', 'PRAZO', 'LIMITE'].indexOf(b) !== -1).map(b => P.ROTULO_BLOQUEIO[b]).join(', ')) + ') só o administrador libera' + (CRM.ehAdmin() ? ' — ou ajuste a ficha em Caixa → Crédito' : '') + '.' + avisoCredito(p, bAbertos, t) : '') + '</p>' : '') +
       '<p class="acoes">' + botoes.join(' ') + '</p>' + (CRM.nfe ? CRM.nfe.doPedido(p) : '') +
       '<div class="chips">' + abas.map(a => '<button type="button" class="chip-filtro' + (abaPed === a[0] ? ' ativo' : '') + '" data-acao="pd-aba-ped" data-id="' + a[0] + '">' + esc(a[1]) + '</button>').join('') + '</div>' + corpo + '</section>';
   }
