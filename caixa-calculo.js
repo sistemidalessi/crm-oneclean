@@ -128,11 +128,13 @@
   const contaNoSaldo = (l, a) => l.situacao === 'pago' && l.baixa === 'caixa' && l.pago_em &&
     (l.pago_em > a.data || (l.pago_em === a.data && tempo(l.baixado_em) > tempo(a.criado_em)));
   const sinal = l => (l.tipo === 'entrada' ? 1 : -1) * Number(l.valor || 0);
-  function saldoAtual(saldos, lancs) {
+  // Com "hoje", o que foi baixado com data de amanhã em diante (boleto pago hoje que o banco só credita no dia útil seguinte;
+  // 03/11/2026) fica fora do saldo de agora e entra na grade no dia dele.
+  function saldoAtual(saldos, lancs, hoje) {
     const a = ancora(saldos);
     if (!a) return { ancora: null, saldo: null, entradas: 0, saidas: 0, n: 0 };
     let e = 0, s = 0, n = 0;
-    (lancs || []).forEach(l => { if (contaNoSaldo(l, a)) { n++; if (l.tipo === 'entrada') e += Number(l.valor || 0); else s += Number(l.valor || 0); } });
+    (lancs || []).forEach(l => { if (contaNoSaldo(l, a) && !(hoje && l.pago_em > hoje)) { n++; if (l.tipo === 'entrada') e += Number(l.valor || 0); else s += Number(l.valor || 0); } });
     return { ancora: a, saldo: r2(Number(a.valor) + e - s), entradas: r2(e), saidas: r2(s), n };
   }
 
@@ -238,10 +240,11 @@
       if (d < hoje) {
         if (d < s.ancora.data) { out[d] = null; return; }
         let v = s.saldo;
-        (lancs || []).forEach(l => { if (contaNoSaldo(l, s.ancora) && l.pago_em > d) v -= sinal(l); });
+        (lancs || []).forEach(l => { if (contaNoSaldo(l, s.ancora) && l.pago_em > d && l.pago_em <= hoje) v -= sinal(l); });
         out[d] = r2(v); return;
       }
       let v = s.saldo;
+      (lancs || []).forEach(l => { if (contaNoSaldo(l, s.ancora) && l.pago_em > hoje && l.pago_em <= d) v += sinal(l); });
       (previstos || []).forEach(x => { if (x.estado === 'previsto' && x.data >= hoje && x.data <= d) v += (x.secao === 'entrada' ? 1 : -1) * x.valor; });
       out[d] = r2(v);
     });
@@ -333,7 +336,7 @@
       return out.map(i => { const x = Object.assign({}, i); delete x._ag; delete x._n; if (i._n > 1) x.lancamentos_somados = i._n; return x; });
     };
 
-    const s = saldoAtual(d.saldos, lancs);
+    const s = saldoAtual(d.saldos, lancs, hoje);
     const brutos = itensGrade(hoje, ate, hoje, lancs, d.titulos, opc);
     const saldos = saldosGrade(dias, hoje, s, lancs, brutos);
     const proximos_dias = dias.map(dia => {

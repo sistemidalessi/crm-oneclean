@@ -43,7 +43,7 @@
     return (pend.length ? '<details class="cartao cx-venc" data-chave="bb-site" open><summary><strong>Boletos do site do BB pagos, sem título certo: ' + pend.length + ' (' + esc(R.moeda(tp(pend))) + ')</strong> <small>o banco diz que foi pago, mas o CRM não achou um título só para dar a baixa. Veja e dê o "Recebi" no título certo (ou lance a entrada); depois "Já resolvi".</small></summary>' +
         '<div class="tabela-rolagem"><table class="tabela"><tbody>' + pend.map(x => '<tr><td>' + esc(x.cliente || '—') + '<small>seu número ' + esc(x.seu_numero || '—') + (x.vencimento ? ' · vencia ' + esc(R.dataBR(x.vencimento)) : '') + ' · ' + esc(x.motivo || '') + '</small></td>' +
           '<td>crédito ' + esc(dm(x.credito)) + '</td><td class="num">' + esc(R.moeda(x.pago)) + '</td><td class="acoes-linha">' + b('cx-bbsite-ok', x.nosso_numero, 'Já resolvi') + '</td></tr>').join('') + '</tbody></table></div></details>' : '') +
-      (feitos.length ? '<details class="cartao cx-venc" data-chave="bb-site-feitos"><summary><strong>Boletos do site do BB baixados sozinhos (7 dias): ' + feitos.length + ' (' + esc(R.moeda(tp(feitos))) + ')</strong> <small>pagos no banco: o CRM achou o título (pelo seu número ou por CNPJ, valor e vencimento) e lançou a entrada no dia do pagamento.</small></summary>' +
+      (feitos.length ? '<details class="cartao cx-venc" data-chave="bb-site-feitos"><summary><strong>Boletos do site do BB baixados sozinhos (7 dias): ' + feitos.length + ' (' + esc(R.moeda(tp(feitos))) + ')</strong> <small>pagos no banco: o CRM achou o título (pelo seu número ou por CNPJ, valor e vencimento) e lançou a entrada no dia do crédito.</small></summary>' +
         '<div class="tabela-rolagem"><table class="tabela"><tbody>' + feitos.map(x => '<tr><td>' + esc(x.cliente || '—') + '<small>duplicata ' + esc(x.titulo_duplicata || '') + ' · ' + esc(x.motivo || '') + '</small></td><td>crédito ' + esc(dm(x.credito)) + '</td><td class="num">' + esc(R.moeda(x.pago)) + '</td></tr>').join('') +
         '</tbody></table></div></details>' : '');
   }
@@ -245,7 +245,7 @@
   }
 
   function formConferir() {
-    const s = saldoAtual(F.saldos, F.lancamentos);
+    const s = saldoAtual(F.saldos, F.lancamentos, hoje());
     CRM.abrirForm({
       titulo: 'Conferir com o banco',
       intro: s.ancora ? 'Pelo CRM, o saldo agora é ' + R.moeda(s.saldo) + ' (informado ' + R.moeda(s.ancora.valor) + ' em ' + R.dataBR(s.ancora.data) +
@@ -880,7 +880,7 @@
       if (!F) { setTimeout(carrega, 0); return '<div class="cabecalho"><div><h1>Caixa</h1></div></div><div class="cartao"><p class="vazio">Carregando o caixa…</p></div>'; }
       const escrevendo = typeof document !== 'undefined' && document.activeElement && document.activeElement.id === 'cxFrases';
       if (Date.now() - lidoEm > 60000 && !escrevendo) setTimeout(carrega, 0); // o que mudou em outro computador
-      const s = saldoAtual(F.saldos, F.lancamentos);
+      const s = saldoAtual(F.saldos, F.lancamentos, hoje());
       const pausadas = F.lancamentos.filter(x => x.situacao === 'pausado').length;
       const aba = (id, rot) => '<button type="button" class="' + (vista === id ? 'ativa' : '') + '" data-acao="cx-vista" data-id="' + id + '">' + esc(rot) + '</button>';
       if (vista === 'pausadas') filtro.situacao = 'pausadas';
