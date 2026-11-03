@@ -278,6 +278,40 @@
       return null;
     }).filter(Boolean);
   }
+  // Quantas unidades a embalagem da nota diz ter (03/11/2026): "C/ 5 PACOTES", "FD C/8 UN", "CX C/6 ROLOS", "C/12",
+  // "(15X4)", "(1X10)". Devolve os candidatos (cada número e os produtos "AxB"); quem escolhe é o custo.
+  function fatoresDaDescricao(desc) {
+    const t = String(desc || '').toUpperCase().replace(/,/g, '.'), out = new Set();
+    let m; const re1 = /C\s*\/\s*(\d{1,4})\b/g, re2 = /\((\d{1,4})\s*X\s*(\d{1,4})\)/g;
+    while ((m = re1.exec(t))) out.add(+m[1]);
+    while ((m = re2.exec(t))) { out.add(+m[1]); out.add(+m[2]); out.add(+m[1] * +m[2]); }
+    return [...out].filter(n => n >= 2 && n <= 1000).sort((a, b) => a - b);
+  }
+  // Custo de cada unidade muito longe do custo atual (03/11/2026, o comprador: "valor de compra é 6,50" e o CRM gravou 33,56
+  // no papel 290014 — o fardo com 5 pacotes entrou como 1). Pega os dois erros: embalagem com o número errado e item ligado
+  // ao produto errado (Coala 120 ml no limpador de 5 L, cabo plástico na vassoura). custoDe: Map(codigo → custo atual).
+  // Mais que 1,8× ou menos que 0,55× o atual: avisa e, se a conta fechar com um número da descrição ou um inteiro, sugere.
+  function custosSuspeitos(itens, lista, custoDe) {
+    const porId = new Map((itens || []).map(i => [i.id, i]));
+    return (lista || []).filter(x => !x.ignorar && x.codigo && Number(x.fator) > 0).map(x => {
+      const it = porId.get(x.id), f = Number(x.fator), atual = Number(custoDe && custoDe.get(x.codigo));
+      const novo = it ? custoItem(it, f) : null;
+      if (!(atual > 0) || !(novo > 0)) return null;
+      const r = novo / atual;
+      if (r <= 1.8 && r >= 0.55) return null;
+      const moeda = v => 'R$ ' + v.toFixed(2).replace('.', ',');
+      let dica = '';
+      if (r > 1.8) {
+        const alvo = r * f, cands = fatoresDaDescricao(it.descricao);
+        const daDesc = cands.find(n => Math.abs(n / alvo - 1) <= 0.25), inteiro = Math.round(alvo);
+        const sug = daDesc || (Math.abs(inteiro / alvo - 1) <= 0.12 && inteiro >= 2 ? inteiro : null);
+        if (sug) dica = ' → com ' + sug + ' por embalagem fica ' + moeda(custoItem(it, sug)) + ' cada' + (daDesc ? ' (a descrição diz ' + sug + ')' : '');
+      }
+      return { id: x.id, sugestao: dica ? (fatoresDaDescricao(it.descricao).find(n => Math.abs(n / (r * f) - 1) <= 0.25) || Math.round(r * f)) : null,
+        texto: (it.descricao || x.codigo) + ' → ' + x.codigo + ': ' + moeda(novo) + ' cada, o custo atual é ' + moeda(atual) + ' (' + (r > 1 ? r.toFixed(1).replace('.', ',') + '× mais' : Math.round((1 - r) * 100) + '% menos') + ')' +
+          (dica || (r < 0.55 ? ' → confira se é o mesmo produto' : ' → confira o produto e o "vem quantas"')) };
+    }).filter(Boolean);
+  }
   // Código do produto como está no cadastro (23/10/2026: na entrada das compras o comprador digitou "10087" para o 010087 e
   // nasceram 7 produtos que não existem, com a mercadoria fora do produto certo). Igual → o mesmo; sem os zeros da frente e
   // um só no cadastro → esse; senão null (o banco recusa código fora do cadastro). codigos: os do cadastro, sem as caixas.
@@ -406,7 +440,7 @@
         o.custo ? [l.entradas_custo == null ? '' : l.entradas_custo, l.custo_medio == null ? '' : l.custo_medio, l.custo_vendido == null ? '' : l.custo_vendido, l.margem == null ? '' : l.margem] : [])) };
   }
 
-  const api = { antesDe, folhaContagem, custoAvulsa, codigoDoCadastro, fatoresSuspeitos, junta, valor, sequencia, lerContagem, atualFkn, ehCaixa, TIPOS, extrasDoXml, stDoDet, compraDoXml, devolucaoDoXml, custoItem, sugere, avisosDfe, sugereFornecedor, chegadaCompras, pareceDespesa,
+  const api = { antesDe, folhaContagem, custoAvulsa, codigoDoCadastro, fatoresSuspeitos, fatoresDaDescricao, custosSuspeitos, junta, valor, sequencia, lerContagem, atualFkn, ehCaixa, TIPOS, extrasDoXml, stDoDet, compraDoXml, devolucaoDoXml, custoItem, sugere, avisosDfe, sugereFornecedor, chegadaCompras, pareceDespesa,
     parcelasDaNota, dividirParcelas, conferirParcelas, parcelasMudaram, periodoPreset, PRESETS, periodoLinhas, periodoTotais, periodoPlanilha };
   raiz.CRMEstoque = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
@@ -1236,6 +1270,23 @@
             const susp = S.fatoresSuspeitos(itens, lista, unDe);
             if (susp.length && !confirm('Confira o "vem quantas na embalagem" de ' + susp.length + ' item(ns):\n\n' + susp.join('\n') +
               '\n\nSe a nota já vem na mesma unidade do estoque, o certo é 1. Dar entrada assim mesmo?')) return false;
+            if (!dv && !op()) {
+              const custoDe = new Map();
+              (saldo || []).forEach(z => { if (Number(z.custo_medio) > 0) custoDe.set(z.codigo, Number(z.custo_medio)); });
+              base.forEach(z => { if (!custoDe.has(z.codigo) && Number(z.custo_unit) > 0) custoDe.set(z.codigo, Number(z.custo_unit)); });
+              const caros = S.custosSuspeitos(itens, lista, custoDe);
+              if (caros.length) {
+                const comSug = caros.filter(z => z.sugestao);
+                if (!confirm('O custo de ' + caros.length + ' item(ns) ficou longe do custo atual:\n\n' + caros.map(z => '· ' + z.texto).join('\n') +
+                  '\n\nUm fardo ou caixa com várias unidades precisa do número certo em "vem quantas na embalagem", e cada item da nota precisa estar ligado ao mesmo produto nosso.' +
+                  (comSug.length ? '\n\nOK: usar o número sugerido (' + comSug.length + ' item(ns)) e conferir de novo. Cancelar: voltar sem dar entrada.' : '\n\nOK: dar entrada assim mesmo (o preço mudou de verdade). Cancelar: voltar e corrigir.'))) return false;
+                if (comSug.length) {
+                  comSug.forEach(z => { const e = form.elements['f_' + z.id]; if (e) { e.value = z.sugestao; e.dispatchEvent(new Event('input')); } });
+                  CRM.toast('Número da embalagem trocado em ' + comSug.length + ' item(ns): confira e clique de novo em "Dar entrada".');
+                  return false;
+                }
+              }
+            }
             const fora = lista.filter(x => !x.ignorar && !cad.has(x.codigo));
             if (fora.length) throw new Error(fora.length + ' código(s) que o cadastro de produtos não tem: ' + fora.map(x => x.codigo).join(', ') +
               '. Escolha o produto na lista; se for produto novo, cadastre antes em Produtos.');
