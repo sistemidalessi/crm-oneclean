@@ -143,7 +143,7 @@
 
   // Endereço de entrega do cadastro do cliente (o "Local entrega 0 — ENDEREÇO DE ENTREGA" do FKN).
   const entregaDoCliente = e => (e ? { endereco: e.logradouro || '', numero: e.numero || '', compl: e.complemento || '', bairro: e.bairro || '', cidade: e.cidade || '', uf: e.uf || '', cep: e.cep || '' } : {});
-  const entregaTexto = d => (d ? [[d.endereco, d.numero].filter(Boolean).join(', '), d.compl, d.bairro, [d.cidade, d.uf].filter(Boolean).join('/'), d.cep ? 'CEP ' + d.cep : ''].filter(Boolean).join(' · ') : '');
+  const entregaTexto = d => (d ? [d.local, [d.endereco, d.numero].filter(Boolean).join(', '), d.compl, d.bairro, [d.cidade, d.uf].filter(Boolean).join('/'), d.cep ? 'CEP ' + d.cep : ''].filter(Boolean).join(' · ') : '');
 
   // Apuração da comissão do mês (Fase 3b): nasce na nota emitida, item a item, pela faixa do preço praticado na tabela e
   // pelo plano de quem vendeu (o vendedor escrito na nota). Só itens de venda (CFOP x1xx e x4xx: 5102, 5405, 5117…; fora
@@ -628,6 +628,27 @@
     return i => est[i] || 0;
   }
 
+  // Locais de entrega (03/11/2026, vendedora: "aonde eu vejo o nome do condomínio?" — terceirizada como a Agilité compra num
+  // CNPJ e entrega em vários condomínios): o pedido tem o "Nome do local" e o CRM lembra os locais já usados com o cliente
+  // (pedidos anteriores) para escolher de novo. A rota, o celular do motorista e a nota usam sempre o local do pedido.
+  const chaveLocal = en => [en.local, en.endereco, en.numero, en.compl].map(s => R.semAcento ? R.semAcento(String(s || '')).toUpperCase().trim() : String(s || '').toUpperCase().trim()).join('|');
+  function locaisDe(empresaId) {
+    if (!empresaId) return [];
+    const e = CRM.empresa(empresaId), vistos = new Map();
+    const poe = en => { if (en && String(en.endereco || '').trim()) { const k = chaveLocal(en); if (!vistos.has(k)) vistos.set(k, en); } };
+    (peds || []).filter(p => p.empresa_id === empresaId && p.situacao !== 'cancelado').sort((a, b) => String(b.criado_em).localeCompare(String(a.criado_em)))
+      .forEach(p => poe(p.dados && p.dados.entrega));
+    if (e) poe(Object.assign({ local: 'Endereço do cadastro (CNPJ)' }, P.entregaDoCliente(e)));
+    return [...vistos.values()];
+  }
+  function seletorLocais(empresaId, atual) {
+    const l = locaisDe(empresaId);
+    if (!l.some(en => en.local !== 'Endereço do cadastro (CNPJ)')) return '';   // só o do cadastro: nada a escolher
+    const k = atual ? chaveLocal(atual) : '';
+    return '<label class="campo largo"><span>📍 Locais já usados com este cliente (' + l.length + ')</span><select data-pd-local><option value="">— escolher para preencher —</option>' +
+      l.map((en, i) => '<option value="' + i + '"' + (chaveLocal(en) === k ? ' selected' : '') + '>' + esc(P.entregaTexto(en)) + '</option>').join('') + '</select></label>';
+  }
+
   function sugestoesPag() {
     const lista = (E().D.opcoes || []).filter(o => o.tipo === 'forma_pagamento').map(o => o.nome);
     return lista.length ? [...new Set(lista)] : [...new Set(PAGAMENTOS.concat((E().D.propostas || []).map(p => p.dados && p.dados.pagamento).filter(Boolean)))].slice(0, 60);
@@ -646,7 +667,8 @@
       { nome: 'faturar_em', rotulo: 'Data de entrega', tipo: 'data' },
       { nome: 'transportadora', rotulo: 'Transportadora' },
       { nome: 'volumes', rotulo: 'Volumes' },
-      { tipo: 'secao', rotulo: 'Endereço de entrega' },
+      { tipo: 'secao', rotulo: 'Local de entrega' },
+      { nome: 'local', rotulo: 'Nome do local (condomínio, unidade, obra)', largo: true },
       { nome: 'endereco', rotulo: 'Rua', largo: true }, { nome: 'numero', rotulo: 'Número' }, { nome: 'compl', rotulo: 'Complemento' },
       { nome: 'bairro', rotulo: 'Bairro' }, { nome: 'cidade', rotulo: 'Cidade' }, { nome: 'uf', rotulo: 'UF' }, { nome: 'cep', rotulo: 'CEP' },
       { tipo: 'secao', rotulo: 'Textos' },
@@ -655,7 +677,7 @@
       { nome: 'seu_pedido', rotulo: 'Pedido do cliente (nº)' }, { nome: 'ac', rotulo: 'A/C' }
     ];
     const vals = { pagamento: d.pagamento || '', prog: dataProgramada(d.pagamento), faturar_em: p.entrega || '', transportadora: d.transportadora || '', volumes: d.volumes || '',
-      endereco: en.endereco || '', numero: en.numero || '', compl: en.compl || '', bairro: en.bairro || '', cidade: en.cidade || '', uf: en.uf || '', cep: en.cep || '',
+      local: en.local || '', endereco: en.endereco || '', numero: en.numero || '', compl: en.compl || '', bairro: en.bairro || '', cidade: en.cidade || '', uf: en.uf || '', cep: en.cep || '',
       texto_nota: d.texto_nota || '', observacoes: d.observacoes || '', seu_pedido: d.seu_pedido || '', ac: d.ac || '' };
     const igual = (a, b) => String(a == null ? '' : a).trim() === String(b == null ? '' : b).trim();
     CRM.abrirForm({
@@ -669,7 +691,7 @@
       aoSalvar: async v => {
         const mud = {};
         ['pagamento', 'transportadora', 'volumes', 'texto_nota', 'observacoes', 'seu_pedido', 'ac'].forEach(k => { if (!igual(v[k], vals[k])) mud[k] = v[k] == null ? null : String(v[k]).trim(); });
-        const ends = ['endereco', 'numero', 'compl', 'bairro', 'cidade', 'uf', 'cep'];
+        const ends = ['local', 'endereco', 'numero', 'compl', 'bairro', 'cidade', 'uf', 'cep'];
         if (ends.some(k => !igual(v[k], vals[k]))) {
           const novo = Object.assign({}, en);
           ends.forEach(k => { const x = v[k] == null ? '' : String(v[k]).trim(); if (x) novo[k] = k === 'uf' ? x.toUpperCase() : x; else delete novo[k]; });
@@ -711,7 +733,9 @@
         inp('Valor do frete (R$)', 'frete', x.frete || '', ' type="text" data-moeda') + inp('Qtde de volumes', 'dados.volumes', d.volumes, ' type="number" min="0"') +
         inp('Seu pedido', 'dados.seu_pedido', d.seu_pedido) + inp('A/C Sr(a)', 'dados.ac', d.ac) + inp('Referente', 'dados.referente', d.referente) +
         inp('Validade do orçamento (dias)', 'dados.validade_dias', d.validade_dias, ' type="number" min="1"') + inp('Prazo de entrega', 'dados.prazo_entrega', d.prazo_entrega) +
-        '<h3 class="largo">Local de entrega</h3>' + inp('Endereço', 'dados.entrega.endereco', d.entrega.endereco) + inp('Nº', 'dados.entrega.numero', d.entrega.numero) + inp('Compl.', 'dados.entrega.compl', d.entrega.compl) +
+        '<h3 class="largo">Local de entrega</h3>' + seletorLocais(x.empresa_id, d.entrega) +
+        inp('Nome do local (condomínio, unidade, obra)', 'dados.entrega.local', d.entrega.local, ' placeholder="ex.: Condomínio Jardim das Flores"') +
+        inp('Endereço', 'dados.entrega.endereco', d.entrega.endereco) + inp('Nº', 'dados.entrega.numero', d.entrega.numero) + inp('Compl.', 'dados.entrega.compl', d.entrega.compl) +
         inp('Bairro', 'dados.entrega.bairro', d.entrega.bairro) + inp('Cidade', 'dados.entrega.cidade', d.entrega.cidade) + inp('UF', 'dados.entrega.uf', d.entrega.uf) + inp('CEP', 'dados.entrega.cep', d.entrega.cep) +
         '<label class="campo largo"><span>Observações</span><textarea data-ed="dados.observacoes" rows="2">' + esc(d.observacoes) + '</textarea></label>' +
         '<label class="campo largo"><span>Texto da nota</span><textarea data-ed="dados.texto_nota" rows="2" placeholder="ex.: horário de recebimento, A/C">' + esc(d.texto_nota) + '</textarea></label></div>';
@@ -996,6 +1020,11 @@
       });
       if (!ed) return;
       on('[data-ed]', 'change', el => { poe(el.dataset.ed, el.value); if (el.dataset.ed === 'vendedor_id' || el.dataset.ed === 'frete') CRM.render(); });
+      on('[data-pd-local]', 'change', el => {
+        const en = locaisDe(ed.empresa_id)[Number(el.value)]; if (el.value === '' || !en) return;
+        ed.dados.entrega = Object.assign({}, en); if (en.local === 'Endereço do cadastro (CNPJ)') ed.dados.entrega.local = '';
+        CRM.render();
+      });
       on('[data-pd-prog]', 'change', el => {
         if (!el.value) return;
         const novo = pagProgramado(ed.dados.pagamento, el.value); ed.dados.pagamento = novo;

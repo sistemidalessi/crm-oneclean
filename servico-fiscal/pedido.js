@@ -184,7 +184,8 @@ function notaDoPedido(o) {
   const aPrazo = cobra && pg.forma === '15';   // boleto: sempre com parcela (à vista vence no dia)
   const duplicatas = aPrazo ? parcelas(cobrar, pg.dias, emissao) : [];
   const vendedor = String(o.vendedorNome || '').trim().toUpperCase();
-  const entregaTxt = d.entrega && d.entrega.endereco && dig(d.entrega.cep) !== dig(e.cep) ? 'LOCAL DE ENTREGA: ' + [d.entrega.endereco, d.entrega.numero, d.entrega.compl, d.entrega.bairro, d.entrega.cidade, d.entrega.uf].filter(Boolean).join(', ') : '';
+  // com o nome do local (condomínio, unidade) quando houver; nome sozinho já basta para sair (mesmo CEP do cadastro)
+  const entregaTxt = d.entrega && d.entrega.endereco && (dig(d.entrega.cep) !== dig(e.cep) || String(d.entrega.local || '').trim()) ? 'LOCAL DE ENTREGA: ' + [String(d.entrega.local || '').trim().toUpperCase(), d.entrega.endereco, d.entrega.numero, d.entrega.compl, d.entrega.bairro, d.entrega.cidade, d.entrega.uf].filter(Boolean).join(', ') : '';
   // Do jeito do FKN (XML reais de 15/10/2026): "PORTADOR: BOLETO PRAZO: 28 DIAS;LOCAL DE ENTREGA: …;VENDEDOR: SILMARA;…",
   // separado por ";" (o vigia e a comissão leem o "VENDEDOR:" daqui).
   const PORTADOR = { '15': 'BOLETO', '17': 'PIX', '18': 'TRANSFERENCIA', '01': 'DINHEIRO', '03': 'CARTAO', '04': 'CARTAO' };

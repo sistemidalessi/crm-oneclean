@@ -8570,3 +8570,90 @@ revoke all on function public.crm_negocio_fecha_propostas() from public, anon, a
 drop trigger if exists crm_negocio_fecha_propostas on public.crm_negocios;
 create trigger crm_negocio_fecha_propostas after update of status on public.crm_negocios
   for each row execute function public.crm_negocio_fecha_propostas();
+
+-- Rota pelo local de entrega do pedido (03/11/2026, Anderson: "quando tiver local de entrega diferente, ele tem que trazer
+-- sempre o local de entrega"): a rota e o celular do motorista mostravam o endereço do cadastro (CNPJ) — NF 2867: Osasco no
+-- pedido, Av. Paulista na rota. Agora o endereço do pedido da nota, quando preenchido; senão, o do cadastro; e o nome do local
+-- (condomínio, unidade) ao lado do cliente.
+-- Migração rota_pelo_local_de_entrega_do_pedido (substitui crm_minha_rota, crm_rota_dia e crm_rota_candidatas). Aplicada em 03/11/2026.
+create or replace function public.crm_entrega_texto(en jsonb) returns text language sql immutable set search_path = public as $$
+  select nullif(concat_ws(' · ', nullif(concat_ws(', ', nullif(btrim(coalesce(en->>'endereco', '')), ''), nullif(btrim(coalesce(en->>'numero', '')), '')), ''),
+    nullif(btrim(coalesce(en->>'compl', '')), ''), nullif(btrim(coalesce(en->>'bairro', '')), ''),
+    nullif(concat_ws('/', nullif(btrim(coalesce(en->>'cidade', '')), ''), nullif(btrim(coalesce(en->>'uf', '')), '')), ''),
+    nullif(btrim(coalesce(en->>'cep', '')), '')), '');
+$$;
+create or replace function public.crm_entrega_da_nota(p_nota uuid) returns jsonb language sql stable security definer set search_path = public as $$
+  select p.dados->'entrega' from public.crm_pedidos p
+   where p.nota_id = p_nota and btrim(coalesce(p.dados->'entrega'->>'endereco', '')) <> ''
+   order by p.atualizado_em desc nulls last limit 1;
+$$;
+revoke all on function public.crm_entrega_da_nota(uuid) from public, anon, authenticated;
+revoke all on function public.crm_entrega_texto(jsonb) from public, anon;
+
+create or replace function public.crm_minha_rota(p_dia date)
+ returns table(id uuid, numero integer, cliente text, endereco text, telefone text, contato text, ordem integer, situacao text, obs text, entregue_em timestamp with time zone, canhoto text)
+ language plpgsql stable security definer set search_path to 'public'
+as $function$
+begin
+  if not public.crm_eh_ativo() then raise exception 'sem acesso'; end if;
+  return query
+    select x.id, n.numero::integer,
+      coalesce(e.nome, n.cliente_nome) || coalesce(' — ' || nullif(btrim(coalesce(en.v->>'local', '')), ''), ''),
+      coalesce(public.crm_entrega_texto(en.v), public.crm_endereco_texto(e)),
+      coalesce(nullif(c.celular, ''), nullif(c.whatsapp, ''), nullif(c.telefone, ''), nullif(e.whatsapp, ''), nullif(e.telefone, '')), c.nome,
+      x.ordem, x.situacao, x.obs, x.entregue_em, x.canhoto
+      from public.crm_entregas x
+      join public.crm_notas n on n.id = x.nota_id
+      left join public.crm_empresas e on e.id = x.empresa_id
+      left join lateral (select public.crm_entrega_da_nota(n.id) v) en on true
+      left join lateral (select ct.nome, ct.celular, ct.whatsapp, ct.telefone from public.crm_contatos ct where ct.empresa_id = x.empresa_id
+        order by ct.principal desc, ct.criado_em limit 1) c on true
+     where x.dia = p_dia and x.liberada and x.motorista_id = auth.uid()
+     order by x.ordem, n.numero;
+end $function$;
+
+create or replace function public.crm_rota_dia(p_dia date)
+ returns table(id uuid, nota_id uuid, numero integer, empresa_id uuid, cliente text, endereco text, bairro text, cidade text, valor numeric, vendedor text, motorista_id uuid, ordem integer, liberada boolean, situacao text, obs text, canhoto text, entregue_em timestamp with time zone, cli_status text, cli_erro text, cli_em timestamp with time zone, cli_proximo_em timestamp with time zone)
+ language plpgsql stable security definer set search_path to 'public'
+as $function$
+begin
+  if not (public.crm_eh_gestor() or public.crm_eh_logistica()) then raise exception 'só a logística'; end if;
+  return query
+    select x.id, x.nota_id, n.numero::integer, x.empresa_id,
+      coalesce(e.nome, n.cliente_nome) || coalesce(' — ' || nullif(btrim(coalesce(en.v->>'local', '')), ''), ''),
+      coalesce(public.crm_entrega_texto(en.v), public.crm_endereco_texto(e)),
+      case when en.v is not null then nullif(btrim(en.v->>'bairro'), '') else e.bairro end,
+      coalesce(case when en.v is not null then nullif(btrim(en.v->>'cidade'), '') end, e.cidade, n.cidade), n.valor_total,
+      case when upper(n.vendedor_nome) = 'DIRETO' then 'Venda direta' else coalesce(u.nome, n.vendedor_nome) end, x.motorista_id, x.ordem, x.liberada, x.situacao, x.obs, x.canhoto, x.entregue_em, x.cli_status, x.cli_erro, x.cli_em, x.cli_proximo_em
+      from public.crm_entregas x
+      join public.crm_notas n on n.id = x.nota_id
+      left join public.crm_empresas e on e.id = x.empresa_id
+      left join lateral (select public.crm_entrega_da_nota(n.id) v) en on true
+      left join public.crm_usuarios u on u.user_id = n.vendedor_id
+     where x.dia = p_dia
+     order by x.motorista_id nulls last, x.ordem, n.numero;
+end $function$;
+
+create or replace function public.crm_rota_candidatas(p_desde date)
+ returns table(nota_id uuid, numero integer, emitida_em timestamp with time zone, empresa_id uuid, cliente text, endereco text, bairro text, cidade text, valor numeric, vendedor text)
+ language plpgsql stable security definer set search_path to 'public'
+as $function$
+begin
+  if not (public.crm_eh_gestor() or public.crm_eh_logistica()) then raise exception 'só a logística'; end if;
+  return query
+    select n.id, n.numero::integer, n.emitida_em, n.empresa_id,
+      coalesce(e.nome, n.cliente_nome) || coalesce(' — ' || nullif(btrim(coalesce(en.v->>'local', '')), ''), ''),
+      coalesce(public.crm_entrega_texto(en.v), public.crm_endereco_texto(e)),
+      case when en.v is not null then nullif(btrim(en.v->>'bairro'), '') else e.bairro end,
+      coalesce(case when en.v is not null then nullif(btrim(en.v->>'cidade'), '') end, e.cidade, n.cidade),
+      n.valor_total, case when upper(n.vendedor_nome) = 'DIRETO' then 'Venda direta' else coalesce(u.nome, n.vendedor_nome) end
+      from public.crm_notas n
+      left join public.crm_empresas e on e.id = n.empresa_id
+      left join lateral (select public.crm_entrega_da_nota(n.id) v) en on true
+      left join public.crm_usuarios u on u.user_id = n.vendedor_id
+     where not n.cancelada and n.emitida_em >= (greatest(p_desde, coalesce(public.crm_logistica_desde(), p_desde))::timestamp at time zone 'America/Sao_Paulo')
+       and not exists (select 1 from public.crm_entregas x where x.nota_id = n.id)
+       and not exists (select 1 from public.crm_nota_itens i where i.nota_id = n.id and i.cfop in ('5922', '6922'))
+     order by n.emitida_em desc
+     limit 300;
+end $function$;
