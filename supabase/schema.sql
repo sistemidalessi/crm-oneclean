@@ -7949,12 +7949,44 @@ $$;
 revoke all on function public.crm_prospec_base_resumo() from public, anon;
 grant execute on function public.crm_prospec_base_resumo() to authenticated;
 
--- Agendador: dias úteis às 6h30 de São Paulo (9h30 UTC); a função confere o feriado e se está ligado.
+-- Dia útil de São Bernardo do Campo (o mesmo calendário de caixa-calculo.js e da crm-prospeccao).
+create or replace function public.crm_prospec_dia_util(d date) returns boolean
+language plpgsql immutable set search_path = public as $$
+declare
+  ano int := extract(year from d)::int; a int; b int; c int; dd int; e int; f int; g int; h int; i int; k int; l int; m int;
+  mes int; dia int; p date;
+begin
+  if extract(isodow from d) in (6, 7) then return false; end if;
+  if to_char(d, 'MM-DD') = any (array['01-01','04-21','05-01','09-07','10-12','11-02','11-15','11-20','12-25','07-09','08-20']) then
+    return false;
+  end if;
+  a := ano % 19; b := ano / 100; c := ano % 100; dd := b / 4; e := b % 4;
+  f := (b + 8) / 25; g := (b - f + 1) / 3; h := (19 * a + b - dd - g + 15) % 30;
+  i := c / 4; k := c % 4; l := (32 + 2 * e + 2 * i - h - k) % 7; m := (a + 11 * h + 22 * l) / 451;
+  mes := (h + l - 7 * m + 114) / 31; dia := ((h + l - 7 * m + 114) % 31) + 1;
+  p := make_date(ano, mes, dia);
+  return d not in (p - 48, p - 47, p - 2, p + 60);
+end;
+$$;
+revoke all on function public.crm_prospec_dia_util(date) from public, anon;
+
+-- Agendador: dias úteis às 6h30 de São Paulo (9h30 UTC). A lista do dia é montada AQUI, no banco: pelo PostgREST o
+-- service_role tem limite de 8 s e a montagem com a base da Receita leva ~7–10 s (em 03/11/2026 estourou e a 1ª lista não
+-- saiu). Depois chama a crm-prospeccao, que acha a lista pronta ("ja_tinha") e só procura o contato pela IA.
 create or replace function public.crm_prospec_tick() returns void language plpgsql security definer set search_path = public as $$
-declare c record;
+declare c record; v_dia date := (now() at time zone 'America/Sao_Paulo')::date;
 begin
   select * into c from crm_interno.prospeccao_cfg where id = 1;
   if c.url is null then return; end if;
+  if public.crm_prospec_dia_util(v_dia) then
+    begin
+      perform set_config('request.jwt.claims', '{"role":"service_role"}', true);
+      perform set_config('statement_timeout', '120s', true);
+      perform public.crm_prospec_gerar(v_dia);
+    exception when others then
+      raise warning 'crm_prospec_tick: gerar falhou: %', sqlerrm;
+    end;
+  end if;
   perform net.http_post(url := c.url, body := jsonb_build_object('acao', 'rodar', 'origem', 'agendador'),
     headers := jsonb_build_object('Content-Type', 'application/json', 'Authorization', 'Bearer ' || c.senha), timeout_milliseconds := 300000);
 end;
