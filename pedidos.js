@@ -167,6 +167,7 @@
   // hoje da listagem; caixa vendida como "CX" usa o preço da caixa. Sem preço de tabela, conta como faixa A e avisa.
   //   o: { notas, itensPorNota (Map), mes 'AAAA-MM', dia(nota) → 'AAAA-MM-DD', precos (Map código → preço "ven"),
   //        precoCaixa (Map código → preço da caixa), pedidoDaNota (Map nota_id → pedido), cfg, usuarios [{user_id, nome, papel}] }
+  const unidadeNorm = u => String(u || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
   const ehVendaCfop = c => !c || /^[56][14]/.test(String(c));
   // Devolução (22/10/2026, decisão do Anderson: "devolveu é meio que não houve venda"): o.devolucoes (R.devolucoesComoNotas)
   // do mês tiram a comissão da venda devolvida, na proporção do valor devolvido, de quem vendeu — no mês da devolução (o mês da
@@ -196,7 +197,9 @@
         if (!ehVendaCfop(it.cfop)) return;
         const cod = String(it.codigo || ''), un = String(it.unidade || '').toUpperCase();
         let tab = doPedido.get(cod.replace(/\.\d+$/, '') + '|' + un);
-        if (tab == null) tab = un === 'CX' && o.precoCaixa && o.precoCaixa.has(cod) ? o.precoCaixa.get(cod) : o.precos && o.precos.get(cod);
+        // caixa/fardo vendido com o código da unidade (03/11/2026: toda unidade diferente da do cadastro, não só CX)
+        const ub = o.unidades && o.unidades.get(cod), outra = un === 'CX' || (ub && unidadeNorm(ub) && unidadeNorm(un) !== unidadeNorm(ub));
+        if (tab == null) tab = outra && o.precoCaixa && o.precoCaixa.has(cod) ? o.precoCaixa.get(cod) : o.precos && o.precos.get(cod);
         let fx = faixaDoPreco(num(it.valor_unitario), tab, tabela);
         if (!fx) { fx = 'A'; r.semTabela++; }
         const pctc = num(plano.faixas[fx]), v = num(it.valor_total), c = r2(v * pctc / 100);
@@ -244,7 +247,7 @@
 
   const FRETE_CONTA = [['0', '0-Remetente (CIF)'], ['1', '1-Destinatário (FOB)'], ['2', '2-Terceiros'], ['9', '9-Sem frete']];
 
-  const P = { TABELA_PADRAO, PLANOS_PADRAO, MARGEM_MINIMA, MARGEM_INTERNO, margemDoPlano, pctDaMargem, chaveMargem, rotuloMargem, margemMinima, apuraComissao, totalComAjustes, itensParaRepetir, ehVendaCfop, FAIXAS, FRETE_CONTA, ROTULO_BLOQUEIO, tabelaDe, planosDe, planoDoUsuario, precoLiq, totalItem, precoDaFaixa, faixaDoPreco, rotuloFaixa,
+  const P = { unidadeNorm, TABELA_PADRAO, PLANOS_PADRAO, MARGEM_MINIMA, MARGEM_INTERNO, margemDoPlano, pctDaMargem, chaveMargem, rotuloMargem, margemMinima, apuraComissao, totalComAjustes, itensParaRepetir, ehVendaCfop, FAIXAS, FRETE_CONTA, ROTULO_BLOQUEIO, tabelaDe, planosDe, planoDoUsuario, precoLiq, totalItem, precoDaFaixa, faixaDoPreco, rotuloFaixa,
     margem, sobreTabela, abaixoDaTabela, linha, totais, bloqueiosAbertos, situacao, pausado, bolao, ultimasCompras, procura, itensDaProposta, entregaDoCliente, entregaTexto };
   raiz.CRMPedidos = P;
   if (typeof module !== 'undefined') module.exports = P;
@@ -635,8 +638,11 @@
   // A caixa vendida com o código da unidade e "CX" (como sai na nota) vira o código da caixa (".1"): preço, custo e fator dela.
   function completa(it) {
     let cod = it.codigo ? String(it.codigo).replace(/\.0+$/, '') : null;
-    if (cod && String(it.unidade || '').toUpperCase() === 'CX' && !/\.\d+$/.test(cod)) {
-      const b = porCod.get(cod), v = b && String(b.unidade || '').toUpperCase() !== 'CX' && disp.find(x => x.base === cod && /\.\d+$/.test(x.codigo));
+    // 03/11/2026: vale para toda unidade diferente da do cadastro (fardo "FD", caixa "CX"…), não só "CX": o papel higiênico em
+    // fardo saía com o preço do pacote como tabela (faixa F, "desc s/tab" de 1.666%) e a reserva contava pacote
+    const un = P.unidadeNorm(it.unidade), b0 = cod && porCod.get(cod);
+    if (cod && un && !/\.\d+$/.test(cod) && b0 && P.unidadeNorm(b0.unidade) && un !== P.unidadeNorm(b0.unidade)) {
+      const v = disp.find(x => x.base === cod && /\.\d+$/.test(x.codigo));
       if (v) cod = v.codigo;
     }
     const d = cod ? porCod.get(cod) : null;
@@ -927,10 +933,10 @@
     com.mesCarregado = com.mes; com.carregando = false; CRM.render();
   }
   function previa(m) {
-    const precos = new Map(), caixa = new Map();
-    disp.forEach(d => { if (/\.\d+$/.test(d.codigo)) { if (!caixa.has(d.base) && d.preco_venda) caixa.set(d.base, num(d.preco_venda)); } else if (d.preco_venda) precos.set(d.codigo, num(d.preco_venda)); });
+    const precos = new Map(), caixa = new Map(), unidades = new Map();
+    disp.forEach(d => { if (/\.\d+$/.test(d.codigo)) { if (!caixa.has(d.base) && d.preco_venda) caixa.set(d.base, num(d.preco_venda)); } else { if (d.preco_venda) precos.set(d.codigo, num(d.preco_venda)); if (d.unidade) unidades.set(d.codigo, d.unidade); } });
     const pedidoDaNota = new Map((peds || []).filter(p => p.nota_id).map(p => [p.nota_id, p]));
-    const r = P.apuraComissao({ margens: com.margens && com.margens.mes === m ? com.margens.mapa : null, notas: E().D.notas || [], devolucoes: R.devolucoesComoNotas ? R.devolucoesComoNotas(E().D) : [], itensPorNota: E().ix.porNota, mes: m, dia: n => R.diaLocal(n.emitida_em), precos, precoCaixa: caixa, pedidoDaNota, cfg: E().cfg, usuarios: E().D.usuarios || [] });
+    const r = P.apuraComissao({ margens: com.margens && com.margens.mes === m ? com.margens.mapa : null, notas: E().D.notas || [], devolucoes: R.devolucoesComoNotas ? R.devolucoesComoNotas(E().D) : [], itensPorNota: E().ix.porNota, mes: m, dia: n => R.diaLocal(n.emitida_em), precos, precoCaixa: caixa, unidades, pedidoDaNota, cfg: E().cfg, usuarios: E().D.usuarios || [] });
     return CRM.ehAdmin() ? r : r.filter(g => g.user_id === CRM.meuId());
   }
   const ordFx = k => (/^M\d+$/.test(k) ? Number(k.slice(1)) : 100 + P.FAIXAS.concat(['ABAIXO']).indexOf(k));

@@ -193,3 +193,13 @@ test('comissão interna pela margem da nota (regra do FKN)', () => {
   assert.deepStrictEqual([t.margem, t.comissaoPct, t.comissao], [23.08, 3.5, 4.55]);
   assert.strictEqual(P.totais([{ quantidade: 1, preco: 13, preco_tab: 10 }], 0, { plano: P.PLANOS_PADRAO[0] }).comissao, null);   // sem custo (vendedora)
 });
+
+// 03/11/2026: fardo (FD) vendido com o código do pacote usa o preço da caixa ".1" na faixa, não o do pacote (antes caía na F)
+test('comissão: fardo pelo preço da caixa', () => {
+  const notas = [{ id: 'a', numero: 1, emitida_em: '2026-10-05T13:00:00Z', vendedor_id: 'v' }];
+  const itens = new Map([['a', [{ codigo: '300044', unidade: 'FD', valor_unitario: 113.75, valor_total: 113.75, cfop: '5102' }]]]);
+  const cfg = { comissao_usuarios: { v: 'externo' } };
+  const r = P.apuraComissao({ notas, itensPorNota: itens, mes: '2026-10', cfg, precos: new Map([['300044', 6.44]]), precoCaixa: new Map([['300044', 103.01]]),
+    unidades: new Map([['300044', 'PT']]), usuarios: [{ user_id: 'v', nome: 'S', papel: 'vendedor' }] });
+  assert.deepStrictEqual(Object.keys(r[0].porFaixa), ['C']);   // 113,75 ÷ 103,01 = +10,4% → faixa C (antes: ÷ 6,44 → F)
+});
