@@ -1197,6 +1197,7 @@
   Supa.prototype.pedidoLiberar = async function (id, liberar, entrada) {
     return unwrap(await this.sb.rpc('crm_pedido_liberar', { p_id: id, p_liberar: liberar == null ? null : !!liberar, p_entrada: entrada == null ? null : !!entrada }));
   };
+  Supa.prototype.pedidoDados = async function (id, p) { return unwrap(await this.sb.rpc('crm_pedido_dados', { p_id: id, p })); };
   Supa.prototype.pedidoComentar = async function (id, texto) { return unwrap(await this.sb.rpc('crm_pedido_comentar', { p_id: id, p_texto: texto })); };
   Supa.prototype.bolaoMontar = async function (ids, obs) { return unwrap(await this.sb.rpc('crm_bolao_montar', { p_pedidos: ids, p_obs: obs || null })); };
   Supa.prototype.pedidoSepararItem = async function (id, idx, ok) { return unwrap(await this.sb.rpc('crm_pedido_separar_item', { p_id: id, p_idx: idx, p_ok: !!ok })); };
@@ -1290,6 +1291,15 @@
     if (entrada != null) r.entrada_ok = !!entrada;
     await this.pedidosAtualizar();
     if (liberar != null) Object.assign(r, { liberado: liberar ? r.bloqueios.slice() : [], liberado_em: liberar ? new Date().toISOString() : null, liberado_por: liberar ? LOCAL_ADMIN : null });
+    this._pedsGrava();
+    return Object.assign({}, r);
+  };
+  Local.prototype.pedidoDados = async function (id, p) {
+    const r = this._ped(id), mud = Object.assign({}, p);
+    if ('faturar_em' in mud) { r.entrega = mud.faturar_em || null; delete mud.faturar_em; }
+    r.dados = Object.assign({}, r.dados || {}, mud);
+    r.comentarios = (r.comentarios || []).concat([{ quando: new Date().toISOString(), por: LOCAL_ADMIN, nome: 'Administrador (modo local)', texto: 'Dados alterados: ' + Object.keys(p).join(', ') }]);
+    await this.pedidosAtualizar();
     this._pedsGrava();
     return Object.assign({}, r);
   };

@@ -8501,3 +8501,53 @@ create trigger crm_empresa_nome_pelo_cnpj before insert or update on public.crm_
 -- de almoço). Vai sozinho para o "Texto da nota" de cada pedido novo. Preenchido com o texto das notas do FKN de 121 clientes
 -- (backup crm_backup.obs_nota_fkn_20261103).
 alter table public.crm_empresas add column if not exists obs_nota text;
+
+-- ✎ Editar dados do pedido até a nota (03/11/2026, Anderson: "deixa um lapisinho aí, porque até que se emita a nota
+-- fiscal, a gente pode mexer"). Pedido aberto, em separação ou separado: forma de pagamento (inclusive "PROGRAMADO
+-- dd/mm/aaaa"), data de entrega, endereço de entrega e textos. Os itens não mudam por aqui.
+-- Gestão e logística mudam; a vendedora só no aberto; prazo de pagamento maior depois de liberado, só o administrador.
+-- Cada mudança vira comentário no pedido e as travas são recalculadas (crm_pedidos_atualizar).
+-- Aplicado em 03/11/2026 (migração crm_pedido_dados_editar_ate_a_nota).
+
+create or replace function public.crm_pedido_dados(p_id uuid, p jsonb)
+ returns jsonb
+ language plpgsql
+ security definer
+ set search_path to 'public'
+as $function$
+declare r public.crm_pedidos; k text; antes jsonb; novo jsonb; mud text[] := '{}'; pz0 int; pz1 int; nome text;
+  campos text[] := array['pagamento', 'entrega', 'texto_nota', 'observacoes', 'seu_pedido', 'ac', 'referente', 'transportadora', 'frete_conta', 'volumes', 'prazo_entrega'];
+begin
+  select * into r from public.crm_pedidos where id = p_id for update;
+  if r.id is null or r.id not in (select public.crm_pedidos_meus()) then raise exception 'pedido não encontrado'; end if;
+  if r.situacao not in ('aberto', 'separacao', 'separado') then raise exception 'o pedido já está %: depois da nota, corrija pela carta de correção', r.situacao; end if;
+  if not (public.crm_eh_gestor() or public.crm_eh_logistica() or (r.situacao = 'aberto' and r.vendedor_id = auth.uid())) then
+    raise exception 'quem muda o pedido em separação é a logística ou a gestão'; end if;
+  antes := coalesce(r.dados, '{}'::jsonb); novo := antes;
+  foreach k in array campos loop
+    if p ? k and (p -> k) is distinct from (antes -> k) then
+      novo := jsonb_set(novo, array[k], p -> k, true);
+      mud := mud || (case k when 'pagamento' then 'pagamento: ' || coalesce(antes->>k, '—') || ' → ' || coalesce(p->>k, '—')
+                            when 'entrega' then 'endereço de entrega' when 'texto_nota' then 'texto da nota' else replace(k, '_', ' ') end);
+    end if;
+  end loop;
+  if p ? 'pagamento' and (p->>'pagamento') is distinct from (antes->>'pagamento') and r.situacao <> 'aberto' and not public.crm_eh_admin() then
+    pz0 := coalesce(public.crm_credito_prazo(antes->>'pagamento', (r.criado_em at time zone 'America/Sao_Paulo')::date), 0);
+    pz1 := coalesce(public.crm_credito_prazo(p->>'pagamento', (r.criado_em at time zone 'America/Sao_Paulo')::date), 0);
+    if pz1 > pz0 then raise exception 'prazo de pagamento maior (% dias, era %): só o administrador muda depois de liberado', pz1, pz0; end if;
+  end if;
+  if p ? 'faturar_em' and nullif(p->>'faturar_em', '')::date is distinct from r.entrega then mud := mud || 'data de entrega'::text; end if;
+  if array_length(mud, 1) is null then return public.crm_pedido_saida(r); end if;
+  select u.nome into nome from public.crm_usuarios u where u.user_id = auth.uid();
+  update public.crm_pedidos set dados = novo,
+    entrega = case when p ? 'faturar_em' then nullif(p->>'faturar_em', '')::date else entrega end,
+    comentarios = coalesce(comentarios, '[]'::jsonb) || jsonb_build_array(jsonb_build_object('nome', coalesce(nome, ''), 'quando', now(), 'texto', 'Dados alterados (' || r.situacao || '): ' || array_to_string(mud, '; '))),
+    atualizado_por = auth.uid(), atualizado_em = now()
+  where id = r.id returning * into r;
+  perform public.crm_pedidos_atualizar();
+  select * into r from public.crm_pedidos where id = r.id;
+  return public.crm_pedido_saida(r);
+end;
+$function$;
+revoke all on function public.crm_pedido_dados(uuid, jsonb) from public, anon;
+grant execute on function public.crm_pedido_dados(uuid, jsonb) to authenticated;

@@ -488,6 +488,8 @@
       : '<button type="button" class="btn sec" data-acao="pd-desliberar" data-id="' + esc(p.id) + '">Desfazer liberação</button>');
     if (gest && p.situacao === 'aberto' && ((p.bloqueios || []).indexOf('SEM ENTRADA') !== -1 || p.entrada_ok)) botoes.push('<button type="button" class="btn sec" data-acao="pd-entrada" data-id="' + esc(p.id) + '">' + (p.entrada_ok ? 'Desfazer "entrada recebida"' : 'Entrada recebida') + '</button>');
     if (ehOp() && p.situacao === 'aberto' && !bAbertos.length) botoes.push('<button type="button" class="btn" data-acao="pd-bolao-um" data-id="' + esc(p.id) + '">Mandar para separação</button>');
+    if (!podeEditar(p) && ['aberto', 'separacao', 'separado'].indexOf(p.situacao) !== -1 && (ehOp() || (p.situacao === 'aberto' && p.vendedor_id === CRM.meuId())))
+      botoes.push('<button type="button" class="btn sec" data-acao="pd-editar-dados" data-id="' + esc(p.id) + '" title="Forma de pagamento, data, endereço de entrega e textos — até a nota ser emitida">✎ Editar dados</button>');
     if (ehOp() && p.situacao === 'separacao') botoes.push('<button type="button" class="btn verde" data-acao="pd-separado" data-id="' + esc(p.id) + '">Separado ✓</button>');
     if (ehOp() && (p.situacao === 'separacao' || p.situacao === 'separado')) botoes.push('<button type="button" class="btn sec" data-acao="pd-voltar-aberto" data-id="' + esc(p.id) + '">Voltar ao aberto</button>');
     if (CRM.nfe && CRM.nfe.podeEmitir(p)) botoes.push('<button type="button" class="btn' + (p.situacao === 'separado' ? ' verde' : '') + '" data-acao="nf-emitir" data-id="' + esc(p.id) + '">Emitir NF-e</button>');
@@ -568,6 +570,16 @@
       .sort((a, b) => String(b.criado_em || b.atualizado_em || '').localeCompare(String(a.criado_em || a.atualizado_em || '')));
     return l.length ? String(l[0].dados.pagamento).trim() : '';
   };
+  // "Programar data" (03/11/2026, Anderson: "no FKN, programar data abria para o vendedor colocar o dia do vencimento; tem
+  // cliente que quer pagar exatamente naquele dia"): o calendário escreve "PROGRAMADO dd/mm/aaaa BOLETO" (ou PIX/TRANSFERENCIA,
+  // conforme o que já estava), que a nota (lePagamento), o boleto e a análise de crédito já entendem como vencimento nesse dia.
+  const isoDeBR = (dd, mm, aa) => aa + '-' + mm + '-' + dd;
+  const dataProgramada = pag => { const m = /PROGRAMAD\S*\s*(?:DATA\s*)?(\d{2})\/(\d{2})\/(\d{4})/i.exec(String(pag || '')); return m ? isoDeBR(m[1], m[2], m[3]) : ''; };
+  const pagProgramado = (pag, iso) => {
+    const forma = /PIX/i.test(pag || '') ? 'PIX' : /TRANSF|DEP[OÓ]SITO/i.test(pag || '') ? 'TRANSFERENCIA' : 'BOLETO';
+    return iso ? 'PROGRAMADO ' + iso.slice(8, 10) + '/' + iso.slice(5, 7) + '/' + iso.slice(0, 4) + ' ' + forma : String(pag || '');
+  };
+  const campoProgramado = pag => '<label class="campo"><span>📅 Programar data (vencimento)</span><input type="date" data-pd-prog value="' + esc(dataProgramada(pag)) + '" title="O cliente paga num dia certo: escolha a data e a forma de pagamento vira PROGRAMADO com essa data"></label>';
   const PAGAMENTOS = ['28 DIAS BOLETO', '28/35/42 DIAS BOLETO', '30 DIAS BOLETO', '30/60 DIAS BOLETO', '30/60/90 DIAS BOLETO', 'A VISTA BOLETO', 'A VISTA PIX', 'A VISTA TRANSFERENCIA', 'CARTAO DE CREDITO'];
   function novoEd(o) {
     o = o || {};
@@ -616,14 +628,68 @@
     return i => est[i] || 0;
   }
 
+  function sugestoesPag() {
+    const lista = (E().D.opcoes || []).filter(o => o.tipo === 'forma_pagamento').map(o => o.nome);
+    return lista.length ? [...new Set(lista)] : [...new Set(PAGAMENTOS.concat((E().D.propostas || []).map(p => p.dados && p.dados.pagamento).filter(Boolean)))].slice(0, 60);
+  }
+
+  // ✎ Editar dados (03/11/2026, Anderson: "deixa um lapisinho aí, porque até que se emita a nota fiscal, a gente pode mexer"):
+  // pedido liberado, em separação ou separado — forma de pagamento, data, endereço de entrega, textos. Os itens não mudam aqui
+  // (para isso, "Voltar ao aberto"). Quem grava é o banco (crm_pedido_dados): gestão e logística; a vendedora só no aberto;
+  // prazo de pagamento maior depois de liberado, só o administrador. Cada mudança vira comentário no pedido.
+  function formEditarDados(p) {
+    const d = p.dados || {}, en = d.entrega || {};
+    const campos = [
+      { tipo: 'secao', rotulo: 'Pagamento e entrega' },
+      { nome: 'pagamento', rotulo: 'Forma de pagamento', sugestoes: sugestoesPag(), largo: true },
+      { nome: 'prog', rotulo: '📅 Programar data (o cliente paga num dia certo)', tipo: 'data', ajuda: 'escolha o dia e a forma de pagamento vira "PROGRAMADO dd/mm/aaaa"' },
+      { nome: 'faturar_em', rotulo: 'Data de entrega', tipo: 'data' },
+      { nome: 'transportadora', rotulo: 'Transportadora' },
+      { nome: 'volumes', rotulo: 'Volumes' },
+      { tipo: 'secao', rotulo: 'Endereço de entrega' },
+      { nome: 'endereco', rotulo: 'Rua', largo: true }, { nome: 'numero', rotulo: 'Número' }, { nome: 'compl', rotulo: 'Complemento' },
+      { nome: 'bairro', rotulo: 'Bairro' }, { nome: 'cidade', rotulo: 'Cidade' }, { nome: 'uf', rotulo: 'UF' }, { nome: 'cep', rotulo: 'CEP' },
+      { tipo: 'secao', rotulo: 'Textos' },
+      { nome: 'texto_nota', rotulo: 'Texto da nota fiscal', tipo: 'textarea', largo: true },
+      { nome: 'observacoes', rotulo: 'Observações (para a separação e a entrega)', tipo: 'textarea', largo: true },
+      { nome: 'seu_pedido', rotulo: 'Pedido do cliente (nº)' }, { nome: 'ac', rotulo: 'A/C' }
+    ];
+    const vals = { pagamento: d.pagamento || '', prog: dataProgramada(d.pagamento), faturar_em: p.entrega || '', transportadora: d.transportadora || '', volumes: d.volumes || '',
+      endereco: en.endereco || '', numero: en.numero || '', compl: en.compl || '', bairro: en.bairro || '', cidade: en.cidade || '', uf: en.uf || '', cep: en.cep || '',
+      texto_nota: d.texto_nota || '', observacoes: d.observacoes || '', seu_pedido: d.seu_pedido || '', ac: d.ac || '' };
+    const igual = (a, b) => String(a == null ? '' : a).trim() === String(b == null ? '' : b).trim();
+    CRM.abrirForm({
+      titulo: '✎ Dados do pedido ' + p.numero, largura: 'largo',
+      intro: 'Dá para mudar até a nota ser emitida. Os produtos não mudam aqui (para isso, "Voltar ao aberto"). A mudança fica nos comentários do pedido.',
+      campos, valores: vals, salvarTexto: 'Gravar',
+      extras: form => {
+        const prog = form.elements.prog, pg = form.elements.pagamento;
+        if (prog && pg) prog.addEventListener('change', () => { if (prog.value) pg.value = pagProgramado(pg.value, prog.value); });
+      },
+      aoSalvar: async v => {
+        const mud = {};
+        ['pagamento', 'transportadora', 'volumes', 'texto_nota', 'observacoes', 'seu_pedido', 'ac'].forEach(k => { if (!igual(v[k], vals[k])) mud[k] = v[k] == null ? null : String(v[k]).trim(); });
+        const ends = ['endereco', 'numero', 'compl', 'bairro', 'cidade', 'uf', 'cep'];
+        if (ends.some(k => !igual(v[k], vals[k]))) {
+          const novo = Object.assign({}, en);
+          ends.forEach(k => { const x = v[k] == null ? '' : String(v[k]).trim(); if (x) novo[k] = k === 'uf' ? x.toUpperCase() : x; else delete novo[k]; });
+          mud.entrega = novo;
+        }
+        if (!igual(v.faturar_em, vals.faturar_em)) mud.faturar_em = v.faturar_em || '';
+        if (!Object.keys(mud).length) { CRM.toast('Nada mudou.'); return; }
+        const r = await CRM.store().pedidoDados(p.id, mud);
+        troca(r); CRM.toast('Pedido ' + p.numero + ' atualizado.'); CRM.render();
+      }
+    });
+  }
+
   function telaEditor() {
     const x = ed, e = x.empresa_id ? CRM.empresa(x.empresa_id) : null, d = x.dados, ctx = ctxDe(x.vendedor_id), t = P.totais(x.itens, x.frete, ctx);
     const abas = [['dados', 'Dados cadastrais'], ['produtos', 'Produtos (' + x.itens.length + ')']];
     const inp = (rot, chave, v, extra) => '<label class="campo"><span>' + esc(rot) + '</span><input data-ed="' + chave + '" value="' + esc(v == null ? '' : v) + '"' + (extra || '') + ' autocomplete="off"></label>';
     // Sugestões da forma de pagamento: a lista de Configurações → Listas → Formas de pagamento (03/11/2026, o Anderson cadastra);
     // sem a lista, as de sempre e as já usadas nos orçamentos.
-    const lista = (E().D.opcoes || []).filter(o => o.tipo === 'forma_pagamento').map(o => o.nome);
-    const pags = lista.length ? [...new Set(lista)] : [...new Set(PAGAMENTOS.concat((E().D.propostas || []).map(p => p.dados && p.dados.pagamento).filter(Boolean)))].slice(0, 60);
+    const pags = sugestoesPag();
     let corpo;
     if (x.aba === 'dados') {
       const emps = R.ordemAlfa(E().D.empresas || [], c => c.nome);   // em ordem alfabética (pedido do Anderson)
@@ -639,6 +705,7 @@
         '<label class="campo"><span>Tipo de pedido</span><select data-ed="tipo">' + CRM.opcoesHTML([['normal', 'Normal'], ['programado', 'Programado']], x.tipo) + '</select></label>' +
         '<label class="campo"><span>Faturar em / entrega</span><input type="date" data-ed="entrega" value="' + esc(x.entrega || '') + '"></label>' +
         '<label class="campo"><span>Forma de pagamento</span><input data-ed="dados.pagamento" list="pdPags" value="' + esc(d.pagamento) + '" autocomplete="off"></label><datalist id="pdPags">' + R.ordemAlfa(pags).map(s => '<option value="' + esc(s) + '">').join('') + '</datalist>' +
+        campoProgramado(d.pagamento) +
         inp('Transportadora', 'dados.transportadora', d.transportadora) +
         '<label class="campo"><span>Frete por conta</span><select data-ed="dados.frete_conta">' + CRM.opcoesHTML(P.FRETE_CONTA, d.frete_conta) + '</select></label>' +
         inp('Valor do frete (R$)', 'frete', x.frete || '', ' type="text" data-moeda') + inp('Qtde de volumes', 'dados.volumes', d.volumes, ' type="number" min="0"') +
@@ -929,6 +996,11 @@
       });
       if (!ed) return;
       on('[data-ed]', 'change', el => { poe(el.dataset.ed, el.value); if (el.dataset.ed === 'vendedor_id' || el.dataset.ed === 'frete') CRM.render(); });
+      on('[data-pd-prog]', 'change', el => {
+        if (!el.value) return;
+        const novo = pagProgramado(ed.dados.pagamento, el.value); ed.dados.pagamento = novo;
+        const pg = c.querySelector('[data-ed="dados.pagamento"]'); if (pg) pg.value = novo;
+      });
       on('[data-ed-cliente]', 'change', el => {
         const v = el.value.trim(), emps = E().D.empresas || [];
         const e = emps.find(x => (x.nome + (x.cnpj ? ' · ' + x.cnpj : '')) === v) || (emps.filter(x => R.normaliza(x.nome) === R.normaliza(v)).length === 1 ? emps.find(x => R.normaliza(x.nome) === R.normaliza(v)) : null);
@@ -978,6 +1050,7 @@
     'pd-novo': () => { aberto = null; ed = novoEd(); CRM.render(); },
     'pd-de-proposta': id => CRM.pedidos.deProposta(id),
     'pd-novo-negocio': id => { const n = CRM.negocio(id); if (n) CRM.pedidos.novo({ empresa_id: n.empresa_id, negocio_id: n.id, vendedor_id: n.responsavel_id || CRM.meuId() }); },
+    'pd-editar-dados': id => { const p = ped(id); if (p) formEditarDados(p); },
     'pd-editar': id => { const p = ped(id); if (p) { ed = edDePedido(p); aberto = null; CRM.render(); } },
     'pd-ed-sair': () => {
       const msg = ed && ed.proposta_id && !ed.id ? 'Sair? O orçamento ' + (ed.dados.numero_orcamento || '') + ' está salvo no negócio; o pedido não foi gravado (dá para virar pedido depois, na aba Orçamentos).'
