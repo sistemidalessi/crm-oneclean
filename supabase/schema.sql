@@ -8245,6 +8245,209 @@ begin
 end;
 $do$;
 
+-- ============================================================ Parcelas na entrada da nota de compra (03/11/2026)
+-- Pedido do Wellington (comprador), trazido pelo Anderson no 1º dia só com o CRM: "a Kubera vem com as parcelas zeradas no
+-- XML; a Destro vem sempre numa parcela só, mas a compra é parcelada". Na janela da entrada (pelo XML ou à mão) o comprador
+-- vê o faturamento da nota e acerta valor e vencimento, acrescenta ou tira parcela antes do OK; estoque e contas a pagar
+-- entram de uma vez, na mesma transação (crm_compra_entrada / crm_compra_entrada_manual). O que vinha no XML fica guardado
+-- em parcelas_xml e o acerto em parcelas_acerto (quem, quando, soma × total da nota). Ele não ganha acesso ao Caixa: só a
+-- entrada mexe nas parcelas, e só enquanto a nota está pendente. Nota que já entrou no FKN: as contas trazidas do Sifn083
+-- continuam valendo (a entrada liga essas, como em 24/10) e o acerto não muda nada; a tela só as mostra.
+alter table public.crm_compras add column if not exists parcelas_xml jsonb;
+alter table public.crm_compras add column if not exists parcelas_acerto jsonb;
+
+-- As contas do FKN (Sifn083, "00271|8414-01") de uma nota de compra ainda sem dono: número da nota e 1ª palavra do fornecedor
+-- (o mesmo casamento do crm_compra_pagar de 24/10, agora num lugar só). Uso interno: o gatilho, a entrada e a leitura abaixo.
+create or replace function public.crm_compra_fkn_contas(p_numero bigint, p_fornecedor text)
+returns table (id uuid, chave_fkn text, valor numeric, vencimento date, situacao text)
+language sql stable security definer set search_path = public as $$
+  select x.id, x.chave_fkn, x.valor, x.vencimento, x.situacao from public.crm_fin_lancamentos x
+   where x.origem = 'fkn' and x.compra_id is null and p_numero is not null
+     and ltrim(regexp_replace(split_part(split_part(x.chave_fkn, '|', 2), '-', 1), '\D', '', 'g'), '0') = ltrim(p_numero::text, '0')
+     and public.crm_nome_chave(split_part(x.descricao, ' · ', 1)) = public.crm_nome_chave(coalesce(nullif(btrim(p_fornecedor), ''), 'Fornecedor'));
+$$;
+revoke all on function public.crm_compra_fkn_contas(bigint, text) from public, anon, authenticated;
+
+-- Para a tela da entrada: as contas do FKN que a entrada vai ligar a esta nota (só parcela, vencimento, valor e se já foi
+-- paga). Administrador e comprador; vazio antes da virada (aí o FKN é que lança) e fora de nota pendente.
+create or replace function public.crm_compra_parcelas_fkn(p_compra uuid)
+returns table (parcela integer, valor numeric, vencimento date, pago boolean)
+language plpgsql stable security definer set search_path = public as $$
+declare c record;
+begin
+  if not (public.crm_eh_admin() or public.crm_eh_comprador()) then raise exception 'só o administrador ou o comprador'; end if;
+  select * into c from public.crm_compras where id = p_compra;
+  if c.id is null or c.situacao <> 'pendente' or coalesce(c.devolucao, false) or not public.crm_produtos_do_crm() then return; end if;
+  return query select (row_number() over (order by f.chave_fkn))::int, f.valor, f.vencimento, f.situacao = 'pago'
+    from public.crm_compra_fkn_contas(c.numero, c.fornecedor_nome) f order by f.chave_fkn;
+end;
+$$;
+revoke all on function public.crm_compra_parcelas_fkn(uuid) from public, anon;
+grant execute on function public.crm_compra_parcelas_fkn(uuid) to authenticated;
+
+-- Grava as parcelas acertadas na nota pendente (uso interno das duas entradas abaixo). p_parcelas: [{ vencimento, valor }],
+-- 1 a 60, valor > 0, vencimento de até 7 dias antes da emissão a 2 anos depois; ficam em ordem de vencimento, numeradas 1..k.
+-- Com contas do FKN para ligar, não muda nada (devolve { fkn: n }). A soma pode diferir do total da nota (a tela pede a
+-- confirmação do comprador); o acerto guarda os dois.
+create or replace function public.crm_compra_parcelas_aplicar(p_compra uuid, p_parcelas jsonb) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare c record; p jsonb; v numeric; d date; emi date; lista jsonb; soma numeric := 0; k integer := 0; fkn integer := 0;
+begin
+  if not (public.crm_eh_admin() or public.crm_eh_comprador()) then raise exception 'só o administrador ou o comprador acertam as parcelas da nota'; end if;
+  select * into c from public.crm_compras where id = p_compra for update;
+  if c.id is null then raise exception 'nota de compra não encontrada'; end if;
+  if c.situacao <> 'pendente' then raise exception 'esta nota já foi %', case c.situacao when 'lancada' then 'lançada' else 'deixada de lado' end; end if;
+  if coalesce(c.devolucao, false) then raise exception 'devolução de cliente não tem parcelas a pagar'; end if;
+  if public.crm_produtos_do_crm() then select count(*) into fkn from public.crm_compra_fkn_contas(c.numero, c.fornecedor_nome); end if;
+  if fkn > 0 then return jsonb_build_object('fkn', fkn); end if;
+  if jsonb_typeof(p_parcelas) is distinct from 'array' or jsonb_array_length(p_parcelas) = 0 then raise exception 'diga pelo menos uma parcela'; end if;
+  if jsonb_array_length(p_parcelas) > 60 then raise exception 'no máximo 60 parcelas'; end if;
+  emi := coalesce((c.emitida_em at time zone 'America/Sao_Paulo')::date, current_date);
+  for p in select value from jsonb_array_elements(p_parcelas) loop
+    k := k + 1;
+    begin v := round((p->>'valor')::numeric, 2); d := (p->>'vencimento')::date;
+    exception when others then raise exception 'parcela %: valor ou vencimento inválido', k; end;
+    if v is null or v <= 0 then raise exception 'parcela %: valor zerado', k; end if;
+    if d is null then raise exception 'parcela %: falta o vencimento', k; end if;
+    if d < emi - 7 or d > emi + 730 then raise exception 'parcela %: vencimento % longe demais da emissão da nota (%)', k, to_char(d, 'DD/MM/YYYY'), to_char(emi, 'DD/MM/YYYY'); end if;
+    soma := soma + v;
+  end loop;
+  select jsonb_agg(jsonb_build_object('n', s.rn, 'vencimento', s.venc, 'valor', s.valor) order by s.rn) into lista
+    from (select row_number() over (order by (e.value->>'vencimento')::date, e.ord) rn, (e.value->>'vencimento')::date venc, round((e.value->>'valor')::numeric, 2) valor
+            from jsonb_array_elements(p_parcelas) with ordinality as e(value, ord)) s;
+  update public.crm_compras set parcelas_xml = coalesce(parcelas_xml, parcelas), parcelas = lista,
+    parcelas_acerto = jsonb_build_object('por', auth.uid(), 'em', now(), 'soma', round(soma, 2), 'total_nota', c.valor_total), atualizado_em = now()
+   where id = c.id;
+  return jsonb_build_object('parcelas', k, 'soma', round(soma, 2), 'total_nota', c.valor_total);
+end;
+$$;
+revoke all on function public.crm_compra_parcelas_aplicar(uuid, jsonb) from public, anon, authenticated;
+
+-- A entrada com as parcelas acertadas: grava as parcelas e dá a entrada (crm_compra_lancar, de sempre) na mesma transação;
+-- se a entrada falhar, as parcelas também voltam. Sem parcelas (null), é a entrada de sempre.
+create or replace function public.crm_compra_entrada(p_compra uuid, p_itens jsonb, p_parcelas jsonb) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare a jsonb := null;
+begin
+  if p_parcelas is not null then a := public.crm_compra_parcelas_aplicar(p_compra, p_parcelas); end if;
+  return public.crm_compra_lancar(p_compra, p_itens) || case when a is null then '{}'::jsonb else jsonb_build_object('parcelas', a) end;
+end;
+$$;
+revoke all on function public.crm_compra_entrada(uuid, jsonb, jsonb) from public, anon;
+grant execute on function public.crm_compra_entrada(uuid, jsonb, jsonb) to authenticated;
+
+create or replace function public.crm_compra_entrada_manual(p_compra uuid, p_linhas jsonb, p_motivo text, p_parcelas jsonb) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare a jsonb := null;
+begin
+  if p_parcelas is not null then a := public.crm_compra_parcelas_aplicar(p_compra, p_parcelas); end if;
+  return public.crm_compra_lancar_manual(p_compra, p_linhas, p_motivo) || case when a is null then '{}'::jsonb else jsonb_build_object('parcelas', a) end;
+end;
+$$;
+revoke all on function public.crm_compra_entrada_manual(uuid, jsonb, text, jsonb) from public, anon;
+grant execute on function public.crm_compra_entrada_manual(uuid, jsonb, text, jsonb) to authenticated;
+
+-- Compras → contas a pagar (22/10/2026), com o casamento das contas do FKN em crm_compra_fkn_contas e, quando o comprador
+-- acertou as parcelas na entrada, a observação na conta com o que o XML trazia (para o administrador conferir no Caixa).
+create or replace function public.crm_compra_pagar() returns trigger language plpgsql security definer set search_path = public as $$
+declare p jsonb; k int; i int := 0; forn text; num text; ja int; obs text := null;
+begin
+  if not public.crm_produtos_do_crm() then return new; end if;
+  if new.situacao <> 'lancada' or old.situacao = 'lancada' then return new; end if;
+  if new.devolucao then return new; end if; -- devolução do cliente: não é conta a pagar (abate os títulos da venda)
+  if exists (select 1 from public.crm_fin_lancamentos where compra_id = new.id) then return new; end if;
+  forn := coalesce(nullif(btrim(new.fornecedor_nome), ''), 'Fornecedor');
+  num := coalesce(new.numero::text, '?');
+  -- 24/10/2026 (ensaio da virada): a nota que já entrou no FKN tem as contas trazidas do Sifn083: liga as do FKN à compra.
+  update public.crm_fin_lancamentos l set compra_id = new.id, parcela = f.rn
+    from (select x.id, row_number() over (order by x.chave_fkn)::int rn from public.crm_compra_fkn_contas(new.numero, forn) x) f
+   where l.id = f.id;
+  get diagnostics ja = row_count;
+  if ja > 0 then return new; end if;
+  if new.parcelas_acerto is not null then
+    obs := left('Parcelas acertadas na entrada da nota' ||
+      case when round(coalesce((new.parcelas_acerto->>'soma')::numeric, 0) - coalesce(new.valor_total, 0), 2) <> 0
+        then ' (soma ' || replace(to_char(coalesce((new.parcelas_acerto->>'soma')::numeric, 0), 'FM999999990.00'), '.', ',') || ' × total da nota ' || replace(to_char(coalesce(new.valor_total, 0), 'FM999999990.00'), '.', ',') || ')' else '' end ||
+      '. O XML trazia: ' || coalesce((select string_agg(to_char(nullif(x->>'vencimento', '')::date, 'DD/MM/YYYY') || ' ' || replace(to_char(coalesce((x->>'valor')::numeric, 0), 'FM999999990.00'), '.', ','), ', ')
+        from jsonb_array_elements(coalesce(new.parcelas_xml, '[]'::jsonb)) x), 'nenhuma parcela') || '.', 500);
+  end if;
+  k := jsonb_array_length(coalesce(new.parcelas, '[]'::jsonb));
+  if k = 0 then
+    insert into public.crm_fin_lancamentos (tipo, descricao, fornecedor, categoria, valor, vencimento, origem, compra_id, parcela, parcelas, titulo_duplicata, observacoes)
+    values ('saida', forn || ' · ' || num, forn, 'Fornecedores', coalesce(new.valor_total, 0), coalesce((new.emitida_em at time zone 'America/Sao_Paulo')::date, current_date),
+      'tela', new.id, 1, 1, num, 'A nota de compra não traz as parcelas: confira o vencimento com o boleto do fornecedor.');
+    return new;
+  end if;
+  for p in select value from jsonb_array_elements(new.parcelas) loop
+    i := i + 1;
+    insert into public.crm_fin_lancamentos (tipo, descricao, fornecedor, categoria, valor, vencimento, origem, compra_id, parcela, parcelas, titulo_duplicata, observacoes)
+    values ('saida', forn || ' · ' || num || '-' || lpad(coalesce(p->>'n', i::text), 2, '0'), forn, 'Fornecedores', coalesce((p->>'valor')::numeric, 0),
+      coalesce(nullif(p->>'vencimento', '')::date, (new.emitida_em at time zone 'America/Sao_Paulo')::date, current_date),
+      'tela', new.id, i, k, num || '-' || lpad(coalesce(p->>'n', i::text), 2, '0'), obs)
+    on conflict do nothing;
+  end loop;
+  return new;
+end;
+$$;
+
+-- ============================================================ Relatório por período (Estoque → Relatórios, 03/11/2026)
+-- Pedido do Wellington: escolher a data de início e fim (mensal, semestral, o que quiser). Uma linha por produto com as vendas
+-- do período (notas de venda CFOP 5/6/7 x1 e x4, sem as canceladas; a caixa "010284.1" em unidades, como crm_rel_vendas_ano)
+-- e o livro do estoque (crm_estoque_mov): saldo no início, entradas de compra, saídas pelas notas, estornos, ajustes e
+-- inventário (o saldo inicial que veio do FKN entra aqui quando cai no período) e saldo no fim. Saídas vêm positivas:
+-- fim = início + entradas − saídas + estornos + ajustes. Quem lê: administrador, gestora, comprador e logística (como o
+-- relatório do ano); o valor vendido só administrador, gestora e comprador (a logística não vê valor); custo das entradas e
+-- custo médio só administrador e comprador. Produtos sem venda, sem movimento e com saldo zero no fim ficam de fora.
+create or replace function public.crm_rel_periodo(p_de date, p_ate date)
+returns table (codigo text, descricao text, unidade text, vendas_qtd numeric, vendas_valor numeric, vendas_notas integer,
+  saldo_inicial numeric, entradas numeric, saidas numeric, estornos numeric, ajustes numeric, saldo_final numeric,
+  entradas_custo numeric, custo_medio numeric)
+language plpgsql stable security definer set search_path = public as $$
+#variable_conflict use_column
+declare
+  ve_valor boolean := public.crm_eh_gestor() or public.crm_eh_comprador();
+  ve_custo boolean := public.crm_eh_admin() or public.crm_eh_comprador();
+  t_ini timestamptz; t_fim timestamptz;
+begin
+  if not (public.crm_eh_gestor() or public.crm_eh_comprador() or public.crm_eh_logistica()) then raise exception 'só o administrador, a gestora, o comprador e a logística'; end if;
+  if p_de is null or p_ate is null or p_ate < p_de then raise exception 'período inválido'; end if;
+  if p_ate - p_de > 1100 then raise exception 'período de no máximo 3 anos'; end if;
+  t_ini := p_de::timestamp at time zone 'America/Sao_Paulo';
+  t_fim := (p_ate + 1)::timestamp at time zone 'America/Sao_Paulo';
+  return query
+  with it as (
+    select regexp_replace(i.codigo, '\.\d+$', '') cod, n.id nid, i.valor_total vt,
+           i.quantidade * coalesce((select u.fator from public.crm_estoque_unidades u where u.codigo = regexp_replace(i.codigo, '\.\d+$', '') and u.unidade = public.crm_un(i.unidade)), 1) q
+      from public.crm_nota_itens i join public.crm_notas n on n.id = i.nota_id
+     where not n.cancelada and i.codigo is not null and coalesce(i.cfop, '') ~ '^[567][14]' and n.emitida_em >= t_ini and n.emitida_em < t_fim
+  ), v as (select it.cod, sum(it.q) q, sum(it.vt) vt, count(distinct it.nid)::int nn from it group by it.cod),
+  m as (
+    select x.codigo cod,
+           coalesce(sum(x.quantidade) filter (where x.quando < t_ini), 0) ini,
+           coalesce(sum(x.quantidade) filter (where x.quando >= t_ini and x.tipo = 'entrada'), 0) ent,
+           sum(x.quantidade * x.custo_unit) filter (where x.quando >= t_ini and x.tipo = 'entrada') ent_custo,
+           coalesce(-sum(x.quantidade) filter (where x.quando >= t_ini and x.tipo = 'saida'), 0) sai,
+           coalesce(sum(x.quantidade) filter (where x.quando >= t_ini and x.tipo = 'estorno'), 0) est,
+           coalesce(sum(x.quantidade) filter (where x.quando >= t_ini and x.tipo not in ('entrada', 'saida', 'estorno')), 0) aj,
+           coalesce(sum(x.quantidade), 0) fin,
+           bool_or(x.quando >= t_ini) mexeu
+      from public.crm_estoque_mov x where x.quando < t_fim group by x.codigo
+  )
+  select coalesce(v.cod, m.cod), coalesce(e.descricao, s.descricao, coalesce(v.cod, m.cod)), coalesce(e.unidade, s.unidade),
+         round(coalesce(v.q, 0), 3), case when ve_valor then round(coalesce(v.vt, 0), 2) end, coalesce(v.nn, 0),
+         round(coalesce(m.ini, 0), 3), round(coalesce(m.ent, 0), 3), round(coalesce(m.sai, 0), 3), round(coalesce(m.est, 0), 3),
+         round(coalesce(m.aj, 0), 3), round(coalesce(m.fin, 0), 3),
+         case when ve_custo then round(m.ent_custo, 2) end, case when ve_custo then s.custo_medio end
+    from v full join m on m.cod = v.cod
+    left join public.crm_estoque e on e.codigo = coalesce(v.cod, m.cod)
+    left join public.crm_estoque_saldo s on s.codigo = coalesce(v.cod, m.cod)
+   where coalesce(v.q, 0) <> 0 or coalesce(m.mexeu, false) or coalesce(m.fin, 0) <> 0
+   order by 2, 1;
+end;
+$$;
+revoke all on function public.crm_rel_periodo(date, date) from public, anon;
+grant execute on function public.crm_rel_periodo(date, date) to authenticated;
+
 -- =====================================================================================================================
 -- Formas de pagamento como lista editável (03/11/2026, pedido do Anderson: "eu mesmo cadastrar"): Configurações → Listas →
 -- Formas de pagamento. São só sugestões no pedido e no orçamento (o campo continua livre); o CRM lê os prazos do texto.

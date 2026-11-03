@@ -227,6 +227,8 @@ motorista, pela logística e como app instalado (PWA).
   por gatilho; custo médio ponderado. Com a chave ligada, o banco espelha o estoque em `crm_estoque`.
 - Sugestão de compra usa o saldo como ele é (negativo conta). Fornecedor com `ativo = false` deixa o produto sem
   fornecedor. Entrada de compra lança contas a pagar só com a chave ligada (antes duplicaria com o FKN).
+- Parcelas da nota de compra: o comprador acerta na entrada (`crm_compra_entrada`/`_manual`, só admin e comprador; o XML fica em
+  `parcelas_xml`). Nota com contas do FKN para ligar: valem as do FKN (`crm_compra_fkn_contas`), o acerto não muda nada.
 - Concorrentes: a lista fica no banco (`crm_concorrentes`), **nunca no código**; estratégia e levantamento no
   `sistemi-dalessi` (privado). Sites de concorrente ficam bloqueados na busca de fotos.
 

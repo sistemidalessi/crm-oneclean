@@ -302,7 +302,112 @@
     const x = Date.parse(a), y = Date.parse(b);
     return Number.isFinite(x) && Number.isFinite(y) && x < y;
   }
-  const api = { antesDe, folhaContagem, custoAvulsa, codigoDoCadastro, fatoresSuspeitos, junta, valor, sequencia, lerContagem, atualFkn, ehCaixa, TIPOS, extrasDoXml, stDoDet, compraDoXml, devolucaoDoXml, custoItem, sugere, avisosDfe, sugereFornecedor, chegadaCompras, pareceDespesa };
+  // ---- parcelas (o "faturamento") na entrada da nota de compra (03/11/2026, Wellington, 1º dia só com o CRM: "a Kubera vem
+  // com as parcelas zeradas no XML; a Destro vem sempre numa parcela só, mas a compra é parcelada"). O comprador confere os
+  // materiais e as parcelas na mesma tela e acerta valor e vencimento, acrescenta ou tira parcela antes do OK; o que ele
+  // confirma é o que vai para o contas a pagar do Caixa (crm_compra_entrada no banco).
+  const ehDia = d => /^\d{4}-\d{2}-\d{2}$/.test(String(d || '')) && new Date(Date.parse(d + 'T12:00:00Z') || 0).toISOString().slice(0, 10) === d;
+  const porVencimento = l => l.map((p, i) => ({ p, i })).sort((a, b) => String(a.p.vencimento).localeCompare(String(b.p.vencimento)) || a.i - b.i)
+    .map((x, k) => ({ n: k + 1, vencimento: x.p.vencimento, valor: x.p.valor }));
+  // A proposta de parcelas: as da nota (o leitor de notas já tira as zeradas); sem nenhuma, uma só com o total e o vencimento
+  // na emissão — o mesmo que o banco faria sozinho, mas agora à vista do comprador, para acertar.
+  function parcelasDaNota(c) {
+    const l = ((c && c.parcelas) || []).filter(p => p && num(p.valor) > 0).map(p => ({ vencimento: String(p.vencimento || '').slice(0, 10), valor: r2(p.valor) }));
+    if (l.length) return { lista: porVencimento(l), semParcelas: false };
+    return { lista: [{ n: 1, vencimento: dia(c && c.emitida_em) || '', valor: r2(c && c.valor_total) }], semParcelas: true };
+  }
+  // Divide o total em n parcelas iguais, a cada `dias` dias a partir do 1º vencimento; o centavo que sobra vai na última
+  // (como a Destro faz: 1.080,21 + 1.080,21 + 1.080,23).
+  function dividirParcelas(total, n, primeiro, dias) {
+    const k = Math.floor(num(n)), cent = Math.round(num(total) * 100), passo = Math.floor(num(dias));
+    if (!(k >= 1 && k <= 60) || cent <= 0 || !ehDia(primeiro)) return [];
+    const base = Math.floor(cent / k);
+    return Array.from({ length: k }, (_, i) => ({ n: i + 1, vencimento: maisDias(primeiro, i * passo), valor: (i === k - 1 ? cent - base * (k - 1) : base) / 100 }));
+  }
+  // Confere as parcelas digitadas contra o total da nota. linhas: [{ vencimento, valor }] como vieram da tela (linha toda vazia
+  // é ignorada). → { parcelas (em ordem de vencimento, numeradas), soma, total, dif, bate, erros }
+  function conferirParcelas(linhas, total) {
+    const erros = [], ok = [];
+    (linhas || []).forEach((l, i) => {
+      const venc = String((l && l.vencimento) || '').trim(), bruto = l ? l.valor : '', v = bruto === '' || bruto == null ? null : Number(bruto);
+      if (!venc && v == null) return;
+      const nome = 'parcela ' + (i + 1);
+      if (!venc) erros.push(nome + ': falta o vencimento');
+      else if (!ehDia(venc)) erros.push(nome + ': vencimento inválido');
+      if (v == null || !isFinite(v) || v <= 0) erros.push(nome + ': ' + (v == null ? 'falta o valor' : 'valor zerado ou inválido'));
+      if (venc && ehDia(venc) && v != null && isFinite(v) && v > 0) ok.push({ vencimento: venc, valor: r2(v) });
+    });
+    if (!ok.length && !erros.length) erros.push('diga pelo menos uma parcela');
+    const parcelas = porVencimento(ok), soma = r2(parcelas.reduce((t, p) => t + p.valor, 0)), t = r2(total), dif = r2(soma - t);
+    return { parcelas, soma, total: t, dif, bate: Math.abs(dif) < 0.005, erros };
+  }
+  // As parcelas mudaram em relação às da nota? (só então vão para o banco; nota sem parcelas conta como mudada: o comprador
+  // confirmou vencimento e valor)
+  function parcelasMudaram(antes, depois) {
+    const a = ((antes || []).filter(p => num(p.valor) > 0)).map(p => String(p.vencimento || '').slice(0, 10) + '|' + r2(p.valor).toFixed(2)).sort();
+    const b = (depois || []).map(p => String(p.vencimento || '').slice(0, 10) + '|' + r2(p.valor).toFixed(2)).sort();
+    return !a.length || a.join(',') !== b.join(',');
+  }
+
+  // ---- relatório por período (03/11/2026, Wellington: "escolher a data de início e fim, mensal, semestral, o que quiser"):
+  // vendas de cada produto no período (quantidade e valor, pelas notas de venda) e o livro do estoque (saldo no início,
+  // entradas, saídas, estornos, ajustes, saldo no fim). Linhas de crm_rel_periodo (banco); valor de venda e custo já vêm
+  // vazios para quem não pode ver. Aqui: atalhos de período, o cálculo de cada linha, os totais e a planilha.
+  const fimDoMes = (a, m) => new Date(Date.UTC(a, m, 0)).toISOString().slice(0, 10); // m = 1..12
+  const doisDig = n => String(n).padStart(2, '0');
+  function periodoPreset(nome, hoje) {
+    if (!ehDia(hoje)) return null;
+    const a = +hoje.slice(0, 4), m = +hoje.slice(5, 7);
+    const ini = (aa, mm) => { while (mm < 1) { mm += 12; aa--; } return aa + '-' + doisDig(mm) + '-01'; };
+    switch (nome) {
+      case 'mes': return { de: ini(a, m), ate: hoje };
+      case 'mes_passado': { const de = ini(a, m - 1); return { de, ate: fimDoMes(+de.slice(0, 4), +de.slice(5, 7)) }; }
+      case 'trimestre': return { de: ini(a, m - ((m - 1) % 3)), ate: hoje };
+      case 'semestre': return { de: ini(a, m <= 6 ? 1 : 7), ate: hoje };
+      case 'semestre_passado': return m <= 6 ? { de: (a - 1) + '-07-01', ate: (a - 1) + '-12-31' } : { de: a + '-01-01', ate: a + '-06-30' };
+      case 'ano': return { de: a + '-01-01', ate: hoje };
+      case '12m': return { de: ini(a, m - 11), ate: hoje };
+      default: return null;
+    }
+  }
+  const PRESETS = [['mes', 'Este mês'], ['mes_passado', 'Mês passado'], ['trimestre', 'Este trimestre'], ['semestre', 'Este semestre'],
+    ['semestre_passado', 'Semestre passado'], ['ano', 'Este ano'], ['12m', '12 meses']];
+  const ouNulo = v => (v == null || v === '' ? null : Number(v));
+  // linhas: as do banco. o: { soMov } (só produtos com venda ou movimento no período). Custo do vendido e margem são
+  // estimados pelo custo médio de hoje (a saída pela nota não guarda o custo).
+  function periodoLinhas(linhas, o) {
+    o = o || {};
+    return (linhas || []).map(x => {
+      const l = { codigo: x.codigo, descricao: x.descricao || x.codigo, unidade: x.unidade || '', vendas_qtd: num(x.vendas_qtd), vendas_valor: ouNulo(x.vendas_valor),
+        vendas_notas: num(x.vendas_notas), saldo_inicial: num(x.saldo_inicial), entradas: num(x.entradas), saidas: num(x.saidas), estornos: num(x.estornos),
+        ajustes: num(x.ajustes), saldo_final: num(x.saldo_final), entradas_custo: ouNulo(x.entradas_custo), custo_medio: ouNulo(x.custo_medio) };
+      l.mov = !!(l.vendas_qtd || l.entradas || l.saidas || l.estornos || l.ajustes);
+      l.custo_vendido = l.custo_medio == null || !l.vendas_qtd ? null : r2(l.vendas_qtd * l.custo_medio);
+      l.margem = l.custo_vendido == null || !(l.vendas_valor > 0) ? null : Math.round((l.vendas_valor - l.custo_vendido) / l.vendas_valor * 1000) / 10;
+      return l;
+    }).filter(l => !o.soMov || l.mov).sort((a, b) => String(a.descricao).localeCompare(String(b.descricao), 'pt-BR') || String(a.codigo).localeCompare(String(b.codigo)));
+  }
+  // Totais em dinheiro (quantidades de produtos diferentes não se somam). Nulo quando a pessoa não vê aquele valor.
+  function periodoTotais(linhas) {
+    const l = linhas || [], soma = f => (l.some(x => x[f] != null) ? r2(l.reduce((t, x) => t + num(x[f]), 0)) : null);
+    const vv = soma('vendas_valor'), cv = soma('custo_vendido');
+    const vComCusto = r2(l.filter(x => x.custo_vendido != null).reduce((t, x) => t + num(x.vendas_valor), 0));
+    return { produtos: l.length, vendidos: l.filter(x => x.vendas_qtd).length, comEntrada: l.filter(x => x.entradas).length,
+      vendas_valor: vv, entradas_custo: soma('entradas_custo'), custo_vendido: cv,
+      margem: cv == null || !(vComCusto > 0) ? null : Math.round((vComCusto - cv) / vComCusto * 1000) / 10 };
+  }
+  // Planilha do período; o: { valor, custo } = o que a pessoa pode ver (as colunas somem, não ficam vazias).
+  function periodoPlanilha(linhas, o) {
+    o = o || {};
+    const cab = ['Código', 'Produto', 'Unidade', 'Saldo no início', 'Entradas (compras)', 'Saídas (notas)', 'Estornos', 'Ajustes e inventário', 'Saldo no fim', 'Quantidade vendida', 'Notas de venda']
+      .concat(o.valor ? ['Valor vendido (R$)'] : [], o.custo ? ['Custo das entradas (R$)', 'Custo médio hoje (R$)', 'Custo do vendido, estimado (R$)', 'Margem estimada (%)'] : []);
+    return { cabecalho: cab, linhas: (linhas || []).map(l => [l.codigo, l.descricao, l.unidade, l.saldo_inicial, l.entradas, l.saidas, l.estornos, l.ajustes, l.saldo_final, l.vendas_qtd, l.vendas_notas]
+      .concat(o.valor ? [l.vendas_valor == null ? '' : l.vendas_valor] : [],
+        o.custo ? [l.entradas_custo == null ? '' : l.entradas_custo, l.custo_medio == null ? '' : l.custo_medio, l.custo_vendido == null ? '' : l.custo_vendido, l.margem == null ? '' : l.margem] : [])) };
+  }
+
+  const api = { antesDe, folhaContagem, custoAvulsa, codigoDoCadastro, fatoresSuspeitos, junta, valor, sequencia, lerContagem, atualFkn, ehCaixa, TIPOS, extrasDoXml, stDoDet, compraDoXml, devolucaoDoXml, custoItem, sugere, avisosDfe, sugereFornecedor, chegadaCompras, pareceDespesa,
+    parcelasDaNota, dividirParcelas, conferirParcelas, parcelasMudaram, periodoPreset, PRESETS, periodoLinhas, periodoTotais, periodoPlanilha };
   raiz.CRMEstoque = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);
@@ -391,7 +496,7 @@
       kpi('Produtos no estoque do CRM', (saldo || []).length, 'saldo de cada produto e os movimentos (☰)', '', 'saldo') +
       kpi('Notas de compra', compras.filter(c => c.situacao === 'pendente').length + ' pendente(s)', 'conferir o que chegou e dar entrada', compras.some(c => c.situacao === 'pendente') ? 'ambar' : '', 'compras') +
       kpi('Contagem e ajuste', '✎', 'inventário por contagem ou acerto de um produto', '', 'contagem') +
-      kpi('Relatórios', '📄', 'estoque atual e vendas do ano mês a mês (planilha e impressão)', '', 'relatorios') +
+      kpi('Relatórios', '📄', 'estoque atual, período escolhido (vendas, entradas e saídas) e vendas do ano mês a mês', '', 'relatorios') +
       (CRM.produtos ? kpi('Fotos e fichas', '📷', 'aprovar o que a IA achou e completar foto, ficha técnica e FISPQ', '', 'fotos') : '') + '</div>';
     const negativos = (saldo || []).filter(x => +x.saldo < 0).length;
     if (dono()) return '<div class="kpis">' +
@@ -399,7 +504,7 @@
       kpi('Saldo negativo', negativos, negativos ? 'vendido sem entrada: conferir a compra ou contar' : 'nenhum produto abaixo de zero', negativos ? 'vermelho' : 'verde', 'saldo') +
       kpi('Notas de compra', compras.filter(c => c.situacao === 'pendente').length + ' pendente(s)', 'dar entrada no que chegou (soma no estoque e lança no contas a pagar)', compras.some(c => c.situacao === 'pendente') ? 'ambar' : '', 'compras') +
       kpi('Contagem e ajuste', '✎', 'inventário por contagem ou acerto de um produto', '', 'contagem') +
-      kpi('Relatórios', '📄', 'estoque atual e vendas do ano mês a mês (planilha e impressão)', '', 'relatorios') +
+      kpi('Relatórios', '📄', 'estoque atual, período escolhido (vendas, entradas e saídas) e vendas do ano mês a mês', '', 'relatorios') +
       (CRM.produtos ? kpi('Fotos e fichas', '📷', 'foto, ficha técnica e FISPQ de cada produto (a IA procura, você aprova)', '', 'fotos') : '') + '</div>';
     return '<div class="kpis">' +
       kpi('Produtos no estoque do CRM', (saldo || []).length, 'valor a custo médio: ' + R.moeda(S.valor(linhas)), '', 'saldo') +
@@ -408,7 +513,7 @@
       kpi('Dias seguidos sem diferença sem explicação', seq.dias + ' de 15', seq.dias >= 15 ? 'pronto para a Fase 3 do plano' : 'a meta para confiar no estoque do CRM', seq.dias >= 15 ? 'verde' : '', 'conferencia') +
       kpi('Notas de compra', compras.filter(c => c.situacao === 'pendente').length + ' pendente(s)', 'subir o XML e dar entrada no estoque', compras.some(c => c.situacao === 'pendente') ? 'ambar' : '', 'compras') +
       kpi('Contagem e ajuste', '✎', 'inventário por contagem ou acerto de um produto', '', 'contagem') +
-      kpi('Relatórios', '📄', 'estoque atual e vendas do ano mês a mês (planilha e impressão)', '', 'relatorios') +
+      kpi('Relatórios', '📄', 'estoque atual, período escolhido (vendas, entradas e saídas) e vendas do ano mês a mês', '', 'relatorios') +
       (CRM.produtos ? kpi('Fotos e fichas', '📷', 'foto, ficha técnica e FISPQ de cada produto (a IA procura, você aprova)', '', 'fotos') : '') + '</div>';
   }
 
@@ -485,6 +590,50 @@
         CRM.Lista.corta('es-movs-per', l, 100).map(m => '<tr><td>' + esc(quando(m.quando)) + '</td><td>' + esc(nome(m.codigo)) + '<small>' + esc(m.codigo) + '</small></td><td>' + esc(S.TIPOS[m.tipo] || m.tipo) + '</td>' +
           '<td class="num">' + (m.quantidade > 0 ? '+' : '') + qtd(m.quantidade) + '</td><td>' + esc(m.motivo || '') + '</td></tr>').join('') + '</tbody></table></div>' + CRM.Lista.mais('es-movs-per', l, 100)) + '</section>';
   }
+  // Relatório por período (03/11/2026, Wellington: "escolher a data de início e fim, mensal, semestral, o que quiser"): por
+  // produto, as vendas do período (quantidade e, para quem vê, o valor) e o livro do estoque (saldo no início, entradas, saídas,
+  // estornos e ajustes, saldo no fim). Custo e margem só para administrador e comprador; a logística vê só quantidades. O banco
+  // (crm_rel_periodo) já devolve vazio o que a pessoa não pode ver; a tela só esconde as colunas.
+  const relPer = { chave: '', l: null, lendo: false, soMov: true };
+  function telaRelPeriodo() {
+    const hoje = CRM.hoje(), mes = S.periodoPreset('mes', hoje);
+    const st = CRM.Lista.estado('es-rel-per', { de: mes.de, ate: mes.ate });
+    const de = st.de || mes.de, ate = st.ate || hoje, k = de + '|' + ate, invalido = ate < de;
+    if (!invalido && relPer.chave !== k && !relPer.lendo) {
+      relPer.lendo = true;
+      CRM.store().relPeriodo(de, ate).then(l => { relPer.l = l || []; relPer.chave = k; }).catch(e => { CRM.falhou(e); relPer.l = []; relPer.chave = k; })
+        .then(() => { relPer.lendo = false; CRM.render(); });
+    }
+    const comValor = !op(), comCusto = CRM.ehAdmin() || CRM.ehComprador();
+    const base = !invalido && relPer.chave === k ? S.periodoLinhas(relPer.l, { soMov: relPer.soMov }) : null;
+    const l = base ? CRM.Lista.filtra('es-rel-per', base, { texto: x => [x.codigo, x.descricao] }) : [];
+    const tot = S.periodoTotais(l), pl = S.periodoPlanilha([], { valor: comValor, custo: comCusto });
+    CRM.Lista.planilha('es-rel-per', 'estoque-e-vendas-' + de + '-a-' + ate, pl.cabecalho, () => S.periodoPlanilha(l, { valor: comValor, custo: comCusto }).linhas);
+    const atalhos = '<label class="filtro-inline">Período <select data-rel-per-preset>' + CRM.opcoesHTML([['', 'escolher…']].concat(S.PRESETS), '') + '</select></label> ' +
+      '<label class="filtro-inline"><input type="checkbox" data-rel-per-mov' + (relPer.soMov ? ' checked' : '') + '> só com venda ou movimento</label>';
+    const q = v => (v ? qtd(v) : '');
+    return '<section class="cartao"><h2>Relatório do período <small>' + esc(R.dataBR(de)) + ' a ' + esc(R.dataBR(ate)) + (base ? ' · ' + base.length + ' produto(s)' : '') + '</small></h2>' +
+      CRM.Lista.barra('es-rel-per', { periodo: true, placeholder: 'Procurar produto ou código', total: base ? base.length : null, achados: l.length, extra: atalhos }) +
+      (invalido ? '<p class="vazio">A data de início é depois da data de fim.</p>' : !base ? '<p class="vazio">Carregando…</p>' : !l.length ? '<p class="vazio">Nada nesse período.</p>' :
+        '<div class="kpis">' +
+          '<div class="kpi"><span>Produtos vendidos</span><strong>' + tot.vendidos + '</strong><small>' + tot.comEntrada + ' com entrada de compra</small></div>' +
+          (comValor ? '<div class="kpi"><span>Valor vendido</span><strong>' + R.moeda(tot.vendas_valor || 0) + '</strong><small>pelas notas de venda, sem as canceladas</small></div>' : '') +
+          (comCusto ? '<div class="kpi"><span>Custo das entradas</span><strong>' + R.moeda(tot.entradas_custo || 0) + '</strong><small>o que entrou de compra, a custo</small></div>' +
+            '<div class="kpi"><span>Margem estimada</span><strong>' + (tot.margem == null ? '—' : String(tot.margem).replace('.', ',') + '%') + '</strong><small>custo do vendido pelo custo médio de hoje: ' + R.moeda(tot.custo_vendido || 0) + '</small></div>' : '') +
+        '</div>' +
+        '<p class="dica">Vendido: pelas notas de venda do período (sem as canceladas; a caixa vendida conta em unidades). Saídas: todas as notas que tiram do estoque (venda, bonificação, remessa). ' +
+          'O livro do estoque do CRM começou em 16/10/2026: antes disso o saldo é zero e o saldo que veio do FKN aparece como ajuste.' + (comCusto ? ' Custo do vendido e margem são estimados pelo custo médio de hoje (a saída pela nota não guarda o custo).' : '') + '</p>' +
+        '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Produto</th><th class="num">Saldo no início</th><th class="num">Entradas</th><th class="num">Saídas</th>' +
+          '<th class="num" title="Estornos de nota cancelada, ajustes e inventário">Estornos e ajustes</th><th class="num">Saldo no fim</th><th class="num">Vendido</th>' +
+          (comValor ? '<th class="num">Valor vendido</th>' : '') + (comCusto ? '<th class="num">Custo das entradas</th><th class="num">Margem est.</th>' : '') + '</tr></thead><tbody>' +
+        CRM.Lista.corta('es-rel-per', l, 300).map(x => '<tr><td>' + esc(R.nomeDeItem(x.descricao)) + '<small>' + esc(x.codigo) + (x.unidade ? ' · ' + esc(x.unidade) : '') + '</small></td>' +
+          '<td class="num' + (x.saldo_inicial < 0 ? ' neg' : '') + '">' + qtd(x.saldo_inicial) + '</td><td class="num">' + q(x.entradas) + '</td><td class="num">' + q(x.saidas) + '</td>' +
+          '<td class="num">' + q(Math.round((x.estornos + x.ajustes) * 1000) / 1000) + '</td><td class="num' + (x.saldo_final < 0 ? ' neg' : '') + '"><strong>' + qtd(x.saldo_final) + '</strong></td>' +
+          '<td class="num">' + q(x.vendas_qtd) + (x.vendas_notas ? '<small>' + x.vendas_notas + ' nota(s)</small>' : '') + '</td>' +
+          (comValor ? '<td class="num">' + (x.vendas_valor ? R.moeda(x.vendas_valor) : '') + '</td>' : '') +
+          (comCusto ? '<td class="num">' + (x.entradas_custo ? R.moeda(x.entradas_custo) : '') + '</td><td class="num' + (x.margem != null && x.margem < 0 ? ' neg' : '') + '">' + (x.margem == null ? '' : String(x.margem).replace('.', ',') + '%') + '</td>' : '') +
+          '</tr>').join('') + '</tbody></table></div>' + CRM.Lista.mais('es-rel-per', l, 300)) + '</section>';
+  }
   function telaRelatorios(linhas) {
     const est = estoqueRel(linhas);
     if (rel.vendasAno !== rel.ano) setTimeout(carregaVendas, 0);
@@ -510,7 +659,7 @@
         : '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Código</th><th>Produto</th>' + MESES.map(m => '<th class="num">' + m + '</th>').join('') + '<th class="num">Total</th></tr></thead><tbody>' +
           vend.slice(0, mostra).map(x => '<tr><td>' + esc(x.codigo) + '</td><td>' + esc(R.nomeDeItem(x.descricao || x.codigo)) + (x.unidade ? '<small>' + esc(x.unidade) + '</small>' : '') + '</td>' +
             (x.meses || []).map(v => '<td class="num">' + (v == null ? '' : qtd(v)) + '</td>').join('') + '<td class="num"><strong>' + qtd(x.total) + '</strong></td></tr>').join('') +
-          '</tbody></table></div>' + (vend.length > mostra ? '<p class="dica">Mostrando ' + mostra + ' de ' + vend.length + '; a planilha leva todos.</p>' : '')) + '</section>' + telaMovsPeriodo();
+          '</tbody></table></div>' + (vend.length > mostra ? '<p class="dica">Mostrando ' + mostra + ' de ' + vend.length + '; a planilha leva todos.</p>' : '')) + '</section>' + telaRelPeriodo() + telaMovsPeriodo();
   }
 
   function telaConferencia() {
@@ -813,6 +962,84 @@
       '<p class="dica">Peça o CPF/CNPJ da empresa no cupom sempre que der. Compra de fornecedor com nota não entra aqui: entra pela nota de compra.</p></section>';
   }
 
+  // ---- Faturamento na entrada da nota de compra (03/11/2026, Wellington): na mesma janela dos itens, as parcelas que vão para
+  // o contas a pagar, editáveis (valor, vencimento, + parcela, tirar, dividir o total), com a soma conferida contra o total da
+  // nota. Só administrador e comprador (tem valor; a logística dá a entrada sem ver valor e as parcelas ficam as da nota), e
+  // nunca na devolução do cliente (não é conta a pagar). Nota que já entrou no FKN: as contas de lá valem (só mostra).
+  const editaParcelas = c => !op() && !(c.devolucao || devolucoes.has(c.id)) && (CRM.ehAdmin() || CRM.ehComprador());
+  const linhaParcela = p => '<tr data-plinha><td class="num" data-pn></td><td><input type="date" data-pv value="' + esc(p.vencimento || '') + '"></td>' +
+    '<td class="num"><input type="text" data-moeda data-pval inputmode="numeric" autocomplete="off" placeholder="0,00" value="' + esc(p.valor == null ? '' : String(p.valor)) + '"></td>' +
+    '<td class="num"><button type="button" class="mini" data-ptira title="Tirar esta parcela">×</button></td></tr>';
+  function blocoParcelas(c, fknContas) {
+    const total = Number(c.valor_total) || 0;
+    const titulo = '<h3>Faturamento: parcelas para o contas a pagar <small>total da nota ' + R.moeda(total) + '</small></h3>';
+    if (fknContas && fknContas.length) return '<section class="es-parcelas">' + titulo +
+      '<p class="dica">Esta nota já entrou no FKN: as parcelas dela já estão no contas a pagar do Caixa (vieram do FKN). A entrada liga essas contas à nota e não cria outras; ' +
+        'para mudar valor ou vencimento, fale com o administrador (Caixa).</p>' +
+      '<table class="tabela" data-sem-filtro><thead><tr><th class="num">Parcela</th><th>Vencimento</th><th class="num">Valor</th><th></th></tr></thead><tbody>' +
+      fknContas.map(p => '<tr><td class="num">' + esc(p.parcela) + '</td><td>' + esc(R.dataBR(p.vencimento)) + '</td><td class="num">' + R.moeda(p.valor) + '</td><td>' + (p.pago ? CRM.selo('paga', 'verde') : '') + '</td></tr>').join('') +
+      '</tbody></table></section>';
+    const prop = S.parcelasDaNota(c), l = prop.lista;
+    const intervalo = l.length >= 2 && l[0].vencimento && l[1].vencimento ? Math.max(0, Math.round((Date.parse(l[1].vencimento) - Date.parse(l[0].vencimento)) / 864e5)) : 7;
+    return '<section class="es-parcelas" data-parcelas>' + titulo +
+      (prop.semParcelas ? '<p class="dica neg">⚠ O XML não traz as parcelas (ou vêm zeradas). Ficou uma parcela só, com o total e o vencimento na emissão: confira com o boleto e acerte.</p>' : '') +
+      '<p class="dica">Confira com o boleto ou com o combinado com o fornecedor: mude o vencimento e o valor, acrescente ou tire parcela. ' +
+        (dono() ? 'É o que vai para o contas a pagar do Caixa ao dar a entrada.' : 'Enquanto o FKN roda junto, as contas vêm de lá: aqui as parcelas só ficam guardadas na nota.') + '</p>' +
+      '<div class="tabela-rolagem"><table class="tabela" data-sem-filtro><thead><tr><th class="num">Parcela</th><th>Vencimento</th><th class="num">Valor, R$</th><th></th></tr></thead><tbody data-pcorpo>' +
+      l.map(linhaParcela).join('') + '</tbody></table></div>' +
+      '<p class="acoes"><button type="button" class="btn sec" data-pmais>+ parcela</button> ' +
+      '<label class="filtro-inline">Dividir o total em <input type="number" min="1" max="60" step="1" data-pdiv-n value="' + Math.max(2, l.length) + '"> parcelas,</label> ' +
+      '<label class="filtro-inline">1ª em <input type="date" data-pdiv-1 value="' + esc(l[0].vencimento || '') + '"></label> ' +
+      '<label class="filtro-inline">a cada <input type="number" min="0" max="365" step="1" data-pdiv-d value="' + intervalo + '"> dias</label> ' +
+      '<button type="button" class="btn sec" data-pdividir>Dividir</button> <button type="button" class="mini" data-pvolta title="Desfaz o que mudou aqui">voltar às da nota</button></p>' +
+      '<p data-psoma></p></section>';
+  }
+  // Liga os botões do bloco; devolve a função que lê e confere as parcelas (null quando o bloco não é editável).
+  function ligaParcelas(form, c) {
+    const caixa = form.querySelector('[data-parcelas]');
+    if (!caixa) return null;
+    const corpo = caixa.querySelector('[data-pcorpo]'), soma = caixa.querySelector('[data-psoma]'), total = Number(c.valor_total) || 0;
+    const trs = () => Array.from(corpo.querySelectorAll('tr[data-plinha]'));
+    const linhas = () => trs().map(tr => ({ vencimento: tr.querySelector('[data-pv]').value, valor: tr.querySelector('[data-pval]').value }));
+    let aviso = '';
+    const atualiza = () => {
+      trs().forEach((tr, i) => { tr.querySelector('[data-pn]').textContent = i + 1; });
+      const r = S.conferirParcelas(linhas(), total);
+      soma.innerHTML = 'Soma das parcelas: <strong>' + R.moeda(r.soma) + '</strong> · total da nota ' + R.moeda(r.total) +
+        (r.bate ? ' ✓' : ' · <span class="neg">diferença ' + R.moeda(r.dif) + '</span>') +
+        (r.erros.length || aviso ? '<br><span class="neg">' + esc([aviso].concat(r.erros).filter(Boolean).join(' · ')) + '</span>' : '');
+      aviso = '';
+    };
+    const poe = lista => { corpo.innerHTML = lista.map(linhaParcela).join(''); CRM.aplicaMascaras(corpo); atualiza(); };
+    corpo.addEventListener('input', atualiza);
+    corpo.addEventListener('change', atualiza);
+    corpo.addEventListener('click', ev => { const b = ev.target.closest('[data-ptira]'); if (b) { b.closest('tr').remove(); atualiza(); } });
+    caixa.querySelector('[data-pmais]').addEventListener('click', () => {
+      const l = linhas(), ult = l.length ? l[l.length - 1].vencimento : '', passo = Number(caixa.querySelector('[data-pdiv-d]').value) || 7;
+      corpo.insertAdjacentHTML('beforeend', linhaParcela({ vencimento: /^\d{4}-\d{2}-\d{2}$/.test(ult) ? R.somaDias(ult, passo) : '', valor: '' }));
+      CRM.aplicaMascaras(corpo); atualiza();
+    });
+    caixa.querySelector('[data-pdividir]').addEventListener('click', () => {
+      const l = S.dividirParcelas(total, caixa.querySelector('[data-pdiv-n]').value, caixa.querySelector('[data-pdiv-1]').value, caixa.querySelector('[data-pdiv-d]').value);
+      if (!l.length) { aviso = 'para dividir, diga em quantas parcelas (1 a 60) e a data da 1ª'; atualiza(); return; }
+      poe(l);
+    });
+    caixa.querySelector('[data-pvolta]').addEventListener('click', () => poe(S.parcelasDaNota(c).lista));
+    atualiza();
+    return () => S.conferirParcelas(linhas(), total);
+  }
+  // Na hora do OK. → undefined (nada a mandar: sem o bloco ou igual à nota), a lista para o banco, ou false (desistiu para
+  // corrigir). Parcela incompleta é erro; soma diferente do total só com a confirmação.
+  function parcelasParaGravar(ler, c) {
+    if (!ler) return undefined;
+    const r = ler();
+    if (r.erros.length) throw new Error('faturamento: ' + r.erros.join('; '));
+    if (!r.bate && !confirm('A soma das parcelas (' + R.moeda(r.soma) + ') não bate com o total da nota (' + R.moeda(r.total) + '): diferença de ' + R.moeda(r.dif) +
+      '.\n\nO contas a pagar fica com os valores das parcelas. Dar entrada assim mesmo?')) return false;
+    return S.parcelasMudaram(c.parcelas, r.parcelas) ? r.parcelas.map(p => ({ vencimento: p.vencimento, valor: p.valor })) : undefined;
+  }
+  const textoParcelas = r => { const p = r && r.parcelas; return p && p.fkn ? ' As contas do FKN desta nota ficaram ligadas a ela.' : p && p.parcelas ? ' ' + p.parcelas + ' parcela(s) acertada(s) no contas a pagar (' + R.moeda(p.soma) + ').' : ''; };
+
   CRM.telas.estoque = {
     turmaSub: () => filtro.ver,
     render() {
@@ -837,6 +1064,10 @@
       if (rb) rb.addEventListener('input', () => { rel.busca = rb.value; CRM.render(); });
       const rs = c.querySelector('[data-rel-so]');
       if (rs) rs.addEventListener('change', () => { rel.soSaldo = rs.checked; CRM.render(); });
+      const rp = c.querySelector('[data-rel-per-preset]');
+      if (rp) rp.addEventListener('change', () => { const p = S.periodoPreset(rp.value, CRM.hoje()); if (!p) return; Object.assign(CRM.Lista.estado('es-rel-per'), { de: p.de, ate: p.ate, limite: 0 }); CRM.render(); });
+      const rm = c.querySelector('[data-rel-per-mov]');
+      if (rm) rm.addEventListener('change', () => { relPer.soMov = rm.checked; CRM.render(); });
       const ra = c.querySelector('[data-rel-ano]');
       if (ra) ra.addEventListener('change', () => { rel.ano = Number(ra.value); rel.vendas = null; CRM.render(); });
       const f = c.querySelector('[data-es-foto]');
@@ -953,7 +1184,8 @@
         const cad = new Set(base.map(e => e.codigo));
         const dv = devolucoes.get(id);
         const ctx = { vinculos: new Map(vinc.map(v => [v.fornecedor_doc + '|' + v.cod_fornecedor, v])), produtos: base, unidades: new Map(unis.map(u => [u.codigo + '|' + u.unidade, Number(u.fator)])), devolucao: !!dv };
-        const pend = c.situacao === 'pendente';
+        const pend = c.situacao === 'pendente', fat = pend && editaParcelas(c);
+        const fknContas = fat && dono() && st.compraParcelasFkn ? await st.compraParcelasFkn(id).catch(() => []) : [];
         const sug = new Map(itens.map(it => [it.id, pend ? S.sugere(it, c.fornecedor_doc, ctx) : { codigo: it.codigo, fator: it.fator, como: '' }]));
         const linhaI = it => {
           const g = sug.get(it.id) || {};
@@ -963,15 +1195,18 @@
             '<td><input name="f_' + esc(it.id) + '" type="number" step="any" min="0" value="' + esc(g.fator == null ? '' : g.fator) + '"' + (pend ? '' : ' disabled') + ' class="es-fator"><small data-q="' + esc(it.id) + '"></small></td>' +
             '<td>' + (pend ? '<label class="filtro-inline"><input type="checkbox" name="i_' + esc(it.id) + '"> não é estoque</label>' : '') + '</td></tr>';
         };
+        let lerParcelas = null;
         CRM.abrirForm({
           titulo: 'NF ' + c.numero + ' · ' + (c.fornecedor_nome || ''), largura: 'extra', campos: [], valores: {},
           intro: dv ? (pend ? '↩ Devolução emitida pelo cliente' + (dv.ref_numero ? ' (venda NF ' + dv.ref_numero + ')' : ' (a nota não diz qual venda: confira os títulos do cliente depois)') +
               '. Ligue cada item ao nosso produto (o código da nossa nota já vem) e diga quantas unidades vêm em cada um. A entrada devolve ao estoque pelo custo médio, não vira conta a pagar e abate o valor dos títulos da venda; se o cliente já pagou, fica "Devolver ao cliente" no Caixa.'
               : 'Devolução: entrada dada em ' + quando(c.lancada_em) + '.' + (dv.efeitos && dv.efeitos.abatido != null ? ' Abatido dos títulos: ' + R.moeda(dv.efeitos.abatido) + (Number(dv.efeitos.sobra) > 0 ? ' · a devolver ao cliente: ' + R.moeda(dv.efeitos.sobra) : '') + '.' : ''))
-          : (pend ? 'Ligue cada item a um produto nosso e diga quantas unidades do nosso estoque vêm em 1 unidade da nota (ex.: 1 caixa com 300 esponjas = 300). "Não é estoque": frete, brinde, material de uso. Dar entrada soma no estoque do CRM e, depois da virada (CRM dono do cadastro), lança as parcelas no contas a pagar do Caixa.'
-            : 'Entrada dada em ' + quando(c.lancada_em) + '.') + (!dv && c.parcelas && c.parcelas.length ? ' Parcelas da nota: ' + c.parcelas.map(p => R.dataBR(p.vencimento) + ' ' + R.moeda(p.valor)).join(', ') + ' (depois da virada entram no contas a pagar do Caixa com a entrada; antes, vêm do FKN).' : ''),
+          : (pend ? 'Ligue cada item a um produto nosso e diga quantas unidades do nosso estoque vêm em 1 unidade da nota (ex.: 1 caixa com 300 esponjas = 300). "Não é estoque": frete, brinde, material de uso. Dar entrada soma no estoque do CRM e, depois da virada (CRM dono do cadastro), lança as parcelas no contas a pagar do Caixa.' +
+              (fat ? ' Confira também o faturamento (as parcelas), embaixo, antes de dar a entrada.' : '')
+            : 'Entrada dada em ' + quando(c.lancada_em) + '.') + (!dv && !fat && c.parcelas && c.parcelas.length ? ' Parcelas da nota: ' + c.parcelas.map(p => R.dataBR(p.vencimento) + ' ' + R.moeda(p.valor)).join(', ') + ' (depois da virada entram no contas a pagar do Caixa com a entrada; antes, vêm do FKN).' : ''),
           htmlDepois: '<datalist id="esProdutos">' + R.ordemAlfa(base.map(e => [e.codigo, e.descricao]), x => x[1] || x[0]).map(([k, v]) => '<option value="' + esc(k) + '">' + esc(v || '') + '</option>').join('') + '</datalist>' +
-            '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Item da nota</th><th>Produto nosso</th><th title="Quantas unidades do nosso estoque vêm em 1 unidade da nota (o antigo &quot;fator&quot;)">Vem quantas na embalagem?</th><th></th></tr></thead><tbody>' + itens.map(linhaI).join('') + '</tbody></table></div>',
+            '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Item da nota</th><th>Produto nosso</th><th title="Quantas unidades do nosso estoque vêm em 1 unidade da nota (o antigo &quot;fator&quot;)">Vem quantas na embalagem?</th><th></th></tr></thead><tbody>' + itens.map(linhaI).join('') + '</tbody></table></div>' +
+            (fat ? blocoParcelas(c, fknContas) : ''),
           salvarTexto: pend ? (dv ? 'Dar entrada da devolução' : 'Dar entrada no estoque') : 'Fechar',
           rodape: pend && !dv && (CRM.ehAdmin() || CRM.ehComprador()) ? '<button type="button" class="btn sec" data-acao="es-compra-mao" data-id="' + esc(id) + '" title="Quando os itens do XML não batem com o que veio (ex.: uma linha só com &quot;diversos&quot;)">Os itens não batem: lançar à mão</button>' : '',
           extras: form => {
@@ -983,6 +1218,7 @@
               if (q) q.textContent = fat ? '= ' + qtd(Number(it.quantidade) * fat) + ' ' + (unDe.get(cod) || '') + (dv ? ' · volta pelo custo médio' : op() ? '' : ' · ' + R.moeda(S.custoItem(it, fat)) + ' cada') : '';
             };
             itens.forEach(it => { atualiza(it); ['c_', 'f_'].forEach(p => form.elements[p + it.id].addEventListener('input', () => atualiza(it))); });
+            lerParcelas = fat ? ligaParcelas(form, c) : null;
           },
           aoSalvar: async (v, form) => {
             if (!pend) return;
@@ -1002,9 +1238,11 @@
             if (fora.length) throw new Error(fora.length + ' código(s) que o cadastro de produtos não tem: ' + fora.map(x => x.codigo).join(', ') +
               '. Escolha o produto na lista; se for produto novo, cadastre antes em Produtos.');
             if (trocados.length && !confirm('Acertei o zero da frente: ' + trocados.join(', ') + '.\n\nDar entrada assim?')) return false;
-            const r = await st.compraLancar(id, lista);
+            const parcelas = parcelasParaGravar(lerParcelas, c);
+            if (parcelas === false) return false;
+            const r = await st.compraLancar(id, lista, parcelas || null);
             const e = r.devolucao;
-            CRM.toast('Entrada dada: ' + r.itens + ' item(ns) no estoque' + (r.ignorados ? ', ' + r.ignorados + ' fora do estoque' : '') + '.' +
+            CRM.toast('Entrada dada: ' + r.itens + ' item(ns) no estoque' + (r.ignorados ? ', ' + r.ignorados + ' fora do estoque' : '') + '.' + textoParcelas(r) +
               (e ? (e.sem_nota ? ' A nota não diz qual venda: abata os títulos do cliente à mão.' : ' Abatido dos títulos da venda NF ' + e.venda + ': ' + R.moeda(e.abatido) + '.' +
                 (Number(e.sobra) > 0 ? ' O cliente já tinha pago ' + R.moeda(e.sobra) + ': ficou "Devolver ao cliente" no Caixa.' : '')) : ''));
             saldo = null; carrega();
@@ -1026,11 +1264,14 @@
         const linha = i => '<tr data-mlinha><td><input name="mc_' + i + '" list="esProdutosM" placeholder="código" class="es-cod" autocomplete="off"><small data-mnome="' + i + '"></small></td>' +
           '<td><input name="mq_' + i + '" type="number" step="any" min="0" class="es-fator" placeholder="0"><small data-mun="' + i + '"></small></td>' +
           '<td><input name="mv_' + i + '" type="text" data-moeda class="es-fator" placeholder="0,00"><small data-mcusto="' + i + '"></small></td></tr>';
-        let n = Math.max(5, itens.length);
+        let n = Math.max(5, itens.length), lerParcelas = null;
+        const fat = editaParcelas(c);
+        const fknContas = fat && dono() && st.compraParcelasFkn ? await st.compraParcelasFkn(id).catch(() => []) : [];
         CRM.abrirForm({
           titulo: 'Lançar à mão: NF ' + c.numero + ' · ' + (c.fornecedor_nome || ''), largura: 'extra',
           intro: 'Digite cada produto que veio: o código nosso, a quantidade na unidade do estoque e o valor total pago nele (com IPI, ST e frete, se tiver). ' +
-            'O estoque soma essas quantidades e o custo de cada um sai do valor ÷ quantidade. A nota e as parcelas continuam as do XML; os itens do XML ficam guardados.',
+            'O estoque soma essas quantidades e o custo de cada um sai do valor ÷ quantidade. Os itens do XML ficam guardados. ' +
+            (fat ? 'Confira também o faturamento (as parcelas), embaixo, antes de dar a entrada.' : 'As parcelas continuam as do XML.'),
           campos: [{ nome: 'motivo', rotulo: 'Por que à mão', largo: true, dica: 'ex.: o XML vem com uma linha só, "sacos diversos"' }],
           valores: { motivo: 'itens do XML não batem com o que veio' },
           htmlAntes: '<p class="dica"><strong>O XML diz:</strong> ' + itens.map(it => esc(qtd(it.quantidade) + ' ' + (it.unidade || '') + ' ' + (it.descricao || '')) + ' (' + R.moeda(Number(it.valor_total) + Number(it.ipi) + Number(it.st) + Number(it.frete) + Number(it.outras)) + ')').join(' · ') +
@@ -1038,7 +1279,8 @@
           htmlDepois: '<datalist id="esProdutosM">' + R.ordemAlfa([...nomeDe.entries()], x => x[1] || x[0]).map(([k, v]) => '<option value="' + esc(k) + '">' + esc(v || '') + '</option>').join('') + '</datalist>' +
             '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Produto (código)</th><th>Quantidade (unidade do estoque)</th><th>Valor total, R$</th></tr></thead><tbody data-mcorpo>' +
             Array.from({ length: n }, (_, i) => linha(i)).join('') + '</tbody></table></div>' +
-            '<p class="acoes"><button type="button" class="btn sec" data-mmais>+ mais 5 linhas</button> <span data-msoma></span></p>',
+            '<p class="acoes"><button type="button" class="btn sec" data-mmais>+ mais 5 linhas</button> <span data-msoma></span></p>' +
+            (fat ? blocoParcelas(c, fknContas) : ''),
           salvarTexto: 'Dar entrada no estoque',
           extras: form => {
             const corpo = form.querySelector('[data-mcorpo]'), soma = form.querySelector('[data-msoma]');
@@ -1058,6 +1300,7 @@
             corpo.addEventListener('input', atualiza);
             form.querySelector('[data-mmais]').addEventListener('click', () => { corpo.insertAdjacentHTML('beforeend', Array.from({ length: 5 }, (_, k) => linha(n + k)).join('')); n += 5; atualiza(); });
             atualiza();
+            lerParcelas = fat ? ligaParcelas(form, c) : null;
           },
           aoSalvar: async (v, form) => {
             const linhas = [], trocados = [];
@@ -1074,10 +1317,12 @@
             if (!linhas.length) throw new Error('digite pelo menos um produto');
             const t = linhas.reduce((a, x) => a + x.valor, 0), dif = Math.round((t - total) * 100) / 100;
             if (Math.abs(dif) > Math.max(1, total * 0.005) && !confirm('A soma dos produtos (' + R.moeda(t) + ') é diferente do total da nota (' + R.moeda(total) + '): diferença de ' + R.moeda(dif) +
-              '.\n\nO estoque fica com os valores que você digitou; as parcelas continuam as da nota. Dar entrada assim mesmo?')) return false;
+              '.\n\nO estoque fica com os valores que você digitou; ' + (fat ? 'o contas a pagar, com as parcelas de baixo' : 'as parcelas continuam as da nota') + '. Dar entrada assim mesmo?')) return false;
             if (trocados.length && !confirm('Acertei o zero da frente: ' + trocados.join(', ') + '.\n\nDar entrada assim?')) return false;
-            const r = await st.compraLancarManual(id, linhas, v.motivo || '');
-            CRM.toast('Entrada dada à mão: ' + r.itens + ' produto(s) no estoque (' + R.moeda(r.soma) + ').');
+            const parcelas = parcelasParaGravar(lerParcelas, c);
+            if (parcelas === false) return false;
+            const r = await st.compraLancarManual(id, linhas, v.motivo || '', parcelas || null);
+            CRM.toast('Entrada dada à mão: ' + r.itens + ' produto(s) no estoque (' + R.moeda(r.soma) + ').' + textoParcelas(r));
             saldo = null; carrega();
           }
         });

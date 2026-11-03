@@ -70,10 +70,31 @@ test('números da NF-e sem uso: só gestão e logística, sem anônimo, e entram
 test('virada: nota de compra que já entrou no FKN liga as contas dele em vez de criar outras', () => {
   const i = sql.lastIndexOf('create or replace function public.crm_compra_pagar()');
   const f = sql.slice(i, sql.indexOf('$$;', i));
-  assert.ok(f.includes("x.origem = 'fkn' and x.compra_id is null"));
-  assert.ok(f.includes('public.crm_nome_chave(split_part(x.descricao, \' · \', 1)) = public.crm_nome_chave(forn)'));
+  // 03/11/2026: o casamento com as contas do FKN mudou para crm_compra_fkn_contas (o mesmo que a entrada e a tela usam)
+  assert.ok(f.includes('from public.crm_compra_fkn_contas(new.numero, forn) x'));
   assert.ok(f.indexOf('if ja > 0 then return new; end if;') < f.indexOf('insert into public.crm_fin_lancamentos'));
+  const j = sql.lastIndexOf('create or replace function public.crm_compra_fkn_contas(');
+  const g = sql.slice(j, sql.indexOf('$$;', j));
+  assert.ok(g.includes("x.origem = 'fkn' and x.compra_id is null"));
+  assert.ok(g.includes("public.crm_nome_chave(split_part(x.descricao, ' · ', 1)) = public.crm_nome_chave(coalesce(nullif(btrim(p_fornecedor), ''), 'Fornecedor'))"));
+  assert.ok(sql.includes('revoke all on function public.crm_compra_fkn_contas(bigint, text) from public, anon, authenticated;'));
   assert.ok(sql.includes('revoke all on function public.crm_nome_chave(text) from public, anon;'));
+});
+
+test('parcelas na entrada da nota de compra: só pela entrada, só admin/comprador, com o acerto guardado', () => {
+  const i = sql.lastIndexOf('create or replace function public.crm_compra_parcelas_aplicar(');
+  const f = sql.slice(i, sql.indexOf('$$;', i));
+  assert.ok(f.includes('if not (public.crm_eh_admin() or public.crm_eh_comprador()) then raise exception'));
+  assert.ok(f.includes("if c.situacao <> 'pendente' then raise exception"));
+  assert.ok(f.includes("if fkn > 0 then return jsonb_build_object('fkn', fkn); end if;"), 'contas do FKN valem: o acerto não muda nada');
+  assert.ok(f.includes('parcelas_xml = coalesce(parcelas_xml, parcelas)'), 'o que veio no XML fica guardado');
+  assert.ok(sql.includes('revoke all on function public.crm_compra_parcelas_aplicar(uuid, jsonb) from public, anon, authenticated;'), 'só pelas entradas');
+  ['crm_compra_entrada(uuid, jsonb, jsonb)', 'crm_compra_entrada_manual(uuid, jsonb, text, jsonb)', 'crm_compra_parcelas_fkn(uuid)', 'crm_rel_periodo(date, date)']
+    .forEach(fn => assert.ok(sql.includes('revoke all on function public.' + fn + ' from public, anon;'), fn));
+  const r = sql.slice(sql.lastIndexOf('create or replace function public.crm_rel_periodo('));
+  assert.ok(r.includes('ve_custo boolean := public.crm_eh_admin() or public.crm_eh_comprador();'), 'custo só admin e comprador');
+  assert.ok(r.includes('case when ve_custo then round(m.ent_custo, 2) end, case when ve_custo then s.custo_medio end'));
+  assert.ok(r.includes('ve_valor boolean := public.crm_eh_gestor() or public.crm_eh_comprador();'), 'a logística não vê valor');
 });
 
 test('conferir a virada avisa quando o contador de pedidos fica atrás do maior número', () => {

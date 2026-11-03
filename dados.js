@@ -652,9 +652,21 @@
     if (r.error) return null;
     return await r.data.text();
   };
-  Supa.prototype.compraLancar = async function (id, itens) { return unwrap(await this.sb.rpc('crm_compra_lancar', { p_compra: id, p_itens: itens })); };
+  // parcelas: [{ vencimento, valor }] acertadas pelo comprador na entrada (03/11/2026, Wellington) → crm_compra_entrada, que grava
+  // as parcelas e dá a entrada na mesma transação; sem parcelas (logística, devolução, nada mudou), o caminho de sempre.
+  Supa.prototype.compraLancar = async function (id, itens, parcelas) {
+    if (parcelas) return unwrap(await this.sb.rpc('crm_compra_entrada', { p_compra: id, p_itens: itens, p_parcelas: parcelas }));
+    return unwrap(await this.sb.rpc('crm_compra_lancar', { p_compra: id, p_itens: itens }));
+  };
   // nota lançada à mão (28/10/2026, Wellington): os itens do XML não batem; o comprador digita código, quantidade e valor
-  Supa.prototype.compraLancarManual = async function (id, linhas, motivo) { return unwrap(await this.sb.rpc('crm_compra_lancar_manual', { p_compra: id, p_linhas: linhas, p_motivo: motivo || '' })); };
+  Supa.prototype.compraLancarManual = async function (id, linhas, motivo, parcelas) {
+    if (parcelas) return unwrap(await this.sb.rpc('crm_compra_entrada_manual', { p_compra: id, p_linhas: linhas, p_motivo: motivo || '', p_parcelas: parcelas }));
+    return unwrap(await this.sb.rpc('crm_compra_lancar_manual', { p_compra: id, p_linhas: linhas, p_motivo: motivo || '' }));
+  };
+  // contas do FKN que a entrada vai ligar a esta nota (a nota já entrou no FKN): só vencimento, valor e se já foi pago
+  Supa.prototype.compraParcelasFkn = async function (id) { return unwrap(await this.sb.rpc('crm_compra_parcelas_fkn', { p_compra: id })); };
+  // vendas e livro do estoque de cada produto entre duas datas (Estoque → Relatórios, 03/11/2026)
+  Supa.prototype.relPeriodo = async function (de, ate) { return paginado((a, b) => this.sb.rpc('crm_rel_periodo', { p_de: de, p_ate: ate }).range(a, b)); };
   // quantidade vendida de cada produto em cada mês do ano (Estoque → Relatórios)
   Supa.prototype.relVendasAno = async function (ano) { return paginado((de, ate) => this.sb.rpc('crm_rel_vendas_ano', { p_ano: ano }).range(de, ate)); };
   Supa.prototype.compraIgnorar = async function (id, obs) {
@@ -693,6 +705,8 @@
   Local.prototype.compraLancar = async function () { throw new Error('a entrada no estoque só funciona ligada ao banco'); };
   Local.prototype.compraLancarManual = Local.prototype.compraLancar;
   Local.prototype.relVendasAno = async function () { return []; };
+  Local.prototype.compraParcelasFkn = async function () { return []; };
+  Local.prototype.relPeriodo = async function () { return []; };
   Local.prototype.estoqueMovsPeriodo = async function () { return []; };
   Local.prototype.compraIgnorar = async function (id, obs) { const c = (this._compras || []).find(x => x.id === id); if (c) Object.assign(c, { situacao: 'ignorada', obs }); return c; };
 

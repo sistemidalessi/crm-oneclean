@@ -194,3 +194,104 @@ test('antesDe compara o instante, não o texto: 14:04 de Brasília é depois de 
   assert.equal(S.antesDe(null, '2026-10-16T14:56:00+00:00'), false);
   assert.equal(S.antesDe('2026-10-16T14:04:00-03:00', null), false);
 });
+
+// ---- parcelas na entrada da nota de compra (03/11/2026, Wellington)
+test('parcelas da nota: as do XML em ordem de vencimento; sem nenhuma (ou zeradas), uma só com o total na emissão', () => {
+  const c = { valor_total: 3240.65, emitida_em: '2026-10-20T19:21:32-03:00', parcelas: [{ n: 2, vencimento: '2026-11-10', valor: 1080.21 }, { n: 1, vencimento: '2026-11-03', valor: 1080.21 }, { n: 3, vencimento: '2026-11-17', valor: 1080.23 }] };
+  const p = S.parcelasDaNota(c);
+  assert.equal(p.semParcelas, false);
+  assert.deepEqual(p.lista.map(x => [x.n, x.vencimento, x.valor]), [[1, '2026-11-03', 1080.21], [2, '2026-11-10', 1080.21], [3, '2026-11-17', 1080.23]]);
+  const z = S.parcelasDaNota({ valor_total: 500, emitida_em: '2026-11-03T22:30:00-03:00', parcelas: [{ n: 1, vencimento: '2026-12-03', valor: 0 }] });
+  assert.equal(z.semParcelas, true, 'parcela zerada (a Kubera) não vale');
+  assert.deepEqual(z.lista, [{ n: 1, vencimento: '2026-11-03', valor: 500 }], 'o dia da emissão no horário de São Paulo');
+});
+
+test('dividir o total em parcelas iguais: o centavo que sobra vai na última, a cada N dias', () => {
+  assert.deepEqual(S.dividirParcelas(3240.65, 3, '2026-11-03', 7).map(p => [p.vencimento, p.valor]), [['2026-11-03', 1080.21], ['2026-11-10', 1080.21], ['2026-11-17', 1080.23]]);
+  assert.deepEqual(S.dividirParcelas(100, 1, '2026-11-30', 30).map(p => p.valor), [100]);
+  assert.deepEqual(S.dividirParcelas(758.49, 2, '2026-12-30', 30).map(p => p.vencimento), ['2026-12-30', '2027-01-29'], 'passa a virada do ano');
+  const l = S.dividirParcelas(1000, 6, '2026-11-10', 28);
+  assert.equal(Math.round(l.reduce((t, p) => t + p.valor, 0) * 100), 100000, 'a soma fecha no centavo');
+  assert.deepEqual(S.dividirParcelas(100, 0, '2026-11-10', 7), [], 'sem número de parcelas');
+  assert.deepEqual(S.dividirParcelas(100, 2, '', 7), [], 'sem a 1ª data');
+  assert.deepEqual(S.dividirParcelas(0, 2, '2026-11-10', 7), [], 'sem total');
+});
+
+test('conferir parcelas: soma × total da nota, erros por linha, linha vazia ignorada, ordem por vencimento', () => {
+  const r = S.conferirParcelas([{ vencimento: '2026-11-22', valor: '100' }, { vencimento: '', valor: '' }, { vencimento: '2026-11-08', valor: 100 }, { vencimento: '2026-11-15', valor: '100.00' }], 300);
+  assert.deepEqual(r.erros, []);
+  assert.equal(r.bate, true);
+  assert.deepEqual(r.parcelas.map(p => [p.n, p.vencimento, p.valor]), [[1, '2026-11-08', 100], [2, '2026-11-15', 100], [3, '2026-11-22', 100]]);
+  const d = S.conferirParcelas([{ vencimento: '2026-11-30', valor: 90 }], 100);
+  assert.equal(d.bate, false);
+  assert.equal(d.dif, -10);
+  assert.equal(d.soma, 90);
+  const e = S.conferirParcelas([{ vencimento: '2026-11-30', valor: '' }, { vencimento: '', valor: 50 }, { vencimento: '2026-02-30', valor: 10 }, { vencimento: '2026-12-01', valor: 0 }], 60);
+  assert.deepEqual(e.erros, ['parcela 1: falta o valor', 'parcela 2: falta o vencimento', 'parcela 3: vencimento inválido', 'parcela 4: valor zerado ou inválido']);
+  assert.deepEqual(S.conferirParcelas([], 100).erros, ['diga pelo menos uma parcela']);
+  assert.equal(S.conferirParcelas([{ vencimento: '2026-11-30', valor: 33.33 }, { vencimento: '2026-12-30', valor: 33.33 }, { vencimento: '2027-01-30', valor: 33.34 }], 100).bate, true, 'sem erro de arredondamento');
+});
+
+test('parcelas mudaram? só então vão ao banco (nota sem parcelas conta como mudada)', () => {
+  const xml = [{ n: 1, vencimento: '2026-11-15', valor: 300 }];
+  assert.equal(S.parcelasMudaram(xml, [{ n: 1, vencimento: '2026-11-15', valor: 300 }]), false);
+  assert.equal(S.parcelasMudaram(xml, [{ n: 1, vencimento: '2026-11-15', valor: 150 }, { n: 2, vencimento: '2026-11-22', valor: 150 }]), true);
+  assert.equal(S.parcelasMudaram(xml, [{ n: 1, vencimento: '2026-11-16', valor: 300 }]), true);
+  assert.equal(S.parcelasMudaram([], [{ n: 1, vencimento: '2026-11-03', valor: 500 }]), true);
+  assert.equal(S.parcelasMudaram([{ vencimento: '2026-11-03', valor: 0 }], [{ n: 1, vencimento: '2026-11-03', valor: 500 }]), true, 'parcela zerada = sem parcelas');
+});
+
+// ---- relatório por período (03/11/2026, Wellington)
+test('atalhos de período: mês, mês passado, trimestre, semestre, semestre passado, ano e 12 meses', () => {
+  const h = '2026-11-03';
+  assert.deepEqual(S.periodoPreset('mes', h), { de: '2026-11-01', ate: h });
+  assert.deepEqual(S.periodoPreset('mes_passado', h), { de: '2026-10-01', ate: '2026-10-31' });
+  assert.deepEqual(S.periodoPreset('mes_passado', '2026-03-10'), { de: '2026-02-01', ate: '2026-02-28' });
+  assert.deepEqual(S.periodoPreset('mes_passado', '2027-01-05'), { de: '2026-12-01', ate: '2026-12-31' }, 'janeiro → dezembro do ano anterior');
+  assert.deepEqual(S.periodoPreset('trimestre', h), { de: '2026-10-01', ate: h });
+  assert.deepEqual(S.periodoPreset('semestre', h), { de: '2026-07-01', ate: h });
+  assert.deepEqual(S.periodoPreset('semestre', '2026-03-15'), { de: '2026-01-01', ate: '2026-03-15' });
+  assert.deepEqual(S.periodoPreset('semestre_passado', h), { de: '2026-01-01', ate: '2026-06-30' });
+  assert.deepEqual(S.periodoPreset('semestre_passado', '2026-03-15'), { de: '2025-07-01', ate: '2025-12-31' });
+  assert.deepEqual(S.periodoPreset('ano', h), { de: '2026-01-01', ate: h });
+  assert.deepEqual(S.periodoPreset('12m', h), { de: '2025-12-01', ate: h });
+  assert.equal(S.periodoPreset('xyz', h), null);
+  assert.equal(S.periodoPreset('mes', ''), null);
+  S.PRESETS.forEach(([k]) => assert.ok(S.periodoPreset(k, h), k));
+});
+
+test('relatório do período: linhas, custo do vendido e margem estimados, só com movimento, ordem alfabética', () => {
+  const banco = [
+    { codigo: '020', descricao: 'SABONETE', unidade: 'GL', vendas_qtd: '10', vendas_valor: '200.00', vendas_notas: 3, saldo_inicial: '30', entradas: '0', saidas: '12', estornos: '0', ajustes: '-1', saldo_final: '17', entradas_custo: null, custo_medio: '12' },
+    { codigo: '010', descricao: 'ALCOOL', unidade: 'UN', vendas_qtd: '0', vendas_valor: '0.00', vendas_notas: 0, saldo_inicial: '5', entradas: '20', saidas: '0', estornos: '0', ajustes: '0', saldo_final: '25', entradas_custo: '100.00', custo_medio: '5' },
+    { codigo: '030', descricao: 'PARADO', unidade: 'UN', vendas_qtd: '0', vendas_valor: '0.00', vendas_notas: 0, saldo_inicial: '8', entradas: '0', saidas: '0', estornos: '0', ajustes: '0', saldo_final: '8', entradas_custo: null, custo_medio: '1' }];
+  const l = S.periodoLinhas(banco, {});
+  assert.deepEqual(l.map(x => x.codigo), ['010', '030', '020'], 'por nome');
+  l.forEach(x => assert.equal(Math.round((x.saldo_inicial + x.entradas - x.saidas + x.estornos + x.ajustes) * 1000), Math.round(x.saldo_final * 1000), 'o livro fecha: ' + x.codigo));
+  const sab = l.find(x => x.codigo === '020');
+  assert.equal(sab.custo_vendido, 120);
+  assert.equal(sab.margem, 40);
+  assert.equal(l.find(x => x.codigo === '010').margem, null, 'sem venda, sem margem');
+  assert.deepEqual(S.periodoLinhas(banco, { soMov: true }).map(x => x.codigo), ['010', '020'], 'parado sai');
+  const t = S.periodoTotais(l);
+  assert.deepEqual(t, { produtos: 3, vendidos: 1, comEntrada: 1, vendas_valor: 200, entradas_custo: 100, custo_vendido: 120, margem: 40 });
+});
+
+test('relatório do período: quem não vê valor ou custo não recebe a coluna (nem vazia) e o total fica nulo', () => {
+  const semValor = [{ codigo: '1', descricao: 'A', vendas_qtd: 4, vendas_valor: null, vendas_notas: 1, saldo_inicial: 0, entradas: 0, saidas: 4, estornos: 0, ajustes: 0, saldo_final: -4, entradas_custo: null, custo_medio: null }];
+  const l = S.periodoLinhas(semValor);
+  assert.equal(l[0].custo_vendido, null);
+  const t = S.periodoTotais(l);
+  assert.equal(t.vendas_valor, null);
+  assert.equal(t.custo_vendido, null);
+  assert.equal(t.margem, null);
+  const op = S.periodoPlanilha(l, { valor: false, custo: false });
+  assert.equal(op.cabecalho.length, 11);
+  assert.ok(!op.cabecalho.some(c => /R\$|Margem|Custo/.test(c)), 'logística: só quantidades');
+  assert.deepEqual(op.linhas[0], ['1', 'A', '', 0, 0, 4, 0, 0, -4, 4, 1]);
+  const gest = S.periodoPlanilha(l, { valor: true, custo: false });
+  assert.deepEqual(gest.cabecalho.slice(11), ['Valor vendido (R$)']);
+  const comp = S.periodoPlanilha(S.periodoLinhas([{ codigo: '2', descricao: 'B', vendas_qtd: 2, vendas_valor: 30, saldo_final: 0, entradas_custo: 10, custo_medio: 10 }]), { valor: true, custo: true });
+  assert.deepEqual(comp.cabecalho.slice(11), ['Valor vendido (R$)', 'Custo das entradas (R$)', 'Custo médio hoje (R$)', 'Custo do vendido, estimado (R$)', 'Margem estimada (%)']);
+  assert.deepEqual(comp.linhas[0].slice(11), [30, 10, 10, 20, 33.3]);
+});
