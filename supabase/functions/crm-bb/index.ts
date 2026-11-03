@@ -37,6 +37,10 @@ const hojeSP = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America
 const maisDias = (isoD: string, n: number) => new Date(Date.parse(isoD + 'T12:00:00Z') + n * 86400000).toISOString().slice(0, 10);
 const dig = (v: unknown) => String(v ?? '').replace(/\D/g, '');
 // texto do pagador: sem acento nem caractere estranho, no tamanho que o banco aceita
+// "Seu número" do boleto (numeroTituloBeneficiario): o BB recusou "002862/01" (4678420, "preenchido com dados inválidos",
+// 03/11/2026, 1º boleto da virada). Vai só com letras e números: "00286201" (nota 002862, parcela 01); a mensagem do boleto
+// continua com "NF 002862/01".
+const seuNumero = (v: unknown) => String(v ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 15);
 const txt = (v: unknown, n: number) => String(v ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9 .,\/&-]/g, ' ').replace(/\s+/g, ' ').trim().toUpperCase().slice(0, n);
 const msgBB = (j: any, t: string) => {
   const e = j?.erros || j?.errors || (j?.error ? [j.error] : null);
@@ -122,7 +126,7 @@ Deno.serve(async (req) => {
           codigoModalidade: 1, dataEmissao: br(bo.emissao), dataVencimento: br(bo.vencimento), valorOriginal: Number(bo.valor),
           valorAbatimento: 0, quantidadeDiasProtesto: 0, quantidadeDiasNegativacao: 0, indicadorAceiteTituloVencido: 'S', numeroDiasLimiteRecebimento: 0,
           codigoAceite: 'N', codigoTipoTitulo: 2, descricaoTipoTitulo: 'DM', indicadorPermissaoRecebimentoParcial: 'N',
-          numeroTituloBeneficiario: txt(bo.documento || bo.duplicata, 15), numeroTituloCliente: '000' + bo.nosso_numero,
+          numeroTituloBeneficiario: seuNumero(bo.documento || bo.duplicata), numeroTituloCliente: '000' + bo.nosso_numero,
           mensagemBloquetoOcorrencia: txt(b.instrucao || ('NF ' + (bo.duplicata || '')), 165),
           jurosMora: juros > 0 ? { tipo: 2, porcentagem: juros } : { tipo: 3 },
           multa: multa > 0 ? { tipo: 2, data: br(maisDias(bo.vencimento, 1)), porcentagem: multa } : { tipo: 0 },
