@@ -8795,3 +8795,37 @@ create policy ler on public.crm_empresa_locais for select to authenticated
 revoke all on public.crm_empresa_locais from anon;
 grant select on public.crm_empresa_locais to authenticated;
 
+
+-- Comissão do plano INTERNO pela margem da nota, como no FKN (03/11/2026, Anderson: "se a opção for mudar o CRM para a regra
+-- que já era na FKN, tudo bem"). Um percentual por nota, pela margem dela: abaixo de 23% → 2%; 23–28 → 3,5%; 28–33 → 5%;
+-- 33–38 → 5,5%; 38% ou mais → 6%. Conferido com a planilha da Renata de outubro: R$ 775,92 (FKN: R$ 775,89).
+-- Custo de cada item: o da saída do estoque (crm_estoque_mov, custo médio na hora da nota) e, para as notas de antes do
+-- estoque do CRM, o do cadastro (crm_estoque.custo_unit), da caixa fechada (código ".1") quando a unidade da nota não é a
+-- do cadastro (fardo, caixa). A vendedora recebe só a margem (%) das notas dela, nunca o custo.
+-- Migração crm_nota_margens (aplicada em 03/11/2026).
+create or replace function public.crm_nota_margens(p_mes date)
+returns table(nota_id uuid, base numeric, margem numeric, itens_sem_custo int)
+language sql stable security definer set search_path = public as $$
+  with n as (
+    select n.id, n.vendedor_id from public.crm_notas n
+     where not n.cancelada
+       and n.emitida_em >= (date_trunc('month', p_mes)::timestamp at time zone 'America/Sao_Paulo')
+       and n.emitida_em < ((date_trunc('month', p_mes) + interval '1 month')::timestamp at time zone 'America/Sao_Paulo')
+       and (public.crm_eh_admin() or public.crm_eh_gestor() or n.vendedor_id = auth.uid())),
+  it as (
+    select n.id nota, i.id iid, i.codigo, translate(upper(coalesce(i.unidade, '')), 'ÇÃÁÂÀÉÊÍÓÔÕÚ', 'CAAAAEEIOOOU') un, i.quantidade q, i.valor_total v
+      from n join public.crm_nota_itens i on i.nota_id = n.id
+     where i.cfop is null or i.cfop ~ '^[56][14]'),
+  b as (
+    select it.*, nullif(translate(upper(coalesce(e.unidade, '')), 'ÇÃÁÂÀÉÊÍÓÔÕÚ', 'CAAAAEEIOOOU'), '') bun, e.custo_unit bc,
+      (select x.custo_unit from public.crm_estoque x where x.codigo like regexp_replace(it.codigo, '\.\d+$', '') || '.%' and x.custo_unit > 0 order by x.codigo limit 1) cxc,
+      (select sum(abs(m.quantidade) * m.custo_unit) from public.crm_estoque_mov m where m.nota_item_id = it.iid and m.estorno_de is null and m.custo_unit > 0) cmov
+    from it left join public.crm_estoque e on e.codigo = it.codigo),
+  c as (
+    select b.nota, b.v, coalesce(b.cmov, b.q * case when b.bun is not null and b.un <> b.bun and b.cxc is not null then b.cxc else nullif(b.bc, 0) end) custo from b)
+  select c.nota, round(sum(c.v), 2), case when sum(c.v) > 0 and count(*) filter (where c.custo is null) = 0 then round((sum(c.v) - sum(c.custo)) / sum(c.v) * 100, 2) end,
+         (count(*) filter (where c.custo is null))::int
+    from c group by c.nota;
+$$;
+revoke all on function public.crm_nota_margens(date) from public, anon;
+grant execute on function public.crm_nota_margens(date) to authenticated;

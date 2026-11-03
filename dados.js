@@ -1358,6 +1358,7 @@
   };
 
   // Comissão do mês fechado (Fase 3b): o administrador lê todas; cada um, a própria (RLS). Fechar e reabrir: funções do banco.
+  Supa.prototype.notaMargens = async function (mes) { return unwrap(await this.sb.rpc('crm_nota_margens', { p_mes: mes })); };
   Supa.prototype.comissoes = async function (mes) { return unwrap(await this.sb.from('crm_comissoes').select('*').eq('mes', mes)); };
   Supa.prototype.comissaoFechar = async function (mes, linhas) { return unwrap(await this.sb.rpc('crm_comissao_fechar', { p_mes: mes, p_linhas: linhas })); };
   Supa.prototype.comissaoReabrir = async function (mes) { return unwrap(await this.sb.rpc('crm_comissao_reabrir', { p_mes: mes })); };

@@ -33,7 +33,7 @@ test('linha e totais: comissão pelo plano de quem vendeu', () => {
   const t = P.totais([it, { quantidade: 2, preco: 10, desconto: 10, preco_tab: null, custo: null }], 15, { plano });
   assert.deepStrictEqual(t, { produtos: 655, frete: 15, geral: 670, margem: 23.21, comissao: 31.85, comissaoPct: 5 });
   const esc = P.linha({ quantidade: 1, preco: 1.70, preco_tab: 1.96 }, { plano: P.PLANOS_PADRAO[0] });
-  assert.strictEqual(esc.faixa, 'ABAIXO'); assert.strictEqual(esc.comissao, 2);  // interno: abaixo da tabela A conta 2%
+  assert.strictEqual(esc.faixa, 'ABAIXO'); assert.strictEqual(esc.comissao, null);  // interno (03/11/2026): o % é do pedido, pela margem
   assert.strictEqual(P.linha({ quantidade: 1, preco: 1.70, preco_tab: 1.96 }, { plano: P.PLANOS_PADRAO[1] }).comissao, 0);
 });
 
@@ -173,4 +173,23 @@ test('repetir pedido: do pedido do CRM ou da nota (com os preços dela, sem boni
     [{ codigo: 'A', descricao: 'X', unidade: 'GL', quantidade: 2, preco: 5, desconto: 1 }]);
   assert.deepStrictEqual(P.itensParaRepetir(null, [{ codigo: 'B', descricao: 'Y', unidade: 'UN', quantidade: 3, valor_unitario: 4.5, cfop: '5102' }, { codigo: 'C', descricao: 'Z', quantidade: 1, valor_unitario: 0, cfop: '5910' }]),
     [{ codigo: 'B', descricao: 'Y', unidade: 'UN', quantidade: 3, preco: 4.5, desconto: 0 }]);
+});
+
+// 03/11/2026: plano interno pela margem da nota, como no FKN (planilha da Renata de outubro: R$ 775,89)
+test('comissão interna pela margem da nota (regra do FKN)', () => {
+  const f = P.MARGEM_INTERNO;
+  assert.deepStrictEqual([22.99, 23, 24.42, 28.31, 30.5, 35.91, 38, 51.06].map(m => P.pctDaMargem(m, f)), [2, 3.5, 3.5, 5, 5, 5.5, 6, 6]);
+  assert.strictEqual(P.rotuloMargem(P.chaveMargem(30.5, f)), 'margem 28–33%');
+  assert.strictEqual(P.rotuloMargem(P.chaveMargem(10, f)), 'margem abaixo de 23%');
+  const notas = [{ id: 'a', numero: 1, emitida_em: '2026-10-05T13:00:00Z', vendedor_id: 'v' }, { id: 'b', numero: 2, emitida_em: '2026-10-06T13:00:00Z', vendedor_id: 'v' }];
+  const itens = new Map([['a', [{ codigo: 'X', valor_unitario: 10, valor_total: 574.49, cfop: '5102' }]], ['b', [{ codigo: 'X', valor_unitario: 99, valor_total: 1398, cfop: '5102' }]]]);
+  const r = P.apuraComissao({ notas, itensPorNota: itens, mes: '2026-10', precos: new Map([['X', 10]]), margens: new Map([['a', 24.42], ['b', 41.84]]), usuarios: [{ user_id: 'v', nome: 'V', papel: 'vendedor' }] });
+  assert.strictEqual(r[0].comissao, 20.11 + 83.88);   // MaisMu 3,5% e Senac 6%, como na planilha
+  assert.deepStrictEqual(r[0].notas.map(n => n.margem), [24.42, 41.84]);
+  // sem a margem (sem custo), a nota cai na faixa de preço; o externo continua pela faixa
+  const sem = P.apuraComissao({ notas, itensPorNota: itens, mes: '2026-10', precos: new Map([['X', 10]]), margens: new Map(), usuarios: [{ user_id: 'v', nome: 'V', papel: 'vendedor' }] });
+  assert.strictEqual(sem[0].semMargem, 2);
+  const t = P.totais([{ quantidade: 10, preco: 13, preco_tab: 10, custo: 10 }], 0, { plano: P.PLANOS_PADRAO[0] });
+  assert.deepStrictEqual([t.margem, t.comissaoPct, t.comissao], [23.08, 3.5, 4.55]);
+  assert.strictEqual(P.totais([{ quantidade: 1, preco: 13, preco_tab: 10 }], 0, { plano: P.PLANOS_PADRAO[0] }).comissao, null);   // sem custo (vendedora)
 });
