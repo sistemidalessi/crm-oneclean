@@ -546,7 +546,7 @@
       corpo = ((p.comentarios || []).length ? '<ol class="linha-tempo">' + p.comentarios.map(c => '<li><strong>' + esc(c.nome || '') + '</strong> <small>' + esc(quando(c.quando)) + '</small><p>' + esc(c.texto) + '</p></li>').join('') + '</ol>' : '<p class="vazio">Nenhum comentário.</p>') +
         '<label class="campo largo"><span>Inserir comentário</span><textarea rows="3" data-pd-coment></textarea></label><p class="acoes"><button type="button" class="btn" data-acao="pd-comentar" data-id="' + esc(p.id) + '">Inserir comentário</button></p>';
     } else {
-      corpo = gradeProdutos(p.itens || [], { ctx, faltas: fs, ler: true }) + rodapeTotais(t);
+      corpo = gradeProdutos(p.itens || [], { ctx, faltas: fs, ler: true }) + rodapeTotais(t, p.itens || []);
     }
     return '<section class="cartao pd-janela"><header class="pd-topo"><button type="button" class="btn sec" data-acao="pd-fechar">← Voltar</button><h2>Pedido ' + esc(p.numero) + ' · ' + esc(nomeCliente(p)) + '</h2>' + CRM.selo(s.rotulo, s.cor) + '</header>' +
       (pz ? '<p class="aviso-notas">⏸ <strong>Pausado</strong>' + (p.dados.pausado.ate ? ' até ' + esc(R.dataBR(String(p.dados.pausado.ate).slice(0, 10))) + ' (volta sozinho nesse dia)' : ' até alguém clicar em "Retomar"') +
@@ -559,24 +559,52 @@
       '<div class="chips">' + abas.map(a => '<button type="button" class="chip-filtro' + (abaPed === a[0] ? ' ativo' : '') + '" data-acao="pd-aba-ped" data-id="' + a[0] + '">' + esc(a[1]) + '</button>').join('') + '</div>' + corpo + '</section>';
   }
 
+  // Sinal da margem para quem não vê custo (03/11/2026, Anderson: "opção 2, o sinal verde/vermelho para todas"): o banco
+  // (crm_pedido_sinal) diz só sim/não por item e para o pedido, pela mesma regra da trava PREÇO; nunca o custo nem a margem.
+  const sinais = new Map(), sinalIds = new Map();
+  const chaveSinal = its => JSON.stringify(its.map(i => [i.codigo || '', i.unidade || '', num(i.quantidade), num(i.preco), num(i.desconto)]));
+  const bola = v => (v === true ? '<span class="sinal" title="margem dentro do mínimo">🟢</span>' : v === false ? '<span class="sinal" title="abaixo da margem mínima">🔴</span>' : '<span class="sinal" title="sem custo cadastrado: não dá para medir">⚪</span>');
+  const textoGeral = v => (v === true ? '🟢 dentro da margem mínima' : v === false ? '<strong class="neg">🔴 abaixo da margem mínima: o pedido fica bloqueado até a gestora ou a logística liberar</strong>' : '—');
+  function sinalDe(its) {
+    if (veMargem() || !its.length || !CRM.store().pedidoSinal) return null;
+    const k = chaveSinal(its);
+    if (!sinalIds.has(k)) sinalIds.set(k, 'sg' + sinalIds.size);
+    let x = sinais.get(k);
+    if (!x) {
+      x = { res: null }; sinais.set(k, x);
+      if (sinais.size > 60) sinais.delete(sinais.keys().next().value);
+      CRM.store().pedidoSinal(its.map(i => ({ codigo: i.codigo || null, descricao: i.descricao || '', unidade: i.unidade || null, quantidade: num(i.quantidade), preco: num(i.preco), desconto: num(i.desconto) })))
+        .then(r => { x.res = r || {}; pinta(k); }).catch(() => { x.res = {}; pinta(k); });
+    }
+    return { id: sinalIds.get(k), res: x.res };
+  }
+  const htmlSinal = (sg, i) => (i === 'geral' ? textoGeral(sg.res.geral) : bola((sg.res.itens || [])[i]));
+  function pinta(k) {
+    const sg = { id: sinalIds.get(k), res: (sinais.get(k) || {}).res };
+    if (!sg.res || typeof document === 'undefined') return;
+    document.querySelectorAll('[data-sk="' + sg.id + '"]').forEach(el => { el.innerHTML = htmlSinal(sg, el.dataset.si === 'geral' ? 'geral' : Number(el.dataset.si)); });
+  }
+  const slotSinal = (sg, i) => (sg ? '<span data-sk="' + sg.id + '" data-si="' + i + '">' + (sg.res ? htmlSinal(sg, i) : '…') + '</span>' : '');
+
   function gradeProdutos(itens, o) {
-    const gest = veMargem();
+    const gest = veMargem(), sg = gest ? null : sinalDe(itens);
     const falta = i => { const x = (o.faltas || []).find(y => y.idx === i); return x ? num(x.falta) : (o.estimaFalta ? o.estimaFalta(i) : 0); };
     return '<div class="tabela-rolagem"><table class="tabela pd-grade"><thead><tr><th>Item</th><th>Código</th><th>Nome do produto</th><th>Un</th><th class="num">Qtde</th><th class="num">Ñ atend.</th><th class="num">Preço un</th><th class="num">Desc</th>' +
-      (gest ? '<th class="num">Margem</th>' : '') + '<th class="num">Preço total</th><th>Faixa</th><th class="num">Comis%</th><th class="num">Desc s/tab</th>' + (o.ler ? '' : '<th class="num">Disp.</th><th></th>') + '</tr></thead><tbody>' +
+      (gest ? '<th class="num">Margem</th>' : sg ? '<th title="verde: margem dentro do mínimo; vermelho: abaixo">Margem</th>' : '') + '<th class="num">Preço total</th><th>Faixa</th><th class="num">Comis%</th><th class="num">Desc s/tab</th>' + (o.ler ? '' : '<th class="num">Disp.</th><th></th>') + '</tr></thead><tbody>' +
       (itens.length ? itens.map((it, i) => {
         const l = P.linha(it, o.ctx), fa = falta(i), d = porCod.get(it.codigo);
         return '<tr' + (o.sel === i ? ' class="sel"' : '') + '><td>' + String(i + 1).padStart(3, '0') + '</td><td>' + esc(it.codigo || '') + '</td><td>' + (it.codigo && CRM.produtos ? CRM.produtos.miniatura(it.codigo, 'pequena') : '') + esc(it.descricao) + (it.obs ? '<small>' + esc(it.obs) + '</small>' : '') + '</td><td>' + esc(it.unidade || '') + '</td>' +
           '<td class="num">' + qtd(it.quantidade) + '</td><td class="num">' + (fa > 0 ? '<strong class="neg">' + qtd(fa) + '</strong>' : '0') + '</td><td class="num">' + preco(it.preco) + '</td><td class="num">' + preco(it.desconto) + '</td>' +
-          (gest ? '<td class="num">' + (l.margem == null ? '—' : l.abaixoMinimo ? '<strong class="neg" title="este item está abaixo da margem mínima; o que trava é a margem geral do pedido">' + pct(l.margem) + '</strong>' : pct(l.margem)) + '</td>' : '') + '<td class="num">' + preco(l.total) + '</td><td>' + esc(P.rotuloFaixa(l.faixa)) + '</td><td class="num">' + (l.comissao == null ? '—' : preco(l.comissao)) + '</td>' +
+          (gest ? '<td class="num">' + (l.margem == null ? '—' : l.abaixoMinimo ? '<strong class="neg" title="este item está abaixo da margem mínima; o que trava é a margem geral do pedido">' + pct(l.margem) + '</strong>' : pct(l.margem)) + '</td>' : sg ? '<td>' + slotSinal(sg, i) + '</td>' : '') + '<td class="num">' + preco(l.total) + '</td><td>' + esc(P.rotuloFaixa(l.faixa)) + '</td><td class="num">' + (l.comissao == null ? '—' : preco(l.comissao)) + '</td>' +
           '<td class="num">' + (l.sobreTab == null ? '—' : preco(l.sobreTab)) + '</td>' +
           (o.ler ? '' : '<td class="num">' + (d ? qtd(Math.floor(num(d.disponivel) * 1000) / 1000) : '—') + '</td><td class="num"><button type="button" class="mini" data-acao="pd-item-editar" data-id="' + i + '" title="Alterar o item">✎</button>' +
             '<button type="button" class="mini" data-acao="pd-item-excluir" data-id="' + i + '" title="Excluir o item">×</button></td>') + '</tr>';
       }).join('') : '<tr><td colspan="15" class="vazio">Nenhum item.</td></tr>') + '</tbody></table></div>';
   }
-  function rodapeTotais(t) {
+  function rodapeTotais(t, itens) {
+    const sg = veMargem() ? null : sinalDe(itens || []);
     return '<div class="pd-totais"><span>Total dos produtos <strong>' + R.moeda(t.produtos) + '</strong></span><span>Frete <strong>' + R.moeda(t.frete) + '</strong></span>' +
-      (veMargem() ? '<span>Margem geral <strong' + (t.margem != null && t.margem < P.margemMinima(E().cfg) - 0.005 ? ' class="neg" title="abaixo da margem mínima: o pedido fica bloqueado até a gestora ou a logística liberar"' : '') + '>' + pct(t.margem) + '</strong></span>' : '') + '<span>Comissão <strong>' + (t.comissao == null ? '<span title="no plano interno, a comissão é um % do pedido pela margem dele (sai na nota)">pela margem do pedido</span>' : R.moeda(t.comissao) + (t.comissaoPct != null ? ' (' + pct(t.comissaoPct) + ')' : '')) + '</strong></span>' +
+      (veMargem() ? '<span>Margem geral <strong' + (t.margem != null && t.margem < P.margemMinima(E().cfg) - 0.005 ? ' class="neg" title="abaixo da margem mínima: o pedido fica bloqueado até a gestora ou a logística liberar"' : '') + '>' + pct(t.margem) + '</strong></span>' : sg ? '<span>Margem geral ' + slotSinal(sg, 'geral') + '</span>' : '') + '<span>Comissão <strong>' + (t.comissao == null ? '<span title="no plano interno, a comissão é um % do pedido pela margem dele (sai na nota)">pela margem do pedido</span>' : R.moeda(t.comissao) + (t.comissaoPct != null ? ' (' + pct(t.comissaoPct) + ')' : '')) + '</strong></span>' +
       '<span class="geral">Total geral <strong>' + R.moeda(t.geral) + '</strong></span></div>';
   }
 
@@ -807,12 +835,12 @@
           (CRM.aCaminho && CRM.aCaminho.texto(dd.codigo, dd.unidade) ? ' · <strong>' + esc(CRM.aCaminho.texto(dd.codigo, dd.unidade)) + '</strong>' : dd.a_caminho ? ' · a caminho ' + qtd(dd.a_caminho) + ' (FKN, sem data)' : '') + ' · preço tabela R$ ' + preco(dd.preco_venda) + ' · líquido R$ ' + preco(lin.precoLiq) + ' · total R$ ' + preco(lin.total) +
           ' · faixa ' + esc(P.rotuloFaixa(lin.faixa)) + (lin.comissao != null ? ' · comissão ' + preco(lin.comissao) + '%' : '') + (veCusto() && dd.custo != null ? ' · custo R$ ' + preco(dd.custo) : '') + (veMargem() && lin.margem != null ? ' · margem <strong class="' + (lin.abaixoMinimo ? 'neg' : '') + '">' + pct(lin.margem) + '</strong>' +
             (lin.abaixoMinimo ? ' <strong class="neg">abaixo de ' + pct(P.margemMinima(E().cfg)) + ' neste item: o que trava é a margem geral do pedido</strong>' : '') : '') +
-          (!veMargem() && P.abaixoDaTabela(lin) ? ' <strong class="neg">abaixo da tabela A: o pedido pode ficar bloqueado até a gestora ou a logística liberar</strong>' : '') : 'Escolha o produto: o CRM mostra o disponível e o preço da tabela.') + '</div>' +
+          (!veMargem() && num(l.preco) > 0 && num(l.quantidade) > 0 ? (sgl => (sgl ? ' · margem ' + slotSinal(sgl, 0) : ''))(sinalDe([l])) : '') : 'Escolha o produto: o CRM mostra o disponível e o preço da tabela.') + '</div>' +
         (dd && num(dd.preco_venda) > 0 ? '<div class="pd-faixas">Tabela: ' + P.FAIXAS.slice().reverse().map(fx => '<button type="button" class="mini" data-acao="pd-faixa" data-id="' + fx + '" title="' + (tab[fx] >= 0 ? '+' : '') + tab[fx] + '%">' + P.rotuloFaixa(fx) + ' ' + preco(P.precoDaFaixa(dd.preco_venda, fx, tab)) + '</button>').join('') + '</div>' : '') +
         '<p class="acoes"><button type="button" class="btn" data-acao="pd-item-salvar">' + (x.sel != null ? 'Salvar item' : 'Inserir item') + '</button> ' + (x.sel != null || l.codigo ? '<button type="button" class="btn sec" data-acao="pd-item-cancelar">Cancelar item</button> ' : '') +
         (x.empresa_id ? '<button type="button" class="btn sec" data-acao="pd-ultimas">Últimas compras</button> <button type="button" class="btn sec" data-acao="pd-importar-ultimas">Importar últimas compras</button> <button type="button" class="btn sec" data-acao="pd-repetir" title="Repetir um pedido ou uma nota anterior do cliente, com os preços dela">Repetir pedido</button> ' : '') +
         (x.itens.length > 1 ? '<button type="button" class="mini" data-acao="pd-organizar">Organizar por nome</button>' : '') + '</p></div>' +
-        gradeProdutos(x.itens, { ctx, sel: x.sel, estimaFalta: estimador() }) + rodapeTotais(t);
+        gradeProdutos(x.itens, { ctx, sel: x.sel, estimaFalta: estimador() }) + rodapeTotais(t, x.itens);
     }
     const titulo = x.id ? 'Pedido ' + x.numero : x.proposta_id ? 'Orçamento ' + (x.dados.numero_orcamento || '') + ' → pedido' : 'Novo orçamento / pedido';
     return '<section class="cartao pd-janela"><header class="pd-topo"><button type="button" class="btn sec" data-acao="pd-ed-sair">← Sair sem gravar</button><h2>' + esc(titulo) + (e ? ' · ' + esc(e.nome) : '') + '</h2></header>' +

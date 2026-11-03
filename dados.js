@@ -1206,6 +1206,8 @@
   Supa.prototype.fornecedorPagarEditar = async function (id, p, motivo) { return unwrap(await this.sb.rpc('crm_fin_fornecedor_editar', { p_id: id, p, p_motivo: motivo })); };
   Supa.prototype.pedidoPausar = async function (id, pausar, ate, motivo) { return unwrap(await this.sb.rpc('crm_pedido_pausar', { p_id: id, p_pausar: !!pausar, p_ate: ate || null, p_motivo: motivo || null })); };
   Supa.prototype.pedidoDados = async function (id, p) { return unwrap(await this.sb.rpc('crm_pedido_dados', { p_id: id, p })); };
+  // sinal verde/vermelho da margem para quem não vê custo (só sim/não; 03/11/2026)
+  Supa.prototype.pedidoSinal = async function (itens) { return unwrap(await this.sb.rpc('crm_pedido_sinal', { p_itens: itens })); };
   Supa.prototype.pedidoComentar = async function (id, texto) { return unwrap(await this.sb.rpc('crm_pedido_comentar', { p_id: id, p_texto: texto })); };
   Supa.prototype.bolaoMontar = async function (ids, obs) { return unwrap(await this.sb.rpc('crm_bolao_montar', { p_pedidos: ids, p_obs: obs || null })); };
   Supa.prototype.pedidoSepararItem = async function (id, idx, ok) { return unwrap(await this.sb.rpc('crm_pedido_separar_item', { p_id: id, p_idx: idx, p_ok: !!ok })); };
