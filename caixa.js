@@ -859,6 +859,8 @@
   }
 
   CRM.telas.caixa = {
+    // o que volta depois da versão nova do CRM (app.js, guardaParaVersao; 03/11/2026)
+    lugar: { obter: () => ({ filtro: Object.assign({}, filtro), vista }), aplicar: o => { if (!o) return; Object.assign(filtro, o.filtro || {}); if (o.vista) vista = o.vista; } },
     turmaSub: () => vista,
     render() {
       if (!CRM.ehAdmin()) return '<div class="cartao"><p class="vazio">Esta tela é só do administrador.</p></div>';

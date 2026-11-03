@@ -399,6 +399,13 @@
   // rolagem da página e da janela (celular), a das tabelas e grades com rolagem própria e os blocos
   // recolhíveis abertos (fechados, a página encolhia e subia). Bloco pelo texto do resumo sem números.
   const ROLAM = '.tabela-rolagem, .cx-grade-rolagem';
+  // lugar guardado antes de a versão nova recarregar a página (guardaParaVersao, mais abaixo); vale uma vez, logo ao abrir
+  let lugarVersao = null;
+  try {
+    lugarVersao = JSON.parse(sessionStorage.getItem('sd-crm-lugar') || 'null');
+    sessionStorage.removeItem('sd-crm-lugar');
+    if (lugarVersao && !(Date.now() - lugarVersao.em < 120000)) lugarVersao = null; else if (lugarVersao) lugarVersao.carregado = Date.now();
+  } catch (e) { lugarVersao = null; }
   // data-chave fixa (ex.: "+ 7 saídas" de cada dia do Caixa); sem ela, a classe e o resumo sem números
   const chaveBloco = d => d.dataset.chave || (d.className || '') + '|' + ((d.querySelector('summary') || {}).textContent || '').replace(/[\d.,R$%()\s]+/g, ' ').trim().slice(0, 80);
   function guardaLugar(c) {
@@ -479,13 +486,19 @@
       return;
     }
     const tela = CRM.telas[E.aba] || CRM.telas.inicio;
-    const lugar = guardaLugar(c);
+    if (lugarVersao && !lugarVersao.aplicado) {
+      lugarVersao.aplicado = true;
+      Object.keys(lugarVersao.telas || {}).forEach(k => { const l = CRM.telas[k] && CRM.telas[k].lugar; if (l && l.aplicar) { try { l.aplicar(lugarVersao.telas[k]); } catch (e) { /* sem */ } } });
+    }
+    const lugar = lugarVersao && lugarVersao.rolagem && lugarVersao.rolagem.aba === E.aba && Date.now() - lugarVersao.carregado < 20000 ? lugarVersao.rolagem : guardaLugar(c);
     const foco = document.activeElement && document.activeElement.id && c.contains(document.activeElement) ? document.activeElement.id : null;
     c.innerHTML = tela.render(al);
     if (tela.depois) tela.depois(c);
     CRM.aplicaBarras(c);
     if (CRM.filtraTabelas) CRM.filtraTabelas(c); // filtro nas colunas (listas.js), antes de devolver o cursor à caixa
     voltaLugar(c, lugar);
+    // depois da versão nova, a rolagem volta quando a tela já tem altura (dados que chegam depois, "Carregando…")
+    if (lugarVersao && lugar === lugarVersao.rolagem && c.scrollHeight - c.clientHeight >= (lugar.topo || 0) && document.documentElement.scrollHeight - window.innerHeight >= (lugar.jy || 0)) lugarVersao.rolagem = null;
     if (foco && document.getElementById(foco)) {
       const el = document.getElementById(foco);
       el.focus({ preventScroll: true });
@@ -531,6 +544,7 @@
   // ------------------------------------------------------------ ações por delegação
   const ACOES = CRM.acoes = {
     'atualizar-pagina': () => location.reload(),
+    'versao-agora': () => { if (versaoNova) recarregaVersao(); else location.reload(); },
     'recarregar-dados': () => CRM.recarregar(false, { completa: true }).then(() => { if (!E.falhaCarga) CRM.toast('Dados carregados.'); }),
     'ver-integracoes': () => { CRM.gravaPref('ajustes', 'integracoes'); CRM.irPara('ajustes'); },
     aba: id => CRM.irPara(id),
@@ -645,13 +659,32 @@
     const a = document.activeElement;
     return !!(a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && a.value);
   }
+  // 03/11/2026 (o comprador, no meio da tela de Produtos: "o sistema atualiza e volta do início"): a versão nova só entra
+  // sozinha com o CRM PARADO (10 min sem clique nem tecla) e sem nada pela metade; até lá fica a faixa "Atualizar agora".
+  // Ao entrar, a tela volta onde estava: a aba, a rolagem e o que cada tela guarda em CRM.telas[x].lugar
+  // ({ obter, aplicar }: o produto aberto, a busca, a sub-aba…), pelo sessionStorage desta aba do navegador.
+  const PARADO = 10 * 60 * 1000;
+  function faixaVersao() {
+    const f = $('#faixaVersao'); if (!f || !f.hidden) return;
+    f.innerHTML = 'Há uma versão nova do CRM. <button type="button" class="mini" data-acao="versao-agora">Atualizar agora</button> ' +
+      '<small>(ou ela entra sozinha quando o CRM ficar 10 minutos sem uso; a tela volta onde está)</small>';
+    f.hidden = false;
+  }
+  function guardaParaVersao() {
+    const telas = {};
+    Object.keys(CRM.telas || {}).forEach(k => { const l = CRM.telas[k] && CRM.telas[k].lugar; if (l && l.obter) { try { telas[k] = l.obter(); } catch (e) { /* sem */ } } });
+    const c = $('#conteudo');
+    try { sessionStorage.setItem('sd-crm-lugar', JSON.stringify({ aba: E.aba, telas, rolagem: c ? guardaLugar(c) : null, em: Date.now() })); } catch (e) { /* ok */ }
+  }
+  function recarregaVersao() {
+    try { sessionStorage.setItem('sd-crm-recarregou', versaoNova); } catch (e) { /* ok */ }
+    guardaParaVersao();
+    CRM.toast('Versão nova do CRM: atualizando…');
+    setTimeout(() => location.reload(), 800);
+  }
   function atualizaSePuder() {
     if (!versaoNova) return;
-    if (ocupado()) {
-      const f = $('#faixaVersao');
-      if (f && f.hidden && telaOcupada()) { f.textContent = 'Há uma versão nova do CRM: ela entra sozinha quando você gravar ou sair do que está fazendo.'; f.hidden = false; }
-      return;
-    }
+    if (ocupado() || Date.now() - mexeuEm < PARADO) { faixaVersao(); return; }
     // Sem laço: se já recarregou para esta versão e o navegador insistiu na antiga, só avisa.
     let tentou = '';
     try { tentou = sessionStorage.getItem('sd-crm-recarregou') || ''; } catch (e) { /* ok */ }
@@ -660,9 +693,7 @@
       if (f && f.hidden) { f.textContent = 'Há uma versão nova do CRM. Aperte Ctrl+F5 para atualizar.'; f.hidden = false; }
       return;
     }
-    try { sessionStorage.setItem('sd-crm-recarregou', versaoNova); } catch (e) { /* ok */ }
-    CRM.toast('Versão nova do CRM: atualizando…');
-    setTimeout(() => location.reload(), 1500);
+    recarregaVersao();
   }
   CRM.versao = { minha: () => minhaVersao, confere: () => { ultimaConsulta = 0; return confereVersao(); }, agoraSePuder: () => setTimeout(atualizaSePuder, 2500) };
 
@@ -873,7 +904,7 @@
   }
   // aba que ficou aberta de um dia para o outro: pede o login quando a pessoa volta (sem cortar quem está digitando)
   let mexeuEm = Date.now();
-  ['pointerdown', 'keydown'].forEach(t => document.addEventListener(t, () => { mexeuEm = Date.now(); }, true));
+  ['pointerdown', 'keydown', 'wheel'].forEach(t => document.addEventListener(t, () => { mexeuEm = Date.now(); }, { capture: true, passive: true }));
   function vigiaDiaNovo() {
     if (!sb || !E.eu || loginDeHoje()) return;
     if (document.hidden || Date.now() - mexeuEm > 30 * 60 * 1000) pedeLoginDoDia();

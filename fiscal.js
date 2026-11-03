@@ -422,6 +422,8 @@
   }
 
   CRM.telas.fiscal = {
+    // o que volta depois da versão nova do CRM (app.js, guardaParaVersao; 03/11/2026)
+    lugar: { obter: () => Object.assign({}, filtro), aplicar: o => { Object.assign(filtro, o || {}); } },
     render() {
       if (!CRM.ehAdmin()) return '<div class="cartao"><p class="vazio">Esta tela é só do administrador.</p></div>';
       if (produtos === null) { setTimeout(carrega, 0); return '<div class="cartao"><p class="vazio">Carregando…</p></div>'; }

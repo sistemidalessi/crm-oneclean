@@ -1041,6 +1041,8 @@
   const textoParcelas = r => { const p = r && r.parcelas; return p && p.fkn ? ' As contas do FKN desta nota ficaram ligadas a ela.' : p && p.parcelas ? ' ' + p.parcelas + ' parcela(s) acertada(s) no contas a pagar (' + R.moeda(p.soma) + ').' : ''; };
 
   CRM.telas.estoque = {
+    // o que volta depois da versão nova do CRM (app.js, guardaParaVersao; 03/11/2026)
+    lugar: { obter: () => Object.assign({}, filtro), aplicar: o => { Object.assign(filtro, o || {}); } },
     turmaSub: () => filtro.ver,
     render() {
       if (!(CRM.ehAdmin() || CRM.ehComprador() || op())) return '<div class="cartao"><p class="vazio">Esta tela é do administrador, do comprador e da logística.</p></div>';

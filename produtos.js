@@ -968,6 +968,8 @@
   }
 
   CRM.telas.produtos = {
+    // o que volta depois da versão nova do CRM (app.js, guardaParaVersao; 03/11/2026)
+    lugar: { obter: () => Object.assign({}, pc), aplicar: o => { Object.assign(pc, o || {}); } },
     turmaSub: () => (pc.aberto ? 'produto' : modo()),
     render() {
       if (lista === null) { setTimeout(carrega, 0); return '<div class="cabecalho"><div><h1>Produtos</h1></div></div><div class="cartao"><p class="vazio">Carregando…</p></div>'; }

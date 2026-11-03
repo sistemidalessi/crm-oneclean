@@ -902,6 +902,9 @@
   };
 
   CRM.telas.pedidos = {
+    // o que volta depois da versão nova do CRM (app.js, guardaParaVersao; 03/11/2026)
+    lugar: { obter: () => ({ ver: f.ver, sit: f.sit, vend: f.vend, busca: f.busca, est: f.est, bolao: f.bolao, aberto, abaPed }),
+      aplicar: o => { if (!o) return; ['ver', 'sit', 'vend', 'busca', 'est', 'bolao'].forEach(k => { if (k in o) f[k] = o[k]; }); aberto = o.aberto || null; abaPed = o.abaPed || abaPed; } },
     turmaSub: () => (ed ? 'editor' : aberto ? 'pedido' : f.ver),
     render() {
       if (peds === null) { setTimeout(() => carrega(), 0); return cabecalho() + '<div class="cartao"><p class="vazio">Carregando…</p></div>'; }
