@@ -141,7 +141,8 @@
       if (f && f.gtin && e.indexOf(f.gtin) === -1) e.unshift(f.gtin);
       return Object.assign({}, x, {
         cad: c ? { min: c.estoque_min == null ? null : num(c.estoque_min), max: c.estoque_max == null ? null : num(c.estoque_max), ult_entrada: c.ult_entrada || null,
-          ult_saida: c.ult_saida || null, custo_compra: c.custo_compra == null ? null : num(c.custo_compra), localizacao: c.localizacao || '' } : null,
+          ult_saida: c.ult_saida || null, custo_compra: c.custo_compra == null ? null : num(c.custo_compra),
+          indice_custo: c.indice_custo == null ? null : num(c.indice_custo), localizacao: c.localizacao || '' } : null,
         forn: fcod ? { cod: fcod, nome: fnome, trocado: !!tr } : null, fiscal: ex.fiscal ? f : undefined, ncm: f ? f.ncm || '' : null, eans: e
       });
     });
@@ -898,7 +899,8 @@
     if (vc) {
       const s0 = d.saldo, c = x.cad;
       h += '<div><h3>Custo</h3>' + dl([['Custo do cadastro', 'R$ ' + preco(x.custo)], s0 && s0.custo_medio != null ? ['Custo médio (livro do estoque)', 'R$ ' + preco(s0.custo_medio)] : null,
-          c && c.custo_compra != null ? ['Último custo de compra (FKN)', 'R$ ' + preco(c.custo_compra)] : null]) +
+          c && c.custo_compra != null ? ['Preço de compra (última nota)', 'R$ ' + preco(c.custo_compra)] : null,
+          c && c.indice_custo ? ['Índice de custo', pct(c.indice_custo) + ' sobre a compra'] : null]) +
         (podeFotos() ? '<h3>Histórico do custo</h3>' + (d.carregando ? '<p class="dica">Carregando…</p>' : (d.hist || []).length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Quando</th><th class="num">De</th><th class="num">Para</th></tr></thead><tbody>' +
           d.hist.map(z => '<tr><td>' + esc(dataBR(z.em)) + '</td><td class="num">R$ ' + preco(z.custo_de) + '</td><td class="num">R$ ' + preco(z.custo_para) + '</td></tr>').join('') + '</tbody></table></div>' : '<p class="vazio">O custo não mudou desde que o CRM começou a acompanhar.</p>') : '') + '</div>';
     }
@@ -1038,8 +1040,12 @@
         { nome: 'localizacao', rotulo: 'Localização no galpão' },
         { tipo: 'secao', rotulo: 'Preço e estoque' }])
       // precificação (28/10/2026, Wellington: "lançamento do valor com a opção de precificação para cálculo de porcentagem",
-      // como o Preços/Margem do FKN): custo + acréscimo % dá o preço; mudar o preço refaz o acréscimo; a margem aparece embaixo
-      .concat(comCusto ? [{ nome: 'custo_unit', rotulo: 'Custo (reposição), R$', tipo: 'numero', vazioNulo: true },
+      // como o Preços/Margem do FKN): custo + acréscimo % dá o preço; mudar o preço refaz o acréscimo; a margem aparece embaixo.
+      // Índice de custo (03/11/2026, Anderson: "alguns fornecedores têm um índice a mais"), como o Sifn736 do FKN: preço de
+      // compra + índice % = preço de custo; o acréscimo vai sobre o custo. A entrada de nota de compra aplica o índice sozinha.
+      .concat(comCusto ? [{ nome: 'custo_compra', rotulo: 'Preço de compra, R$', tipo: 'numero', vazioNulo: true },
+        { nome: 'indice_custo', rotulo: 'Índice de custo, %', tipo: 'numero', vazioNulo: true, ajuda: 'o que o fornecedor pesa a mais (frete, IPI, taxa): 8 = 8% sobre a compra; vazio ou 0 = sem índice' },
+        { nome: 'custo_unit', rotulo: 'Preço de custo (compra + índice), R$', tipo: 'numero', vazioNulo: true },
         { nome: 'acrescimo', rotulo: 'Acréscimo sobre o custo, %', tipo: 'numero', vazioNulo: true, ajuda: 'digite o % e o preço se calcula; ou digite o preço e o % se acerta' }] : [])
       .concat([{ nome: 'preco_venda', rotulo: 'Preço de venda (tabela A), R$', tipo: 'numero', obrigatorio: true, vazioNulo: true },
         { nome: 'estoque_min', rotulo: 'Estoque mínimo', tipo: 'numero', passo: '1', vazioNulo: true },
@@ -1073,9 +1079,12 @@
           aviso.textContent = 'Margem sobre o preço: ' + m.toFixed(1).replace('.', ',') + '% (mínima ' + margemMin + '%)' + (m < margemMin ? ' — abaixo da mínima: o pedido fica bloqueado até a gestora liberar' : '');
           aviso.className = 'aviso-campo' + (m < margemMin ? ' neg' : ''); aviso.hidden = false;
         };
+        const peloIndice = () => { const c = num('custo_compra'); if (c > 0) el('custo_unit').value = (Math.round(c * (1 + num('indice_custo') / 100) * 10000) / 10000).toFixed(4).replace(/0{1,2}$/, ''); pelaPorcentagem(); };
         const pelaPorcentagem = () => { const c = num('custo_unit'); if (c > 0 && el('acrescimo').value !== '') el('preco_venda').value = (Math.round(c * (1 + num('acrescimo') / 100) * 100) / 100).toFixed(2); margem(); };
         const peloPreco = () => { const c = num('custo_unit'), p = num('preco_venda'); el('acrescimo').value = c > 0 && p > 0 ? (Math.round((p / c - 1) * 10000) / 100).toFixed(2) : ''; margem(); };
-        el('custo_unit').addEventListener('input', pelaPorcentagem);
+        el('custo_compra').addEventListener('input', peloIndice);
+        el('indice_custo').addEventListener('input', peloIndice);
+        el('custo_unit').addEventListener('input', () => { const c = num('custo_compra'), u = num('custo_unit'); if (c > 0 && u > 0) el('indice_custo').value = (Math.round((u / c - 1) * 1000) / 10).toFixed(1); pelaPorcentagem(); });
         el('acrescimo').addEventListener('input', pelaPorcentagem);
         el('preco_venda').addEventListener('input', peloPreco);
         margem();
@@ -1083,7 +1092,7 @@
       aoSalvar: async v => {
         const d = {};
         ['descricao', 'unidade', 'situacao', 'linha', 'familia', 'localizacao', 'preco_venda', 'estoque_min', 'estoque_max', 'ncm', 'cest', 'gtin', 'origem'].forEach(k => { d[k] = v[k] == null ? '' : v[k]; });
-        if (comCusto) d.custo_unit = v.custo_unit == null ? '' : v.custo_unit;
+        if (comCusto) ['custo_compra', 'indice_custo', 'custo_unit'].forEach(k => { d[k] = v[k] == null ? '' : v[k]; });
         if (temForn) d.fornecedor_cod = v.fornecedor_cod || '';
         if (novo) d.novo = true;
         if (novo || !v0.tem_regra) d.modelo = String(v.modelo || '').trim().toUpperCase();

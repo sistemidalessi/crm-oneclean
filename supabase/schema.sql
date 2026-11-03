@@ -779,6 +779,9 @@ alter table public.crm_estoque add column if not exists pend_cliente    numeric(
 alter table public.crm_estoque add column if not exists pend_fornecedor numeric(14,3);
 alter table public.crm_estoque add column if not exists custo_unit      numeric(16,4);
 alter table public.crm_estoque add column if not exists custo_compra    numeric(16,4);
+-- índice de custo (03/11/2026, como o Sifn736 do FKN): preço de custo (custo_unit) = preço de compra (custo_compra) + índice %;
+-- a entrada de nota de compra grava custo_unit = custo médio × (1 + índice). SQL em sistemi-dalessi docs/oneclean/sql/2026-11-03-indice-de-custo.sql
+alter table public.crm_estoque add column if not exists indice_custo    numeric(8,3);
 alter table public.crm_estoque add column if not exists preco_venda     numeric(16,4);
 alter table public.crm_estoque add column if not exists ult_entrada     date;
 alter table public.crm_estoque add column if not exists ult_saida       date;
@@ -4367,7 +4370,7 @@ begin
   if not (custo or public.crm_eh_logistica()) then raise exception 'só o administrador, o comprador e a logística cadastram produto'; end if;
   if not public.crm_produtos_do_crm() then raise exception 'o cadastro ainda é do FKN: o administrador passa para o CRM em Produtos ("Passar o cadastro para o CRM")'; end if;
   if cod = '' or cod !~ '^[A-Z0-9][A-Z0-9.\-]{0,19}$' then raise exception 'código inválido (letras, números, ponto ou traço; até 20)'; end if;
-  if (custo is false) and (d ? 'custo_unit' or d ? 'custo_compra') then raise exception 'o custo só o administrador e o comprador mudam'; end if;
+  if (custo is false) and (d ? 'custo_unit' or d ? 'custo_compra' or d ? 'indice_custo') then raise exception 'o custo só o administrador e o comprador mudam'; end if;
   select * into e from public.crm_estoque where codigo = cod;
   if novo and e.codigo is not null then raise exception 'já existe um produto com o código %', cod; end if;
   if not novo and e.codigo is null then raise exception 'produto % não encontrado', cod; end if;
@@ -4383,12 +4386,13 @@ begin
     if v !~ '^[A-Z0-9]{1,6}$' then raise exception 'unidade inválida (ex.: UN, CX, FD, GL, PCT)'; end if;
   end if;
   if d ? 'situacao' and coalesce(d ->> 'situacao', '') not in ('ATIVO', 'INATIVO') then raise exception 'situação: ATIVO ou INATIVO'; end if;
-  foreach v in array array['preco_venda', 'estoque_min', 'estoque_max', 'custo_unit', 'custo_compra'] loop
+  foreach v in array array['preco_venda', 'estoque_min', 'estoque_max', 'custo_unit', 'custo_compra', 'indice_custo'] loop
     if d ? v and nullif(d ->> v, '') is not null then
       begin n := (d ->> v)::numeric; exception when others then raise exception '% inválido', v; end;
       if n < 0 then raise exception '% não pode ser negativo', v; end if;
     end if;
   end loop;
+  if coalesce(nullif(d ->> 'indice_custo', '')::numeric, 0) > 300 then raise exception 'índice de custo acima de 300%%: confira'; end if;
   if novo and coalesce(nullif(d ->> 'preco_venda', '')::numeric, 0) <= 0 then raise exception 'diga o preço de venda (tabela A)'; end if;
   if (novo or d ? 'ncm') and regexp_replace(coalesce(d ->> 'ncm', ''), '\D', '', 'g') !~ '^\d{8}$' then raise exception 'NCM com 8 números'; end if;
   if d ? 'cest' and nullif(regexp_replace(coalesce(d ->> 'cest', ''), '\D', '', 'g'), '') is not null and regexp_replace(d ->> 'cest', '\D', '', 'g') !~ '^\d{7}$' then raise exception 'CEST com 7 números'; end if;
@@ -4410,11 +4414,11 @@ begin
   perform set_config('crm.cadastro', '1', true);
   if novo then
     insert into public.crm_estoque (codigo, descricao, unidade, situacao, linha, familia, fornecedor_cod, fornecedor, estoque_min, estoque_max,
-        preco_venda, localizacao, custo_unit, custo_compra, quantidade, estoque_atual, custo_total, atualizado_em)
+        preco_venda, localizacao, custo_unit, custo_compra, indice_custo, quantidade, estoque_atual, custo_total, atualizado_em)
       values (cod, btrim(d ->> 'descricao'), upper(btrim(d ->> 'unidade')), coalesce(d ->> 'situacao', 'ATIVO'), nullif(btrim(coalesce(d ->> 'linha', '')), ''),
         nullif(btrim(coalesce(d ->> 'familia', '')), ''), nullif(d ->> 'fornecedor_cod', ''), fn, nullif(d ->> 'estoque_min', '')::numeric, nullif(d ->> 'estoque_max', '')::numeric,
         (d ->> 'preco_venda')::numeric, nullif(btrim(coalesce(d ->> 'localizacao', '')), ''), case when custo then nullif(d ->> 'custo_unit', '')::numeric end,
-        case when custo then nullif(d ->> 'custo_compra', '')::numeric end, 0, 0, 0, now());
+        case when custo then nullif(d ->> 'custo_compra', '')::numeric end, case when custo then nullif(d ->> 'indice_custo', '')::numeric end, 0, 0, 0, now());
     insert into public.crm_estoque_saldo (codigo, descricao, unidade, saldo, custo_medio, inicio, atualizado_em)
       values (cod, btrim(d ->> 'descricao'), upper(btrim(d ->> 'unidade')), 0, case when custo then nullif(d ->> 'custo_unit', '')::numeric end, now(), now())
       on conflict (codigo) do nothing;
@@ -4439,6 +4443,7 @@ begin
       localizacao = case when d ? 'localizacao' then nullif(btrim(coalesce(d ->> 'localizacao', '')), '') else localizacao end,
       custo_unit = case when custo and d ? 'custo_unit' then nullif(d ->> 'custo_unit', '')::numeric else custo_unit end,
       custo_compra = case when custo and d ? 'custo_compra' then nullif(d ->> 'custo_compra', '')::numeric else custo_compra end,
+      indice_custo = case when custo and d ? 'indice_custo' then nullif(d ->> 'indice_custo', '')::numeric else indice_custo end,
       atualizado_em = now()
      where codigo = cod;
     update public.crm_estoque_saldo set descricao = coalesce(case when d ? 'descricao' then btrim(d ->> 'descricao') end, descricao),
@@ -4486,7 +4491,7 @@ begin
   return jsonb_build_object('codigo', e.codigo, 'descricao', e.descricao, 'unidade', e.unidade, 'situacao', e.situacao, 'linha', e.linha, 'familia', e.familia,
     'fornecedor_cod', e.fornecedor_cod, 'fornecedor', e.fornecedor, 'estoque_min', e.estoque_min, 'estoque_max', e.estoque_max, 'preco_venda', e.preco_venda,
     'localizacao', e.localizacao, 'ncm', f.ncm, 'cest', f.cest, 'gtin', f.gtin, 'origem', f.origem, 'tem_regra', coalesce(f.regra ? 'venda', false),
-    'custo_unit', case when custo then e.custo_unit end, 'custo_compra', case when custo then e.custo_compra end, 'dono_crm', public.crm_produtos_do_crm());
+    'custo_unit', case when custo then e.custo_unit end, 'custo_compra', case when custo then e.custo_compra end, 'indice_custo', case when custo then e.indice_custo end, 'dono_crm', public.crm_produtos_do_crm());
 end;
 $$;
 grant execute on function public.crm_produto_ler(text) to authenticated;
@@ -4944,7 +4949,7 @@ begin
     if new.tipo = 'entrada' then
       update public.crm_estoque e set
         custo_compra = case when coalesce(new.custo_unit, 0) > 0 then round(new.custo_unit, 4) else e.custo_compra end,
-        custo_unit = coalesce(nullif(s.custo_medio, 0), e.custo_unit),
+        custo_unit = coalesce(round(nullif(s.custo_medio, 0) * (1 + coalesce(e.indice_custo, 0) / 100), 4), e.custo_unit),
         pend_fornecedor = greatest(coalesce(e.pend_fornecedor, 0) - new.quantidade, 0),
         ult_entrada = greatest(coalesce(e.ult_entrada, dia), dia), atualizado_em = now()
         from public.crm_estoque_saldo s where s.codigo = e.codigo and e.codigo = new.codigo;
