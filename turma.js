@@ -200,7 +200,7 @@
       boletos: CRM.cobranca && !CRM.foraDeVendas() ? CRM.cobranca.paraFila().length : 0,
       gestor: CRM.ehGestor(), admin: CRM.ehAdmin(), comprador: CRM.ehComprador(), op: CRM.ehLogistica() || CRM.ehGestor(),
       fkn: CRM.lembreteFkn ? CRM.lembreteFkn() : [], recusas: CRM.recusasFkn ? CRM.recusasFkn() : [],
-      vigiasParados: CRM.ehAdmin() ? (E().vigias || []).filter(c => raiz.CRMDados.situacaoVigia(c).estado === 'parado').map(c => c.nome) : [],
+      vigiasParados: CRM.ehAdmin() && !(CRM.fknDesligado && CRM.fknDesligado()) ? (E().vigias || []).filter(c => raiz.CRMDados.situacaoVigia(c).estado === 'parado').map(c => c.nome) : [],
       papel: eu.papel, hoje: CRM.hoje(),
       analise: fazAnalise() ? { pronta: !!(analise && analise.texto), gerando: gerandoAnalise } : null
     });

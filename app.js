@@ -385,7 +385,8 @@
   function atualizaFaixaVigia() {
     const f = $('#faixaVigia');
     if (!f) return;
-    const parados = CRM.ehAdmin() ? (E.vigias || []).filter(c => DD.situacaoVigia(c).estado === 'parado') : [];
+    // Virada (03/11/2026): sem o FKN, o vigia não tem mais o que mandar (as notas do CRM entram direto): sem aviso.
+    const parados = CRM.ehAdmin() && !CRM.fknDesligado() ? (E.vigias || []).filter(c => DD.situacaoVigia(c).estado === 'parado') : [];
     f.hidden = !parados.length;
     if (parados.length) f.innerHTML = parados.map(c => 'O vigia de notas "' + esc(c.nome) + '" não dá sinal de vida desde ' +
       esc(R.dataBR(R.diaLocal(c.ultimo_sinal)) + ' ' + R.horaLocal(c.ultimo_sinal)) + ': as notas novas não estão entrando.').join(' ') +
