@@ -2591,7 +2591,7 @@ grant execute on function public.crm_estoque_disponivel() to authenticated;
 create or replace function public.crm_pedido_itens_norm(p_itens jsonb) returns jsonb language plpgsql stable security definer set search_path = public as $$
 declare x jsonb; out jsonb := '[]'::jsonb; cod text; base text; un text; eu text; f numeric; q numeric; pr numeric; d numeric; e record; k int := 0;
 begin
-  if not public.crm_eh_membro() then raise exception 'só a equipe de vendas'; end if;
+  if not (public.crm_eh_membro() or public.crm_eh_logistica()) then raise exception 'só a equipe de vendas e a logística'; end if;
   for x in select value from jsonb_array_elements(coalesce(p_itens, '[]'::jsonb)) loop
     k := k + 1;
     cod := nullif(upper(btrim(coalesce(x->>'codigo', ''))), '');

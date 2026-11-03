@@ -495,7 +495,7 @@
       ps.map(p => htmlPedidoImpresso(p, true)).join('') + '</div>';
   }
   function htmlPedidoImpresso(p, quebra) {
-    const d = p.dados || {};
+    const d = p.dados || {}, sem = x => String(x == null ? '' : x).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
     return '<section class="sp-ped' + (quebra ? ' quebra' : '') + '"><h2>Pedido ' + esc(p.numero) + ' · ' + esc(nomeCliente(p)) + '</h2>' +
       '<p>' + esc([P.entregaTexto(d.entrega), d.telefone, p.entrega ? 'Entrega ' + R.dataBR(p.entrega) : '', d.transportadora ? 'Transporte: ' + d.transportadora : '', d.volumes ? d.volumes + ' volume(s)' : ''].filter(Boolean).join(' · ')) + '</p>' +
       (d.texto_nota ? '<p><strong>Texto da nota:</strong> ' + esc(d.texto_nota) + '</p>' : '') + (d.observacoes ? '<p><strong>Obs.:</strong> ' + esc(d.observacoes) + '</p>' : '') +
@@ -574,11 +574,11 @@
       x = { res: null }; sinais.set(k, x);
       if (sinais.size > 60) sinais.delete(sinais.keys().next().value);
       CRM.store().pedidoSinal(its.map(i => ({ codigo: i.codigo || null, descricao: i.descricao || '', unidade: i.unidade || null, quantidade: num(i.quantidade), preco: num(i.preco), desconto: num(i.desconto) })))
-        .then(r => { x.res = r || {}; pinta(k); }).catch(() => { x.res = {}; pinta(k); });
+        .then(r => { x.res = r || {}; pinta(k); }).catch(() => { x.res = { erro: true }; pinta(k); });
     }
     return { id: sinalIds.get(k), res: x.res };
   }
-  const htmlSinal = (sg, i) => (i === 'geral' ? textoGeral(sg.res.geral) : bola((sg.res.itens || [])[i]));
+  const htmlSinal = (sg, i) => (sg.res.erro ? '—' : i === 'geral' ? textoGeral(sg.res.geral) : bola((sg.res.itens || [])[i]));
   function pinta(k) {
     const sg = { id: sinalIds.get(k), res: (sinais.get(k) || {}).res };
     if (!sg.res || typeof document === 'undefined') return;
