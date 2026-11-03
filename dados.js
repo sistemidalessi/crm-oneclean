@@ -1805,12 +1805,21 @@
   const enderecoLocal = e => (e ? [[e.logradouro, e.numero].filter(Boolean).join(', '), e.complemento, e.bairro, [e.cidade, e.uf].filter(Boolean).join('/'), e.cep]
     .map(x => String(x || '').trim()).filter(Boolean).join(' · ') : '');
   const vendedorRota = (n, u) => (/^direto$/i.test(String(n.vendedor_nome || '').trim()) ? 'Venda direta' : (u && u.nome) || n.vendedor_nome);
+  // local de entrega do pedido da nota (03/11/2026; igual a crm_entrega_da_nota do banco): o endereço do pedido vale sobre o do cadastro
+  Local.prototype.entregaDaNota = function (notaId) {
+    const p = (this._peds ? this._peds() : []).filter(x => x.nota_id === notaId && x.dados && x.dados.entrega && String(x.dados.entrega.endereco || '').trim())[0];
+    return p ? p.dados.entrega : null;
+  };
+  const entregaLocalTexto = en => [[en.endereco, en.numero].filter(Boolean).join(', '), en.compl, en.bairro, [en.cidade, en.uf].filter(Boolean).join('/'), en.cep].filter(Boolean).join(' · ');
+  const comLocal = (nome, en) => (nome || '') + (en && String(en.local || '').trim() ? ' — ' + String(en.local).trim() : '');
   Local.prototype.rotaLinhas = function () {
     const d = this.ler(), emp = new Map(d.empresas.map(e => [e.id, e])), nts = new Map((d.notas || []).map(n => [n.id, n])), us = new Map(d.usuarios.map(u => [u.user_id, u]));
     return lsLe('crm_entregas', []).map(x => {
       const n = nts.get(x.nota_id) || {}, e = emp.get(x.empresa_id || n.empresa_id), u = us.get(n.vendedor_id);
       const c = d.contatos.filter(k => e && k.empresa_id === e.id).sort((a, b) => (b.principal ? 1 : 0) - (a.principal ? 1 : 0))[0];
-      return Object.assign({}, x, { numero: n.numero, cliente: (e && e.nome) || n.cliente_nome, endereco: enderecoLocal(e), bairro: e && e.bairro, cidade: (e && e.cidade) || n.cidade,
+      const en = this.entregaDaNota(x.nota_id);
+      return Object.assign({}, x, { numero: n.numero, cliente: comLocal((e && e.nome) || n.cliente_nome, en), endereco: en ? entregaLocalTexto(en) : enderecoLocal(e),
+        bairro: en ? en.bairro : e && e.bairro, cidade: (en && en.cidade) || (e && e.cidade) || n.cidade,
         valor: n.valor_total, vendedor: vendedorRota(n, u), contato: c && c.nome,
         telefone: (c && (c.celular || c.whatsapp || c.telefone)) || (e && (e.whatsapp || e.telefone)) || '' });
     });
@@ -1820,8 +1829,9 @@
     return (d.notas || []).filter(n => !n.cancelada && String(n.emitida_em || '').slice(0, 10) >= desde && !usadas.has(n.id))
       .sort((a, b) => String(b.emitida_em).localeCompare(String(a.emitida_em))).map(n => {
         const e = emp.get(n.empresa_id), u = us.get(n.vendedor_id);
-        return { nota_id: n.id, numero: n.numero, emitida_em: n.emitida_em, empresa_id: n.empresa_id || null, cliente: (e && e.nome) || n.cliente_nome, endereco: enderecoLocal(e),
-          bairro: e && e.bairro, cidade: (e && e.cidade) || n.cidade, valor: n.valor_total, vendedor: vendedorRota(n, u) };
+        const en = this.entregaDaNota(n.id);
+        return { nota_id: n.id, numero: n.numero, emitida_em: n.emitida_em, empresa_id: n.empresa_id || null, cliente: comLocal((e && e.nome) || n.cliente_nome, en), endereco: en ? entregaLocalTexto(en) : enderecoLocal(e),
+          bairro: en ? en.bairro : e && e.bairro, cidade: (en && en.cidade) || (e && e.cidade) || n.cidade, valor: n.valor_total, vendedor: vendedorRota(n, u) };
       });
   };
   Local.prototype.rotaDia = async function (dia) { return this.rotaLinhas().filter(x => x.dia === dia); };
