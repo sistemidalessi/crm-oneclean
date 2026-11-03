@@ -124,7 +124,7 @@
       // ---- coluna 1: dados + contatos
       '<div class="ficha-col">' +
         '<section><dl class="dados">' +
-          dado('Grupo', grupo) + dado('Razão social', esc(e.razao_social)) + (e.apelido ? dado('Apelido', esc(e.apelido)) : '') + dado('CNPJ/CPF', esc(e.cnpj) + (e.cnpj && R.ehCNPJ(R.chaveDoc(e.cnpj)) && !R.cnpjValido(e.cnpj) ? ' ' + CRM.selo('inválido?', 'ambar') : '')) +
+          dado('Grupo', grupo) + dado('Razão social', esc(e.razao_social)) + (e.apelido ? dado('Apelido', esc(e.apelido)) : '') + (e.obs_nota ? dado('Texto na nota', esc(e.obs_nota)) : '') + dado('CNPJ/CPF', esc(e.cnpj) + (e.cnpj && R.ehCNPJ(R.chaveDoc(e.cnpj)) && !R.cnpjValido(e.cnpj) ? ' ' + CRM.selo('inválido?', 'ambar') : '')) +
           dado('Telefone', esc(e.telefone)) + dado('WhatsApp', esc(e.whatsapp)) +
           dado('E-mail', e.email ? (separaEmails(e.email).length ? separaEmails(e.email).map(m => '<a href="mailto:' + esc(m) + '">' + esc(m) + '</a>').join('<br>') : esc(e.email)) : '') +
           dado('Site', e.site ? '<a href="' + esc(/^https?:/i.test(e.site) ? e.site : 'https://' + e.site) + '" target="_blank" rel="noopener noreferrer">' + esc(e.site) + '</a>' : '') +
@@ -370,6 +370,9 @@
       { nome: 'nome', rotulo: 'Nome', obrigatorio: true, largo: true, ajuda: 'Com CNPJ e razão social, o nome passa a ser a razão social (regra da empresa). O nome do dia a dia vai em "Apelido".' },
       { nome: 'razao_social', rotulo: 'Razão social' },
       { nome: 'apelido', rotulo: 'Apelido (nome fantasia, contato)' },
+      // 03/11/2026 (Edson, logística: "o FKN punha na observação da nota o horário de almoço e de recebimento"): vai sozinho para o
+      // "Texto da nota" de cada pedido novo do cliente (dá para mudar no pedido)
+      { nome: 'obs_nota', rotulo: 'Texto na nota fiscal (horário de recebimento, almoço, portaria…)', tipo: 'textarea', largo: true, linhas: 2 },
       { nome: 'cnpj', rotulo: 'CNPJ ou CPF' },
       { nome: 'situacao', rotulo: 'Situação', tipo: 'select', opcoes: opcoesSituacao(), padrao: 'lead' },
       { nome: 'qualificacao', rotulo: 'Qualificação', tipo: 'estrelas' },

@@ -8496,3 +8496,8 @@ $$;
 drop trigger if exists crm_empresa_nome_pelo_cnpj on public.crm_empresas;
 create trigger crm_empresa_nome_pelo_cnpj before insert or update on public.crm_empresas
   for each row execute function public.crm_empresa_nome_pelo_cnpj();
+
+-- Texto fixo do cliente na nota fiscal (03/11/2026, Edson/logística: o FKN punha na observação da nota o horário de recebimento e
+-- de almoço). Vai sozinho para o "Texto da nota" de cada pedido novo. Preenchido com o texto das notas do FKN de 121 clientes
+-- (backup crm_backup.obs_nota_fkn_20261103).
+alter table public.crm_empresas add column if not exists obs_nota text;
