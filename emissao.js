@@ -599,6 +599,7 @@
     const p = CRM.pedidos && CRM.pedidos.pedido ? CRM.pedidos.pedido(pedidoId) : null;
     const fp = faltaPagamento(p);
     if (fp) { CRM.toast('Antes da nota: ' + fp, true); return; }
+    if (semData(p)) return;
     if (p && p.situacao === 'separacao' && (p.itens || []).some(i => !i.separado) && !confirm('O pedido ' + p.numero + ' ainda tem itens sem a caixinha de separado. Emitir a nota assim mesmo?')) return;
     CRM.toast('Montando a prévia da nota…');
     let r;
@@ -936,9 +937,17 @@
       } });
   }
   // Do pedido: bonificação, faturamento ou remessa da entrega futura.
+  // "[DATA]" no texto da nota: a data entra quando a logística retoma o pedido pausado (▶), no dia da entrega (03/11/2026,
+  // remessas da Santa Casa); a nota nunca sai com o "[DATA]" escrito.
+  function semData(p) {
+    if (!p || String((p.dados || {}).texto_nota || '').indexOf('[DATA]') === -1) return false;
+    CRM.toast('O texto da nota ainda tem "[DATA]": retome o pedido (▶) no dia da entrega ou troque pela data no ✎ Editar dados.', true);
+    return true;
+  }
   function outraDoPedido(pedidoId) {
     const p = CRM.pedidos && CRM.pedidos.pedido ? CRM.pedidos.pedido(pedidoId) : null;
     if (!p) return;
+    if (semData(p)) return;
     const temFat = (nfes || []).some(n => n.tipo === 'faturamento_futuro' && n.situacao === 'autorizada' && n.empresa_id === p.empresa_id);
     CRM.abrirForm({ titulo: 'Outra operação · pedido ' + p.numero, campos: [{ nome: 'tipo', rotulo: 'Nota', tipo: 'select', obrigatorio: true, opcoes: [
         ['bonificacao', 'Bonificação (5910): sem cobrança, ICMS como na venda'],

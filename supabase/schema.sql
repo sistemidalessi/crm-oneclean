@@ -8688,7 +8688,10 @@ begin
               else 'Pedido retomado (saiu da pausa)' end;
   update public.crm_pedidos set
     dados = case when p_pausar then coalesce(dados, '{}'::jsonb) || jsonb_build_object('pausado', jsonb_build_object('ate', p_ate, 'motivo', nullif(btrim(coalesce(p_motivo, '')), ''), 'por', coalesce(nome, ''), 'em', now()))
-                 else coalesce(dados, '{}'::jsonb) - 'pausado' end,
+                 -- ao retomar, "[DATA]" no texto da nota vira o dia de hoje (remessas da Santa Casa, 03/11/2026)
+                 else (coalesce(dados, '{}'::jsonb) - 'pausado') || case when coalesce(dados->>'texto_nota', '') like '%[DATA]%'
+                        then jsonb_build_object('texto_nota', replace(dados->>'texto_nota', '[DATA]', to_char((now() at time zone 'America/Sao_Paulo')::date, 'DD/MM/YYYY')))
+                        else '{}'::jsonb end end,
     comentarios = coalesce(comentarios, '[]'::jsonb) || jsonb_build_array(jsonb_build_object('nome', coalesce(nome, ''), 'quando', now(), 'texto', txt)),
     atualizado_por = auth.uid(), atualizado_em = now()
   where id = r.id returning * into r;
