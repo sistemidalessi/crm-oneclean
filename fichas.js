@@ -953,6 +953,7 @@
   const ncmDe = cod => { if (!ncms || !cod) return ''; const c = String(cod), v = ncms.get(c) || ncms.get(c.replace(/\.\d+$/, '')) || ''; return v.replace(/^(\d{4})(\d{2})(\d{2})$/, '$1.$2.$3'); };
   fichas.garanteNcm = garanteNcm;
   // Monta o documento (HTML) da proposta e o nome do arquivo.
+  fichas.montaProposta = p => montaProposta(p);   // para conferir o documento (testes)
   function montaProposta(p) {
     garanteNcm(); // a 1ª vez só começa a carregar; quem gera o PDF espera (baixarPdfProposta)
     const n = CRM.negocio(p.negocio_id);
@@ -975,7 +976,21 @@
     if (d.fkn || d.orcamento || R.num(d.frete)) cartoes.push([R.num(d.frete) ? 'Frete ' + R.moeda(d.frete) : 'Frete grátis', 'Neste orçamento']);
     if (d.prazo_entrega) cartoes.push(['Entrega em ' + acentua(d.prazo_entrega.toLowerCase()), d.transportadora === 'PROPRIO' ? 'Frota própria' : d.transportadora ? 'Transporte: ' + iniciais(d.transportadora) : 'Prazo de entrega']);
     else if (d.transportadora) cartoes.push([d.transportadora === 'PROPRIO' ? 'Entrega com frota própria' : 'Transporte: ' + iniciais(d.transportadora), 'Entrega']);
-    if (d.pagamento) cartoes.push([[d.cobranca, d.pagamento].filter(Boolean).join(' '), 'Condições de pagamento']);
+    // Pix/transferência (03/11/2026, Anderson: o SESI paga por transferência, "não quer que apareça boleto 21 dias"): o cartão diz
+    // "Pix / transferência 21 dias" e o documento traz a conta e a chave Pix (o CNPJ), da configuração do boleto do BB.
+    const pagTxt = [d.cobranca, d.pagamento].filter(Boolean).join(' ');
+    const porPix = /pix|transfer|dep[oó]sito/i.test(pagTxt);
+    if (d.pagamento && porPix) {
+      const prazo = String(d.pagamento).replace(/boleto|pix|transfer[eê]ncia|transferencia|dep[oó]sito|banc[aá]ri[oa]|[\/+]|\bou\b|\be\b/gi, ' ').replace(/\s+/g, ' ').trim();
+      cartoes.push(['Pix ou transferência' + (prazo ? ' · ' + prazo : ''), 'Condições de pagamento']);
+    } else if (d.pagamento) cartoes.push([pagTxt, 'Condições de pagamento']);
+    const em = (cfg.fiscal && cfg.fiscal.emitente) || {}, ee = em.endereco || {}, bb = cfg.boleto || {};
+    const docEm = R.formataDoc ? R.formataDoc(em.cnpj || '') : String(em.cnpj || '').replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
+    const contaPix = porPix && (bb.agencia || bb.conta || em.cnpj) ? ['Banco do Brasil' + (bb.agencia ? ' · Agência ' + bb.agencia : '') + (bb.conta ? ' · Conta corrente ' + bb.conta : ''),
+      'Favorecido: ' + String(em.razao || CRM.nomeInstalacao()).toUpperCase(), em.cnpj ? 'Chave Pix (CNPJ): ' + docEm : ''].filter(Boolean) : [];
+    // os dados da empresa no alto (03/11/2026: "mesmo sendo orçamento, alguns clientes solicitam": razão social, CNPJ e endereço)
+    const emitLinhas = em.razao ? [String(em.razao).toUpperCase(), [docEm ? 'CNPJ ' + docEm : '', em.ie ? 'IE ' + em.ie : ''].filter(Boolean).join(' · '),
+      [[iniciais(ee.logradouro), ee.numero].filter(Boolean).join(', '), iniciais(ee.bairro), [iniciais(ee.municipio), ee.uf].filter(Boolean).join('/'), ee.cep ? 'CEP ' + String(ee.cep).replace(/^(\d{5})(\d{3})$/, '$1-$2') : ''].filter(Boolean).join(' · ')].filter(Boolean) : [];
     const cepCliente = e ? R.digitos(e.cep) : '';
     const entregaAqui = !d.endereco_entrega || (cepCliente && R.digitos(d.endereco_entrega).indexOf(cepCliente) !== -1);
     const entrega = [entregaAqui ? 'Entrega no endereço indicado acima.' : 'Entrega em ' + iniciais(d.endereco_entrega.replace(/\s+Bairro:\s*/i, ' · ').replace(/\s+Cep:\s*/i, ' · CEP ')) + '.',
@@ -990,7 +1005,8 @@
     // Orçamento comprido: letras e espaços menores para caber na primeira folha (com o total e o botão).
     const html = '<div class="proposta-doc' + (itens.length > 12 ? ' denso' : '') + '">' +
       '<div class="faixa-doc"></div>' +
-      '<header><img src="' + esc(CRM.logo()) + '" alt="' + esc(CRM.nomeInstalacao()) + '">' +
+      '<header><div class="doc-emit"><img src="' + esc(CRM.logo()) + '" alt="' + esc(CRM.nomeInstalacao()) + '">' +
+        (emitLinhas.length ? '<p class="emit">' + emitLinhas.map(esc).join('<br>') + '</p>' : '') + '</div>' +
         '<div class="doc-id"><strong>' + (p.numero_fkn || d.orcamento ? 'Orçamento ' : 'Proposta ') + esc(numero) + '</strong>' +
         '<span>Emitido em ' + esc(R.dataBR(emitida)) + '</span>' + (p.validade ? '<span>Válido até ' + esc(R.dataBR(p.validade)) + '</span>' : '') + '</div></header>' +
       (cfg.proposta_chamada ? '<section class="chamada' + (mascote ? ' com-mascote' : '') + '"><div><h1>' + esc(cfg.proposta_chamada) + '</h1>' + (cfg.proposta_subchamada ? '<p>' + esc(cfg.proposta_subchamada) + '</p>' : '') + '</div>' +
@@ -1006,6 +1022,7 @@
         '<td class="num tot">' + esc(R.moeda(totalDe(it))) + '</td></tr>').join('') + '</tbody></table>' +
       '<section class="fecho"><div class="atende"><h2>Entrega e atendimento</h2>' + entrega.map(x => '<p>' + esc(x) + '</p>').join('') +
         (!d.fkn && !d.orcamento && p.condicoes ? '<p class="pre">' + esc(p.condicoes) + '</p>' : '') + (p.observacoes ? '<p class="pre">' + esc(p.observacoes) + '</p>' : '') +
+        (contaPix.length ? '<div class="dados-pag"><h2>Dados para pagamento</h2>' + contaPix.map(x => '<p>' + esc(x) + '</p>').join('') + '</div>' : '') +
         (vend ? '<p class="contato">Seu contato: ' + esc(R.primeiroNome(vend.nome)) + '</p>' + [tel ? 'WhatsApp ' + telBonito(tel) : '', vend.email || ''].filter(Boolean).map(x => '<p>' + esc(x) + '</p>').join('') : '') + '</div>' +
         '<div class="total"><span class="rot">Total do pedido</span><strong>' + esc(R.moeda(p.valor_total)) + '</strong><span class="sub">' + esc([itens.length + (itens.length === 1 ? ' item' : ' itens'), freteTxt].filter(Boolean).join(' · ')) + '</span></div></section>' +
       (tel ? '<a class="cta" href="' + esc(R.linkWhatsApp(tel, msgWa)) + '"><span>' + esc(cfg.proposta_cta || 'Vamos programar sua entrega?') + '</span><span class="vai">Confirmar pelo WhatsApp &nbsp;›</span></a>' : '') +

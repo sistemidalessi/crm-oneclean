@@ -26,7 +26,7 @@ const PD = require('./pedido');
 const O = require('./outras');
 const D = require('./dfe');
 
-const VERSAO = '2026-10-30a';
+const VERSAO = '2026-11-03a';
 const env = process.env;
 let cert = null;   // { certPem, keyPem, dados }
 

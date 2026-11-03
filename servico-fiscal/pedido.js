@@ -228,7 +228,8 @@ function notaDoPedido(o) {
     itens, frete: { modFrete: Number(d.frete_conta == null || d.frete_conta === '' ? 0 : d.frete_conta), valor: num(p.frete),
       transportadora: /^PROPRI/i.test(transp) ? null : { nome: transp }, volumes: num(d.volumes) > 0 ? { qVol: num(d.volumes) } : null },
     cobranca: duplicatas.length ? { numero: String(o.numero), duplicatas } : null,
-    pagamento: cobra ? [{ tPag: aPrazo ? '15' : pg.forma, indPag: aPrazo ? 1 : 0, valor: cobrar, descricao: pg.forma === '99' ? (d.pagamento || 'OUTROS') : null }] : [{ tPag: '90', valor: 0 }],
+    // a prazo vai como boleto (15), menos o Pix (17) e a transferência/depósito (18) a prazo (03/11/2026: cliente sem boleto)
+    pagamento: cobra ? [{ tPag: aPrazo ? (pg.forma === '17' || pg.forma === '18' ? pg.forma : '15') : pg.forma, indPag: aPrazo ? 1 : 0, valor: cobrar, descricao: pg.forma === '99' ? (d.pagamento || 'OUTROS') : null }] : [{ tPag: '90', valor: 0 }],
     infCpl, infAdFisco, respTec: cfg.respTec || null, ibscbs: cfg.ibscbs == null ? undefined : cfg.ibscbs, reforma: ref || undefined
   };
   return { nota, avisos: { bloqueia: [...new Set(bloqueia)], conferir: [...new Set(conferir)] }, total, cobrar, difal };

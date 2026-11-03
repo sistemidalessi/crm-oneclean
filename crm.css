@@ -522,9 +522,15 @@ body.arrastando-card .zonas-fim { display: grid; grid-template-columns: 1fr 1fr;
 .proposta-doc .cta { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 4mm; padding: 3mm 3.5mm 3mm 7mm; border-radius: 10px; background: var(--dd); color: #fff; text-decoration: none; font-weight: 700; font-size: 12.5pt; break-inside: avoid; }
 .proposta-doc .cta .vai { font-size: 11pt; padding: 2.2mm 5mm; border-radius: 999px; background: var(--dv); color: var(--dp); white-space: nowrap; }
 .proposta-doc .pre { white-space: pre-wrap; }
-.proposta-doc footer { margin-top: 3mm; color: var(--cz); font-size: 9pt; }
-.proposta-doc .assinatura { display: block; margin: 1.5mm 0 0; padding: 0; color: #9aa3a8; font-size: 7pt; letter-spacing: .02em; }
-.proposta-doc .assinatura strong { font-weight: 600; color: #7d878c; }
+.proposta-doc footer { margin-top: 3mm; color: #2b3438; font-size: 9pt; }
+/* 03/11/2026 (Anderson: "tá meio apagadinho, parece falha de impressão"): rodapé e assinatura em cinza escuro */
+.proposta-doc .assinatura { display: block; margin: 1.5mm 0 0; padding: 0; color: #4a5357; font-size: 7.5pt; letter-spacing: .02em; }
+.proposta-doc .assinatura strong { font-weight: 600; color: #2b3438; }
+.proposta-doc .doc-emit { display: grid; gap: 1.5mm; justify-items: start; }
+.proposta-doc .doc-emit .emit { margin: 0; color: #2b3438; font-size: 7.5pt; line-height: 1.35; }
+.proposta-doc .dados-pag { margin-top: 2.5mm; padding: 2mm 3mm; border-left: 3px solid var(--dv); background: #f4f8f9; border-radius: 6px; }
+.proposta-doc .dados-pag h2 { margin: 0 0 1mm; }
+.proposta-doc .dados-pag p { margin: .4mm 0; color: #1d2427; font-size: 9pt; }
 .proposta-doc tr { break-inside: avoid; }
 /* Orçamento comprido (mais de 12 itens): tudo um pouco menor para caber na primeira folha. */
 .proposta-doc.denso header { padding: 3mm 0; }

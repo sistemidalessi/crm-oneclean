@@ -2671,7 +2671,7 @@ begin
     select p.id, array_remove(array[
       case when p.id in (select pedido_id from f) then 'ESTOQUE' end,
       case when exists (select 1 from public.crm_titulos t where t.empresa_id = p.empresa_id and coalesce(t.previsao, t.vencimento) < hoje and not t.abono) then 'ATRASO' end,
-      case when not p.entrada_ok and coalesce(p.dados->>'pagamento', '') ~* '(vista|antecipad|pix|transfer|dep[oó]sito)' then 'SEM ENTRADA' end,
+      case when not p.entrada_ok and coalesce(p.dados->>'pagamento', '') ~* '(vista|antecipad|pix|transfer|dep[oó]sito)' and coalesce(p.dados->>'pagamento', '') !~* '[0-9]+ *(dias|ddl)' then 'SEM ENTRADA' end,
       case when trava and (coalesce(mg.sem_preco, false)
              or (coalesce(mg.rec_c, 0) > 0 and (mg.rec_c - mg.cus_c) / mg.rec_c * 100 < mmin - 0.005)
              or (coalesce(mg.tab_t, 0) > 0 and mg.rec_t < round(mg.tab_t * (1 + neg / 100), 2) - 0.005)) then 'PREÇO' end,
@@ -8121,6 +8121,11 @@ create or replace function public.crm_boleto_bb_a_registrar() returns text[] lan
      and (t.duplicata ~ '^[0-9]+-' or exists (select 1 from public.crm_nfe n where n.ambiente = 'producao' and n.situacao = 'autorizada'
             and n.serie = coalesce(nullif(substring(t.duplicata from '^([0-9]+)-'), '')::int, 1) and n.numero = t.nota_numero))
      and (t.portador is null or t.portador ~* 'BOLETO')
+     -- 03/11/2026: pedido em Pix/transferência/depósito (mesmo a prazo) não leva boleto
+     and not exists (select 1 from public.crm_nfe n2 join public.crm_pedidos p2 on p2.id = n2.pedido_id
+                      where n2.ambiente = 'producao' and n2.numero = t.nota_numero
+                        and n2.serie = coalesce(nullif(substring(t.duplicata from '^([0-9]+)-'), '')::int, 1)
+                        and coalesce(p2.dados->>'pagamento', '') ~* '(pix|transfer|dep[oó]sito)')
      and t.vencimento >= (now() at time zone 'America/Sao_Paulo')::date and t.valor > 0 and t.cartorio_em is null and not coalesce(t.abono, false)
      and not exists (select 1 from public.crm_boletos_bb b where b.duplicata = t.duplicata and b.situacao in ('preparado', 'registrado', 'pago'));
 $$;
