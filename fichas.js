@@ -801,8 +801,10 @@
   };
 
   // ------------------------------------------------------------ itens e propostas
-  fichas.formItem = (it, negocioId) => {
+  // pre: valores já escolhidos (volta do "Procurar com foto"), num item novo.
+  fichas.formItem = (it, negocioId, pre) => {
     const produtos = E().D.produtos.filter(p => p.ativo !== false).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+    const temFoto = !!(CRM.produtos && CRM.produtos.fotoDe);
     CRM.abrirForm({
       titulo: it ? 'Editar item' : 'Adicionar item',
       campos: [
@@ -812,16 +814,44 @@
         { nome: 'preco', rotulo: 'Preço unitário (R$)', tipo: 'numero' },
         { nome: 'desconto', rotulo: 'Desconto (%)', tipo: 'numero', max: 100 }
       ],
-      valores: it || { quantidade: 1, desconto: 0 },
-      htmlDepois: '<p class="total-item" id="totalItem"></p>',
+      valores: Object.assign({}, it || { quantidade: 1, desconto: 0 }, pre || {}),
+      // 03/11/2026, pedido das vendedoras: a foto do produto escolhido, para não pôr o item errado no orçamento
+      htmlDepois: (temFoto ? '<div class="item-foto" id="fotoItem" hidden></div>' +
+        '<p class="acoes"><button type="button" class="btn sec" id="itemProcurarFoto">🔍 Procurar com foto</button></p>' : '') +
+        '<p class="total-item" id="totalItem"></p>',
       extras: form => {
         const atualiza = () => { $('#totalItem').textContent = 'Total do item: ' + R.moeda(R.totalItem({ quantidade: form.elements.quantidade.value, preco: form.elements.preco.value, desconto: form.elements.desconto.value })); };
+        const mostraFoto = () => {
+          const box = $('#fotoItem'); if (!box) return;
+          const p = CRM.produto(form.elements.produto_id.value);
+          if (!p || !p.codigo) { box.hidden = true; box.innerHTML = ''; return; }
+          const pedido = p.id;
+          CRM.produtos.fotoDe(p.codigo).then(u => {
+            if (form.elements.produto_id.value !== pedido) return; // trocou de produto enquanto carregava
+            box.hidden = false;
+            box.innerHTML = (u ? '<img src="' + esc(u) + '" alt="">' : '<span class="item-foto-vazia">sem foto cadastrada</span>') +
+              '<span><strong>' + esc(p.nome) + '</strong><small>' + esc(p.codigo) + (p.unidade ? ' · ' + esc(p.unidade) : '') + '</small></span>';
+          });
+        };
         form.elements.produto_id.addEventListener('change', () => {
           const p = CRM.produto(form.elements.produto_id.value);
           if (p) { form.elements.descricao.value = p.nome + (p.unidade ? ' (' + p.unidade + ')' : ''); form.elements.preco.value = p.preco; atualiza(); }
+          mostraFoto();
+        });
+        const bt = $('#itemProcurarFoto');
+        if (bt) bt.addEventListener('click', () => {
+          const atual = { produto_id: form.elements.produto_id.value, descricao: form.elements.descricao.value, quantidade: form.elements.quantidade.value, preco: form.elements.preco.value, desconto: form.elements.desconto.value };
+          const base = c => String(c || '').replace(/\.0+$/, '');
+          CRM.produtos.escolher(cod => {
+            const p = produtos.find(x => base(x.codigo) === base(cod)) || produtos.find(x => base(x.codigo) === base(cod).replace(/\.\d+$/, ''));
+            const escolha = p ? { produto_id: p.id, descricao: p.nome + (p.unidade ? ' (' + p.unidade + ')' : ''), preco: p.preco } : {};
+            if (!p) CRM.toast('Esse produto não está no catálogo do negócio: escolha na lista ou digite à mão.', true);
+            fichas.formItem(it, negocioId, Object.assign(atual, escolha));
+          });
         });
         ['quantidade', 'preco', 'desconto'].forEach(n => form.elements[n].addEventListener('input', atualiza));
         atualiza();
+        mostraFoto();
       },
       aoSalvar: async v => {
         if (!(v.quantidade > 0)) throw new Error('quantidade precisa ser maior que zero');

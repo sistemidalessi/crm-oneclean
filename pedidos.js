@@ -513,7 +513,7 @@
     }
     return '<section class="cartao pd-janela"><header class="pd-topo"><button type="button" class="btn sec" data-acao="pd-fechar">← Voltar</button><h2>Pedido ' + esc(p.numero) + ' · ' + esc(nomeCliente(p)) + '</h2>' + CRM.selo(s.rotulo, s.cor) + '</header>' +
       (bAbertos.length ? '<p class="alerta">Bloqueado por: <strong>' + esc(bAbertos.map(b => P.ROTULO_BLOQUEIO[b] || b).join(', ')) + '</strong>.' + (gest ? ' Confira e clique em "Liberar".' : ' Quem libera é a gestora ou a logística.') +
-        (bAbertos.some(b => ['SEM ANÁLISE', 'PRAZO', 'LIMITE'].indexOf(b) !== -1) ? ' O crédito (' + esc(bAbertos.filter(b => ['SEM ANÁLISE', 'PRAZO', 'LIMITE'].indexOf(b) !== -1).map(b => P.ROTULO_BLOQUEIO[b]).join(', ') + ') só o administrador libera' + (CRM.ehAdmin() ? ' — ou ajuste a ficha em Caixa → Crédito' : '') + '.') : '') + '</p>' : '') +
+        (bAbertos.some(b => ['SEM ANÁLISE', 'PRAZO', 'LIMITE'].indexOf(b) !== -1) ? ' O crédito (' + esc(bAbertos.filter(b => ['SEM ANÁLISE', 'PRAZO', 'LIMITE'].indexOf(b) !== -1).map(b => P.ROTULO_BLOQUEIO[b]).join(', ') + ') só o administrador libera' + (CRM.ehAdmin() ? ' — ou ajuste a ficha em Caixa → Crédito' : '') + '.' + avisoCredito(p, bAbertos, t)) : '') + '</p>' : '') +
       '<p class="acoes">' + botoes.join(' ') + '</p>' + (CRM.nfe ? CRM.nfe.doPedido(p) : '') +
       '<div class="chips">' + abas.map(a => '<button type="button" class="chip-filtro' + (abaPed === a[0] ? ' ativo' : '') + '" data-acao="pd-aba-ped" data-id="' + a[0] + '">' + esc(a[1]) + '</button>').join('') + '</div>' + corpo + '</section>';
   }
@@ -537,6 +537,19 @@
     return '<div class="pd-totais"><span>Total dos produtos <strong>' + R.moeda(t.produtos) + '</strong></span><span>Frete <strong>' + R.moeda(t.frete) + '</strong></span>' +
       (veMargem() ? '<span>Margem <strong>' + pct(t.margem) + '</strong></span>' : '') + '<span>Comissão <strong>' + R.moeda(t.comissao) + (t.comissaoPct != null ? ' (' + pct(t.comissaoPct) + ')' : '') + '</strong></span>' +
       '<span class="geral">Total geral <strong>' + R.moeda(t.geral) + '</strong></span></div>';
+  }
+
+  // 03/11/2026 (pedido do Anderson): quem trava no crédito (só o administrador libera) chama o administrador na hora, pelo
+  // WhatsApp dele, com o pedido, o cliente, o valor, a forma de pagamento e a trava já escritos.
+  function avisoCredito(p, bAbertos, t) {
+    if (CRM.ehAdmin()) return '';
+    const adm = (E().D.usuarios || []).find(u => u.papel === 'admin' && u.ativo !== false && String(u.telefone || '').replace(/\D/g, '').length >= 10);
+    if (!adm) return '';
+    const tel = String(adm.telefone).replace(/\D/g, ''), d = p.dados || {};
+    const travas = bAbertos.filter(b => ['SEM ANÁLISE', 'PRAZO', 'LIMITE'].indexOf(b) !== -1).map(b => P.ROTULO_BLOQUEIO[b] || b).join(', ');
+    const txt = 'Olá, ' + String(adm.nome || '').split(' ')[0] + '! O pedido ' + p.numero + ' de ' + nomeCliente(p) + ' (' + R.moeda(t.geral) + (d.pagamento ? ', ' + d.pagamento : '') +
+      ') está travado no crédito: ' + travas + '. Pode analisar no CRM (Pedidos → pedido ' + p.numero + ' ou Caixa → Crédito)? Assim a gente já separa. — ' + (CRM.nomeUsuario(CRM.meuId()) || '');
+    return ' <a class="btn" href="https://wa.me/' + (tel.length <= 11 ? '55' : '') + tel + '?text=' + encodeURIComponent(txt) + '" target="_blank" rel="noopener noreferrer">📲 Pedir a análise ao ' + esc(String(adm.nome || 'administrador').split(' ')[0]) + '</a>';
   }
 
   // ------------------------------------------------ editor (orçamento / pedido)

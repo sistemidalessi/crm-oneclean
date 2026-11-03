@@ -288,12 +288,15 @@
     CRM.render();
   }
   // só as fotos (para as miniaturas fora do catálogo), uma vez
-  let pedindoFotos = false;
+  let pedindoFotos = false, fotosP = null;
   function garanteFotos() {
-    if (fotos || pedindoFotos || !CRM.store()) return;
+    if (fotos || pedindoFotos || !CRM.store()) return fotosP || Promise.resolve();
     pedindoFotos = true;
-    st().produtoFotos().then(fs => { fotos = new Map(fs.map(x => [x.codigo, x])); CRM.render(); }).catch(() => { fotos = new Map(); });
+    fotosP = st().produtoFotos().then(fs => { fotos = new Map(fs.map(x => [x.codigo, x])); CRM.render(); }).catch(() => { fotos = new Map(); });
+    return fotosP;
   }
+  // A foto de um produto (endereço), esperando as fotos chegarem se ainda não chegaram (janela "Adicionar item" do negócio).
+  const fotoDe = cod => Promise.resolve(garanteFotos()).then(() => urlFoto(cod));
   const urlFoto = cod => { const x = fotos && fotos.get(base(cod)); return x ? st().fotoUrl(x.caminho) : ''; };
   const base = cod => String(cod || '').replace(/\.\d+$/, '');
   function miniatura(cod, cls) {
@@ -1116,5 +1119,5 @@
     'pc-ir-fiscal': () => { CRM.estado.aba = 'fiscal'; CRM.render(); }
   });
 
-  CRM.produtos = { miniatura, abrirFicha, escolher, telaFotos, depoisFotos, garanteFotos, recarregar: () => { lista = null; det.clear(); }, abrir: cod => CRM.acoes['pf-abrir'](cod) };
+  CRM.produtos = { miniatura, fotoDe, abrirFicha, escolher, telaFotos, depoisFotos, garanteFotos, recarregar: () => { lista = null; det.clear(); }, abrir: cod => CRM.acoes['pf-abrir'](cod) };
 })(typeof window !== 'undefined' ? window : globalThis);
