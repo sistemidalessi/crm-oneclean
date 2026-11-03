@@ -1436,6 +1436,12 @@
   Supa.prototype.prospecParecidos = async function () { return unwrap(await this.sb.rpc('crm_prospec_parecidos')); };
   Supa.prototype.prospecResultado = async function (desde) { return unwrap(await this.sb.rpc('crm_prospec_resultado2', { p_desde: desde })); };
   Supa.prototype.prospecBaseResumo = async function () { return unwrap(await this.sb.rpc('crm_prospec_base_resumo')); };
+  // Botão de emergência dos leads: o banco agenda a rodada (crm_prospec_agora; só administrador)
+  Supa.prototype.prospecAgora = async function () {
+    const { data, error } = await this.sb.rpc('crm_prospec_agora');
+    if (error) throw error;
+    return data;
+  };
   Supa.prototype.prospeccao = async function (corpo) {
     const r = await this.sb.functions.invoke('crm-prospeccao', { body: corpo });
     if (r.error) throw await erroDaFuncao(r);
@@ -1468,6 +1474,7 @@
   Local.prototype.prospecParecidos = async function () { return [{ segmento: 'Condomínio', descricao: 'HIPOCLORITO 5 LTS (CLORO 5%)', clientes: 12, total: 28 }]; };
   Local.prototype.prospecResultado = async function () { return []; };
   Local.prototype.prospecBaseResumo = async function () { return []; };
+  Local.prototype.prospecAgora = async function () { throw new Error('os leads sugeridos só funcionam com o Supabase ligado'); };
   Local.prototype.prospeccao = async function (corpo) { return corpo && corpo.acao === 'situacao' ? { ligado: false, ia: false, gasto_mes: 0 } : Promise.reject(new Error('os leads sugeridos só funcionam com o Supabase ligado')); };
   Supa.prototype.analiseLogisticaHoje = async function (dia) { return unwrap(await this.sb.from('crm_ia_analises_areas').select('dia, texto, em').eq('dia', dia).eq('area', 'logistica').maybeSingle()); };
   Local.prototype.analiseLogistica = async function () { const a = { dia: R.hojeISO(), texto: '(modo local: sem IA) Aqui aparece a análise de logística do dia: **a rota de hoje**, as entregas sem confirmação, os problemas de entrega e as notas que não entraram em rota.', em: new Date().toISOString(), nova: true }; this._analiseL = a; return a; };

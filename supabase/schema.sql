@@ -7970,27 +7970,55 @@ end;
 $$;
 revoke all on function public.crm_prospec_dia_util(date) from public, anon;
 
--- Agendador: dias úteis às 6h30 de São Paulo (9h30 UTC). A lista do dia é montada AQUI, no banco: pelo PostgREST o
--- service_role tem limite de 8 s e a montagem com a base da Receita leva ~7–10 s (em 03/11/2026 estourou e a 1ª lista não
--- saiu). Depois chama a crm-prospeccao, que acha a lista pronta ("ja_tinha") e só procura o contato pela IA.
-create or replace function public.crm_prospec_tick() returns void language plpgsql security definer set search_path = public as $$
+-- Rodada dos leads no banco: a lista do dia é montada AQUI (pelo PostgREST o service_role tem limite de 8 s e a montagem
+-- com a base da Receita leva ~7–10 s: em 03/11/2026 estourou e a 1ª lista não saiu). Depois chama a crm-prospeccao, que
+-- acha a lista pronta ("ja_tinha") e só procura o contato pela IA. p_forcar: o botão de emergência (monta a lista mesmo
+-- fora de dia útil; aí a função não procura os contatos, que podem ser pedidos um a um no cartão).
+create or replace function public.crm_prospec_rodar_banco(p_forcar boolean default false) returns void
+language plpgsql security definer set search_path = public as $$
 declare c record; v_dia date := (now() at time zone 'America/Sao_Paulo')::date;
 begin
+  -- o pedido do botão é de uma vez só
+  perform cron.unschedule(j.jobid) from cron.job j where j.jobname = 'crm-leads-agora';
   select * into c from crm_interno.prospeccao_cfg where id = 1;
   if c.url is null then return; end if;
-  if public.crm_prospec_dia_util(v_dia) then
+  if p_forcar or public.crm_prospec_dia_util(v_dia) then
     begin
       perform set_config('request.jwt.claims', '{"role":"service_role"}', true);
       perform set_config('statement_timeout', '120s', true);
       perform public.crm_prospec_gerar(v_dia);
     exception when others then
-      raise warning 'crm_prospec_tick: gerar falhou: %', sqlerrm;
+      raise warning 'crm_prospec_rodar_banco: gerar falhou: %', sqlerrm;
     end;
   end if;
-  perform net.http_post(url := c.url, body := jsonb_build_object('acao', 'rodar', 'origem', 'agendador'),
+  perform net.http_post(url := c.url, body := jsonb_build_object('acao', 'rodar', 'origem', 'agendador', 'forcar', p_forcar),
     headers := jsonb_build_object('Content-Type', 'application/json', 'Authorization', 'Bearer ' || c.senha), timeout_milliseconds := 300000);
 end;
 $$;
+revoke all on function public.crm_prospec_rodar_banco(boolean) from public, anon, authenticated;
+
+-- Agendador: dias úteis às 6h30 de São Paulo (9h30 UTC).
+create or replace function public.crm_prospec_tick() returns void language plpgsql security definer set search_path = public as $$
+begin
+  perform public.crm_prospec_rodar_banco(false);
+end;
+$$;
+
+-- Botão de emergência "Gerar a lista de hoje agora" (só administrador): agenda uma rodada no próximo minuto, pelo mesmo
+-- caminho das 6h30 (sem o limite de 8 s da chamada direta).
+create or replace function public.crm_prospec_agora() returns jsonb
+language plpgsql security definer set search_path = public as $$
+begin
+  if not public.crm_eh_admin() then raise exception 'só o administrador'; end if;
+  if exists (select 1 from cron.job j where j.jobname = 'crm-leads-agora') then
+    return jsonb_build_object('ok', true, 'ja_pedido', true);
+  end if;
+  perform cron.schedule('crm-leads-agora', '* * * * *', 'select public.crm_prospec_rodar_banco(true)');
+  return jsonb_build_object('ok', true, 'ja_pedido', false);
+end;
+$$;
+revoke all on function public.crm_prospec_agora() from public, anon;
+grant execute on function public.crm_prospec_agora() to authenticated;
 revoke all on function public.crm_prospec_tick() from public, anon, authenticated;
 do $$ begin
   if exists (select 1 from pg_roles where rolname = 'service_role') then

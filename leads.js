@@ -310,11 +310,13 @@
     },
     'lead-config': () => formConfig(),
     'lead-gerar': async () => {
-      CRM.toast('Gerando a lista de hoje e procurando os contatos… (alguns minutos)');
+      // Pelo banco (03/11/2026): montar a lista leva ~7–10 s e a chamada direta passa do limite de 8 s. O botão pede ao
+      // agendador, que roda em até 1 minuto, monta a lista no banco e manda a IA procurar os contatos.
+      if (!confirm('Gerar a lista de hoje agora? Ela sai em até 1 minuto e a IA procura os contatos em seguida (uns 3 minutos). Se a lista de hoje já existe, só procura os contatos que faltam. Fora de dia útil a lista sai, mas os contatos ficam para pedir no cartão.')) return;
       try {
-        const r = await CRM.store().prospeccao({ acao: 'rodar', forcar: true });
-        CRM.toast(r.pulado ? 'Nada gerado: ' + r.pulado + '.' : 'Lista: ' + ((r.lista && (r.lista.geradas != null ? r.lista.geradas : r.lista.ja_tinha)) || 0) + ' empresas; contato achado em ' + (r.contato_achado || 0) + ' de ' + (r.contato_procurado || 0) + '.');
-        recarrega();
+        const r = await CRM.store().prospecAgora();
+        CRM.toast(r && r.ja_pedido ? 'Já pedido: a lista sai em até 1 minuto.' : 'Pedido feito: a lista sai em até 1 minuto. A tela se atualiza sozinha em 2 minutos.');
+        setTimeout(() => { dados = null; recarrega(); }, 120000);
       } catch (e) { CRM.falhou(e); }
     },
     'lead-senha': async () => {
