@@ -5748,7 +5748,7 @@ begin
     'ganhos_mes_valor', coalesce(round(sum(valor) filter (where status = 'ganho' and fechado_em >= (ini::timestamp at time zone 'America/Sao_Paulo')), 2), 0),
     'perdidos_mes', count(*) filter (where status = 'perdido' and fechado_em >= (ini::timestamp at time zone 'America/Sao_Paulo')),
     'parados_15_dias', count(*) filter (where status = 'aberto' and coalesce(etapa_desde, criado_em) < now() - interval '15 days'),
-    'propostas_sem_resposta_7_dias', (select count(*) from public.crm_propostas p where p.status = 'enviada' and p.enviada_em < now() - interval '7 days'))
+    'propostas_sem_resposta_7_dias', (select count(*) from public.crm_propostas p where p.status = 'enviada' and exists (select 1 from public.crm_negocios g2 where g2.id = p.negocio_id and g2.status = 'aberto') and p.enviada_em < now() - interval '7 days'))
     into x from public.crm_negocios;
   r := r || jsonb_build_object('funil', x);
   -- contas a receber (título em cartório fica à parte, como no Caixa)
@@ -6089,7 +6089,7 @@ create or replace function public.crm_gv_funil() returns jsonb language sql stab
               where g.status = 'aberto' and coalesce(g.etapa_desde, g.criado_em) < now() - interval '15 days'),
   p as (select pr.numero, pr.valor_total, pr.enviada_em, e.nome cliente, u.nome dono from public.crm_propostas pr join public.crm_negocios g on g.id = pr.negocio_id
                left join public.crm_empresas e on e.id = g.empresa_id left join public.crm_usuarios u on u.user_id = g.responsavel_id
-              where pr.status = 'enviada' and pr.enviada_em < (now() at time zone 'America/Sao_Paulo')::date - 7)
+              where pr.status = 'enviada' and g.status = 'aberto' and pr.enviada_em < (now() at time zone 'America/Sao_Paulo')::date - 7)
   select jsonb_build_object(
     'negocios_parados', (select count(*) from n), 'negocios_parados_valor', (select round(coalesce(sum(valor), 0), 2) from n),
     'maiores_parados', coalesce((select jsonb_agg(jsonb_build_object('negocio', y.titulo, 'cliente', y.cliente, 'valor', y.valor, 'etapa', y.etapa, 'parado_dias', y.parado, 'responsavel', y.dono))
@@ -8551,3 +8551,22 @@ end;
 $function$;
 revoke all on function public.crm_pedido_dados(uuid, jsonb) from public, anon;
 grant execute on function public.crm_pedido_dados(uuid, jsonb) to authenticated;
+
+-- Negócio perdido fecha as propostas (03/11/2026): a Renata deu a Nicrosol como perdida em 29/10, mas a proposta (R$ 17.743,94)
+-- continuou "enviada" e contava como "proposta sem resposta" na IA de vendas e no resumo do CEO. Agora, ao perder o negócio,
+-- rascunho e enviada viram "recusada"; e o "sem resposta" (crm_gv_funil, crm_ceo_resumo) só conta negócio aberto.
+-- 70 propostas antigas acertadas (backup crm_backup.propostas_perdidas_20261103). Migração proposta_sai_quando_negocio_perdido.
+create or replace function public.crm_negocio_fecha_propostas() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if new.status = 'perdido' and old.status is distinct from 'perdido' then
+    update public.crm_propostas set status = 'recusada', respondida_em = coalesce(respondida_em, coalesce(new.fechado_em::date, current_date)), atualizado_em = now()
+     where negocio_id = new.id and status in ('rascunho', 'enviada');
+  end if;
+  return new;
+end;
+$$;
+revoke all on function public.crm_negocio_fecha_propostas() from public, anon, authenticated;
+drop trigger if exists crm_negocio_fecha_propostas on public.crm_negocios;
+create trigger crm_negocio_fecha_propostas after update of status on public.crm_negocios
+  for each row execute function public.crm_negocio_fecha_propostas();

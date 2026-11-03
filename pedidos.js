@@ -360,7 +360,7 @@
     // pesquisa e período (28/10/2026): sem período, os dos últimos 60 dias; com período, desde a data escolhida
     const st = CRM.Lista.estado('pd-orc'), desde = st.de || R.somaDias(CRM.hoje(), -60);
     const l0 = (E().D.propostas || []).filter(p => (p.status === 'rascunho' || p.status === 'enviada' || p.status === 'aprovada') && !comPedido.has(p.id) && String(p.criado_em).slice(0, 10) >= desde)
-      .map(p => ({ p, n: CRM.negocio(p.negocio_id) })).filter(x => x.n && (CRM.ehGestor() || x.n.responsavel_id === CRM.meuId() || CRM.empresa(x.n.empresa_id)))
+      .map(p => ({ p, n: CRM.negocio(p.negocio_id) })).filter(x => x.n && x.n.status !== 'perdido' && (CRM.ehGestor() || x.n.responsavel_id === CRM.meuId() || CRM.empresa(x.n.empresa_id)))
       .sort((a, b) => String(b.p.criado_em).localeCompare(String(a.p.criado_em)));
     const l = CRM.Lista.filtra('pd-orc', l0, { texto: x => [x.p.numero_fkn, x.p.numero, CRM.nomeEmpresa(x.n.empresa_id), CRM.nomeUsuario(x.n.responsavel_id), x.n.titulo], data: x => x.p.criado_em });
     CRM.Lista.planilha('pd-orc', 'orcamentos-sem-pedido', ['Orçamento', 'Origem', 'Data', 'Cliente', 'Valor', 'Situação', 'Vendedor(a)'],
