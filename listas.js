@@ -161,6 +161,64 @@
       conta.append(b);
     } else if (conta) conta.remove();
   }
+  // ---- ordenar pelo título da coluna (03/11/2026, Anderson na tela de Pedidos: "clicar em Pedido e trazer em ordem crescente,
+  // clicar em Data e trazer por data"): 1º clique crescente, 2º decrescente; número, R$, % e data (dd/mm/aaaa) pelo valor, o
+  // resto pelo texto. A ordem fica guardada por tabela (a mesma chave do filtro) e volta quando a tela se redesenha. Linha de
+  // largura toda logo abaixo de outra (detalhe) anda junto com ela. Título com botão ou ação própria fica como está.
+  const ordensCol = {};
+  const chaveOrdem = txt => {
+    const t = String(txt || '').trim();
+    let m = /^(\d{2})\/(\d{2})\/(\d{4})(?:\D+(\d{2}):(\d{2}))?/.exec(t);
+    if (m) return { n: Number(m[3] + m[2] + m[1] + (m[4] || '00') + (m[5] || '00')) };
+    m = /^(\d{2})\/(\d{2})(?!\/)/.exec(t);                                  // dd/mm sem ano
+    if (m) return { n: Number(m[2] + m[1]) };
+    const lim = t.replace(/^R\$\s*/, '').replace(/^[^\d\-−]*(?=[\-−]?\d)/, '');
+    m = /^([\-−]?\d{1,3}(?:\.\d{3})*(?:,\d+)?|[\-−]?\d+(?:,\d+)?)(?:\s|%|$)/.exec(lim);
+    if (m && /^[\s\-−\dR$.,%]*$/.test(t.slice(0, Math.min(t.length, 25)).replace(/[A-Za-zÀ-ú()\/·]+.*$/, ''))) return { n: Number(m[1].replace(/[−]/, '-').replace(/\./g, '').replace(',', '.')) };
+    return { t: t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase() };
+  };
+  function ordena(t, i, dir) {
+    const corpo = t.tBodies[0]; if (!corpo) return;
+    const n = t.tHead.rows[t.tHead.rows.length - 1].cells.length, grupos = [];
+    Array.from(corpo.rows).forEach(tr => {
+      const largura = tr.cells.length === 1 && (tr.cells[0].colSpan || 1) >= n;
+      if (largura && grupos.length) grupos[grupos.length - 1].push(tr); else grupos.push([tr]);
+    });
+    if (grupos.length < 2) return;
+    const chaves = grupos.map(g => chaveOrdem(textosDa(g[0], n)[i]));
+    const idx = grupos.map((g, k) => k).sort((a, b) => {
+      const x = chaves[a], y = chaves[b];
+      let r;
+      if (x.n != null && y.n != null) r = x.n - y.n;
+      else if (x.n != null) r = -1; else if (y.n != null) r = 1;
+      else r = x.t.localeCompare(y.t, 'pt-BR', { numeric: true });
+      return (r || a - b) * (r ? dir : 1);
+    });
+    const frag = document.createDocumentFragment();
+    idx.forEach(k => grupos[k].forEach(tr => frag.appendChild(tr)));
+    corpo.appendChild(frag);
+  }
+  function marcaSeta(cab, i, dir) {
+    Array.from(cab.cells).forEach((th, k) => {
+      const s = th.querySelector(':scope > .seta-ord');
+      if (s) s.textContent = k === i ? (dir > 0 ? ' ▲' : ' ▼') : '';
+      th.setAttribute('aria-sort', k === i ? (dir > 0 ? 'ascending' : 'descending') : 'none');
+    });
+  }
+  function ligaOrdem(t, cab, ths, nomes, chave) {
+    ths.forEach((th, i) => {
+      if (!nomes[i] || th.querySelector('button, a, input, select') || th.hasAttribute('data-acao') || th.closest('[data-acao]')) return;
+      th.classList.add('ordenavel'); th.title = th.title || 'Clique para ordenar';
+      const s = document.createElement('span'); s.className = 'seta-ord'; th.appendChild(s);
+      th.addEventListener('click', () => {
+        const o = ordensCol[chave], dir = o && o.i === i ? -o.dir : 1;
+        ordensCol[chave] = { i, dir };
+        ordena(t, i, dir); marcaSeta(cab, i, dir);
+      });
+    });
+    const o = ordensCol[chave];
+    if (o) { ordena(t, o.i, o.dir); marcaSeta(cab, o.i, o.dir); }
+  }
   function preparaTabela(t) {
     if (!t || t.dataset.filtroCol || t.hasAttribute('data-sem-filtro') || !t.tHead || t.tHead.rows.length !== 1) return;
     const cab = t.tHead.rows[0], ths = Array.from(cab.cells);
@@ -194,6 +252,7 @@
     });
     // 30/10/2026 (Anderson): a barra de filtrar em cima e os títulos embaixo
     t.tHead.insertBefore(tr, cab);
+    ligaOrdem(t, cab, ths, nomes, chave);
     if (st && st.some(Boolean)) aplicaFiltro(t);
   }
   function filtraTabelas(raizEl) {
