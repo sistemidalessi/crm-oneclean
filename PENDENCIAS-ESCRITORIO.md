@@ -7,10 +7,8 @@ A mesma lista resumida está no `PENDENCIAS-ESCRITORIO.md` do `agilite-sistema-g
 
 - [x] **Serviço fiscal na VPS `2026-10-23e`**: atualizado pelo Anderson em 26/10 e conferido em Fiscal → Emissão.
 - [x] **Serviço fiscal na VPS `2026-10-27a`** (aviso contra boleto falso no texto da nota): atualizado pelo Anderson em 27/10 e conferido.
-- [ ] **Serviço fiscal na VPS `2026-10-30a`** (consulta cadastro da Sefaz-SP: a inscrição estadual no cadastro do cliente):
-      `ssh root@216.128.169.101`, depois `cd /opt/oneclean-fiscal && git pull && systemctl restart oneclean-fiscal`. Conferir em
-      Fiscal → 4. Emissão (versão 2026-10-30a) e cadastrando um cliente pelo CNPJ: tem de aparecer "Sefaz-SP: inscrição estadual …
-      habilitada". Até lá o cadastro busca só na Receita e avisa que a consulta da Sefaz ainda não está ligada.
+- [x] **Serviço fiscal na VPS `2026-11-03b`** (nota a prazo em Pix/transferência com tPag 17/18 e o nome do local de entrega no
+      "LOCAL DE ENTREGA"; inclui a `2026-10-30a`): atualizado pelo Anderson em 03/11 (`active`) e conferido em Fiscal → Emissão.
 - [ ] **Santa Casa (entrega futura):** **ainda há entregas a fazer** (Anderson, 27/10). O faturamento (5922) é de antes de 2026
       e não está no CRM; as remessas de 2026 foram álcool 800 ml, pano multiuso Lifeclean e Bettanin (a última em 03/08). Falta a
       **logística** passar a chave (ou o número) da nota de faturamento e o saldo de cada produto; a remessa pelo CRM é em
