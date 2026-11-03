@@ -8706,3 +8706,69 @@ begin
     coalesce((select jsonb_agg(o.i - 'custo' order by o.n) from jsonb_array_elements(r.itens) with ordinality o(i, n)), '[]'::jsonb));
 end;
 $function$;
+
+-- Contas a pagar de FORNECEDOR para o comprador (03/11/2026, Anderson: "liberar para ele visualizar, mas somente título de
+-- fornecedor… e deixar a opção dele editar se tiver errado, com um campo de observação, por que está editando, e vai ficar
+-- tudo registrado"). Só a categoria Fornecedores (saídas). Corrige valor, vencimento, fornecedor e descrição de conta ainda
+-- não paga, sempre com o motivo: registro em crm_fin_fornecedor_edicoes (só o administrador lê) e o motivo nas observações.
+-- Não dá baixa, não exclui e não vê as outras categorias. Migração comprador_contas_de_fornecedor (aplicada em 03/11/2026).
+create table if not exists public.crm_fin_fornecedor_edicoes (
+  id bigserial primary key,
+  lancamento_id uuid not null,
+  por uuid default auth.uid(),
+  por_nome text,
+  em timestamptz not null default now(),
+  motivo text not null,
+  antes jsonb not null,
+  depois jsonb not null
+);
+alter table public.crm_fin_fornecedor_edicoes enable row level security;
+drop policy if exists ler_admin on public.crm_fin_fornecedor_edicoes;
+create policy ler_admin on public.crm_fin_fornecedor_edicoes for select to authenticated using (public.crm_eh_admin());
+revoke all on public.crm_fin_fornecedor_edicoes from anon;
+
+create or replace function public.crm_fin_fornecedores_ler(p_pagos_desde date default null)
+returns setof jsonb language sql stable security definer set search_path = public as $$
+  select jsonb_build_object('id', l.id, 'fornecedor', l.fornecedor, 'descricao', l.descricao, 'valor', l.valor, 'vencimento', l.vencimento,
+      'situacao', l.situacao, 'pago_em', l.pago_em, 'parcela', l.parcela, 'parcelas', l.parcelas, 'titulo_duplicata', l.titulo_duplicata,
+      'observacoes', l.observacoes, 'origem', l.origem, 'compra_id', l.compra_id, 'chave_fkn', l.chave_fkn, 'criado_em', l.criado_em, 'atualizado_em', l.atualizado_em,
+      'edicoes', coalesce((select jsonb_agg(jsonb_build_object('em', x.em, 'por', x.por_nome, 'motivo', x.motivo, 'antes', x.antes, 'depois', x.depois) order by x.em desc)
+         from public.crm_fin_fornecedor_edicoes x where x.lancamento_id = l.id), '[]'::jsonb))
+    from public.crm_fin_lancamentos l
+   where (public.crm_eh_comprador() or public.crm_eh_admin())
+     and l.tipo = 'saida' and l.categoria = 'Fornecedores'
+     and (l.situacao in ('aberto', 'pausado') or (l.situacao = 'pago' and coalesce(l.pago_em, l.vencimento) >= coalesce(p_pagos_desde, (now() at time zone 'America/Sao_Paulo')::date - 30)))
+   order by l.vencimento, l.fornecedor;
+$$;
+revoke all on function public.crm_fin_fornecedores_ler(date) from public, anon;
+grant execute on function public.crm_fin_fornecedores_ler(date) to authenticated;
+
+create or replace function public.crm_fin_fornecedor_editar(p_id uuid, p jsonb, p_motivo text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare l public.crm_fin_lancamentos; antes jsonb; depois jsonb; nome text; v numeric; venc date; txt text;
+begin
+  if not (public.crm_eh_comprador() or public.crm_eh_admin()) then raise exception 'só o comprador ou o administrador'; end if;
+  if length(btrim(coalesce(p_motivo, ''))) < 5 then raise exception 'diga por que está corrigindo (o motivo fica registrado)'; end if;
+  select * into l from public.crm_fin_lancamentos where id = p_id for update;
+  if l.id is null or l.tipo <> 'saida' or coalesce(l.categoria, '') <> 'Fornecedores' then raise exception 'conta não encontrada'; end if;
+  if l.situacao not in ('aberto', 'pausado') then raise exception 'conta já paga: não muda mais por aqui'; end if;
+  v := case when p ? 'valor' then nullif(p->>'valor', '')::numeric else l.valor end;
+  venc := case when p ? 'vencimento' then nullif(p->>'vencimento', '')::date else l.vencimento end;
+  if v is null or v <= 0 then raise exception 'valor inválido'; end if;
+  if venc is null then raise exception 'vencimento inválido'; end if;
+  antes := jsonb_build_object('valor', l.valor, 'vencimento', l.vencimento, 'fornecedor', l.fornecedor, 'descricao', l.descricao);
+  depois := jsonb_build_object('valor', v, 'vencimento', venc,
+    'fornecedor', case when p ? 'fornecedor' then nullif(btrim(p->>'fornecedor'), '') else l.fornecedor end,
+    'descricao', case when p ? 'descricao' then coalesce(nullif(btrim(p->>'descricao'), ''), l.descricao) else l.descricao end);
+  if antes = depois then return to_jsonb(l); end if;
+  select u.nome into nome from public.crm_usuarios u where u.user_id = auth.uid();
+  insert into public.crm_fin_fornecedor_edicoes (lancamento_id, por_nome, motivo, antes, depois) values (l.id, nome, btrim(p_motivo), antes, depois);
+  txt := '[' || to_char(now() at time zone 'America/Sao_Paulo', 'DD/MM HH24:MI') || ' ' || coalesce(nome, 'comprador') || ' corrigiu: ' || btrim(p_motivo) || ']';
+  update public.crm_fin_lancamentos set valor = v, vencimento = venc, fornecedor = depois->>'fornecedor', descricao = depois->>'descricao',
+    observacoes = concat_ws(E'\n', nullif(btrim(coalesce(observacoes, '')), ''), txt), atualizado_em = now()
+   where id = l.id returning * into l;
+  return to_jsonb(l);
+end;
+$$;
+revoke all on function public.crm_fin_fornecedor_editar(uuid, jsonb, text) from public, anon;
+grant execute on function public.crm_fin_fornecedor_editar(uuid, jsonb, text) to authenticated;
