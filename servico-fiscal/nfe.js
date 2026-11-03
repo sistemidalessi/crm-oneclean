@@ -17,8 +17,10 @@ const num = v => (v == null || v === '' ? 0 : Number(v) || 0);
 const dig = v => String(v == null ? '' : v).replace(/\D/g, '');
 const docLimpo = v => String(v == null ? '' : v).toUpperCase().replace(/[^0-9A-Z]/g, '');   // CNPJ pode ter letras (07/2026)
 // Texto do XML: sem quebra de linha nem espaço repetido, com os 5 escapes do XML (a Sefaz rejeita espaço nas pontas).
-const txt = v => String(v == null ? '' : v).replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim()
-  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+// Com `max`, corta no tamanho máximo do XSD antes dos escapes (03/11/2026: razão social de 61 letras deu a rejeição 225).
+const txt = (v, max) => { let s = String(v == null ? '' : v).replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (max && s.length > max) s = s.slice(0, max).trim();
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); };
 const d2 = v => r2(v).toFixed(2);
 const d4 = v => (Math.round(num(v) * 10000) / 10000).toFixed(4);
 const pct = v => num(v).toFixed(4).replace(/0{1,2}$/, '');   // "18.00", "1.65", "7.60", "0.90"
@@ -196,8 +198,8 @@ function calcula(nota) {
 }
 
 // ---------------------------------------------------------------- XML
-const enderecoXml = (nome, e, emitente) => '<' + nome + '>' + tag('xLgr', txt(e.logradouro)) + tag('nro', txt(e.numero || 'S/N')) + tag('xCpl', txt(e.complemento)) +
-  tag('xBairro', txt(e.bairro)) + tag('cMun', dig(e.cMun)) + tag('xMun', txt(e.municipio)) + tag('UF', txt(e.uf)) + tag('CEP', dig(e.cep)) +
+const enderecoXml = (nome, e, emitente) => '<' + nome + '>' + tag('xLgr', txt(e.logradouro, 60)) + tag('nro', txt(e.numero || 'S/N', 60)) + tag('xCpl', txt(e.complemento, 60)) +
+  tag('xBairro', txt(e.bairro, 60)) + tag('cMun', dig(e.cMun)) + tag('xMun', txt(e.municipio, 60)) + tag('UF', txt(e.uf)) + tag('CEP', dig(e.cep)) +
   tag('cPais', '1058') + tag('xPais', 'BRASIL') + tag('fone', dig(e.fone)) + '</' + nome + '>' + (emitente ? '' : '');
 const docXml = d => { const x = docLimpo(d); return x.length === 11 ? tag('CPF', x) : tag('CNPJ', x); };
 
@@ -269,7 +271,7 @@ function monta(nota, opc) {
   if ((nota.refs || []).map(dig).filter(Boolean).some(k => k.length !== 44) || (nota.itens || []).some(it => it.ref && dig(it.ref.chave).length !== 44))
     throw new Error('chave da nota referenciada com tamanho errado (são 44 dígitos)');
   if (fin === '4' && !refs.length && !porItem) throw new Error('nota de devolução precisa da chave da nota devolvida');
-  const ide = '<ide>' + tag('cUF', cUF) + tag('cNF', cNF) + tag('natOp', txt(nota.natOp || 'VENDA NO ESTADO')) + '<mod>55</mod>' + tag('serie', String(Number(nota.serie))) +
+  const ide = '<ide>' + tag('cUF', cUF) + tag('cNF', cNF) + tag('natOp', txt(nota.natOp || 'VENDA NO ESTADO', 60)) + '<mod>55</mod>' + tag('serie', String(Number(nota.serie))) +
     tag('nNF', String(Number(nota.numero))) + tag('dhEmi', nota.emissao) + (nota.saida ? tag('dhSaiEnt', nota.saida) : '') + tag('tpNF', tpNF) + tag('idDest', idDest) +
     tag('cMunFG', dig(e.cMun)) + '<tpImp>1</tpImp><tpEmis>1</tpEmis>' + tag('cDV', chave.slice(-1)) + tag('tpAmb', homolog ? '2' : '1') + tag('finNFe', fin) +
     tag('indFinal', String(nota.indFinal == null ? 1 : nota.indFinal)) + tag('indPres', String(indPres)) +
@@ -277,26 +279,26 @@ function monta(nota, opc) {
     // nos outros (435). 0 = sem intermediador (venda direta, sem marketplace)
     ([2, 3, 4, 9].indexOf(Number(indPres)) !== -1 ? tag('indIntermed', String(nota.indIntermed == null ? 0 : nota.indIntermed)) : '') +
     '<procEmi>0</procEmi>' + tag('verProc', txt(nota.verProc || 'CRM Sistemi 1.0')) + refs.map(k => '<NFref>' + tag('refNFe', k) + '</NFref>').join('') + '</ide>';
-  const emit = '<emit>' + docXml(em.cnpj) + tag('xNome', txt(em.razao)) + tag('xFant', txt(em.fantasia)) +
+  const emit = '<emit>' + docXml(em.cnpj) + tag('xNome', txt(em.razao, 60)) + tag('xFant', txt(em.fantasia, 60)) +
     enderecoXml('enderEmit', { logradouro: e.logradouro, numero: e.numero, complemento: e.complemento, bairro: e.bairro, cMun: e.cMun, municipio: e.municipio, uf: e.uf, cep: e.cep, fone: e.fone }, true) +
     tag('IE', dig(em.ie)) + tag('CRT', String(em.crt || 3)) + '</emit>';
   const de2 = de.endereco || {};
   const ind = String(de.indIEDest || (de.ie && !/ISENT/i.test(de.ie) ? 1 : 9));
-  const dest = '<dest>' + docXml(de.doc) + tag('xNome', txt(homolog ? HOMOLOGACAO_NOME : de.nome)) +
-    (de2.logradouro ? enderecoXml('enderDest', de2) : '') + tag('indIEDest', ind) + (ind === '1' ? tag('IE', dig(de.ie)) : '') + tag('email', txt(de.email)) + '</dest>';
+  const dest = '<dest>' + docXml(de.doc) + tag('xNome', txt(homolog ? HOMOLOGACAO_NOME : de.nome, 60)) +
+    (de2.logradouro ? enderecoXml('enderDest', de2) : '') + tag('indIEDest', ind) + (ind === '1' ? tag('IE', dig(de.ie)) : '') + tag('email', txt(de.email, 60)) + '</dest>';
   const det = (nota.itens || []).map((it, i) => {
     const ci = c.itens[i], gtin = dig(it.gtin);
     const ean = gtin && [8, 12, 13, 14].indexOf(gtin.length) !== -1 ? gtin : 'SEM GTIN';
-    const prod = '<prod>' + tag('cProd', txt(it.codigo || String(i + 1))) + tag('cEAN', ean) + tag('xProd', txt(it.descricao)) + tag('NCM', dig(it.ncm)) +
-      (it.cest ? tag('CEST', dig(it.cest)) : '') + (it.cBenef ? tag('cBenef', txt(it.cBenef)) : '') + (it.extipi ? tag('EXTIPI', dig(it.extipi)) : '') + tag('CFOP', dig(it.cfop)) + tag('uCom', txt(it.unidade || 'UN')) + tag('qCom', d4(it.quantidade)) +
-      tag('vUnCom', d4(it.valorUnitario)) + tag('vProd', d2(ci.vProd)) + tag('cEANTrib', ean) + tag('uTrib', txt(it.unidade || 'UN')) + tag('qTrib', d4(it.quantidade)) +
+    const prod = '<prod>' + tag('cProd', txt(it.codigo || String(i + 1), 60)) + tag('cEAN', ean) + tag('xProd', txt(it.descricao, 120)) + tag('NCM', dig(it.ncm)) +
+      (it.cest ? tag('CEST', dig(it.cest)) : '') + (it.cBenef ? tag('cBenef', txt(it.cBenef)) : '') + (it.extipi ? tag('EXTIPI', dig(it.extipi)) : '') + tag('CFOP', dig(it.cfop)) + tag('uCom', txt(it.unidade || 'UN', 6)) + tag('qCom', d4(it.quantidade)) +
+      tag('vUnCom', d4(it.valorUnitario)) + tag('vProd', d2(ci.vProd)) + tag('cEANTrib', ean) + tag('uTrib', txt(it.unidade || 'UN', 6)) + tag('qTrib', d4(it.quantidade)) +
       tag('vUnTrib', d4(it.valorUnitario)) + (ci.vFrete ? tag('vFrete', d2(ci.vFrete)) : '') + (ci.vDesc ? tag('vDesc', d2(ci.vDesc)) : '') + (ci.vOutro ? tag('vOutro', d2(ci.vOutro)) : '') + '<indTot>1</indTot>' +
-      (it.pedidoCliente ? tag('xPed', txt(it.pedidoCliente)) : '') + '</prod>';
+      (it.pedidoCliente ? tag('xPed', txt(it.pedidoCliente, 15)) : '') + '</prod>';
     const imp = '<imposto>' + (it.vTotTrib != null ? tag('vTotTrib', d2(it.vTotTrib)) : '') + grupoIcms(ci, it) + grupoFed('PIS', ci.pis) + grupoFed('COFINS', ci.cofins) + grupoDifal(ci.difal) + grupoIbsCbs(ci.ibscbs) + '</imposto>';
     const devol = ci.ipiDevol > 0 ? '<impostoDevol><pDevol>100.00</pDevol><IPI>' + tag('vIPIDevol', d2(ci.ipiDevol)) + '</IPI></impostoDevol>' : '';
     // devolução: cada item aponta o item da nota original (DFeReferenciado, leiaute PL_010; sem ele a Sefaz rejeita com 321)
     const ref = it.ref && it.ref.chave ? '<DFeReferenciado>' + tag('chaveAcesso', dig(it.ref.chave)) + (it.ref.nItem ? tag('nItem', String(Number(it.ref.nItem))) : '') + '</DFeReferenciado>' : '';
-    return '<det nItem="' + (i + 1) + '">' + prod + imp + devol + (it.infAdProd ? tag('infAdProd', txt(it.infAdProd)) : '') + ref + '</det>';
+    return '<det nItem="' + (i + 1) + '">' + prod + imp + devol + (it.infAdProd ? tag('infAdProd', txt(it.infAdProd, 500)) : '') + ref + '</det>';
   }).join('');
   const t = c.totais;
   // tributos aproximados (Lei 12.741/2012, tabela do IBPT): por item e o total
@@ -313,23 +315,23 @@ function monta(nota, opc) {
     '<gCBS><vDif>0.00</vDif><vDevTrib>0.00</vDevTrib>' + tag('vCBS', d2(ib.vCBS)) + '<vCredPres>0.00</vCredPres><vCredPresCondSus>0.00</vCredPresCondSus></gCBS></IBSCBSTot>' : '';
   const fr = nota.frete || {}, tr = fr.transportadora, vol = fr.volumes;
   const transp = '<transp>' + tag('modFrete', String(fr.modFrete == null ? 0 : fr.modFrete)) +
-    (tr && tr.nome ? '<transporta>' + (tr.doc ? docXml(tr.doc) : '') + tag('xNome', txt(tr.nome)) + (tr.ie ? tag('IE', dig(tr.ie)) : '') + tag('xEnder', txt(tr.endereco)) +
-      tag('xMun', txt(tr.municipio)) + tag('UF', txt(tr.uf)) + '</transporta>' : '') +
-    (vol && num(vol.qVol) > 0 ? '<vol>' + tag('qVol', String(Math.round(num(vol.qVol)))) + tag('esp', txt(vol.esp || 'VOLUMES')) + '</vol>' : '') + '</transp>';
+    (tr && tr.nome ? '<transporta>' + (tr.doc ? docXml(tr.doc) : '') + tag('xNome', txt(tr.nome, 60)) + (tr.ie ? tag('IE', dig(tr.ie)) : '') + tag('xEnder', txt(tr.endereco, 60)) +
+      tag('xMun', txt(tr.municipio, 60)) + tag('UF', txt(tr.uf)) + '</transporta>' : '') +
+    (vol && num(vol.qVol) > 0 ? '<vol>' + tag('qVol', String(Math.round(num(vol.qVol)))) + tag('esp', txt(vol.esp || 'VOLUMES', 60)) + '</vol>' : '') + '</transp>';
   const cb = nota.cobranca, dups = (cb && cb.duplicatas) || [];
   const somaDup = r2(dups.reduce((s, d) => s + num(d.valor), 0));
   if (dups.length && Math.abs(somaDup - t.vCobrar) > 0.009) throw new Error('as parcelas (' + d2(somaDup) + ') não fecham com o total da nota (' + d2(t.vCobrar) + ')');
-  const cobr = dups.length ? '<cobr><fat>' + tag('nFat', txt(cb.numero || String(nota.numero))) + tag('vOrig', d2(t.vCobrar)) + '<vDesc>0.00</vDesc>' + tag('vLiq', d2(t.vCobrar)) + '</fat>' +
+  const cobr = dups.length ? '<cobr><fat>' + tag('nFat', txt(cb.numero || String(nota.numero), 60)) + tag('vOrig', d2(t.vCobrar)) + '<vDesc>0.00</vDesc>' + tag('vLiq', d2(t.vCobrar)) + '</fat>' +
     dups.map((d, i) => '<dup>' + tag('nDup', String(i + 1).padStart(3, '0')) + tag('dVenc', d.vencimento) + tag('vDup', d2(d.valor)) + '</dup>').join('') + '</cobr>' : '';
   const pags = (nota.pagamento && nota.pagamento.length) ? nota.pagamento : [{ tPag: dups.length ? '15' : '90', indPag: dups.length ? 1 : null, valor: dups.length ? t.vCobrar : 0 }];
   const pag = '<pag>' + pags.map(p => '<detPag>' + (p.indPag != null ? tag('indPag', String(p.indPag)) : '') + tag('tPag', String(p.tPag).padStart(2, '0')) +
-    (String(p.tPag) === '99' ? tag('xPag', txt(p.descricao || 'OUTROS')) : '') + tag('vPag', d2(p.valor)) + '</detPag>').join('') + '</pag>';
+    (String(p.tPag) === '99' ? tag('xPag', txt(p.descricao || 'OUTROS', 60)) : '') + tag('vPag', d2(p.valor)) + '</detPag>').join('') + '</pag>';
   // DIFAL: valor e fundamento no texto da nota, como as notas do FKN para o RS (a guia GNRE acompanha a mercadoria)
   if (t.vICMSUFDest > 0) nota = Object.assign({}, nota, { infCpl: (nota.infCpl ? String(nota.infCpl).replace(/;?$/, ';') : '') +
     'ICMS DIFAL DEVIDO A UF DE DESTINO (' + ufDest + '): R$ ' + d2(t.vICMSUFDest) + (t.vFCPUFDest > 0 ? ' + FCP R$ ' + d2(t.vFCPUFDest) : '') + ' - EC 87/2015 E LC 190/2022, RECOLHIDO POR GNRE;' });
-  const infAdic = nota.infCpl || nota.infAdFisco ? '<infAdic>' + tag('infAdFisco', txt(nota.infAdFisco)) + tag('infCpl', txt(nota.infCpl)) + '</infAdic>' : '';
+  const infAdic = nota.infCpl || nota.infAdFisco ? '<infAdic>' + tag('infAdFisco', txt(nota.infAdFisco, 2000)) + tag('infCpl', txt(nota.infCpl, 5000)) + '</infAdic>' : '';
   const rt = nota.respTec;
-  const resp = rt && rt.cnpj ? '<infRespTec>' + tag('CNPJ', docLimpo(rt.cnpj)) + tag('xContato', txt(rt.contato)) + tag('email', txt(rt.email)) + tag('fone', dig(rt.fone)) + '</infRespTec>' : '';
+  const resp = rt && rt.cnpj ? '<infRespTec>' + tag('CNPJ', docLimpo(rt.cnpj)) + tag('xContato', txt(rt.contato, 60)) + tag('email', txt(rt.email, 60)) + tag('fone', dig(rt.fone)) + '</infRespTec>' : '';
   const id = 'NFe' + chave;
   const infNFe = '<infNFe Id="' + id + '" versao="4.00">' + ide + emit + dest + det + '<total>' + icmsTot + ibsTot + (t.vNFTot != null ? tag('vNFTot', d2(t.vNFTot)) : '') + '</total>' + transp + cobr + pag + infAdic + resp + '</infNFe>';
   return { chave, id, cNF, infNFe, calculo: c, totais: t };

@@ -176,7 +176,7 @@ async function dadosDaOutra(db: ReturnType<typeof createClient>, o: Linha, fisca
       ref = { chave: ch, numero: n ? n.numero : Number(ch.slice(25, 34)), emissao: n ? n.emitida_em : null };
     }
   }
-  return Object.assign(base, { pedido: d.pedido, empresa: d.empresa, regras: d.regras, vendedorNome: d.vendedorNome, cfg: d.fiscal, ibpt: d.ibpt, ref });
+  return Object.assign(base, { pedido: d.pedido, empresa: cabeNoXml(d.empresa as Linha), regras: d.regras, vendedorNome: d.vendedorNome, cfg: d.fiscal, ibpt: d.ibpt, ref });
 }
 
 // ICMS-ST retido (CST 60) como o FKN informa: da nota mais recente de cada produto com CST 60, o valor POR UNIDADE
@@ -347,6 +347,15 @@ async function lancaGnre(db: ReturnType<typeof createClient>, nfe: Linha | null)
     vencimento: new Date(Date.now() - 3 * 36e5).toISOString().slice(0, 10), situacao: 'aberto', origem: 'tela',
     observacoes: 'ICMS DIFAL de venda a consumidor final não contribuinte de outra UF (EC 87/2015, LC 190/2022): pagar a GNRE antes de a mercadoria sair; a guia acompanha a nota.' });
 }
+// 03/11/2026: a Sefaz recusa (225, schema) nome ou endereço com mais de 60 letras; razão social longa (61) travou a NF 1-2870.
+// Corta aqui, antes de ir ao serviço fiscal, para valer já (o serviço fiscal também corta desde a versão 2026-11-03c).
+const CAMPOS_60 = ['razao_social', 'nome', 'logradouro', 'numero', 'complemento', 'bairro', 'cidade'];
+const cabeNoXml = (e: Linha | null) => {
+  if (!e) return e;
+  const o: Linha = Object.assign({}, e);
+  for (const k of CAMPOS_60) if (typeof o[k] === 'string') { const t = String(o[k]).replace(/\s+/g, ' ').trim(); if (t.length > 60) o[k] = t.slice(0, 60).trim(); }
+  return o;
+};
 const semXml = (n: Linha | null) => n && Object.assign({}, n, { nfe_xml: undefined, proc_xml: n.proc_xml ? true : false });
 
 Deno.serve(async (req) => {
@@ -442,7 +451,7 @@ Deno.serve(async (req) => {
           }
         }
       }
-      const corpo = { pedido: d.pedido, empresa: d.empresa, regras: d.regras, emitente: d.fiscal.emitente, ambiente: amb, serie, vendedorNome: d.vendedorNome, cfg: d.fiscal, ibpt: d.ibpt };
+      const corpo = { pedido: d.pedido, empresa: cabeNoXml(d.empresa as Linha), regras: d.regras, emitente: d.fiscal.emitente, ambiente: amb, serie, vendedorNome: d.vendedorNome, cfg: d.fiscal, ibpt: d.ibpt };
       if (acao === 'previa') return resposta(200, Object.assign(await servico('/previa-pedido', corpo), { ambiente: amb, serie }));
       const { data: res, error } = await db.rpc('crm_nfe_reservar', { p_ambiente: amb, p_serie: serie, p_pedido: d.pedido.id, p_empresa: d.pedido.empresa_id });
       if (error) throw new Error(error.message);

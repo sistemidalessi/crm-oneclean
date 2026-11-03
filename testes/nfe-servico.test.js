@@ -102,6 +102,26 @@ test('XML assinado passa no esquema oficial da NF-e (PL_010 v1.30, com IBS/CBS) 
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('textos longos (razão social de 61 letras, endereço, produto) cortados no tamanho do XSD: passa no esquema (rejeição 225 de 03/11/2026)', { skip: !temFerramentas && 'sem xmllint/openssl' }, () => {
+  const A = require('../servico-fiscal/assinatura.js');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nfe-teste-'));
+  try {
+    execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', path.join(dir, 'k.pem'), '-out', path.join(dir, 'c.pem'), '-days', '2', '-subj', '/CN=TESTE'], { stdio: 'pipe' });
+    const keyPem = fs.readFileSync(path.join(dir, 'k.pem'), 'utf8'), certPem = fs.readFileSync(path.join(dir, 'c.pem'), 'utf8');
+    const longo = 'ASSOCIACAO BENEFICENTE DE TESTE MISSIONARIA DE ASSISTENCIA E & EDUCACAO';   // 72, com & (escape conta 1)
+    const n0 = nota();
+    const m = N.monta(nota({ ambiente: 'producao',
+      dest: Object.assign({}, n0.dest, { nome: longo, email: 'compras.departamento.de.suprimentos.e.manutencao@cliente-de-teste.teste',
+        endereco: Object.assign({}, n0.dest.endereco, { logradouro: 'AVENIDA CONSELHEIRO RODRIGUES ALVES DE TESTE DO BAIRRO ' + 'X'.repeat(20), bairro: 'B'.repeat(70), complemento: 'C'.repeat(70) }) }),
+      itens: n0.itens.map(it => Object.assign({}, it, { descricao: 'D'.repeat(130), unidade: 'GALAO5L' })) }));
+    const xml = N.nfeCompleta(m.infNFe, A.assinaElemento(m.infNFe, m.id, certPem, keyPem));
+    assert.match(xml, /<dest><CNPJ>\d+<\/CNPJ><xNome>ASSOCIACAO BENEFICENTE DE TESTE MISSIONARIA DE ASSISTENCIA E<\/xNome>/);   // 60, sem o espaço do fim
+    const f = path.join(dir, 'n.xml'); fs.writeFileSync(f, xml);
+    const r = spawnSync('xmllint', ['--noout', '--schema', path.join(ESQ, 'nfe_v4.00.xsd'), f]);
+    assert.strictEqual(r.status, 0, String(r.stderr));
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('mensagens da Sefaz (status, consulta, cancelamento, CC-e, inutilização) passam nos esquemas oficiais', { skip: !temFerramentas && 'sem xmllint/openssl' }, () => {
   const A = require('../servico-fiscal/assinatura.js'), S = require('../servico-fiscal/sefaz.js');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nfe-teste-'));
