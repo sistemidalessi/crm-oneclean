@@ -793,7 +793,7 @@
         fat.topClientes.slice(0, 10).map((c, i) => [i + 1, nomeCli(c) + (c.novo ? ' <span class="selo verde">1ª compra</span>' : ''), c.notas, esc(R.moeda(c.valor)), CRM.barra(c.valor, mc), pctTotal(c.valor)])) + '</section>' +
       '<section class="cartao"><h2>Vendas por segmento ' + exp('tFatSeg') + '</h2>' + tabela('tFatSeg', [['Segmento'], ['Clientes', 1], ['Notas', 1], ['Valor', 1], [''], ['% do total', 1]],
         fat.porSegmento.map(g => [esc(g.nome), g.clientes, g.notas, esc(R.moeda(g.valor)), CRM.barra(g.valor, ms), pctTotal(g.valor)])) +
-        (fat.porSegmento.some(g => g.nome === '(sem segmento)') && CRM.ehGestor() ? '<p class="dica">Sem segmento: preencha na ficha, em massa na lista de Empresas, ou pelo nome em Configurações → Origens, segmentos, motivos.</p>' : '') + '</section>' +
+        (fat.porSegmento.some(g => g.nome === '(sem segmento)') && CRM.ehGestor() ? '<p class="dica">Sem segmento: preencha na ficha, em massa na lista de Empresas, ou pelo nome em Configurações → Listas.</p>' : '') + '</section>' +
       '</div><div class="colunas">' +
       '<section class="cartao"><h2>Top 10 produtos <small>por valor</small> ' + exp('tFatProd') + todos('produtos') + '</h2>' + tabela('tFatProd', [['#'], ['Produto'], ['Quantidade', 1], ['Valor', 1], [''], ['Clientes', 1]],
         fat.topProdutosValor.slice(0, 10).map((x, i) => [i + 1, esc(x.descricao) + (x.codigo ? ' <small>' + esc(x.codigo) + '</small>' : ''), esc(R.numero(x.quantidade)) + ' ' + esc(x.unidade), esc(R.moeda(x.valor)), CRM.barra(x.valor, mp), x.clientes]),

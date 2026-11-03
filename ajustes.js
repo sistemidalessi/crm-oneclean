@@ -9,7 +9,7 @@
   const E = () => CRM.estado;
 
   const SECOES = [
-    ['geral', 'Geral e automações'], ['funil', 'Funil e etapas'], ['listas', 'Origens, segmentos, motivos'], ['produtos', 'Produtos'],
+    ['geral', 'Geral e automações'], ['funil', 'Funil e etapas'], ['listas', 'Listas: origens, segmentos, motivos e formas de pagamento'], ['produtos', 'Produtos'],
     ['equipe', 'Equipe e permissões'], ['metas', 'Metas'], ['modelos', 'Modelos de mensagem'], ['importar', 'Importar'],
     ['exportar', 'Exportar e backup'], ['duplicados', 'Duplicados'], ['integracoes', 'Integrações'], ['historico', 'Histórico de alterações']
   ];
