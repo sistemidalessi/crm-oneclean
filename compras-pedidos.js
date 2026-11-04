@@ -153,7 +153,7 @@
       ': ainda faltam ' + p.itens.filter(i => i.falta > 0).map(i => qtd(i.falta) + ' ' + (i.unidade || '') + ' de ' + R.nomeDeItem(i.descricao || i.codigo)).join(', ') + '. Tem previsão de entrega?') : '';
     return blocoAprovacao(p) + '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Produto</th><th class="num">Pedido</th><th class="num">Faturado (nota)</th><th class="num">Entrou</th><th class="num">Falta chegar</th>' +
         '<th class="num">Custo un.</th></tr></thead><tbody>' +
-      p.itens.map(i => '<tr><td>' + esc(R.nomeDeItem(i.descricao || i.codigo)) + ' <small>' + esc(i.codigo) + '</small></td><td class="num">' + qtd(i.quantidade) + ' ' + esc(i.unidade || '') +
+      p.itens.map(i => '<tr' + (p.aberto ? ' class="clicavel" data-acao="cp-item" data-id="' + p.id + ':' + i.ordem + '" title="Mudar a quantidade ou o custo"' : '') + '><td>' + esc(R.nomeDeItem(i.descricao || i.codigo)) + ' <small>' + esc(i.codigo) + '</small>' + (p.aberto ? ' <span class="mini">✎</span>' : '') + '</td><td class="num">' + qtd(i.quantidade) + ' ' + esc(i.unidade || '') +
         (num(i.cancelado) ? '<br><small>' + qtd(i.cancelado) + ' cancelado(s)</small>' : '') + '</td><td class="num">' + (i.faturado ? qtd(i.faturado) : '—') + '</td><td class="num">' + (i.recebido ? qtd(i.recebido) : '—') + '</td>' +
         '<td class="num"><strong' + (i.falta && p.atrasado ? ' class="neg"' : '') + '>' + qtd(i.falta) + '</strong></td><td class="num">' + (i.custo_unit != null ? esc(R.moeda(i.custo_unit)) : '—') + '</td></tr>').join('') +
       '</tbody></table></div>' +
@@ -342,6 +342,23 @@
   }
   Object.assign(CRM.acoes, {
     'cp-novo': () => novoPedido(),
+    // mudar a quantidade ou o custo de um item (04/11/2026, pedido do Wellington: sem cancelar o pedido)
+    'cp-item': chave => {
+      const [id, ordem] = String(chave).split(':').map(Number);
+      const p = dados && dados.lista.find(x => x.id === id), i = p && p.itens.find(x => x.ordem === ordem);
+      if (!i) return;
+      CRM.abrirForm({ titulo: 'Item do pedido ' + id + ': ' + R.nomeDeItem(i.descricao || i.codigo),
+        intro: 'Pedido ' + qtd(i.quantidade) + ' ' + (i.unidade || '') + (i.recebido ? ' · já entraram ' + qtd(i.recebido) + ' (não dá para pôr menos que isso)' : '') + '.\nQuantidade 0 tira o item do pedido. A mudança fica anotada no pedido.',
+        campos: [{ nome: 'quantidade', rotulo: 'Quantidade (' + (i.unidade || 'unidade do estoque') + ')', tipo: 'numero', passo: '0.001', obrigatorio: true },
+          { nome: 'custo', rotulo: 'Custo unitário (R$)', tipo: 'numero', passo: '0.0001', vazioNulo: true }],
+        valores: { quantidade: num(i.quantidade), custo: i.custo_unit != null ? num(i.custo_unit) : null }, salvarTexto: 'Salvar',
+        aoSalvar: async v => {
+          if (Number(v.quantidade) === 0 && !confirm('Tirar ' + R.nomeDeItem(i.descricao || i.codigo) + ' do pedido?')) return false;
+          await st().compraPedidoItem(id, ordem, v.quantidade, v.custo == null ? null : v.custo);
+          dados = null; CRM.aCaminho.limpa(); if (CRM.comprasRecarregar) CRM.comprasRecarregar(); carrega();
+          CRM.toast(Number(v.quantidade) === 0 ? 'Item tirado do pedido.' : 'Item do pedido atualizado: as vendedoras já veem a quantidade nova a caminho.');
+        } });
+    },
     'cp-pdf': async id => {
       const p = dados && dados.lista.find(x => x.id === Number(id)); if (!p) return;
       try { await CRM.fichas.baixarPdfHtml(htmlPedidoCompra(p), 'Ordem de compra ' + p.id + ' - ' + R.nomeDeItem(p.fornecedor_nome)); } catch (e) { CRM.falhou(e); }

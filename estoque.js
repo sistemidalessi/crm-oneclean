@@ -996,7 +996,7 @@
     return '<section class="cartao"><h2>Entrada avulsa <small>compra sem nota de compra (balcão)</small></h2>' +
       '<p>Faltou um item e foi comprado numa loja, sem nota de compra para a OneClean? Dê a entrada aqui: entra no estoque pelo valor pago, com onde comprou, o motivo e a foto do cupom ou recibo. ' +
       'Fica nesta lista, com quem lançou, para o contador ver no fechamento do mês.' + (CRM.ehAdmin() ? ' O pagamento pode ir junto para o Caixa.' : '') + '</p>' +
-      '<p class="acoes"><button type="button" class="btn" data-acao="es-avulsa">+ Entrada avulsa</button></p>' +
+      '<p class="acoes"><button type="button" class="btn" data-acao="es-avulsa">+ Entrada avulsa</button> <button type="button" class="btn sec" data-acao="es-saida-avulsa">− Saída avulsa (tirar do estoque)</button></p>' +
       (avulsas.length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Comprado em</th><th>Produto</th><th class="num">Qtd.</th><th class="num">Valor</th><th>Onde e por quê</th><th></th></tr></thead><tbody>' +
         avulsas.map(linha).join('') + '</tbody></table></div>' : '<p class="vazio">Nenhuma entrada avulsa ainda.</p>') +
       '<p class="dica">Peça o CPF/CNPJ da empresa no cupom sempre que der. Compra de fornecedor com nota não entra aqui: entra pela nota de compra.</p></section>';
@@ -1471,6 +1471,38 @@
             comprovante, caixa: !!v.caixa, pago: !!v.pago });
           CRM.toast('Entrada avulsa: ' + qtd(v.quantidade) + ' de ' + (nomeDe.get(certo) || certo) + ' (' + R.moeda(r.valor) + ')' + (r.caixa ? ', lançada no Caixa' : '') + '.');
           avulsas = null; saldo = null; carrega();
+        }
+      });
+    },
+    // Saída avulsa (04/11/2026, pedido do Wellington): tira do estoque com o motivo, sem contar o produto inteiro
+    'es-saida-avulsa': () => {
+      const base = (fkn || []).filter(e => !S.ehCaixa(e.codigo));
+      const nomeDe = new Map(base.map(e => [e.codigo, e.descricao])), cad = new Set(base.map(e => e.codigo));
+      const MOT = ['avaria / quebrado', 'vencido', 'uso interno', 'amostra / brinde', 'troca com cliente', 'perda / sumiu', 'outro'];
+      CRM.abrirForm({
+        titulo: 'Saída avulsa (tirar do estoque)',
+        intro: 'Para o que sai do estoque sem nota de venda: avaria, vencido, uso interno, amostra. Fica no livro do estoque com o motivo e quem tirou. Venda sai pela nota, não aqui.',
+        campos: [{ nome: 'codigo', rotulo: 'Produto (código)', obrigatorio: true, dica: 'comece a digitar o código ou o nome' },
+          { nome: 'quantidade', rotulo: 'Quantidade que sai (na unidade do estoque)', tipo: 'numero', passo: '0.001', obrigatorio: true },
+          { nome: 'motivo', rotulo: 'Motivo', tipo: 'select', obrigatorio: true, opcoes: [['', '— escolher —']].concat(MOT.map(m => [m, m])) },
+          { nome: 'obs', rotulo: 'Detalhe', largo: true, dica: 'ex.: galão furou na descarga; amostra para a Escola X' }],
+        valores: {}, salvarTexto: 'Tirar do estoque',
+        htmlDepois: '<datalist id="esSaidaProd">' + R.ordemAlfa(base.map(e => [e.codigo, e.descricao]), x => x[1] || x[0]).map(([k, v]) => '<option value="' + esc(k) + '">' + esc(v || '') + '</option>').join('') + '</datalist>' +
+          '<p class="dica" data-sa-resumo></p>',
+        extras: form => {
+          const c = form.elements.codigo; if (c) c.setAttribute('list', 'esSaidaProd');
+          const res = form.querySelector('[data-sa-resumo]');
+          c.addEventListener('input', () => { const cod = String(c.value || '').trim(), certo = cad.has(cod) ? cod : S.codigoDoCadastro(cod, cad);
+            res.textContent = certo ? (nomeDe.get(certo) || certo) + (certo !== cod ? ' (faltava o zero: ' + certo + ')' : '') : cod ? 'código que o cadastro não tem' : ''; });
+        },
+        aoSalvar: async v => {
+          const cod = String(v.codigo || '').trim(), certo = cad.has(cod) ? cod : S.codigoDoCadastro(cod, cad);
+          if (!certo) throw new Error('o código ' + cod + ' não está no cadastro de produtos');
+          if (!(Number(v.quantidade) > 0)) throw new Error('diga a quantidade que sai');
+          if (v.motivo === 'outro' && !String(v.obs || '').trim()) throw new Error('em "outro", escreva o detalhe');
+          const novo = await CRM.store().estoqueSaidaAvulsa(certo, v.quantidade, v.motivo + (v.obs ? ': ' + String(v.obs).trim() : ''));
+          CRM.toast('Saída avulsa: ' + qtd(v.quantidade) + ' de ' + (nomeDe.get(certo) || certo) + ' (' + v.motivo + '). Estoque agora: ' + qtd(novo) + '.');
+          saldo = null; carrega();
         }
       });
     },

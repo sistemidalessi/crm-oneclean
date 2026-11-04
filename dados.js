@@ -568,6 +568,8 @@
     return unwrap(await this.sb.from('crm_estoque_avulsas').select('*').order('criado_em', { ascending: false }).limit(limite || 100)) || [];
   };
   Supa.prototype.estoqueAvulsa = async function (p) { return unwrap(await this.sb.rpc('crm_estoque_entrada_avulsa', { p })); };
+  Supa.prototype.estoqueSaidaAvulsa = async function (codigo, quantidade, motivo) { return unwrap(await this.sb.rpc('crm_estoque_saida_avulsa', { p_codigo: codigo, p_quantidade: quantidade, p_motivo: motivo })); };
+  Supa.prototype.compraPedidoItem = async function (id, ordem, quantidade, custo) { return unwrap(await this.sb.rpc('crm_compra_pedido_item', { p_id: id, p_ordem: ordem, p_quantidade: quantidade, p_custo: custo == null ? null : custo })); };
   Supa.prototype.estoqueAvulsaEstornar = async function (id, motivo) { return unwrap(await this.sb.rpc('crm_estoque_avulsa_estornar', { p_id: id, p_motivo: motivo })); };
   Supa.prototype.comprovanteEnviar = async function (arquivo, hoje) {
     const ext = (String(arquivo.name || '').split('.').pop() || '').toLowerCase().replace(/[^a-z]/g, '') ||
@@ -717,6 +719,7 @@
   Local.prototype.estoqueContagem = async function () { throw new Error('o estoque do CRM só funciona ligado ao banco'); };
   Local.prototype.estoqueAvulsas = async function () { return []; };
   Local.prototype.estoqueAvulsa = async function () { throw new Error('a entrada avulsa só funciona ligada ao banco'); };
+  Local.prototype.estoqueSaidaAvulsa = async function () { throw new Error('a saída avulsa só funciona ligada ao banco'); };
   Local.prototype.estoqueSaldo = async function () { return []; };
   Local.prototype.estoqueMovs = async function () { return []; };
   Local.prototype.estoqueFotos = async function () { return []; };

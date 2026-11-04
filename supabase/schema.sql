@@ -9297,3 +9297,66 @@ begin
 end $$;
 revoke all on function public.crm_entregas_vendedor(date, date) from public, anon;
 grant execute on function public.crm_entregas_vendedor(date, date) to authenticated;
+
+-- ============================================================ 04/11/2026: saída avulsa e item do pedido ao fornecedor
+-- Saída avulsa do estoque (04/11/2026, pedido do Wellington: "ele tem um campo que deixa eu dar a entrada de algum item e ao
+-- mesmo tempo deveria ter um campo que deixasse eu tirar um item"): tira do estoque com o motivo (avaria, vencido, uso interno,
+-- amostra, troca…), sem precisar contar o produto. Fica no livro como "ajuste" negativo com "Saída avulsa: <motivo>".
+create or replace function public.crm_estoque_saida_avulsa(p_codigo text, p_quantidade numeric, p_motivo text) returns numeric
+language plpgsql security definer set search_path = public as $$
+declare s record; q numeric := round(coalesce(p_quantidade, 0), 3);
+begin
+  if not public.crm_eh_estoque_op() then raise exception 'só o administrador, o comprador ou a logística'; end if;
+  if q <= 0 then raise exception 'diga a quantidade que sai'; end if;
+  if coalesce(btrim(p_motivo), '') = '' then raise exception 'diga o motivo'; end if;
+  select codigo, saldo into s from public.crm_estoque_saldo where codigo = btrim(p_codigo) for update;
+  if s.codigo is null then raise exception 'produto % não está no estoque do CRM', p_codigo; end if;
+  insert into public.crm_estoque_mov (codigo, quando, tipo, quantidade, motivo)
+  values (s.codigo, now(), 'ajuste', -q, left('Saída avulsa: ' || btrim(p_motivo), 300));
+  return round(s.saldo - q, 3);
+end $$;
+revoke all on function public.crm_estoque_saida_avulsa(text, numeric, text) from public, anon;
+grant execute on function public.crm_estoque_saida_avulsa(text, numeric, text) to authenticated;
+
+-- Pedido ao fornecedor: mudar a quantidade (ou o custo) de um item sem cancelar o pedido (04/11/2026, pedido do Wellington:
+-- "ficou faltando a opção de eu clicar no item e mudar a quantidade dele, sem eu ter que cancelar o pedido").
+-- Só com o pedido em aberto; nunca abaixo do que já entrou; quantidade 0 tira o item (se nada dele entrou e não é o único).
+-- Com a aprovação ligada, aumentar o total além do aprovado volta o pedido para "aguardando".
+create or replace function public.crm_compra_pedido_item(p_id bigint, p_ordem integer, p_quantidade numeric, p_custo numeric)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare r public.crm_compra_pedidos; it public.crm_compra_pedido_itens; rec numeric; q numeric := round(coalesce(p_quantidade, -1), 3); tot numeric;
+begin
+  if not (public.crm_eh_admin() or public.crm_eh_comprador()) then raise exception 'só o administrador e o comprador mexem no pedido ao fornecedor'; end if;
+  select * into r from public.crm_compra_pedidos where id = p_id for update;
+  if r.id is null then raise exception 'pedido não encontrado'; end if;
+  if r.situacao <> 'aberto' then raise exception 'o pedido já foi fechado ou cancelado'; end if;
+  select * into it from public.crm_compra_pedido_itens where pedido_id = p_id and ordem = p_ordem for update;
+  if it.pedido_id is null then raise exception 'item não encontrado'; end if;
+  if q < 0 then raise exception 'diga a quantidade'; end if;
+  if p_custo is not null and p_custo < 0 then raise exception 'custo inválido'; end if;
+  select coalesce(max(a.recebido), 0) into rec from public.crm_compra_andamento_int() a where a.pedido_id = p_id and a.ordem = p_ordem;
+  if q = 0 then
+    if rec > 0 then raise exception 'parte deste item já entrou: não dá para tirar (use "cancelar o que falta")'; end if;
+    if (select count(*) from public.crm_compra_pedido_itens where pedido_id = p_id) <= 1 then raise exception 'é o único item: cancele o pedido'; end if;
+    delete from public.crm_compra_pedido_itens where pedido_id = p_id and ordem = p_ordem;
+  else
+    if q < rec then raise exception 'já entraram % deste item: a quantidade não pode ser menor', rec; end if;
+    update public.crm_compra_pedido_itens set quantidade = q, custo_unit = coalesce(p_custo, custo_unit), cancelado = least(cancelado, q)
+     where pedido_id = p_id and ordem = p_ordem;
+  end if;
+  if r.aprovacao is not null then
+    select coalesce(sum(greatest(quantidade - cancelado, 0) * coalesce(custo_unit, 0)), 0) into tot from public.crm_compra_pedido_itens where pedido_id = p_id;
+    if tot > coalesce(r.aprovacao_total, 0) + 0.009 and r.aprovacao = 'aprovado' then
+      update public.crm_compra_pedidos set aprovacao = 'aguardando', aprovacao_total = round(tot, 2), aprovado_em = null, aprovado_por = null where id = p_id;
+    elsif r.aprovacao = 'aguardando' then
+      update public.crm_compra_pedidos set aprovacao_total = round(tot, 2) where id = p_id;
+    end if;
+  end if;
+  update public.crm_compra_pedidos set atualizado_em = now(),
+    obs = left(concat_ws(' · ', nullif(obs, ''), to_char(now() at time zone 'America/Sao_Paulo', 'DD/MM HH24:MI') || ' item ' || it.codigo || ': ' ||
+      trim(to_char(it.quantidade, 'FM999999990.###')) || ' → ' || trim(to_char(q, 'FM999999990.###'))), 1000)
+   where id = p_id returning * into r;
+  return to_jsonb(r);
+end $$;
+revoke all on function public.crm_compra_pedido_item(bigint, integer, numeric, numeric) from public, anon;
+grant execute on function public.crm_compra_pedido_item(bigint, integer, numeric, numeric) to authenticated;
