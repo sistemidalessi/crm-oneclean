@@ -23,7 +23,9 @@ const resposta = (s: number, c: unknown) => new Response(JSON.stringify(c), { st
 const OAUTH = Deno.env.get('BB_OAUTH_URL') || 'https://oauth.bb.com.br/oauth/token';
 const COBRANCA = Deno.env.get('BB_COBRANCA_URL') || 'https://api.bb.com.br/cobrancas/v2';
 const APP = () => encodeURIComponent(Deno.env.get('BB_APP_KEY') ?? '');
-const EXTRATOS = Deno.env.get('BB_EXTRATOS_URL') || 'https://api-extratos.bb.com.br/extratos/v1';
+// Extratos v2 (OpenAPI do BB, 04/11/2026): produção em extratos.mtls.api.bb.com.br/v2 (a v1 em api-extratos dá 403 para esta
+// aplicação); página de 30 a 120 registros; período de no máximo 31 dias; datas DDMMAAAA sem o zero da frente.
+const EXTRATOS = Deno.env.get('BB_EXTRATOS_URL') || 'https://extratos.mtls.api.bb.com.br/v2';
 
 // Serviço fiscal da VPS (04/11/2026): a API Extratos exige o certificado A1 (mTLS), que só existe lá. A chamada sai daqui pronta
 // (endereço + token); a VPS só acrescenta o certificado (rota /bb, servico-fiscal/bb.js). Mesmos Secrets da crm-fiscal.
@@ -352,7 +354,8 @@ Deno.serve(async (req) => {
       const ag = dig(b.agencia).slice(0, -1), cc = dig(b.conta).slice(0, -1);
       if (!ag || !cc) throw new Error('faltam agência e conta em Configurações → Integrações → Dados do convênio');
       const ate = /^\d{4}-\d{2}-\d{2}$/.test(String(c.ate)) ? c.ate : hojeSP();
-      const de = /^\d{4}-\d{2}-\d{2}$/.test(String(c.de)) ? c.de : maisDias(ate, -2);
+      let de = /^\d{4}-\d{2}-\d{2}$/.test(String(c.de)) ? c.de : maisDias(ate, -2);
+      if (de < maisDias(ate, -30)) de = maisDias(ate, -30);   // o BB aceita no máximo 31 dias por consulta
       // diagnóstico (04/11/2026, 1ª leitura deu 403 sem texto): { token_vps: true } pega o token pela VPS (com o certificado) e
       // { base: 'https://...bb.com.br/...' } troca o endereço da API
       const escopo = String(c.escopo || 'extrato-info');
@@ -366,7 +369,7 @@ Deno.serve(async (req) => {
       const base = /^https:\/\/([a-z0-9-]+\.)*bb\.com\.br\//i.test(String(c.base || '')) ? String(c.base).replace(/\/$/, '') : EXTRATOS;
       const lanc: any[] = []; let pagina = 1, ultimo: any = null;
       for (let volta = 0; volta < 30; volta++) {
-        const u = base + '/conta-corrente/agencia/' + ag + '/conta/' + cc + '?numeroPaginaSolicitacao=' + pagina + '&quantidadeRegistroPaginaSolicitacao=200' +
+        const u = base + '/conta-corrente/agencia/' + ag + '/conta/' + cc + '?numeroPaginaSolicitacao=' + pagina + '&quantidadeRegistroPaginaSolicitacao=120' +
           '&dataInicioSolicitacao=' + dataExtrato(de) + '&dataFimSolicitacao=' + dataExtrato(ate) + '&gw-dev-app-key=' + APP();
         const r = await viaVps({ url: u, token: tk });
         ultimo = r;
@@ -378,8 +381,11 @@ Deno.serve(async (req) => {
         pagina = prox;
       }
       const l = lanc.map((x: any) => ({ data: isoExtrato(x.dataLancamento), movimento: isoExtrato(x.dataMovimento), valor: Number(x.valorLancamento) || 0,
-        sinal: x.indicadorSinalLancamento ?? null, historico: String(x.textoDescricaoHistorico ?? '').trim(), complemento: String(x.textoInformacaoComplementar ?? '').trim(),
-        documento: x.numeroDocumento ?? null, codigo: x.codigoHistorico ?? null, contrapartida: dig(x.numeroCpfCnpjContrapartida) || null }));
+        sinal: x.indicadorSinalLancamento ?? null, tipo: x.indicadorTipoLancamento ?? null,
+        historico: String(x.textoDescricaoSubHistorico ?? x.textoDescricaoHistorico ?? '').trim(), complemento: String(x.textoInformacaoComplementar ?? '').trim(),
+        documento: x.numeroDocumento ?? null, codigo: x.codigoHistorico ?? null, lote: x.numeroLote ?? null,
+        contrapartida: dig(x.numeroCadastroPessoaFisicaCadastroNacPessoasJuridicasContrapartida ?? x.numeroCpfCnpjContrapartida) || null,
+        id_transacao: String(x.textoIdentificadorUnicoTransacao ?? '').trim() || null }));
       return resposta(200, { ok: true, de, ate, n: l.length, lancamentos: l, ...(c.bruto ? { bruto: lanc.slice(0, 5), pagina: ultimo?.json ? Object.keys(ultimo.json) : null } : {}) });
     }
     if (c.acao === 'baixar_canceladas') return resposta(200, await baixarCanceladas());
