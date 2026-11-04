@@ -676,17 +676,21 @@
     const anoAtual = new Date().getFullYear(), anos = [];
     for (let a = anoAtual; a >= 2025; a--) anos.push([a, String(a)]);
     const mostra = 500;
+    // 04/11/2026 (Wellington não achava o mês a mês: ficava embaixo dos ~900 produtos do estoque atual): um relatório de cada vez
+    const vista = rel.vista || 'ano';
+    const bt = (id, t) => '<button type="button" class="' + (vista === id ? 'ativa' : '') + '" data-acao="es-rel-vista" data-id="' + id + '">' + esc(t) + '</button>';
     return '<section class="cartao"><h2>Relatórios</h2>' +
-      '<p class="acoes"><input type="search" placeholder="Procurar produto ou código (vale para os dois)" value="' + esc(rel.busca) + '" data-rel-busca class="of-busca"> ' +
+      '<nav class="cx-abas">' + bt('ano', 'Vendas do ano, mês a mês') + bt('estoque', 'Estoque atual') + bt('periodo', 'Período (vendas, entradas e saídas)') + '</nav>' +
+      '<p class="acoes"><input type="search" placeholder="Procurar produto ou código" value="' + esc(rel.busca) + '" data-rel-busca class="of-busca"> ' +
       '<button type="button" class="btn sec" data-acao="imprimir">Imprimir</button></p></section>' +
-      '<section class="cartao"><h2>Estoque atual <small>' + est.length + ' produto(s)</small></h2>' +
+      (vista !== 'estoque' ? '' : '<section class="cartao"><h2>Estoque atual <small>' + est.length + ' produto(s)</small></h2>' +
       '<p class="acoes"><label class="filtro-inline"><input type="checkbox" data-rel-so' + (rel.soSaldo ? ' checked' : '') + '> só os que têm saldo (tira os zerados)</label> ' +
       '<button type="button" class="btn sec" data-acao="es-rel-estoque-csv">Baixar planilha</button></p>' +
       (est.length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Código</th><th>Produto</th><th>Unidade</th><th class="num">Quantidade em estoque</th></tr></thead><tbody>' +
         est.slice(0, mostra).map(x => '<tr><td>' + esc(x.codigo) + '</td><td>' + esc(R.nomeDeItem(x.descricao || x.codigo)) + '</td><td>' + esc(x.unidade || '') + '</td>' +
           '<td class="num' + (+x.saldo < 0 ? ' neg' : '') + '">' + qtd(x.saldo) + '</td></tr>').join('') + '</tbody></table></div>' +
-        (est.length > mostra ? '<p class="dica">Mostrando ' + mostra + ' de ' + est.length + '; a planilha leva todos.</p>' : '') : '<p class="vazio">Nada aqui.</p>') + '</section>' +
-      '<section class="cartao"><h2>Vendas do ano, mês a mês <small>' + (vend ? vend.length + ' produto(s)' : 'carregando…') + '</small></h2>' +
+        (est.length > mostra ? '<p class="dica">Mostrando ' + mostra + ' de ' + est.length + '; a planilha leva todos.</p>' : '') : '<p class="vazio">Nada aqui.</p>') + '</section>') +
+      (vista !== 'ano' ? '' : '<section class="cartao"><h2>Vendas do ano, mês a mês <small>' + (vend ? vend.length + ' produto(s)' : 'carregando…') + '</small></h2>' +
       '<p class="dica">' + (comValorAno ? 'Valor (R$) e quantidade' : 'Quantidade') + ' vendida de cada produto em cada mês, pelas notas de venda (sem as canceladas), como a venda anual por produto do FKN. A caixa vendida com o código da unidade conta em unidades.</p>' +
       '<p class="acoes"><label class="filtro-inline">Ano <select data-rel-ano>' + CRM.opcoesHTML(anos, rel.ano) + '</select></label> ' +
       '<button type="button" class="btn sec" data-acao="es-rel-vendas-csv"' + (vend ? '' : ' disabled') + '>Baixar planilha</button></p>' +
@@ -699,7 +703,8 @@
             const lv = (x.valores || []).map(v => '<td class="num">' + (v == null ? '' : R.moeda(v).replace(/^R\$\s*/, '')) + '</td>').join('') + '<td class="num"><strong>' + R.moeda(x.valor_total || 0).replace(/^R\$\s*/, '') + '</strong></td>';
             return '<tr class="ra-valor">' + nome + '<td><small>R$</small></td>' + lv + '</tr><tr class="ra-qtd"><td><small>qtde</small></td>' + lq + '</tr>';
           }).join('') +
-          '</tbody></table></div>' + (vend.length > mostra ? '<p class="dica">Mostrando ' + mostra + ' de ' + vend.length + '; a planilha leva todos.</p>' : '')) + '</section>' + telaRelPeriodo() + telaMovsPeriodo();
+          '</tbody></table></div>' + (vend.length > mostra ? '<p class="dica">Mostrando ' + mostra + ' de ' + vend.length + '; a planilha leva todos.</p>' : '')) + '</section>') +
+      (vista === 'periodo' ? telaRelPeriodo() + telaMovsPeriodo() : '');
   }
 
   function telaConferencia() {
@@ -1495,6 +1500,7 @@
       });
     },
     // Saída avulsa (04/11/2026, pedido do Wellington): tira do estoque com o motivo, sem contar o produto inteiro
+    'es-rel-vista': id => { rel.vista = id; CRM.render(); },
     'es-saida-avulsa': () => {
       const base = (fkn || []).filter(e => !S.ehCaixa(e.codigo));
       const nomeDe = new Map(base.map(e => [e.codigo, e.descricao])), cad = new Set(base.map(e => e.codigo));
