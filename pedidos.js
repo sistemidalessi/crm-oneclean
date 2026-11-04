@@ -296,6 +296,7 @@
         esc('disp. ' + qtd(d.disponivel) + ' ' + (d.unidade || '') + (d.preco_venda ? ' · R$ ' + preco(d.preco_venda) : '')) + '</option>').join('') + '</datalist>';
     } catch (e) { peds = peds || []; if (!silencio) CRM.falhou(e); }
     carregando = false;
+    tentaAbrirNumero();
     CRM.render();
   }
   const recarrega = () => { carregando = false; return carrega(true); };
@@ -610,6 +611,8 @@
 
   // 03/11/2026 (pedido do Anderson): quem trava no crédito (só o administrador libera) chama o administrador na hora, pelo
   // WhatsApp dele, com o pedido, o cliente, o valor, a forma de pagamento e a trava já escritos.
+  // endereço do CRM + "#pedido=N": abre direto no pedido (app.js)
+  const linkPedido = n => location.origin + location.pathname.replace(/[^/]*$/, '') + '#pedido=' + n;
   function avisoCredito(p, bAbertos, t) {
     if (CRM.ehAdmin()) return '';
     const adm = (E().D.usuarios || []).find(u => u.papel === 'admin' && u.ativo !== false && String(u.telefone || '').replace(/\D/g, '').length >= 10);
@@ -617,7 +620,8 @@
     const tel = String(adm.telefone).replace(/\D/g, ''), d = p.dados || {};
     const travas = bAbertos.filter(b => ['SEM ANÁLISE', 'PRAZO', 'LIMITE'].indexOf(b) !== -1).map(b => P.ROTULO_BLOQUEIO[b] || b).join(', ');
     const txt = 'Olá, ' + String(adm.nome || '').split(' ')[0] + '! O pedido ' + p.numero + ' de ' + nomeCliente(p) + ' (' + R.moeda(t.geral) + (d.pagamento ? ', ' + d.pagamento : '') +
-      ') está travado no crédito: ' + travas + '. Pode analisar no CRM (Pedidos → pedido ' + p.numero + ' ou Caixa → Crédito)? Assim a gente já separa. — ' + (CRM.nomeUsuario(CRM.meuId()) || '');
+      ') está travado no crédito: ' + travas + '. Pode analisar? Assim a gente já separa. — ' + (CRM.nomeUsuario(CRM.meuId()) || '') +
+      '\n\n👉 Abrir o pedido ' + p.numero + ' no CRM: ' + linkPedido(p.numero);
     return ' <a class="btn" href="https://wa.me/' + (tel.length <= 11 ? '55' : '') + tel + '?text=' + encodeURIComponent(txt) + '" target="_blank" rel="noopener noreferrer">📲 Pedir a análise ao ' + esc(String(adm.nome || 'administrador').split(' ')[0]) + '</a>';
   }
 
@@ -1080,7 +1084,18 @@
     }
   };
 
+  // Abre o pedido pelo número (link "#pedido=N" do WhatsApp, app.js). Se a lista ainda não chegou, abre quando chegar; se o
+  // pedido não estiver entre os carregados (antigo, ou de outra carteira), avisa.
+  let abrirNum = null;
+  function tentaAbrirNumero() {
+    if (abrirNum == null || peds === null) return;
+    const n = abrirNum; abrirNum = null;
+    const p = peds.find(x => Number(x.numero) === n);
+    if (p) { ed = null; aberto = p.id; abaPed = 'produtos'; f.ver = 'lista'; }
+    else CRM.toast('Pedido ' + n + ' não encontrado (pode ser de outra carteira ou já ter saído da lista).');
+  }
   CRM.telas.pedidos = {
+    abrirNumero(n) { abrirNum = n; tentaAbrirNumero(); CRM.render(); },
     // o que volta depois da versão nova do CRM (app.js, guardaParaVersao; 03/11/2026)
     lugar: { obter: () => ({ ver: f.ver, sit: f.sit, vend: f.vend, busca: f.busca, est: f.est, bolao: f.bolao, aberto, abaPed }),
       aplicar: o => { if (!o) return; ['ver', 'sit', 'vend', 'busca', 'est', 'bolao'].forEach(k => { if (k in o) f[k] = o[k]; }); aberto = o.aberto || null; abaPed = o.abaPed || abaPed; } },

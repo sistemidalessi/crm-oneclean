@@ -12,6 +12,27 @@
     integrity: 'sha384-iLddHTLokph6Omwoyid4XKxHaWa6w41BnoEj0q5oOrzmYPpHIKt1wyjReA7s//pP'
   };
 
+  // Link direto para um pedido (04/11/2026, pedido do Anderson: abrir do WhatsApp, no celular, já no pedido travado):
+  // ".../crm-oneclean/#pedido=69". O número fica guardado na aba (sessionStorage) para passar pelo login e o "#" sai do
+  // endereço (o login usa o "#" na troca de senha). Depois de entrar, o CRM abre a tela Pedidos já nesse pedido.
+  const LINK_PEDIDO = 'sd-crm-ir-pedido';
+  function guardaLinkPedido() {
+    const m = /^#pedido=(\d{1,9})$/.exec(location.hash || '');
+    if (!m) return false;
+    try { sessionStorage.setItem(LINK_PEDIDO, m[1]); } catch (e) { /* sem guarda: abre a tela normal */ }
+    try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { /* fica o # */ }
+    return true;
+  }
+  guardaLinkPedido();
+  function abreLinkPedido() {
+    let n = null;
+    try { n = sessionStorage.getItem(LINK_PEDIDO); sessionStorage.removeItem(LINK_PEDIDO); } catch (e) { return; }
+    if (!n || !E.eu || !CRM.telas.pedidos || !CRM.telas.pedidos.abrirNumero) return;
+    E.aba = 'pedidos'; gravaAbaDaSessao('pedidos');
+    CRM.telas.pedidos.abrirNumero(Number(n));
+  }
+  window.addEventListener('hashchange', () => { if (guardaLinkPedido()) abreLinkPedido(); });
+
   const pref = (k, p) => { try { return localStorage.getItem('sd-crm-pref-' + k) || p; } catch (e) { return p; } };
   const gravaPref = (k, v) => { try { localStorage.setItem('sd-crm-pref-' + k, v); } catch (e) { /* ok */ } };
   // A tela em uso fica na aba do navegador (sessionStorage): recarregar continua nela; abrir o CRM de novo começa na
@@ -934,6 +955,7 @@
     if (atual) E.eu = atual;
     if (!abaDaSessao()) { E.aba = telaInicial(E.eu); gravaAbaDaSessao(E.aba); } // abriu o CRM agora: a tela ao entrar
     document.title = nomeInstalacao() + ' · CRM';
+    abreLinkPedido();   // veio por um link "#pedido=N" (WhatsApp): vai direto ao pedido
     CRM.render();
     const al = R.alertas(E.D, E.ix, E.cfg, CRM.hoje(), CRM.meuId());
     if (al.atrasadas.length) CRM.toast('Você tem ' + al.atrasadas.length + ' tarefa(s) atrasada(s).');
