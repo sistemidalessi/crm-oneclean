@@ -98,7 +98,7 @@ async function criaModeloBoleto(token: string, wabaId: string, appId: string, ur
     name: MODELO_BOLETO, language: 'pt_BR', category: 'UTILITY',
     components: [
       { type: 'HEADER', format: 'DOCUMENT', example: { header_handle: [String(uj.h)] } },
-      { type: 'BODY', text: CORPO_BOLETO(EMPRESA), example: { body_text: [['Maria', 'Renata', 'a NF 2428, que venceu em 28/10/2026',
+      { type: 'BODY', text: CORPO_BOLETO(EMPRESA), example: { body_text: [['Maria', 'Renata', 'da NF 2428, que venceu em 28/10/2026',
         'R$ 715,44 (original R$ 678,35, com juros e multa até 04/11/2026)', '00190.00009 03804.880106 00001.464171 9 16130000067835']] } },
       { type: 'FOOTER', text: EMPRESA + ' · financeiro' },
       { type: 'BUTTONS', buttons: [

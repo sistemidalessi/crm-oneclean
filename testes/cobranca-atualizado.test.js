@@ -66,7 +66,8 @@ test('quem recebe: um envio por cliente; fora o cartório, o combinado, o que j�
 test('texto do WhatsApp e do e-mail, a faixa do PDF e o resumo da rodada', () => {
   const env = { itens: [{ boleto: bol(), titulo: { nota_numero: 2552, duplicata: '002552/01', vencimento: '2026-10-28' }, ...A.encargos(bol(), '2026-11-04') }], original: 678.35, total: 715.44 };
   const p = A.parametrosBoleto({ cliente: 'Maria', vendedora: 'Renata', envio: env, hoje: '2026-11-04' });
-  assert.strictEqual(p[2], 'a NF 2552, que venceu em 28/10/2026');
+  assert.strictEqual(p[2], 'da NF 2552, que venceu em 28/10/2026');
+  assert.match(A.textoFinal(A.CORPO_BOLETO('X'), p), /o pagamento da NF 2552, que venceu/);
   assert.strictEqual(p[3], 'R$ 715,44 (original R$ 678,35, com juros e multa até 04/11/2026)');
   assert.match(p[4], /^00190\.00009 03804\.880106/);
   const corpo = A.CORPO_BOLETO('Empresa Exemplo');

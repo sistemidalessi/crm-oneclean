@@ -111,7 +111,7 @@ const docDe = t => (t.nota_numero ? 'NF ' + t.nota_numero : 'duplicata ' + t.dup
 // aviso do 3º dia útil). {{1}} cliente · {{2}} vendedor(a) · {{3}} notas e vencimentos · {{4}} valor de hoje ·
 // {{5}} linha(s) digitável(is).
 export const CORPO_BOLETO = (empresa) => 'Olá, {{1}}! Aqui é {{2}}, da ' + empresa + '.\n\n' +
-  'Ainda não identificamos o pagamento de {{3}}. Para facilitar, segue em PDF o boleto atualizado, já com juros e multa até hoje.\n\n' +
+  'Ainda não identificamos o pagamento {{3}}. Para facilitar, segue em PDF o boleto atualizado, já com juros e multa até hoje.\n\n' +
   'Valor para pagar hoje: {{4}}\nLinha digitável: {{5}}\n\n' +
   'O código é o mesmo do boleto original: o banco calcula os encargos do dia na hora do pagamento. Se já tiver pago, por favor desconsidere e toque em "Já paguei". Qualquer dúvida, fale comigo pelo botão abaixo. Obrigado!';
 const formataLinha = l => {
@@ -120,8 +120,8 @@ const formataLinha = l => {
 };
 export function parametrosBoleto({ cliente, vendedora, envio, hoje }) {
   const it = envio.itens;
-  const p3 = it.length === 1 ? 'a ' + docDe(it[0].titulo) + ', que venceu em ' + dm(it[0].titulo.vencimento)
-    : 'as ' + juntaE(it.map(x => docDe(x.titulo) + ' (venceu em ' + dm(x.titulo.vencimento) + ')'));
+  const p3 = it.length === 1 ? 'da ' + docDe(it[0].titulo) + ', que venceu em ' + dm(it[0].titulo.vencimento)
+    : 'das ' + juntaE(it.map(x => docDe(x.titulo) + ' (venceu em ' + dm(x.titulo.vencimento) + ')'));
   const p4 = moeda(envio.total) + ' (original ' + moeda(envio.original) + ', com juros e multa até ' + dm(hoje) + ')';
   const p5 = it.map(x => formataLinha(x.boleto.linha)).join(' / ');
   return [cliente || 'tudo bem', vendedora || 'o financeiro', p3, p4, p5];
