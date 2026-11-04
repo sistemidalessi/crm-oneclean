@@ -13,7 +13,7 @@
   const POLITICA = {
     compraPadrao: 1500,      // sem compra prevista nem histórico
     scoreMinimo: 400,        // abaixo: só à vista
-    scoreBom: 600,           // a partir daqui: 2 meses de compra e 28 dias
+    scoreBom: 600,           // a partir daqui: 2 meses de compra e 35 dias (era 28; Anderson, 04/11/2026)
     pontualMinima: 80,       // pontualidade abaixo disso desce um degrau
     tetoDoBureau: 1,         // nunca mais que o limite sugerido pela consulta (era 10%, que cortava demais o limite da API da Rekta;
                              // 28/10/2026, decisão do Anderson depois da 2ª consulta real)
@@ -71,7 +71,7 @@
       if (t < P.arredonda) { motivos.push('limite da consulta baixo demais (' + R.moeda(k.limite_sugerido) + ')'); return fim('vista'); }
       if (limite > t) { limite = t; motivos.push('limitado ao limite da consulta: ' + R.moeda(t)); }
     }
-    return fim('prazo', limite, degrau === 2 ? 28 : 21);
+    return fim('prazo', limite, degrau === 2 ? 35 : 21);
   }
 
   // Fatos da consulta em linhas curtas (para a conferência e a ficha).
@@ -672,7 +672,7 @@
       intro: 'O pedido vai para o Anderson aprovar (ele recebe uma tarefa). A resposta volta para você como tarefa e aparece aqui na ficha.',
       campos: [{ nome: 'limite', rotulo: 'Limite que o cliente precisa (R$)', tipo: 'numero', terco: true },
         { nome: 'prazo', rotulo: 'Prazo (dias)', tipo: 'numero', passo: '1', max: 365, terco: true, vazioNulo: true },
-        { nome: 'motivo', rotulo: 'Motivo', tipo: 'textarea', largo: true, linhas: 3, obrigatorio: true, dica: 'ex.: o cliente vai comprar R$ 8 mil por mês e só fecha faturado em 28 dias' }],
+        { nome: 'motivo', rotulo: 'Motivo', tipo: 'textarea', largo: true, linhas: 3, obrigatorio: true, dica: 'ex.: o cliente vai comprar R$ 8 mil por mês e só fecha faturado em 35 dias' }],
       salvarTexto: 'Mandar ao Anderson',
       aoSalvar: async v => {
         await CRM.store().creditoPedir(id, Number(v.limite) || null, v.prazo || null, v.motivo);
@@ -693,7 +693,7 @@
       campos: [{ nome: 'decisao', rotulo: 'Decisão', tipo: 'select', obrigatorio: true, opcoes: [['aprova', 'Aprovar a prazo'], ['recusa', 'Não aprovar']] },
         { nome: 'limite', rotulo: 'Limite (R$)', tipo: 'numero', terco: true }, { nome: 'prazo', rotulo: 'Prazo (dias)', tipo: 'numero', passo: '1', max: 365, terco: true, vazioNulo: true },
         { nome: 'resposta', rotulo: 'Resposta para a vendedora (opcional)', tipo: 'textarea', largo: true, linhas: 2 }],
-      valores: { decisao: 'aprova', limite: p.limite || '', prazo: p.prazo_max || 28 }, salvarTexto: 'Responder',
+      valores: { decisao: 'aprova', limite: p.limite || '', prazo: p.prazo_max || 35 }, salvarTexto: 'Responder',
       aoSalvar: async v => {
         await CRM.store().creditoResponder(p.id, v.decisao === 'aprova', Number(v.limite) || null, v.prazo || null, v.resposta);
         cacheVer.delete(p.empresa_id);

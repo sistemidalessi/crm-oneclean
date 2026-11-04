@@ -9829,3 +9829,51 @@ do $$ begin if exists (select 1 from pg_roles where rolname = 'service_role') th
   grant execute on function public.crm_credito_auto_gravar(uuid, text, numeric, integer, integer, jsonb, text, text) to service_role;
   grant execute on function public.crm_credito_pedido_da_consulta(uuid, uuid, numeric, integer, text) to service_role;
 end if; end $$;
+
+-- 04/11/2026, depois do teste: valor nas tarefas como "R$ 8.000,00" (saía "8.000.00") e prazo padrão de 35 dias, não 28
+-- (Anderson: "em vez de 28 dias, deixe 35 dias"; a política do credito.js também passou para 35).
+-- Aplicado em 04/11/2026 (migração crm_credito_tarefa_moeda_35_dias).
+create or replace function public.crm_credito_avisa_admin(p_pedido bigint) returns void language plpgsql security definer set search_path = public as $$
+declare p public.crm_credito_pedidos; e record; quem text; adm uuid;
+begin
+  select * into p from public.crm_credito_pedidos where id = p_pedido;
+  select nome into e from public.crm_empresas where id = p.empresa_id;
+  select nome into quem from public.crm_usuarios where user_id = p.pedido_por;
+  select user_id into adm from public.crm_usuarios where papel = 'admin' and ativo order by criado_em limit 1;
+  if adm is null then return; end if;
+  insert into public.crm_atividades (empresa_id, tipo, descricao, data_hora, concluida, responsavel_id, automatica, criado_por)
+  values (p.empresa_id, 'tarefa', left('Crédito: ' || coalesce(quem, 'a equipe') || ' pede ' ||
+      case when p.limite > 0 then 'R$ ' || translate(to_char(p.limite, 'FM999G999G990D00'), ',.', '.,') else 'a análise' end ||
+      case when p.prazo_max is not null then ' em ' || p.prazo_max || ' dias' else '' end || ' para ' || coalesce(e.nome, 'o cliente') ||
+      coalesce(' (' || nullif(btrim(p.motivo), '') || ')', '') || '. Responder em Caixa → Crédito.', 500), now(), false, adm, true, p.pedido_por);
+end;
+$$;
+create or replace function public.crm_credito_responder(p_id bigint, p_aprova boolean, p_limite numeric, p_prazo integer, p_resposta text) returns void
+language plpgsql security definer set search_path = public as $$
+declare p public.crm_credito_pedidos; hoje date := (now() at time zone 'America/Sao_Paulo')::date; e text;
+begin
+  if not public.crm_eh_admin() then raise exception 'só o administrador responde'; end if;
+  select * into p from public.crm_credito_pedidos where id = p_id for update;
+  if p.id is null or p.situacao <> 'aberto' then raise exception 'pedido de crédito não encontrado ou já respondido'; end if;
+  if p_aprova and coalesce(p_limite, 0) <= 0 then raise exception 'para aprovar, diga o limite'; end if;
+  update public.crm_credito_pedidos set situacao = case when p_aprova then 'aprovado' else 'recusado' end, resposta = nullif(btrim(coalesce(p_resposta, '')), ''),
+    respondido_por = auth.uid(), respondido_em = now(), limite = case when p_aprova then p_limite else limite end, prazo_max = case when p_aprova then coalesce(p_prazo, prazo_max) else prazo_max end
+   where id = p_id;
+  if p_aprova then
+    insert into public.crm_credito as c (empresa_id, situacao, limite, prazo_max, analisado_em, revisar_em, origem, obs, aprovado_por, aprovado_em, atualizado_em)
+    values (p.empresa_id, 'prazo', p_limite, coalesce(p_prazo, p.prazo_max, 35), hoje, (hoje + interval '6 months')::date, 'manual',
+      'Pedido da equipe aprovado' || coalesce(': ' || nullif(btrim(coalesce(p_resposta, '')), ''), ''), auth.uid(), now(), now())
+    on conflict (empresa_id) do update set situacao = 'prazo', limite = excluded.limite, prazo_max = excluded.prazo_max, analisado_em = excluded.analisado_em,
+      revisar_em = excluded.revisar_em, obs = excluded.obs, aprovado_por = excluded.aprovado_por, aprovado_em = excluded.aprovado_em, atualizado_em = now();
+    perform public.crm_pedidos_atualizar();
+  end if;
+  select nome into e from public.crm_empresas where id = p.empresa_id;
+  update public.crm_atividades set concluida = true, concluida_em = now()
+   where empresa_id = p.empresa_id and tipo = 'tarefa' and not concluida and automatica and descricao like 'Crédito: %Responder em Caixa → Crédito.';
+  insert into public.crm_atividades (empresa_id, tipo, descricao, data_hora, concluida, responsavel_id, automatica, criado_por)
+  values (p.empresa_id, 'tarefa', left('Crédito de ' || coalesce(e, 'o cliente') || ': ' ||
+      case when p_aprova then 'APROVADO, R$ ' || translate(to_char(p_limite, 'FM999G999G990D00'), ',.', '.,') || ' em até ' || coalesce(p_prazo, p.prazo_max, 35) || ' dias'
+           else 'não aprovado' end || coalesce(' (' || nullif(btrim(coalesce(p_resposta, '')), '') || ')', '') || '. Avise o cliente.', 500),
+    now(), false, p.pedido_por, true, auth.uid());
+end;
+$$;

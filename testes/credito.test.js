@@ -4,18 +4,18 @@ const assert = require('node:assert');
 const C = require('../credito.js');
 
 // consulta FICTÍCIA de uma empresa boa (score 780, sem restrições, 100% pontual, limite sugerido R$ 45.000, troca de sócio
-// há 3 anos): compra de R$ 1.500 por mês → R$ 3.000 a prazo, 28 dias. (Nunca dados reais de cliente: o repositório é público.)
+// há 3 anos): compra de R$ 1.500 por mês → R$ 3.000 a prazo, 35 dias (era 28 até 04/11/2026). (Nunca dados reais de cliente: o repositório é público.)
 const MBS = { razao_social: 'EMPRESA EXEMPLO LTDA', documento: '11222333000181', situacao_cadastral: 'Ativo', fundacao: '1990-01-15',
   score: 780, prob_inadimplencia: 3, recomendacao: 'Negociação Recomendada', pendencias_qtd: 0, pendencias_valor: 0, protestos_qtd: 0, protestos_valor: 0,
   cheques_qtd: 0, acoes_qtd: 0, falencia: false, fraude: false, pontualidade: 100, atraso_mais_60: false, limite_sugerido: 45000,
   faturamento_presumido: 'De R$ 800.001 até R$ 1.000.000', mudanca_societaria: 'sócio único desde 2023', mudanca_em: '2023-09-01', consultas_12m: 2, alertas: ['consulta de factoring no último ano'] };
 const hoje = '2026-10-27';
 
-test('MBS: 2 meses de compra, 28 dias, revisão em 6 meses', () => {
+test('MBS: 2 meses de compra, 35 dias, revisão em 6 meses', () => {
   const p = C.propor(MBS, { compra_mensal: 1500, hoje });
   assert.strictEqual(p.situacao, 'prazo');
   assert.strictEqual(p.limite, 3000);
-  assert.strictEqual(p.prazo_max, 28);
+  assert.strictEqual(p.prazo_max, 35);
   assert.strictEqual(p.revisar_em, '2027-04-27');
   assert.ok(p.atencao.some(a => /factoring/.test(a)));
 });
@@ -133,7 +133,7 @@ test('daRekta: resposta de pessoa jurídica (texto com JSON dentro)', () => {
   assert.equal(k.mudanca_em, '2019-02-05');
   assert.deepEqual(k.alertas, []);
   const p = C2.propor(k, { hoje: '2026-10-28' });
-  assert.deepEqual([p.situacao, p.limite, p.prazo_max], ['prazo', 3000, 28]);
+  assert.deepEqual([p.situacao, p.limite, p.prazo_max], ['prazo', 3000, 35]);
   // o texto também pode vir duas vezes embrulhado; e restrição em formato novo conta (melhor parar para conferir)
   assert.equal(C2.daRekta(JSON.stringify(JSON.stringify(pj)), '11222333000181').score, 812);
   const ruim = Object.assign({}, pj, { protestos: { lista: [{ valor: '1.200,00', cartorio: 'X' }, { valor: '300,00', cartorio: 'Y' }] }, pendencias_restricoes: { quantidade_total: '3', valor_total: '4.500,00' },
