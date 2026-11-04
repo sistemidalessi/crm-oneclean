@@ -923,6 +923,7 @@ pre.of-previa { white-space: pre-wrap; font-family: inherit; font-size: .88rem; 
 .sp-doc th, .sp-doc td { border: 1px solid #999; padding: 1.2mm 2mm; text-align: left; vertical-align: top; }
 .sp-doc td.n { text-align: right; font-weight: 700; } .sp-doc td.cx { width: 7mm; }
 .sp-doc .ass { margin-top: 4mm; }
+.rt-romaneio td.rt-ass { width: 55mm; height: 12mm; } .rt-romaneio small { color: #333; }
 @media print { .sp-doc .quebra { break-before: page; } }
 .pd-num { width: 80px; }
 

@@ -177,7 +177,8 @@
         (k ? (vid => '<label class="filtro-inline">🚚 Caminhão <select data-rt-veic="' + esc(k) + '"><option value="">— escolher —</option>' +
           (veics || []).filter(v => v.ativo !== false || v.id === vid).map(v => '<option value="' + v.id + '"' + (v.id === vid ? ' selected' : '') + '>' + esc(v.nome + (v.placa ? ' · ' + v.placa : '')) + '</option>').join('') +
           '</select></label>' + (vid ? '' : ' <small class="neg">sem caminhão</small>'))(veicDoMot(k)) : '') +
-        (l.length > 1 && l.some(x => !X.feita(x)) ? '<button type="button" class="mini" data-acao="rt-bairro" data-id="' + esc(k) + '">Ordenar por bairro</button>' : '') + '</div>' +
+        (l.length > 1 && l.some(x => !X.feita(x)) ? '<button type="button" class="mini" data-acao="rt-bairro" data-id="' + esc(k) + '">Ordenar por bairro</button>' : '') +
+        ' <button type="button" class="mini" data-acao="rt-romaneio" data-id="' + esc(k) + '" title="folha para o motorista: clientes, endereços de entrega e notas, na ordem da rota">🖨 Romaneio</button></div>' +
       '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Ordem</th><th>Cliente e endereço</th><th>Nota</th><th>Motorista</th><th>Situação</th></tr></thead><tbody>' +
       l.map((x, i) => {
         const s = SIT[x.situacao] || [x.situacao, ''], ag = X.seloAgradecimento(x);
@@ -192,6 +193,33 @@
             (x.situacao === 'pendente' ? ' <button type="button" class="mini" data-acao="rt-tirar" data-id="' + esc(x.id) + '" title="tirar da rota (a nota volta para a lista de baixo)">tirar</button>' : '') + '</td></tr>';
       }).join('') + '</tbody></table></div></section>';
   }
+  // Romaneio (04/11/2026, Edson: "na FKN sai os endereços de entrega e o nome dos clientes"): a folha do motorista com as
+  // paradas na ordem da rota, o endereço de entrega (o local do pedido, quando tem), a nota e o valor, e espaço para quem recebeu.
+  function imprimir(html, titulo) {
+    const el = document.getElementById('impressao');
+    el.innerHTML = html;
+    document.body.classList.add('imprimindo');
+    const antes = document.title; document.title = titulo;
+    const limpa = () => { document.body.classList.remove('imprimindo'); document.title = antes; window.removeEventListener('afterprint', limpa); };
+    window.addEventListener('afterprint', limpa);
+    setTimeout(() => window.print(), 50);
+  }
+  function htmlRomaneio(k) {
+    const l = doMotorista(k).slice().sort((a, b) => (a.ordem || 0) - (b.ordem || 0) || (a.numero || 0) - (b.numero || 0));
+    const veic = (l.find(x => x.veiculo) || {}).veiculo || '';
+    const total = l.reduce((t, x) => t + (Number(x.valor) || 0), 0);
+    return '<div class="sp-doc rt-romaneio"><h1>Romaneio de entrega — ' + esc(diaLongo(dados.dia)) + '</h1>' +
+      '<p><strong>Motorista:</strong> ' + esc(k ? nomeMot(k) || '—' : 'sem motorista') + ' &nbsp; <strong>Caminhão:</strong> ' + esc(veic || '____________') +
+        ' &nbsp; <strong>Paradas:</strong> ' + l.length + ' &nbsp; <strong>Total das notas:</strong> ' + esc(R.moeda(total)) + '</p>' +
+      '<table><thead><tr><th>Nº</th><th>Cliente</th><th>Endereço de entrega</th><th>NF</th><th>Valor</th><th>Recebido por (nome e assinatura)</th></tr></thead><tbody>' +
+      l.map((x, i) => '<tr><td class="n">' + (i + 1) + '</td><td><strong>' + esc(x.cliente || '—') + '</strong>' + (x.vendedor ? '<br><small>' + esc(x.vendedor) + '</small>' : '') + '</td>' +
+        '<td>' + esc(x.endereco || 'sem endereço no cadastro') + (x.obs ? '<br><small>Obs.: ' + esc(x.obs) + '</small>' : '') + '</td>' +
+        '<td>' + esc(x.numero) + '</td><td>' + esc(R.moeda(x.valor)) + '</td><td class="rt-ass"></td></tr>').join('') +
+      '</tbody></table>' +
+      '<p class="ass">Saída: ____:____ &nbsp; Km saída: ________ &nbsp; Retorno: ____:____ &nbsp; Km retorno: ________</p>' +
+      '<p class="ass">Motorista: ______________________________ &nbsp; Conferido por: ______________________________</p></div>';
+  }
+
   function blocoCandidatas(opMot) {
     const l = dados.cand;
     return '<section class="cartao"><div class="cabecalho-cartao"><h2>Notas para pôr na rota <small>' + l.length + ' nota(s) dos últimos 10 dias, ainda sem entrega</small></h2></div>' +
@@ -301,6 +329,7 @@
   // ============================================================ ações e registro das telas
   Object.assign(CRM.acoes, {
     'rt-atualizar': () => recarrega(),
+    'rt-romaneio': k => { if (!doMotorista(k).length) return; imprimir(htmlRomaneio(k), 'Romaneio ' + dados.dia + ' ' + (k ? nomeMot(k) || '' : '')); },
     'rt-proximo-dia': () => { f.dia = proximoDiaEntrega(hojeSP()); dados = null; CRM.render(); },
     'rt-programada': () => {
       const d = ((CRM.estado.D.config || [])[0] || {}).dados || {};
