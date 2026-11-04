@@ -2663,6 +2663,7 @@ begin
     select p.id,
            bool_or(v.pl <= 0) sem_preco,
            sum(v.pl * v.q) filter (where v.c > 0) rec_c, sum(v.c * v.q) filter (where v.c > 0) cus_c,
+           sum((v.c / (1 - mmin / 100) - 0.01) * v.q) filter (where v.c > 0) min_c,   -- 1 centavo de tolerância (arredondamento da tabela)
            sum(v.pl * v.q) filter (where v.c <= 0 and v.tb > 0) rec_t, sum(v.tb * v.q) filter (where v.c <= 0 and v.tb > 0) tab_t
       from public.crm_pedidos p
       cross join lateral jsonb_array_elements(p.itens) i
@@ -2676,7 +2677,7 @@ begin
       case when exists (select 1 from public.crm_titulos t where t.empresa_id = p.empresa_id and coalesce(t.previsao, t.vencimento) < hoje and not t.abono) then 'ATRASO' end,
       case when not p.entrada_ok and coalesce(p.dados->>'pagamento', '') ~* '(vista|antecipad|pix|transfer|dep[oó]sito)' and coalesce(p.dados->>'pagamento', '') !~* '[0-9]+ *(dias|ddl)' then 'SEM ENTRADA' end,
       case when trava and (coalesce(mg.sem_preco, false)
-             or (coalesce(mg.rec_c, 0) > 0 and (mg.rec_c - mg.cus_c) / mg.rec_c * 100 < mmin - 0.005)
+             or (coalesce(mg.rec_c, 0) > 0 and (mg.rec_c - mg.cus_c) / mg.rec_c * 100 < mmin - 0.005 and mg.rec_c < mg.min_c - 0.000001)
              or (coalesce(mg.tab_t, 0) > 0 and mg.rec_t < round(mg.tab_t * (1 + neg / 100), 2) - 0.005)) then 'PREÇO' end,
       case when cr.id is not null and (cr.tem is null or cr.situacao = 'analise') then 'SEM ANÁLISE' end,
       case when cr.id is not null and (cr.situacao = 'vista' or (cr.situacao = 'prazo' and cr.prazo_max is not null and cr.prazo > cr.prazo_max)) then 'PRAZO' end,
@@ -8889,7 +8890,7 @@ grant execute on function public.crm_nota_margens(date) to authenticated;
 create or replace function public.crm_pedido_sinal(p_itens jsonb) returns jsonb
 language plpgsql stable security definer set search_path = public as $$
 declare its jsonb; neg numeric; mmin numeric; ok jsonb := '[]'::jsonb; i jsonb; pl numeric; c numeric; tb numeric; q numeric;
-  rec_c numeric := 0; cus_c numeric := 0; rec_t numeric := 0; tab_t numeric := 0; sem_preco boolean := false; s boolean;
+  rec_c numeric := 0; cus_c numeric := 0; min_c numeric := 0; rec_t numeric := 0; tab_t numeric := 0; sem_preco boolean := false; s boolean;
 begin
   if jsonb_array_length(coalesce(p_itens, '[]'::jsonb)) > 300 then raise exception 'itens demais'; end if;
   its := public.crm_pedido_itens_norm(p_itens);   -- confere que é da equipe
@@ -8899,14 +8900,15 @@ begin
     pl := coalesce((i->>'preco')::numeric, 0) * (1 - coalesce((i->>'desconto')::numeric, 0) / 100);
     c := coalesce((i->>'custo')::numeric, 0); tb := coalesce((i->>'preco_tab')::numeric, 0); q := coalesce((i->>'quantidade')::numeric, 0);
     if pl <= 0 then s := false; sem_preco := true;
-    elsif c > 0 then s := (pl - c) / pl * 100 >= mmin - 0.005; rec_c := rec_c + pl * q; cus_c := cus_c + c * q;
+    elsif c > 0 then s := (pl - c) / pl * 100 >= mmin - 0.005 or pl >= c / (1 - mmin / 100) - 0.01 - 0.000001;
+      rec_c := rec_c + pl * q; cus_c := cus_c + c * q; min_c := min_c + (c / (1 - mmin / 100) - 0.01) * q;
     elsif tb > 0 then s := pl >= round(tb * (1 + neg / 100), 2) - 0.005; rec_t := rec_t + pl * q; tab_t := tab_t + tb * q;
     else s := null; end if;
     ok := ok || jsonb_build_array(s);
   end loop;
   return jsonb_build_object('itens', ok, 'geral',
     case when jsonb_array_length(its) = 0 then null
-         else not (sem_preco or (rec_c > 0 and (rec_c - cus_c) / rec_c * 100 < mmin - 0.005) or (tab_t > 0 and rec_t < round(tab_t * (1 + neg / 100), 2) - 0.005)) end);
+         else not (sem_preco or (rec_c > 0 and (rec_c - cus_c) / rec_c * 100 < mmin - 0.005 and rec_c < min_c - 0.000001) or (tab_t > 0 and rec_t < round(tab_t * (1 + neg / 100), 2) - 0.005)) end);
 end;
 $$;
 revoke all on function public.crm_pedido_sinal(jsonb) from public, anon;

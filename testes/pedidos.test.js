@@ -31,7 +31,7 @@ test('linha e totais: comissão pelo plano de quem vendeu', () => {
   const l = P.linha(it, { plano });
   assert.deepStrictEqual([l.total, l.faixa, l.margem, l.comissao, l.valorComissao], [637, 'A', 23.21, 5, 31.85]); // R$ 31,85 como no FKN
   const t = P.totais([it, { quantidade: 2, preco: 10, desconto: 10, preco_tab: null, custo: null }], 15, { plano });
-  assert.deepStrictEqual(t, { produtos: 655, frete: 15, geral: 670, margem: 23.21, comissao: 31.85, comissaoPct: 5 });
+  assert.deepStrictEqual(t, { produtos: 655, frete: 15, geral: 670, margem: 23.21, abaixoMinimo: false, comissao: 31.85, comissaoPct: 5 });
   const esc = P.linha({ quantidade: 1, preco: 1.70, preco_tab: 1.96 }, { plano: P.PLANOS_PADRAO[0] });
   assert.strictEqual(esc.faixa, 'ABAIXO'); assert.strictEqual(esc.comissao, null);  // interno (03/11/2026): o % é do pedido, pela margem
   assert.strictEqual(P.linha({ quantidade: 1, preco: 1.70, preco_tab: 1.96 }, { plano: P.PLANOS_PADRAO[1] }).comissao, 0);
@@ -94,6 +94,11 @@ test('margem mínima de 23%: abaixo dela o item avisa (e o pedido bloqueia no ba
   assert.strictEqual(P.linha({ quantidade: 1, preco: 1.94, preco_tab: 1.96, custo: 1.505 }, { margemMinima: 20 }).abaixoMinimo, false);
   assert.strictEqual(P.linha({ quantidade: 1, preco: 0, preco_tab: 1.96, custo: 1.505 }).abaixoMinimo, true);      // brinde sem preço
   assert.strictEqual(P.linha({ quantidade: 1, preco: 5, preco_tab: 1.96, custo: null }).abaixoMinimo, false);       // sem custo: não sabe
+  // arredondamento da tabela (04/11/2026): custo 1,773 → mínimo exato 2,3026; a tabela A de 2,30 dá 22,91% e não é "abaixo"
+  assert.strictEqual(P.linha({ quantidade: 1, preco: 2.30, preco_tab: 2.30, custo: 1.773 }).abaixoMinimo, false);
+  assert.strictEqual(P.linha({ quantidade: 1, preco: 2.29, preco_tab: 2.30, custo: 1.773 }).abaixoMinimo, true);
+  assert.strictEqual(P.totais([{ quantidade: 10, preco: 2.30, custo: 1.773 }, { quantidade: 4, preco: 0.51, custo: 0.395 }]).abaixoMinimo, false);
+  assert.strictEqual(P.totais([{ quantidade: 10, preco: 2.25, custo: 1.773 }]).abaixoMinimo, true);
   assert.strictEqual(P.margemMinima({ margem_minima: 25 }), 25);
   assert.strictEqual(P.margemMinima({}), 23);
 });

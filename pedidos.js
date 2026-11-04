@@ -90,6 +90,12 @@
   const rotuloFaixa = f => (/^M\d+$/.test(String(f)) ? rotuloMargem(f) : f === 'NEG' ? 'neg.' : f === 'ABAIXO' ? 'abaixo' : f || '—');
   // Margem sobre o preço (como no FKN): (preço líquido − custo) ÷ preço líquido.
   const margem = (pl, custo) => (num(pl) > 0 && custo != null && custo !== '' ? r2((num(pl) - num(custo)) / num(pl) * 100) : null);
+  // Abaixo da margem mínima (04/11/2026, Anderson: produto vendido na tabela dava bolinha vermelha): o preço de tabela é o
+  // custo ÷ (1 − mínima) arredondado em centavos, e o arredondamento para baixo deixava 22,9% em vez de 23%. Tolerância de
+  // um centavo por unidade: abaixo só quando o preço fica mais de 1 centavo abaixo do preço mínimo exato (custo ÷ 0,77). Mesma regra no banco
+  // (crm_pedido_sinal e a trava PREÇO de crm_pedidos_atualizar).
+  const precoMinimo = (custo, min) => num(custo) / (1 - num(min) / 100);
+  const abaixoDoMinimo = (pl, custo, min) => num(custo) > 0 && (num(pl) <= 0 || (margem(pl, custo) < num(min) - 0.005 && num(pl) < precoMinimo(custo, min) - 0.01 - 1e-9));
   // "Desc s/tab": quanto o preço está acima (+) ou abaixo (−) da tabela A.
   const sobreTabela = (pl, tab) => (num(tab) > 0 ? r2((num(pl) / num(tab) - 1) * 100) : null);
 
@@ -102,23 +108,25 @@
     const com = margemDoPlano(plano) ? null : fx && plano.faixas[fx] != null ? num(plano.faixas[fx]) : null;   // pela margem: o % é do pedido inteiro (totais)
     const total = totalItem(it);
     const mg = margem(pl, it.custo), min = ctx.margemMinima == null ? MARGEM_MINIMA : ctx.margemMinima;
-    return { precoLiq: pl, total, faixa: fx, margem: mg, abaixoMinimo: num(it.custo) > 0 && (pl <= 0 || (mg != null && mg < min - 0.005)), sobreTab: sobreTabela(pl, tab),
+    return { precoLiq: pl, total, faixa: fx, margem: mg, abaixoMinimo: abaixoDoMinimo(pl, it.custo, min), sobreTab: sobreTabela(pl, tab),
       comissao: com, valorComissao: com == null ? 0 : r2(total * com / 100) };
   }
 
   // Totais do rodapé: produtos, frete, geral, margem ponderada (só itens com custo) e comissão.
   function totais(itens, frete, ctx) {
-    let prod = 0, comCusto = 0, custo = 0, com = 0, pesoCom = 0;
+    let prod = 0, comCusto = 0, custo = 0, com = 0, pesoCom = 0, minimo = 0;
+    const mmin = ctx && ctx.margemMinima != null ? ctx.margemMinima : MARGEM_MINIMA;
     (itens || []).forEach(it => {
       const l = linha(it, ctx);
       prod += l.total;
-      if (it.custo != null && it.custo !== '') { comCusto += l.total; custo += num(it.custo) * num(it.quantidade); }
+      if (it.custo != null && it.custo !== '') { comCusto += l.total; custo += num(it.custo) * num(it.quantidade); if (num(it.custo) > 0) minimo += (precoMinimo(it.custo, mmin) - 0.01) * num(it.quantidade); }
       com += l.valorComissao; if (l.comissao != null) pesoCom += l.total;
     });
     prod = r2(prod);
     const mgG = comCusto > 0 ? r2((comCusto - custo) / comCusto * 100) : null, mf = margemDoPlano((ctx && ctx.plano) || PLANOS_PADRAO[0]);
-    if (mf) { const p2 = mgG == null ? null : pctDaMargem(mgG, mf); return { produtos: prod, frete: r2(num(frete)), geral: r2(prod + num(frete)), margem: mgG, comissao: p2 == null ? null : r2(prod * p2 / 100), comissaoPct: p2 }; }
-    return { produtos: prod, frete: r2(num(frete)), geral: r2(prod + num(frete)), margem: mgG,
+    const abaixo = mgG != null && mgG < mmin - 0.005 && comCusto < minimo - 1e-9;
+    if (mf) { const p2 = mgG == null ? null : pctDaMargem(mgG, mf); return { produtos: prod, frete: r2(num(frete)), geral: r2(prod + num(frete)), margem: mgG, abaixoMinimo: abaixo, comissao: p2 == null ? null : r2(prod * p2 / 100), comissaoPct: p2 }; }
+    return { produtos: prod, frete: r2(num(frete)), geral: r2(prod + num(frete)), margem: mgG, abaixoMinimo: abaixo,
       comissao: r2(com), comissaoPct: pesoCom > 0 ? r2(com / pesoCom * 100) : null };
   }
 
@@ -282,7 +290,7 @@
 
   const FRETE_CONTA = [['0', '0-Remetente (CIF)'], ['1', '1-Destinatário (FOB)'], ['2', '2-Terceiros'], ['9', '9-Sem frete']];
 
-  const P = { FINANCEIRO, unidadeNorm, descontoValor, descontoPct, descontoGeral, TABELA_PADRAO, PLANOS_PADRAO, MARGEM_MINIMA, MARGEM_INTERNO, margemDoPlano, pctDaMargem, chaveMargem, rotuloMargem, margemMinima, apuraComissao, totalComAjustes, itensParaRepetir, ehVendaCfop, FAIXAS, FRETE_CONTA, ROTULO_BLOQUEIO, tabelaDe, planosDe, planoDoUsuario, precoLiq, totalItem, precoDaFaixa, faixaDoPreco, rotuloFaixa,
+  const P = { precoMinimo, abaixoDoMinimo, FINANCEIRO, unidadeNorm, descontoValor, descontoPct, descontoGeral, TABELA_PADRAO, PLANOS_PADRAO, MARGEM_MINIMA, MARGEM_INTERNO, margemDoPlano, pctDaMargem, chaveMargem, rotuloMargem, margemMinima, apuraComissao, totalComAjustes, itensParaRepetir, ehVendaCfop, FAIXAS, FRETE_CONTA, ROTULO_BLOQUEIO, tabelaDe, planosDe, planoDoUsuario, precoLiq, totalItem, precoDaFaixa, faixaDoPreco, rotuloFaixa,
     margem, sobreTabela, abaixoDaTabela, linha, totais, bloqueiosAbertos, situacao, pausado, bolao, ultimasCompras, procura, itensDaProposta, entregaDoCliente, entregaTexto };
   raiz.CRMPedidos = P;
   if (typeof module !== 'undefined') module.exports = P;
@@ -672,7 +680,7 @@
   function rodapeTotais(t, itens) {
     const sg = veMargem() ? null : sinalDe(itens || []);
     return '<div class="pd-totais"><span>Total dos produtos <strong>' + R.moeda(t.produtos) + '</strong></span><span>Frete <strong>' + R.moeda(t.frete) + '</strong></span>' +
-      (veMargem() ? '<span>Margem geral <strong' + (t.margem != null && t.margem < P.margemMinima(E().cfg) - 0.005 ? ' class="neg" title="abaixo da margem mínima: o pedido fica bloqueado até a gestora ou a logística liberar"' : '') + '>' + pct(t.margem) + '</strong></span>' : sg ? '<span>Margem geral ' + slotSinal(sg, 'geral') + '</span>' : '') + '<span>Comissão <strong>' + (t.comissao == null ? '<span title="no plano interno, a comissão é um % do pedido pela margem dele (sai na nota)">pela margem do pedido</span>' : R.moeda(t.comissao) + (t.comissaoPct != null ? ' (' + pct(t.comissaoPct) + ')' : '')) + '</strong></span>' +
+      (veMargem() ? '<span>Margem geral <strong' + (t.abaixoMinimo ? ' class="neg" title="abaixo da margem mínima: o pedido fica bloqueado até a gestora ou a logística liberar"' : '') + '>' + pct(t.margem) + '</strong></span>' : sg ? '<span>Margem geral ' + slotSinal(sg, 'geral') + '</span>' : '') + '<span>Comissão <strong>' + (t.comissao == null ? '<span title="no plano interno, a comissão é um % do pedido pela margem dele (sai na nota)">pela margem do pedido</span>' : R.moeda(t.comissao) + (t.comissaoPct != null ? ' (' + pct(t.comissaoPct) + ')' : '')) + '</strong></span>' +
       '<span class="geral">Total geral <strong>' + R.moeda(t.geral) + '</strong></span></div>';
   }
 

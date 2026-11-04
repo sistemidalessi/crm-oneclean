@@ -832,7 +832,7 @@
           '<td><button type="button" class="link" data-acao="pf-abrir" data-id="' + esc(x.codigo) + '">' + esc(nome(x)) + '</button>' + (x.info && x.info.marca ? '<small>' + esc(x.info.marca) + '</small>' : '') + '</td>' +
           '<td>' + esc(x.linha ? R.nomeDeItem(x.linha) : '—') + '</td>' + (cuida ? '<td>' + esc(x.forn ? R.nomeDeItem(x.forn.nome) : '—') + '</td>' : '') + '<td>' + esc(emb(x)) + '</td>' +
           '<td class="num' + (x.disponivel > 0 ? '' : ' neg') + '">' + qtd(Math.floor(x.disponivel * 1000) / 1000) + '</td><td class="num"><strong>' + (x.preco ? preco(x.preco) : '—') + '</strong></td>' +
-          (vc ? '<td class="num' + (mg != null && mg < mmin ? ' neg' : '') + '">' + pct(mg) + '</td>' : '') + '<td>' + selos(x) + '</td></tr>';
+          (vc ? '<td class="num' + (mg != null && P && P.abaixoDoMinimo(x.preco, x.custo, mmin) ? ' neg' : '') + '">' + pct(mg) + '</td>' : '') + '<td>' + selos(x) + '</td></tr>';
       }).join('') + '</tbody></table></div></div>';
   }
   function resultado() {
@@ -896,7 +896,7 @@
       (cx ? '<th class="num">Caixa</th>' : '') + (vc ? '<th class="num">Margem</th>' : '') + '</tr></thead><tbody>' +
       fx.map(f => { const pr = P.precoDaFaixa(x.preco, f, tab), m = vc ? X.margemDe(pr, x.custo) : null;
         return '<tr><td><strong>' + esc(P.rotuloFaixa(f)) + '</strong></td><td class="num">' + (tab[f] ? (tab[f] > 0 ? '+' : '') + tab[f] + '%' : 'base') + '</td><td class="num"><strong>R$ ' + preco(pr) + '</strong></td>' +
-          (cx ? '<td class="num">R$ ' + preco(P.precoDaFaixa(cx.preco, f, tab)) + '</td>' : '') + (vc ? '<td class="num' + (m != null && m < mmin ? ' neg' : '') + '">' + pct(m) + '</td>' : '') + '</tr>'; }).join('') +
+          (cx ? '<td class="num">R$ ' + preco(P.precoDaFaixa(cx.preco, f, tab)) + '</td>' : '') + (vc ? '<td class="num' + (m != null && P.abaixoDoMinimo(pr, x.custo, mmin) ? ' neg' : '') + '">' + pct(m) + '</td>' : '') + '</tr>'; }).join('') +
       '</tbody></table></div><p class="dica">' + (vc ? 'Abaixo de ' + pct(mmin) + ' de margem o pedido fica bloqueado até a gestora ou a logística liberar.' : 'A comissão sai pela faixa do preço praticado. Abaixo da tabela A o pedido pode ficar bloqueado até a gestora ou a logística liberar.') + '</p></div>';
     if (vc) {
       const s0 = d.saldo, c = x.cad;
