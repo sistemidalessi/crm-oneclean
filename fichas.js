@@ -291,7 +291,9 @@
           (n.motivo_perda ? '<dt>Motivo</dt><dd>' + esc(n.motivo_perda) + '</dd>' : '') +
         '</dl>' + (n.observacoes ? '<p class="obs">' + esc(n.observacoes) + '</p>' : '') +
         dadosContatoNegocio(n, contato) +
-        '<section><h3>Produtos / serviços ' + (pode ? '<button type="button" class="mini" data-acao="novo-item">+ item</button>' : '') + '</h3>' +
+        // 04/11/2026 (Anderson: "o cliente às vezes quer por ordem alfabética", como no pedido): grava a ordem A→Z dos itens
+        '<section><h3>Produtos / serviços ' + (pode ? '<button type="button" class="mini" data-acao="novo-item">+ item</button>' +
+          (itens.length > 1 ? ' <button type="button" class="mini" data-acao="itens-organizar" data-id="' + esc(n.id) + '" title="Põe os itens em ordem alfabética, aqui e na proposta">Organizar por nome</button>' : '') : '') + '</h3>' +
           (itens.length ? '<table class="tabela itens"><thead><tr><th>Item</th><th class="num">Qtd.</th><th class="num">Preço</th><th class="num">Desc.</th><th class="num">Total</th></tr></thead><tbody>' +
             itens.map(it => '<tr' + (pode ? ' data-acao="editar-item" data-id="' + esc(it.id) + '" tabindex="0" class="clicavel"' : '') + '><td>' + esc(it.descricao) + '</td><td class="num">' + esc(R.numero(it.quantidade)) +
               '</td><td class="num">' + esc(R.moeda(it.preco)) + '</td><td class="num">' + (R.num(it.desconto) ? esc(R.numero(it.desconto)) + '%' : '—') + '</td><td class="num">' + esc(R.moeda(R.totalItem(it))) + '</td></tr>').join('') +
@@ -353,6 +355,8 @@
         : (c ? '<dl class="dados"><dt>Pessoa</dt><dd>' + linhas[0][1] + '</dd></dl>' : '') + '<p class="vazio">Nenhum e-mail ou telefone cadastrado para este cliente.</p>') + '</section>';
   }
 
+  // Os itens do negócio na ordem gravada (a mesma da tela, da proposta e do PDF)
+  const itensEmOrdem = id => CRM.doNegocio('negocio_itens', id).slice().sort((a, b) => (Number(a.ordem) || 0) - (Number(b.ordem) || 0));
   // Valor do negócio acompanha os itens (quando há itens).
   async function recalculaValor(negocioId) {
     const itens = CRM.doNegocio('negocio_itens', negocioId);
@@ -908,7 +912,7 @@
 
   fichas.formProposta = (p, n) => {
     const cfg = E().cfg;
-    const itens = CRM.doNegocio('negocio_itens', n.id);
+    const itens = itensEmOrdem(n.id);
     CRM.abrirForm({
       titulo: p ? 'Proposta #' + p.numero : 'Gerar proposta · ' + n.titulo,
       intro: p ? null : (itens.length ? 'Os ' + itens.length + ' itens do negócio entram na proposta como estão agora (' + R.moeda(R.totalItens(itens)) + ').' : 'O negócio não tem itens: a proposta sai com o valor do negócio (' + R.moeda(n.valor) + ').'),
@@ -958,7 +962,7 @@
   // sai na hora; o histórico do negócio não ganha registro novo.
   fichas.atualizarProposta = async p => {
     const n = CRM.negocio(p.negocio_id); if (!n) return;
-    const itens = CRM.doNegocio('negocio_itens', n.id);
+    const itens = itensEmOrdem(n.id);
     if (!itens.length) { CRM.toast('O negócio não tem itens: acerte os itens acima antes de atualizar a proposta.', true); return; }
     const snap = snapItens(n, itens, p.itens), tot = R.totalItens(snap);
     if (!confirm('Atualizar a proposta #' + p.numero + ' com os ' + snap.length + ' itens de agora (' + R.moeda(tot) + '; antes ' + R.moeda(p.valor_total) + ') e baixar o PDF?\n\nNão cria outra proposta.')) return;
@@ -1649,6 +1653,15 @@
     'editar-negocio': () => fichas.formNegocio(CRM.negocio(abertoNegocio)),
     'mover-etapa': id => { const n = CRM.negocio(abertoNegocio); if (n.etapa_id !== id) CRM.auto.mudarNegocio(n, { etapa_id: id }).catch(CRM.falhou); },
     'novo-item': () => fichas.formItem(null, abertoNegocio),
+    'itens-organizar': async id => {
+      const l = itensEmOrdem(id).slice().sort((a, b) => String(a.descricao || '').localeCompare(String(b.descricao || ''), 'pt-BR', { sensitivity: 'base' }));
+      try {
+        for (let i = 0; i < l.length; i++) if (Number(l[i].ordem) !== i) await CRM.atualizar('negocio_itens', l[i].id, { ordem: i });
+        const props = CRM.doNegocio('propostas', id).filter(p => p.status === 'rascunho' || p.status === 'enviada');
+        CRM.toast('Itens em ordem alfabética.' + (props.length ? ' Na proposta já feita, clique em "Atualizar e baixar PDF" para sair nesta ordem.' : ''));
+        CRM.render();
+      } catch (e) { CRM.falhou(e); }
+    },
     'editar-item': id => fichas.formItem(E().ix.porId.negocio_itens.get(id), abertoNegocio),
     'nova-proposta': () => fichas.formProposta(null, CRM.negocio(abertoNegocio)),
     'editar-proposta': id => fichas.formProposta(E().ix.porId.propostas.get(id), CRM.negocio(abertoNegocio)),
