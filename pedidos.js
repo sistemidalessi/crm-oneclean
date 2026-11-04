@@ -48,6 +48,37 @@
 
   const precoLiq = it => r4(num(it.preco) * (1 - num(it.desconto) / 100));
   const totalItem = it => r2(num(it.quantidade) * num(it.preco) * (1 - num(it.desconto) / 100));
+  // Desconto em R$ (04/11/2026, pedido do Anderson: "incluir campo de DESCONTO por valor e porcentagem"). O pedido guarda o %
+  // (é o que a nota e o banco usam); o R$ vira o % com 6 casas, que dá exatamente esse valor no item.
+  const descontoValor = it => r2(num(it.quantidade) * num(it.preco) * num(it.desconto) / 100);
+  function descontoPct(valor, q, p) {
+    const b = num(q) * num(p);
+    if (!(b > 0) || !(num(valor) > 0)) return 0;
+    return Math.min(100, Math.max(0, Math.round(num(valor) / b * 100 * 1e6) / 1e6));
+  }
+  // Desconto no pedido inteiro: { pct } = o mesmo % em todos os itens; { valor } = os R$ espalhados pelos itens na proporção
+  // do valor de cada um (o maior item fica com a sobra dos centavos). Troca o desconto que os itens tinham.
+  function descontoGeral(itens, o) {
+    const l = (itens || []).map(it => Object.assign({}, it));
+    const bruto = l.reduce((s, it) => s + num(it.quantidade) * num(it.preco), 0);
+    if (!(bruto > 0)) throw new Error('o pedido ainda não tem valor');
+    if (o && o.pct != null) {
+      const d = num(o.pct);
+      if (d < 0 || d > 100) throw new Error('desconto entre 0 e 100%');
+      l.forEach(it => { it.desconto = d; });
+      return l;
+    }
+    const v = r2(num(o && o.valor));
+    if (v < 0 || v > r2(bruto)) throw new Error('o desconto passa do valor dos produtos (' + r2(bruto).toFixed(2).replace('.', ',') + ')');
+    const d = v / bruto * 100;
+    l.forEach(it => { it.desconto = Math.round(d * 1e6) / 1e6; });
+    const sobra = r2(v - l.reduce((s, it) => s + descontoValor(it), 0));
+    if (sobra !== 0 && l.length) {
+      const k = l.reduce((m, it, i) => (num(it.quantidade) * num(it.preco) > num(l[m].quantidade) * num(l[m].preco) ? i : m), 0);
+      l[k].desconto = descontoPct(descontoValor(l[k]) + sobra, l[k].quantidade, l[k].preco);
+    }
+    return l;
+  }
   const precoDaFaixa = (tab, faixa, tabela) => r4(num(tab) * (1 + num((tabela || TABELA_PADRAO)[faixa]) / 100));
   // A faixa é o maior degrau que o preço alcança; abaixo da faixa negativa = "ABAIXO". Sem preço de tabela: null.
   function faixaDoPreco(preco, tab, tabela) {
@@ -251,7 +282,7 @@
 
   const FRETE_CONTA = [['0', '0-Remetente (CIF)'], ['1', '1-Destinatário (FOB)'], ['2', '2-Terceiros'], ['9', '9-Sem frete']];
 
-  const P = { FINANCEIRO, unidadeNorm, TABELA_PADRAO, PLANOS_PADRAO, MARGEM_MINIMA, MARGEM_INTERNO, margemDoPlano, pctDaMargem, chaveMargem, rotuloMargem, margemMinima, apuraComissao, totalComAjustes, itensParaRepetir, ehVendaCfop, FAIXAS, FRETE_CONTA, ROTULO_BLOQUEIO, tabelaDe, planosDe, planoDoUsuario, precoLiq, totalItem, precoDaFaixa, faixaDoPreco, rotuloFaixa,
+  const P = { FINANCEIRO, unidadeNorm, descontoValor, descontoPct, descontoGeral, TABELA_PADRAO, PLANOS_PADRAO, MARGEM_MINIMA, MARGEM_INTERNO, margemDoPlano, pctDaMargem, chaveMargem, rotuloMargem, margemMinima, apuraComissao, totalComAjustes, itensParaRepetir, ehVendaCfop, FAIXAS, FRETE_CONTA, ROTULO_BLOQUEIO, tabelaDe, planosDe, planoDoUsuario, precoLiq, totalItem, precoDaFaixa, faixaDoPreco, rotuloFaixa,
     margem, sobreTabela, abaixoDaTabela, linha, totais, bloqueiosAbertos, situacao, pausado, bolao, ultimasCompras, procura, itensDaProposta, entregaDoCliente, entregaTexto };
   raiz.CRMPedidos = P;
   if (typeof module !== 'undefined') module.exports = P;
@@ -604,7 +635,7 @@
       (itens.length ? itens.map((it, i) => {
         const l = P.linha(it, o.ctx), fa = falta(i), d = porCod.get(it.codigo);
         return '<tr' + (o.sel === i ? ' class="sel"' : '') + '><td>' + String(i + 1).padStart(3, '0') + '</td><td>' + esc(it.codigo || '') + '</td><td>' + (it.codigo && CRM.produtos ? CRM.produtos.miniatura(it.codigo, 'pequena') : '') + esc(it.descricao) + (it.obs ? '<small>' + esc(it.obs) + '</small>' : '') + '</td><td>' + esc(it.unidade || '') + '</td>' +
-          '<td class="num">' + qtd(it.quantidade) + '</td><td class="num">' + (fa > 0 ? '<strong class="neg">' + qtd(fa) + '</strong>' : '0') + '</td><td class="num">' + preco(it.preco) + '</td><td class="num">' + preco(it.desconto) + '</td>' +
+          '<td class="num">' + qtd(it.quantidade) + '</td><td class="num">' + (fa > 0 ? '<strong class="neg">' + qtd(fa) + '</strong>' : '0') + '</td><td class="num">' + preco(it.preco) + '</td><td class="num">' + (num(it.desconto) > 0 ? preco(Math.round(num(it.desconto) * 100) / 100) + '%<small>R$ ' + preco(P.descontoValor(it)) + '</small>' : '0,00') + '</td>' +
           (gest ? '<td class="num">' + (l.margem == null ? '—' : l.abaixoMinimo ? '<strong class="neg" title="este item está abaixo da margem mínima; o que trava é a margem geral do pedido">' + pct(l.margem) + '</strong>' : pct(l.margem)) + '</td>' : sg ? '<td>' + slotSinal(sg, i) + '</td>' : '') + '<td class="num">' + preco(l.total) + '</td><td>' + esc(P.rotuloFaixa(l.faixa)) + '</td><td class="num">' + (l.comissao == null ? '—' : preco(l.comissao)) + '</td>' +
           '<td class="num">' + (l.sobreTab == null ? '—' : preco(l.sobreTab)) + '</td>' +
           (o.ler ? '' : '<td class="num">' + (d ? qtd(Math.floor(num(d.disponivel) * 1000) / 1000) : '—') + '</td><td class="num"><button type="button" class="mini" data-acao="pd-item-editar" data-id="' + i + '" title="Alterar o item">✎</button>' +
@@ -855,6 +886,7 @@
         '<label class="campo"><span>Qtde' + (l.unidade ? ' (' + esc(l.unidade) + ')' : '') + '</span><input id="pdQtd" data-seq="' + x.seq + '" type="number" step="any" min="0" value="' + esc(l.quantidade) + '" inputmode="decimal"></label>' +
         '<label class="campo"><span>Preço un</span><input id="pdPreco" data-seq="' + x.seq + '" type="number" step="any" min="0" value="' + esc(l.preco) + '" inputmode="decimal"></label>' +
         '<label class="campo"><span>Desc %</span><input id="pdDesc" data-seq="' + x.seq + '" type="number" step="any" min="0" max="100" value="' + esc(l.desconto) + '" inputmode="decimal"></label>' +
+        '<label class="campo"><span>Desc R$ (no item)</span><input id="pdDescV" data-seq="' + x.seq + '" type="number" step="0.01" min="0" value="' + esc(num(l.desconto) > 0 && num(l.quantidade) > 0 && num(l.preco) > 0 ? P.descontoValor(l).toFixed(2) : '') + '" inputmode="decimal" placeholder="0,00"></label>' +
         (CRM.produtos ? '<button type="button" class="btn sec pd-procurar" data-acao="pd-procurar-foto" title="Procurar no estoque com foto, disponível e preço">🔍 Procurar com foto</button>' : '') +
         '<div class="pd-info" id="pdInfo">' + (dd && CRM.produtos ? '<button type="button" class="pd-info-foto" data-acao="pf-ficha" data-id="' + esc(dd.codigo) + '" title="Ver a ficha do produto">' + CRM.produtos.miniatura(dd.codigo) + '</button>' : '') + (dd ? 'Disponível <strong class="' + (num(dd.disponivel) < num(l.quantidade) ? 'neg' : '') + '">' + qtd(Math.floor(num(dd.disponivel) * 1000) / 1000) + ' ' + esc(dd.unidade || '') + '</strong>' +
           (CRM.aCaminho && CRM.aCaminho.texto(dd.codigo, dd.unidade) ? ' · <strong>' + esc(CRM.aCaminho.texto(dd.codigo, dd.unidade)) + '</strong>' : dd.a_caminho ? ' · a caminho ' + qtd(dd.a_caminho) + ' (FKN, sem data)' : '') + ' · preço tabela R$ ' + preco(dd.preco_venda) + ' · líquido R$ ' + preco(lin.precoLiq) + ' · total R$ ' + preco(lin.total) +
@@ -864,6 +896,7 @@
         (dd && num(dd.preco_venda) > 0 ? '<div class="pd-faixas">Tabela: ' + P.FAIXAS.slice().reverse().map(fx => '<button type="button" class="mini" data-acao="pd-faixa" data-id="' + fx + '" title="' + (tab[fx] >= 0 ? '+' : '') + tab[fx] + '%">' + P.rotuloFaixa(fx) + ' ' + preco(P.precoDaFaixa(dd.preco_venda, fx, tab)) + '</button>').join('') + '</div>' : '') +
         '<p class="acoes"><button type="button" class="btn" data-acao="pd-item-salvar">' + (x.sel != null ? 'Salvar item' : 'Inserir item') + '</button> ' + (x.sel != null || l.codigo ? '<button type="button" class="btn sec" data-acao="pd-item-cancelar">Cancelar item</button> ' : '') +
         (x.empresa_id ? '<button type="button" class="btn sec" data-acao="pd-ultimas">Últimas compras</button> <button type="button" class="btn sec" data-acao="pd-importar-ultimas">Importar últimas compras</button> <button type="button" class="btn sec" data-acao="pd-repetir" title="Repetir um pedido ou uma nota anterior do cliente, com os preços dela">Repetir pedido</button> ' : '') +
+        (x.itens.length ? '<button type="button" class="btn sec" data-acao="pd-desconto-geral" title="Desconto no pedido inteiro, em % ou em R$, espalhado pelos itens">Desconto no pedido</button> ' : '') +
         (x.itens.length > 1 ? '<button type="button" class="mini" data-acao="pd-organizar">Organizar por nome</button>' : '') + '</p></div>' +
         gradeProdutos(x.itens, { ctx, sel: x.sel, estimaFalta: estimador() }) + rodapeTotais(t, x.itens);
     }
@@ -1181,6 +1214,15 @@
           if (!ed.linha.codigo) return;
           CRM.render(); setTimeout(() => { const q = document.querySelector('#pdQtd'); if (q) q.focus(); }, 30);
         });
+        // Desc % ⇄ Desc R$ (um preenche o outro)
+        const dP = c.querySelector('#pdDesc'), dV = c.querySelector('#pdDescV'), qQ = c.querySelector('#pdQtd'), qP = c.querySelector('#pdPreco');
+        if (dP && dV && qQ && qP) {
+          const base = () => num(String(qQ.value).replace(',', '.')) * num(String(qP.value).replace(',', '.'));
+          dV.addEventListener('input', () => { const b = base(), v = num(String(dV.value).replace(',', '.')); dP.value = b > 0 && v > 0 ? String(P.descontoPct(v, 1, b)) : '0'; });
+          dP.addEventListener('input', () => { const b = base(), d = num(String(dP.value).replace(',', '.')); dV.value = b > 0 && d > 0 ? (Math.round(b * d) / 100).toFixed(2) : ''; });
+          dV.addEventListener('change', () => { leLinha(c); CRM.render(); });
+          dV.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); leLinha(c); try { salvaItem(); CRM.render(); } catch (e) { CRM.toast(e.message, true); } } });
+        }
         ['#pdDescLivre', '#pdQtd', '#pdPreco', '#pdDesc'].forEach(s => { const el = c.querySelector(s); if (!el) return;
           el.addEventListener('change', () => { leLinha(c); CRM.render(); });
           el.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); leLinha(c); try { salvaItem(); CRM.render(); setTimeout(() => { const p = document.querySelector('#pdProd'); if (p) p.focus(); }, 30); } catch (e) { CRM.toast(e.message, true); } } }); });
@@ -1233,6 +1275,21 @@
       if (ed && ed.itens.length && !confirm(msg)) return; ed = null; CRM.render(); versaoAgora();
     },
     'pd-aba-ed': id => { const c = document.querySelector('.pd-janela'); if (c) leLinha(c); ed.aba = id; CRM.render(); },
+    'pd-desconto-geral': () => {
+      const c = document.querySelector('.pd-janela'); if (c) leLinha(c);
+      const bruto = ed.itens.reduce((t, it) => t + num(it.quantidade) * num(it.preco), 0);
+      CRM.abrirForm({ titulo: 'Desconto no pedido inteiro',
+        intro: 'Produtos sem desconto: R$ ' + preco(bruto) + '. O desconto é espalhado pelos itens (na proporção do valor de cada um) e troca o desconto que os itens tinham. Na nota sai item a item.',
+        campos: [{ nome: 'tipo', rotulo: 'Desconto em', tipo: 'select', opcoes: [['valor', 'R$ (valor)'], ['pct', '% (porcentagem)']] },
+          { nome: 'quanto', rotulo: 'Quanto', tipo: 'numero', passo: '0.01', obrigatorio: true }],
+        valores: { tipo: 'valor' }, salvarTexto: 'Aplicar o desconto',
+        aoSalvar: async v => {
+          ed.itens = P.descontoGeral(ed.itens, v.tipo === 'pct' ? { pct: v.quanto } : { valor: v.quanto });
+          const dTot = ed.itens.reduce((t, it) => t + P.descontoValor(it), 0);
+          CRM.toast('Desconto de R$ ' + preco(dTot) + ' espalhado pelos ' + ed.itens.length + ' itens.');
+          CRM.render();
+        } });
+    },
     'pd-faixa': fx => { const c = document.querySelector('.pd-janela'); leLinha(c); const d = porCod.get(ed.linha.codigo); if (d) { ed.linha.preco = P.precoDaFaixa(d.preco_venda, fx, P.tabelaDe(E().cfg)); ed.linha.desconto = 0; } CRM.render(); },
     'pd-item-salvar': () => { const c = document.querySelector('.pd-janela'); leLinha(c); try { salvaItem(); CRM.render(); } catch (e) { CRM.toast(e.message, true); } },
     'pd-item-cancelar': () => { linhaNova(); CRM.render(); },
