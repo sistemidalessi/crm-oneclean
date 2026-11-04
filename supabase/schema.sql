@@ -9511,3 +9511,35 @@ alter table public.crm_nfe add column if not exists email_em timestamptz;
 alter table public.crm_nfe add column if not exists email_ok boolean;
 alter table public.crm_nfe add column if not exists email_para text;
 alter table public.crm_nfe add column if not exists email_erro text;
+
+-- Código do cliente (04/11/2026, pedido da Isabela pelo Anderson). O número é o do FKN, que a equipe já conhece; cliente
+-- cadastrado no CRM ganha o próximo número sozinho, a partir de 2001 (o maior do FKN que o CRM viu é 1671; a folga evita
+-- encostar em código do FKN que ainda não chegou). Preenchido com os códigos que vieram do FKN sem dúvida (um código para
+-- um cadastro só): títulos a receber, orçamentos importados e pedidos de outubro. Os demais esperam a lista de clientes do FKN.
+-- Aplicado em 04/11/2026 (migração crm_empresas_codigo).
+alter table public.crm_empresas add column if not exists codigo text;
+create unique index if not exists crm_empresas_codigo_uq on public.crm_empresas (codigo) where codigo is not null;
+create sequence if not exists public.crm_empresa_codigo_seq start 2001;
+create or replace function public.crm_empresa_codigo_novo() returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if new.codigo is null or btrim(new.codigo) = '' then
+    loop
+      new.codigo := nextval('public.crm_empresa_codigo_seq')::text;
+      exit when not exists (select 1 from public.crm_empresas where codigo = new.codigo);
+    end loop;
+  else
+    new.codigo := btrim(new.codigo);
+  end if;
+  return new;
+end $$;
+revoke all on function public.crm_empresa_codigo_novo() from public, anon, authenticated;
+drop trigger if exists crm_empresa_codigo_novo on public.crm_empresas;
+create trigger crm_empresa_codigo_novo before insert on public.crm_empresas for each row execute function public.crm_empresa_codigo_novo();
+-- quem muda o código à mão: só tira espaço; vazio volta a ser nulo
+create or replace function public.crm_empresa_codigo_limpa() returns trigger language plpgsql set search_path = public as $$
+begin
+  new.codigo := nullif(btrim(coalesce(new.codigo, '')), '');
+  return new;
+end $$;
+drop trigger if exists crm_empresa_codigo_limpa on public.crm_empresas;
+create trigger crm_empresa_codigo_limpa before update of codigo on public.crm_empresas for each row execute function public.crm_empresa_codigo_limpa();

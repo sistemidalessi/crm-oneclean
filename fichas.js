@@ -124,7 +124,7 @@
       // ---- coluna 1: dados + contatos
       '<div class="ficha-col">' +
         '<section><dl class="dados">' +
-          dado('Grupo', grupo) + dado('Razão social', esc(e.razao_social)) + (e.razao_receita && e.razao_receita !== e.razao_social ? dado('Razão social completa (Receita)', esc(e.razao_receita)) : '') + (e.apelido ? dado('Apelido', esc(e.apelido)) : '') + (e.obs_nota ? dado('Texto na nota', esc(e.obs_nota)) : '') + (e.email_nfe ? dado('E-mail da nota fiscal', esc(e.email_nfe)) : '') + dado('CNPJ/CPF', esc(e.cnpj) + (e.cnpj && R.ehCNPJ(R.chaveDoc(e.cnpj)) && !R.cnpjValido(e.cnpj) ? ' ' + CRM.selo('inválido?', 'ambar') : '')) +
+          (e.codigo ? dado('Código', '<strong>' + esc(e.codigo) + '</strong>') : '') + dado('Grupo', grupo) + dado('Razão social', esc(e.razao_social)) + (e.razao_receita && e.razao_receita !== e.razao_social ? dado('Razão social completa (Receita)', esc(e.razao_receita)) : '') + (e.apelido ? dado('Apelido', esc(e.apelido)) : '') + (e.obs_nota ? dado('Texto na nota', esc(e.obs_nota)) : '') + (e.email_nfe ? dado('E-mail da nota fiscal', esc(e.email_nfe)) : '') + dado('CNPJ/CPF', esc(e.cnpj) + (e.cnpj && R.ehCNPJ(R.chaveDoc(e.cnpj)) && !R.cnpjValido(e.cnpj) ? ' ' + CRM.selo('inválido?', 'ambar') : '')) +
           dado('Telefone', esc(e.telefone)) + dado('WhatsApp', esc(e.whatsapp)) +
           dado('E-mail', e.email ? (separaEmails(e.email).length ? separaEmails(e.email).map(m => '<a href="mailto:' + esc(m) + '">' + esc(m) + '</a>').join('<br>') : esc(e.email)) : '') +
           dado('Site', e.site ? '<a href="' + esc(/^https?:/i.test(e.site) ? e.site : 'https://' + e.site) + '" target="_blank" rel="noopener noreferrer">' + esc(e.site) + '</a>' : '') +
@@ -372,6 +372,8 @@
       { nome: 'nome', rotulo: 'Nome', obrigatorio: true, largo: true, ajuda: 'Com CNPJ e razão social, o nome passa a ser a razão social (regra da empresa). O nome do dia a dia vai em "Apelido".' },
       { nome: 'razao_social', rotulo: 'Razão social', ajuda: 'Até ' + R.RAZAO_MAX + ' letras: é o limite da nota fiscal (a mais, a Sefaz recusa a nota).' },
       { nome: 'apelido', rotulo: 'Apelido (nome fantasia, contato)' },
+      // 04/11/2026 (Isabela): o código do cliente, o mesmo do FKN; cadastro novo ganha o próximo número sozinho (banco)
+      { nome: 'codigo', rotulo: 'Código do cliente', terco: true, ajuda: 'O mesmo do FKN. Vazio: o CRM dá o próximo número ao salvar.' },
       // 03/11/2026 (Edson, logística: "o FKN punha na observação da nota o horário de almoço e de recebimento"): vai sozinho para o
       // "Texto da nota" de cada pedido novo do cliente (dá para mudar no pedido)
       { nome: 'obs_nota', rotulo: 'Texto na nota fiscal (horário de recebimento, almoço, portaria…)', tipo: 'textarea', largo: true, linhas: 2 },
