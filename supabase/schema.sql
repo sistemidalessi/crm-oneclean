@@ -9611,3 +9611,63 @@ do $$ begin
     perform cron.schedule('crm-nfe-email', '*/15 10-23,0 * * *', 'select public.crm_nfe_email_tick()');
   end if;
 end $$;
+
+-- Vendas do ano mês a mês: o nome do produto (04/11/2026, Wellington: "na coluna produto deve aparecer a descrição e não os
+-- números"). Produto que não está mais no estoque (inativo ou só no cadastro) saía com o código no lugar do nome: agora o
+-- nome vem do estoque, do saldo, do cadastro de produtos e, por último, da própria nota (a descrição do item mais recente).
+-- Aplicado em 04/11/2026 (migração crm_rel_vendas_ano_nome).
+create or replace function public.crm_rel_vendas_ano(p_ano integer) returns table (codigo text, descricao text, unidade text, meses numeric[], total numeric)
+language plpgsql stable security definer set search_path = public as $$
+#variable_conflict use_column
+begin
+  if not (public.crm_eh_gestor() or public.crm_eh_comprador() or public.crm_eh_logistica()) then raise exception 'só o administrador, a gestora, o comprador e a logística'; end if;
+  if p_ano is null or p_ano < 2020 or p_ano > 2100 then raise exception 'ano inválido'; end if;
+  return query
+  with it as (
+    select regexp_replace(i.codigo, '\.\d+$', '') cod, extract(month from (n.emitida_em at time zone 'America/Sao_Paulo'))::int mes,
+           i.quantidade * coalesce((select u.fator from public.crm_estoque_unidades u where u.codigo = regexp_replace(i.codigo, '\.\d+$', '') and u.unidade = public.crm_un(i.unidade)), 1) q,
+           i.descricao d, i.unidade un, n.emitida_em em
+      from public.crm_nota_itens i join public.crm_notas n on n.id = i.nota_id
+     where not n.cancelada and i.codigo is not null and coalesce(i.cfop, '') ~ '^[567][14]'
+       and n.emitida_em >= make_timestamptz(p_ano, 1, 1, 0, 0, 0, 'America/Sao_Paulo') and n.emitida_em < make_timestamptz(p_ano + 1, 1, 1, 0, 0, 0, 'America/Sao_Paulo')
+  ), m as (select it.cod, it.mes, sum(it.q) q from it group by 1, 2),
+  nome as (select distinct on (it.cod) it.cod, nullif(btrim(it.d), '') d, it.un from it order by it.cod, it.em desc)
+  select m.cod, coalesce(e.descricao, s.descricao, (select p.nome from public.crm_produtos p where p.codigo = m.cod limit 1), nm.d, m.cod),
+         coalesce(e.unidade, s.unidade, (select p.unidade from public.crm_produtos p where p.codigo = m.cod limit 1), nm.un),
+         array[sum(m.q) filter (where m.mes = 1), sum(m.q) filter (where m.mes = 2), sum(m.q) filter (where m.mes = 3), sum(m.q) filter (where m.mes = 4),
+               sum(m.q) filter (where m.mes = 5), sum(m.q) filter (where m.mes = 6), sum(m.q) filter (where m.mes = 7), sum(m.q) filter (where m.mes = 8),
+               sum(m.q) filter (where m.mes = 9), sum(m.q) filter (where m.mes = 10), sum(m.q) filter (where m.mes = 11), sum(m.q) filter (where m.mes = 12)],
+         sum(m.q)
+    from m left join public.crm_estoque e on e.codigo = m.cod left join public.crm_estoque_saldo s on s.codigo = m.cod left join nome nm on nm.cod = m.cod
+   group by m.cod, e.descricao, s.descricao, e.unidade, s.unidade, nm.d, nm.un
+   order by 2;
+end;
+$$;
+create or replace function public.crm_rel_vendas_ano_valor(p_ano integer) returns table (codigo text, descricao text, unidade text, meses numeric[], valores numeric[], total numeric, valor_total numeric)
+language plpgsql stable security definer set search_path = public as $$
+#variable_conflict use_column
+declare ve boolean;
+begin
+  if not (public.crm_eh_gestor() or public.crm_eh_comprador() or public.crm_eh_logistica()) then raise exception 'só o administrador, a gestora, o comprador e a logística'; end if;
+  if p_ano is null or p_ano < 2020 or p_ano > 2100 then raise exception 'ano inválido'; end if;
+  ve := public.crm_eh_gestor() or public.crm_eh_comprador();
+  return query
+  with it as (
+    select regexp_replace(i.codigo, '\.\d+$', '') cod, extract(month from (n.emitida_em at time zone 'America/Sao_Paulo'))::int mes,
+           i.quantidade * coalesce((select u.fator from public.crm_estoque_unidades u where u.codigo = regexp_replace(i.codigo, '\.\d+$', '') and u.unidade = public.crm_un(i.unidade)), 1) q,
+           coalesce(i.valor_total, 0) v, i.descricao d, i.unidade un, n.emitida_em em
+      from public.crm_nota_itens i join public.crm_notas n on n.id = i.nota_id
+     where not n.cancelada and i.codigo is not null and coalesce(i.cfop, '') ~ '^[567][14]'
+       and n.emitida_em >= make_timestamptz(p_ano, 1, 1, 0, 0, 0, 'America/Sao_Paulo') and n.emitida_em < make_timestamptz(p_ano + 1, 1, 1, 0, 0, 0, 'America/Sao_Paulo')
+  ), m as (select it.cod, it.mes, sum(it.q) q, sum(it.v) v from it group by 1, 2),
+  nome as (select distinct on (it.cod) it.cod, nullif(btrim(it.d), '') d, it.un from it order by it.cod, it.em desc)
+  select m.cod, coalesce(e.descricao, s.descricao, (select p.nome from public.crm_produtos p where p.codigo = m.cod limit 1), nm.d, m.cod),
+         coalesce(e.unidade, s.unidade, (select p.unidade from public.crm_produtos p where p.codigo = m.cod limit 1), nm.un),
+         array(select sum(m2.q) from generate_series(1, 12) g left join m m2 on m2.cod = m.cod and m2.mes = g group by g order by g),
+         case when ve then array(select round(sum(m2.v), 2) from generate_series(1, 12) g left join m m2 on m2.cod = m.cod and m2.mes = g group by g order by g) end,
+         sum(m.q), case when ve then round(sum(m.v), 2) end
+    from m left join public.crm_estoque e on e.codigo = m.cod left join public.crm_estoque_saldo s on s.codigo = m.cod left join nome nm on nm.cod = m.cod
+   group by m.cod, e.descricao, s.descricao, e.unidade, s.unidade, nm.d, nm.un
+   order by 2;
+end;
+$$;
