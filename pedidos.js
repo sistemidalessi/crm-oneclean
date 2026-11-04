@@ -94,7 +94,11 @@
   // Bloqueios que ainda seguram (os liberados à mão não contam; um novo volta a segurar).
   const bloqueiosAbertos = p => (p.bloqueios || []).filter(b => (p.liberado || []).indexOf(b) === -1);
   const ROTULO_BLOQUEIO = { ESTOQUE: 'estoque', ATRASO: 'duplicata em atraso', 'SEM ENTRADA': 'sem entrada (pagamento antecipado)', 'PREÇO': 'margem geral abaixo do mínimo',
-    'SEM ANÁLISE': 'sem análise de crédito', PRAZO: 'prazo além do crédito', LIMITE: 'acima do limite de crédito' };
+    'SEM ANÁLISE': 'sem análise de crédito', PRAZO: 'prazo além do crédito', LIMITE: 'acima do limite de crédito',
+    'SEM CADASTRO': 'item sem cadastro (CONSULTOR): troque pelo produto cadastrado' };
+  // Financeiro (04/11/2026, Anderson: "quando o caso for financeiro, somente eu que desbloqueio"): crédito, duplicata em atraso e
+  // pagamento antecipado sem entrada só o administrador libera (crm_pedido_liberar). SEM CADASTRO ninguém libera.
+  const FINANCEIRO = ['SEM ANÁLISE', 'PRAZO', 'LIMITE', 'ATRASO', 'SEM ENTRADA'];
   // Situação como no Sifn050: BLOQUEADO / LIBERADO / EM SEPARAÇÃO (SP n) / A EMITIR NF / FATURADO / CANCELADO.
   // Pausado (03/11/2026, Anderson: entregas futuras da Santa Casa ficavam "liberadas" e a logística podia emitir sem querer):
   // não vai à separação nem à nota; com data, volta sozinho no dia ("até" = o dia em que volta).
@@ -247,7 +251,7 @@
 
   const FRETE_CONTA = [['0', '0-Remetente (CIF)'], ['1', '1-Destinatário (FOB)'], ['2', '2-Terceiros'], ['9', '9-Sem frete']];
 
-  const P = { unidadeNorm, TABELA_PADRAO, PLANOS_PADRAO, MARGEM_MINIMA, MARGEM_INTERNO, margemDoPlano, pctDaMargem, chaveMargem, rotuloMargem, margemMinima, apuraComissao, totalComAjustes, itensParaRepetir, ehVendaCfop, FAIXAS, FRETE_CONTA, ROTULO_BLOQUEIO, tabelaDe, planosDe, planoDoUsuario, precoLiq, totalItem, precoDaFaixa, faixaDoPreco, rotuloFaixa,
+  const P = { FINANCEIRO, unidadeNorm, TABELA_PADRAO, PLANOS_PADRAO, MARGEM_MINIMA, MARGEM_INTERNO, margemDoPlano, pctDaMargem, chaveMargem, rotuloMargem, margemMinima, apuraComissao, totalComAjustes, itensParaRepetir, ehVendaCfop, FAIXAS, FRETE_CONTA, ROTULO_BLOQUEIO, tabelaDe, planosDe, planoDoUsuario, precoLiq, totalItem, precoDaFaixa, faixaDoPreco, rotuloFaixa,
     margem, sobreTabela, abaixoDaTabela, linha, totais, bloqueiosAbertos, situacao, pausado, bolao, ultimasCompras, procura, itensDaProposta, entregaDoCliente, entregaTexto };
   raiz.CRMPedidos = P;
   if (typeof module !== 'undefined') module.exports = P;
@@ -514,7 +518,7 @@
     if (podeEditar(p)) botoes.push('<button type="button" class="btn sec" data-acao="pd-editar" data-id="' + esc(p.id) + '">Editar</button>');
     if (gest && p.situacao === 'aberto' && (p.bloqueios || []).length) botoes.push(bAbertos.length ? '<button type="button" class="btn verde" data-acao="pd-liberar" data-id="' + esc(p.id) + '">Liberar</button>'
       : '<button type="button" class="btn sec" data-acao="pd-desliberar" data-id="' + esc(p.id) + '">Desfazer liberação</button>');
-    if (gest && p.situacao === 'aberto' && ((p.bloqueios || []).indexOf('SEM ENTRADA') !== -1 || p.entrada_ok)) botoes.push('<button type="button" class="btn sec" data-acao="pd-entrada" data-id="' + esc(p.id) + '">' + (p.entrada_ok ? 'Desfazer "entrada recebida"' : 'Entrada recebida') + '</button>');
+    if (CRM.ehAdmin() && p.situacao === 'aberto' && ((p.bloqueios || []).indexOf('SEM ENTRADA') !== -1 || p.entrada_ok)) botoes.push('<button type="button" class="btn sec" data-acao="pd-entrada" data-id="' + esc(p.id) + '">' + (p.entrada_ok ? 'Desfazer "entrada recebida"' : 'Entrada recebida') + '</button>');
     const pz = P.pausado(p);
     if (ehOp() && ['aberto', 'separacao', 'separado'].indexOf(p.situacao) !== -1) botoes.push(pz
       ? '<button type="button" class="btn verde" data-acao="pd-retomar" data-id="' + esc(p.id) + '">▶ Retomar</button>'
@@ -553,7 +557,8 @@
       (pz ? '<p class="aviso-notas">⏸ <strong>Pausado</strong>' + (p.dados.pausado.ate ? ' até ' + esc(R.dataBR(String(p.dados.pausado.ate).slice(0, 10))) + ' (volta sozinho nesse dia)' : ' até alguém clicar em "Retomar"') +
         (p.dados.pausado.motivo ? ' · ' + esc(p.dados.pausado.motivo) : '') + (p.dados.pausado.por ? ' · por ' + esc(p.dados.pausado.por) : '') + '. Não vai à separação nem à nota.</p>' : '') +
       (bAbertos.length ? '<p class="alerta">Bloqueado por: <strong>' + esc(bAbertos.map(b => P.ROTULO_BLOQUEIO[b] || b).join(', ')) + '</strong>.' + (gest ? ' Confira e clique em "Liberar".' : ' Quem libera é a gestora ou a logística.') +
-        (bAbertos.some(b => ['SEM ANÁLISE', 'PRAZO', 'LIMITE'].indexOf(b) !== -1) ? ' O crédito (' + esc(bAbertos.filter(b => ['SEM ANÁLISE', 'PRAZO', 'LIMITE'].indexOf(b) !== -1).map(b => P.ROTULO_BLOQUEIO[b]).join(', ')) + ') só o administrador libera.' + (CRM.ehAdmin() && CRM.credito && CRM.credito.analisar ?
+        (bAbertos.indexOf('SEM CADASTRO') !== -1 ? ' <strong>O item genérico (CONSULTOR) não vai à separação nem à nota:</strong> peça o cadastro do produto ao comprador e troque o item no pedido (ninguém libera esta trava).' : '') +
+        (bAbertos.some(b => P.FINANCEIRO.indexOf(b) !== -1) ? ' O financeiro (' + esc(bAbertos.filter(b => P.FINANCEIRO.indexOf(b) !== -1).map(b => P.ROTULO_BLOQUEIO[b]).join(', ')) + ') só o administrador libera.' + (CRM.ehAdmin() && CRM.credito && CRM.credito.analisar && bAbertos.some(b => ['SEM ANÁLISE', 'PRAZO', 'LIMITE'].indexOf(b) !== -1) ?
           ' <button type="button" class="btn" data-acao="pd-credito" data-id="' + esc(p.id) + '" title="Abre a análise de crédito deste cliente aqui mesmo; ao aprovar, a trava do crédito sai do pedido">💳 Analisar o crédito do cliente</button>' : '') +
           avisoCredito(p, bAbertos, t) : '') + '</p>' : '') +
       '<p class="acoes">' + botoes.join(' ') + '</p>' + (CRM.nfe ? CRM.nfe.doPedido(p) : '') +
@@ -618,9 +623,9 @@
     const adm = (E().D.usuarios || []).find(u => u.papel === 'admin' && u.ativo !== false && String(u.telefone || '').replace(/\D/g, '').length >= 10);
     if (!adm) return '';
     const tel = String(adm.telefone).replace(/\D/g, ''), d = p.dados || {};
-    const travas = bAbertos.filter(b => ['SEM ANÁLISE', 'PRAZO', 'LIMITE'].indexOf(b) !== -1).map(b => P.ROTULO_BLOQUEIO[b] || b).join(', ');
+    const travas = bAbertos.filter(b => P.FINANCEIRO.indexOf(b) !== -1).map(b => P.ROTULO_BLOQUEIO[b] || b).join(', ');
     const txt = 'Olá, ' + String(adm.nome || '').split(' ')[0] + '! O pedido ' + p.numero + ' de ' + nomeCliente(p) + ' (' + R.moeda(t.geral) + (d.pagamento ? ', ' + d.pagamento : '') +
-      ') está travado no crédito: ' + travas + '. Pode analisar? Assim a gente já separa. — ' + (CRM.nomeUsuario(CRM.meuId()) || '') +
+      ') está travado no financeiro: ' + travas + '. Pode analisar? Assim a gente já separa. — ' + (CRM.nomeUsuario(CRM.meuId()) || '') +
       '\n\n👉 Abrir o pedido ' + p.numero + ' no CRM: ' + linkPedido(p.numero);
     return ' <a class="btn" href="https://wa.me/' + (tel.length <= 11 ? '55' : '') + tel + '?text=' + encodeURIComponent(txt) + '" target="_blank" rel="noopener noreferrer">📲 Pedir a análise ao ' + esc(String(adm.nome || 'administrador').split(' ')[0]) + '</a>';
   }
@@ -831,7 +836,8 @@
       const tab = P.tabelaDe(E().cfg);
       corpo = listaProdutosHTML + '<div class="pd-entrada">' +
         '<label class="campo largo"><span>Produto (código ou nome) — item ' + (x.sel != null ? x.sel + 1 : x.itens.length + 1) + '</span><input id="pdProd" list="pdProdutos" value="' + esc(l.codigo ? l.codigo + ' — ' + l.descricao : l.descricao) + '" placeholder="digite o código ou parte do nome" autocomplete="off"></label>' +
-        (ehLivre(dd) ? '<label class="campo largo"><span>Descrição deste item (vai no pedido e na nota)</span><input id="pdDescLivre" data-seq="' + x.seq + '" maxlength="120" value="' + esc(l.descricao) + '" placeholder="escreva o produto como deve sair na nota" autocomplete="off"></label>' : '') +
+        (ehLivre(dd) ? '<p class="alerta largo">⚠ Item genérico: o pedido fica <strong>travado (sem cadastro)</strong> até trocar este item pelo produto cadastrado. Peça o cadastro ao comprador.</p>' +
+          '<label class="campo largo"><span>Descrição deste item (para a separação saber o que é)</span><input id="pdDescLivre" data-seq="' + x.seq + '" maxlength="120" value="' + esc(l.descricao) + '" placeholder="escreva o produto como deve sair na nota" autocomplete="off"></label>' : '') +
         '<label class="campo"><span>Qtde' + (l.unidade ? ' (' + esc(l.unidade) + ')' : '') + '</span><input id="pdQtd" data-seq="' + x.seq + '" type="number" step="any" min="0" value="' + esc(l.quantidade) + '" inputmode="decimal"></label>' +
         '<label class="campo"><span>Preço un</span><input id="pdPreco" data-seq="' + x.seq + '" type="number" step="any" min="0" value="' + esc(l.preco) + '" inputmode="decimal"></label>' +
         '<label class="campo"><span>Desc %</span><input id="pdDesc" data-seq="' + x.seq + '" type="number" step="any" min="0" max="100" value="' + esc(l.desconto) + '" inputmode="decimal"></label>' +
@@ -1243,7 +1249,7 @@
     'pd-gravar': vivo(gravarPedido),
     'pd-salvar-orcamento': vivo(salvarOrcamento),
     'pd-liberar': vivo(async id => { const p = ped(id); if (!confirm('Liberar o pedido ' + p.numero + ' (' + P.bloqueiosAbertos(p).map(b => P.ROTULO_BLOQUEIO[b] || b).join(', ') + ')?')) return; troca(await CRM.store().pedidoLiberar(id, true, null)); const r = P.bloqueiosAbertos(ped(id));
-      CRM.toast(r.length ? 'Liberado o que você pode. Continua bloqueado por ' + r.map(b => P.ROTULO_BLOQUEIO[b] || b).join(', ') + ' (crédito: só o administrador).' : 'Pedido liberado para a separação.', !!r.length); CRM.render(); }),
+      CRM.toast(r.length ? 'Liberado o que você pode. Continua bloqueado por ' + r.map(b => P.ROTULO_BLOQUEIO[b] || b).join(', ') + ' (financeiro: só o administrador; item sem cadastro: trocar o item).' : 'Pedido liberado para a separação.', !!r.length); CRM.render(); }),
     'pd-desliberar': vivo(async id => { troca(await CRM.store().pedidoLiberar(id, false, null)); CRM.render(); }),
     'pd-entrada': vivo(async id => { const p = ped(id); troca(await CRM.store().pedidoLiberar(id, null, !p.entrada_ok)); CRM.render(); }),
     'pd-cancelar': vivo(async id => { const p = ped(id); const m = prompt('Cancelar o pedido ' + p.numero + '? A reserva do estoque sai. Diga o motivo:'); if (!m) return; troca(await CRM.store().pedidoSituacao(id, 'cancelado', m)); await recarrega(); }),
