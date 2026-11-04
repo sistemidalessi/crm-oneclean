@@ -210,7 +210,7 @@
       if (l.situacao === 'pago') {
         const adi = recebidoAntes(l);
         add(Object.assign(base, { data: l.pago_em, estado: l.baixa === 'caixa' ? 'feito' : 'fora', adiantado: adi,
-          obs: (adi ? 'adiantado: vencia ' + dm(l.vencimento) + ', o cliente pagou em ' + dm(l.pago_em) : '') + (l.baixa === 'caixa' ? '' : (adi ? ' · ' : '') + 'pago fora do caixa do dia') }));
+          obs: (adi ? 'adiantado: vencia ' + dm(l.vencimento) + ', crédito no banco em ' + dm(l.pago_em) : '') + (l.baixa === 'caixa' ? '' : (adi ? ' · ' : '') + 'pago fora do caixa do dia') }));
         return;
       }
       const pg = posterga(l.vencimento);

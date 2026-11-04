@@ -325,7 +325,7 @@ test('título recebido antes do vencimento: adiantado (verde) no dia em que entr
   const lanc = (venc, pago) => ({ id: 'l' + pago, tipo: 'entrada', situacao: 'pago', baixa: 'caixa', origem: 'titulo', titulo_duplicata: '002435/01', descricao: 'Recebido: HOSPITAL EXEMPLO · 002435/01', valor: 7422.15, vencimento: venc, pago_em: pago });
   const g = C.itensGrade('2026-10-10', '2026-10-30', '2026-10-14', [lanc('2026-10-25', '2026-10-14')], [], { d1: true });
   assert.deepEqual([g[0].data, g[0].estado, g[0].adiantado], ['2026-10-14', 'feito', true]);
-  assert.match(g[0].obs, /adiantado: vencia 25\/10, o cliente pagou em 14\/10/);
+  assert.match(g[0].obs, /adiantado: vencia 25\/10, crédito no banco em 14\/10/);
   assert.equal(C.itensGrade('2026-10-10', '2026-10-30', '2026-10-14', [lanc('2026-10-14', '2026-10-14')], [], { d1: true })[0].adiantado, false, 'no próprio dia');
   assert.equal(C.itensGrade('2026-10-10', '2026-10-30', '2026-10-14', [lanc('2026-10-09', '2026-10-14')], [], { d1: true })[0].adiantado, false, 'atrasado');
   // vencimento no sábado (paga na segunda): pago na segunda não é adiantado
