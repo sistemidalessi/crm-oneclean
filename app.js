@@ -387,6 +387,22 @@
   CRM.recarregarFkn = async () => { if (store && store.fknAtualizado) { E.fkn = await store.fknAtualizado().catch(() => E.fkn); CRM.render(); } };
 
   let pendente = false;
+  // Campo em foco antes de redesenhar (04/11/2026, Anderson: na busca do Estoque "eu digito 3 e já sai fora"): pelo id
+  // ou, sem id, pelo 1º atributo data-* (e a posição entre os iguais), para o cursor voltar à mesma caixa.
+  function qualFoco(c) {
+    const a = document.activeElement;
+    if (!a || !c.contains(a) || a === c) return null;
+    if (a.id) return { id: a.id };
+    const at = [...a.attributes].find(x => /^data-[\w-]+$/.test(x.name));
+    if (!at) return null;
+    const sel = a.tagName.toLowerCase() + '[' + at.name + (at.value ? '="' + CSS.escape(at.value) + '"' : '') + ']';
+    return { sel, i: [...c.querySelectorAll(sel)].indexOf(a) };
+  }
+  function achaFoco(c, f) {
+    if (f.id) return document.getElementById(f.id);
+    const l = c.querySelectorAll(f.sel);
+    return l[f.i] || (l.length === 1 ? l[0] : null);
+  }
   CRM.render = () => {
     if (pendente) return;
     pendente = true;
@@ -512,7 +528,7 @@
       Object.keys(lugarVersao.telas || {}).forEach(k => { const l = CRM.telas[k] && CRM.telas[k].lugar; if (l && l.aplicar) { try { l.aplicar(lugarVersao.telas[k]); } catch (e) { /* sem */ } } });
     }
     const lugar = lugarVersao && lugarVersao.rolagem && lugarVersao.rolagem.aba === E.aba && Date.now() - lugarVersao.carregado < 20000 ? lugarVersao.rolagem : guardaLugar(c);
-    const foco = document.activeElement && document.activeElement.id && c.contains(document.activeElement) ? document.activeElement.id : null;
+    const foco = qualFoco(c);
     c.innerHTML = tela.render(al);
     if (tela.depois) tela.depois(c);
     CRM.aplicaBarras(c);
@@ -520,8 +536,8 @@
     voltaLugar(c, lugar);
     // depois da versão nova, a rolagem volta quando a tela já tem altura (dados que chegam depois, "Carregando…")
     if (lugarVersao && lugar === lugarVersao.rolagem && c.scrollHeight - c.clientHeight >= (lugar.topo || 0) && document.documentElement.scrollHeight - window.innerHeight >= (lugar.jy || 0)) lugarVersao.rolagem = null;
-    if (foco && document.getElementById(foco)) {
-      const el = document.getElementById(foco);
+    const el = foco && achaFoco(c, foco);
+    if (el) {
       el.focus({ preventScroll: true });
       // Só campos de texto aceitam cursor (caixa de marcar, data, número etc. dão erro).
       if (el.setSelectionRange && /^(text|textarea|search|tel|url|email|password|)$/.test(el.type || '') && typeof el.value === 'string') { try { el.setSelectionRange(el.value.length, el.value.length); } catch (e) { /* sem cursor */ } }
