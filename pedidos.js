@@ -502,7 +502,9 @@
   function htmlPedidoImpresso(p, quebra) {
     const d = p.dados || {}, sem = x => String(x == null ? '' : x).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
     return '<section class="sp-ped' + (quebra ? ' quebra' : '') + '"><h2>Pedido ' + esc(p.numero) + ' · ' + esc(nomeCliente(p)) + '</h2>' +
-      '<p>' + esc([P.entregaTexto(d.entrega), d.telefone, p.entrega ? 'Entrega ' + R.dataBR(p.entrega) : '', d.transportadora ? 'Transporte: ' + d.transportadora : '', d.volumes ? d.volumes + ' volume(s)' : ''].filter(Boolean).join(' · ')) + '</p>' +
+      '<p>' + esc([P.entregaTexto(d.entrega), d.telefone, p.entrega ? 'Entrega ' + R.dataBR(p.entrega) : '', d.transportadora ? 'Transporte: ' + d.transportadora : '', d.volumes ? d.volumes + ' volume(s)' : '',
+        // 04/11/2026 (logística): o nome do(a) vendedor(a) no pedido impresso e na lista de separação
+        p.vendedor_id && CRM.nomeUsuario(p.vendedor_id) !== '—' ? 'Vendedor(a): ' + CRM.nomeUsuario(p.vendedor_id) : ''].filter(Boolean).join(' · ')) + '</p>' +
       (d.texto_nota ? '<p><strong>Texto da nota:</strong> ' + esc(d.texto_nota) + '</p>' : '') + (d.observacoes ? '<p><strong>Obs.:</strong> ' + esc(d.observacoes) + '</p>' : '') +
       '<table><thead><tr><th>✓</th><th>Item</th><th>Código</th><th>Produto</th><th>Qtde</th><th>Un</th></tr></thead><tbody>' +
       (p.itens || []).map((it, i) => [it, i]).sort((a, b) => sem(a[0].descricao).localeCompare(sem(b[0].descricao), 'pt-BR', { numeric: true })).map(([it, i]) => '<tr><td class="cx"></td><td>' + (i + 1) + '</td><td>' + esc(it.codigo || '') + '</td><td>' + esc(it.descricao) + '</td><td class="n">' + qtd(it.quantidade) + '</td><td>' + esc(it.unidade || '') + '</td></tr>').join('') +
