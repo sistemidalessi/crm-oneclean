@@ -5712,7 +5712,7 @@ grant execute on function public.crm_estoque_avulsa_estornar(uuid, text) to auth
 -- Sai pela crm-caixa-leitura (?parte=ceo, a mesma senha de leitura que a Agilité já usa); por isso só o service_role
 -- executa. Venda = nota não cancelada com item de CFOP de venda (5/6/7 com 1 ou 4), como a Gestão.
 create or replace function public.crm_ceo_resumo() returns jsonb language plpgsql stable security definer set search_path = public as $$
-declare hoje date := (now() at time zone 'America/Sao_Paulo')::date; ini date; ini_ant date; fim_ant_parcial date; r jsonb := '{}'; x jsonb; mes_txt text;
+declare hoje date := (now() at time zone 'America/Sao_Paulo')::date; ini date; ini_ant date; fim_ant_parcial date; r jsonb := '{}'; x jsonb; mes_txt text; gv jsonb;
 begin
   ini := date_trunc('month', hoje)::date; ini_ant := (ini - interval '1 month')::date; fim_ant_parcial := least(ini_ant + (hoje - ini), ini - 1);
   mes_txt := to_char(ini, 'YYYY-MM');
@@ -5746,14 +5746,16 @@ begin
        and (exists (select 1 from public.crm_nota_itens i where i.nota_id = n.id and i.cfop ~ '^[567][14]')
             or not exists (select 1 from public.crm_nota_itens i where i.nota_id = n.id))));
   r := r || jsonb_build_object('vendas', x);
-  -- funil
+  -- funil (parados e propostas sem resposta = crm_gv_funil, a regra do Diretor de Vendas: último movimento, 04/11/2026;
+  -- migração crm_ceo_resumo_funil_ultimo_contato)
+  gv := public.crm_gv_funil();
   select jsonb_build_object(
     'abertos', count(*) filter (where status = 'aberto'), 'abertos_valor', coalesce(round(sum(valor) filter (where status = 'aberto'), 2), 0),
     'ganhos_mes', count(*) filter (where status = 'ganho' and fechado_em >= (ini::timestamp at time zone 'America/Sao_Paulo')),
     'ganhos_mes_valor', coalesce(round(sum(valor) filter (where status = 'ganho' and fechado_em >= (ini::timestamp at time zone 'America/Sao_Paulo')), 2), 0),
     'perdidos_mes', count(*) filter (where status = 'perdido' and fechado_em >= (ini::timestamp at time zone 'America/Sao_Paulo')),
-    'parados_15_dias', count(*) filter (where status = 'aberto' and coalesce(etapa_desde, criado_em) < now() - interval '15 days'),
-    'propostas_sem_resposta_7_dias', (select count(*) from public.crm_propostas p where p.status = 'enviada' and exists (select 1 from public.crm_negocios g2 where g2.id = p.negocio_id and g2.status = 'aberto') and p.enviada_em < now() - interval '7 days'))
+    'parados_15_dias', coalesce((gv->>'negocios_parados')::int, 0),
+    'propostas_sem_resposta_7_dias', coalesce((gv->>'propostas_sem_resposta')::int, 0))
     into x from public.crm_negocios;
   r := r || jsonb_build_object('funil', x);
   -- contas a receber (título em cartório fica à parte, como no Caixa)
