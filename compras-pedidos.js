@@ -243,6 +243,8 @@
       const t = String(v || '').trim(); if (!t) return null;
       const c = t.split(' ')[0].replace(/\.\d+$/, '');
       if (prods.has(c)) return prods.get(c);
+      // 04/11/2026 (Wellington): "10610" é o 010610 (o relatório do FKN mostra o código sem o zero da frente)
+      if (/^\d{1,5}$/.test(c) && prods.has(c.padStart(6, '0'))) return prods.get(c.padStart(6, '0'));
       const u = t.toUpperCase(); return lp.find(e => String(e.descricao).toUpperCase() === u) || null;
     };
     CRM.abrirForm({
@@ -267,7 +269,10 @@
           const k = ev.target.dataset && ev.target.dataset.cpCod; if (k == null) return;
           const e = acha(ev.target.value), d = form.querySelector('[data-cp-desc="' + k + '"]'), c = form.querySelector('[data-cp-c="' + k + '"]');
           if (e) { ev.target.value = String(e.codigo).replace(/\.\d+$/, ''); d.textContent = R.nomeDeItem(e.descricao) + ' · ' + (e.unidade || '') + (e.estoque_atual != null ? ' · saldo ' + qtd(e.estoque_atual) : '');
-            if (c && !c.value && Number(e.custo_unit) > 0) c.value = Number(e.custo_unit); }
+            // custo: o último preço de compra do produto (o do fornecedor, sem o índice); sem ele, o custo médio (04/11/2026, Wellington)
+            const cu = Number(e.custo_compra) > 0 ? Number(e.custo_compra) : Number(e.custo_unit) > 0 ? Number(e.custo_unit) : 0;
+            if (c && !c.value && cu > 0) c.value = Math.round(cu * 10000) / 10000;
+            if (cu > 0) d.textContent += ' · último custo R$ ' + R.moeda(cu).replace(/^R\$\s*/, ''); }
           else d.textContent = ev.target.value.trim() ? 'produto não encontrado no cadastro' : '';
         });
         form.querySelector('#cpMais').addEventListener('click', () => { const tb = form.querySelector('#cpLinhas'); for (let i = 0; i < 5; i++) tb.insertAdjacentHTML('beforeend', linha(n++)); });

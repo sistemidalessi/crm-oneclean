@@ -672,10 +672,11 @@
     const est = estoqueRel(linhas);
     if (rel.vendasAno !== rel.ano) setTimeout(carregaVendas, 0);
     const vend = rel.vendasAno === rel.ano ? vendasRel() : null;
+    const comValorAno = !!(vend && vend.some(x => Array.isArray(x.valores)));   // a logística recebe só quantidades
     const anoAtual = new Date().getFullYear(), anos = [];
     for (let a = anoAtual; a >= 2025; a--) anos.push([a, String(a)]);
     const mostra = 500;
-    return '<section class="cartao"><h2>Relatórios <small>só quantidades</small></h2>' +
+    return '<section class="cartao"><h2>Relatórios</h2>' +
       '<p class="acoes"><input type="search" placeholder="Procurar produto ou código (vale para os dois)" value="' + esc(rel.busca) + '" data-rel-busca class="of-busca"> ' +
       '<button type="button" class="btn sec" data-acao="imprimir">Imprimir</button></p></section>' +
       '<section class="cartao"><h2>Estoque atual <small>' + est.length + ' produto(s)</small></h2>' +
@@ -686,13 +687,18 @@
           '<td class="num' + (+x.saldo < 0 ? ' neg' : '') + '">' + qtd(x.saldo) + '</td></tr>').join('') + '</tbody></table></div>' +
         (est.length > mostra ? '<p class="dica">Mostrando ' + mostra + ' de ' + est.length + '; a planilha leva todos.</p>' : '') : '<p class="vazio">Nada aqui.</p>') + '</section>' +
       '<section class="cartao"><h2>Vendas do ano, mês a mês <small>' + (vend ? vend.length + ' produto(s)' : 'carregando…') + '</small></h2>' +
-      '<p class="dica">Quantidade vendida de cada produto em cada mês, pelas notas de venda (sem as canceladas). A caixa vendida com o código da unidade conta em unidades.</p>' +
+      '<p class="dica">' + (comValorAno ? 'Valor (R$) e quantidade' : 'Quantidade') + ' vendida de cada produto em cada mês, pelas notas de venda (sem as canceladas), como a venda anual por produto do FKN. A caixa vendida com o código da unidade conta em unidades.</p>' +
       '<p class="acoes"><label class="filtro-inline">Ano <select data-rel-ano>' + CRM.opcoesHTML(anos, rel.ano) + '</select></label> ' +
       '<button type="button" class="btn sec" data-acao="es-rel-vendas-csv"' + (vend ? '' : ' disabled') + '>Baixar planilha</button></p>' +
       (!vend ? '<p class="vazio">Carregando…</p>' : !vend.length ? '<p class="vazio">Nenhuma venda neste ano.</p>'
-        : '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Código</th><th>Produto</th>' + MESES.map(m => '<th class="num">' + m + '</th>').join('') + '<th class="num">Total</th></tr></thead><tbody>' +
-          vend.slice(0, mostra).map(x => '<tr><td>' + esc(x.codigo) + '</td><td>' + esc(R.nomeDeItem(x.descricao || x.codigo)) + (x.unidade ? '<small>' + esc(x.unidade) + '</small>' : '') + '</td>' +
-            (x.meses || []).map(v => '<td class="num">' + (v == null ? '' : qtd(v)) + '</td>').join('') + '<td class="num"><strong>' + qtd(x.total) + '</strong></td></tr>').join('') +
+        : '<div class="tabela-rolagem"><table class="tabela rel-ano"><thead><tr><th>Código</th><th>Produto</th>' + (comValorAno ? '<th></th>' : '') + MESES.map(m => '<th class="num">' + m + '</th>').join('') + '<th class="num">Total</th></tr></thead><tbody>' +
+          vend.slice(0, mostra).map(x => {
+            const nome = '<td' + (comValorAno ? ' rowspan="2"' : '') + '>' + esc(x.codigo) + '</td><td' + (comValorAno ? ' rowspan="2"' : '') + '>' + esc(R.nomeDeItem(x.descricao || x.codigo)) + (x.unidade ? '<small>' + esc(x.unidade) + '</small>' : '') + '</td>';
+            const lq = (x.meses || []).map(v => '<td class="num">' + (v == null ? '' : qtd(v)) + '</td>').join('') + '<td class="num"><strong>' + qtd(x.total) + '</strong></td>';
+            if (!comValorAno) return '<tr>' + nome + lq + '</tr>';
+            const lv = (x.valores || []).map(v => '<td class="num">' + (v == null ? '' : R.moeda(v).replace(/^R\$\s*/, '')) + '</td>').join('') + '<td class="num"><strong>' + R.moeda(x.valor_total || 0).replace(/^R\$\s*/, '') + '</strong></td>';
+            return '<tr class="ra-valor">' + nome + '<td><small>R$</small></td>' + lv + '</tr><tr class="ra-qtd"><td><small>qtde</small></td>' + lq + '</tr>';
+          }).join('') +
           '</tbody></table></div>' + (vend.length > mostra ? '<p class="dica">Mostrando ' + mostra + ' de ' + vend.length + '; a planilha leva todos.</p>' : '')) + '</section>' + telaRelPeriodo() + telaMovsPeriodo();
   }
 
@@ -1386,8 +1392,12 @@
       CRM.baixarCSV('estoque-atual', ['Código', 'Produto', 'Unidade', 'Quantidade em estoque'], l.map(x => [x.codigo, x.descricao || '', x.unidade || '', x.saldo]));
     },
     'es-rel-vendas-csv': () => {
-      CRM.baixarCSV('vendas-' + rel.ano + '-por-mes', ['Código', 'Produto', 'Unidade'].concat(MESES, ['Total']),
-        vendasRel().map(x => [x.codigo, x.descricao || '', x.unidade || ''].concat((x.meses || []).map(v => (v == null ? 0 : v)), [x.total])));
+      const l = vendasRel(), comV = l.some(x => Array.isArray(x.valores));
+      CRM.baixarCSV('vendas-' + rel.ano + '-por-mes', ['Código', 'Produto', 'Unidade'].concat(comV ? ['Linha'] : [], MESES, ['Total']),
+        [].concat(...l.map(x => {
+          const q = [x.codigo, x.descricao || '', x.unidade || ''].concat(comV ? ['qtde'] : [], (x.meses || []).map(v => (v == null ? 0 : v)), [x.total]);
+          return comV ? [[x.codigo, x.descricao || '', x.unidade || '', 'R$'].concat((x.valores || []).map(v => (v == null ? 0 : v)), [x.valor_total || 0]), q] : [q];
+        })));
     },
     'es-chegou': id => {
       const c = compras.find(x => x.id === id); if (!c) return;

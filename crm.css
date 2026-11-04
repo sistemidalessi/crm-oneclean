@@ -1376,3 +1376,7 @@ button.ordena.ativo { color: var(--marinho); }
 .es-parcelas h3 small { font-weight: 400; color: var(--texto-2, #666); margin-left: 6px; }
 .es-parcelas input[data-pval] { width: 9em; text-align: right; }
 .es-parcelas input[type=number] { width: 4.5em; }
+
+/* relatório anual com valor e quantidade (04/11/2026) */
+.rel-ano tr.ra-valor td { border-bottom: 0; }
+.rel-ano tr.ra-qtd td { color: var(--texto-2, #555); }

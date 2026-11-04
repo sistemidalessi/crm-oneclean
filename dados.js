@@ -668,7 +668,8 @@
   // vendas e livro do estoque de cada produto entre duas datas (Estoque → Relatórios, 03/11/2026)
   Supa.prototype.relPeriodo = async function (de, ate) { return paginado((a, b) => this.sb.rpc('crm_rel_periodo', { p_de: de, p_ate: ate }).range(a, b)); };
   // quantidade vendida de cada produto em cada mês do ano (Estoque → Relatórios)
-  Supa.prototype.relVendasAno = async function (ano) { return paginado((de, ate) => this.sb.rpc('crm_rel_vendas_ano', { p_ano: ano }).range(de, ate)); };
+  // 04/11/2026: com o valor de cada mês (crm_rel_vendas_ano_valor; a logística recebe o valor vazio)
+  Supa.prototype.relVendasAno = async function (ano) { return paginado((de, ate) => this.sb.rpc('crm_rel_vendas_ano_valor', { p_ano: ano }).range(de, ate)); };
   Supa.prototype.compraIgnorar = async function (id, obs) {
     return unwrap(await this.sb.from('crm_compras').update({ situacao: 'ignorada', obs: obs || null, atualizado_em: new Date().toISOString() }).eq('id', id).eq('situacao', 'pendente').select().single());
   };
