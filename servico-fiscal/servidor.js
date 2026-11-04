@@ -12,7 +12,8 @@
    Rotas (POST com JSON): /status, /previa, /emitir, /consultar, /reenviar, /cancelar, /cce, /inutilizar, /dfe (notas de
    compra: distribuição pelo NSU ou pela chave), /ciencia (Ciência da Operação de uma nota de compra), /manifestar (resposta
    definitiva: confirmação, desconhecimento, operação não realizada), /cadastro (consulta cadastro da Sefaz-SP pelo CNPJ: inscrição
-   estadual e se está habilitada; sempre em produção, é só leitura); GET /saude.
+   estadual e se está habilitada; sempre em produção, é só leitura), /bb (chamada ao Banco do Brasil com o A1: extrato da conta;
+   só endereços *.bb.com.br; ver bb.js); GET /saude.
    Certificado novo (renovação do A1): trocar o arquivo e mandar "systemctl reload oneclean-fiscal" (SIGHUP relê). */
 
 const http = require('http');
@@ -25,8 +26,9 @@ const S = require('./sefaz');
 const PD = require('./pedido');
 const O = require('./outras');
 const D = require('./dfe');
+const BB = require('./bb');
 
-const VERSAO = '2026-11-03c';
+const VERSAO = '2026-11-04a';
 const env = process.env;
 let cert = null;   // { certPem, keyPem, dados }
 
@@ -131,7 +133,9 @@ const ROTAS = {
   'POST /cadastro': async b => S.cadastro(cfgSefaz('producao'), { uf: 'SP', cnpj: b.cnpj, cpf: b.cpf, ie: b.ie }),
   'POST /ciencia': async b => D.daCiencia(cfgSefaz(b.ambiente), { cnpj: b.cnpj, chave: b.chave, quando: agoraSP() }),
   // resposta definitiva à nota de compra (confirmacao | desconhecimento | nao_realizada, esta com justificativa)
-  'POST /manifestar': async b => D.manifesta(cfgSefaz(b.ambiente), { cnpj: b.cnpj, chave: b.chave, quando: agoraSP(), tipo: b.tipo, justificativa: b.justificativa })
+  'POST /manifestar': async b => D.manifesta(cfgSefaz(b.ambiente), { cnpj: b.cnpj, chave: b.chave, quando: agoraSP(), tipo: b.tipo, justificativa: b.justificativa }),
+  // Banco do Brasil com o A1 (04/11/2026): extrato da conta (conciliação) e, depois, pagamentos. Ver bb.js.
+  'POST /bb': async b => BB.chama(cfgSefaz('producao'), b)
 };
 
 function autorizado(req) {

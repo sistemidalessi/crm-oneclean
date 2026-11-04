@@ -10,6 +10,7 @@
 //                                    número ou por CNPJ + valor + vencimento; o resto fica em crm_bb_site para o administrador)
 //   POST { acao: 'baixar_canceladas' } baixa no banco o boleto de nota cancelada (02/11/2026): o cliente não consegue mais pagar
 //   POST { acao: 'vencidos' }        boletos em aberto já vencidos com linha digitável, juros e multa (cobrança automática, 04/11/2026)
+//   POST { acao: 'extrato', de?, ate?, bruto? }  extrato da conta pela VPS (com o A1, mTLS), 04/11/2026: lê e devolve os lançamentos
 //   POST { acao: 'ciclo' }           o do agendador (pg_cron crm-bb-ciclo, a cada 10 min das 7h às 20h50): prepara as parcelas
 //                                    das notas do CRM, registra, baixa os das notas canceladas e lê os pagos
 // Chaves só nos Secrets: BB_CLIENT_ID, BB_CLIENT_SECRET, BB_APP_KEY (developer_application_key).
@@ -22,6 +23,32 @@ const resposta = (s: number, c: unknown) => new Response(JSON.stringify(c), { st
 const OAUTH = Deno.env.get('BB_OAUTH_URL') || 'https://oauth.bb.com.br/oauth/token';
 const COBRANCA = Deno.env.get('BB_COBRANCA_URL') || 'https://api.bb.com.br/cobrancas/v2';
 const APP = () => encodeURIComponent(Deno.env.get('BB_APP_KEY') ?? '');
+const EXTRATOS = Deno.env.get('BB_EXTRATOS_URL') || 'https://api-extratos.bb.com.br/extratos/v1';
+
+// Serviço fiscal da VPS (04/11/2026): a API Extratos exige o certificado A1 (mTLS), que só existe lá. A chamada sai daqui pronta
+// (endereço + token); a VPS só acrescenta o certificado (rota /bb, servico-fiscal/bb.js). Mesmos Secrets da crm-fiscal.
+async function viaVps(corpo: unknown) {
+  const url = Deno.env.get('FISCAL_URL'), tok = Deno.env.get('FISCAL_TOKEN');
+  if (!url || !tok) throw new Error('faltam FISCAL_URL e FISCAL_TOKEN nos Secrets');
+  const r = await fetch(url.replace(/\/$/, '') + '/bb', { method: 'POST', headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json' },
+    body: JSON.stringify(corpo), signal: AbortSignal.timeout(60000) });
+  const j = await r.json().catch(() => ({ erro: 'resposta inválida do serviço fiscal (HTTP ' + r.status + ')' }));
+  if (r.status === 404) throw new Error('o serviço fiscal da VPS ainda não tem a rota /bb: falta o git pull e reiniciar o serviço (versão 2026-11-04a)');
+  if (!r.ok) throw new Error(j.erro || 'serviço fiscal: HTTP ' + r.status);
+  return j as { status: number, json: any, texto?: string };
+}
+// token para API com certificado: primeiro do jeito de sempre; se o BB pedir o certificado também no token, pela VPS
+async function tokenMtls(escopo: string) {
+  try { return await token(escopo); } catch (e1) {
+    const id = Deno.env.get('BB_CLIENT_ID') ?? '', seg = Deno.env.get('BB_CLIENT_SECRET') ?? '';
+    const r = await viaVps({ url: OAUTH, metodo: 'POST', basic: id + ':' + seg, form: { grant_type: 'client_credentials', scope: escopo } });
+    if (r.status !== 200 || !r.json?.access_token) throw new Error((e1 as Error).message + ' / pela VPS (' + r.status + '): ' + String(r.json?.error_description || r.json?.error || r.texto || '').slice(0, 200));
+    return r.json.access_token as string;
+  }
+}
+// data do extrato: o BB manda/recebe DDMMAAAA como número (o zero da frente some: 4112026 = 04/11/2026)
+const dataExtrato = (isoD: string) => { const [a, m, d] = isoD.split('-'); return String(Number(d + m + a)); };
+const isoExtrato = (v: unknown) => { const s = String(v ?? '').replace(/\D/g, '').padStart(8, '0'); return /^\d{8}$/.test(s) && s !== '00000000' ? s.slice(4) + '-' + s.slice(2, 4) + '-' + s.slice(0, 2) : null; };
 
 async function token(escopo: string) {
   const id = Deno.env.get('BB_CLIENT_ID') ?? '', seg = Deno.env.get('BB_CLIENT_SECRET') ?? '';
@@ -318,6 +345,32 @@ Deno.serve(async (req) => {
             cidade: String(d.nomeMunicipioSacadoCobranca || '').trim(), uf: String(d.siglaUnidadeFederacaoSacadoCobranca || '').trim(), cep: dig(d.numeroCepSacadoCobranca).padStart(8, '0') } });
       }
       return resposta(200, { n: l.length, boletos: out, ...(c.bruto ? { bruto } : {}) });
+    }
+    // extrato da conta corrente (04/11/2026, conciliação bancária): { de?, ate?, bruto? }. Por enquanto só lê e devolve, para
+    // conferir o formato na 1ª leitura real; a conciliação no Caixa vem em seguida, com os nomes dos campos confirmados.
+    if (c.acao === 'extrato') {
+      const ag = dig(b.agencia).slice(0, -1), cc = dig(b.conta).slice(0, -1);
+      if (!ag || !cc) throw new Error('faltam agência e conta em Configurações → Integrações → Dados do convênio');
+      const ate = /^\d{4}-\d{2}-\d{2}$/.test(String(c.ate)) ? c.ate : hojeSP();
+      const de = /^\d{4}-\d{2}-\d{2}$/.test(String(c.de)) ? c.de : maisDias(ate, -2);
+      const tk = await tokenMtls(String(c.escopo || 'extrato-info'));
+      const lanc: any[] = []; let pagina = 1, ultimo: any = null;
+      for (let volta = 0; volta < 30; volta++) {
+        const u = EXTRATOS + '/conta-corrente/agencia/' + ag + '/conta/' + cc + '?numeroPaginaSolicitacao=' + pagina + '&quantidadeRegistroPaginaSolicitacao=200' +
+          '&dataInicioSolicitacao=' + dataExtrato(de) + '&dataFimSolicitacao=' + dataExtrato(ate) + '&gw-dev-app-key=' + APP();
+        const r = await viaVps({ url: u, token: tk });
+        ultimo = r;
+        if (r.status === 404) break;   // sem lançamentos no período
+        if (r.status !== 200) return resposta(200, { ok: false, status: r.status, erro: msgBB(r.json, r.texto || ''), de, ate });
+        lanc.push(...(r.json?.listaLancamento || []));
+        const prox = Number(r.json?.numeroPaginaProximo) || 0;
+        if (!prox || prox <= pagina) break;
+        pagina = prox;
+      }
+      const l = lanc.map((x: any) => ({ data: isoExtrato(x.dataLancamento), movimento: isoExtrato(x.dataMovimento), valor: Number(x.valorLancamento) || 0,
+        sinal: x.indicadorSinalLancamento ?? null, historico: String(x.textoDescricaoHistorico ?? '').trim(), complemento: String(x.textoInformacaoComplementar ?? '').trim(),
+        documento: x.numeroDocumento ?? null, codigo: x.codigoHistorico ?? null, contrapartida: dig(x.numeroCpfCnpjContrapartida) || null }));
+      return resposta(200, { ok: true, de, ate, n: l.length, lancamentos: l, ...(c.bruto ? { bruto: lanc.slice(0, 5), pagina: ultimo?.json ? Object.keys(ultimo.json) : null } : {}) });
     }
     if (c.acao === 'baixar_canceladas') return resposta(200, await baixarCanceladas());
     if (c.acao === 'registrar') return resposta(200, await registrar(Array.isArray(c.ids) ? c.ids : undefined));
