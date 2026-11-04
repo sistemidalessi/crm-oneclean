@@ -9,6 +9,7 @@
 //                                    e, desde 03/11/2026, também os feitos no site do BB (crm_bb_site_casar: título certo pelo seu
 //                                    número ou por CNPJ + valor + vencimento; o resto fica em crm_bb_site para o administrador)
 //   POST { acao: 'baixar_canceladas' } baixa no banco o boleto de nota cancelada (02/11/2026): o cliente não consegue mais pagar
+//   POST { acao: 'vencidos' }        boletos em aberto já vencidos com linha digitável, juros e multa (cobrança automática, 04/11/2026)
 //   POST { acao: 'ciclo' }           o do agendador (pg_cron crm-bb-ciclo, a cada 10 min das 7h às 20h50): prepara as parcelas
 //                                    das notas do CRM, registra, baixa os das notas canceladas e lê os pagos
 // Chaves só nos Secrets: BB_CLIENT_ID, BB_CLIENT_SECRET, BB_APP_KEY (developer_application_key).
@@ -76,7 +77,10 @@ Deno.serve(async (req) => {
   const db = createClient(url, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } });
   const bearer = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
   let ok = false, papel: string | null = null;
-  if (bearer.length >= 32 && bearer.split('.').length !== 3) {
+  // a crm-cobranca (04/11/2026) chama a leitura dos vencidos com a chave de serviço do próprio projeto
+  const servico = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+  if (servico && bearer === servico) ok = true;
+  else if (bearer.length >= 32 && bearer.split('.').length !== 3) {
     const { data } = await db.rpc('crm_bb_senha_ok', { p: bearer });
     ok = data === true;
   } else {
@@ -271,6 +275,46 @@ Deno.serve(async (req) => {
       const tk = await token('cobrancas.boletos-info');
       const l = await lista(tk, b, 'B', maisDias(hojeSP(), -Math.min(30, Math.max(1, Number(c.dias) || 3))), hojeSP(), '&codigoEstadoTituloCobranca=6');
       return resposta(200, l.map(x => ({ n: dig(x.numeroBoletoBB).slice(3), movimento: x.dataMovimento || null, credito: x.dataCredito || null, vencimento: x.dataVencimento || null, pago: x.valorPago ?? null })));
+    }
+    // boletos em aberto já vencidos (04/11/2026, cobrança automática: o boleto atualizado sai ao cliente no 1º dia de atraso).
+    // Devolve, de cada um, o que o boleto atualizado precisa (linha digitável, valores, juros e multa do próprio boleto);
+    // com { bruto: true }, o detalhe inteiro dos 2 primeiros (para conferir os nomes dos campos do BB).
+    if (c.acao === 'vencidos') {
+      const tk = await token('cobrancas.boletos-info');
+      const ag = dig(b.agencia).slice(0, -1), cc = dig(b.conta).slice(0, -1);
+      const l: any[] = [];
+      let indice = 0;
+      for (let volta = 0; volta < 20; volta++) {
+        const u = COBRANCA + '/boletos?indicadorSituacao=A&boletoVencido=S&agenciaBeneficiario=' + ag + '&contaBeneficiario=' + cc +
+          '&dataInicioVencimento=' + br(maisDias(hojeSP(), -Math.min(180, Math.max(1, Number(c.dias) || 60)))) + '&dataFimVencimento=' + br(maisDias(hojeSP(), -1)) +
+          (indice ? '&indice=' + indice : '') + '&gw-dev-app-key=' + APP();
+        const r = await fetch(u, { headers: { Authorization: 'Bearer ' + tk } });
+        const t = await r.text(); let j: any = null; try { j = JSON.parse(t); } catch { /* texto */ }
+        if (r.status === 404) break;
+        if (!r.ok) throw new Error('lista de vencidos (' + r.status + '): ' + msgBB(j, t));
+        l.push(...(j?.boletos || []));
+        if (j?.indicadorContinuidade !== 'S' || !j?.proximoIndice) break;
+        indice = j.proximoIndice;
+      }
+      const out: any[] = [], bruto: any[] = [];
+      for (const x of l.slice(0, 80)) {
+        let d: any = {};
+        try {
+          const r = await fetch(COBRANCA + '/boletos/' + dig(x.numeroBoletoBB) + '?numeroConvenio=' + encodeURIComponent(String(b.convenio)) + '&gw-dev-app-key=' + APP(), { headers: { Authorization: 'Bearer ' + tk } });
+          const t = await r.text(); try { d = JSON.parse(t) || {}; } catch { d = {}; }
+          if (!r.ok) d = { erro: r.status + ' ' + msgBB(d, t) };
+        } catch (e) { d = { erro: String((e as Error).message || e).slice(0, 120) }; }
+        if (c.bruto && bruto.length < 2) bruto.push({ lista: x, detalhe: d });
+        out.push({ nosso_numero: dig(x.numeroBoletoBB).slice(3), vencimento: iso(x.dataVencimento) || iso(d.dataVencimentoTituloCobranca), valor: x.valorOriginal ?? d.valorOriginalTituloCobranca ?? null,
+          valor_atual: x.valorAtual ?? d.valorAtualTituloCobranca ?? null, linha: dig(d.codigoLinhaDigitavel), seu: String(d.numeroTituloCedenteCobranca ?? x.numeroTituloBeneficiario ?? '').trim(),
+          doc: dig(d.numeroInscricaoSacadoCobranca ?? ''), erro: d.erro || null,
+          juros: { tipo: d.codigoTipoJuroMora ?? null, pct: d.percentualJuroMoraTitulo ?? null, valor: d.valorJuroMoraTitulo ?? null },
+          multa: { tipo: d.codigoTipoMulta ?? null, pct: d.percentualMultaTitulo ?? null, valor: d.valorMultaTituloCobranca ?? null, data: iso(d.dataMultaTitulo) },
+          codigo: dig(d.textoCodigoBarrasTituloCobranca), estado: d.codigoEstadoTituloCobranca ?? x.codigoEstadoTituloCobranca ?? null, limite: iso(d.dataLimiteRecebimentoTitulo), emissao: iso(d.dataEmissaoTituloCobranca),
+          pagador: { nome: String(d.nomeSacadoCobranca || '').trim(), endereco: String(d.textoEnderecoSacadoCobranca || '').trim(), bairro: String(d.nomeBairroSacadoCobranca || '').trim(),
+            cidade: String(d.nomeMunicipioSacadoCobranca || '').trim(), uf: String(d.siglaUnidadeFederacaoSacadoCobranca || '').trim(), cep: dig(d.numeroCepSacadoCobranca).padStart(8, '0') } });
+      }
+      return resposta(200, { n: l.length, boletos: out, ...(c.bruto ? { bruto } : {}) });
     }
     if (c.acao === 'baixar_canceladas') return resposta(200, await baixarCanceladas());
     if (c.acao === 'registrar') return resposta(200, await registrar(Array.isArray(c.ids) ? c.ids : undefined));

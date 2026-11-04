@@ -1015,10 +1015,12 @@
   fichas.montaProposta = p => montaProposta(p);   // para conferir o documento (testes)
   function montaProposta(p) {
     garanteNcm(); // a 1ª vez só começa a carregar; quem gera o PDF espera (baixarPdfProposta)
+    // p.doc === 'pedido' (04/11/2026, "salvar o pedido em PDF"): o pedido no mesmo modelo, com o cliente e o(a) vendedor(a) do pedido
+    const ehPedido = p.doc === 'pedido';
     const n = CRM.negocio(p.negocio_id);
-    const e = n && CRM.empresa(n.empresa_id);
+    const e = (n && CRM.empresa(n.empresa_id)) || (p.empresa_id && CRM.empresa(p.empresa_id)) || null;
     const c = n && n.contato_id ? CRM.contato(n.contato_id) : (e && principal(e.id));
-    const vend = n && CRM.usuario(n.responsavel_id);
+    const vend = (ehPedido && p.vendedor_id && CRM.usuario(p.vendedor_id)) || (n && CRM.usuario(n.responsavel_id));
     const cfg = E().cfg, d = p.dados || {};
     const itens = p.itens || [];
     const comDesc = itens.some(it => R.num(it.desconto));
@@ -1055,9 +1057,9 @@
     const entrega = [entregaAqui ? 'Entrega no endereço indicado acima.' : 'Entrega em ' + iniciais(d.endereco_entrega.replace(/\s+Bairro:\s*/i, ' · ').replace(/\s+Cep:\s*/i, ' · CEP ')) + '.',
       d.ref ? 'Referência: ' + frase(d.ref).toLowerCase() + '.' : '', d.seu_pedido ? 'Seu pedido: ' + d.seu_pedido + '.' : ''].filter(Boolean);
     const tel = vend && R.linkWhatsApp(vend.telefone) ? vend.telefone : '';
-    const msgWa = 'Olá' + (vend ? ', ' + R.primeiroNome(vend.nome) : '') + '! Recebi o orçamento nº ' + numero + ' (' + R.moeda(p.valor_total) + ') e quero programar a entrega.';
+    const msgWa = 'Olá' + (vend ? ', ' + R.primeiroNome(vend.nome) : '') + '! Recebi o ' + (ehPedido ? 'pedido' : 'orçamento') + ' nº ' + numero + ' (' + R.moeda(p.valor_total) + ') e quero programar a entrega.';
     const freteTxt = R.num(d.frete) ? 'Frete ' + R.moeda(d.frete) + ' incluído' : (d.fkn || d.orcamento ? 'Frete grátis' : '');
-    const nome = ((p.numero_fkn ? 'Orcamento ' + p.numero_fkn : (d.orcamento ? 'Orcamento ' : 'Proposta ') + p.numero) + ' - ' + (e ? e.nome : '')).replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim();
+    const nome = ((ehPedido ? 'Pedido ' + p.numero : p.numero_fkn ? 'Orcamento ' + p.numero_fkn : (d.orcamento ? 'Orcamento ' : 'Proposta ') + p.numero) + ' - ' + (e ? e.nome : '')).replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim();
     // mascote das propostas da instalação (turma.js; o da tela Negócios), ao lado da frase de destaque, como no boleto
     const tt = (window.CRM_CONFIG && window.CRM_CONFIG.turma) || {};
     const mascote = CRM.turma && (tt.telas || {}).negocios ? CRM.turma.img(tt.telas.negocios) : null;
@@ -1066,7 +1068,7 @@
       '<div class="faixa-doc"></div>' +
       '<header><div class="doc-emit"><img src="' + esc(CRM.logo()) + '" alt="' + esc(CRM.nomeInstalacao()) + '">' +
         (emitLinhas.length ? '<p class="emit">' + emitLinhas.map(esc).join('<br>') + '</p>' : '') + '</div>' +
-        '<div class="doc-id"><strong>' + (p.numero_fkn || d.orcamento ? 'Orçamento ' : 'Proposta ') + esc(numero) + '</strong>' +
+        '<div class="doc-id"><strong>' + (ehPedido ? 'Pedido ' : p.numero_fkn || d.orcamento ? 'Orçamento ' : 'Proposta ') + esc(numero) + '</strong>' +
         '<span>Emitido em ' + esc(R.dataBR(emitida)) + '</span>' + (p.validade ? '<span>Válido até ' + esc(R.dataBR(p.validade)) + '</span>' : '') + '</div></header>' +
       (cfg.proposta_chamada ? '<section class="chamada' + (mascote ? ' com-mascote' : '') + '"><div><h1>' + esc(cfg.proposta_chamada) + '</h1>' + (cfg.proposta_subchamada ? '<p>' + esc(cfg.proposta_subchamada) + '</p>' : '') + '</div>' +
         (mascote ? '<img class="mascote" src="' + esc(mascote) + '" alt="">' : '') + '</section>' : '') +
@@ -1087,7 +1089,7 @@
       (tel ? '<a class="cta" href="' + esc(R.linkWhatsApp(tel, msgWa)) + '"><span>' + esc(cfg.proposta_cta || 'Vamos programar sua entrega?') + '</span><span class="vai">Confirmar pelo WhatsApp &nbsp;›</span></a>' : '') +
       '<footer>' + esc(cfg.proposta_rodape || CRM.nomeInstalacao()) + '</footer>' +
       // assinatura do produto (pedido do Anderson, 06/10/2026: o orçamento faz a propaganda); dá para tirar em Configurações
-      (cfg.sem_assinatura ? '' : '<p class="assinatura">Orçamento gerado pelo CRM <strong>Sistemi Dalessi</strong> · sistemas sob medida · ' + esc(CRM.ASSINATURA_EMAIL) + '</p>') + '</div>';
+      (cfg.sem_assinatura ? '' : '<p class="assinatura">' + (ehPedido ? 'Pedido' : 'Orçamento') + ' gerado pelo CRM <strong>Sistemi Dalessi</strong> · sistemas sob medida · ' + esc(CRM.ASSINATURA_EMAIL) + '</p>') + '</div>';
     return { html, nome };
   }
 
@@ -1198,6 +1200,15 @@
       CRM.toast('Não consegui gerar o PDF direto (' + e.message + '). Abrindo a impressão: escolha "Salvar como PDF".', true);
       fichas.imprimirProposta(p);
     }
+  };
+  // o pedido (crm_pedidos) no modelo do orçamento: mesmo caminho do "Baixar PDF" da proposta
+  fichas.baixarPdfPedido = ped => {
+    const d = Object.assign({}, ped.dados || {}), en = d.entrega || {};
+    d.frete = ped.frete != null ? ped.frete : d.frete; d.emissao = R.diaLocal(ped.criado_em);
+    if (en.endereco || en.cidade) d.endereco_entrega = [en.local, [en.endereco, en.numero].filter(Boolean).join(', '), en.compl, en.bairro ? 'Bairro: ' + en.bairro : '',
+      [en.cidade, en.uf].filter(Boolean).join('/'), en.cep ? 'Cep: ' + en.cep : ''].filter(Boolean).join(' ');
+    return fichas.baixarPdfProposta({ doc: 'pedido', numero: ped.numero, itens: ped.itens || [], valor_total: ped.valor_total, dados: d, negocio_id: ped.negocio_id,
+      empresa_id: ped.empresa_id, vendedor_id: ped.vendedor_id, criado_em: ped.criado_em, observacoes: null });
   };
   fichas.pedeArquivoPdf = nome => pedeArquivo(String(nome).replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim());
 

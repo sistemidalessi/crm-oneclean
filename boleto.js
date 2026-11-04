@@ -201,7 +201,7 @@
       escreve(doc, x + w - 38, y + 5.4, 36, 7.6, { negrito: true, direita: true });
       (linhas || []).slice(0, 2).forEach((l, i) => escreve(l, x + 1.6, y + 8.8 + i * 3.3, w - 4, 7, { negrito: true }));
     }
-    const venc = dataBR(d.vencimento), valor = moeda(d.valor).replace('R$ ', '');
+    const venc = dataBR(d.vencimento), valor = moeda(d.valor).replace('R$ ', ''), cob = op.cobrado || null;
     // ---------------- QR Code Pix (só quando o banco devolve o Pix do boleto; desenhado por quem chamou)
     let y = 14;
     if (d.pix && op.qr) { op.qr(pdf, X, y, 30); fonte(13, true); pdf.setTextColor(60, 90, 220); pdf.text('Pague agora com o seu Pix', X + 36, y + 14); pdf.setTextColor(0);
@@ -214,6 +214,15 @@
       pdf.rect(X, y, W, ha, 'FD');
       pdf.setTextColor(150, 0, 0); pdf.text(ls, X + 4, y + 4.6, { lineHeightFactor: 1.2 }); pdf.setTextColor(0);
       y += ha + 3;
+    }
+    // ---------------- boleto vencido: faixa com o valor de hoje (op.cobrado.faixa, uma ou duas linhas)
+    if (cob && cob.faixa) {
+      fonte(9, true);
+      const ls = pdf.splitTextToSize(limpa(cob.faixa), W - 8), hf = 5 + ls.length * 4.2;
+      pdf.setFillColor(230, 240, 255); pdf.setDrawColor(0, 45, 114); pdf.setLineWidth(0.5);
+      pdf.rect(X, y, W, hf, 'FD');
+      pdf.setTextColor(0, 45, 114); pdf.text(ls, X + 4, y + 5.4, { lineHeightFactor: 1.25 }); pdf.setTextColor(0);
+      y += hf + 3;
     }
     // ---------------- recibo do pagador
     fonte(7, true); pdf.text('Recibo do Pagador', X + W, y + 3, { align: 'right' });
@@ -259,7 +268,9 @@
     // na ficha, a linha curta do aviso (o banco e o caixa veem esta parte)
     if (op.aviso && ins.length < 6) ins.push('ATENÇÃO: SÓ PAGUE SE O BENEFICIÁRIO FOR ' + limpa(d.beneficiario.nome).toUpperCase() + (d.beneficiario.doc ? ' - CNPJ ' + d.beneficiario.doc : ''));
     ins.forEach((t, i) => escreve(t, X + 3, y + 6.5 + i * 3.6, ESQ - 6, 7.4, { negrito: op.aviso && i === ins.length - 1 && /^ATENÇÃO: SÓ PAGUE/.test(t) }));
-    [['(-) Abatimento', ''], ['(+) Juros / Multa', ''], ['(=) Valor Cobrado', '']].forEach((c, i) => cel(X + ESQ, yIns + i * H, DIR, H, c[0], c[1], { amarela: true, cinza: i === 2 }));
+    // boleto vencido atualizado (04/11/2026, cobrança automática): juros e multa até o dia e o valor cobrado, como a 2ª via do BB
+    [['(-) Abatimento', ''], ['(+) Juros / Multa', cob ? moeda(cob.encargos).replace('R$ ', '') : ''], ['(=) Valor Cobrado', cob ? moeda(cob.total).replace('R$ ', '') : '']]
+      .forEach((c, i) => cel(X + ESQ, yIns + i * H, DIR, H, c[0], c[1], { amarela: true, cinza: i === 2, direita: true }));
     y += 3 * H + 8;
     pdf.setDrawColor(0); pdf.setLineWidth(0.4); pdf.line(X, y, X + W, y);
     bloco(X, y, ESQ, 15, 'Nome do Pagador / Endereço', d.pagador.nome, d.pagador.doc, d.pagador.endereco);
