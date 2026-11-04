@@ -164,7 +164,7 @@
         '<button type="button" class="btn sec" data-acao="cp-chegou" data-id="' + p.id + '">Chegou tudo</button> ' +
         '<button type="button" class="btn sec" data-acao="cp-cancelar-resto" data-id="' + p.id + '">Cancelar o que falta</button> ' +
         (p.itens.every(i => !i.recebido) ? '<button type="button" class="mini" data-acao="cp-cancelar" data-id="' + p.id + '">cancelar o pedido</button>' : '') + '</p>' : '') +
-      (p.situacaoAtual !== 'cancelado' ? '<p class="acoes"><button type="button" class="btn" data-acao="cp-pdf" data-id="' + p.id + '">📄 PDF do pedido (para o fornecedor)</button></p>' : '');
+      (p.situacaoAtual !== 'cancelado' ? '<p class="acoes"><button type="button" class="btn" data-acao="cp-pdf" data-id="' + p.id + '">📄 PDF da ordem de compra nº ' + p.id + ' (para o fornecedor)</button></p>' : '');
   }
   // o pedido de compra em PDF para mandar ao fornecedor (04/11/2026, pedido do Wellington: "baixe em PDF todos os dados da
   // empresa, como o endereço, a marca da OneClean, para encaminhar ao fornecedor"), no modelo do pedido de compra do FKN
@@ -177,7 +177,7 @@
     const endEm = [[en.logradouro, en.numero].filter(Boolean).join(', '), en.bairro, [en.municipio, en.uf].filter(Boolean).join(' - '), en.cep ? 'CEP ' + R.mascaraCep(en.cep) : ''].filter(Boolean).join(' · ');
     return '<div class="pcdoc"><header><img src="' + esc(CRM.logo()) + '" alt=""><div><strong>' + esc(em.razao || CRM.nomeInstalacao()) + '</strong>' +
         '<span>' + esc(endEm) + '</span><span>' + [en.fone ? 'Tel.: ' + R.mascaraTel(en.fone) : '', em.cnpj ? 'CNPJ: ' + R.formataCNPJ(em.cnpj) : '', em.ie ? 'IE: ' + R.formataIE(em.ie) : ''].filter(Boolean).map(esc).join(' · ') + '</span></div></header>' +
-      '<h1>Pedido de compra nº ' + p.id + '</h1>' +
+      '<h1>Ordem de compra nº ' + p.id + '</h1>' +
       '<table class="pc-dados"><tbody>' + linha('Data', R.dataBR(R.diaLocal(p.criado_em))) +
         linha('Fornecedor', [p.fornecedor_cod, forn.nome || R.nomeDeItem(p.fornecedor_nome)].filter(Boolean).join(' — ')) +
         linha('CNPJ', forn.cnpj ? R.formataCNPJ(forn.cnpj) : '') + linha('Contato', [forn.contato, forn.telefone ? R.mascaraTel(forn.telefone) : '', forn.email].filter(Boolean).join(' · ')) +
@@ -188,7 +188,7 @@
           return '<tr><td>' + String(k + 1).padStart(2, '0') + '</td><td>' + esc(i.codigo) + '</td><td>' + esc(R.nomeDeItem(i.descricao || i.codigo)) + '</td><td>' + esc(i.unidade || '') + '</td>' +
             '<td class="num">' + qtd(q) + '</td><td class="num">' + (i.custo_unit != null ? esc(R.moeda(i.custo_unit)) : '—') + '</td><td class="num">' + (i.custo_unit != null ? esc(R.moeda(q * num(i.custo_unit))) : '—') + '</td></tr>'; }).join('') +
       '</tbody><tfoot><tr><td colspan="6">Total dos produtos (' + its.length + ' ' + (its.length === 1 ? 'item' : 'itens') + ')</td><td class="num"><strong>' + esc(R.moeda(total)) + '</strong></td></tr></tfoot></table>' +
-      '<p class="pc-nota">Por favor, confirme o pedido, os preços e a data de entrega. Na nota fiscal, informe o nº deste pedido.</p>' +
+      '<p class="pc-nota">Por favor, confirme o pedido, os preços e a data de entrega. <strong>Informe a ordem de compra nº ' + p.id + ' na nota fiscal (campo do pedido do cliente) e no boleto.</strong></p>' +
       '<footer><div class="pc-ass">' + esc(em.razao || CRM.nomeInstalacao()) + '</div><small>Emitido em ' + esc(R.dataBR(CRM.hoje())) + (p.criado_por ? ' por ' + esc(CRM.nomeUsuario(p.criado_por)) : '') + '</small></footer></div>';
   }
 
@@ -344,7 +344,7 @@
     'cp-novo': () => novoPedido(),
     'cp-pdf': async id => {
       const p = dados && dados.lista.find(x => x.id === Number(id)); if (!p) return;
-      try { await CRM.fichas.baixarPdfHtml(htmlPedidoCompra(p), 'Pedido de compra ' + p.id + ' - ' + R.nomeDeItem(p.fornecedor_nome)); } catch (e) { CRM.falhou(e); }
+      try { await CRM.fichas.baixarPdfHtml(htmlPedidoCompra(p), 'Ordem de compra ' + p.id + ' - ' + R.nomeDeItem(p.fornecedor_nome)); } catch (e) { CRM.falhou(e); }
     },
     'cp-abrir': id => { aberto = aberto === Number(id) ? null : Number(id); CRM.render(); },
     'cp-ver': id => { f.ver = id; CRM.render(); },
