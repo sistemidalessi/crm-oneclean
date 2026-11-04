@@ -61,6 +61,8 @@
   const hora = iso => (iso ? new Date(iso).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' }) : '');
   const dm = iso => (iso ? String(iso).slice(8, 10) + '/' + String(iso).slice(5, 7) : '');
   const SEMANA = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
+  // próximo dia de entrega: o dia seguinte, pulando sábado e domingo
+  const proximoDiaEntrega = iso => { let x = R.somaDias(iso, 1); while ([0, 6].includes(new Date(x + 'T12:00:00').getDay())) x = R.somaDias(x, 1); return x; };
   const diaLongo = iso => SEMANA[new Date(iso + 'T12:00:00').getDay()] + ', ' + dm(iso);
   const motoristas = () => R.ordemAlfa((CRM.estado.D.usuarios || []).filter(u => u.papel === 'motorista' && u.ativo !== false), u => u.nome);
   const nomeMot = id => { const u = (CRM.estado.D.usuarios || []).find(x => x.user_id === id); return u ? u.nome : ''; };
@@ -194,6 +196,10 @@
     const l = dados.cand;
     return '<section class="cartao"><div class="cabecalho-cartao"><h2>Notas para pôr na rota <small>' + l.length + ' nota(s) dos últimos 10 dias, ainda sem entrega</small></h2></div>' +
       (l.length ? '<div class="acoes"><label class="filtro-inline">Motorista <select data-rt-mot-novo>' + opMot(f.mot, '— escolher depois —') + '</select></label> ' +
+          // 04/11/2026 (Edson, logística: "só tem essa opção, mas seria pro dia 4"): o dia fica aqui também, ao lado do botão,
+          // com o atalho para o próximo dia de entrega (o de cima, "Dia da entrega", continua valendo; os dois são o mesmo)
+          '<label class="filtro-inline">para o dia <input type="date" data-rt-dia value="' + esc(f.dia || hojeSP()) + '"></label> ' +
+          (f.dia === hojeSP() ? '<button type="button" class="mini" data-acao="rt-proximo-dia" title="montar a rota do próximo dia de entrega">' + esc(diaLongo(proximoDiaEntrega(hojeSP()))) + '</button> ' : '') +
           '<button type="button" class="btn" data-acao="rt-por"' + (f.marcadas.size ? '' : ' disabled') + '>Pôr na rota de ' + esc(diaLongo(f.dia)) + ' (' + f.marcadas.size + ')</button> ' +
           '<button type="button" class="mini" data-acao="rt-marcar-todas">' + (f.marcadas.size === l.length ? 'desmarcar todas' : 'marcar todas') + '</button></div>' +
         '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th></th><th>Nota</th><th>Cliente</th><th>Bairro e cidade</th><th>Vendedor(a)</th><th>Emitida</th></tr></thead><tbody>' +
@@ -295,6 +301,7 @@
   // ============================================================ ações e registro das telas
   Object.assign(CRM.acoes, {
     'rt-atualizar': () => recarrega(),
+    'rt-proximo-dia': () => { f.dia = proximoDiaEntrega(hojeSP()); dados = null; CRM.render(); },
     'rt-programada': () => {
       const d = ((CRM.estado.D.config || [])[0] || {}).dados || {};
       CRM.abrirForm({
@@ -357,8 +364,7 @@
   CRM.telas.rotas = {
     render: telaRotas,
     depois(c) {
-      const d = c.querySelector('[data-rt-dia]');
-      if (d) d.addEventListener('change', () => { if (d.value) { f.dia = d.value; f.marcadas.clear(); dados = null; CRM.render(); } });
+      c.querySelectorAll('[data-rt-dia]').forEach(d => d.addEventListener('change', () => { if (d.value) { f.dia = d.value; dados = null; CRM.render(); } }));
       const mn = c.querySelector('[data-rt-mot-novo]');
       if (mn) mn.addEventListener('change', () => { f.mot = mn.value; });
       c.querySelectorAll('[data-rt-marca]').forEach(cb => cb.addEventListener('change', () => { if (cb.checked) f.marcadas.add(cb.dataset.rtMarca); else f.marcadas.delete(cb.dataset.rtMarca); CRM.render(); }));
