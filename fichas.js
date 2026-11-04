@@ -124,7 +124,7 @@
       // ---- coluna 1: dados + contatos
       '<div class="ficha-col">' +
         '<section><dl class="dados">' +
-          dado('Grupo', grupo) + dado('Razão social', esc(e.razao_social)) + (e.razao_receita && e.razao_receita !== e.razao_social ? dado('Razão social completa (Receita)', esc(e.razao_receita)) : '') + (e.apelido ? dado('Apelido', esc(e.apelido)) : '') + (e.obs_nota ? dado('Texto na nota', esc(e.obs_nota)) : '') + dado('CNPJ/CPF', esc(e.cnpj) + (e.cnpj && R.ehCNPJ(R.chaveDoc(e.cnpj)) && !R.cnpjValido(e.cnpj) ? ' ' + CRM.selo('inválido?', 'ambar') : '')) +
+          dado('Grupo', grupo) + dado('Razão social', esc(e.razao_social)) + (e.razao_receita && e.razao_receita !== e.razao_social ? dado('Razão social completa (Receita)', esc(e.razao_receita)) : '') + (e.apelido ? dado('Apelido', esc(e.apelido)) : '') + (e.obs_nota ? dado('Texto na nota', esc(e.obs_nota)) : '') + (e.email_nfe ? dado('E-mail da nota fiscal', esc(e.email_nfe)) : '') + dado('CNPJ/CPF', esc(e.cnpj) + (e.cnpj && R.ehCNPJ(R.chaveDoc(e.cnpj)) && !R.cnpjValido(e.cnpj) ? ' ' + CRM.selo('inválido?', 'ambar') : '')) +
           dado('Telefone', esc(e.telefone)) + dado('WhatsApp', esc(e.whatsapp)) +
           dado('E-mail', e.email ? (separaEmails(e.email).length ? separaEmails(e.email).map(m => '<a href="mailto:' + esc(m) + '">' + esc(m) + '</a>').join('<br>') : esc(e.email)) : '') +
           dado('Site', e.site ? '<a href="' + esc(/^https?:/i.test(e.site) ? e.site : 'https://' + e.site) + '" target="_blank" rel="noopener noreferrer">' + esc(e.site) + '</a>' : '') +
@@ -398,6 +398,9 @@
         ajuda: 'Com inscrição estadual = contribuinte. CPF, condomínio e órgão público sem IE = não contribuinte.' },
       { nome: 'ie', rotulo: 'Inscrição estadual', terco: true, ajuda: 'Só os números. Vazio se não tiver.' },
       { nome: 'codigo_municipio', rotulo: 'Código do município (IBGE)', terco: true, ajuda: 'Vem sozinho pelo CEP.' },
+      // 04/11/2026 (Anderson): a nota emitida vai sozinha por e-mail, com o XML e a DANFE (crm-fiscal)
+      { nome: 'email_nfe', rotulo: 'E-mail para a nota fiscal (XML e DANFE)', largo: true,
+        ajuda: 'A nota vai sozinha para este e-mail quando é emitida. Vazio: vai para o e-mail da empresa. Mais de um: separe com ponto e vírgula.' },
       { tipo: 'secao', rotulo: 'Pós-venda' },
       { nome: 'ciclo_recompra_dias', rotulo: 'Compra a cada (dias)', tipo: 'numero', passo: '1', min: 1, vazioNulo: true, ajuda: 'vazio = padrão de ' + E().cfg.ciclo_recompra_padrao + ' dias' },
       { nome: 'observacoes', rotulo: 'Observações importantes', tipo: 'textarea', largo: true }

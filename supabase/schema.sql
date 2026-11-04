@@ -9500,3 +9500,14 @@ begin
 end $$;
 revoke all on function public.crm_pedido_falta(uuid, jsonb, text) from public, anon;
 grant execute on function public.crm_pedido_falta(uuid, jsonb, text) to authenticated;
+
+-- E-mail da nota fiscal ao cliente (04/11/2026, Anderson: "quando emite, precisa ir o XML junto com a DANFE para o e-mail de
+-- cadastro", com um campo próprio no cadastro). A crm-fiscal manda sozinha, logo depois da autorização, a nota de PRODUÇÃO ao
+-- "E-mail para a nota fiscal" (email_nfe; vazio: o e-mail da empresa), em nome da empresa, com a resposta para o(a) vendedor(a).
+-- email_em marca a tentativa (a automática vai uma vez só); email_ok/email_para/email_erro dizem o que aconteceu (lista de NF-e).
+-- Aplicado em 04/11/2026 (migração crm_nfe_email_ao_cliente).
+alter table public.crm_empresas add column if not exists email_nfe text;
+alter table public.crm_nfe add column if not exists email_em timestamptz;
+alter table public.crm_nfe add column if not exists email_ok boolean;
+alter table public.crm_nfe add column if not exists email_para text;
+alter table public.crm_nfe add column if not exists email_erro text;

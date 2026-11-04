@@ -1393,7 +1393,7 @@
 
   // NF-e emitida pelo CRM (Fase 4): a Edge Function crm-fiscal faz tudo que fala com a Sefaz (pelo serviço fiscal da VPS);
   // a leitura é direta (administrador, gestora e logística, pela RLS). Os XML vêm só quando pedidos (DANFE, fechamento).
-  const NFE_COLUNAS = 'id,ambiente,serie,numero,pedido_id,empresa_id,chave,situacao,cstat,motivo,protocolo,autorizada_em,valor,totais,avisos,nota_id,eventos,tentativas,inutilizada_em,criado_por,criado_em,atualizado_em,outra_id,tipo';
+  const NFE_COLUNAS = 'id,ambiente,serie,numero,pedido_id,empresa_id,chave,situacao,cstat,motivo,protocolo,autorizada_em,valor,totais,avisos,nota_id,eventos,tentativas,inutilizada_em,criado_por,criado_em,atualizado_em,outra_id,tipo,email_em,email_ok,email_para,email_erro';
   Supa.prototype.fiscal = async function (corpo) {
     const r = await this.sb.functions.invoke('crm-fiscal', { body: corpo });
     if (r.error) throw await erroDaFuncao(r);

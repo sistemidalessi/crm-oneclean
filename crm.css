@@ -1408,3 +1408,6 @@ button.ordena.ativo { color: var(--marinho); }
 .pcdoc footer small { display: block; margin-top: 10px; color: #666; }
 /* Rota do motorista aberta sem internet (rota-offline.html, 04/11/2026) */
 .ro-corpo { margin: 0; padding: 12px; background: var(--fundo); color: var(--texto); font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; }
+/* e-mail da nota ao cliente (04/11/2026): situação do envio na lista de NF-e */
+.tabela small.ok { color: var(--verde); }
+.tabela small.erro { color: var(--vermelho); }

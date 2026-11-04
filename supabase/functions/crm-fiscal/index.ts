@@ -11,6 +11,8 @@
 // Deploy: verify_jwt LIGADO.
 import { createClient } from 'npm:@supabase/supabase-js@2.116.0';
 import { ibptUrl, ibptLinha, ibptPrecisa } from './ibpt.js';
+import { destinatarios, separaEmails, assunto, texto, html, arquivos, proporcaoPng } from './email-nota.js';
+import { jsPDF } from 'npm:jspdf@2.5.2';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -20,6 +22,15 @@ const CORS = {
 const resposta = (status: number, corpo: unknown) => new Response(JSON.stringify(corpo), { status, headers: { ...CORS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
 const EMITE = ['admin', 'gestor', 'logistica'], CANCELA = ['admin', 'gestor', 'logistica'], DFE = ['admin', 'comprador'];
 type Linha = Record<string, unknown>;
+// A DANFE do e-mail ao cliente (04/11/2026) é desenhada aqui pelo MESMO danfe.js do site, baixado do GitHub na versão fixada
+// (node ferramentas/fixa-motor-notas.js troca o commit e o SHA-256; depois, publicar esta função de novo).
+const COMMIT = '0000000000000000000000000000000000000000';
+const HASHES: Record<string, string> = { 'danfe.js': '' };
+const FONTE = 'https://raw.githubusercontent.com/sistemidalessi/crm-oneclean/' + COMMIT + '/';
+const EMPRESA = Deno.env.get('CRM_EMPRESA_NOME') ?? 'OneClean';
+const LOGO = Deno.env.get('CRM_LOGO') ?? 'assets/oneclean-logo.png';
+// as cores do config.js do site (cores.principal e cores.destaque), as mesmas da DANFE que a logística imprime
+const CORES = { principal: Deno.env.get('CRM_COR_PRINCIPAL') ?? '#175b6d', destaque: Deno.env.get('CRM_COR_DESTAQUE') ?? '#a9c451' };
 
 async function sha256(t: string) {
   const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t));
@@ -311,6 +322,84 @@ async function dfeManifestar(db: ReturnType<typeof createClient>, fiscal: Linha,
   return ev;
 }
 
+// ------------------------------------------------------------------ e-mail da nota ao cliente (XML + DANFE)
+// deno-lint-ignore no-explicit-any
+let DAN: any = null, LOGO_DANFE: Linha | null | undefined;
+async function carregaDanfe() {
+  if (DAN) return DAN;
+  const r = await fetch(FONTE + 'danfe.js');
+  if (!r.ok) throw new Error('não baixou danfe.js (' + r.status + ')');
+  const codigo = await r.text();
+  if (await sha256(codigo) !== HASHES['danfe.js']) throw new Error('danfe.js não confere com a versão fixada');
+  // deno-lint-ignore no-explicit-any
+  const g: any = {};
+  new Function('module', 'require', 'globalThis', 'window', codigo)(undefined, undefined, g, g);
+  DAN = g.CRMDanfe;
+  return DAN;
+}
+const base64 = (buf: ArrayBuffer | Uint8Array) => { const u = buf instanceof Uint8Array ? buf : new Uint8Array(buf); let s = ''; for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode(...u.subarray(i, i + 0x8000)); return btoa(s); };
+async function logoDanfe() {
+  if (LOGO_DANFE !== undefined) return LOGO_DANFE;
+  try {
+    const r = await fetch(FONTE + LOGO);
+    const u = new Uint8Array(await r.arrayBuffer());
+    const prop = r.ok ? proporcaoPng(u) : 0;
+    LOGO_DANFE = prop ? { data: 'data:image/png;base64,' + base64(u), formato: 'PNG', proporcao: prop } : null;
+  } catch { LOGO_DANFE = null; }
+  return LOGO_DANFE;
+}
+async function pdfDanfe(xml: string) {
+  const Dn = await carregaDanfe();
+  const d = Dn.ler(xml);
+  if (!d) throw new Error('não li o XML da nota para a DANFE');
+  const pdf = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
+  Dn.desenha(pdf, d, { logo: await logoDanfe(), cores: CORES });
+  return new Uint8Array(pdf.output('arraybuffer'));
+}
+// Manda o XML e a DANFE da nota de PRODUÇÃO autorizada ao cliente: ao "E-mail para a nota fiscal" do cadastro (vazio: o e-mail
+// da empresa). Sozinha uma vez só, logo depois da autorização (crm_nfe.email_em marca a tentativa, para nunca ir em dobro);
+// pelo botão da tela (acao 'email_nota') vai de novo, para os e-mails que a pessoa escrever ou os do cadastro.
+// Resposta e remetente: o(a) vendedor(a) do pedido (ou da carteira do cliente; sem e-mail, o administrador).
+async function enviaEmailNota(db: ReturnType<typeof createClient>, nfeId: string, op: { para?: string; manual?: boolean } = {}) {
+  const agora = new Date().toISOString();
+  const { data: nRow } = await db.from('crm_nfe').select('id, ambiente, situacao, serie, numero, chave, valor, autorizada_em, proc_xml, pedido_id, empresa_id, email_em').eq('id', nfeId).maybeSingle();
+  const nfe = nRow as Linha | null;
+  if (!nfe || nfe.ambiente !== 'producao' || nfe.situacao !== 'autorizada' || !nfe.proc_xml) return { ok: false, erro: 'só nota de produção autorizada vai por e-mail' };
+  if (!op.manual) {   // a automática: marca antes de mandar; se outra chamada já marcou, não manda de novo
+    const { data: marcou } = await db.from('crm_nfe').update({ email_em: agora }).eq('id', nfeId).is('email_em', null).select('id');
+    if (!marcou || !(marcou as Linha[]).length) return { ok: false, erro: 'já tentado' };
+  }
+  const fim = async (r: Linha) => { await db.from('crm_nfe').update({ email_em: agora, email_ok: r.ok === true, email_para: r.para || null, email_erro: r.ok ? null : String(r.erro || '').slice(0, 300) }).eq('id', nfeId); return r; };
+  try {
+    const { data: emp } = nfe.empresa_id ? await db.from('crm_empresas').select('nome, razao_social, email, email_nfe, responsavel_id').eq('id', nfe.empresa_id).maybeSingle() : { data: null };
+    const e = (emp || {}) as Linha;
+    const lista = op.para ? separaEmails(op.para).slice(0, 5) : destinatarios(e).emails;
+    if (!lista.length) return await fim({ ok: false, erro: 'cliente sem e-mail no cadastro (preencha "E-mail para a nota fiscal" ou o e-mail da empresa)' });
+    const brevo = Deno.env.get('BREVO_API_KEY') ?? '';
+    if (!brevo) return await fim({ ok: false, erro: 'falta a chave do Brevo (BREVO_API_KEY)' });
+    let vendId = e.responsavel_id as string | null;
+    if (nfe.pedido_id) { const { data: p } = await db.from('crm_pedidos').select('vendedor_id').eq('id', nfe.pedido_id).maybeSingle(); if (p && (p as Linha).vendedor_id) vendId = String((p as Linha).vendedor_id); }
+    const { data: v } = vendId ? await db.from('crm_usuarios').select('nome, email, ativo').eq('user_id', vendId).maybeSingle() : { data: null };
+    const { data: adms } = await db.from('crm_usuarios').select('nome, email').eq('papel', 'admin').eq('ativo', true);
+    const vend = v && (v as Linha).ativo && /@/.test(String((v as Linha).email || '')) ? v as Linha : null;
+    const rem = vend || ((adms || []) as Linha[]).find(a => /@/.test(String(a.email || ''))) || null;
+    if (!rem) return await fim({ ok: false, erro: 'nenhum remetente com e-mail (vendedor(a) ou administrador)' });
+    const pdf = await pdfDanfe(String(nfe.proc_xml));
+    const arq = arquivos(nfe, EMPRESA), o = { empresa: EMPRESA, cliente: String(e.razao_social || e.nome || ''), vendedor: vend ? String(vend.nome) : '' };
+    const r = await fetch('https://api.brevo.com/v3/smtp/email', { method: 'POST', headers: { 'api-key': brevo, 'content-type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify({ sender: { name: EMPRESA + ' · Nota fiscal', email: rem.email }, replyTo: { name: String(rem.nome), email: rem.email },
+        to: lista.map(x => ({ email: x })), subject: assunto(nfe, EMPRESA), htmlContent: html(nfe, o), textContent: texto(nfe, o),
+        attachment: [{ name: arq.xml, content: base64(new TextEncoder().encode(String(nfe.proc_xml))) }, { name: arq.pdf, content: base64(pdf) }],
+        tags: ['nfe'] }) });
+    if (!r.ok) return await fim({ ok: false, para: lista.join(', '), erro: 'o Brevo recusou o e-mail (' + r.status + '): ' + (await r.text().catch(() => '')).slice(0, 200) });
+    return await fim({ ok: true, para: lista.join(', ') });
+  } catch (err) { return await fim({ ok: false, erro: 'e-mail: ' + String((err as Error).message || err) }); }
+}
+const emSegundoPlano = (p: Promise<unknown>) => {
+  const rt = (globalThis as unknown as { EdgeRuntime?: { waitUntil: (p: Promise<unknown>) => void } }).EdgeRuntime;
+  if (rt) rt.waitUntil(p.catch(() => null)); else p.catch(() => null);
+};
+
 async function gravaResultado(db: ReturnType<typeof createClient>, nfeId: string, r: Linha, eu: string) {
   const patch: Linha = { situacao: r.situacao === 'pendente' ? 'pendente' : r.situacao === 'bloqueada' ? 'bloqueada' : r.situacao, atualizado_em: new Date().toISOString() };
   for (const [k, c] of [['chave', 'chave'], ['cStat', 'cstat'], ['motivo', 'motivo'], ['protocolo', 'protocolo'], ['nfeXml', 'nfe_xml'], ['procXml', 'proc_xml'], ['totais', 'totais'], ['avisos', 'avisos'], ['nota', 'nota']] as const)
@@ -320,6 +409,8 @@ async function gravaResultado(db: ReturnType<typeof createClient>, nfeId: string
   const { data } = await db.from('crm_nfe').update(patch).eq('id', nfeId).select().single();
   const nfe = data as Linha;
   await lancaGnre(db, nfe).catch(() => null);
+  // a nota autorizada vai sozinha ao e-mail do cliente (XML + DANFE), sem segurar a resposta da emissão
+  if (nfe && nfe.ambiente === 'producao' && nfe.situacao === 'autorizada' && nfe.proc_xml && !nfe.email_em) emSegundoPlano(enviaEmailNota(db, String(nfe.id)));
   // Homologação (teste, sem valor fiscal) NUNCA entra no CRM: nem estoque, nem título, nem comissão; o pedido não muda.
   if (nfe && nfe.ambiente === 'producao' && nfe.situacao === 'autorizada' && nfe.proc_xml && !nfe.nota_id) {
     const ent = await entregaAoCrm(db, 'NFe' + nfe.chave + '-procNFe.xml', String(nfe.proc_xml));
@@ -495,6 +586,11 @@ Deno.serve(async (req) => {
         return resposta(200, { nfe: semXml(await gravaResultado(db, String(nfe.id), await servico('/reenviar', { ambiente: nfe.ambiente, chave: nfe.chave, nfeXml: nfe.nfe_xml }), quem.user.id)) });
       }
       return resposta(200, { nfe: semXml(await gravaResultado(db, String(nfe.id), Object.assign(r, { nfeXml: undefined }), quem.user.id)) });
+    }
+    // "✉ Mandar por e-mail" na tela da NF-e: de novo, para os e-mails escritos (ou os do cadastro)
+    if (acao === 'email_nota') {
+      if (!nfe) throw new Error('nota não encontrada');
+      return resposta(200, await enviaEmailNota(db, String(nfe.id), { para: b.para ? String(b.para) : '', manual: true }));
     }
     if (acao === 'xml') {
       if (!nfe) throw new Error('nota não encontrada');

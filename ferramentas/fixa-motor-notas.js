@@ -3,6 +3,7 @@
 //   crm-notas          → regras.js, nfe.js, fkn.js
 //   crm-caixa-leitura  → caixa-calculo.js
 //   crm-cobranca       → boleto.js (boleto atualizado do 1º dia de atraso)
+//   crm-fiscal         → danfe.js (DANFE do e-mail da nota ao cliente)
 //   node ferramentas/fixa-motor-notas.js [commit]
 // Depois, publicar de novo a função que mudou (deploy com verify_jwt desligado).
 'use strict';
@@ -13,7 +14,7 @@ const { execSync } = require('child_process');
 const raiz = path.join(__dirname, '..');
 const hash = f => crypto.createHash('sha256').update(fs.readFileSync(path.join(raiz, f))).digest('hex');
 
-const FUNCOES = { 'crm-notas': ['regras.js', 'nfe.js', 'fkn.js'], 'crm-caixa-leitura': ['caixa-calculo.js'], 'crm-cobranca': ['boleto.js'] };
+const FUNCOES = { 'crm-notas': ['regras.js', 'nfe.js', 'fkn.js'], 'crm-caixa-leitura': ['caixa-calculo.js'], 'crm-cobranca': ['boleto.js'], 'crm-fiscal': ['danfe.js'] };
 const ARQUIVOS = FUNCOES['crm-notas'];
 const arquivoDa = f => path.join(raiz, 'supabase', 'functions', f, 'index.ts');
 function hashesDe(lista) { const h = {}; lista.forEach(f => { h[f] = hash(f); }); return h; }

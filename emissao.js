@@ -390,6 +390,15 @@
     return bb ? [bt('', 'DANFE e boleto', 'As vias da DANFE e, no fim, o boleto do BB'), bt('-so-nota', 'Só a DANFE', 'Só as vias da nota, sem o boleto'),
       bt('-so-boleto', 'Só o boleto', '2ª via do boleto, sem a nota')] : [bt('', 'DANFE', 'A DANFE da nota')];
   }
+  // E-mail da nota ao cliente (04/11/2026, Anderson): a nota de produção autorizada vai sozinha, com o XML e a DANFE, para o
+  // "E-mail para a nota fiscal" do cadastro (vazio: o e-mail da empresa). Aqui a situação do envio e, no botão, mandar de novo.
+  function emailNfe(n) {
+    if (n.ambiente !== 'producao' || M.situacaoDe(n) !== 'autorizada') return '';
+    if (n.email_ok) return '<small class="ok">✉ enviada a ' + esc(n.email_para || '') + ' · ' + esc(quando(n.email_em)) + '</small>';
+    if (n.email_em && n.email_erro) return '<small class="erro">✉ não foi por e-mail: ' + esc(n.email_erro) + '</small>';
+    if (n.email_em) return '<small>✉ mandando…</small>';
+    return '';
+  }
   function linhaNfe(n) {
     const s = M.situacaoDe(n), pn = pedidoNum(n), b = [];
     if (n.chave && (s === 'autorizada' || s === 'cancelada' || s === 'denegada')) b.push(...botoesDanfe(n.id, s === 'autorizada'), '<button type="button" class="mini" data-acao="nf-xml" data-id="' + esc(n.id) + '">XML</button>');
@@ -397,6 +406,7 @@
     if (s === 'autorizada') {
       b.push('<button type="button" class="mini" data-acao="nf-cce" data-id="' + esc(n.id) + '">Carta de correção</button>');
       if (ehOp()) b.push('<button type="button" class="mini perigo" data-acao="nf-cancelar" data-id="' + esc(n.id) + '">Cancelar</button>');
+      if (n.ambiente === 'producao') b.push('<button type="button" class="mini" data-acao="nf-email" data-id="' + esc(n.id) + '" title="Mandar o XML e a DANFE ao e-mail do cliente">✉ E-mail</button>');
     }
     if ((s === 'rejeitada' || s === 'bloqueada') && n.outra_id) b.push('<button type="button" class="mini" data-acao="nf-outra-emitir" data-id="' + esc(n.outra_id) + '">Emitir de novo</button>');
     else if ((s === 'rejeitada' || s === 'bloqueada') && n.pedido_id) b.push('<button type="button" class="mini" data-acao="nf-emitir" data-id="' + esc(n.pedido_id) + '">Emitir de novo</button>');
@@ -407,7 +417,7 @@
       '<td>' + esc(CRM.nomeEmpresa(n.empresa_id)) + (pn ? ' <button type="button" class="mini" data-acao="nf-pedido" data-id="' + esc(n.pedido_id) + '">pedido ' + esc(pn) + '</button>' : '') + '</td>' +
       '<td class="num">' + (n.valor != null ? moeda(n.valor) : '—') + '</td><td>' + seloNfe(n) +
       (['rejeitada', 'denegada', 'pendente', 'bloqueada'].indexOf(s) !== -1 && n.motivo ? '<small>' + esc((n.cstat ? n.cstat + ' — ' : '') + n.motivo) + '</small>' : '') + (avisos.length ? '<small>' + esc(avisos.join(' · ')) + '</small>' : '') +
-      (evs ? '<small>' + esc(evs) + '</small>' : '') + '</td><td>' + esc(quando(n.autorizada_em || n.atualizado_em || n.criado_em)) + '</td><td class="num">' + b.join(' ') + '</td></tr>';
+      (evs ? '<small>' + esc(evs) + '</small>' : '') + emailNfe(n) + '</td><td>' + esc(quando(n.autorizada_em || n.atualizado_em || n.criado_em)) + '</td><td class="num">' + b.join(' ') + '</td></tr>';
   }
   // ------------------------------------------------ Consultar notas (28/10/2026, pedido do Anderson: "consultar pelo número da
   // nota, pelo cliente… e a sequência da nota tem que continuar"). Todas as notas que o CRM conhece (as do FKN, série 1, e as do
@@ -1124,6 +1134,21 @@
     },
     'nf-xml': async id => {
       try { const n = nfe(id), xml = await xmlDe(id); CRM.baixar('NFe' + (n ? n.chave : id) + '-procNFe.xml', xml, 'application/xml'); } catch (e) { CRM.falhou(e); }
+    },
+    'nf-email': id => {
+      const n = nfe(id); if (!n) return;
+      const e = CRM.empresa(n.empresa_id) || {};
+      CRM.abrirForm({ titulo: 'Mandar a NF ' + n.serie + '-' + n.numero + ' por e-mail', salvarTexto: 'Mandar o XML e a DANFE',
+        intro: 'Vai o XML (o arquivo que vale para a contabilidade do cliente) e a DANFE em PDF, em nome da empresa; a resposta vai para o(a) vendedor(a). ' +
+          'Mais de um e-mail: separe com ponto e vírgula.' + (n.email_ok ? ' Esta nota já foi para ' + n.email_para + ' em ' + quando(n.email_em) + '.' : ''),
+        campos: [{ nome: 'para', rotulo: 'Para', obrigatorio: true, largo: true, padrao: e.email_nfe || e.email || '',
+          ajuda: e.email_nfe ? 'O "E-mail para a nota fiscal" do cadastro do cliente.' : 'O e-mail da empresa (o cliente não tem "E-mail para a nota fiscal" no cadastro).' }],
+        aoSalvar: async v => {
+          const r = await chama({ acao: 'email_nota', nfe_id: id, para: v.para });
+          await recarrega();
+          if (!r.ok) throw new Error(r.erro || 'não foi');
+          CRM.toast('NF ' + n.numero + ' mandada a ' + r.para + '.');
+        } });
     },
     'nf-consultar': async id => {
       try {
