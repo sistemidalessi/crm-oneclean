@@ -831,6 +831,7 @@
       const tab = P.tabelaDe(E().cfg);
       corpo = listaProdutosHTML + '<div class="pd-entrada">' +
         '<label class="campo largo"><span>Produto (código ou nome) — item ' + (x.sel != null ? x.sel + 1 : x.itens.length + 1) + '</span><input id="pdProd" list="pdProdutos" value="' + esc(l.codigo ? l.codigo + ' — ' + l.descricao : l.descricao) + '" placeholder="digite o código ou parte do nome" autocomplete="off"></label>' +
+        (ehLivre(dd) ? '<label class="campo largo"><span>Descrição deste item (vai no pedido e na nota)</span><input id="pdDescLivre" data-seq="' + x.seq + '" maxlength="120" value="' + esc(l.descricao) + '" placeholder="escreva o produto como deve sair na nota" autocomplete="off"></label>' : '') +
         '<label class="campo"><span>Qtde' + (l.unidade ? ' (' + esc(l.unidade) + ')' : '') + '</span><input id="pdQtd" data-seq="' + x.seq + '" type="number" step="any" min="0" value="' + esc(l.quantidade) + '" inputmode="decimal"></label>' +
         '<label class="campo"><span>Preço un</span><input id="pdPreco" data-seq="' + x.seq + '" type="number" step="any" min="0" value="' + esc(l.preco) + '" inputmode="decimal"></label>' +
         '<label class="campo"><span>Desc %</span><input id="pdDesc" data-seq="' + x.seq + '" type="number" step="any" min="0" max="100" value="' + esc(l.desconto) + '" inputmode="decimal"></label>' +
@@ -860,6 +861,10 @@
     while (k.length > 1) { const a = k.shift(); o[a] = o[a] || {}; o = o[a]; }
     o[k[0]] = chave === 'frete' ? num(v) : v;
   }
+  // Produto genérico (04/11/2026, logística: "itens novos sem cadastro: usávamos o de CONSULTOR e alterávamos a descrição,
+  // como no FKN"): os produtos "CONSULTOR …" (620000 a 620005) aceitam a descrição escrita no item, que vai ao pedido e à
+  // nota (o banco guarda a descrição do item; a regra fiscal continua a do produto genérico).
+  const ehLivre = d => !!(d && /^\s*CONSULTOR\b/i.test(String(d.descricao_cadastro || d.descricao || '')));
   function escolheProduto(texto) {
     const cod = String(texto || '').split(' — ')[0].trim();
     let d = porCod.get(cod) || porCod.get(cod.replace(/\.0+$/, ''));
@@ -869,7 +874,8 @@
       else if (l.length > 1) CRM.toast(l.length + ' produtos com esse nome: escolha na lista que aparece ao digitar (ou digite o código).', true);
     }
     const l = ed.linha;
-    if (d) Object.assign(l, { codigo: d.codigo, descricao: d.descricao, unidade: d.unidade || '', preco: l.preco || (d.preco_venda ? Number(d.preco_venda) : '') });
+    if (d && ehLivre(d) && l.codigo === d.codigo && l.descricao) { /* o mesmo item genérico: fica a descrição escrita */ }
+    else if (d) Object.assign(l, { codigo: d.codigo, descricao: d.descricao, unidade: d.unidade || '', preco: l.preco || (d.preco_venda ? Number(d.preco_venda) : '') });
     else Object.assign(l, { codigo: '', descricao: String(texto || '').trim(), unidade: '' });
   }
   // Lê a linha de digitação. Cada linha tem um número (seq): o Enter grava o item e o navegador ainda dispara o
@@ -877,6 +883,8 @@
   function leLinha(c) {
     const l = ed.linha, g = id => c.querySelector('#' + id);
     if (g('pdQtd') && Number(g('pdQtd').dataset.seq) === ed.seq) { l.quantidade = g('pdQtd').value; l.preco = g('pdPreco').value; l.desconto = g('pdDesc').value; }
+    const dl = g('pdDescLivre');
+    if (dl && Number(dl.dataset.seq) === ed.seq && dl.value.trim()) l.descricao = dl.value.replace(/\s+/g, ' ').trim().slice(0, 120);
   }
   const linhaNova = () => { ed.seq = (ed.seq || 0) + 1; ed.sel = null; ed.linha = { codigo: '', descricao: '', unidade: '', quantidade: '', preco: '', desconto: 0 }; };
   function salvaItem() {
@@ -1144,8 +1152,15 @@
       });
       const prod = c.querySelector('#pdProd');
       if (prod) {
-        prod.addEventListener('change', () => { leLinha(c); escolheProduto(prod.value); CRM.render(); setTimeout(() => { const q = document.querySelector('#pdQtd'); if (q) q.focus(); }, 30); });
-        ['#pdQtd', '#pdPreco', '#pdDesc'].forEach(s => { const el = c.querySelector(s); if (!el) return;
+        // 04/11/2026 (celular da equipe: digitou "Papel" e o "Procurar com foto" não abria): o "change" vem quando o campo perde
+        // o foco, e redesenhar a tela nessa hora apagava o botão que a pessoa estava tocando. Só redesenha quando achou o
+        // produto; texto solto fica guardado na linha sem mexer na tela.
+        prod.addEventListener('change', () => {
+          leLinha(c); escolheProduto(prod.value);
+          if (!ed.linha.codigo) return;
+          CRM.render(); setTimeout(() => { const q = document.querySelector('#pdQtd'); if (q) q.focus(); }, 30);
+        });
+        ['#pdDescLivre', '#pdQtd', '#pdPreco', '#pdDesc'].forEach(s => { const el = c.querySelector(s); if (!el) return;
           el.addEventListener('change', () => { leLinha(c); CRM.render(); });
           el.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); leLinha(c); try { salvaItem(); CRM.render(); setTimeout(() => { const p = document.querySelector('#pdProd'); if (p) p.focus(); }, 30); } catch (e) { CRM.toast(e.message, true); } } }); });
       }
@@ -1202,7 +1217,9 @@
     'pd-item-cancelar': () => { linhaNova(); CRM.render(); },
     'pd-procurar-foto': () => {
       const c = document.querySelector('.pd-janela'); if (c) leLinha(c);
-      CRM.produtos.escolher(cod => { if (!ed) return; linhaNova(); escolheProduto(cod); CRM.render(); setTimeout(() => { const q = document.querySelector('#pdQtd'); if (q) q.focus(); }, 80); });
+      // o que foi digitado no campo do produto (sem ter escolhido da lista) já entra como busca
+      const pr = document.querySelector('#pdProd'), digitado = pr && pr.value.indexOf(' — ') === -1 ? pr.value.trim() : '';
+      CRM.produtos.escolher(cod => { if (!ed) return; linhaNova(); escolheProduto(cod); CRM.render(); setTimeout(() => { const q = document.querySelector('#pdQtd'); if (q) q.focus(); }, 80); }, digitado);
     },
     'pd-item-editar': i => { const it = ed.itens[Number(i)]; linhaNova(); ed.sel = Number(i); ed.linha = { codigo: it.codigo || '', descricao: it.descricao, unidade: it.unidade || '', quantidade: it.quantidade, preco: it.preco, desconto: it.desconto }; CRM.render(); },
     'pd-item-excluir': i => { ed.itens.splice(Number(i), 1); ed.sel = null; CRM.render(); },

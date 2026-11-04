@@ -422,8 +422,9 @@
   }
 
   // ----------------------------------------------------------------- escolher o produto no pedido, com foto
-  function escolher(fn) {
+  function escolher(fn, busca) {
     aoEscolher = fn;
+    if (busca != null && String(busca).trim()) { f.busca = String(busca).trim(); f.limite = 60; }
     const abre = () => CRM.abrirForm({
       titulo: 'Procurar no estoque', largura: 'extra', campos: [], semFoco: true, salvarTexto: 'Fechar', aoSalvar: async () => { aoEscolher = null; },
       htmlAntes: filtrosHTML('escolher') + '<div data-pf-lista>' + grade('escolher') + '</div>',
@@ -433,7 +434,8 @@
         dlg.addEventListener('close', () => { aoEscolher = null; }, { once: true }); // fechou sem escolher: o próximo "+ Pedido" não volta para cá
       }
     });
-    if (lista === null) carrega().then(abre); else abre();
+    // a lista ainda vindo (outra tela pediu antes): espera chegar em vez de abrir vazia
+    if (lista === null) carrega().then(() => (lista === null ? setTimeout(() => escolher(fn, busca), 400) : abre())); else abre();
   }
 
   // ----------------------------------------------------------------- fotos: reduzir, guardar
