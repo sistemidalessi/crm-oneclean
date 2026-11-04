@@ -353,15 +353,25 @@ Deno.serve(async (req) => {
       if (!ag || !cc) throw new Error('faltam agência e conta em Configurações → Integrações → Dados do convênio');
       const ate = /^\d{4}-\d{2}-\d{2}$/.test(String(c.ate)) ? c.ate : hojeSP();
       const de = /^\d{4}-\d{2}-\d{2}$/.test(String(c.de)) ? c.de : maisDias(ate, -2);
-      const tk = await tokenMtls(String(c.escopo || 'extrato-info'));
+      // diagnóstico (04/11/2026, 1ª leitura deu 403 sem texto): { token_vps: true } pega o token pela VPS (com o certificado) e
+      // { base: 'https://...bb.com.br/...' } troca o endereço da API
+      const escopo = String(c.escopo || 'extrato-info');
+      let tk = '';
+      if (c.token_vps) {
+        const id = Deno.env.get('BB_CLIENT_ID') ?? '', seg = Deno.env.get('BB_CLIENT_SECRET') ?? '';
+        const t = await viaVps({ url: OAUTH, metodo: 'POST', basic: id + ':' + seg, form: { grant_type: 'client_credentials', scope: escopo } });
+        if (t.status !== 200 || !t.json?.access_token) return resposta(200, { ok: false, etapa: 'token pela VPS', status: t.status, erro: String(t.json?.error_description || t.json?.error || t.texto || '').slice(0, 300) });
+        tk = t.json.access_token;
+      } else tk = await tokenMtls(escopo);
+      const base = /^https:\/\/([a-z0-9-]+\.)*bb\.com\.br\//i.test(String(c.base || '')) ? String(c.base).replace(/\/$/, '') : EXTRATOS;
       const lanc: any[] = []; let pagina = 1, ultimo: any = null;
       for (let volta = 0; volta < 30; volta++) {
-        const u = EXTRATOS + '/conta-corrente/agencia/' + ag + '/conta/' + cc + '?numeroPaginaSolicitacao=' + pagina + '&quantidadeRegistroPaginaSolicitacao=200' +
+        const u = base + '/conta-corrente/agencia/' + ag + '/conta/' + cc + '?numeroPaginaSolicitacao=' + pagina + '&quantidadeRegistroPaginaSolicitacao=200' +
           '&dataInicioSolicitacao=' + dataExtrato(de) + '&dataFimSolicitacao=' + dataExtrato(ate) + '&gw-dev-app-key=' + APP();
         const r = await viaVps({ url: u, token: tk });
         ultimo = r;
         if (r.status === 404) break;   // sem lançamentos no período
-        if (r.status !== 200) return resposta(200, { ok: false, status: r.status, erro: msgBB(r.json, r.texto || ''), de, ate });
+        if (r.status !== 200) return resposta(200, { ok: false, status: r.status, erro: msgBB(r.json, r.texto || ''), corpo: r.json || r.texto || null, base, escopo, de, ate });
         lanc.push(...(r.json?.listaLancamento || []));
         const prox = Number(r.json?.numeroPaginaProximo) || 0;
         if (!prox || prox <= pagina) break;
