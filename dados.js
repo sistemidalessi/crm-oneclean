@@ -1215,6 +1215,7 @@
   Supa.prototype.fornecedorPagarEditar = async function (id, p, motivo) { return unwrap(await this.sb.rpc('crm_fin_fornecedor_editar', { p_id: id, p, p_motivo: motivo })); };
   Supa.prototype.pedidoPausar = async function (id, pausar, ate, motivo) { return unwrap(await this.sb.rpc('crm_pedido_pausar', { p_id: id, p_pausar: !!pausar, p_ate: ate || null, p_motivo: motivo || null })); };
   Supa.prototype.pedidoDados = async function (id, p) { return unwrap(await this.sb.rpc('crm_pedido_dados', { p_id: id, p })); };
+  Supa.prototype.pedidoFalta = async function (id, itens, obs) { return unwrap(await this.sb.rpc('crm_pedido_falta', { p_id: id, p_itens: itens, p_obs: obs || null })); };
   // sinal verde/vermelho da margem para quem não vê custo (só sim/não; 03/11/2026)
   Supa.prototype.pedidoSinal = async function (itens) { return unwrap(await this.sb.rpc('crm_pedido_sinal', { p_itens: itens })); };
   Supa.prototype.pedidoComentar = async function (id, texto) { return unwrap(await this.sb.rpc('crm_pedido_comentar', { p_id: id, p_texto: texto })); };
@@ -1320,6 +1321,13 @@
     if (pausar) r.dados.pausado = { ate: ate || null, motivo: motivo || null, por: 'Administrador (modo local)', em: new Date().toISOString() }; else delete r.dados.pausado;
     r.comentarios = (r.comentarios || []).concat([{ quando: new Date().toISOString(), por: LOCAL_ADMIN, nome: 'Administrador (modo local)', texto: pausar ? 'Pedido pausado' : 'Pedido retomado' }]);
     this._pedsGrava(); return Object.assign({}, r);
+  };
+  Local.prototype.pedidoFalta = async function (id, itens, obs) {
+    const p = this._peds().find(x => x.id === id); if (!p) throw new Error('pedido não encontrado');
+    p.dados = Object.assign({}, p.dados);
+    if (!itens.length && !obs) delete p.dados.separacao_falta;
+    else p.dados.separacao_falta = { itens: itens.map(x => Object.assign({ falta: x.falta, idx: x.idx }, (({ codigo, descricao, unidade }) => ({ codigo, descricao, unidade }))(p.itens[x.idx] || {}))), obs: obs || null, em: new Date().toISOString(), por: 'você' };
+    this._pedsGrava(); return { itens: itens.length };
   };
   Local.prototype.pedidoDados = async function (id, p) {
     const r = this._ped(id), mud = Object.assign({}, p);

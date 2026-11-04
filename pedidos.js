@@ -517,7 +517,8 @@
           '<table class="tabela"><tbody>' + (p.itens || []).map((it, i) => '<tr><td><label class="filtro-inline"><input type="checkbox" data-pd-sep="' + esc(p.id) + ':' + i + '"' + (it.separado ? ' checked' : '') + (p.situacao !== 'separacao' ? ' disabled' : '') + '> ' +
             esc(it.descricao) + '</label><small>' + esc(it.codigo || '') + '</small></td><td class="num"><strong>' + qtd(it.quantidade) + '</strong> ' + esc(it.unidade || '') + '</td></tr>').join('') + '</tbody></table>' +
           '<p class="acoes">' + (p.situacao === 'separacao' ? '<button type="button" class="btn' + (todos ? ' verde' : ' sec') + '" data-acao="pd-separado" data-id="' + esc(p.id) + '">Separado ✓</button> ' : '') +
-          '<button type="button" class="mini" data-acao="pd-voltar-aberto" data-id="' + esc(p.id) + '">tirar da lista (volta ao aberto)</button></p></div>';
+          '<button type="button" class="btn sec" data-acao="pd-falta" data-id="' + esc(p.id) + '">⚠ Faltou</button> ' +
+          '<button type="button" class="mini" data-acao="pd-voltar-aberto" data-id="' + esc(p.id) + '">tirar da lista (volta ao aberto)</button></p>' + avisoFalta(p) + '</div>';
       }).join('') + '</section>';
   }
 
@@ -543,6 +544,30 @@
   }
 
   // ------------------------------------------------ pedido aberto (Dados / Produtos / Comentários)
+  // Faltou na separação (04/11/2026, pedido da logística): o que a separação não achou, para a vendedora avisar o cliente
+  function avisoFalta(p) {
+    const f = p.dados && p.dados.separacao_falta;
+    if (!f) return '';
+    const l = (f.itens || []).map(x => qtd(x.falta) + ' ' + (x.unidade || '') + ' de ' + (x.descricao || x.codigo));
+    return '<p class="alerta">⚠ <strong>Faltou na separação</strong>' + (f.em ? ' (' + esc(R.dataBR(R.diaLocal(f.em))) + (f.por ? ', ' + esc(f.por) : '') + ')' : '') + ': ' +
+      esc(l.join('; ') || 'veja a observação') + (f.obs ? '. Obs.: ' + esc(f.obs) : '') + '.' + (ehOp() ? '' : ' Avise o cliente e combine com a logística (entrega parcial, troca ou o resto depois).') + '</p>';
+  }
+  function formFalta(p) {
+    const f = (p.dados && p.dados.separacao_falta) || {}, ant = new Map((f.itens || []).map(x => [x.idx, x.falta]));
+    CRM.abrirForm({ titulo: 'Faltou na separação: pedido ' + p.numero, largura: 'largo',
+      intro: 'Diga quanto faltou de cada item (deixe vazio o que veio completo). A vendedora vê no pedido e recebe uma tarefa para avisar o cliente. Tudo vazio apaga o registro.',
+      campos: (p.itens || []).map((it, i) => ({ nome: 'f' + i, rotulo: (i + 1) + '. ' + (it.descricao || it.codigo) + ' — pedido ' + qtd(it.quantidade) + ' ' + (it.unidade || ''), tipo: 'numero', passo: '0.001', vazioNulo: true, moeda: false }))
+        .concat([{ nome: 'obs', rotulo: 'Observação', tipo: 'textarea', largo: true, linhas: 2 }]),
+      valores: Object.assign({ obs: f.obs || '' }, ...(p.itens || []).map((it, i) => ({ ['f' + i]: ant.has(i) ? ant.get(i) : null }))),
+      salvarTexto: 'Registrar e avisar a vendedora',
+      aoSalvar: async v => {
+        const itens = (p.itens || []).map((it, i) => ({ idx: i, falta: v['f' + i] || 0 })).filter(x => num(x.falta) > 0);
+        const r = await CRM.store().pedidoFalta(p.id, itens, v.obs || '');
+        carregando = false; await carrega(true);
+        CRM.toast(r && r.apagado ? 'Registro da falta apagado.' : 'Falta registrada: a vendedora vê no pedido e recebeu a tarefa.');
+      } });
+  }
+  CRM.pedidoFalta = formFalta;
   function telaPedido(p) {
     const s = P.situacao(p, notaNumero(p)), d = p.dados || {}, ctx = ctxDe(p.vendedor_id), t = P.totais(p.itens, p.frete, ctx);
     const fs = faltasDe(p.id), gest = ehOp();   // 21/10/2026: a logística também libera (pedido do Anderson)
@@ -560,6 +585,7 @@
     if (!podeEditar(p) && ['aberto', 'separacao', 'separado'].indexOf(p.situacao) !== -1 && (ehOp() || (p.situacao === 'aberto' && p.vendedor_id === CRM.meuId())))
       botoes.push('<button type="button" class="btn sec" data-acao="pd-editar-dados" data-id="' + esc(p.id) + '" title="Forma de pagamento, data, endereço de entrega e textos — até a nota ser emitida">✎ Editar dados</button>');
     if (ehOp() && p.situacao === 'separacao' && !pz) botoes.push('<button type="button" class="btn verde" data-acao="pd-separado" data-id="' + esc(p.id) + '">Separado ✓</button>');
+    if (ehOp() && ['aberto', 'separacao', 'separado'].indexOf(p.situacao) !== -1) botoes.push('<button type="button" class="btn sec" data-acao="pd-falta" data-id="' + esc(p.id) + '">⚠ Faltou na separação</button>');
     if (ehOp() && (p.situacao === 'separacao' || p.situacao === 'separado')) botoes.push('<button type="button" class="btn sec" data-acao="pd-voltar-aberto" data-id="' + esc(p.id) + '">Voltar ao aberto</button>');
     if (CRM.nfe && CRM.nfe.podeEmitir(p) && !pz) botoes.push('<button type="button" class="btn' + (p.situacao === 'separado' ? ' verde' : '') + '" data-acao="nf-emitir" data-id="' + esc(p.id) + '">Emitir NF-e</button>');
     if (CRM.nfe && CRM.nfe.podeEmitir(p) && !pz && CRM.nfe.outraDoPedido) botoes.push('<button type="button" class="btn sec" data-acao="nf-outra-pedido" data-id="' + esc(p.id) + '" title="bonificação ou entrega futura">Outra operação…</button>');
@@ -589,6 +615,7 @@
       corpo = gradeProdutos(p.itens || [], { ctx, faltas: fs, ler: true }) + rodapeTotais(t, p.itens || []);
     }
     return '<section class="cartao pd-janela"><header class="pd-topo"><button type="button" class="btn sec" data-acao="pd-fechar">← Voltar</button><h2>Pedido ' + esc(p.numero) + ' · ' + esc(nomeCliente(p)) + '</h2>' + CRM.selo(s.rotulo, s.cor) + '</header>' +
+      avisoFalta(p) +
       (pz ? '<p class="aviso-notas">⏸ <strong>Pausado</strong>' + (p.dados.pausado.ate ? ' até ' + esc(R.dataBR(String(p.dados.pausado.ate).slice(0, 10))) + ' (volta sozinho nesse dia)' : ' até alguém clicar em "Retomar"') +
         (p.dados.pausado.motivo ? ' · ' + esc(p.dados.pausado.motivo) : '') + (p.dados.pausado.por ? ' · por ' + esc(p.dados.pausado.por) : '') + '. Não vai à separação nem à nota.</p>' : '') +
       (bAbertos.length ? '<p class="alerta">Bloqueado por: <strong>' + esc(bAbertos.map(b => P.ROTULO_BLOQUEIO[b] || b).join(', ')) + '</strong>.' + (bAbertos.some(b => b !== 'SEM CADASTRO' && P.FINANCEIRO.indexOf(b) === -1) ? (gest ? ' Confira e clique em "Liberar".' : ' Estoque e preço, quem libera é a gestora ou a logística.') : '') +
@@ -1325,6 +1352,7 @@
     'pd-desliberar': vivo(async id => { troca(await CRM.store().pedidoLiberar(id, false, null)); CRM.render(); }),
     'pd-entrada': vivo(async id => { const p = ped(id); troca(await CRM.store().pedidoLiberar(id, null, !p.entrada_ok)); CRM.render(); }),
     'pd-cancelar': vivo(async id => { const p = ped(id); const m = prompt('Cancelar o pedido ' + p.numero + '? A reserva do estoque sai. Diga o motivo:'); if (!m) return; troca(await CRM.store().pedidoSituacao(id, 'cancelado', m)); await recarrega(); }),
+    'pd-falta': id => { const p = ped(id); if (p) formFalta(p); },
     'pd-separado': vivo(async id => { const p = ped(id); if ((p.itens || []).some(i => !i.separado) && !confirm('Há itens sem a caixinha de conferido. Marcar o pedido ' + p.numero + ' como separado assim mesmo?')) return; troca(await CRM.store().pedidoSituacao(id, 'separado')); CRM.render(); }),
     'pd-voltar-aberto': vivo(async id => { if (!confirm('Tirar o pedido da separação (volta ao aberto)?')) return; troca(await CRM.store().pedidoSituacao(id, 'aberto')); await recarrega(); }),
     'pd-desfaturar': vivo(async id => { if (!confirm('Desfazer o faturado? O pedido volta a "a emitir NF" e reserva o estoque de novo.')) return; troca(await CRM.store().pedidoSituacao(id, 'desfaturar')); await recarrega(); }),

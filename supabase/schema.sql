@@ -9458,3 +9458,45 @@ create or replace function public.crm_gv_funil()
     'maiores_propostas', coalesce((select jsonb_agg(jsonb_build_object('proposta', y.numero, 'cliente', y.cliente, 'valor', y.valor_total, 'enviada_em', y.enviada_em, 'responsavel', y.dono))
        from (select * from p order by valor_total desc limit 10) y), '[]'::jsonb));
 $function$;
+
+-- ============================================================ 04/11/2026: faltou na separação (logística → vendedora)
+-- Faltou na separação (04/11/2026, áudio da logística: "eles agora me perguntam o que está faltando no meu pedido ... na hora
+-- da separação eu já colocaria: está faltando duas águas sanitárias, dois desinfetantes"). A logística registra quanto faltou de
+-- cada item e uma observação; fica no pedido (dados.separacao_falta, a vendedora vê) e vira tarefa do(a) vendedor(a).
+-- Lista vazia e sem observação apaga o registro.
+create or replace function public.crm_pedido_falta(p_id uuid, p_itens jsonb, p_obs text) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare p record; x jsonb; it jsonb; l jsonb := '[]'::jsonb; q numeric; txt text := ''; quem text; emp text;
+begin
+  if not (public.crm_eh_logistica() or public.crm_eh_gestor()) then raise exception 'só a logística ou a gestão registram a falta da separação'; end if;
+  select * into p from public.crm_pedidos where id = p_id for update;
+  if p.id is null then raise exception 'pedido não encontrado'; end if;
+  if p.situacao not in ('aberto', 'separacao', 'separado') then raise exception 'o pedido já foi faturado ou cancelado'; end if;
+  for x in select * from jsonb_array_elements(coalesce(p_itens, '[]'::jsonb)) loop
+    q := round(coalesce(nullif(x->>'falta', '')::numeric, 0), 3);
+    if q <= 0 then continue; end if;
+    it := p.itens -> ((x->>'idx')::int);
+    if it is null then raise exception 'item % não é deste pedido', x->>'idx'; end if;
+    if q > coalesce((it->>'quantidade')::numeric, 0) then raise exception 'item %: faltou mais do que o pedido (%)', (x->>'idx')::int + 1, it->>'quantidade'; end if;
+    l := l || jsonb_build_object('idx', (x->>'idx')::int, 'codigo', it->>'codigo', 'descricao', it->>'descricao', 'unidade', it->>'unidade', 'falta', q);
+    txt := txt || case when txt = '' then '' else '; ' end || trim(to_char(q, 'FM999999990.###')) || ' ' || coalesce(it->>'unidade', '') || ' de ' || coalesce(it->>'descricao', it->>'codigo', '');
+  end loop;
+  if jsonb_array_length(l) = 0 and coalesce(btrim(p_obs), '') = '' then
+    update public.crm_pedidos set dados = coalesce(dados, '{}'::jsonb) - 'separacao_falta', atualizado_em = now(), atualizado_por = auth.uid() where id = p_id;
+    return jsonb_build_object('apagado', true);
+  end if;
+  select nome into quem from public.crm_usuarios where user_id = auth.uid();
+  update public.crm_pedidos set dados = jsonb_set(coalesce(dados, '{}'::jsonb), '{separacao_falta}', jsonb_build_object('itens', l, 'obs', nullif(btrim(coalesce(p_obs, '')), ''),
+      'em', now(), 'por', quem)), atualizado_em = now(), atualizado_por = auth.uid()
+   where id = p_id;
+  if p.vendedor_id is not null then
+    select nome into emp from public.crm_empresas where id = p.empresa_id;
+    insert into public.crm_atividades (empresa_id, responsavel_id, tipo, descricao, data_hora, automatica, criado_por)
+    values (p.empresa_id, p.vendedor_id, 'tarefa', left('Pedido ' || p.numero || coalesce(' (' || emp || ')', '') || ': na separação faltou ' ||
+      coalesce(nullif(txt, ''), 'item') || coalesce('. Obs.: ' || nullif(btrim(coalesce(p_obs, '')), ''), '') ||
+      '. Avise o cliente e combine (entrega parcial, troca ou o resto depois).', 1000), now(), true, auth.uid());
+  end if;
+  return jsonb_build_object('itens', jsonb_array_length(l));
+end $$;
+revoke all on function public.crm_pedido_falta(uuid, jsonb, text) from public, anon;
+grant execute on function public.crm_pedido_falta(uuid, jsonb, text) to authenticated;
