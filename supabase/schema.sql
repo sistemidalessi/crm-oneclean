@@ -9543,3 +9543,46 @@ begin
 end $$;
 drop trigger if exists crm_empresa_codigo_limpa on public.crm_empresas;
 create trigger crm_empresa_codigo_limpa before update of codigo on public.crm_empresas for each row execute function public.crm_empresa_codigo_limpa();
+
+-- Funil do Diretor de Vendas (04/11/2026, 2ª mudança; Renata: "esses clientes não estão parados, eu só não mudei de etapa porque
+-- não houve alteração: são orçamentos que ainda estão aguardando retorno dos clientes"):
+-- - negócio na etapa de orçamento/proposta não é "parado": é "aguardando retorno do cliente". Só entra na lista (separada)
+--   quando passa de 15 dias sem contato concluído com o cliente; a ação é cobrar o retorno, não mudar de etapa nem dar perdido;
+-- - como na tela (regras.js alertas): negócio com tarefa aberta, no negócio ou no cliente, não é parado (o próximo passo já existe).
+-- Aplicado em 04/11/2026 (migração crm_gv_funil_aguardando_retorno).
+create or replace function public.crm_gv_funil() returns jsonb language sql stable security invoker set search_path = public as $$
+  with c as (select a.empresa_id, max(coalesce(a.concluida_em, a.data_hora)) ult from public.crm_atividades a
+              where a.concluida and a.tipo <> 'sistema' group by a.empresa_id),
+  t as (select distinct a.empresa_id from public.crm_atividades a where not a.concluida and a.empresa_id is not null),
+  tn as (select distinct a.negocio_id from public.crm_atividades a where not a.concluida and a.negocio_id is not null),
+  n as (select g.*, e.nome cliente, et.nome etapa, u.nome dono,
+               translate(lower(coalesce(et.nome, '')), 'çãáâéêíóôõú', 'caaaeeiooou') ~ '(orcamento|proposta)' aguardando,
+               greatest(coalesce(g.etapa_desde, g.criado_em), coalesce(c.ult, '-infinity'::timestamptz)) mov
+          from public.crm_negocios g left join public.crm_empresas e on e.id = g.empresa_id left join public.crm_etapas et on et.id = g.etapa_id
+          left join public.crm_usuarios u on u.user_id = g.responsavel_id left join c on c.empresa_id = g.empresa_id
+         where g.status = 'aberto'
+           and not exists (select 1 from t where t.empresa_id = g.empresa_id) and not exists (select 1 from tn where tn.negocio_id = g.id)),
+  nv as (select n.*, ((now() at time zone 'America/Sao_Paulo')::date - (mov at time zone 'America/Sao_Paulo')::date) parado from n
+          where mov < now() - interval '15 days'),
+  np as (select * from nv where not aguardando),
+  na as (select * from nv where aguardando),
+  p as (select pr.numero, pr.valor_total, pr.enviada_em, e.nome cliente, u.nome dono from public.crm_propostas pr join public.crm_negocios g on g.id = pr.negocio_id
+          left join public.crm_empresas e on e.id = g.empresa_id left join public.crm_usuarios u on u.user_id = g.responsavel_id
+          left join c on c.empresa_id = g.empresa_id
+         where pr.status = 'enviada' and g.status = 'aberto' and pr.enviada_em < (now() at time zone 'America/Sao_Paulo')::date - 7
+           and (c.ult is null or (c.ult at time zone 'America/Sao_Paulo')::date <= pr.enviada_em)
+           and not exists (select 1 from t where t.empresa_id = g.empresa_id) and not exists (select 1 from tn where tn.negocio_id = g.id))
+  select jsonb_build_object(
+    'regra', 'parado = fora da etapa de orçamento, sem mudar de etapa, sem contato concluído com o cliente há mais de 15 dias e sem tarefa marcada; '
+      || 'aguardando retorno = na etapa de orçamento/proposta, esperando o cliente, sem contato há mais de 15 dias e sem tarefa (cobrar o retorno; não é para mudar de etapa nem dar perdido); '
+      || 'proposta sem resposta = enviada há mais de 7 dias, sem contato com o cliente depois do envio e sem tarefa marcada',
+    'negocios_parados', (select count(*) from np), 'negocios_parados_valor', (select round(coalesce(sum(valor), 0), 2) from np),
+    'maiores_parados', coalesce((select jsonb_agg(jsonb_build_object('negocio', y.titulo, 'cliente', y.cliente, 'valor', y.valor, 'etapa', y.etapa, 'parado_dias', y.parado, 'responsavel', y.dono))
+       from (select * from np order by valor desc limit 10) y), '[]'::jsonb),
+    'orcamentos_aguardando_retorno', (select count(*) from na), 'orcamentos_aguardando_retorno_valor', (select round(coalesce(sum(valor), 0), 2) from na),
+    'maiores_aguardando_retorno', coalesce((select jsonb_agg(jsonb_build_object('negocio', y.titulo, 'cliente', y.cliente, 'valor', y.valor, 'etapa', y.etapa, 'dias_sem_contato', y.parado, 'responsavel', y.dono))
+       from (select * from na order by valor desc limit 10) y), '[]'::jsonb),
+    'propostas_sem_resposta', (select count(*) from p), 'propostas_sem_resposta_valor', (select round(coalesce(sum(valor_total), 0), 2) from p),
+    'maiores_propostas', coalesce((select jsonb_agg(jsonb_build_object('proposta', y.numero, 'cliente', y.cliente, 'valor', y.valor_total, 'enviada_em', y.enviada_em, 'responsavel', y.dono))
+       from (select * from p order by valor_total desc limit 10) y), '[]'::jsonb));
+$$;
