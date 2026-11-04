@@ -1856,8 +1856,9 @@
     if (r.error) throw new Error(r.error.message);
     return r.data.signedUrl;
   };
-  Supa.prototype.entregaConfirmar = async function (id, situacao, obs, canhoto) {
-    return unwrap(await this.sb.rpc('crm_entrega_confirmar', { p_id: id, p_situacao: situacao, p_obs: obs || null, p_canhoto: canhoto }));
+  // em: a hora em que o motorista confirmou de verdade (confirmação feita sem internet e enviada depois; 04/11/2026)
+  Supa.prototype.entregaConfirmar = async function (id, situacao, obs, canhoto, em) {
+    return unwrap(await this.sb.rpc('crm_entrega_confirmar', Object.assign({ p_id: id, p_situacao: situacao, p_obs: obs || null, p_canhoto: canhoto }, em ? { p_em: em } : {})));
   };
   // Modo local: as entregas ficam no navegador (crm_entregas) e a foto como data: (crm_canhotos).
   const enderecoLocal = e => (e ? [[e.logradouro, e.numero].filter(Boolean).join(', '), e.complemento, e.bairro, [e.cidade, e.uf].filter(Boolean).join('/'), e.cep]

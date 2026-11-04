@@ -272,7 +272,7 @@
       for (const rec of (await FR.lista()).filter(x => x.user === meuIdM())) {
         try {
           const caminho = await st().canhotoSubir(rec.foto, rec.id, rec.dia);
-          await st().entregaConfirmar(rec.id, rec.como, rec.obs, caminho);
+          await st().entregaConfirmar(rec.id, rec.como, rec.obs, caminho, rec.em);
           await FR.tira(rec.id); mandou++;
           st().whatsapp && st().whatsapp({ acao: 'entrega', entrega: rec.id }).catch(e => console.warn('agradecimento', e));
         } catch (e) {
