@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Minha rota (sem internet)</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="theme-color" content="#175b6d">
+<link rel="stylesheet" href="crm.css">
+</head>
+<!-- Aberta pelo sw.js quando o app abre sem internet (04/11/2026): mostra a rota guardada no celular (rota-offline-fila.js)
+     e guarda as confirmações para o CRM mandar quando a internet voltar. -->
+<body class="ro-corpo">
+<main id="ro" class="mt"></main>
+<script src="rota-offline-fila.js"></script>
+<script src="rota-offline.js"></script>
+</body>
+</html>

@@ -992,6 +992,10 @@
   Local.prototype.boletoLer = SO_SUPABASE;
   // Crédito no modo local (demonstração): sem fichas; o CRM mostra a aba vazia e não trava pedido.
   Local.prototype.creditoPainel = async function () { return { fichas: [], pendentes: [], sugestoes: [] }; };
+  Local.prototype.pagLer = async function () { return { lotes: [], itens: [], favorecidos: this.ler().fin_favorecidos || [] }; };
+  Local.prototype.pagChamar = async function () { throw new Error('o pagamento pelo BB só funciona com o banco de dados (modo local)'); };
+  Local.prototype.favorecidoGravar = async function (f) { const d = this.ler(); d.fin_favorecidos = d.fin_favorecidos || []; const x = Object.assign({ id: f.id || ('fav-' + Date.now()) }, f);
+    const i = d.fin_favorecidos.findIndex(y => y.id === x.id); if (i >= 0) d.fin_favorecidos[i] = x; else d.fin_favorecidos.push(x); this.gravar(d); return x; };
   Local.prototype.creditoVer = async function () { return null; };
   Local.prototype.creditoGravar = SO_SUPABASE;
   Local.prototype.creditoEnviar = SO_SUPABASE;
@@ -1802,6 +1806,7 @@
   // entregas liberadas dele (crm_minha_rota); a confirmação exige a foto do canhoto (bucket privado crm-canhotos).
   Supa.prototype.rotaCandidatas = async function (desde) { return unwrap(await this.sb.rpc('crm_rota_candidatas', { p_desde: desde })) || []; };
   Supa.prototype.rotaDia = async function (dia) { return unwrap(await this.sb.rpc('crm_rota_dia', { p_dia: dia })) || []; };
+  Supa.prototype.entregasVendedor = async function (de, ate) { return unwrap(await this.sb.rpc('crm_entregas_vendedor', { p_de: de, p_ate: ate })) || []; };
   Supa.prototype.minhaRota = async function (dia) { return unwrap(await this.sb.rpc('crm_minha_rota', { p_dia: dia })) || []; };
   Supa.prototype.entregasCriar = async function (linhas) { return unwrap(await this.sb.from('crm_entregas').insert(linhas).select('id')); };
   Supa.prototype.entregaAtualizar = async function (id, patch) { return unwrap(await this.sb.from('crm_entregas').update(patch).eq('id', id).select('id').single()); };
@@ -1812,6 +1817,24 @@
       .or('situacao.in.(duvida,sem_titulo),and(situacao.eq.baixado,credito.gte.' + desde + ')').order('credito', { ascending: false }).limit(300)) || [];
   };
   Supa.prototype.bbSiteResolver = async function (nn, obs) { return unwrap(await this.sb.rpc('crm_bb_site_resolver', { p_nosso: nn, p_obs: obs })); };
+  // pagamento de contas pelo BB (04/11/2026, pagar-bb.js): os envios dos últimos 60 dias, os pagamentos e os favorecidos do Pix
+  Supa.prototype.pagLer = async function () {
+    const desde = new Date(Date.now() - 60 * 86400000).toISOString();
+    const [lotes, itens, favorecidos] = await Promise.all([
+      this.sb.from('crm_fin_pag_lotes').select('*').gte('enviado_em', desde).order('id', { ascending: false }).limit(200),
+      this.sb.from('crm_fin_pag_itens').select('id, lote_id, lancamento_id, ambiente, forma, descricao, favorecido, valor, data_pagamento, identificador_bb, aceito, erros, estado, ativo, pago_em, baixado').gte('atualizado_em', desde).order('id', { ascending: false }).limit(2000),
+      this.sb.from('crm_fin_favorecidos').select('*').order('nome')]);
+    return { lotes: unwrap(lotes) || [], itens: unwrap(itens) || [], favorecidos: unwrap(favorecidos) || [] };
+  };
+  Supa.prototype.pagChamar = async function (corpo) {
+    const r = await this.sb.functions.invoke('crm-bb-pagar', { body: corpo });
+    if (r.error) throw await erroDaFuncao(r);
+    return r.data;
+  };
+  Supa.prototype.favorecidoGravar = async function (f) {
+    const d = Object.assign({}, f); delete d.id;
+    return unwrap(f.id ? await this.sb.from('crm_fin_favorecidos').update(d).eq('id', f.id).select('id').single() : await this.sb.from('crm_fin_favorecidos').insert(d).select('id').single());
+  };
   Supa.prototype.veiculos = async function () { return unwrap(await this.sb.from('crm_veiculos').select('*').order('nome')) || []; };
   Supa.prototype.veiculoGravar = async function (v) {
     const d = { nome: String(v.nome || '').trim(), placa: String(v.placa || '').trim().toUpperCase() || null, ativo: v.ativo !== false };

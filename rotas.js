@@ -251,10 +251,62 @@
   // ============================================================ motorista
   const m = { dia: null, aberta: null, foto: null, fotoUrl: '', como: 'entregue', obs: '', enviando: false };
   let minha = null, carregandoM = false, lidoM = 0;
+  // ---- sem internet (04/11/2026): a rota guardada no celular e a fila das confirmações (rota-offline-fila.js)
+  const FR = raiz.CRMFilaRota;
+  let semSinal = false, guardadaEm = null, naFila = 0, enviandoFila = false;
+  const meuIdM = () => (CRM.estado.eu ? CRM.estado.eu.user_id : null);
+  function guardaRota(l) {
+    if (!FR) return;
+    const r = { user: meuIdM(), nome: CRM.estado.eu ? CRM.estado.eu.nome : '', dia: m.dia, em: new Date().toISOString(),
+      l: l.map(y => { const mp = X.mapas(y.endereco) || {}; return { id: y.id, ordem: y.ordem, numero: y.numero, cliente: y.cliente, endereco: y.endereco, contato: y.contato || '',
+        telefone: y.telefone || '', situacao: y.situacao, entregue_em: y.entregue_em || null, waze: mp.waze || '', google: mp.google || '' }; }) };
+    if (FR.guardaRota(r)) guardadaEm = r.em;
+  }
+  async function contaFila() { try { naFila = FR ? (await FR.lista()).filter(x => x.user === meuIdM()).length : 0; } catch (e) { naFila = 0; } }
+  // manda o que foi confirmado sem sinal (a foto e a confirmação), na ordem; para no primeiro erro de rede
+  async function enviaFila() {
+    if (!FR || enviandoFila || (raiz.navigator && raiz.navigator.onLine === false)) return;
+    enviandoFila = true;
+    let mandou = 0;
+    try {
+      for (const rec of (await FR.lista()).filter(x => x.user === meuIdM())) {
+        try {
+          const caminho = await st().canhotoSubir(rec.foto, rec.id, rec.dia);
+          await st().entregaConfirmar(rec.id, rec.como, rec.obs, caminho);
+          await FR.tira(rec.id); mandou++;
+          st().whatsapp && st().whatsapp({ acao: 'entrega', entrega: rec.id }).catch(e => console.warn('agradecimento', e));
+        } catch (e) {
+          if (FR.semRede(e)) break;
+          // a entrega já tinha sido confirmada (ou saiu da rota): não adianta tentar de novo
+          if (/não encontrad|already|já confirm|permiss/i.test(String(e.message || e))) { await FR.tira(rec.id); continue; }
+          console.warn('fila da rota', e); break;
+        }
+      }
+    } finally { enviandoFila = false; }
+    await contaFila();
+    if (mandou) { CRM.toast(mandou + ' entrega(s) confirmada(s) sem internet foram enviadas agora.'); carregandoM = false; carregaM(true); }
+  }
+  if (FR && raiz.addEventListener) {
+    raiz.addEventListener('online', () => { semSinal = false; enviaFila(); if (CRM.estado.aba === 'rota') { carregandoM = false; carregaM(true); } });
+    raiz.addEventListener('offline', () => { semSinal = true; if (CRM.estado.aba === 'rota') CRM.render(); });
+    setInterval(() => { if (naFila && CRM.estado.eu && CRM.ehMotorista()) enviaFila(); }, 60000);
+  }
   async function carregaM(silencio) {
     if (carregandoM) return;
     carregandoM = true;
-    try { m.dia = m.dia || hojeSP(); minha = await st().minhaRota(m.dia) || []; lidoM = Date.now(); } catch (e) { minha = minha || []; if (!silencio) CRM.falhou(e); }
+    m.dia = m.dia || hojeSP();
+    try {
+      minha = await st().minhaRota(m.dia) || []; lidoM = Date.now(); semSinal = false;
+      await contaFila();
+      // o que está na fila aparece como feito até o envio
+      if (naFila) { const fila = new Map((await FR.lista()).map(r => [r.id, r])); minha.forEach(y => { const r = fila.get(y.id); if (r && y.situacao === 'pendente') { y.situacao = r.como; y.entregue_em = r.em; y.na_fila = true; } }); }
+      guardaRota(minha);
+      if (naFila) setTimeout(enviaFila, 0);
+    } catch (e) {
+      const g = FR && FR.rotaGuardada();
+      if (FR && FR.semRede(e) && g && g.user === meuIdM() && g.dia === m.dia) { minha = g.l; semSinal = true; guardadaEm = g.em; await contaFila(); }
+      else { minha = minha || []; if (!silencio) CRM.falhou(e); }
+    }
     carregandoM = false;
     CRM.render();
   }
@@ -268,13 +320,16 @@
     return '<div class="mt">' +
       '<header class="mt-topo"><div><strong>Rota de ' + esc(m.dia === hojeSP() ? 'hoje' : diaLongo(m.dia)) + '</strong><span>' + esc(CRM.estado.eu ? CRM.estado.eu.nome : '') + '</span></div>' +
         '<small>' + esc(diaLongo(m.dia)) + ' · ' + feitas + ' de ' + l.length + ' entrega(s) feita(s)</small><div class="mt-barra"><i data-largura="' + pct + '"></i></div></header>' +
+      (semSinal ? '<p class="alerta">📴 <strong>Sem internet.</strong> Esta é a rota guardada no celular' + (guardadaEm ? ' às ' + esc(hora(guardadaEm)) : '') + ': siga normalmente; o Waze e o Maps funcionam sem sinal. As confirmações ficam guardadas e vão sozinhas quando a internet voltar.</p>' : '') +
+      (naFila ? '<p class="aviso-notas">⏳ ' + naFila + ' confirmação(ões) guardada(s) no celular, esperando a internet para ir ao escritório.</p>' : '') +
       (l.length ? l.map((y, i) => cartaoParada(y, i, prox)).join('') : '<section class="cartao"><p class="vazio">Nenhuma entrega para você ' + (m.dia === hojeSP() ? 'hoje' : 'neste dia') + '. Quando a logística mandar a rota, ela aparece aqui.</p></section>') +
-      '<p class="acoes"><button type="button" class="btn sec" data-acao="mt-atualizar">Atualizar</button></p></div>';
+      '<p class="acoes"><button type="button" class="btn sec" data-acao="mt-atualizar">Atualizar</button></p>' +
+      (FR && guardadaEm && !semSinal ? '<p class="dica">✅ Rota guardada no celular às ' + esc(hora(guardadaEm)) + ': se a internet cair na rua, ela continua aqui (até fechando e abrindo o app).</p>' : '') + '</div>';
   }
   function cartaoParada(y, i, prox) {
     const s = SIT[y.situacao] || [y.situacao, ''], ehProx = prox && prox.id === y.id, mp = X.mapas(y.endereco);
     const tel = String(y.telefone || '').replace(/\D/g, '');
-    if (X.feita(y)) return '<article class="cartao mt-parada feita"><div class="mt-linha"><strong>' + (i + 1) + '. ' + esc(y.cliente) + '</strong>' + CRM.selo(s[0] + ' ' + hora(y.entregue_em), s[1]) + '</div><small>' + esc(y.endereco || '') + '</small></article>';
+    if (X.feita(y)) return '<article class="cartao mt-parada feita"><div class="mt-linha"><strong>' + (i + 1) + '. ' + esc(y.cliente) + '</strong>' + CRM.selo(s[0] + ' ' + hora(y.entregue_em), s[1]) + (y.na_fila ? ' ' + CRM.selo('esperando a internet', 'ambar') : '') + '</div><small>' + esc(y.endereco || '') + '</small></article>';
     return '<article class="cartao mt-parada' + (ehProx ? ' proxima' : '') + '">' + (ehProx ? '<span class="mt-rotulo">Próxima entrega</span>' : '') +
       '<div class="mt-linha"><strong>' + (i + 1) + '. ' + esc(y.cliente) + '</strong>' + (ehProx ? '' : CRM.selo('pendente', 'ambar')) + '</div>' +
       '<p class="mt-end">' + esc(y.endereco || 'sem endereço no cadastro: ligue para o cliente') + '</p>' +
@@ -315,15 +370,28 @@
     if (!m.foto) { CRM.toast('Falta a foto do canhoto: sem ela não dá para confirmar.', true); return; }
     if (m.como === 'problema' && !m.obs.trim()) { CRM.toast('Conte na observação o que aconteceu.', true); return; }
     m.enviando = true; CRM.render();
+    const foto = await reduz(m.foto);
+    const proxNome = (X.proxima(minha.filter(y => y.id !== x.id && !X.feita(y))) || {}).cliente;
+    const limpa = () => { m.aberta = null; m.foto = null; if (m.fotoUrl) URL.revokeObjectURL(m.fotoUrl); m.fotoUrl = ''; m.obs = ''; m.como = 'entregue'; };
     try {
-      const caminho = await st().canhotoSubir(await reduz(m.foto), x.id, m.dia);
+      const caminho = await st().canhotoSubir(foto, x.id, m.dia);
       await st().entregaConfirmar(x.id, m.como, m.obs, caminho);
-      const proxNome = (X.proxima(minha.filter(y => y.id !== x.id)) || {}).cliente;
-      m.aberta = null; m.foto = null; if (m.fotoUrl) URL.revokeObjectURL(m.fotoUrl); m.fotoUrl = ''; m.obs = ''; m.como = 'entregue';
+      limpa();
       CRM.toast('Entrega confirmada.' + (proxNome ? ' Próxima: ' + proxNome + '.' : ' Era a última: rota concluída!'));
       st().whatsapp && st().whatsapp({ acao: 'entrega', entrega: x.id }).catch(e => console.warn('agradecimento', e));
       carregandoM = false; await carregaM(true);
-    } catch (e) { CRM.falhou(e); } finally { m.enviando = false; CRM.render(); }
+    } catch (e) {
+      // sem sinal: a confirmação fica guardada no celular e vai sozinha quando a internet voltar
+      if (FR && FR.semRede(e)) {
+        try {
+          const em = new Date().toISOString();
+          await FR.guarda({ id: x.id, dia: m.dia, como: m.como, obs: m.obs, foto, em, user: meuIdM() });
+          x.situacao = m.como; x.entregue_em = em; x.na_fila = true; FR.marcaFeita(x.id, m.como, em); semSinal = true;
+          await contaFila(); limpa();
+          CRM.toast('Sem internet: a entrega ficou guardada no celular e vai sozinha quando o sinal voltar.' + (proxNome ? ' Próxima: ' + proxNome + '.' : ''));
+        } catch (e2) { CRM.falhou(e2); }
+      } else CRM.falhou(e);
+    } finally { m.enviando = false; CRM.render(); }
   }
 
   // ============================================================ ações e registro das telas

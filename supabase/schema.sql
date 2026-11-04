@@ -9108,3 +9108,192 @@ end $$;
 revoke all on public.crm_cobranca_rodadas from anon;
 grant select on public.crm_cobranca_rodadas to authenticated;
 
+
+-- ============================================================ 04/11/2026: pagamento de contas pelo BB (Caixa → Pagar no BB)
+-- Pagamento de fornecedores pela API Pagamentos em Lote do BB (04/11/2026, pedido do Anderson: "deixar lançado e aí você vai
+-- pagando ... eu dou um ok pelo celular").
+-- * a conta a pagar ganha o que o banco precisa: o código de barras (boleto ou guia) e o CPF/CNPJ do beneficiário, ou o
+--   favorecido do Pix (chave ou dados bancários);
+-- * cada envio ao BB é um lote (crm_fin_pag_lotes) com os pagamentos (crm_fin_pag_itens); só a função crm-bb-pagar grava neles
+--   (chave de serviço), o administrador lê;
+-- * uma conta não entra em dois envios vivos ao mesmo tempo (índice único), para nunca pagar duas vezes;
+-- * na homologação (ambiente 'hm', conta de teste do BB) nada é baixado no Caixa.
+
+alter table public.crm_fin_lancamentos add column if not exists pag_forma text check (pag_forma is null or pag_forma in ('boleto', 'guia', 'pix'));
+alter table public.crm_fin_lancamentos add column if not exists pag_codigo text check (pag_codigo is null or pag_codigo ~ '^[0-9]{44}$');
+alter table public.crm_fin_lancamentos add column if not exists pag_doc text check (pag_doc is null or pag_doc ~ '^([0-9]{11}|[0-9]{14})$');
+alter table public.crm_fin_lancamentos add column if not exists pag_favorecido_id uuid;
+
+create table if not exists public.crm_fin_favorecidos (
+  id             uuid primary key default gen_random_uuid(),
+  nome           text not null check (length(btrim(nome)) > 0),
+  doc            text check (doc is null or doc ~ '^([0-9]{11}|[0-9]{14})$'),
+  pix_tipo       text check (pix_tipo is null or pix_tipo in ('telefone', 'email', 'documento', 'aleatoria', 'conta')),
+  pix_chave      text,
+  compe          integer check (compe is null or compe between 1 and 999),
+  agencia        integer check (agencia is null or agencia between 1 and 99999),
+  conta          text check (conta is null or conta ~ '^[0-9]{1,20}$'),
+  conta_dv       text check (conta_dv is null or conta_dv ~ '^[0-9Xx]$'),
+  tipo_conta     smallint check (tipo_conta is null or tipo_conta in (1, 2, 3)),
+  obs            text,
+  ativo          boolean not null default true,
+  criado_em      timestamptz not null default now(),
+  atualizado_em  timestamptz not null default now(),
+  atualizado_por uuid default auth.uid(),
+  constraint crm_fin_favorecidos_pix_ck check (
+    pix_tipo is null
+    or (pix_tipo = 'conta' and compe is not null and agencia is not null and conta is not null and conta_dv is not null and tipo_conta is not null and doc is not null)
+    or (pix_tipo = 'documento' and doc is not null)
+    or (pix_tipo in ('telefone', 'email', 'aleatoria') and coalesce(btrim(pix_chave), '') <> ''))
+);
+create unique index if not exists crm_fin_favorecidos_nome_uq on public.crm_fin_favorecidos (lower(btrim(nome))) where ativo;
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'crm_fin_lanc_pag_favorecido_fk') then
+    alter table public.crm_fin_lancamentos add constraint crm_fin_lanc_pag_favorecido_fk foreign key (pag_favorecido_id) references public.crm_fin_favorecidos(id) on delete set null;
+  end if;
+end $$;
+drop trigger if exists crm_fin_favorecidos_atualizado_em on public.crm_fin_favorecidos;
+create trigger crm_fin_favorecidos_atualizado_em before update on public.crm_fin_favorecidos for each row execute function public.crm_toca_atualizado_em();
+alter table public.crm_fin_favorecidos enable row level security;
+revoke all on public.crm_fin_favorecidos from anon, public;
+grant select, insert, update, delete on public.crm_fin_favorecidos to authenticated;
+revoke truncate, references, trigger on public.crm_fin_favorecidos from authenticated;
+drop policy if exists so_admin on public.crm_fin_favorecidos;
+create policy so_admin on public.crm_fin_favorecidos for all to authenticated using ((select public.crm_eh_admin())) with check ((select public.crm_eh_admin()));
+
+create sequence if not exists public.crm_fin_pag_requisicao_seq start 100001 maxvalue 999999;
+create table if not exists public.crm_fin_pag_lotes (
+  id                bigint generated always as identity primary key,
+  numero_requisicao integer not null unique,
+  ambiente          text not null check (ambiente in ('hm', 'prod')),
+  forma             text not null check (forma in ('boleto', 'guia', 'pix')),
+  data_pagamento    date not null,
+  quantidade        integer not null default 0,
+  valor             numeric(14,2) not null default 0,
+  estado            integer,                -- estadoRequisicao do BB (1..10)
+  enviado_em        timestamptz not null default now(),
+  enviado_por       uuid,
+  liberado_em       timestamptz,
+  liberado_por      uuid,
+  liberado_via      text check (liberado_via is null or liberado_via in ('crm', 'celular', 'banco')),
+  resposta          jsonb,
+  erro              text,
+  atualizado_em     timestamptz not null default now()
+);
+create table if not exists public.crm_fin_pag_itens (
+  id               bigint generated always as identity primary key,
+  lote_id          bigint not null references public.crm_fin_pag_lotes(id) on delete cascade,
+  lancamento_id    uuid references public.crm_fin_lancamentos(id) on delete set null,
+  ambiente         text not null check (ambiente in ('hm', 'prod')),
+  forma            text not null check (forma in ('boleto', 'guia', 'pix')),
+  descricao        text,
+  favorecido       text,
+  valor            numeric(14,2) not null check (valor > 0),
+  data_pagamento   date not null,
+  identificador_bb text,                    -- o número do pagamento no BB (até 17 dígitos: guardado como texto)
+  aceito           boolean,
+  erros            integer[],
+  estado           text not null default 'enviado',  -- enviado, consistente, pendente, agendado, aguardando, pago, debitado, inconsistente, rejeitado, devolvido, cancelado, bloqueado
+  ativo            boolean not null default true,     -- falso quando rejeitado, devolvido ou cancelado: a conta pode ir de novo
+  autenticacao     text,
+  pago_em          date,
+  baixado          boolean not null default false,
+  ultimo           jsonb,
+  atualizado_em    timestamptz not null default now()
+);
+create unique index if not exists crm_fin_pag_itens_vivo_uq on public.crm_fin_pag_itens (lancamento_id) where ativo and ambiente = 'prod';
+create index if not exists crm_fin_pag_itens_lote_idx on public.crm_fin_pag_itens (lote_id);
+drop trigger if exists crm_fin_pag_lotes_atualizado_em on public.crm_fin_pag_lotes;
+create trigger crm_fin_pag_lotes_atualizado_em before update on public.crm_fin_pag_lotes for each row execute function public.crm_toca_atualizado_em();
+drop trigger if exists crm_fin_pag_itens_atualizado_em on public.crm_fin_pag_itens;
+create trigger crm_fin_pag_itens_atualizado_em before update on public.crm_fin_pag_itens for each row execute function public.crm_toca_atualizado_em();
+alter table public.crm_fin_pag_lotes enable row level security;
+alter table public.crm_fin_pag_itens enable row level security;
+revoke all on public.crm_fin_pag_lotes, public.crm_fin_pag_itens from anon, public, authenticated;
+grant select on public.crm_fin_pag_lotes, public.crm_fin_pag_itens to authenticated;
+drop policy if exists admin_le on public.crm_fin_pag_lotes;
+create policy admin_le on public.crm_fin_pag_lotes for select to authenticated using ((select public.crm_eh_admin()));
+drop policy if exists admin_le on public.crm_fin_pag_itens;
+create policy admin_le on public.crm_fin_pag_itens for select to authenticated using ((select public.crm_eh_admin()));
+revoke all on sequence public.crm_fin_pag_requisicao_seq from public, anon, authenticated;
+
+-- o próximo número de requisição (só a função, com a chave de serviço)
+create or replace function public.crm_fin_pag_numero() returns integer language sql security definer set search_path = public as $$
+  select nextval('public.crm_fin_pag_requisicao_seq')::integer;
+$$;
+revoke all on function public.crm_fin_pag_numero() from public, anon, authenticated;
+do $$ begin if exists (select 1 from pg_roles where rolname = 'service_role') then
+  grant execute on function public.crm_fin_pag_numero() to service_role;
+  grant select, insert, update on public.crm_fin_pag_lotes, public.crm_fin_pag_itens to service_role;
+  grant usage on sequence public.crm_fin_pag_requisicao_seq to service_role;
+end if; end $$;
+
+-- configuração (ligado = false até o convênio PAG; ambiente 'hm' usa a conta de teste do BB)
+update public.crm_config set dados = jsonb_set(coalesce(dados, '{}'::jsonb), '{pagamentos}',
+  coalesce(dados -> 'pagamentos', '{}'::jsonb) || jsonb_build_object('ambiente', coalesce(dados -> 'pagamentos' ->> 'ambiente', 'hm')))
+ where id = 1;
+
+-- agendador: a cada 10 minutos das 7h às 21h50 (São Paulo) a função lê a situação dos pagamentos vivos e baixa os pagos
+create or replace function public.crm_bb_pag_tick() returns void language plpgsql security definer set search_path = public as $$
+declare c record;
+begin
+  if not exists (select 1 from public.crm_fin_pag_itens where ativo and not baixado and estado not in ('pago', 'debitado')
+                   and data_pagamento >= (now() at time zone 'America/Sao_Paulo')::date - 15) then return; end if;
+  select * into c from crm_interno.bb_cfg where id = 1;
+  if c.url is null then return; end if;
+  perform net.http_post(url := replace(c.url, '/crm-bb', '/crm-bb-pagar'), body := jsonb_build_object('acao', 'ciclo', 'origem', 'agendador'),
+    headers := jsonb_build_object('Content-Type', 'application/json', 'Authorization', 'Bearer ' || c.senha), timeout_milliseconds := 120000);
+end;
+$$;
+revoke all on function public.crm_bb_pag_tick() from public, anon, authenticated;
+do $$ begin
+  if exists (select 1 from pg_extension where extname = 'pg_cron') then
+    perform cron.unschedule(jobid) from cron.job where jobname = 'crm-bb-pagar-ciclo';
+    perform cron.schedule('crm-bb-pagar-ciclo', '*/10 10-23,0 * * *', 'select public.crm_bb_pag_tick()');
+  end if;
+end $$;
+
+-- ============================================================ 04/11/2026: Vendas → Entregas (rota visível para as vendedoras)
+-- Entregas visíveis para as vendedoras (04/11/2026, pedido do Anderson: "deixa visível para os vendedores, porque às vezes os
+-- clientes deles perguntam se está indo aquele dia"). Só leitura e só das notas da vendedora (ou dos clientes da carteira dela);
+-- gestão e logística veem todas. Sem canhoto, sem telefone do motorista, sem valores de outras vendedoras.
+--   tipo 'rota'     = a nota está na rota do dia (motorista, parada nº X de Y, se a rota já saiu, entregue/problema)
+--   tipo 'sem_rota' = nota emitida nos últimos 10 dias que ainda não entrou em rota nenhuma
+create or replace function public.crm_entregas_vendedor(p_de date, p_ate date)
+returns table(tipo text, dia date, numero integer, cliente text, bairro text, cidade text, valor numeric, vendedor text, motorista text,
+              parada integer, paradas integer, saiu boolean, situacao text, entregue_em timestamptz, obs text, emitida_em timestamptz)
+language plpgsql stable security definer set search_path = public as $$
+declare todos boolean := public.crm_eh_gestor() or public.crm_eh_logistica(); eu uuid := auth.uid();
+begin
+  if eu is null or not public.crm_eh_ativo() then raise exception 'sem acesso'; end if;
+  if p_ate < p_de or p_ate - p_de > 31 then raise exception 'período de até 31 dias'; end if;
+  return query
+    with r as (
+      select x.*, n.numero::integer as nnum, n.valor_total, n.vendedor_id, n.vendedor_nome, n.cliente_nome, n.emitida_em as nemit, n.cidade as ncid,
+             row_number() over (partition by x.dia, x.motorista_id order by x.ordem, n.numero)::integer as pos,
+             count(*) over (partition by x.dia, x.motorista_id)::integer as tot
+        from public.crm_entregas x join public.crm_notas n on n.id = x.nota_id
+       where x.dia between p_de and p_ate)
+    select 'rota'::text, r.dia, r.nnum, coalesce(e.nome, r.cliente_nome), e.bairro, coalesce(e.cidade, r.ncid), r.valor_total,
+           case when upper(coalesce(r.vendedor_nome, '')) = 'DIRETO' then 'Venda direta' else coalesce(u.nome, r.vendedor_nome) end,
+           m.nome, case when r.motorista_id is null then null else r.pos end, case when r.motorista_id is null then null else r.tot end,
+           r.liberada, r.situacao, r.entregue_em, case when r.situacao = 'problema' then r.obs end, r.nemit
+      from r left join public.crm_empresas e on e.id = r.empresa_id
+      left join public.crm_usuarios u on u.user_id = r.vendedor_id
+      left join public.crm_usuarios m on m.user_id = r.motorista_id
+     where todos or r.vendedor_id = eu or e.responsavel_id = eu
+    union all
+    select 'sem_rota'::text, null::date, n.numero::integer, coalesce(e.nome, n.cliente_nome), e.bairro, coalesce(e.cidade, n.cidade), n.valor_total,
+           case when upper(coalesce(n.vendedor_nome, '')) = 'DIRETO' then 'Venda direta' else coalesce(u.nome, n.vendedor_nome) end,
+           null::text, null::integer, null::integer, false, null::text, null::timestamptz, null::text, n.emitida_em
+      from public.crm_notas n left join public.crm_empresas e on e.id = n.empresa_id
+      left join public.crm_usuarios u on u.user_id = n.vendedor_id
+     where not n.cancelada and n.emitida_em >= ((now() at time zone 'America/Sao_Paulo')::date - 10)::timestamp at time zone 'America/Sao_Paulo'
+       and n.emitida_em >= (coalesce(public.crm_logistica_desde(), '2000-01-01'::date)::timestamp at time zone 'America/Sao_Paulo')
+       and not exists (select 1 from public.crm_entregas x where x.nota_id = n.id)
+       and not exists (select 1 from public.crm_nota_itens i where i.nota_id = n.id and i.cfop in ('5922', '6922'))
+       and (todos or n.vendedor_id = eu or e.responsavel_id = eu)
+     order by 2 nulls last, 9 nulls last, 10, 3;
+end $$;
+revoke all on function public.crm_entregas_vendedor(date, date) from public, anon;
+grant execute on function public.crm_entregas_vendedor(date, date) to authenticated;

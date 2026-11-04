@@ -890,14 +890,16 @@
         '<button type="button" class="btn sec" data-acao="cx-conferir">Conferir com o banco</button></div></div>' +
         '<nav class="cx-abas">' + aba('dia', 'Dia a dia') + aba('contas', 'Contas a pagar') + aba('recorrentes', 'Recorrentes') + aba('pausadas', 'Contas pausadas' + (pausadas ? ' (' + pausadas + ')' : '')) +
           (CRM.cobranca ? aba('cobranca', 'Cobrança' + (CRM.cobranca.contagem() ? ' (' + CRM.cobranca.contagem() + ')' : '')) : '') +
-          aba('receber', 'A receber') +
+          aba('receber', 'A receber') + (CRM.pagarbb ? aba('pagarbb', 'Pagar no BB') : '') +
           (CRM.credito ? aba('credito', 'Crédito' + (CRM.credito.contagem() ? ' (' + CRM.credito.contagem() + ')' : '')) : '') + '</nav>' +
         (vista === 'dia' ? caixaFrases() + grade(s) + blocosVencidos() : vista === 'recorrentes' ? listaRecorrentes() : vista === 'cobranca' && CRM.cobranca ? CRM.cobranca.aba()
-          : vista === 'credito' && CRM.credito ? CRM.credito.aba() : vista === 'receber' ? listaReceber() : listaContas());
+          : vista === 'credito' && CRM.credito ? CRM.credito.aba() : vista === 'receber' ? listaReceber()
+          : vista === 'pagarbb' && CRM.pagarbb ? CRM.pagarbb.aba({ lancamentos: F.lancamentos, saldo: s.saldo, hoje: hoje(), grava }) : listaContas());
     },
     depois(el) {
       if (vista === 'cobranca' && CRM.cobranca) CRM.cobranca.depoisAba(el);
       if (vista === 'credito' && CRM.credito) CRM.credito.depoisAba(el);
+      if (vista === 'pagarbb' && CRM.pagarbb) CRM.pagarbb.depoisAba(el);
       const fr = el.querySelector('#cxFrases');
       if (fr) {
         fr.addEventListener('input', () => { rascunho = fr.value; });

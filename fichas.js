@@ -1218,6 +1218,16 @@
       empresa_id: ped.empresa_id, vendedor_id: ped.vendedor_id, criado_em: ped.criado_em, observacoes: null, com_fotos: !!ped.com_fotos });
   };
   fichas.pedeArquivoPdf = nome => pedeArquivo(String(nome).replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim());
+  // qualquer documento do CRM em PDF pelo mesmo caminho (04/11/2026: o pedido ao fornecedor): html = um elemento de 794 px
+  fichas.baixarPdfHtml = async (html, nome) => {
+    const n = String(nome).replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim();
+    const alvo = await pedeArquivo(n);
+    if (alvo === false) return null;
+    CRM.toast('Gerando o PDF…');
+    const arq = await salva(await geraPdf({ html }), n, alvo);
+    CRM.toast('PDF salvo: ' + arq + (alvo ? '' : ' (pasta Downloads)') + '.');
+    return arq;
+  };
 
   // Enviar a proposta ao cliente: abre o WhatsApp (ou o e-mail para todos os endereços) com o
   // modelo de envio de orçamento e o resumo (número, valor, validade). O link do WhatsApp não leva
