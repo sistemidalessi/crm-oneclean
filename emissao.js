@@ -667,8 +667,9 @@
   // Vias da DANFE (02/11/2026, Anderson): o costume da OneClean é imprimir 3 vias de cada nota — 1ª para a contabilidade,
   // 2ª para o cliente assinar e voltar ao escritório (no lugar do canhoto, que rasgava a nota), 3ª fica com o cliente,
   // grampeada com o boleto. O PDF sai já com as vias, uma etiqueta pequena no alto de cada folha, e o boleto no fim.
-  const VIAS_PADRAO = ['Contabilidade', 'Assinatura do cliente: volta ao escritório', 'Cliente'];
-  const viasCfg = () => { const v = fiscalCfg().danfe || {}; const n = Math.max(1, Math.min(5, Number(v.vias) || 3));
+  // 04/11/2026 (Anderson): a contabilidade recebe o XML, não imprime mais a via dela; ficam 2 vias
+  const VIAS_PADRAO = ['Assinatura do cliente: volta ao escritório', 'Cliente'];
+  const viasCfg = () => { const v = fiscalCfg().danfe || {}; const n = Math.max(1, Math.min(5, Number(v.vias) || 2));
     const nomes = Array.isArray(v.nomes) && v.nomes.length ? v.nomes : VIAS_PADRAO; return Array.from({ length: n }, (_, i) => nomes[i] || ''); };
   function desenhaVias(pdf, Dn, d, op, primeira) {
     const vias = viasCfg();
@@ -860,7 +861,7 @@
       valores: { razao: em.razao || '', fantasia: em.fantasia || '', cnpj: em.cnpj || '', ie: em.ie || '', crt: String(em.crt || 3), logradouro: e.logradouro || '', numero: e.numero || '',
         complemento: e.complemento || '', bairro: e.bairro || '', municipio: e.municipio || '', cMun: e.cMun || '', uf: e.uf || 'SP', cep: e.cep || '', fone: e.fone || '',
         natOp: fc.natOp || 'VENDA NO ESTADO', indFinal: String(fc.indFinal == null ? 1 : fc.indFinal), indPres: String(fc.indPres == null ? 9 : fc.indPres), serie: fc.serie == null ? 1 : fc.serie,
-        vias: (fc.danfe && fc.danfe.vias) || 3, vias_nomes: ((fc.danfe && fc.danfe.nomes) || VIAS_PADRAO).join('; '),
+        vias: (fc.danfe && fc.danfe.vias) || 2, vias_nomes: ((fc.danfe && fc.danfe.nomes) || VIAS_PADRAO).join('; '),
         rt_cnpj: rt.cnpj || '', rt_contato: rt.contato || '', rt_email: rt.email || '', rt_fone: rt.fone || '' },
       salvarTexto: 'Salvar',
       aoSalvar: async v => {
@@ -868,7 +869,7 @@
         const novo = { emitente: { cnpj: M.doc(v.cnpj), ie: d(v.ie), razao: String(v.razao).trim().toUpperCase(), fantasia: String(v.fantasia || '').trim().toUpperCase() || null, crt: Number(v.crt) || 3,
           endereco: { logradouro: String(v.logradouro).trim().toUpperCase(), numero: String(v.numero).trim(), complemento: String(v.complemento || '').trim().toUpperCase() || null, bairro: String(v.bairro).trim().toUpperCase(),
             cMun: d(v.cMun), municipio: String(v.municipio).trim().toUpperCase(), uf: String(v.uf).trim().toUpperCase(), cep: d(v.cep), fone: d(v.fone) || null } },
-          danfe: { vias: Math.max(1, Math.min(5, Number(v.vias) || 3)), nomes: String(v.vias_nomes || '').split(';').map(x => x.trim()).filter(Boolean) },
+          danfe: { vias: Math.max(1, Math.min(5, Number(v.vias) || 2)), nomes: String(v.vias_nomes || '').split(';').map(x => x.trim()).filter(Boolean) },
           natOp: String(v.natOp || '').trim().toUpperCase() || 'VENDA NO ESTADO', indFinal: Number(v.indFinal), indPres: Number(v.indPres), serie: v.serie == null ? 1 : Number(v.serie),
           respTec: M.doc(v.rt_cnpj) ? { cnpj: M.doc(v.rt_cnpj), contato: String(v.rt_contato || '').trim(), email: String(v.rt_email || '').trim(), fone: d(v.rt_fone) } : null };
         const falta = M.faltasEmitente(novo);

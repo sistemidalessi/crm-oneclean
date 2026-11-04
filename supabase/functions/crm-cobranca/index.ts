@@ -170,7 +170,15 @@ Deno.serve(async (req) => {
     const { data: pagosB } = await db.from('crm_boletos').select('empresa_id, duplicata').not('cli_pagou_em', 'is', null);
     const pagos = new Set(((pagosB || []) as Linha[]).map(b => b.empresa_id + '|' + b.duplicata));
     const semAviso = new Set(((cfg.sem_aviso as string[]) || []).map(String));
-    const lista = quemRecebe({ titulos: tit || [], avisos, hoje, dias: diasAtraso, pagos, semAviso });
+    // título que já tem entrada paga no Caixa e ficou com sobra (pago em parte): não cobra, vai para conferência (04/11/2026,
+    // LPTA: o FKN dividiu a nota em 626,31 + 600 e o BB em 613,16 + 613,15; a sobra de 13,15 virou um aviso de cartório)
+    const dupsVenc = ((tit || []) as Linha[]).map(t => String(t.duplicata));
+    const { data: pagosParc } = dupsVenc.length ? await db.from('crm_fin_lancamentos').select('titulo_duplicata').eq('tipo', 'entrada').eq('situacao', 'pago').in('titulo_duplicata', dupsVenc) : { data: [] };
+    const parciais = new Set(((pagosParc || []) as Linha[]).map(x => String(x.titulo_duplicata)));
+    const titCob = ((tit || []) as Linha[]).filter(t => !parciais.has(String(t.duplicata)));
+    const foraParcial = ((tit || []) as Linha[]).filter(t => parciais.has(String(t.duplicata)))
+      .map(t => ({ empresa_id: t.empresa_id, duplicata: t.duplicata, nota_numero: t.nota_numero, valor: t.valor, motivo: 'pago em parte: conferir a sobra antes de cobrar' }));
+    const lista = quemRecebe({ titulos: titCob, avisos, hoje, dias: diasAtraso, pagos, semAviso });
 
     // montagem de cada aviso: cliente, contato, vendedor(a), canais e texto
     const empIds = lista.map(x => x.empresa_id);
@@ -200,7 +208,7 @@ Deno.serve(async (req) => {
       const rb = await fetch(url + '/functions/v1/crm-bb', { method: 'POST', headers: { Authorization: 'Bearer ' + servico, 'Content-Type': 'application/json' }, body: JSON.stringify({ acao: 'vencidos', dias: 60 }) });
       const jb = await rb.json().catch(() => ({}));
       if (!rb.ok) throw new Error('leitura dos vencidos no BB: ' + String((jb as Linha).erro || rb.status));
-      const titulos = (tit || []) as Linha[];
+      const titulos = titCob;
       const ids = [...new Set(titulos.map(t => t.empresa_id).filter(Boolean))] as string[];
       const docs = new Map<string, string>();
       for (let i = 0; i < ids.length; i += 200) {
@@ -311,7 +319,7 @@ Deno.serve(async (req) => {
         feitos.push({ empresa: emp.nome, docs, total: env.total, enviado: true, canais });
       }
       const foraN = [];
-      for (const f of fora as Linha[]) {
+      for (const f of (fora as Linha[]).concat(foraParcial as Linha[])) {
         let nome = nomes.get(String(f.empresa_id));
         if (!nome) { const { data } = await db.from('crm_empresas').select('nome').eq('id', f.empresa_id).maybeSingle(); nome = data ? String(data.nome) : ''; }
         foraN.push({ ...f, nome });
