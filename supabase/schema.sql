@@ -9425,3 +9425,34 @@ begin
 end $$;
 revoke all on function public.crm_compra_corrigir(uuid, jsonb) from public, anon;
 grant execute on function public.crm_compra_corrigir(uuid, jsonb) to authenticated;
+
+-- ============================================================ 04/11/2026: Diretor de Vendas, parado pelo último contato
+-- Diretor de Vendas: "parado" conta do último movimento, não só da mudança de etapa (04/11/2026, áudio da vendedora: "os três
+-- já tiveram atualização ... aparece como se eu não tivesse contato com eles há um grande tempo"). Mesma regra da tela do CRM
+-- (regras.js, ultimoMovimento): o maior entre a entrada na etapa e o último contato concluído com o cliente (atividade que não
+-- é do sistema). Proposta "sem resposta" só entra se não houve contato com o cliente depois de enviada.
+create or replace function public.crm_gv_funil()
+ returns jsonb language sql stable set search_path to 'public' as $function$
+  with c as (select a.empresa_id, max(coalesce(a.concluida_em, a.data_hora)) ult from public.crm_atividades a
+              where a.concluida and a.tipo <> 'sistema' group by a.empresa_id),
+  n as (select g.*, e.nome cliente, et.nome etapa, u.nome dono,
+               greatest(coalesce(g.etapa_desde, g.criado_em), coalesce(c.ult, '-infinity'::timestamptz)) mov
+          from public.crm_negocios g left join public.crm_empresas e on e.id = g.empresa_id left join public.crm_etapas et on et.id = g.etapa_id
+          left join public.crm_usuarios u on u.user_id = g.responsavel_id left join c on c.empresa_id = g.empresa_id
+         where g.status = 'aberto'),
+  np as (select n.*, ((now() at time zone 'America/Sao_Paulo')::date - (mov at time zone 'America/Sao_Paulo')::date) parado from n
+          where mov < now() - interval '15 days'),
+  p as (select pr.numero, pr.valor_total, pr.enviada_em, e.nome cliente, u.nome dono from public.crm_propostas pr join public.crm_negocios g on g.id = pr.negocio_id
+          left join public.crm_empresas e on e.id = g.empresa_id left join public.crm_usuarios u on u.user_id = g.responsavel_id
+          left join c on c.empresa_id = g.empresa_id
+         where pr.status = 'enviada' and g.status = 'aberto' and pr.enviada_em < (now() at time zone 'America/Sao_Paulo')::date - 7
+           and (c.ult is null or (c.ult at time zone 'America/Sao_Paulo')::date <= pr.enviada_em))
+  select jsonb_build_object(
+    'regra', 'parado = sem mudar de etapa e sem contato concluído com o cliente há mais de 15 dias; proposta sem resposta = enviada há mais de 7 dias e sem contato com o cliente depois do envio',
+    'negocios_parados', (select count(*) from np), 'negocios_parados_valor', (select round(coalesce(sum(valor), 0), 2) from np),
+    'maiores_parados', coalesce((select jsonb_agg(jsonb_build_object('negocio', y.titulo, 'cliente', y.cliente, 'valor', y.valor, 'etapa', y.etapa, 'parado_dias', y.parado, 'responsavel', y.dono))
+       from (select * from np order by valor desc limit 10) y), '[]'::jsonb),
+    'propostas_sem_resposta', (select count(*) from p), 'propostas_sem_resposta_valor', (select round(coalesce(sum(valor_total), 0), 2) from p),
+    'maiores_propostas', coalesce((select jsonb_agg(jsonb_build_object('proposta', y.numero, 'cliente', y.cliente, 'valor', y.valor_total, 'enviada_em', y.enviada_em, 'responsavel', y.dono))
+       from (select * from p order by valor_total desc limit 10) y), '[]'::jsonb));
+$function$;

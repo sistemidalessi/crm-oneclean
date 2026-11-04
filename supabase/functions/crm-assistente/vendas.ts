@@ -99,7 +99,7 @@ export function ferramentasGerente(h: Ajuda) {
     },
     funil_parado: {
       papeis: VENDAS,
-      def: { name: 'funil_parado', description: 'Negócios abertos parados na mesma etapa há mais de 15 dias e propostas enviadas há mais de 7 dias sem resposta: quantidades, valores e os 10 maiores de cada (com cliente, etapa, dias parado e responsável).', strict: true, input_schema: obj({}, []) },
+      def: { name: 'funil_parado', description: 'Negócios abertos parados (sem mudar de etapa E sem contato concluído com o cliente há mais de 15 dias; ligação ou registro conta como movimento) e propostas enviadas há mais de 7 dias sem contato com o cliente depois do envio: quantidades, valores e os 10 maiores de cada (com cliente, etapa, dias parado e responsável).', strict: true, input_schema: obj({}, []) },
       roda: (c: Ctx) => rpc(c, 'crm_gv_funil')
     }
   };
