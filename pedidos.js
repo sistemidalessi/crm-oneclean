@@ -690,7 +690,10 @@
     // trava, e o texto não leva travessão, emoji nem quebra de linha (o WhatsApp do computador cortava ali).
     const txt = 'Olá, ' + String(adm.nome || '').split(' ')[0] + '! O pedido ' + p.numero + ' de ' + nomeCliente(p) + ' (' + R.moeda(t.geral) + (d.pagamento ? ', ' + d.pagamento : '') +
       ') está travado no financeiro: ' + travas + '. Abrir o pedido no CRM: ' + linkPedido(p.numero) + ' . Pode analisar? Assim a gente já separa. (' + (CRM.nomeUsuario(CRM.meuId()) || 'equipe') + ')';
-    return ' <a class="btn" href="https://wa.me/' + (tel.length <= 11 ? '55' : '') + tel + '?text=' + encodeURIComponent(txt) + '" target="_blank" rel="noopener noreferrer">📲 Pedir a análise ao ' + esc(String(adm.nome || 'administrador').split(' ')[0]) + '</a>';
+    // 04/11/2026: cliente SEM ANÁLISE: a própria vendedora consulta (a política libera até o teto, credito.js 'cred-auto')
+    const consulta = bAbertos.indexOf('SEM ANÁLISE') !== -1 && CRM.store().creditoAuto && ['vendedor', 'gestor'].indexOf(CRM.papel()) !== -1
+      ? ' <button type="button" class="btn" data-acao="cred-auto" data-id="' + esc(p.empresa_id) + '">💳 Consultar o crédito</button>' : '';
+    return consulta + ' <a class="btn' + (consulta ? ' sec' : '') + '" href="https://wa.me/' + (tel.length <= 11 ? '55' : '') + tel + '?text=' + encodeURIComponent(txt) + '" target="_blank" rel="noopener noreferrer">📲 Pedir a análise ao ' + esc(String(adm.nome || 'administrador').split(' ')[0]) + '</a>';
   }
 
   // ------------------------------------------------ editor (orçamento / pedido)

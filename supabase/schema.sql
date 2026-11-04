@@ -9671,3 +9671,161 @@ begin
    order by 2;
 end;
 $$;
+
+-- ============================================================ Crédito pela própria vendedora (04/11/2026, pedido do Anderson)
+-- "Às vezes o cliente só fecha se puder faturar": na ficha do cliente sem análise, a vendedora (ou a gestora) aperta
+-- "Consultar o crédito"; a crm-credito-rekta (ação 'auto') consulta a Rekta (ou reaproveita a consulta dos últimos 30 dias),
+-- a POLÍTICA (credito.js propor, a mesma do administrador) decide e a ficha nasce na hora, sem passar pelo Anderson, até o
+-- teto automático (crm_config.dados.credito.auto_teto, padrão R$ 5.000; decisão do Anderson em 04/11). Acima do teto, só à
+-- vista, "em análise" ou se a vendedora quiser outro limite/prazo: um PEDIDO DE CRÉDITO (crm_credito_pedidos) vai para o
+-- Anderson (tarefa para ele e lista em Caixa → Crédito), que aprova ou recusa; a vendedora recebe a resposta como tarefa.
+-- Vendedora: só clientes da carteira dela. Quem vê a ficha continua vendo só o disponível e o prazo (sem score).
+-- Aplicado em 04/11/2026 (migração crm_credito_pela_vendedora).
+alter table public.crm_credito drop constraint if exists crm_credito_origem_check;
+alter table public.crm_credito add constraint crm_credito_origem_check check (origem in ('consulta', 'historico', 'manual', 'auto'));
+create table if not exists public.crm_credito_pedidos (
+  id            bigint generated always as identity primary key,
+  empresa_id    uuid not null references public.crm_empresas(id) on delete cascade,
+  pedido_por    uuid not null default auth.uid(),
+  limite        numeric(14,2),
+  prazo_max     integer check (prazo_max is null or prazo_max between 1 and 365),
+  motivo        text,
+  origem        text not null default 'vendedora' check (origem in ('vendedora', 'consulta')),
+  situacao      text not null default 'aberto' check (situacao in ('aberto', 'aprovado', 'recusado')),
+  resposta      text,
+  respondido_por uuid,
+  respondido_em timestamptz,
+  criado_em     timestamptz not null default now()
+);
+create index if not exists crm_credito_pedidos_aberto_idx on public.crm_credito_pedidos (situacao, criado_em desc);
+create index if not exists crm_credito_pedidos_empresa_idx on public.crm_credito_pedidos (empresa_id, criado_em desc);
+alter table public.crm_credito_pedidos enable row level security;
+revoke all on public.crm_credito_pedidos from anon, authenticated;
+grant select on public.crm_credito_pedidos to authenticated;
+drop policy if exists ler on public.crm_credito_pedidos;
+create policy ler on public.crm_credito_pedidos for select to authenticated using ((select public.crm_eh_gestor())
+  or empresa_id in (select public.crm_empresas_minhas()) or pedido_por = (select auth.uid()));
+
+-- o histórico do cliente para a política: maior mês de compra (12 meses) e o vencido com a empresa (o mesmo do painel)
+create or replace function public.crm_credito_contexto(p_empresa uuid) returns jsonb language sql stable security definer set search_path = public as $$
+  select jsonb_build_object(
+    'maior_mes', coalesce((select round(max(v), 2) from (select sum(n.valor_total) v from public.crm_notas n
+        where n.empresa_id = p_empresa and not n.cancelada and n.emitida_em >= now() - interval '12 months'
+          and exists (select 1 from public.crm_nota_itens i where i.nota_id = n.id and (i.cfop ~ '^[56]10[1-9]$' or i.cfop ~ '^[56]40[1-5]$' or i.cfop in ('5922', '6922')))
+        group by date_trunc('month', n.emitida_em at time zone 'America/Sao_Paulo')) x), 0),
+    'vencido', coalesce((select sum(valor) from public.crm_titulos where empresa_id = p_empresa and not abono
+        and coalesce(previsao, vencimento) < (now() at time zone 'America/Sao_Paulo')::date), 0));
+$$;
+revoke all on function public.crm_credito_contexto(uuid) from public, anon, authenticated;
+
+-- a ficha que a política deu (só a função da consulta, com a chave de serviço)
+create or replace function public.crm_credito_auto_gravar(p_empresa uuid, p_situacao text, p_limite numeric, p_prazo integer, p_score integer,
+  p_resumo jsonb, p_pdf text, p_obs text) returns void language plpgsql security definer set search_path = public as $$
+declare hoje date := (now() at time zone 'America/Sao_Paulo')::date;
+begin
+  if p_situacao not in ('prazo', 'vista', 'analise') then raise exception 'situação inválida'; end if;
+  insert into public.crm_credito as c (empresa_id, situacao, limite, prazo_max, analisado_em, revisar_em, score, origem, resumo, pdf, obs, aprovado_por, aprovado_em, atualizado_em)
+  values (p_empresa, p_situacao, case when p_situacao = 'prazo' then greatest(0, coalesce(p_limite, 0)) else 0 end, case when p_situacao = 'prazo' then p_prazo end,
+    hoje, (hoje + interval '6 months')::date, p_score, 'auto', p_resumo, p_pdf, p_obs, null, now(), now())
+  on conflict (empresa_id) do update set situacao = excluded.situacao, limite = excluded.limite, prazo_max = excluded.prazo_max,
+    analisado_em = excluded.analisado_em, revisar_em = excluded.revisar_em, score = excluded.score, origem = 'auto',
+    resumo = excluded.resumo, pdf = coalesce(excluded.pdf, c.pdf), obs = excluded.obs, aprovado_por = null, aprovado_em = now(), atualizado_em = now();
+  perform public.crm_pedidos_atualizar();
+end;
+$$;
+revoke all on function public.crm_credito_auto_gravar(uuid, text, numeric, integer, integer, jsonb, text, text) from public, anon, authenticated;
+
+-- tarefa para o administrador (o Anderson) com o pedido de crédito
+create or replace function public.crm_credito_avisa_admin(p_pedido bigint) returns void language plpgsql security definer set search_path = public as $$
+declare p public.crm_credito_pedidos; e record; quem text; adm uuid;
+begin
+  select * into p from public.crm_credito_pedidos where id = p_pedido;
+  select nome into e from public.crm_empresas where id = p.empresa_id;
+  select nome into quem from public.crm_usuarios where user_id = p.pedido_por;
+  select user_id into adm from public.crm_usuarios where papel = 'admin' and ativo order by criado_em limit 1;
+  if adm is null then return; end if;
+  insert into public.crm_atividades (empresa_id, tipo, descricao, data_hora, concluida, responsavel_id, automatica, criado_por)
+  values (p.empresa_id, 'tarefa', left('Crédito: ' || coalesce(quem, 'a equipe') || ' pede ' ||
+      case when p.limite > 0 then 'R$ ' || replace(to_char(p.limite, 'FM999G999G990D00'), ',', '.') else 'a análise' end ||
+      case when p.prazo_max is not null then ' em ' || p.prazo_max || ' dias' else '' end || ' para ' || coalesce(e.nome, 'o cliente') ||
+      coalesce(' (' || nullif(btrim(p.motivo), '') || ')', '') || '. Responder em Caixa → Crédito.', 500), now(), false, adm, true, p.pedido_por);
+end;
+$$;
+revoke all on function public.crm_credito_avisa_admin(bigint) from public, anon, authenticated;
+
+-- a vendedora (carteira dela) ou a gestora pede outro limite/prazo
+create or replace function public.crm_credito_pedir(p_empresa uuid, p_limite numeric, p_prazo integer, p_motivo text) returns bigint
+language plpgsql security definer set search_path = public as $$
+declare idn bigint;
+begin
+  if not (public.crm_eh_gestor() or exists (select 1 from public.crm_empresas e where e.id = p_empresa and e.responsavel_id = auth.uid() and public.crm_eh_membro())) then
+    raise exception 'só para clientes da sua carteira';
+  end if;
+  if coalesce(p_limite, 0) <= 0 and p_prazo is null then raise exception 'diga o limite ou o prazo que o cliente precisa'; end if;
+  if nullif(btrim(coalesce(p_motivo, '')), '') is null then raise exception 'conte o motivo (o que o cliente vai comprar, prazo que pediu…)'; end if;
+  if exists (select 1 from public.crm_credito_pedidos where empresa_id = p_empresa and situacao = 'aberto') then
+    raise exception 'já há um pedido de crédito deste cliente esperando o Anderson';
+  end if;
+  insert into public.crm_credito_pedidos (empresa_id, pedido_por, limite, prazo_max, motivo) values (p_empresa, auth.uid(), nullif(p_limite, 0), p_prazo, btrim(p_motivo))
+  returning id into idn;
+  perform public.crm_credito_avisa_admin(idn);
+  return idn;
+end;
+$$;
+revoke all on function public.crm_credito_pedir(uuid, numeric, integer, text) from public, anon;
+grant execute on function public.crm_credito_pedir(uuid, numeric, integer, text) to authenticated;
+
+-- o administrador responde: aprovar grava a ficha a prazo com o limite e o prazo (os pedidos e o disponível se acertam); a
+-- vendedora recebe a resposta como tarefa
+create or replace function public.crm_credito_responder(p_id bigint, p_aprova boolean, p_limite numeric, p_prazo integer, p_resposta text) returns void
+language plpgsql security definer set search_path = public as $$
+declare p public.crm_credito_pedidos; hoje date := (now() at time zone 'America/Sao_Paulo')::date; e text;
+begin
+  if not public.crm_eh_admin() then raise exception 'só o administrador responde'; end if;
+  select * into p from public.crm_credito_pedidos where id = p_id for update;
+  if p.id is null or p.situacao <> 'aberto' then raise exception 'pedido de crédito não encontrado ou já respondido'; end if;
+  if p_aprova and coalesce(p_limite, 0) <= 0 then raise exception 'para aprovar, diga o limite'; end if;
+  update public.crm_credito_pedidos set situacao = case when p_aprova then 'aprovado' else 'recusado' end, resposta = nullif(btrim(coalesce(p_resposta, '')), ''),
+    respondido_por = auth.uid(), respondido_em = now(), limite = case when p_aprova then p_limite else limite end, prazo_max = case when p_aprova then coalesce(p_prazo, prazo_max) else prazo_max end
+   where id = p_id;
+  if p_aprova then
+    insert into public.crm_credito as c (empresa_id, situacao, limite, prazo_max, analisado_em, revisar_em, origem, obs, aprovado_por, aprovado_em, atualizado_em)
+    values (p.empresa_id, 'prazo', p_limite, coalesce(p_prazo, p.prazo_max, 28), hoje, (hoje + interval '6 months')::date, 'manual',
+      'Pedido da equipe aprovado' || coalesce(': ' || nullif(btrim(coalesce(p_resposta, '')), ''), ''), auth.uid(), now(), now())
+    on conflict (empresa_id) do update set situacao = 'prazo', limite = excluded.limite, prazo_max = excluded.prazo_max, analisado_em = excluded.analisado_em,
+      revisar_em = excluded.revisar_em, obs = excluded.obs, aprovado_por = excluded.aprovado_por, aprovado_em = excluded.aprovado_em, atualizado_em = now();
+    perform public.crm_pedidos_atualizar();
+  end if;
+  select nome into e from public.crm_empresas where id = p.empresa_id;
+  update public.crm_atividades set concluida = true, concluida_em = now()
+   where empresa_id = p.empresa_id and tipo = 'tarefa' and not concluida and automatica and descricao like 'Crédito: %Responder em Caixa → Crédito.';
+  insert into public.crm_atividades (empresa_id, tipo, descricao, data_hora, concluida, responsavel_id, automatica, criado_por)
+  values (p.empresa_id, 'tarefa', left('Crédito de ' || coalesce(e, 'o cliente') || ': ' ||
+      case when p_aprova then 'APROVADO, R$ ' || replace(to_char(p_limite, 'FM999G999G990D00'), ',', '.') || ' em até ' || coalesce(p_prazo, p.prazo_max, 28) || ' dias'
+           else 'não aprovado' end || coalesce(' (' || nullif(btrim(coalesce(p_resposta, '')), '') || ')', '') || '. Avise o cliente.', 500),
+    now(), false, p.pedido_por, true, auth.uid());
+end;
+$$;
+revoke all on function public.crm_credito_responder(bigint, boolean, numeric, integer, text) from public, anon;
+grant execute on function public.crm_credito_responder(bigint, boolean, numeric, integer, text) to authenticated;
+
+-- a consulta automática que precisa do Anderson (acima do teto, em análise) também vira pedido, com a tarefa para ele
+create or replace function public.crm_credito_pedido_da_consulta(p_empresa uuid, p_por uuid, p_limite numeric, p_prazo integer, p_motivo text) returns bigint
+language plpgsql security definer set search_path = public as $$
+declare idn bigint;
+begin
+  select id into idn from public.crm_credito_pedidos where empresa_id = p_empresa and situacao = 'aberto';
+  if idn is not null then return idn; end if;
+  insert into public.crm_credito_pedidos (empresa_id, pedido_por, limite, prazo_max, motivo, origem) values (p_empresa, p_por, nullif(p_limite, 0), p_prazo, p_motivo, 'consulta')
+  returning id into idn;
+  perform public.crm_credito_avisa_admin(idn);
+  return idn;
+end;
+$$;
+revoke all on function public.crm_credito_pedido_da_consulta(uuid, uuid, numeric, integer, text) from public, anon, authenticated;
+-- as três internas são da crm-credito-rekta (chave de serviço)
+do $$ begin if exists (select 1 from pg_roles where rolname = 'service_role') then
+  grant execute on function public.crm_credito_contexto(uuid) to service_role;
+  grant execute on function public.crm_credito_auto_gravar(uuid, text, numeric, integer, integer, jsonb, text, text) to service_role;
+  grant execute on function public.crm_credito_pedido_da_consulta(uuid, uuid, numeric, integer, text) to service_role;
+end if; end $$;

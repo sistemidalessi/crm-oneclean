@@ -970,6 +970,25 @@
     if (r.error) throw await erroDaFuncao(r);
     return r.data;
   };
+  // Crédito pela própria equipe (04/11/2026): a consulta com a política (até o teto, sem passar pelo administrador) e o pedido
+  // de outro limite/prazo ao administrador, que responde em Caixa → Crédito
+  Supa.prototype.creditoAuto = async function (empresa) {
+    const r = await this.sb.functions.invoke('crm-credito-rekta', { body: { acao: 'auto', empresa_id: empresa } });
+    if (r.error) throw await erroDaFuncao(r);
+    return r.data;
+  };
+  Supa.prototype.creditoPedir = async function (empresa, limite, prazo, motivo) {
+    return unwrap(await this.sb.rpc('crm_credito_pedir', { p_empresa: empresa, p_limite: limite || null, p_prazo: prazo || null, p_motivo: motivo || '' }));
+  };
+  Supa.prototype.creditoPedidos = async function (empresa, abertos) {
+    let q = this.sb.from('crm_credito_pedidos').select('*').order('criado_em', { ascending: false }).limit(abertos ? 200 : 5);
+    if (empresa) q = q.eq('empresa_id', empresa);
+    if (abertos) q = q.eq('situacao', 'aberto');
+    return unwrap(await q);
+  };
+  Supa.prototype.creditoResponder = async function (id, aprova, limite, prazo, resposta) {
+    return unwrap(await this.sb.rpc('crm_credito_responder', { p_id: id, p_aprova: !!aprova, p_limite: limite || null, p_prazo: prazo || null, p_resposta: resposta || '' }));
+  };
   // a última consulta da Rekta já feita para o cliente (só o administrador lê crm_credito_rekta): reabrir a análise não paga de novo
   Supa.prototype.creditoRektaUltima = async function (empresa) {
     const r = await this.sb.from('crm_credito_rekta').select('em, caminho, bruto').eq('empresa_id', empresa).is('erro', null).not('bruto', 'is', null).order('em', { ascending: false }).limit(1);
@@ -1002,6 +1021,10 @@
     const i = d.fin_favorecidos.findIndex(y => y.id === x.id); if (i >= 0) d.fin_favorecidos[i] = x; else d.fin_favorecidos.push(x); this.gravar(d); return x; };
   Local.prototype.creditoVer = async function () { return null; };
   Local.prototype.creditoGravar = SO_SUPABASE;
+  Local.prototype.creditoAuto = SO_SUPABASE;
+  Local.prototype.creditoPedir = SO_SUPABASE;
+  Local.prototype.creditoPedidos = async function () { return []; };
+  Local.prototype.creditoResponder = SO_SUPABASE;
   Local.prototype.creditoEnviar = SO_SUPABASE;
   Local.prototype.creditoLer = SO_SUPABASE;
   Local.prototype.creditoLink = SO_SUPABASE;

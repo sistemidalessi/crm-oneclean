@@ -257,7 +257,7 @@
 
   // ================================================================== tela (só no navegador)
   const CRM = raiz.CRM, esc = s => CRM.esc(s);
-  let painel = null, carregando = false, lidoEm = 0;
+  let painel = null, carregando = false, lidoEm = 0, pedEquipe = [];
   const cacheVer = new Map();
   const cfg = () => (((CRM.estado && CRM.estado.cfg) || {}).credito) || {};
   // API da Rekta (28/10/2026, Anderson: "não é para a gente colocar, analisar… ele vai direto, pesquisa e traz a consulta já
@@ -273,6 +273,7 @@
     if (carregando || (!forca && painel && Date.now() - lidoEm < 60000)) return;
     carregando = true;
     try { painel = await CRM.store().creditoPainel(); lidoEm = Date.now(); } catch (e) { CRM.falhou(e); painel = painel || { fichas: [], pendentes: [], sugestoes: [] }; }
+    try { pedEquipe = (await CRM.store().creditoPedidos(null, true)) || []; } catch (e) { pedEquipe = []; }
     finally { carregando = false; }
     if (CRM.estado.aba === 'caixa') CRM.render();
   }
@@ -299,6 +300,14 @@
       '<p><label class="cred-busca">Analisar um cliente: <input type="search" id="credBusca" list="credEmpresas" placeholder="nome ou CNPJ"></label>' +
         '<datalist id="credEmpresas">' + ((CRM.estado.D.empresas) || []).filter(e => e.cnpj).slice(0, 4000).map(e => '<option value="' + esc(e.nome + ' · ' + e.cnpj) + '">').join('') + '</datalist>' +
         ' <button type="button" class="btn" data-acao="cred-buscar">Analisar</button></p></section>' +
+      // 04/11/2026: pedidos da equipe (outro limite/prazo, ou a consulta automática que passou do teto ou pediu análise)
+      (pedEquipe.length ? '<section class="cartao"><h2>Pedidos de crédito da equipe <small>' + pedEquipe.length + ' esperando você</small></h2>' +
+        '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Cliente</th><th>Quem pediu</th><th class="num">Pedido</th><th>Motivo</th><th></th></tr></thead><tbody>' +
+        pedEquipe.map(p => { const e = CRM.empresa(p.empresa_id) || {}, u = CRM.usuario(p.pedido_por);
+          return '<tr><td><button type="button" class="link" data-acao="abrir-empresa" data-id="' + esc(p.empresa_id) + '">' + esc(e.nome || 'cliente') + '</button><small>' + esc(R.dataBR(R.diaLocal(p.criado_em))) + (p.origem === 'consulta' ? ' · da consulta automática' : '') + '</small></td>' +
+            '<td>' + esc(u ? u.nome : '') + '</td><td class="num">' + esc(p.limite ? R.moeda(p.limite) : 'análise') + (p.prazo_max ? '<small>' + p.prazo_max + ' dias</small>' : '') + '</td>' +
+            '<td>' + esc(p.motivo || '') + '</td><td class="acoes-linha"><button type="button" class="mini" data-acao="cred-responder" data-id="' + esc(p.id) + '">Responder</button></td></tr>'; }).join('') +
+        '</tbody></table></div></section>' : '') +
       (pend.length ? '<section class="cartao"><h2>Para analisar <small>' + pend.length + '</small></h2>' +
         (viaApi() ? '<p class="cred-lote"><label><input type="checkbox" id="credMarcaTodos"> marcar todos</label> <button type="button" class="btn" data-acao="cred-lote">Analisar os marcados</button>' +
           ' <small>uma consulta à Rekta por cliente (' + esc(R.moeda(precoApi())) + ' cada; a já feita nos últimos 30 dias não paga de novo); depois é só dar OK em cada um</small></p>' : '') +
@@ -610,16 +619,91 @@
     try { if (!v || Date.now() - v.em > 60000) { v = { em: Date.now(), d: await CRM.store().creditoVer(id) }; cacheVer.set(id, v); } } catch (e) { return; }
     const d = v.d;
     if (!d) return;
-    if (!CRM.ehGestor()) { const t = textoEquipe(d); el.innerHTML = t ? '<h3>Crédito</h3><p class="resumo-compras">' + esc(t) + '</p>' : ''; return; }
+    // 04/11/2026 (Anderson: "eles mesmos podem apertar para consultar o CNPJ… se não concordarem, vem direto para mim"):
+    // a equipe consulta (crm-credito-rekta 'auto'; vendedora só na carteira dela) e pede outro limite/prazo ao administrador
+    let peds = [];
+    try { peds = (await CRM.store().creditoPedidos(id)) || []; } catch (e) { peds = []; }
+    const aberto = peds.find(x => x.situacao === 'aberto');
+    const resp = !aberto && peds.find(x => x.situacao !== 'aberto' && x.respondido_em && Date.now() - new Date(x.respondido_em).getTime() < 30 * 864e5);
+    const pedTxt = aberto ? '<br>' + CRM.selo('esperando o Anderson', 'ambar') + ' pedido de ' + esc(aberto.limite ? R.moeda(aberto.limite) : 'análise') + (aberto.prazo_max ? ' em ' + aberto.prazo_max + ' dias' : '') +
+        (CRM.ehAdmin() ? ' <button type="button" class="mini" data-acao="cred-responder" data-id="' + esc(aberto.id) + '">Responder</button>' : '')
+      : resp ? '<br>' + CRM.selo(resp.situacao === 'aprovado' ? 'pedido aprovado' : 'pedido não aprovado', resp.situacao === 'aprovado' ? 'verde' : 'vermelho') + (resp.resposta ? ' <em>' + esc(resp.resposta) + '</em>' : '') : '';
+    const e0 = CRM.empresa(id) || {};
+    const daEquipe = ['vendedor', 'gestor'].indexOf(CRM.papel()) !== -1 && (CRM.ehGestor() || e0.responsavel_id === CRM.meuId());
+    const podeConsultar = daEquipe && !!CRM.store().creditoAuto && (d.situacao === 'sem_ficha' || d.revisao_vencida);
+    const btConsultar = podeConsultar ? ' <button type="button" class="mini" data-acao="cred-auto" data-id="' + esc(id) + '" title="Consulta o CNPJ na Rekta e a política da empresa decide na hora (até ' + esc(R.moeda(tetoAuto())) + ')">💳 Consultar o crédito</button>' : '';
+    const btPedir = daEquipe && !aberto && d.situacao !== 'sem_ficha' ? ' <button type="button" class="mini" data-acao="cred-pedir" data-id="' + esc(id) + '">Pedir outro limite ou prazo</button>' : '';
+    if (!CRM.ehGestor()) {
+      const t = d.situacao === 'sem_ficha' && d.ligado ? 'Sem análise de crédito: pedido a prazo fica bloqueado.' + (podeConsultar ? ' Consulte o crédito para liberar.' : '') : textoEquipe(d);
+      el.innerHTML = t || btConsultar || pedTxt ? '<h3>Crédito' + btConsultar + btPedir + '</h3><p class="resumo-compras">' + esc(t) + pedTxt + '</p>' : '';
+      return;
+    }
     const editar = !CRM.ehAdmin() ? '' : d.situacao === 'sem_ficha' ? ' ' + linkConsultar(id, 'Analisar', 'mini', 'cred-analisar-site')
       : ' <button type="button" class="mini" data-acao="cred-analisar" data-id="' + esc(id) + '">Editar</button>';
-    el.innerHTML = '<h3>Crédito' + editar + '</h3><p class="resumo-compras">' + (d.situacao === 'sem_ficha' ? 'Sem análise de crédito' + (d.ligado ? ': pedido a prazo fica bloqueado.' : '.')
+    el.innerHTML = '<h3>Crédito' + editar + (CRM.ehAdmin() ? '' : btConsultar + btPedir) + '</h3><p class="resumo-compras">' + (d.situacao === 'sem_ficha' ? 'Sem análise de crédito' + (d.ligado ? ': pedido a prazo fica bloqueado.' : '.')
       : seloSit(d.situacao) + (d.situacao === 'prazo' ? ' limite <strong>' + esc(R.moeda(d.limite)) + '</strong> · usado ' + esc(R.moeda(d.usado)) + ' · disponível <strong>' + esc(R.moeda(d.disponivel)) + '</strong>' + (d.prazo_max ? ' · até ' + d.prazo_max + ' dias' : '') : '') +
         (d.score ? '<br>score ' + d.score : '') + (d.analisado_em ? ' · analisado em ' + esc(R.dataBR(d.analisado_em)) : '') + (d.revisao_vencida ? ' ' + CRM.selo('revisão vencida', 'ambar') : '') +
-        (d.obs ? '<br><em>' + esc(d.obs) + '</em>' : '')) + (d.ligado ? '' : '<br><small>trava de crédito desligada (Caixa → Crédito)</small>') + '</p>';
+        (d.obs ? '<br><em>' + esc(d.obs) + '</em>' : '')) + pedTxt + (d.ligado ? '' : '<br><small>trava de crédito desligada (Caixa → Crédito)</small>') + '</p>';
+  }
+  const tetoAuto = () => (Number(cfg().auto_teto) > 0 ? Number(cfg().auto_teto) : 5000);
+  // a consulta da equipe: confirma o custo, consulta, mostra o resultado e recarrega a ficha e os pedidos travados
+  async function consultaAuto(id) {
+    const e = CRM.empresa(id);
+    if (!e) return;
+    if (!confirm('Consultar o crédito de ' + e.nome + (e.cnpj ? ' (' + e.cnpj + ')' : '') + ' na Rekta?\n\nA consulta custa ' + R.moeda(precoApi()) +
+      ' e a política da empresa decide na hora: libera a prazo até ' + R.moeda(tetoAuto()) + ' sozinha; acima disso, ou se a consulta mostrar risco, vai para o Anderson.')) return;
+    CRM.toast('Consultando a Rekta (pode levar até 1 minuto)…');
+    try {
+      const r = await CRM.store().creditoAuto(id);
+      cacheVer.delete(id);
+      CRM.abrirForm({ titulo: 'Crédito: ' + e.nome, campos: [], salvarTexto: 'Entendi',
+        intro: r.texto,
+        htmlDepois: r.situacao === 'prazo' ? '<p class="dica">O pedido a prazo deste cliente já pode seguir (até o limite e o prazo acima).</p>' : '',
+        aoSalvar: async () => {} });
+      if (CRM.pedidos && CRM.pedidos.recarregar) CRM.pedidos.recarregar();
+      CRM.render();
+    } catch (err) { CRM.falhou(err); }
+  }
+  // outro limite ou prazo: vai para o administrador (tarefa e lista em Caixa → Crédito)
+  function pedirOutro(id) {
+    const e = CRM.empresa(id);
+    if (!e) return;
+    CRM.abrirForm({ titulo: 'Pedir outro limite ou prazo: ' + e.nome,
+      intro: 'O pedido vai para o Anderson aprovar (ele recebe uma tarefa). A resposta volta para você como tarefa e aparece aqui na ficha.',
+      campos: [{ nome: 'limite', rotulo: 'Limite que o cliente precisa (R$)', tipo: 'numero', terco: true },
+        { nome: 'prazo', rotulo: 'Prazo (dias)', tipo: 'numero', passo: '1', max: 365, terco: true, vazioNulo: true },
+        { nome: 'motivo', rotulo: 'Motivo', tipo: 'textarea', largo: true, linhas: 3, obrigatorio: true, dica: 'ex.: o cliente vai comprar R$ 8 mil por mês e só fecha faturado em 28 dias' }],
+      salvarTexto: 'Mandar ao Anderson',
+      aoSalvar: async v => {
+        await CRM.store().creditoPedir(id, Number(v.limite) || null, v.prazo || null, v.motivo);
+        cacheVer.delete(id);
+        CRM.toast('Pedido de crédito mandado ao Anderson.');
+        CRM.render();
+      } });
+  }
+  // a resposta do administrador
+  async function responder(pid) {
+    let p = null;
+    try { p = ((await CRM.store().creditoPedidos(null, true)) || []).find(x => String(x.id) === String(pid)); } catch (e) { p = null; }
+    if (!p) { CRM.toast('Pedido de crédito não encontrado (já respondido?).', true); return; }
+    const e = CRM.empresa(p.empresa_id) || { nome: 'cliente' }, quem = CRM.usuario(p.pedido_por);
+    CRM.abrirForm({ titulo: 'Pedido de crédito: ' + e.nome,
+      intro: (quem ? quem.nome + ' pede ' : 'Pedido: ') + (p.limite ? R.moeda(p.limite) : 'análise') + (p.prazo_max ? ' em ' + p.prazo_max + ' dias' : '') + '. Motivo: ' + (p.motivo || '—'),
+      htmlDepois: '<p class="acoes"><button type="button" class="btn sec" data-acao="cred-analisar" data-id="' + esc(p.empresa_id) + '">Ver a consulta e a ficha</button></p>',
+      campos: [{ nome: 'decisao', rotulo: 'Decisão', tipo: 'select', obrigatorio: true, opcoes: [['aprova', 'Aprovar a prazo'], ['recusa', 'Não aprovar']] },
+        { nome: 'limite', rotulo: 'Limite (R$)', tipo: 'numero', terco: true }, { nome: 'prazo', rotulo: 'Prazo (dias)', tipo: 'numero', passo: '1', max: 365, terco: true, vazioNulo: true },
+        { nome: 'resposta', rotulo: 'Resposta para a vendedora (opcional)', tipo: 'textarea', largo: true, linhas: 2 }],
+      valores: { decisao: 'aprova', limite: p.limite || '', prazo: p.prazo_max || 28 }, salvarTexto: 'Responder',
+      aoSalvar: async v => {
+        await CRM.store().creditoResponder(p.id, v.decisao === 'aprova', Number(v.limite) || null, v.prazo || null, v.resposta);
+        cacheVer.delete(p.empresa_id);
+        CRM.toast('Respondido: ' + (v.decisao === 'aprova' ? 'aprovado' : 'não aprovado') + '. A vendedora recebe a tarefa.');
+        carrega(true);
+        if (CRM.pedidos && CRM.pedidos.recarregar) CRM.pedidos.recarregar();
+      } });
   }
 
-  CRM.credito = { aba, depoisAba, blocoFicha, preencheFicha, contagem: () => (painel ? (painel.pendentes || []).length : 0), consultar, analisar };
+  CRM.credito = { aba, depoisAba, blocoFicha, preencheFicha, contagem: () => (painel ? (painel.pendentes || []).length : 0) + pedEquipe.length, consultar, analisar };
 
   Object.assign(CRM.acoes, {
     'cred-atualiza': () => carrega(true),
@@ -632,6 +716,9 @@
       try { await CRM.salvarConfig({ credito: Object.assign({}, c, { url: u.trim() }) }); CRM.toast(u ? 'Endereço salvo.' : 'Endereço apagado.'); } catch (e) { CRM.falhou(e); }
     },
     'cred-consultar': id => consultar(id),
+    'cred-auto': id => { consultaAuto(id).catch(CRM.falhou); },
+    'cred-pedir': id => pedirOutro(id),
+    'cred-responder': id => { responder(id).catch(CRM.falhou); },
     'cred-analisar': id => { analisar(id).catch(CRM.falhou); },
     'cred-analisar-site': id => { consultar(id); analisar(id, true).catch(CRM.falhou); },
     'cred-analisar-api': id => { analisar(id, false, true).catch(CRM.falhou); },

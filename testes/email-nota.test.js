@@ -39,3 +39,19 @@ test('a crm-fiscal manda a nota sozinha uma vez só e tem o botão de mandar de 
   assert.match(s, /acao === 'email_nota'/);
   assert.match(s, /HASHES\['danfe\.js'\]/);
 });
+
+test('a consulta de crédito da equipe usa a mesma política do site, carregada fora do navegador', () => {
+  const fs = require('fs'), path = require('path'), R = path.join(__dirname, '..');
+  const g = {};
+  new Function(fs.readFileSync(path.join(R, 'regras.js'), 'utf8')).call(g);
+  new Function('window', 'module', 'require', fs.readFileSync(path.join(R, 'credito.js'), 'utf8'))(g, undefined, undefined);
+  assert.equal(typeof g.CRMCredito.propor, 'function');
+  assert.equal(typeof g.CRMCredito.daRekta, 'function');
+  const p = g.CRMCredito.propor({ score: 800, situacao_cadastral: 'ATIVA' }, { maior_mes: 4000, vencido: 0, hoje: '2026-11-04' });
+  assert.equal(p.situacao, 'prazo');
+  assert.equal(p.limite, 8000);   // 2 meses de compra: passa do teto automático (R$ 5.000), que a função aplica
+  const s = fs.readFileSync(path.join(R, 'supabase/functions/crm-credito-rekta/index.ts'), 'utf8');
+  assert.match(s, /c\.acao === 'auto'/);
+  assert.match(s, /'credito\.js'/);
+  assert.match(s, /só para clientes da sua carteira/);
+});
