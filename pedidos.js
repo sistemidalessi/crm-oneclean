@@ -537,6 +537,7 @@
     if ((p.situacao === 'aberto' && ehVenda()) || (ehOp() && ['separacao', 'separado'].indexOf(p.situacao) !== -1)) botoes.push('<button type="button" class="btn perigo" data-acao="pd-cancelar" data-id="' + esc(p.id) + '">Cancelar pedido</button>');
     botoes.push('<button type="button" class="btn sec" data-acao="pd-imprimir" data-id="' + esc(p.id) + '">Imprimir</button>');
     if (CRM.fichas && CRM.fichas.baixarPdfPedido) botoes.push('<button type="button" class="btn sec" data-acao="pd-pdf" data-id="' + esc(p.id) + '" title="salva o pedido em PDF, para mandar ao cliente ou guardar">📄 Baixar PDF</button>');
+    if (CRM.fichas && CRM.fichas.baixarPdfPedido && CRM.ehAdmin() && !E().cfg.proposta_fotos) botoes.push('<button type="button" class="btn sec" data-acao="pd-pdf-fotos" data-id="' + esc(p.id) + '" title="Só para você ver como fica: o mesmo PDF com a foto de cada produto">📷 PDF com fotos (teste)</button>');
     if (ehVenda() && p.negocio_id && CRM.negocio(p.negocio_id)) botoes.push('<button type="button" class="mini" data-acao="abrir-negocio" data-id="' + esc(p.negocio_id) + '">negócio</button>');
     const campo = (rot, v) => '<dt>' + esc(rot) + '</dt><dd>' + esc(v == null || v === '' ? '—' : v) + '</dd>';
     const abas = [['dados', 'Dados cadastrais'], ['produtos', 'Produtos'], ['comentarios', 'Comentários' + ((p.comentarios || []).length ? ' (' + p.comentarios.length + ')' : '')]];
@@ -1278,6 +1279,7 @@
         valores: { nota: l[0].id }, salvarTexto: 'Faturar', aoSalvar: async v => { troca(await CRM.store().pedidoFaturar(id, v.nota)); await recarrega(); } });
     }),
     'pd-comentar': vivo(async id => { const t = document.querySelector('[data-pd-coment]'); if (!t || !t.value.trim()) return; troca(await CRM.store().pedidoComentar(id, t.value.trim())); CRM.render(); }),
+    'pd-pdf-fotos': id => { const p = ped(id); if (p) CRM.fichas.baixarPdfPedido(Object.assign({}, p, { com_fotos: true })).catch(CRM.falhou); },
     'pd-pdf': id => {
       const p = ped(id); if (!p) return;
       CRM.fichas.baixarPdfPedido(p).catch(CRM.falhou);

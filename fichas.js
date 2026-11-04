@@ -303,6 +303,8 @@
           (props.length ? '<ul class="lista">' + props.map(p => '<li class="proposta"><div><strong>#' + esc(p.numero) + ' · ' + esc(R.moeda(p.valor_total)) + '</strong> ' + CRM.seloProposta(p.status) +
             '<small>' + esc([p.enviada_em ? 'enviada ' + R.dataBR(p.enviada_em) : '', p.validade ? 'válida até ' + R.dataBR(p.validade) : '', p.respondida_em ? 'resposta ' + R.dataBR(p.respondida_em) : ''].filter(Boolean).join(' · ')) + '</small></div>' +
             '<span class="acoes-rapidas"><button type="button" class="mini" data-acao="pdf-proposta" data-id="' + esc(p.id) + '" title="Gera o PDF e pergunta onde salvar">Baixar PDF</button>' +
+            // 04/11/2026: só o administrador, para ver o orçamento com a foto de cada produto antes de decidir (cfg.proposta_fotos)
+            (CRM.ehAdmin() && !E().cfg.proposta_fotos ? '<button type="button" class="mini" data-acao="pdf-proposta-fotos" data-id="' + esc(p.id) + '" title="Só para você ver como fica: o mesmo PDF com a foto de cada produto (Fotos e fichas)">📷 PDF com fotos (teste)</button>' : '') +
             (pode ? '<button type="button" class="mini" data-acao="enviar-proposta" data-id="' + esc(p.id) + ':whatsapp" title="Abre o WhatsApp com a mensagem; anexe o PDF na conversa">WhatsApp</button>' +
               '<button type="button" class="mini" data-acao="enviar-proposta" data-id="' + esc(p.id) + ':email" title="Abre o e-mail para todos os endereços do cliente; anexe o PDF">E-mail</button>' : '') +
             (pode && p.status === 'rascunho' ? '<button type="button" class="mini" data-acao="proposta-status" data-id="' + esc(p.id) + ':enviada">Marcar enviada</button>' : '') +
@@ -1637,6 +1639,7 @@
     'editar-proposta': id => fichas.formProposta(E().ix.porId.propostas.get(id), CRM.negocio(abertoNegocio)),
     'imprimir-proposta': id => fichas.imprimirProposta(E().ix.porId.propostas.get(id)),
     'pdf-proposta': id => fichas.baixarPdfProposta(E().ix.porId.propostas.get(id)).catch(CRM.falhou),
+    'pdf-proposta-fotos': id => { const p = E().ix.porId.propostas.get(id); if (p) fichas.baixarPdfProposta(Object.assign({}, p, { com_fotos: true })).catch(CRM.falhou); },
     'atualizar-proposta': id => fichas.atualizarProposta(E().ix.porId.propostas.get(id)).catch(CRM.falhou),
     'enviar-proposta': (id, el) => { const [pid, canal] = id.split(':'); fichas.enviarProposta(pid, canal, el).catch(CRM.falhou); },
     'proposta-status': async id => {

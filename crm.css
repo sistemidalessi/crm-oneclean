@@ -901,7 +901,7 @@ pre.of-previa { white-space: pre-wrap; font-family: inherit; font-size: .88rem; 
 .pd-janela p.alerta { background: var(--vermelho-fundo); color: var(--vermelho); padding: 8px 12px; border-radius: 8px; }
 .pd-campos { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px 12px; margin: 10px 0; }
 .pd-campos .campo, .pd-entrada .campo { grid-column: auto; }
-.pd-campos .campo.largo, .pd-campos .largo, .pd-entrada .campo.largo { grid-column: 1 / -1; }
+.pd-campos .campo.largo, .pd-campos .largo, .pd-entrada .campo.largo, .pd-entrada .largo { grid-column: 1 / -1; }
 .pd-janela .chips { margin: 4px 0 10px; }
 .pd-campos h3 { margin: 8px 0 0; font-size: 1rem; }
 .pd-entrada { display: grid; grid-template-columns: 150px 160px 110px 1fr; gap: 8px 12px; align-items: end; padding: 10px; margin: 10px 0; border: 1px solid var(--borda); border-radius: 10px; background: var(--realce); }
