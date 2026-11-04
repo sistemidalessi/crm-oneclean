@@ -9586,3 +9586,28 @@ create or replace function public.crm_gv_funil() returns jsonb language sql stab
     'maiores_propostas', coalesce((select jsonb_agg(jsonb_build_object('proposta', y.numero, 'cliente', y.cliente, 'valor', y.valor_total, 'enviada_em', y.enviada_em, 'responsavel', y.dono))
        from (select * from p order by valor_total desc limit 10) y), '[]'::jsonb));
 $$;
+
+-- E-mail da nota pelo agendador (04/11/2026): a nota de produção autorizada que ainda não foi por e-mail (a automática falhou
+-- ou caiu) vai pela crm-fiscal, de 15 em 15 minutos, das 7h às 21h; só as dos últimos 2 dias (p_desde manda as mais antigas,
+-- como as 14 da virada, a pedido do Anderson). A crm-fiscal tem verify_jwt ligado: vai com a chave pública do site
+-- (crm_interno.bb_cfg.anon, a mesma do config.js) e a senha do agendador no cabeçalho x-crm-agendador.
+-- Aplicado em 04/11/2026 (migração crm_nfe_email_tick).
+alter table crm_interno.bb_cfg add column if not exists anon text;
+create or replace function public.crm_nfe_email_tick(p_desde date default null) returns void language plpgsql security definer set search_path = public as $$
+declare c record;
+begin
+  if not exists (select 1 from public.crm_nfe where ambiente = 'producao' and situacao = 'autorizada' and email_em is null
+                   and autorizada_em >= coalesce(p_desde::timestamp at time zone 'America/Sao_Paulo', now() - interval '2 days')) then return; end if;
+  select * into c from crm_interno.bb_cfg where id = 1;
+  if c.url is null or c.anon is null then return; end if;
+  perform net.http_post(url := replace(c.url, '/crm-bb', '/crm-fiscal'), body := jsonb_build_object('acao', 'email_pendentes', 'desde', p_desde),
+    headers := jsonb_build_object('Content-Type', 'application/json', 'Authorization', 'Bearer ' || c.anon, 'x-crm-agendador', c.senha), timeout_milliseconds := 120000);
+end;
+$$;
+revoke all on function public.crm_nfe_email_tick(date) from public, anon, authenticated;
+do $$ begin
+  if exists (select 1 from pg_extension where extname = 'pg_cron') then
+    perform cron.unschedule(jobid) from cron.job where jobname = 'crm-nfe-email';
+    perform cron.schedule('crm-nfe-email', '*/15 10-23,0 * * *', 'select public.crm_nfe_email_tick()');
+  end if;
+end $$;

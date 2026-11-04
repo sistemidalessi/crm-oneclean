@@ -453,10 +453,26 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
   if (req.method !== 'POST') return resposta(405, { erro: 'use POST' });
   const url = Deno.env.get('SUPABASE_URL')!;
+  const db = createClient(url, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } });
+  // O agendador do banco (crm_nfe_email_tick, senha de crm_interno.bb_cfg no cabeçalho x-crm-agendador; 04/11/2026): só
+  // manda por e-mail as notas de produção autorizadas que ainda não foram (a automática que falhou, ou as antigas pedidas).
+  const senhaAg = req.headers.get('x-crm-agendador') || '';
+  if (senhaAg) {
+    const { data: ok } = await db.rpc('crm_bb_senha_ok', { p: senhaAg });
+    if (ok !== true) return resposta(401, { erro: 'senha do agendador inválida' });
+    let c: Linha = {};
+    try { c = await req.json(); } catch { /* corpo vazio */ }
+    if (c.acao !== 'email_pendentes') return resposta(400, { erro: 'o agendador só manda os e-mails pendentes' });
+    const desde = /^\d{4}-\d{2}-\d{2}$/.test(String(c.desde || '')) ? String(c.desde) + 'T00:00:00-03:00' : new Date(Date.now() - 2 * 864e5).toISOString();
+    const { data: pend } = await db.from('crm_nfe').select('id, numero').eq('ambiente', 'producao').eq('situacao', 'autorizada').is('email_em', null)
+      .gte('autorizada_em', desde).order('autorizada_em').limit(30);
+    const res: Linha[] = [];
+    for (const n of (pend || []) as Linha[]) res.push(Object.assign({ numero: n.numero }, await enviaEmailNota(db, String(n.id))));
+    return resposta(200, { mandadas: res.filter(r => r.ok).length, total: res.length, notas: res });
+  }
   const comoUsuario = createClient(url, Deno.env.get('SUPABASE_ANON_KEY')!, { global: { headers: { Authorization: req.headers.get('Authorization') ?? '' } }, auth: { persistSession: false } });
   const { data: quem } = await comoUsuario.auth.getUser();
   if (!quem?.user) return resposta(401, { erro: 'faça login' });
-  const db = createClient(url, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } });
   const { data: euRow } = await db.from('crm_usuarios').select('papel, ativo, nome').eq('user_id', quem.user.id).maybeSingle();
   const eu = euRow as Linha | null;
   let b: Linha;
