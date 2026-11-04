@@ -66,9 +66,15 @@
   // Folha de contagem para a noite da virada (24/10/2026): os produtos com saldo negativo no CRM (vendido sem entrada) e os
   // que não batem com o FKN. A logística conta, preenche a coluna "Contado" e cola a folha de volta em "Lançar uma contagem".
   // Sem custo (a logística também usa).
-  function folhaContagem(linhas) {
-    const l = (linhas || []).filter(x => x.saldo != null && (x.saldo < 0 || (x.dif != null && x.dif !== 0)))
+  // 04/11/2026 (logística: "acertar o estoque de todos, de uma linha ou de um produto só"): op.modo 'todos' (todo produto com
+  // saldo no CRM), 'linha' (só a linha op.linha; a linha vem de op.linhas, Map código → linha) ou o de antes (padrão).
+  function folhaContagem(linhas, op) {
+    op = op || {};
+    const linhaDe = x => (op.linhas && op.linhas.get(x.codigo)) || x.linha || '';
+    const l = (linhas || []).filter(x => x.saldo != null && (op.modo === 'todos' ? true : op.modo === 'linha' ? linhaDe(x) === op.linha : (x.saldo < 0 || (x.dif != null && x.dif !== 0))))
       .sort((a, b) => String(a.descricao || '').localeCompare(String(b.descricao || ''), 'pt-BR'));
+    if (op.modo === 'todos' || op.modo === 'linha') return { cabecalho: ['Código', 'Contado', 'Descrição', 'Unidade', 'Saldo no CRM', 'Linha'],
+      linhas: l.map(x => [x.codigo, '', x.descricao || '', x.unidade || '', x.saldo, linhaDe(x)]) };
     return { cabecalho: ['Código', 'Contado', 'Descrição', 'Unidade', 'Saldo no CRM', 'FKN', 'Por que contar'],
       linhas: l.map(x => [x.codigo, '', x.descricao || '', x.unidade || '', x.saldo, x.fkn == null ? '' : x.fkn,
         x.saldo < 0 ? 'saldo negativo no CRM' : 'diferente do FKN']) };
@@ -984,14 +990,14 @@
   }
 
   function telaContagem() {
-    const folhaN = S.folhaContagem(S.junta(saldo, fkn)).linhas.length;
     return '<section class="cartao"><h2>Inventário por contagem</h2>' +
-      '<p>Contou o estoque (todo ou uma parte)? Cole aqui uma linha por produto: <code>código;quantidade contada</code> (da planilha, com Tab, também serve). ' +
-      'O CRM leva o saldo de cada produto ao contado e guarda a diferença no livro como "inventário", com o motivo.</p>' +
-      '<p class="acoes"><button type="button" class="btn" data-acao="es-contagem">Lançar uma contagem</button>' +
-        (folhaN ? ' <button type="button" class="btn sec" data-acao="es-folha">Baixar a folha de contagem (' + folhaN + ' produtos)</button>' : '') + '</p>' +
-      (folhaN ? '<p class="dica">A folha traz os produtos com saldo negativo no CRM e os que não batem com o FKN. Conte, preencha a coluna "Contado" e cole a folha inteira aqui; o que ficar sem contado não muda.</p>' : '') +
-      '<p class="dica">Para acertar um produto só, use o ✎ na lista de saldo. O livro não se apaga: todo acerto fica registrado com quem fez e por quê.</p></section>' +
+      '<p>Para acertar o saldo, conte e lance a contagem: o CRM leva o saldo de cada produto ao contado e guarda a diferença no livro como "inventário", com o motivo. ' +
+      '<strong>Não acerte pelo cadastro do produto:</strong> o saldo é o do livro do estoque.</p>' +
+      '<p class="acoes"><button type="button" class="btn sec" data-acao="es-folha">1. Baixar a folha de contagem</button> ' +
+        '<button type="button" class="btn" data-acao="es-contagem">2. Lançar a contagem</button></p>' +
+      '<p class="dica">A folha sai com todos os produtos, com uma linha só (ex.: Sacos p/ lixo) ou só com os que pedem conferência (saldo negativo). Conte, preencha a coluna "Contado" e cole a folha inteira em "Lançar a contagem"; ' +
+        'o que ficar sem contado não muda. Também dá para digitar só <code>código;quantidade contada</code>, um produto por linha.</p>' +
+      '<p class="dica">Um produto só: o ✎ ao lado dele em "Saldo por produto". O livro não se apaga: todo acerto fica registrado com quem fez e por quê.</p></section>' +
       (CRM.ehAdmin() || CRM.ehComprador() ? telaAvulsas() : '');
   }
   function telaAvulsas() {
@@ -1553,13 +1559,28 @@
         }
       });
     },
-    'es-folha': () => {
-      const f = S.folhaContagem(S.junta(saldo, fkn));
-      CRM.baixarCSV('folha-de-contagem', f.cabecalho, f.linhas);
+    'es-folha': async () => {
+      let mapa = new Map();
+      try { mapa = new Map(((CRM.store().estoqueLinhas ? await CRM.store().estoqueLinhas() : []) || []).map(x => [x.codigo, x.linha || ''])); } catch (e) { mapa = new Map(); }
+      (fkn || []).forEach(x => { if (x.linha && !mapa.get(x.codigo)) mapa.set(x.codigo, x.linha); });
+      const todas = S.junta(saldo, fkn), cods = new Set(todas.filter(x => x.saldo != null).map(x => x.codigo));
+      const nomes = [...new Set([...mapa.entries()].filter(([c, l]) => l && cods.has(c)).map(([, l]) => l))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+      CRM.abrirForm({ titulo: 'Baixar a folha de contagem',
+        intro: 'A folha sai em planilha, em ordem alfabética, com a coluna "Contado" vazia. Conte, preencha e cole a folha inteira em "Lançar a contagem".',
+        campos: [{ nome: 'modo', rotulo: 'Quais produtos?', tipo: 'select', obrigatorio: true, opcoes: [['todos', 'Todos os produtos'], ['linha', 'Uma linha só'], ['conferir', 'Só os que pedem conferência (saldo negativo)']] },
+          { nome: 'linha', rotulo: 'Linha', tipo: 'select', opcoes: [['', '— escolha a linha —']].concat(nomes.map(n => [n, n])) }],
+        valores: { modo: 'linha' }, salvarTexto: 'Baixar a folha',
+        aoSalvar: async v => {
+          if (v.modo === 'linha' && !v.linha) throw new Error('escolha a linha');
+          const f = S.folhaContagem(todas, { modo: v.modo === 'conferir' ? '' : v.modo, linha: v.linha, linhas: mapa });
+          if (!f.linhas.length) throw new Error('nenhum produto com saldo nessa escolha');
+          CRM.baixarCSV('folha-de-contagem' + (v.modo === 'linha' ? '-' + R.normaliza(v.linha).replace(/[^a-z0-9]+/g, '-') : v.modo === 'todos' ? '-todos' : ''), f.cabecalho, f.linhas);
+          CRM.toast('Folha com ' + f.linhas.length + ' produto(s).');
+        } });
     },
     'es-contagem': () => {
       CRM.abrirForm({
-        titulo: 'Lançar uma contagem', largura: 'largo',
+        titulo: 'Lançar a contagem', largura: 'largo',
         intro: 'Uma linha por produto: código;quantidade contada (ex.: 300005;120). Produto que não está na lista não muda.',
         campos: [{ nome: 'texto', rotulo: 'Contagem', tipo: 'textarea', obrigatorio: true }, { nome: 'motivo', rotulo: 'Motivo', obrigatorio: true, dica: 'ex.: inventário do galpão 16/10' }],
         valores: {}, salvarTexto: 'Conferir e lançar',

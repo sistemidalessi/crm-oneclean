@@ -727,6 +727,7 @@
   Local.prototype.estoqueDifs = async function () { return []; };
   Local.prototype.estoqueUnidades = async function () { return []; };
   // Estoque operacional da logística (21/10/2026): as mesmas leituras, sem custo e sem valor da nota (funções do banco).
+  Supa.prototype.estoqueLinhas = async function () { return paginado((de, ate) => this.sb.rpc('crm_estoque_linhas').range(de, ate)); };
   Supa.prototype.estoqueSaldoOp = async function () { return paginado((de, ate) => this.sb.rpc('crm_estoque_saldo_op').range(de, ate)); };
   Supa.prototype.estoqueMovsOp = async function (codigo, limite) { return unwrap(await this.sb.rpc('crm_estoque_movs_op', { p_codigo: codigo, p_limite: limite || 200 })) || []; };
   Supa.prototype.comprasOp = async function (limite) { return unwrap(await this.sb.rpc('crm_compras_op', { p_limite: limite || 200 })) || []; };
@@ -734,6 +735,7 @@
   Supa.prototype.compraVinculosOp = async function () { return paginado((de, ate) => this.sb.rpc('crm_compra_vinculos_op').range(de, ate)); };
   Supa.prototype.estoqueUnidadesOp = async function () { return paginado((de, ate) => this.sb.rpc('crm_estoque_unidades_op').range(de, ate)); };
   const semCusto = l => (l || []).map(x => { const y = Object.assign({}, x); ['custo_medio', 'custo_unit', 'valor_total', 'valor_produtos', 'ipi', 'st', 'frete', 'outras', 'parcelas'].forEach(k => delete y[k]); return y; });
+  Local.prototype.estoqueLinhas = async function () { return (await this.estoque()).map(x => ({ codigo: x.codigo, linha: x.linha || null, familia: x.familia || null })); };
   Local.prototype.estoqueSaldoOp = async function () { return semCusto(await this.estoqueSaldo()); };
   Local.prototype.estoqueMovsOp = async function (c, l) { return semCusto(await this.estoqueMovs(c, l)); };
   Local.prototype.comprasOp = async function (l) { return semCusto(await this.compras(l)); };

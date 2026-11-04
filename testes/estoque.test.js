@@ -295,3 +295,18 @@ test('relatório do período: quem não vê valor ou custo não recebe a coluna 
   assert.deepEqual(comp.cabecalho.slice(11), ['Valor vendido (R$)', 'Custo das entradas (R$)', 'Custo médio hoje (R$)', 'Custo do vendido, estimado (R$)', 'Margem estimada (%)']);
   assert.deepEqual(comp.linhas[0].slice(11), [30, 10, 10, 20, 33.3]);
 });
+
+test('folha de contagem: todos os produtos ou uma linha só (04/11/2026)', () => {
+  const linhas = S.junta([{ codigo: '370051', descricao: 'SACO LIXO 100L', unidade: 'PCT', saldo: 40 }, { codigo: '010003', descricao: 'AGUA SANITARIA', unidade: 'GL', saldo: 105 },
+    { codigo: '370052', descricao: 'SACO LIXO 60L', unidade: 'PCT', saldo: 0 }], []);
+  const mapa = new Map([['370051', 'SACOS P/ LIXO'], ['370052', 'SACOS P/ LIXO'], ['010003', 'DOMISSANITARIOS']]);
+  const t = S.folhaContagem(linhas, { modo: 'todos', linhas: mapa });
+  assert.deepEqual(t.linhas.map(x => x[0]), ['010003', '370051', '370052']);
+  assert.deepEqual(t.cabecalho, ['Código', 'Contado', 'Descrição', 'Unidade', 'Saldo no CRM', 'Linha']);
+  const l = S.folhaContagem(linhas, { modo: 'linha', linha: 'SACOS P/ LIXO', linhas: mapa });
+  assert.deepEqual(l.linhas.map(x => x[0]), ['370051', '370052']);
+  assert.equal(l.linhas[0][5], 'SACOS P/ LIXO');
+  // a folha preenchida volta pelo mesmo "Lançar a contagem"
+  const r = S.lerContagem('Código;Contado;Descrição;Unidade;Saldo no CRM;Linha\n370051;38;SACO LIXO 100L;PCT;40;SACOS P/ LIXO\n370052;;SACO LIXO 60L;PCT;0;SACOS P/ LIXO');
+  assert.deepEqual(r.lote, [{ codigo: '370051', contado: 38 }]);
+});

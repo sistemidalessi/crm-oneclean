@@ -9877,3 +9877,15 @@ begin
     now(), false, p.pedido_por, true, auth.uid());
 end;
 $$;
+
+-- Linha de cada produto para a folha de contagem (04/11/2026, logística: "acertar o estoque de todos, de uma linha ou de um
+-- produto só"). Só código, linha e família, sem custo: a logística (que lê o saldo pela crm_estoque_saldo_op) também usa.
+-- Aplicado em 04/11/2026 (migração crm_estoque_linhas).
+create or replace function public.crm_estoque_linhas() returns table (codigo text, linha text, familia text)
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if not public.crm_eh_estoque_op() then raise exception 'sem acesso ao estoque'; end if;
+  return query select e.codigo, nullif(btrim(e.linha), ''), nullif(btrim(e.familia), '') from public.crm_estoque e;
+end $$;
+revoke all on function public.crm_estoque_linhas() from public, anon;
+grant execute on function public.crm_estoque_linhas() to authenticated;
