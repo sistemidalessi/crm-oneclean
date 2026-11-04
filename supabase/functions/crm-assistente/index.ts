@@ -495,7 +495,17 @@ Deno.serve(async (req) => {
   if (analiseV) {
     if (!['admin', 'gestor', 'vendedor'].includes(eu.papel)) return resposta(403, { erro: 'a análise de vendas é da equipe de vendas' });
     const { data: ja } = await db.from('crm_ia_analises_vendas').select('dia, texto, em').eq('dia', hoje).eq('chave', chaveV).maybeSingle();
-    if (ja && !c.refazer) return resposta(200, Object.assign({ nova: false }, ja));
+    // 04/11/2026 (Renata: "liguei para o SESI, a FDSBC e o SENAC e continua dizendo que estão parados"): a análise guardada do
+    // dia se refaz sozinha quando, depois dela, entrou contato concluído (ligação, WhatsApp, visita…) na carteira de quem abre
+    // (na da equipe, de qualquer um); no máximo de 2 em 2 horas, para o custo não subir. O "↻ Refazer agora" continua.
+    let velha = false;
+    if (ja && !c.refazer && Date.now() - new Date(String((ja as { em: string }).em)).getTime() > 2 * 3600e3) {
+      let q = db.from('crm_atividades').select('id', { count: 'exact', head: true }).eq('concluida', true).neq('tipo', 'sistema').gt('concluida_em', String((ja as { em: string }).em));
+      if (eu.papel === 'vendedor') q = q.eq('responsavel_id', eu.user_id);
+      const { count } = await q;
+      velha = (count || 0) > 0;
+    }
+    if (ja && !c.refazer && !velha) return resposta(200, Object.assign({ nova: false }, ja));
   }
   // a análise de logística do dia: uma só, para a gestão e a logística
   const analiseL = c.acao === 'analise_logistica';

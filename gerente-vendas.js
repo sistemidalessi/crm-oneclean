@@ -13,8 +13,8 @@
 
   // cfg: { id (mascote e prefixo das ações), titulo, papeis, chave(), quem(), gerar(refazer), hoje(dia, chave), pergunta() }
   function cartao(cfg) {
-    let analise = null, dia = '', gerando = false, carregando = false;
-    const marca = 'crm_analise_' + cfg.id + '_tentada';
+    let analise = null, dia = '', gerando = false, carregando = false, conferido = 0;
+    const marca = 'crm_analise_' + cfg.id + '_tentada2';   // 04/11/2026: _tentada2 refaz a de hoje, apagada depois da regra nova do parado
     const daVez = () => !!(CRM.store() && cfg.papeis.indexOf(CRM.papel()) !== -1 && cfg.temStore(CRM.store()));
 
     async function carregar() {
@@ -29,6 +29,16 @@
         try { localStorage.setItem(marca, CRM.hoje() + ':' + cfg.chave()); } catch (e) { /* ok */ }
         gerar(false);
       } else CRM.render();
+    }
+
+    // 04/11/2026 (Renata ligou para os clientes e a análise seguia dizendo "parado"): com a tela aberta, de meia em meia hora
+    // pergunta ao servidor se a análise guardada ficou velha (mais de 2 horas e contato novo depois dela); se ficou, ele refaz
+    // e a nova entra no lugar. Enquanto isso, a de antes continua na tela.
+    async function confere() {
+      if (gerando || !analise || !analise.em || Date.now() - conferido < 30 * 60e3) return;
+      conferido = Date.now();
+      if (Date.now() - new Date(analise.em).getTime() < 2 * 3600e3) return;
+      try { const r = await cfg.gerar(CRM.store(), false); if (r && r.texto && r.em !== analise.em) { analise = r; CRM.render(); } } catch (e) { /* fica a de antes */ }
     }
 
     async function gerar(refazer) {
@@ -48,7 +58,7 @@
 
     function bloco() {
       if (!daVez()) return '';
-      if (dia !== CRM.hoje()) setTimeout(carregar, 0);
+      if (dia !== CRM.hoje()) setTimeout(carregar, 0); else setTimeout(confere, 0);
       const T = CRM.turma, rosto = T && T.img ? T.img(cfg.id, true) : '';
       const em = analise && analise.em ? ' <small>feita às ' + esc(new Date(analise.em).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' })) + '</small>' : '';
       return '<section class="cartao diretor ' + esc(cfg.id) + '"><h2>' + (rosto ? '<img class="gv-rosto" src="' + esc(rosto) + '" alt="" width="36" height="36"> ' : '') +
