@@ -1132,5 +1132,5 @@
     'pc-ir-fiscal': () => { CRM.estado.aba = 'fiscal'; CRM.render(); }
   });
 
-  CRM.produtos = { miniatura, fotoDe, abrirFicha, escolher, telaFotos, depoisFotos, garanteFotos, recarregar: () => { lista = null; det.clear(); }, abrir: cod => CRM.acoes['pf-abrir'](cod) };
+  CRM.produtos = { miniatura, urlFoto, fotoDe, abrirFicha, escolher, telaFotos, depoisFotos, garanteFotos, recarregar: () => { lista = null; det.clear(); }, abrir: cod => CRM.acoes['pf-abrir'](cod) };
 })(typeof window !== 'undefined' ? window : globalThis);

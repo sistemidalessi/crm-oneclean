@@ -1024,6 +1024,10 @@
     const cfg = E().cfg, d = p.dados || {};
     const itens = p.itens || [];
     const comDesc = itens.some(it => R.num(it.desconto));
+    // foto de cada produto (04/11/2026, simulação pedida pelo Anderson, vista num pedido de fornecedor): a de "Fotos e fichas";
+    // ligada por cfg.proposta_fotos (ou p.com_fotos, na simulação). Sem foto aprovada, a célula fica em branco.
+    const comFoto = !!(cfg.proposta_fotos || p.com_fotos) && !!(CRM.produtos && CRM.produtos.urlFoto);
+    const foto = cod => { const u = comFoto && cod ? CRM.produtos.urlFoto(cod) : ''; return '<td class="foto">' + (u ? '<img src="' + esc(u) + '" alt="" crossorigin="anonymous">' : '') + '</td>'; };
     const qtd = v => String(+Number(v || 0).toFixed(3)).replace('.', ',');
     const precoUnit = v => 'R$ ' + Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
     const totalDe = it => (it.total != null ? R.num(it.total) : R.totalItem(it));
@@ -1076,8 +1080,8 @@
         (linhaCliente.length ? '<p>' + linhaCliente.map(esc).join('&nbsp; | &nbsp;') + '</p>' : '') + (endereco ? '<p>' + esc(endereco) + '</p>' : '') + '</section>' +
       (cartoes.length ? '<section class="cartoes c' + cartoes.length + '">' + cartoes.map(x => '<div><strong>' + esc(x[0]) + '</strong><span>' + esc(x[1]) + '</span></div>').join('') + '</section>' : '') +
       '<h2 class="titulo-itens">Produtos selecionados</h2>' +
-      '<table class="itens"><thead><tr><th class="n">#</th><th>Produto / embalagem</th><th class="num">Qtd.</th><th class="num">Unitário</th>' + (comDesc ? '<th class="num">Desc.</th>' : '') + '<th class="num">Total</th></tr></thead><tbody>' +
-      itens.map((it, i) => '<tr><td class="n">' + (i + 1) + '</td><td><span class="prod">' + esc(frase(it.descricao)) + '</span>' + (it.codigo ? '<span class="cod">Cód. ' + esc(it.codigo) + (ncmDe(it.codigo) ? ' · NCM ' + esc(ncmDe(it.codigo)) : '') + '</span>' : '') + '</td>' +
+      '<table class="itens' + (comFoto ? ' com-foto' : '') + '"><thead><tr><th class="n">#</th>' + (comFoto ? '<th class="foto"></th>' : '') + '<th>Produto / embalagem</th><th class="num">Qtd.</th><th class="num">Unitário</th>' + (comDesc ? '<th class="num">Desc.</th>' : '') + '<th class="num">Total</th></tr></thead><tbody>' +
+      itens.map((it, i) => '<tr><td class="n">' + (i + 1) + '</td>' + (comFoto ? foto(it.codigo) : '') + '<td><span class="prod">' + esc(frase(it.descricao)) + '</span>' + (it.codigo ? '<span class="cod">Cód. ' + esc(it.codigo) + (ncmDe(it.codigo) ? ' · NCM ' + esc(ncmDe(it.codigo)) : '') + '</span>' : '') + '</td>' +
         '<td class="num qtd">' + esc(qtd(it.quantidade)) + (it.unidade ? ' ' + esc(it.unidade) : '') + '</td><td class="num">' + esc(precoUnit(it.preco)) + '</td>' +
         (comDesc ? '<td class="num">' + (R.num(it.desconto) ? esc(R.numero(it.desconto)) + '%' : '—') + '</td>' : '') +
         '<td class="num tot">' + esc(R.moeda(totalDe(it))) + '</td></tr>').join('') + '</tbody></table>' +
@@ -1147,7 +1151,7 @@
       const imgs = [...doc.querySelectorAll('img')].filter(i => !i.complete);
       await Promise.race([Promise.all(imgs.map(i => new Promise(ok => { i.onload = i.onerror = ok; }))), new Promise(ok => setTimeout(ok, 4000))]);
       const H = Math.ceil(Math.max(doc.scrollHeight, doc.getBoundingClientRect().height)) + 40; // folga: o html2canvas desenha o texto um pouco abaixo
-      const canvas = await window.html2canvas(doc, { scale: 2, backgroundColor: '#ffffff', logging: false, width: LARGURA, height: H, windowWidth: LARGURA, windowHeight: H + 50, scrollX: 0, scrollY: 0 });
+      const canvas = await window.html2canvas(doc, { scale: 2, useCORS: true, backgroundColor: '#ffffff', logging: false, width: LARGURA, height: H, windowWidth: LARGURA, windowHeight: H + 50, scrollX: 0, scrollY: 0 });
       const pdf = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4', compress: true });
       const base = doc.getBoundingClientRect();
       const cta = doc.querySelector('.cta');
@@ -1192,6 +1196,7 @@
     if (alvo === false) { CRM.toast('PDF não salvo. Quando quiser, clique em "Baixar PDF" na proposta.'); return; }
     CRM.toast('Gerando o PDF…');
     if (!ncms) { await garanteNcm(); m = montaProposta(p); } // o NCM dos itens (depois de escolher onde salvar: a janela precisa do clique)
+    if ((E().cfg.proposta_fotos || p.com_fotos) && CRM.produtos && CRM.produtos.garanteFotos) { await Promise.resolve(CRM.produtos.garanteFotos()); m = montaProposta(p); }
     try {
       const arq = await salva(await geraPdf(m), m.nome, alvo);
       CRM.toast('PDF salvo: ' + arq + (alvo ? '' : ' (pasta Downloads)') + '. Agora é só anexar no WhatsApp ou no e-mail.');
@@ -1208,7 +1213,7 @@
     if (en.endereco || en.cidade) d.endereco_entrega = [en.local, [en.endereco, en.numero].filter(Boolean).join(', '), en.compl, en.bairro ? 'Bairro: ' + en.bairro : '',
       [en.cidade, en.uf].filter(Boolean).join('/'), en.cep ? 'Cep: ' + en.cep : ''].filter(Boolean).join(' ');
     return fichas.baixarPdfProposta({ doc: 'pedido', numero: ped.numero, itens: ped.itens || [], valor_total: ped.valor_total, dados: d, negocio_id: ped.negocio_id,
-      empresa_id: ped.empresa_id, vendedor_id: ped.vendedor_id, criado_em: ped.criado_em, observacoes: null });
+      empresa_id: ped.empresa_id, vendedor_id: ped.vendedor_id, criado_em: ped.criado_em, observacoes: null, com_fotos: !!ped.com_fotos });
   };
   fichas.pedeArquivoPdf = nome => pedeArquivo(String(nome).replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim());
 

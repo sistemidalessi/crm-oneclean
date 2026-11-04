@@ -513,6 +513,8 @@ body.arrastando-card .zonas-fim { display: grid; grid-template-columns: 1fr 1fr;
 .proposta-doc .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .proposta-doc td.qtd { color: var(--cz); }
 .proposta-doc td.tot { color: var(--dp); font-weight: 700; }
+.proposta-doc th.foto, .proposta-doc td.foto { width: 52px; padding: 3px 4px; text-align: center; }
+.proposta-doc td.foto img { width: 46px; height: 46px; object-fit: contain; display: block; margin: 0 auto; background: #fff; border-radius: 6px; }
 .proposta-doc .fecho { display: grid; grid-template-columns: 1fr 1fr; gap: 10mm; align-items: start; margin-top: 4mm; break-inside: avoid; }
 .proposta-doc .atende { display: grid; gap: 3px; color: var(--cz); }
 .proposta-doc .atende h2 { margin-bottom: 4px; }
