@@ -24,8 +24,8 @@ const EMITE = ['admin', 'gestor', 'logistica'], CANCELA = ['admin', 'gestor', 'l
 type Linha = Record<string, unknown>;
 // A DANFE do e-mail ao cliente (04/11/2026) é desenhada aqui pelo MESMO danfe.js do site, baixado do GitHub na versão fixada
 // (node ferramentas/fixa-motor-notas.js troca o commit e o SHA-256; depois, publicar esta função de novo).
-const COMMIT = '0000000000000000000000000000000000000000';
-const HASHES: Record<string, string> = { 'danfe.js': '' };
+const COMMIT = '64fb20ca0ba4608270cc21302eb31d8a9f3d8383';
+const HASHES: Record<string, string> = { 'danfe.js': '451328cf4a5bb951c178c535e124209369238a10ec5050dfc9e158c0c8472f3e' };
 const FONTE = 'https://raw.githubusercontent.com/sistemidalessi/crm-oneclean/' + COMMIT + '/';
 const EMPRESA = Deno.env.get('CRM_EMPRESA_NOME') ?? 'OneClean';
 const LOGO = Deno.env.get('CRM_LOGO') ?? 'assets/oneclean-logo.png';
