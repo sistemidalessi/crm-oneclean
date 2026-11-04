@@ -158,7 +158,7 @@
 
   // ================================================================ Fila do dia
   // Um cliente por vez, na ordem do que pesa mais: tarefas atrasadas, de hoje, recompra, lead
-  // novo, cliente sem contato, negócio parado. O que foi resolvido sai sozinho (tarefa concluída,
+  // novo, cliente sem contato, negócio parado; na recompra, no sem contato e no parado, primeiro quem tem mais estrelas. O que foi resolvido sai sozinho (tarefa concluída,
   // contato registrado, retorno agendado); "Pular" só vale até recarregar a página.
   const pulados = new Set();
   let maiorFila = { dia: '', total: 0 }; // tamanho da fila no começo do dia (nesta página), para o progresso
@@ -172,16 +172,20 @@
       porEmpresa.set(empresaId, it); itens.push(it);
     };
     const porHora = (a, b) => (a.data_hora < b.data_hora ? -1 : 1);
+    // 04/11/2026 (Anderson): dentro de cada grupo, primeiro quem tem mais estrelas (qualificação calculada pelo histórico:
+    // compra mais, com mais frequência e paga em dia). Tarefas seguem pela hora (compromisso marcado); leads, pela chegada.
+    const estr = id => { const e = CRM.empresa(id); return e ? R.num(e.qualificacao) : 0; };
+    const porEstrelas = idDe => (a, b) => estr(idDe(b)) - estr(idDe(a));
     // boleto atualizado que o financeiro mandou (cobranca.js, 14/10/2026): vem antes de tudo
     if (CRM.cobranca) CRM.cobranca.paraFila().forEach(x => poe('b:' + x.empresaId, x.empresaId, 'cobranca', x.motivo));
     al.atrasadas.slice().sort(porHora).forEach(a => poe('t:' + a.id, a.empresa_id, 'tarefa', 'Tarefa atrasada desde ' + R.dataBR(a.data_hora).slice(0, 5) + ': ' + a.descricao, { atividade: a }));
     al.deHoje.slice().sort(porHora).forEach(a => poe('t:' + a.id, a.empresa_id, 'tarefa', 'Tarefa de hoje às ' + R.horaLocal(a.data_hora) + ': ' + a.descricao, { atividade: a }));
-    al.recompra.forEach(e => poe('r:' + e.id, e.id, 'recompra', 'Hora da recompra'));
+    al.recompra.slice().sort(porEstrelas(e => e.id)).forEach(e => poe('r:' + e.id, e.id, 'recompra', 'Hora da recompra'));
     al.leadsSemAtendimento.slice().sort((a, b) => (a.criado_em < b.criado_em ? -1 : 1)).forEach(e => poe('l:' + e.id, e.id, 'lead', 'Lead novo sem atendimento (chegou ' + R.dataBR(e.criado_em) + ')'));
-    al.clientesSemContato.forEach(e => { const r = CRM.resumo(e.id), u = r.ultimoContato || r.ultimaCompra;
+    al.clientesSemContato.slice().sort(porEstrelas(e => e.id)).forEach(e => { const r = CRM.resumo(e.id), u = r.ultimoContato || r.ultimaCompra;
       poe('c:' + e.id, e.id, 'contato', u ? 'Cliente sem contato há ' + R.diasEntre(R.diaLocal(u), hoje) + ' dias' : 'Cliente sem nenhum contato registrado'); });
     // 04/11/2026 (Renata): na etapa de orçamento o negócio está esperando o cliente, não parado: o aviso é cobrar o retorno
-    al.negociosParados.forEach(n => { const et = CRM.etapa(n.etapa_id), dias = R.diasEntre(R.ultimoMovimento(n, E().ix), hoje);
+    al.negociosParados.slice().sort(porEstrelas(n => n.empresa_id)).forEach(n => { const et = CRM.etapa(n.etapa_id), dias = R.diasEntre(R.ultimoMovimento(n, E().ix), hoje);
       poe('n:' + n.id, n.empresa_id, 'parado', (R.etapaDeOrcamento(et && et.nome) ? 'Orçamento aguardando retorno do cliente, sem contato há ' + dias + ' dias (cobrar o retorno): '
         : 'Negócio parado há ' + dias + ' dias: ') + n.titulo + ' (' + R.moeda(n.valor) + ')', { negocio: n }); });
     return itens;
@@ -235,7 +239,7 @@
         '<section class="cartao fila-atual">' +
           '<p class="fila-tipo">' + CRM.selo(rot[0], rot[1]) + ' <span>' + esc(it.motivo) + '</span>' + (CRM.seloFinanceiro ? ' ' + CRM.seloFinanceiro(e.id) : '') + '</p>' +
           (it.outros.length ? '<p class="fila-outros">Também: ' + esc(it.outros.join(' · ')) + '</p>' : '') +
-          '<h2><button type="button" class="link" data-acao="abrir-empresa" data-id="' + esc(e.id) + '">' + esc(e.nome) + '</button> <small>' + esc(R.rotulo(R.SITUACOES || [], e.situacao) || e.situacao) + ' · ' + esc(CRM.nomeUsuario(e.responsavel_id)) + '</small></h2>' +
+          '<h2><button type="button" class="link" data-acao="abrir-empresa" data-id="' + esc(e.id) + '">' + esc(e.nome) + '</button> ' + CRM.estrelas(e.qualificacao, e.qualificacao_motivo) + ' <small>' + esc(R.rotulo(R.SITUACOES || [], e.situacao) || e.situacao) + ' · ' + esc(CRM.nomeUsuario(e.responsavel_id)) + '</small></h2>' +
           '<ul class="fila-contexto">' + contextoFila(it) + '</ul>' +
           '<div class="fila-contatar"><span>Contatar:</span>' + acoesRapidas(e.id, it.atividade && it.atividade.contato_id) + '</div>' +
           '<div class="fila-botoes">' + botoes.join('') + '<span class="flex"></span><button type="button" class="btn sec" data-acao="fila-pular" data-id="' + esc(it.chave) + '">Pular →</button></div>' +
