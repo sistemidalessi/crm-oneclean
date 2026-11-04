@@ -568,6 +568,7 @@
     return unwrap(await this.sb.from('crm_estoque_avulsas').select('*').order('criado_em', { ascending: false }).limit(limite || 100)) || [];
   };
   Supa.prototype.estoqueAvulsa = async function (p) { return unwrap(await this.sb.rpc('crm_estoque_entrada_avulsa', { p })); };
+  Supa.prototype.compraCorrigir = async function (id, itens) { return unwrap(await this.sb.rpc('crm_compra_corrigir', { p_compra: id, p_itens: itens })); };
   Supa.prototype.estoqueSaidaAvulsa = async function (codigo, quantidade, motivo) { return unwrap(await this.sb.rpc('crm_estoque_saida_avulsa', { p_codigo: codigo, p_quantidade: quantidade, p_motivo: motivo })); };
   Supa.prototype.compraPedidoItem = async function (id, ordem, quantidade, custo) { return unwrap(await this.sb.rpc('crm_compra_pedido_item', { p_id: id, p_ordem: ordem, p_quantidade: quantidade, p_custo: custo == null ? null : custo })); };
   Supa.prototype.estoqueAvulsaEstornar = async function (id, motivo) { return unwrap(await this.sb.rpc('crm_estoque_avulsa_estornar', { p_id: id, p_motivo: motivo })); };

@@ -9360,3 +9360,68 @@ begin
 end $$;
 revoke all on function public.crm_compra_pedido_item(bigint, integer, numeric, numeric) from public, anon;
 grant execute on function public.crm_compra_pedido_item(bigint, integer, numeric, numeric) to authenticated;
+
+-- ============================================================ 04/11/2026: corrigir a entrada de nota de compra já lançada
+-- Corrigir a entrada de uma nota de compra já lançada (04/11/2026, pedido do Wellington: "preciso que deixe eu entrar e editar
+-- ... não está aparecendo nenhum campo"; NF 4144 da DR com "Desinfetante Dovini/Lavanda 5 L" entrados no Urca 2 L).
+-- Para cada item trocado (produto ou quantas vêm na embalagem): estorna o que entrou (o livro não se apaga) desfazendo também o
+-- custo médio do produto errado, e dá a entrada no produto certo pelo custo da nota; a ligação do código do fornecedor é
+-- regravada (a próxima nota já vem certa). Contas a pagar não mudam (o valor da nota é o mesmo). Só administrador e comprador.
+alter table public.crm_estoque_mov add column if not exists compra_item_corr uuid;  -- entrada refeita de um item de nota de compra
+create index if not exists crm_estoque_mov_corr on public.crm_estoque_mov (compra_item_corr) where compra_item_corr is not null;
+
+create or replace function public.crm_compra_corrigir(p_compra uuid, p_itens jsonb) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare c record; it record; x jsonb; cod text; f numeric; q numeric; custo numeric; m record; s record; cm numeric; n integer := 0; agora timestamptz := now();
+begin
+  if not (public.crm_eh_admin() or public.crm_eh_comprador()) then raise exception 'só o administrador e o comprador corrigem a entrada'; end if;
+  select * into c from public.crm_compras where id = p_compra for update;
+  if c.id is null then raise exception 'nota de compra não encontrada'; end if;
+  if c.situacao <> 'lancada' then raise exception 'a nota ainda não teve entrada: use "Dar entrada no estoque"'; end if;
+  if c.devolucao then raise exception 'devolução de cliente não se corrige por aqui: fale com o administrador'; end if;
+  for x in select * from jsonb_array_elements(coalesce(p_itens, '[]'::jsonb)) loop
+    select * into it from public.crm_compra_itens where id = (x->>'id')::uuid and compra_id = c.id for update;
+    if it.id is null then raise exception 'item não é desta nota'; end if;
+    cod := nullif(btrim(x->>'codigo'), ''); f := nullif(x->>'fator', '')::numeric;
+    if cod is null or f is null or f <= 0 then raise exception 'item % (%): diga o produto e quantas vêm na embalagem', it.ordem, it.descricao; end if;
+    if cod ~ '\.\d+$' or not exists (select 1 from public.crm_estoque e where e.codigo = cod) then
+      raise exception 'item % (%): o código % não está no cadastro de produtos (confira o zero da frente)', it.ordem, it.descricao, cod; end if;
+    if cod = it.codigo and f = it.fator then continue; end if;
+    -- a entrada viva do item (a original ou a última correção, sem estorno)
+    select * into m from public.crm_estoque_mov mv
+     where mv.tipo = 'entrada' and (mv.compra_item_id = it.id or mv.compra_item_corr = it.id)
+       and not exists (select 1 from public.crm_estoque_mov e where e.estorno_de = mv.id)
+     order by mv.criado_em desc limit 1;
+    if m.id is not null then
+      -- desfaz o custo médio que a entrada errada puxou e estorna a quantidade
+      select * into s from public.crm_estoque_saldo where codigo = m.codigo for update;
+      if s.saldo - m.quantidade > 0 and s.custo_medio is not null and coalesce(m.custo_unit, 0) > 0 then
+        cm := round((s.saldo * s.custo_medio - m.quantidade * m.custo_unit) / (s.saldo - m.quantidade), 4);
+        if cm > 0 then update public.crm_estoque_saldo set custo_medio = cm where codigo = m.codigo; end if;
+      end if;
+      insert into public.crm_estoque_mov (codigo, quando, tipo, quantidade, custo_unit, estorno_de, motivo)
+      values (m.codigo, agora, 'estorno', -m.quantidade, m.custo_unit, m.id,
+        left('Correção da entrada NF ' || coalesce(c.numero::text, '?') || ': item ' || it.ordem || ' ia para ' || cod, 200));
+    end if;
+    q := round(it.quantidade * f, 3);
+    if q <= 0 then raise exception 'item % (%): quantidade zerada', it.ordem, it.descricao; end if;
+    custo := round((it.valor_total + it.ipi + it.st + it.frete + it.outras) / q, 4);
+    insert into public.crm_estoque_saldo (codigo, descricao, unidade, inicio)
+      select cod, coalesce(e.descricao, it.descricao), public.crm_un(coalesce(e.unidade, it.unidade)), agora - interval '1 second'
+      from (select 1) u left join public.crm_estoque e on e.codigo = cod
+      on conflict (codigo) do nothing;
+    insert into public.crm_estoque_mov (codigo, quando, tipo, quantidade, custo_unit, qtd_doc, unidade_doc, fator, compra_item_corr, motivo)
+      values (cod, agora, 'entrada', q, custo, it.quantidade, public.crm_un(it.unidade), f, it.id,
+        left('NF ' || coalesce(c.numero::text, '?') || ' ' || coalesce(c.fornecedor_nome, '') || ' (correção)', 200));
+    update public.crm_compra_itens set codigo = cod, fator = f where id = it.id;
+    if c.fornecedor_doc is not null and it.cod_fornecedor is not null then
+      insert into public.crm_compra_vinculos (fornecedor_doc, cod_fornecedor, codigo, fator) values (c.fornecedor_doc, it.cod_fornecedor, cod, f)
+        on conflict (fornecedor_doc, cod_fornecedor) do update set codigo = excluded.codigo, fator = excluded.fator, atualizado_em = now();
+    end if;
+    n := n + 1;
+  end loop;
+  update public.crm_compras set atualizado_em = agora where id = c.id;
+  return jsonb_build_object('corrigidos', n);
+end $$;
+revoke all on function public.crm_compra_corrigir(uuid, jsonb) from public, anon;
+grant execute on function public.crm_compra_corrigir(uuid, jsonb) to authenticated;

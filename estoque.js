@@ -1227,14 +1227,17 @@
         const dv = devolucoes.get(id);
         const ctx = { vinculos: new Map(vinc.map(v => [v.fornecedor_doc + '|' + v.cod_fornecedor, v])), produtos: base, unidades: new Map(unis.map(u => [u.codigo + '|' + u.unidade, Number(u.fator)])), devolucao: !!dv };
         const pend = c.situacao === 'pendente', fat = pend && editaParcelas(c);
+        // 04/11/2026 (Wellington): nota já lançada também se corrige (produto ou número da embalagem): estorno + entrada certa
+        const corrige = !pend && !dv && c.situacao === 'lancada' && (CRM.ehAdmin() || CRM.ehComprador());
+        const edita = pend || corrige;
         const fknContas = fat && dono() && st.compraParcelasFkn ? await st.compraParcelasFkn(id).catch(() => []) : [];
         const sug = new Map(itens.map(it => [it.id, pend ? S.sugere(it, c.fornecedor_doc, ctx) : { codigo: it.codigo, fator: it.fator, como: '' }]));
         const linhaI = it => {
           const g = sug.get(it.id) || {};
           return '<tr><td><strong>' + esc(it.descricao) + '</strong><small>' + esc(it.cod_fornecedor || '') + ' · ' + qtd(it.quantidade) + ' ' + esc(it.unidade || '') + (op() ? '' : ' · ' + R.moeda(Number(it.valor_total) + Number(it.ipi) + Number(it.st) + Number(it.frete) + Number(it.outras))) +
             (g.como ? ' · ' + esc(g.como) : '') + '</small></td>' +
-            '<td><input name="c_' + esc(it.id) + '" list="esProdutos" value="' + esc(g.codigo || '') + '" placeholder="código do produto"' + (pend ? '' : ' disabled') + ' class="es-cod"><small data-nome="' + esc(it.id) + '">' + esc(nomeDe.get(g.codigo) || '') + '</small></td>' +
-            '<td><input name="f_' + esc(it.id) + '" type="number" step="any" min="0" value="' + esc(g.fator == null ? '' : g.fator) + '"' + (pend ? '' : ' disabled') + ' class="es-fator"><small data-q="' + esc(it.id) + '"></small></td>' +
+            '<td><input name="c_' + esc(it.id) + '" list="esProdutos" value="' + esc(g.codigo || '') + '" placeholder="código do produto"' + (edita ? '' : ' disabled') + ' class="es-cod"><small data-nome="' + esc(it.id) + '">' + esc(nomeDe.get(g.codigo) || '') + '</small></td>' +
+            '<td><input name="f_' + esc(it.id) + '" type="number" step="any" min="0" value="' + esc(g.fator == null ? '' : g.fator) + '"' + (edita ? '' : ' disabled') + ' class="es-fator"><small data-q="' + esc(it.id) + '"></small></td>' +
             '<td>' + (pend ? '<label class="filtro-inline"><input type="checkbox" name="i_' + esc(it.id) + '"> não é estoque</label>' : '') + '</td></tr>';
         };
         let lerParcelas = null;
@@ -1245,11 +1248,11 @@
               : 'Devolução: entrada dada em ' + quando(c.lancada_em) + '.' + (dv.efeitos && dv.efeitos.abatido != null ? ' Abatido dos títulos: ' + R.moeda(dv.efeitos.abatido) + (Number(dv.efeitos.sobra) > 0 ? ' · a devolver ao cliente: ' + R.moeda(dv.efeitos.sobra) : '') + '.' : ''))
           : (pend ? 'Ligue cada item a um produto nosso e diga quantas unidades do nosso estoque vêm em 1 unidade da nota (ex.: 1 caixa com 300 esponjas = 300). "Não é estoque": frete, brinde, material de uso. Dar entrada soma no estoque do CRM e, depois da virada (CRM dono do cadastro), lança as parcelas no contas a pagar do Caixa.' +
               (fat ? ' Confira também o faturamento (as parcelas), embaixo, antes de dar a entrada.' : '')
-            : 'Entrada dada em ' + quando(c.lancada_em) + '.') + (!dv && !fat && c.parcelas && c.parcelas.length ? ' Parcelas da nota: ' + c.parcelas.map(p => R.dataBR(p.vencimento) + ' ' + R.moeda(p.valor)).join(', ') + ' (depois da virada entram no contas a pagar do Caixa com a entrada; antes, vêm do FKN).' : ''),
+            : 'Entrada dada em ' + quando(c.lancada_em) + '.' + (corrige ? ' Item no produto errado ou com o número da embalagem errado? Troque aqui e clique em "Salvar a correção": o CRM estorna o que entrou errado e dá a entrada no produto certo (o custo médio é refeito; as contas a pagar não mudam).' : '')) + (!dv && !fat && c.parcelas && c.parcelas.length ? ' Parcelas da nota: ' + c.parcelas.map(p => R.dataBR(p.vencimento) + ' ' + R.moeda(p.valor)).join(', ') + ' (depois da virada entram no contas a pagar do Caixa com a entrada; antes, vêm do FKN).' : ''),
           htmlDepois: '<datalist id="esProdutos">' + R.ordemAlfa(base.map(e => [e.codigo, e.descricao]), x => x[1] || x[0]).map(([k, v]) => '<option value="' + esc(k) + '">' + esc(v || '') + '</option>').join('') + '</datalist>' +
             '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Item da nota</th><th>Produto nosso</th><th title="Quantas unidades do nosso estoque vêm em 1 unidade da nota (o antigo &quot;fator&quot;)">Vem quantas na embalagem?</th><th></th></tr></thead><tbody>' + itens.map(linhaI).join('') + '</tbody></table></div>' +
             (fat ? blocoParcelas(c, fknContas) : ''),
-          salvarTexto: pend ? (dv ? 'Dar entrada da devolução' : 'Dar entrada no estoque') : 'Fechar',
+          salvarTexto: pend ? (dv ? 'Dar entrada da devolução' : 'Dar entrada no estoque') : corrige ? 'Salvar a correção' : 'Fechar',
           rodape: pend && !dv && (CRM.ehAdmin() || CRM.ehComprador()) ? '<button type="button" class="btn sec" data-acao="es-compra-mao" data-id="' + esc(id) + '" title="Quando os itens do XML não batem com o que veio (ex.: uma linha só com &quot;diversos&quot;)">Os itens não batem: lançar à mão</button>' : '',
           extras: form => {
             const atualiza = it => {
@@ -1263,6 +1266,23 @@
             lerParcelas = fat ? ligaParcelas(form, c) : null;
           },
           aoSalvar: async (v, form) => {
+            if (corrige) {
+              const mud = [];
+              for (const it of itens) {
+                let cod = form.elements['c_' + it.id].value.trim(); const fa = Number(form.elements['f_' + it.id].value);
+                if (cod && !cad.has(cod)) { const certo = S.codigoDoCadastro(cod, cad); if (certo) cod = certo; }
+                if (cod === String(it.codigo || '') && fa === Number(it.fator)) continue;
+                if (!cod || !cad.has(cod)) throw new Error('item "' + it.descricao + '": o código ' + (cod || '(vazio)') + ' não está no cadastro de produtos');
+                if (!(fa > 0)) throw new Error('item "' + it.descricao + '": diga quantas vêm na embalagem');
+                mud.push({ id: it.id, codigo: cod, fator: fa, texto: it.descricao + ': ' + (it.codigo || 'sem produto') + ' × ' + qtd(it.fator) + ' → ' + cod + ' ' + (nomeDe.get(cod) || '') + ' × ' + qtd(fa) });
+              }
+              if (!mud.length) return;
+              if (!confirm('Corrigir a entrada de ' + mud.length + ' item(ns)?\n\n' + mud.map(z => '· ' + z.texto).join('\n') + '\n\nO que entrou errado é estornado (fica no livro) e a entrada vai para o produto certo.')) return false;
+              const r = await CRM.store().compraCorrigir(id, mud.map(z => ({ id: z.id, codigo: z.codigo, fator: z.fator })));
+              CRM.toast('Entrada corrigida: ' + (r && r.corrigidos != null ? r.corrigidos : mud.length) + ' item(ns). A próxima nota deste fornecedor já vem com o produto certo.');
+              compras = await CRM.store().compras(1000); saldo = null; carrega(); CRM.render();
+              return;
+            }
             if (!pend) return;
             const lista = itens.map(it => ({ id: it.id, codigo: form.elements['c_' + it.id].value.trim(), fator: form.elements['f_' + it.id].value, ignorar: form.elements['i_' + it.id].checked }));
             const trocados = [];
