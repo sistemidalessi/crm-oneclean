@@ -8,6 +8,7 @@
 //        crm_ceo_resumo(), que só o service_role executa. Mesma senha.) 25/10/2026: junta `fiscal` (crm_ceo_fiscal() e a
 //        validade do certificado A1, pelo /saude do serviço fiscal) para o Diretor Fiscal do painel; e `analises`: os
 //        textos de hoje do Gerente de Vendas (equipe), do Comprador e da Logística, para o CEO do grupo (os que já saíram).
+//        04/11/2026: junta `cobranca` (a rodada de hoje da cobrança automática: boletos atualizados e avisos, com o resumo pronto).
 // A senha é gerada pelo administrador em Configurações → Integrações → "Leitura do Caixa" (aparece uma
 // vez só; aqui fica só o SHA-256, em crm_integracoes com uso = 'caixa'). Sem senha ou com senha errada:
 // 401 e nada mais. Só GET (o resto: 405). Não grava nada, nem registro de uso.
@@ -46,6 +47,20 @@ async function certificadoA1() {
   } catch (_e) { return { erro: 'serviço fiscal não respondeu' }; }
 }
 
+// resumo da cobrança automática do dia (crm-cobranca): o texto pronto e os números, sem telefone nem e-mail de cliente
+// deno-lint-ignore no-explicit-any
+function cobrancaDe(r: any) {
+  if (!r) return null;
+  const d = r.dados || {}, b = (d.boletos || []), a = (d.avisos || []);
+  // deno-lint-ignore no-explicit-any
+  const soma = (l: any[]) => Math.round(l.reduce((s, x) => s + (Number(x.total) || 0), 0) * 100) / 100;
+  return { dia: r.dia, em: r.atualizado_em, resumo: String(r.resumo || '').slice(0, 3500),
+    // deno-lint-ignore no-explicit-any
+    boletos_enviados: b.filter((x: any) => x.enviado).length, valor_boletos: soma(b.filter((x: any) => x.enviado)),
+    // deno-lint-ignore no-explicit-any
+    avisos_enviados: a.filter((x: any) => x.enviado).length, nao_sairam: b.concat(a).filter((x: any) => !x.enviado).length,
+    fora: (d.fora || []).length, sem_titulo: (d.sem || []).length, cartorio_decidir: Number(d.alertas) || 0, erro: d.erro || null };
+}
 async function sha256(t: string) {
   const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t));
   return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join('');
@@ -185,14 +200,17 @@ Deno.serve(async (req) => {
     const url = new URL(req.url);
     if (url.searchParams.get('parte') === 'ceo') {
       const hoje = hojeSP(), corta = (x: { texto?: string; em?: string } | null) => (x && x.texto ? { texto: String(x.texto).slice(0, 2500), em: x.em || null } : null);
-      const [{ data, error }, fisc, cert, av, ac, al] = await Promise.all([db.rpc('crm_ceo_resumo'), db.rpc('crm_ceo_fiscal'), certificadoA1(),
+      const [{ data, error }, fisc, cert, av, ac, al, cob] = await Promise.all([db.rpc('crm_ceo_resumo'), db.rpc('crm_ceo_fiscal'), certificadoA1(),
         db.from('crm_ia_analises_vendas').select('texto, em').eq('dia', hoje).eq('chave', 'equipe').maybeSingle(),
         db.from('crm_ia_analises').select('texto, em').eq('dia', hoje).eq('tipo', 'compras').maybeSingle(),
-        db.from('crm_ia_analises_areas').select('texto, em').eq('dia', hoje).eq('area', 'logistica').maybeSingle()]);
+        db.from('crm_ia_analises_areas').select('texto, em').eq('dia', hoje).eq('area', 'logistica').maybeSingle(),
+        // 04/11/2026: a rodada de cobrança de hoje (boletos atualizados, avisos do cartório), para o CEO mandar ao Anderson em destaque
+        db.from('crm_cobranca_rodadas').select('dia, resumo, dados, atualizado_em').eq('dia', hoje).maybeSingle()]);
       if (error) throw new Error('crm_ceo_resumo: ' + error.message);
       if (fisc.error) console.error('[crm-caixa-leitura] crm_ceo_fiscal: ' + fisc.error.message);
       return resposta(200, Object.assign({}, data, { fiscal: Object.assign({}, fisc.data || {}, { certificado_a1: cert }),
-        analises: { dia: hoje, vendas: corta(av.data), compras: corta(ac.data), logistica: corta(al.data) } }));
+        analises: { dia: hoje, vendas: corta(av.data), compras: corta(ac.data), logistica: corta(al.data) },
+        cobranca: cobrancaDe(cob.data) }));
     }
     if (url.searchParams.get('parte') === 'pessoal') {
       const de = String(url.searchParams.get('de') || ''), ate = String(url.searchParams.get('ate') || '');

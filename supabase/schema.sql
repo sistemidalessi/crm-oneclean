@@ -9086,3 +9086,25 @@ end;
 $$;
 revoke all on function public.crm_bb_site_resolver(text, text) from public, anon;
 grant execute on function public.crm_bb_site_resolver(text, text) to authenticated;
+
+-- ============ Cobrança automática: boleto vencido atualizado e resumo da rodada (04/11/2026)
+alter table public.crm_boletos add column if not exists origem text not null default 'tela';
+alter table public.crm_boletos add column if not exists encargos jsonb;
+create index if not exists crm_boletos_origem_idx on public.crm_boletos (origem) where origem <> 'tela';
+
+create table if not exists public.crm_cobranca_rodadas (
+  dia           date primary key,
+  resumo        text not null default '',
+  dados         jsonb not null default '{}'::jsonb,
+  criado_em     timestamptz not null default now(),
+  atualizado_em timestamptz not null default now()
+);
+alter table public.crm_cobranca_rodadas enable row level security;
+do $$ begin
+  if not exists (select 1 from pg_policies where tablename = 'crm_cobranca_rodadas' and policyname = 'crm_cobranca_rodadas_admin') then
+    create policy crm_cobranca_rodadas_admin on public.crm_cobranca_rodadas for select to authenticated using ((select public.crm_eh_admin()));
+  end if;
+end $$;
+revoke all on public.crm_cobranca_rodadas from anon;
+grant select on public.crm_cobranca_rodadas to authenticated;
+

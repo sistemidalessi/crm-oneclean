@@ -62,3 +62,16 @@ test('a Edge Function crm-caixa-leitura está fixada no caixa-calculo.js atual e
   const r = g.CRMCaixa.resumoLeitura({ lancamentos: [], saldos: [{ data: '2026-10-05', valor: 8052.79 }], titulos: [] }, { hoje: '2026-10-06', dias: 30 });
   assert.deepEqual([r.empresa, r.saldo.atual, r.proximos_dias.length, r.periodo.ate], ['oneclean', 8052.79, 30, '2026-11-04']);
 });
+
+test('a Edge Function crm-cobranca está fixada no boleto.js atual e ele roda do jeito que ela carrega (boleto atualizado, 04/11/2026)', () => {
+  const { hashesDe, arquivoDa } = require('../ferramentas/fixa-motor-notas.js');
+  const s = fs.readFileSync(arquivoDa('crm-cobranca'), 'utf8');
+  const h = hashesDe(['boleto.js']);
+  assert.match(s, /const COMMIT = '[0-9a-f]{40}';/, 'sem commit fixado');
+  assert.ok(s.includes("'boleto.js': '" + h['boleto.js'] + "'"), 'boleto.js mudou: rode node ferramentas/fixa-motor-notas.js e publique a crm-cobranca');
+  const codigo = fs.readFileSync(path.join(__dirname, '..', 'boleto.js'), 'utf8');
+  const g = {};
+  new Function('module', 'require', 'globalThis', 'window', codigo)(undefined, undefined, g, g);
+  assert.strictEqual(typeof g.CRMBoleto.desenha, 'function');
+  assert.strictEqual(typeof g.CRMBoleto.codigoBarras, 'function');
+});
