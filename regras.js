@@ -459,6 +459,8 @@
     return { atrasadas, deHoje, leadsSemAtendimento, negociosParados, negociosEsquecidos, clientesSemContato, recompra, inativos };
   }
 
+  // Etapa de orçamento/proposta (04/11/2026): o negócio ali espera o retorno do cliente; o aviso é cobrar, não "parado".
+  const etapaDeOrcamento = nome => /orcamento|proposta/.test(normaliza(nome || ''));
   // Dia do último movimento de um negócio: mudança de etapa ou último contato com a empresa.
   function ultimoMovimento(n, ix) {
     const etapa = diaLocal(n.etapa_desde || n.criado_em) || '';
@@ -1188,7 +1190,7 @@
     inicioSemana, periodo, noPeriodo, proximaRecorrencia,
     normaliza, digitos, doc, ehCNPJ, ehCPF, chaveNome, linkWhatsApp, linkTelefone, formataCNPJ, cnpjValido, casaBusca, iniciais,
     primeiroNome, aplicaModelo, linkGoogleAgenda, totalItem, totalItens, indexa, probabilidade,
-    situacaoEfetiva, situacaoTarefa, alertas, ultimoMovimento, ritmoCompra, cicloRecompra, itensHabituais, nomeDeItem, textoItens, dashboard, duplicadosEmpresas, duplicadosContatos, mesclaCampos,
+    situacaoEfetiva, situacaoTarefa, alertas, ultimoMovimento, etapaDeOrcamento, ritmoCompra, cicloRecompra, itensHabituais, nomeDeItem, textoItens, dashboard, duplicadosEmpresas, duplicadosContatos, mesclaCampos,
     buscaGlobal, csvParse, csvGera, csvCelula, numeroBR, dataPlanilha,
     cfopDeVenda, notaDeVenda, devolucoesComoNotas, sugereSegmento, NOMES_SEGMENTO, faturamento, chaveDoc, chaveTelefone, chaveEmail, achaDuplicados, motivoDuplicado, nomesCompativeis, mesmoCliente
   };

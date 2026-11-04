@@ -180,7 +180,10 @@
     al.leadsSemAtendimento.slice().sort((a, b) => (a.criado_em < b.criado_em ? -1 : 1)).forEach(e => poe('l:' + e.id, e.id, 'lead', 'Lead novo sem atendimento (chegou ' + R.dataBR(e.criado_em) + ')'));
     al.clientesSemContato.forEach(e => { const r = CRM.resumo(e.id), u = r.ultimoContato || r.ultimaCompra;
       poe('c:' + e.id, e.id, 'contato', u ? 'Cliente sem contato há ' + R.diasEntre(R.diaLocal(u), hoje) + ' dias' : 'Cliente sem nenhum contato registrado'); });
-    al.negociosParados.forEach(n => poe('n:' + n.id, n.empresa_id, 'parado', 'Negócio parado há ' + R.diasEntre(R.ultimoMovimento(n, E().ix), hoje) + ' dias: ' + n.titulo + ' (' + R.moeda(n.valor) + ')', { negocio: n }));
+    // 04/11/2026 (Renata): na etapa de orçamento o negócio está esperando o cliente, não parado: o aviso é cobrar o retorno
+    al.negociosParados.forEach(n => { const et = CRM.etapa(n.etapa_id), dias = R.diasEntre(R.ultimoMovimento(n, E().ix), hoje);
+      poe('n:' + n.id, n.empresa_id, 'parado', (R.etapaDeOrcamento(et && et.nome) ? 'Orçamento aguardando retorno do cliente, sem contato há ' + dias + ' dias (cobrar o retorno): '
+        : 'Negócio parado há ' + dias + ' dias: ') + n.titulo + ' (' + R.moeda(n.valor) + ')', { negocio: n }); });
     return itens;
   }
   const ROTULO_FILA = { cobranca: ['Cobrança', 'vermelho'], tarefa: ['Tarefa', 'azul'], recompra: ['Recompra', 'verde'], lead: ['Lead novo', 'roxo'], contato: ['Sem contato', 'ambar'], parado: ['Negócio parado', 'ambar'] };

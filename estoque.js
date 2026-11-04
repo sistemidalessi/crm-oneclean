@@ -459,7 +459,7 @@
   let avulsas = null; // entradas avulsas (compra sem nota), só administrador e comprador
   const filtro = { ver: 'saldo', busca: '', soDif: false };
   // Relatórios (28/10/2026, Wellington): estoque atual e vendas do ano mês a mês, só quantidades
-  const rel = { busca: '', soSaldo: true, ano: new Date().getFullYear(), vendas: null, vendasAno: null, carregando: false };
+  const rel = { busca: '', soSaldo: true, comValor: false, ano: new Date().getFullYear(), vendas: null, vendasAno: null, carregando: false };
   let dfe = [], dfeEst = null, buscouDfe = false, buscandoDfe = '', fornDocs = [], fornCad = [], itensProd = [], itensPend = [], nomesOp = [];
   let chegadas = new Map(); // compra.id → { chegou_em, chegou_nome, chegou_obs }: o "Chegou" da logística (22/10/2026)
   let devolucoes = new Map(); // compra.id → { ref_chave, ref_numero, efeitos }: devolução emitida pelo cliente (22/10/2026)
@@ -672,7 +672,9 @@
     const est = estoqueRel(linhas);
     if (rel.vendasAno !== rel.ano) setTimeout(carregaVendas, 0);
     const vend = rel.vendasAno === rel.ano ? vendasRel() : null;
-    const comValorAno = !!(vend && vend.some(x => Array.isArray(x.valores)));   // a logística recebe só quantidades
+    // a logística recebe só quantidades; quem vê valor escolhe (04/11/2026, Wellington: "opção para não aparecer o valor,
+    // somente o número de produtos que saiu"): o padrão é só a quantidade
+    const temValorAno = !!(vend && vend.some(x => Array.isArray(x.valores))), comValorAno = temValorAno && rel.comValor;
     const anoAtual = new Date().getFullYear(), anos = [];
     for (let a = anoAtual; a >= 2025; a--) anos.push([a, String(a)]);
     const mostra = 500;
@@ -693,6 +695,7 @@
       (vista !== 'ano' ? '' : '<section class="cartao"><h2>Vendas do ano, mês a mês <small>' + (vend ? vend.length + ' produto(s)' : 'carregando…') + '</small></h2>' +
       '<p class="dica">' + (comValorAno ? 'Valor (R$) e quantidade' : 'Quantidade') + ' vendida de cada produto em cada mês, pelas notas de venda (sem as canceladas), como a venda anual por produto do FKN. A caixa vendida com o código da unidade conta em unidades.</p>' +
       '<p class="acoes"><label class="filtro-inline">Ano <select data-rel-ano>' + CRM.opcoesHTML(anos, rel.ano) + '</select></label> ' +
+      (temValorAno ? '<label class="filtro-inline"><input type="checkbox" data-rel-valor' + (rel.comValor ? ' checked' : '') + '> mostrar também o valor (R$)</label> ' : '') +
       '<button type="button" class="btn sec" data-acao="es-rel-vendas-csv"' + (vend ? '' : ' disabled') + '>Baixar planilha</button></p>' +
       (!vend ? '<p class="vazio">Carregando…</p>' : !vend.length ? '<p class="vazio">Nenhuma venda neste ano.</p>'
         : '<div class="tabela-rolagem"><table class="tabela rel-ano"><thead><tr><th>Código</th><th>Produto</th>' + (comValorAno ? '<th></th>' : '') + MESES.map(m => '<th class="num">' + m + '</th>').join('') + '<th class="num">Total</th></tr></thead><tbody>' +
@@ -1111,6 +1114,8 @@
       if (rb) rb.addEventListener('input', () => { rel.busca = rb.value; CRM.render(); });
       const rs = c.querySelector('[data-rel-so]');
       if (rs) rs.addEventListener('change', () => { rel.soSaldo = rs.checked; CRM.render(); });
+      const rv = c.querySelector('[data-rel-valor]');
+      if (rv) rv.addEventListener('change', () => { rel.comValor = rv.checked; CRM.render(); });
       const rp = c.querySelector('[data-rel-per-preset]');
       if (rp) rp.addEventListener('change', () => { const p = S.periodoPreset(rp.value, CRM.hoje()); if (!p) return; Object.assign(CRM.Lista.estado('es-rel-per'), { de: p.de, ate: p.ate, limite: 0 }); CRM.render(); });
       const rm = c.querySelector('[data-rel-per-mov]');
@@ -1417,7 +1422,7 @@
       CRM.baixarCSV('estoque-atual', ['Código', 'Produto', 'Unidade', 'Quantidade em estoque'], l.map(x => [x.codigo, x.descricao || '', x.unidade || '', x.saldo]));
     },
     'es-rel-vendas-csv': () => {
-      const l = vendasRel(), comV = l.some(x => Array.isArray(x.valores));
+      const l = vendasRel(), comV = rel.comValor && l.some(x => Array.isArray(x.valores));
       CRM.baixarCSV('vendas-' + rel.ano + '-por-mes', ['Código', 'Produto', 'Unidade'].concat(comV ? ['Linha'] : [], MESES, ['Total']),
         [].concat(...l.map(x => {
           const q = [x.codigo, x.descricao || '', x.unidade || ''].concat(comV ? ['qtde'] : [], (x.meses || []).map(v => (v == null ? 0 : v)), [x.total]);

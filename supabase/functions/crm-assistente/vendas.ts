@@ -19,7 +19,10 @@ Como ler os números:
   costumava levar ("cliente" mostra o que ele mais compra).
 - Funil ("funil_parado"): proposta enviada há mais de 7 dias sem resposta = ligar hoje; negócio parado há mais de 15
   dias = mover de etapa, marcar tarefa ou dar como perdido (com o motivo). Muitos negócios antigos parados de importação
-  pedem uma limpeza do funil, não 1.000 ligações: diga isso.
+  pedem uma limpeza do funil, não 1.000 ligações: diga isso. Negócio na etapa de ORÇAMENTO esperando o cliente NUNCA é
+  "parado" (04/11/2026, Renata: "não mudei de etapa porque não houve alteração, estão aguardando retorno"): vem em
+  "maiores_aguardando_retorno" e a ação é cobrar o retorno do cliente; nunca mande mudar a etapa nem dar como perdido. Quem
+  já ligou ou marcou tarefa não aparece em lista nenhuma: não cobre de novo o que a vendedora já fez.
 - Indicadores ("indicadores_vendas", 27/10/2026): ticket médio (vendido ÷ notas) × o mesmo período do mês passado; clientes
   atendidos e clientes NOVOS no mês; a semana passada (segunda a domingo) × a anterior; o funil fechado no mês (ganhos ×
   perdidos, taxa de ganho) e os motivos de perda. Ticket caindo com o mesmo número de notas = vendendo menos por pedido
@@ -99,7 +102,7 @@ export function ferramentasGerente(h: Ajuda) {
     },
     funil_parado: {
       papeis: VENDAS,
-      def: { name: 'funil_parado', description: 'Negócios abertos parados (sem mudar de etapa E sem contato concluído com o cliente há mais de 15 dias; ligação ou registro conta como movimento) e propostas enviadas há mais de 7 dias sem contato com o cliente depois do envio: quantidades, valores e os 10 maiores de cada (com cliente, etapa, dias parado e responsável).', strict: true, input_schema: obj({}, []) },
+      def: { name: 'funil_parado', description: 'Negócios abertos parados (fora da etapa de orçamento, sem mudar de etapa, sem contato concluído com o cliente há mais de 15 dias e sem tarefa marcada), orçamentos aguardando retorno do cliente (na etapa de orçamento, sem contato há mais de 15 dias: cobrar o retorno, não é parado) e propostas enviadas há mais de 7 dias sem contato depois do envio: quantidades, valores e os 10 maiores de cada (com cliente, etapa, dias e responsável).', strict: true, input_schema: obj({}, []) },
       roda: (c: Ctx) => rpc(c, 'crm_gv_funil')
     }
   };
