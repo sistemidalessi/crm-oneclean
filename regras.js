@@ -1021,12 +1021,55 @@
     return { cep: String(j.cep || ''), logradouro: j.logradouro || '', bairro: j.bairro || '', cidade: j.localidade || '', uf: j.uf || '',
       codigo_municipio: digitos(j.ibge), complemento: j.complemento || '' };
   }
+  // Razão social na NF-e (04/11/2026): o campo do destinatário aceita no máximo 60 letras (rejeição 225 da NF 1-2870, razão
+  // social de 61). A Receita tem razões sociais de até 150: abrevia as palavras comuns de trás para a frente até caber e, se
+  // ainda passar, corta na última palavra inteira (sem "E", "DE"… soltos no fim). O banco faz a MESMA conta
+  // (crm_abrevia_razao, gerada desta tabela por ferramentas/gera-abrevia-razao.js; testes/regras-razao.test.js confere).
+  const ABREV_RAZAO = {
+    LIMITADA: 'LTDA', SOCIEDADE: 'SOC', ASSOCIACAO: 'ASSOC', ASSOCIADOS: 'ASSOC', COMERCIO: 'COM', COMERCIAL: 'COML', INDUSTRIA: 'IND',
+    INDUSTRIAL: 'INDL', INDUSTRIAIS: 'INDS', IMPORTACAO: 'IMP', EXPORTACAO: 'EXP', DISTRIBUIDORA: 'DISTRIB', DISTRIBUICAO: 'DISTRIB',
+    SERVICOS: 'SERVS', SERVICO: 'SERV', PRESTACAO: 'PREST', ADMINISTRACAO: 'ADM', ADMINISTRADORA: 'ADM', EMPREENDIMENTOS: 'EMPREEND',
+    PARTICIPACOES: 'PART', CONDOMINIO: 'COND', EDIFICIO: 'ED', RESIDENCIAL: 'RES', HABITACIONAL: 'HAB', CONJUNTO: 'CJ',
+    EDUCACAO: 'EDUC', EDUCACIONAL: 'EDUC', INFANTIL: 'INF', FUNDAMENTAL: 'FUND', ENSINO: 'ENS', ASSISTENCIA: 'ASSIST',
+    ASSISTENCIAL: 'ASSIST', BENEFICENTE: 'BENEF', HOSPITAL: 'HOSP', HOSPITALARES: 'HOSP', HOSPITALAR: 'HOSP', INSTITUTO: 'INST',
+    FUNDACAO: 'FUND', MATERIAIS: 'MAT', MATERIAL: 'MAT', PRODUTOS: 'PROD', EQUIPAMENTOS: 'EQUIP', TECNOLOGIA: 'TECNOL',
+    TRANSPORTES: 'TRANSP', CONSTRUCOES: 'CONSTR', CONSTRUCAO: 'CONSTR', CONSTRUTORA: 'CONSTR', INCORPORADORA: 'INCORP',
+    MANUTENCAO: 'MANUT', CONSERVACAO: 'CONSERV', ALIMENTOS: 'ALIM', DESENVOLVIMENTO: 'DESENV', MISERICORDIA: 'MISERIC',
+    IRMANDADE: 'IRM', CONGREGACAO: 'CONGREG', MISSIONARIA: 'MISSION', TRATAMENTO: 'TRAT', REVESTIMENTOS: 'REVEST',
+    SUPERFICIAIS: 'SUPERF', AUTOMACAO: 'AUTOM', LOCACAO: 'LOC', EMBALAGENS: 'EMBAL', PLASTICOS: 'PLAST', SEGURANCA: 'SEG',
+    TRABALHO: 'TRAB', MEDICINA: 'MED', CONVIVENCIA: 'CONVIV', ARTISTICA: 'ART', AMBIENTAL: 'AMB', ADVOGADOS: 'ADV',
+    CENTRO: 'CTR', PROFISSIONALIZANTE: 'PROFISS', RECREACAO: 'RECR', COMUNICACAO: 'COMUN', INFORMATICA: 'INFORM',
+    ENGENHARIA: 'ENG', FABRICACAO: 'FABR', TERMICO: 'TERM', PROMOCIONAL: 'PROM', REPRESENTACOES: 'REPRES', ASSESSORIA: 'ASSES', CONSULTORIA: 'CONSULT', MERCANTIL: 'MERC'
+  };
+  const RAZAO_MAX = 60;
+  function abreviaRazao(t, max) {
+    max = max || RAZAO_MAX;
+    let s = String(t == null ? '' : t).replace(/\s+/g, ' ').trim();
+    if (s.length <= max) return s;
+    const p = s.split(' ');
+    for (let i = p.length - 1; i >= 0 && p.join(' ').length > max; i--) {
+      const pre = (/^[^A-Za-z0-9À-ÿ]*/.exec(p[i]) || [''])[0];
+      if (pre === p[i]) continue;
+      const pos = (/[^A-Za-z0-9À-ÿ]*$/.exec(p[i]) || [''])[0], meio = p[i].slice(pre.length, p[i].length - pos.length);
+      const a = ABREV_RAZAO[meio.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase()];
+      if (a) p[i] = pre + a + pos;
+    }
+    s = p.join(' ');
+    if (s.length > max) {
+      s = s.slice(0, max + 1);
+      s = s.indexOf(' ') !== -1 ? s.replace(/ [^ ]*$/, '') : s.slice(0, max);
+      s = s.replace(/(\s+(E|DE|DA|DO|DAS|DOS|EM|-|&))+$/i, '').replace(/[\s,;–&-]+$/, '');
+    }
+    return s;
+  }
+
   // Resposta da BrasilAPI (brasilapi.com.br/api/cnpj/v1/<cnpj>, dados públicos da Receita) → campos do cadastro.
+  // A razão social vem já abreviada para caber na nota (60 letras); a completa vai em razao_receita.
   function empresaDoCnpj(j) {
     if (!j || !j.cnpj) return null;
     const tel = digitos(j.ddd_telefone_1);
     const log = [j.descricao_tipo_de_logradouro, j.logradouro].filter(Boolean).join(' ').trim();
-    return { razao_social: j.razao_social || '', nome: j.nome_fantasia || '', cep: digitos(j.cep).replace(/(\d{5})(\d{3})/, '$1-$2'), logradouro: log,
+    return { razao_social: abreviaRazao(j.razao_social || ''), razao_receita: j.razao_social || '', nome: j.nome_fantasia || '', cep: digitos(j.cep).replace(/(\d{5})(\d{3})/, '$1-$2'), logradouro: log,
       numero: j.numero || '', complemento: j.complemento || '', bairro: j.bairro || '', cidade: j.municipio || '', uf: j.uf || '',
       codigo_municipio: digitos(j.codigo_municipio_ibge), telefone: tel.length >= 10 ? tel : '', email: String(j.email || '').toLowerCase(),
       situacao_receita: j.descricao_situacao_cadastral || '' };
@@ -1067,9 +1110,9 @@
     const en = c.endereco || {}, cep = digitos(en.cep).padStart(8, '0');
     const endereco = { logradouro: en.logradouro || '', numero: en.numero || '', complemento: en.complemento || '', bairro: en.bairro || '',
       cidade: en.cidade || '', codigo_municipio: digitos(en.codigo_municipio), cep: digitos(en.cep) ? cep.replace(/(\d{5})(\d{3})/, '$1-$2') : '', uf: c.uf || 'SP' };
-    if (c.habilitada) return { ind_ie: '1', ie: digitos(c.ie), ok: true, razao_social: c.nome, endereco, regime: c.regime,
+    if (c.habilitada) return { ind_ie: '1', ie: digitos(c.ie), ok: true, razao_social: abreviaRazao(c.nome), endereco, regime: c.regime,
       texto: 'Sefaz-SP: inscrição estadual ' + formataIE(c.ie) + ' habilitada' + (c.regime ? ' (' + c.regime.toLowerCase() + ')' : '') + '.' };
-    return { ind_ie: null, ie: digitos(c.ie), ok: false, razao_social: c.nome, endereco,
+    return { ind_ie: null, ie: digitos(c.ie), ok: false, razao_social: abreviaRazao(c.nome), endereco,
       texto: 'Sefaz-SP: a inscrição estadual ' + formataIE(c.ie) + ' está NÃO HABILITADA' + (c.ultimaSituacao ? ' desde ' + dataBR(c.ultimaSituacao) : '') +
         (c.baixa ? ' (baixada em ' + dataBR(c.baixa) + ')' : '') + ': nota a contribuinte com inscrição irregular é recusada pela Sefaz. Confirme com o cliente antes de vender.' };
   }
@@ -1137,7 +1180,7 @@
 
   const api = {
     moedaTexto, mascaraMoeda, lerMoeda, mascaraTel, mascaraDoc, mascaraCep,
-    IND_IE, faltasNota, enderecoDoCep, empresaDoCnpj, ieValida, formataIE, errosInscricao, inscricaoDaSefaz, diferencasCadastro,
+    IND_IE, faltasNota, enderecoDoCep, empresaDoCnpj, abreviaRazao, ABREV_RAZAO, RAZAO_MAX, ieValida, formataIE, errosInscricao, inscricaoDaSefaz, diferencasCadastro,
     comparaAlfa, ordemAlfa, alfaOpcoes,
     TIPOS_ATIVIDADE, TIPOS_MANUAIS, SITUACOES, STATUS_NEGOCIO, STATUS_PROPOSTA, RECORRENCIAS, PAPEIS, UFS,
     ETAPAS_PADRAO, OPCOES_PADRAO, CONFIG_PADRAO, config, rotulo, num, moeda, numero, pct,

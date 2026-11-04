@@ -8479,17 +8479,59 @@ on conflict (tipo, nome) do nothing;
 
 alter table public.crm_empresas add column if not exists apelido text;
 
+-- 04/11/2026: razão social da NF-e em até 60 letras (NF 1-2870 recusada por 61). A completa fica em razao_receita.
+-- SQL também em sistemi-dalessi/docs/oneclean/sql/2026-11-04-razao-social-60.sql.
+alter table public.crm_empresas add column if not exists razao_receita text;
+
+create or replace function public.crm_abrevia_razao(t text, maxlen int default 60) returns text
+language plpgsql immutable set search_path = public as $f$
+-- gerada por ferramentas/gera-abrevia-razao.js a partir de regras.js (abreviaRazao): não editar à mão
+declare s text := btrim(regexp_replace(coalesce(t, ''), '\s+', ' ', 'g')); p text[]; i int; pre text; pos text; meio text; a text;
+  ab constant jsonb := '{"LIMITADA":"LTDA","SOCIEDADE":"SOC","ASSOCIACAO":"ASSOC","ASSOCIADOS":"ASSOC","COMERCIO":"COM","COMERCIAL":"COML","INDUSTRIA":"IND","INDUSTRIAL":"INDL","INDUSTRIAIS":"INDS","IMPORTACAO":"IMP","EXPORTACAO":"EXP","DISTRIBUIDORA":"DISTRIB","DISTRIBUICAO":"DISTRIB","SERVICOS":"SERVS","SERVICO":"SERV","PRESTACAO":"PREST","ADMINISTRACAO":"ADM","ADMINISTRADORA":"ADM","EMPREENDIMENTOS":"EMPREEND","PARTICIPACOES":"PART","CONDOMINIO":"COND","EDIFICIO":"ED","RESIDENCIAL":"RES","HABITACIONAL":"HAB","CONJUNTO":"CJ","EDUCACAO":"EDUC","EDUCACIONAL":"EDUC","INFANTIL":"INF","FUNDAMENTAL":"FUND","ENSINO":"ENS","ASSISTENCIA":"ASSIST","ASSISTENCIAL":"ASSIST","BENEFICENTE":"BENEF","HOSPITAL":"HOSP","HOSPITALARES":"HOSP","HOSPITALAR":"HOSP","INSTITUTO":"INST","FUNDACAO":"FUND","MATERIAIS":"MAT","MATERIAL":"MAT","PRODUTOS":"PROD","EQUIPAMENTOS":"EQUIP","TECNOLOGIA":"TECNOL","TRANSPORTES":"TRANSP","CONSTRUCOES":"CONSTR","CONSTRUCAO":"CONSTR","CONSTRUTORA":"CONSTR","INCORPORADORA":"INCORP","MANUTENCAO":"MANUT","CONSERVACAO":"CONSERV","ALIMENTOS":"ALIM","DESENVOLVIMENTO":"DESENV","MISERICORDIA":"MISERIC","IRMANDADE":"IRM","CONGREGACAO":"CONGREG","MISSIONARIA":"MISSION","TRATAMENTO":"TRAT","REVESTIMENTOS":"REVEST","SUPERFICIAIS":"SUPERF","AUTOMACAO":"AUTOM","LOCACAO":"LOC","EMBALAGENS":"EMBAL","PLASTICOS":"PLAST","SEGURANCA":"SEG","TRABALHO":"TRAB","MEDICINA":"MED","CONVIVENCIA":"CONVIV","ARTISTICA":"ART","AMBIENTAL":"AMB","ADVOGADOS":"ADV","CENTRO":"CTR","PROFISSIONALIZANTE":"PROFISS","RECREACAO":"RECR","COMUNICACAO":"COMUN","INFORMATICA":"INFORM","ENGENHARIA":"ENG","FABRICACAO":"FABR","TERMICO":"TERM","PROMOCIONAL":"PROM","REPRESENTACOES":"REPRES","ASSESSORIA":"ASSES","CONSULTORIA":"CONSULT","MERCANTIL":"MERC"}';
+begin
+  if length(s) <= maxlen then return s; end if;
+  p := string_to_array(s, ' ');
+  i := array_length(p, 1);
+  while i >= 1 and length(array_to_string(p, ' ')) > maxlen loop
+    pre := coalesce(substring(p[i] from '^[^A-Za-z0-9À-ÿ]*'), '');
+    if pre <> p[i] then
+      pos := coalesce(substring(p[i] from '[^A-Za-z0-9À-ÿ]*$'), '');
+      meio := substr(p[i], length(pre) + 1, length(p[i]) - length(pre) - length(pos));
+      a := ab ->> upper(translate(meio, 'áàâãäéèêëíìîïóòôõöúùûüçÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÇ', 'aaaaaeeeeiiiiooooouuuucAAAAAEEEEIIIIOOOOOUUUUC'));
+      if a is not null then p[i] := pre || a || pos; end if;
+    end if;
+    i := i - 1;
+  end loop;
+  s := array_to_string(p, ' ');
+  if length(s) > maxlen then
+    s := left(s, maxlen + 1);
+    s := case when position(' ' in s) > 0 then regexp_replace(s, ' [^ ]*$', '') else left(s, maxlen) end;
+    s := regexp_replace(s, '(\s+(E|DE|DA|DO|DAS|DOS|EM|-|&))+$', '', 'i');
+    s := regexp_replace(s, '[\s,;–&-]+$', '');
+  end if;
+  return s;
+end;
+$f$;
+revoke execute on function public.crm_abrevia_razao(text, int) from public, anon;
+
 create or replace function public.crm_empresa_nome_pelo_cnpj() returns trigger
 language plpgsql set search_path = public as $$
-declare d text := regexp_replace(coalesce(new.cnpj, ''), '\D', '', 'g'); razao text := upper(btrim(coalesce(new.razao_social, ''))); alvo text; velho text;
+declare d text := regexp_replace(coalesce(new.cnpj, ''), '\D', '', 'g'); razao text; alvo text; velho text;
 begin
-  if length(d) not in (11, 14) or razao = '' then return new; end if;
+  if length(d) not in (11, 14) or btrim(coalesce(new.razao_social, '')) = '' then return new; end if;
+  -- 04/11/2026: a NF-e aceita até 60 letras; a completa (da Receita) fica em razao_receita
+  if length(btrim(new.razao_social)) > 60 then
+    new.razao_receita := btrim(regexp_replace(new.razao_social, '\s+', ' ', 'g'));
+    new.razao_social := public.crm_abrevia_razao(new.razao_social);
+  end if;
+  razao := upper(btrim(new.razao_social));
   alvo := razao;
   if length(d) = 14 and substr(d, 9, 4) <> '0001' and btrim(coalesce(new.cidade, '')) <> '' then alvo := razao || ' (' || upper(btrim(new.cidade)) || ')'; end if;
   if new.nome is distinct from alvo then
     velho := btrim(coalesce(new.nome, ''));
-    -- guarda o nome antigo como apelido (sem repetir, e sem guardar o que já é a própria razão social)
+    -- guarda o nome antigo como apelido (sem repetir, e sem guardar o que já é a própria razão social, completa ou abreviada)
     if velho <> '' and upper(velho) <> razao and upper(velho) not like razao || ' (%'
+       and upper(velho) <> upper(coalesce(new.razao_receita, '')) and upper(velho) not like upper(coalesce(new.razao_receita, '')) || ' (%'
        and position(upper(velho) in upper(coalesce(new.apelido, ''))) = 0 then
       new.apelido := left(concat_ws(' · ', nullif(btrim(coalesce(new.apelido, '')), ''), velho), 300);
     end if;

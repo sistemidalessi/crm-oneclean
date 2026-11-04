@@ -124,7 +124,7 @@
       // ---- coluna 1: dados + contatos
       '<div class="ficha-col">' +
         '<section><dl class="dados">' +
-          dado('Grupo', grupo) + dado('Razão social', esc(e.razao_social)) + (e.apelido ? dado('Apelido', esc(e.apelido)) : '') + (e.obs_nota ? dado('Texto na nota', esc(e.obs_nota)) : '') + dado('CNPJ/CPF', esc(e.cnpj) + (e.cnpj && R.ehCNPJ(R.chaveDoc(e.cnpj)) && !R.cnpjValido(e.cnpj) ? ' ' + CRM.selo('inválido?', 'ambar') : '')) +
+          dado('Grupo', grupo) + dado('Razão social', esc(e.razao_social)) + (e.razao_receita && e.razao_receita !== e.razao_social ? dado('Razão social completa (Receita)', esc(e.razao_receita)) : '') + (e.apelido ? dado('Apelido', esc(e.apelido)) : '') + (e.obs_nota ? dado('Texto na nota', esc(e.obs_nota)) : '') + dado('CNPJ/CPF', esc(e.cnpj) + (e.cnpj && R.ehCNPJ(R.chaveDoc(e.cnpj)) && !R.cnpjValido(e.cnpj) ? ' ' + CRM.selo('inválido?', 'ambar') : '')) +
           dado('Telefone', esc(e.telefone)) + dado('WhatsApp', esc(e.whatsapp)) +
           dado('E-mail', e.email ? (separaEmails(e.email).length ? separaEmails(e.email).map(m => '<a href="mailto:' + esc(m) + '">' + esc(m) + '</a>').join('<br>') : esc(e.email)) : '') +
           dado('Site', e.site ? '<a href="' + esc(/^https?:/i.test(e.site) ? e.site : 'https://' + e.site) + '" target="_blank" rel="noopener noreferrer">' + esc(e.site) + '</a>' : '') +
@@ -368,7 +368,7 @@
       // 03/11/2026 (regra do Anderson): com CNPJ/CPF e razão social, o nome é sempre a razão social (o banco acerta sozinho;
       // filial leva a cidade); o nome do dia a dia (fantasia, contato) fica em "Apelido", que também entra na busca
       { nome: 'nome', rotulo: 'Nome', obrigatorio: true, largo: true, ajuda: 'Com CNPJ e razão social, o nome passa a ser a razão social (regra da empresa). O nome do dia a dia vai em "Apelido".' },
-      { nome: 'razao_social', rotulo: 'Razão social' },
+      { nome: 'razao_social', rotulo: 'Razão social', ajuda: 'Até ' + R.RAZAO_MAX + ' letras: é o limite da nota fiscal (a mais, a Sefaz recusa a nota).' },
       { nome: 'apelido', rotulo: 'Apelido (nome fantasia, contato)' },
       // 03/11/2026 (Edson, logística: "o FKN punha na observação da nota o horário de almoço e de recebimento"): vai sozinho para o
       // "Texto da nota" de cada pedido novo do cliente (dá para mudar no pedido)
@@ -431,6 +431,31 @@
   };
   const avisoSefaz = (uf, sef) => uf && uf !== 'SP' ? 'Fora de SP: a inscrição estadual não é consultada (cliente de outro estado só compra como não contribuinte).'
     : sef && sef.erro ? '⚠ A Sefaz não respondeu (' + esc(/rota desconhecida/.test(sef.erro) ? 'a consulta ainda não está ligada no serviço fiscal' : sef.erro) + '): preencha a inscrição e a situação à mão.' : null;
+  // Trava da razão social (04/11/2026, NF 1-2870 recusada por 61 letras): mostra a conta enquanto digita e oferece a
+  // abreviação (a mesma do banco, R.abreviaRazao); o salvar recusa acima de 60 quando há CNPJ/CPF (erroRazao).
+  function travaRazao(form) {
+    const f = form.elements.razao_social;
+    if (!f) return;
+    const confere = () => {
+      const t = String(f.value || '').replace(/\s+/g, ' ').trim();
+      if (t.length <= R.RAZAO_MAX) { CRM.avisoCampo(form, 'razao_social', ''); return; }
+      const ab = R.abreviaRazao(t);
+      CRM.avisoCampo(form, 'razao_social', '<span class="linha">⚠ <b>' + t.length + ' letras</b>: a nota fiscal aceita até ' + R.RAZAO_MAX + '. Sugestão: <b>' + esc(ab) + '</b></span>' +
+        '<button type="button" class="btn sec mini" data-abrevia>Abreviar</button>');
+      const b = form.querySelector('[data-abrevia]');
+      if (b) b.addEventListener('click', () => { f.value = ab; confere(); });
+    };
+    f.addEventListener('input', confere);
+    f.addEventListener('change', confere);
+    setTimeout(confere, 0);
+  }
+  const erroRazao = v => {
+    const t = String((v && v.razao_social) || '').replace(/\s+/g, ' ').trim();
+    if (!R.chaveDoc(v && v.cnpj) || t.length <= R.RAZAO_MAX) return '';
+    return 'A razão social tem ' + t.length + ' letras e a nota fiscal aceita até ' + R.RAZAO_MAX + '. Use o botão "Abreviar" embaixo do campo (sugestão: "' + R.abreviaRazao(t) + '").';
+  };
+  fichas.erroRazao = erroRazao;
+
   function dadosDaNota(form, existente) {
     const el = n => form.elements[n];
     const poe = (dados, sempre) => Object.keys(dados).forEach(k => {
@@ -539,9 +564,12 @@
         });
         form.elements.cep.addEventListener('blur', () => { const d = R.digitos(form.elements.cep.value); if (d.length === 8) form.elements.cep.value = d.replace(/(\d{5})(\d{3})/, '$1-$2'); });
         dadosDaNota(form, e);
+        travaRazao(form);
       },
       aoSalvar: async v => {
         if (!g) delete v.responsavel_id;
+        const errRaz = erroRazao(v);
+        if (errRaz) throw new Error(errRaz);
         // quem tem CNPJ ou CPF diz se é contribuinte (com a inscrição certa), isento ou não contribuinte (30/10/2026)
         const errIE = R.errosInscricao(v);
         if (errIE.length) throw new Error(errIE.join(' '));
@@ -622,7 +650,7 @@
           const linhas = [], x = R.empresaDoCnpj(rec), vazio = n => !String(el(n).value || '').trim();
           if (x) {
             const sit = x.situacao_receita;
-            oficialLead = { razao_social: x.razao_social, cep: x.cep, logradouro: x.logradouro, numero: x.numero, complemento: x.complemento, bairro: x.bairro,
+            oficialLead = { razao_social: x.razao_social, razao_receita: x.razao_receita, cep: x.cep, logradouro: x.logradouro, numero: x.numero, complemento: x.complemento, bairro: x.bairro,
               cidade: x.cidade, uf: x.uf, codigo_municipio: x.codigo_municipio };
             if (vazio('nome')) el('nome').value = x.nome || x.razao_social;
             if (vazio('cidade')) el('cidade').value = x.cidade;
@@ -656,7 +684,8 @@
           nome: v.nome, cnpj: v.cnpj ? R.formataCNPJ(v.cnpj) : null, telefone: tel, whatsapp: tel && R.digitos(tel).length >= 10 && /^\(?\d{2}\)?\s*9/.test(tel.trim()) ? tel : null, email: v.email,
           cidade: v.cidade, segmento: v.segmento, origem: v.origem, qualificacao: v.qualificacao || 0, situacao: v.situacao || 'lead', responsavel_id: resp, observacoes: v.observacoes,
           ind_ie: v.ind_ie || null, ie: R.digitos(v.ie) || null,
-          ...(oficialLead && R.chaveDoc(v.cnpj) ? { razao_social: oficialLead.razao_social || null, cep: oficialLead.cep || null, logradouro: oficialLead.logradouro || null,
+          ...(oficialLead && R.chaveDoc(v.cnpj) ? { razao_social: oficialLead.razao_social || null,
+            razao_receita: oficialLead.razao_receita && oficialLead.razao_receita !== oficialLead.razao_social ? oficialLead.razao_receita : null, cep: oficialLead.cep || null, logradouro: oficialLead.logradouro || null,
             numero: oficialLead.numero || null, complemento: oficialLead.complemento || null, bairro: oficialLead.bairro || null, uf: oficialLead.uf || null,
             codigo_municipio: oficialLead.codigo_municipio || null, cidade: v.cidade || oficialLead.cidade || null } : {})
         });
