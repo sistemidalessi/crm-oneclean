@@ -188,3 +188,11 @@ export function pdfBoletos(jsPDF, B, envio, { cfg, emit, hoje, aviso }) {
   });
   return pdf.output('arraybuffer');
 }
+
+// dígito do código de barras (módulo 11, o mesmo do cobranca.js): o boleto.js pede ao CRMCobranca, que a função não carrega
+export function mod11(s) {
+  let soma = 0, peso = 2;
+  for (let i = s.length - 1; i >= 0; i--) { soma += Number(s[i]) * peso; peso = peso === 9 ? 2 : peso + 1; }
+  const dv = 11 - (soma % 11);
+  return dv === 0 || dv === 10 || dv === 11 ? 1 : dv;
+}

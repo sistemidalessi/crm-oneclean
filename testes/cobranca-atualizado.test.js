@@ -95,3 +95,13 @@ test('PDF do boleto atualizado: código de barras refeito confere com o do banco
   // código diferente do banco: não sai
   assert.throws(() => A.dadosDoBoleto(B, cfg, emit, Object.assign({}, x, { boleto: Object.assign({}, b, { codigo: '0'.repeat(44) }) }), '2026-11-04'), /não bate/);
 });
+
+test('o módulo 11 da função é o mesmo do cobranca.js e o boleto.js monta o código só com ele (como a função carrega)', () => {
+  const C = require('../cobranca.js');
+  ['0019616130000067835000000380488010000014641', '1234567890123456789012345678901234567890123'].forEach(x => assert.strictEqual(A.mod11(x), C.mod11(x)));
+  const codigo = require('fs').readFileSync(require('path').join(__dirname, '..', 'boleto.js'), 'utf8');
+  const g = { CRMCobranca: { mod11: A.mod11 } };
+  new Function('module', 'require', 'globalThis', 'window', codigo)(undefined, undefined, g, g);
+  const B = g.CRMBoleto;
+  assert.strictEqual(B.codigoBarras('001', '2026-10-28', 678.35, B.campoLivre('38048801000001464', 17)), '00199161300000678350000003804880100000146417');
+});

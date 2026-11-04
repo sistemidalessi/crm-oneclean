@@ -20,7 +20,7 @@
 // Deploy: verify_jwt DESLIGADO (o agendador não tem login; a função confere a senha ou o login do administrador).
 import { createClient } from 'npm:@supabase/supabase-js@2.116.0';
 import { quemRecebe, prazoUtil, parametros, textoFinal, textoEmail, CORPO, alertasCartorio, celularesDoCliente, emailsDoCliente, telWa, moeda, docsTexto } from './avisos.js';
-import { casa, quemRecebeBoleto, pdfBoletos, parametrosBoleto, CORPO_BOLETO, textoEmailBoleto, resumoRodada } from './atualizado.js';
+import { casa, quemRecebeBoleto, pdfBoletos, parametrosBoleto, CORPO_BOLETO, textoEmailBoleto, resumoRodada, mod11 } from './atualizado.js';
 import { jsPDF } from 'npm:jspdf@2.5.2';
 
 const CORS = {
@@ -70,7 +70,7 @@ async function carregaBoleto() {
   const codigo = await r.text();
   if (await sha256(codigo) !== HASHES['boleto.js']) throw new Error('boleto.js não confere com a versão fixada');
   // deno-lint-ignore no-explicit-any
-  const g: any = {};
+  const g: any = { CRMCobranca: { mod11 } };   // o código de barras só usa o módulo 11 do cobranca.js
   new Function('module', 'require', 'globalThis', 'window', codigo)(undefined, undefined, g, g);
   BOL = g.CRMBoleto;
   return BOL;
