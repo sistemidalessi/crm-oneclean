@@ -9891,3 +9891,78 @@ begin
 end $$;
 revoke all on function public.crm_estoque_linhas() from public, anon;
 grant execute on function public.crm_estoque_linhas() to authenticated;
+
+-- Qualificação (estrelas) calculada pelo histórico (04/11/2026, Anderson: "vamos fazer a 2 e aí trava para que seja gerada
+-- sozinha"). Com crm_config.dados.qualificacao_auto = true, ninguém muda à mão: o gatilho devolve o valor antigo e só
+-- crm_qualificacao_calcular() grava (todo dia às 5h40, pg_cron crm-qualificacao). Regra, nos últimos 12 meses:
+--   quanto compra (vendas − devoluções de cliente): entre os que compraram, os 20% maiores = 2; da metade para cima = 1
+--   frequência: meses diferentes com compra ≥ 6 = 2; ≥ 3 = 1
+--   pagamento: nenhum título vencido há mais de 5 dias = 1
+--   sumiu: última compra há mais de 120 dias = −1
+-- Comprou nos 12 meses: de 1 a 5 estrelas; não comprou: 0 (sem estrela). O motivo vai em qualificacao_motivo (aparece ao
+-- passar o mouse nas estrelas).
+alter table public.crm_empresas add column if not exists qualificacao_motivo text;
+
+create or replace function public.crm_qualificacao_trava() returns trigger language plpgsql set search_path = public as $$
+begin
+  if coalesce(current_setting('crm.qualif', true), '') = '1' then return new; end if;
+  if not coalesce((select (dados->>'qualificacao_auto')::boolean from public.crm_config where id = 1), false) then return new; end if;
+  if tg_op = 'INSERT' then new.qualificacao := 0; new.qualificacao_motivo := null;
+  else new.qualificacao := old.qualificacao; new.qualificacao_motivo := old.qualificacao_motivo; end if;
+  return new;
+end;
+$$;
+drop trigger if exists crm_qualificacao_trava on public.crm_empresas;
+create trigger crm_qualificacao_trava before insert or update of qualificacao, qualificacao_motivo on public.crm_empresas
+  for each row execute function public.crm_qualificacao_trava();
+
+create or replace function public.crm_qualificacao_calcular() returns integer language plpgsql security definer set search_path = public as $$
+declare n integer; hoje date := (now() at time zone 'America/Sao_Paulo')::date; ant text := current_setting('crm.qualif', true);
+begin
+  perform set_config('crm.qualif', '1', true);
+  with v as (
+    select n.empresa_id, sum(n.valor_total) val, count(distinct date_trunc('month', n.emitida_em at time zone 'America/Sao_Paulo')) meses,
+           max((n.emitida_em at time zone 'America/Sao_Paulo')::date) ult
+      from public.crm_notas n
+     where not n.cancelada and n.natureza ilike 'vend%' and n.empresa_id is not null and n.emitida_em >= now() - interval '12 months'
+     group by 1),
+  dv as (
+    select n.empresa_id, sum(c.valor_total) dev from public.crm_compras c join public.crm_notas n on n.chave = c.ref_chave
+     where c.devolucao and c.situacao <> 'ignorada' and c.emitida_em >= now() - interval '12 months' and n.empresa_id is not null group by 1),
+  liq as (select v.empresa_id, greatest(v.val - coalesce(dv.dev, 0), 0) val, v.meses, v.ult from v left join dv on dv.empresa_id = v.empresa_id),
+  pr as (select l.*, percent_rank() over (order by l.val) p from liq l where l.val > 0),
+  atr as (select t.empresa_id, count(*) q from public.crm_titulos t where not t.abono and coalesce(t.previsao, t.vencimento) < hoje - 5 and t.empresa_id is not null group by 1),
+  sc as (
+    select pr.empresa_id, pr.val, pr.meses, pr.ult, coalesce(atr.q, 0) atrasados,
+           (case when pr.p >= 0.8 then 2 when pr.p >= 0.5 then 1 else 0 end) pv,
+           (case when pr.meses >= 6 then 2 when pr.meses >= 3 then 1 else 0 end) pf,
+           (case when coalesce(atr.q, 0) = 0 then 1 else 0 end) pp,
+           (case when pr.ult < hoje - 120 then -1 else 0 end) pr_
+      from pr left join atr on atr.empresa_id = pr.empresa_id),
+  novo as (
+    select e.id, case when sc.empresa_id is null then 0 else greatest(1, least(5, sc.pv + sc.pf + sc.pp + sc.pr_)) end q,
+           case when sc.empresa_id is null then 'Sem compra nos últimos 12 meses'
+                else 'Calculada pelo CRM: R$ ' || translate(to_char(sc.val, 'FM999G999G990D00'), ',.', '.,') || ' em 12 meses (' ||
+                     case sc.pv when 2 then 'entre os 20% que mais compram' when 1 then 'acima da metade' else 'abaixo da metade' end ||
+                     '); comprou em ' || sc.meses || case when sc.meses = 1 then ' mês' else ' meses' end ||
+                     case when sc.atrasados > 0 then '; ' || sc.atrasados || ' título(s) vencido(s) há mais de 5 dias' else '; pagamento em dia' end ||
+                     case when sc.pr_ < 0 then '; última compra em ' || to_char(sc.ult, 'DD/MM/YYYY') else '' end
+           end m
+      from public.crm_empresas e left join sc on sc.empresa_id = e.id)
+  update public.crm_empresas e set qualificacao = novo.q, qualificacao_motivo = novo.m
+    from novo where novo.id = e.id and (e.qualificacao is distinct from novo.q or e.qualificacao_motivo is distinct from novo.m);
+  get diagnostics n = row_count;
+  perform set_config('crm.qualif', coalesce(ant, ''), true);
+  return n;
+end;
+$$;
+revoke all on function public.crm_qualificacao_calcular() from public, anon, authenticated;
+
+update public.crm_config set dados = jsonb_set(coalesce(dados, '{}'::jsonb), '{qualificacao_auto}', 'true'::jsonb) where id = 1;
+
+do $$ begin
+  if exists (select 1 from pg_extension where extname = 'pg_cron') then
+    perform cron.unschedule(jobid) from cron.job where jobname = 'crm-qualificacao';
+    perform cron.schedule('crm-qualificacao', '40 8 * * *', 'select public.crm_qualificacao_calcular()');   -- 5h40 em SP
+  end if;
+end $$;

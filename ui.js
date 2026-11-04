@@ -35,9 +35,10 @@
   const COR_PROPOSTA = { rascunho: 'cinza', enviada: 'azul', aprovada: 'verde', recusada: 'vermelho' };
   function seloProposta(s) { return selo(R.rotulo(R.STATUS_PROPOSTA, s), COR_PROPOSTA[s]); }
 
-  function estrelas(n) {
+  // motivo (04/11/2026): com a qualificação calculada pelo CRM (crm_config.dados.qualificacao_auto), o porquê das estrelas
+  function estrelas(n, motivo) {
     n = Math.max(0, Math.min(5, R.num(n)));
-    return n ? '<span class="estrelas" title="Qualificação ' + n + ' de 5">' + '★'.repeat(n) + '<span>' + '★'.repeat(5 - n) + '</span></span>' : '';
+    return n ? '<span class="estrelas" title="' + esc('Qualificação ' + n + ' de 5' + (motivo ? ': ' + motivo : '')) + '">' + '★'.repeat(n) + '<span>' + '★'.repeat(5 - n) + '</span></span>' : '';
   }
 
   function avatar(usuario) {
@@ -192,6 +193,7 @@
   // o: { titulo, intro, campos, valores, salvarTexto, aoSalvar(v, form), aoExcluir(), textoExcluir, largura, extras(form), rodape }
   let formSeq = 0;
   function abrirForm(o) {
+    o.campos = (o.campos || []).filter(Boolean);   // campo que a configuração esconde vem como null
     const dlg = $('#dlgForm');
     // aoSalvar pode abrir outro formulário no mesmo diálogo (ex.: próximo passo);
     // aí este não pode fechar o diálogo ao terminar.

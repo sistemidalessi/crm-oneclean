@@ -442,7 +442,7 @@
             return '<tr data-acao="abrir-empresa" data-id="' + esc(e.id) + '" tabindex="0">' +
               '<td class="sel"><input type="checkbox" data-acao="selecionar" data-id="empresas:' + esc(e.id) + '"' + (selecao.empresas.has(e.id) ? ' checked' : '') + ' aria-label="Selecionar"></td>' +
               '<td class="num">' + (e.codigo ? esc(e.codigo) : '<small>—</small>') + '</td>' +
-              '<td><strong>' + esc(e.nome) + '</strong> ' + CRM.estrelas(e.qualificacao) + '<small>' + esc([e.segmento, (e.tags || []).join(', ')].filter(Boolean).join(' · ')) + '</small></td>' +
+              '<td><strong>' + esc(e.nome) + '</strong> ' + CRM.estrelas(e.qualificacao, e.qualificacao_motivo) + '<small>' + esc([e.segmento, (e.tags || []).join(', ')].filter(Boolean).join(' · ')) + '</small></td>' +
               '<td>' + CRM.seloSituacao(sit) + '</td>' +
               '<td>' + (CRM.seloTipoCliente(e) || '<small>—</small>') + '</td>' +
               '<td>' + esc(CRM.nomeUsuario(e.responsavel_id)) + '</td>' +

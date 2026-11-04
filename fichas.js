@@ -6,6 +6,8 @@
   const R = window.CRMRegras, CRM = window.CRM;
   const { $, $$, esc } = CRM;
   const E = () => CRM.estado;
+  // qualificação calculada pelo CRM (04/11/2026): sem o campo de estrelas no cadastro; o banco também não deixa mudar à mão
+  const qAuto = () => !!(CRM.estado.cfg && CRM.estado.cfg.qualificacao_auto);
 
   const fichas = CRM.fichas = {};
   let abertaEmpresa = null, abertoNegocio = null;
@@ -109,7 +111,7 @@
       '<br><small>' + doGrupo.length + ' cadastro(s) · faturado pelo grupo em 12 meses: ' + esc(R.moeda(fatGrupo)) + '</small>';
 
     dlg.innerHTML = '<div class="ficha">' +
-      '<header class="ficha-topo"><div class="ficha-titulo"><h2>' + esc(e.nome) + '</h2>' + CRM.seloSituacao(sit) + CRM.seloTipoCliente(e, true) + (CRM.seloFinanceiro ? CRM.seloFinanceiro(e.id, true) : '') + CRM.estrelas(e.qualificacao) +
+      '<header class="ficha-topo"><div class="ficha-titulo"><h2>' + esc(e.nome) + '</h2>' + CRM.seloSituacao(sit) + CRM.seloTipoCliente(e, true) + (CRM.seloFinanceiro ? CRM.seloFinanceiro(e.id, true) : '') + CRM.estrelas(e.qualificacao, e.qualificacao_motivo) +
         (e.tags || []).map(t => CRM.selo(t, 'etiqueta')).join('') +
         '<span class="resp">' + CRM.avatar(CRM.usuario(e.responsavel_id)) + esc(CRM.nomeUsuario(e.responsavel_id)) + '</span></div>' +
         '<span class="flex"></span>' +
@@ -383,7 +385,7 @@
       { nome: 'obs_nota', rotulo: 'Texto na nota fiscal (horário de recebimento, almoço, portaria…)', tipo: 'textarea', largo: true, linhas: 2 },
       { nome: 'cnpj', rotulo: 'CNPJ ou CPF' },
       { nome: 'situacao', rotulo: 'Situação', tipo: 'select', opcoes: opcoesSituacao(), padrao: 'lead' },
-      { nome: 'qualificacao', rotulo: 'Qualificação', tipo: 'estrelas' },
+      qAuto() ? null : { nome: 'qualificacao', rotulo: 'Qualificação', tipo: 'estrelas' },
       { nome: 'segmento', rotulo: 'Segmento', sugestoes: CRM.opcoes('segmento') },
       { nome: 'origem', rotulo: 'Origem', tipo: 'select', opcoes: CRM.lista(CRM.opcoes('origem'), '—') },
       { nome: 'responsavel_id', rotulo: 'Responsável', tipo: 'select', opcoes: CRM.opcoesUsuarios('(sem responsável)'), desabilitado: !g, padrao: CRM.meuId() },
@@ -624,7 +626,7 @@
         { nome: 'ie', rotulo: 'Inscrição estadual', ajuda: 'Vem sozinha pela Sefaz-SP. Vazio se não tiver.' },
         { nome: 'segmento', rotulo: 'Segmento', sugestoes: CRM.opcoes('segmento') },
         { nome: 'origem', rotulo: 'Origem', tipo: 'select', opcoes: CRM.lista(CRM.opcoes('origem'), '—') },
-        { nome: 'qualificacao', rotulo: 'Qualificação', tipo: 'estrelas' },
+        qAuto() ? null : { nome: 'qualificacao', rotulo: 'Qualificação', tipo: 'estrelas' },
         g ? { nome: 'responsavel_id', rotulo: 'Responsável', tipo: 'select', opcoes: [['__rodizio', 'Rodízio automático']].concat(usuarios), padrao: E().cfg.rodizio ? '__rodizio' : CRM.meuId() }
           : { nome: 'resp_info', rotulo: 'O lead fica na sua carteira.', tipo: 'info' },
         { nome: 'situacao', rotulo: 'Situação', tipo: 'select', opcoes: opcoesSituacao(), padrao: 'lead' },
@@ -693,7 +695,7 @@
         const tel = v.telefone;
         const emp = await CRM.inserir('empresas', {
           nome: v.nome, cnpj: v.cnpj ? R.formataCNPJ(v.cnpj) : null, telefone: tel, whatsapp: tel && R.digitos(tel).length >= 10 && /^\(?\d{2}\)?\s*9/.test(tel.trim()) ? tel : null, email: v.email,
-          cidade: v.cidade, segmento: v.segmento, origem: v.origem, qualificacao: v.qualificacao || 0, situacao: v.situacao || 'lead', responsavel_id: resp, observacoes: v.observacoes,
+          cidade: v.cidade, segmento: v.segmento, origem: v.origem, ...(qAuto() ? {} : { qualificacao: v.qualificacao || 0 }), situacao: v.situacao || 'lead', responsavel_id: resp, observacoes: v.observacoes,
           ind_ie: v.ind_ie || null, ie: R.digitos(v.ie) || null,
           ...(oficialLead && R.chaveDoc(v.cnpj) ? { razao_social: oficialLead.razao_social || null,
             razao_receita: oficialLead.razao_receita && oficialLead.razao_receita !== oficialLead.razao_social ? oficialLead.razao_receita : null, cep: oficialLead.cep || null, logradouro: oficialLead.logradouro || null,
