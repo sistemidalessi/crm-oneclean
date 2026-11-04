@@ -172,7 +172,9 @@ Deno.serve(async (req) => {
     async function pagos(dias: number) {
       if (!b.ligado || b.caminho !== 'api') return { pulado: 'boleto pela API desligado' };
       const tk = await token('cobrancas.boletos-info');
-      const l = await lista(tk, b, 'B', maisDias(hojeSP(), -dias), hojeSP(), '&codigoEstadoTituloCobranca=6');
+      // 6 = liquidado; 12 = liquidado/pago em cartório (04/11/2026: a ODM pagou no cartório e o CRM não via o pagamento)
+      const l = [...await lista(tk, b, 'B', maisDias(hojeSP(), -dias), hojeSP(), '&codigoEstadoTituloCobranca=6'),
+        ...await lista(tk, b, 'B', maisDias(hojeSP(), -dias), hojeSP(), '&codigoEstadoTituloCobranca=12')];
       const nossos = l.map(x => dig(x.numeroBoletoBB).slice(3)).filter(n => n.length === 17);
       if (!nossos.length) return { liquidados: 0 };
       // boletos feitos no SITE do BB (notas antigas do FKN; 03/11/2026): o que não é do CRM vai à crm_bb_site_casar com o
@@ -273,8 +275,9 @@ Deno.serve(async (req) => {
     // as datas de cada liquidado (pagamento × crédito), sem dados do cliente: para conferir em que dia o dinheiro entra
     if (c.acao === 'datas') {
       const tk = await token('cobrancas.boletos-info');
-      const l = await lista(tk, b, 'B', maisDias(hojeSP(), -Math.min(30, Math.max(1, Number(c.dias) || 3))), hojeSP(), '&codigoEstadoTituloCobranca=6');
-      return resposta(200, l.map(x => ({ n: dig(x.numeroBoletoBB).slice(3), movimento: x.dataMovimento || null, credito: x.dataCredito || null, vencimento: x.dataVencimento || null, pago: x.valorPago ?? null })));
+      // { todos: true }: todos os baixados do período, com o estado (04/11/2026: o pago em cartório não vinha como 6 = liquidado)
+      const l = await lista(tk, b, 'B', maisDias(hojeSP(), -Math.min(30, Math.max(1, Number(c.dias) || 3))), hojeSP(), c.todos ? '' : '&codigoEstadoTituloCobranca=6');
+      return resposta(200, l.map(x => ({ n: dig(x.numeroBoletoBB).slice(3), estado: x.codigoEstadoTituloCobranca ?? null, estado_txt: x.estadoTituloCobranca || null, movimento: x.dataMovimento || null, credito: x.dataCredito || null, vencimento: x.dataVencimento || null, valor: x.valorOriginal ?? null, pago: x.valorPago ?? null })));
     }
     // boletos em aberto já vencidos (04/11/2026, cobrança automática: o boleto atualizado sai ao cliente no 1º dia de atraso).
     // Devolve, de cada um, o que o boleto atualizado precisa (linha digitável, valores, juros e multa do próprio boleto);
