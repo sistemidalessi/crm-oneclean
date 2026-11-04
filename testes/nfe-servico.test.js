@@ -457,6 +457,7 @@ test('pagamento: data escrita vira o prazo; sem forma de pagamento ou programado
   const em = '2026-11-03T10:00:00-03:00';
   assert.deepStrictEqual(PD.lePagamento('PROGRAMADO 15/11/2026', em).dias, [12]);
   assert.deepStrictEqual(PD.lePagamento('15/11 E 15/12 BOLETO', em).dias, [12, 42]);
+  assert.deepStrictEqual(PD.lePagamento('PROGRAMADO 03/12/2026 E 10/12/2026 BOLETO', em).dias, [30, 37]);   // duas datas (04/11/2026)
   assert.deepStrictEqual(PD.lePagamento('28/35 DIAS', em).dias, [28, 35]);   // prazos, não data
   assert.deepStrictEqual(PD.lePagamento('30/60/90', em).dias, [30, 60, 90]);
   assert.strictEqual(PD.lePagamento('PROGRAMADO DATA', em).semData, true);
@@ -467,6 +468,8 @@ test('pagamento: data escrita vira o prazo; sem forma de pagamento ou programado
   assert.ok(prog.avisos.bloqueia.some(x => /programado sem a data/.test(x)));
   const data = PD.notaDoPedido(Object.assign({}, base, { pedido: Object.assign({}, pedido, { dados: Object.assign({}, pedido.dados, { pagamento: 'PROGRAMADO 15/11/2026' }) }) }));
   assert.deepStrictEqual(data.nota.cobranca.duplicatas.map(x => x.vencimento), ['2026-11-15']);
+  const duas = PD.notaDoPedido(Object.assign({}, base, { pedido: Object.assign({}, pedido, { dados: Object.assign({}, pedido.dados, { pagamento: 'PROGRAMADO 03/12/2026 E 10/12/2026 BOLETO' }) }) }));
+  assert.deepStrictEqual(duas.nota.cobranca.duplicatas.map(x => x.vencimento), ['2026-12-03', '2026-12-10']);
 });
 
 

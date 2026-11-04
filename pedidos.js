@@ -624,9 +624,10 @@
     if (!adm) return '';
     const tel = String(adm.telefone).replace(/\D/g, ''), d = p.dados || {};
     const travas = bAbertos.filter(b => P.FINANCEIRO.indexOf(b) !== -1).map(b => P.ROTULO_BLOQUEIO[b] || b).join(', ');
+    // 04/11/2026: a mensagem chegou cortada logo depois de "separa." (sem a assinatura e sem o link): o link vem logo depois da
+    // trava, e o texto não leva travessão, emoji nem quebra de linha (o WhatsApp do computador cortava ali).
     const txt = 'Olá, ' + String(adm.nome || '').split(' ')[0] + '! O pedido ' + p.numero + ' de ' + nomeCliente(p) + ' (' + R.moeda(t.geral) + (d.pagamento ? ', ' + d.pagamento : '') +
-      ') está travado no financeiro: ' + travas + '. Pode analisar? Assim a gente já separa. — ' + (CRM.nomeUsuario(CRM.meuId()) || '') +
-      '\n\n👉 Abrir o pedido ' + p.numero + ' no CRM: ' + linkPedido(p.numero);
+      ') está travado no financeiro: ' + travas + '. Abrir o pedido no CRM: ' + linkPedido(p.numero) + ' . Pode analisar? Assim a gente já separa. (' + (CRM.nomeUsuario(CRM.meuId()) || 'equipe') + ')';
     return ' <a class="btn" href="https://wa.me/' + (tel.length <= 11 ? '55' : '') + tel + '?text=' + encodeURIComponent(txt) + '" target="_blank" rel="noopener noreferrer">📲 Pedir a análise ao ' + esc(String(adm.nome || 'administrador').split(' ')[0]) + '</a>';
   }
 
@@ -644,12 +645,19 @@
   // cliente que quer pagar exatamente naquele dia"): o calendário escreve "PROGRAMADO dd/mm/aaaa BOLETO" (ou PIX/TRANSFERENCIA,
   // conforme o que já estava), que a nota (lePagamento), o boleto e a análise de crédito já entendem como vencimento nesse dia.
   const isoDeBR = (dd, mm, aa) => aa + '-' + mm + '-' + dd;
-  const dataProgramada = pag => { const m = /PROGRAMAD\S*\s*(?:DATA\s*)?(\d{2})\/(\d{2})\/(\d{4})/i.exec(String(pag || '')); return m ? isoDeBR(m[1], m[2], m[3]) : ''; };
-  const pagProgramado = (pag, iso) => {
+  // Duas datas (04/11/2026, Anderson: "para não cair na semana do dia 5"): "PROGRAMADO 03/12/2026 E 10/12/2026 BOLETO" vira duas
+  // parcelas, uma em cada dia (a nota divide o valor; lePagamento já lê várias datas).
+  const datasProgramadas = pag => /PROGRAMAD/i.test(String(pag || '')) ? (String(pag).match(/\d{2}\/\d{2}\/\d{4}/g) || []).map(x => isoDeBR(x.slice(0, 2), x.slice(3, 5), x.slice(6))) : [];
+  const pagProgramado = (pag, isos) => {
     const forma = /PIX/i.test(pag || '') ? 'PIX' : /TRANSF|DEP[OÓ]SITO/i.test(pag || '') ? 'TRANSFERENCIA' : 'BOLETO';
-    return iso ? 'PROGRAMADO ' + iso.slice(8, 10) + '/' + iso.slice(5, 7) + '/' + iso.slice(0, 4) + ' ' + forma : String(pag || '');
+    const l = [...new Set((Array.isArray(isos) ? isos : [isos]).filter(Boolean))].sort();
+    return l.length ? 'PROGRAMADO ' + l.map(iso => iso.slice(8, 10) + '/' + iso.slice(5, 7) + '/' + iso.slice(0, 4)).join(' E ') + ' ' + forma : String(pag || '');
   };
-  const campoProgramado = pag => '<label class="campo"><span>📅 Programar data (vencimento)</span><input type="date" data-pd-prog value="' + esc(dataProgramada(pag)) + '" title="O cliente paga num dia certo: escolha a data e a forma de pagamento vira PROGRAMADO com essa data"></label>';
+  const campoProgramado = pag => {
+    const l = datasProgramadas(pag);
+    return '<label class="campo"><span>📅 Programar data (vencimento)</span><input type="date" data-pd-prog value="' + esc(l[0] || '') + '" title="O cliente paga num dia certo: escolha a data e a forma de pagamento vira PROGRAMADO com essa data"></label>' +
+      '<label class="campo"><span>📅 2ª data (opcional: 2 parcelas)</span><input type="date" data-pd-prog value="' + esc(l[1] || '') + '" title="Com a 2ª data, o valor é dividido em duas parcelas, uma em cada dia"></label>';
+  };
   const PAGAMENTOS = ['28 DIAS BOLETO', '28/35/42 DIAS BOLETO', '30 DIAS BOLETO', '30/60 DIAS BOLETO', '30/60/90 DIAS BOLETO', 'A VISTA BOLETO', 'A VISTA PIX', 'A VISTA TRANSFERENCIA', 'CARTAO DE CREDITO'];
   function novoEd(o) {
     o = o || {};
@@ -748,6 +756,7 @@
       { tipo: 'secao', rotulo: 'Pagamento e entrega' },
       { nome: 'pagamento', rotulo: 'Forma de pagamento', sugestoes: sugestoesPag(), largo: true },
       { nome: 'prog', rotulo: '📅 Programar data (o cliente paga num dia certo)', tipo: 'data', ajuda: 'escolha o dia e a forma de pagamento vira "PROGRAMADO dd/mm/aaaa"' },
+      { nome: 'prog2', rotulo: '📅 2ª data (opcional: divide em 2 parcelas)', tipo: 'data', ajuda: 'com as duas datas: "PROGRAMADO dd/mm/aaaa E dd/mm/aaaa"' },
       { nome: 'faturar_em', rotulo: 'Data de entrega', tipo: 'data' },
       { nome: 'transportadora', rotulo: 'Transportadora' },
       { nome: 'volumes', rotulo: 'Volumes' },
@@ -760,7 +769,7 @@
       { nome: 'observacoes', rotulo: 'Observações (para a separação e a entrega)', tipo: 'textarea', largo: true },
       { nome: 'seu_pedido', rotulo: 'Pedido do cliente (nº)' }, { nome: 'ac', rotulo: 'A/C' }
     ];
-    const vals = { pagamento: d.pagamento || '', prog: dataProgramada(d.pagamento), faturar_em: p.entrega || '', transportadora: d.transportadora || '', volumes: d.volumes || '',
+    const vals = { pagamento: d.pagamento || '', prog: datasProgramadas(d.pagamento)[0] || '', prog2: datasProgramadas(d.pagamento)[1] || '', faturar_em: p.entrega || '', transportadora: d.transportadora || '', volumes: d.volumes || '',
       local: en.local || '', endereco: en.endereco || '', numero: en.numero || '', compl: en.compl || '', bairro: en.bairro || '', cidade: en.cidade || '', uf: en.uf || '', cep: en.cep || '',
       texto_nota: d.texto_nota || '', observacoes: d.observacoes || '', seu_pedido: d.seu_pedido || '', ac: d.ac || '' };
     const igual = (a, b) => String(a == null ? '' : a).trim() === String(b == null ? '' : b).trim();
@@ -771,8 +780,9 @@
       htmlDepois: (() => { const l = locaisDe(p.empresa_id); return l.some(x => x.local !== 'Endereço do cadastro (CNPJ)') ? '<label class="campo largo"><span>📍 Preencher o local de entrega com um já usado (' + l.length + ')</span><select data-pd-local-form><option value="">— escolher —</option>' +
         l.map((x, i) => '<option value="' + i + '">' + esc(P.entregaTexto(x)) + '</option>').join('') + '</select></label>' : ''; })(),
       extras: form => {
-        const prog = form.elements.prog, pg = form.elements.pagamento;
-        if (prog && pg) prog.addEventListener('change', () => { if (prog.value) pg.value = pagProgramado(pg.value, prog.value); });
+        const prog = form.elements.prog, prog2 = form.elements.prog2, pg = form.elements.pagamento;
+        const muda = () => { const l = [prog && prog.value, prog2 && prog2.value].filter(Boolean); if (l.length && pg) pg.value = pagProgramado(pg.value, l); };
+        [prog, prog2].forEach(x => { if (x) x.addEventListener('change', muda); });
         const sl = form.querySelector('[data-pd-local-form]');
         if (sl) sl.addEventListener('change', () => {
           const x = locaisDe(p.empresa_id)[Number(sl.value)]; if (sl.value === '' || !x) return;
@@ -1141,8 +1151,9 @@
         CRM.render();
       });
       on('[data-pd-prog]', 'change', el => {
-        if (!el.value) return;
-        const novo = pagProgramado(ed.dados.pagamento, el.value); ed.dados.pagamento = novo;
+        const l = [...c.querySelectorAll('[data-pd-prog]')].map(x => x.value).filter(Boolean);
+        if (!l.length) return;
+        const novo = pagProgramado(ed.dados.pagamento, l); ed.dados.pagamento = novo;
         const pg = c.querySelector('[data-ed="dados.pagamento"]'); if (pg) pg.value = novo;
       });
       on('[data-ed-cliente]', 'change', el => {
