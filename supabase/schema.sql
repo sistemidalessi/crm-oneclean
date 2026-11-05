@@ -1921,6 +1921,34 @@ create table if not exists public.crm_fiscal_produtos (
 );
 drop trigger if exists crm_fiscal_produtos_atualizado_em on public.crm_fiscal_produtos;
 create trigger crm_fiscal_produtos_atualizado_em before update on public.crm_fiscal_produtos for each row execute function public.crm_toca_atualizado_em();
+
+-- Código de barras (GTIN) que a Sefaz recusa (rejeição 611 "cEAN inválido") vira vazio: a nota sai com SEM GTIN
+-- (05/11/2026: NF 1-2882 rejeitada por "0000000000000"; 86 produtos limpos, backup crm_backup.fiscal_gtin_invalido_20261105).
+-- Recusa: tamanho fora de 8/12/13/14, só zeros, dígito verificador errado, prefixo de uso interno (2xx, 02, 04).
+create or replace function public.crm_gtin_valido(p text) returns text language plpgsql immutable set search_path = public as $$
+declare d text := regexp_replace(coalesce(p, ''), '\D', '', 'g'); n int; s int := 0; i int; c int;
+begin
+  n := length(d);
+  if n not in (8, 12, 13, 14) or d ~ '^0+$' then return null; end if;
+  for i in 1 .. n - 1 loop
+    c := substr(d, n - i, 1)::int;
+    s := s + c * case when i % 2 = 1 then 3 else 1 end;
+  end loop;
+  if (10 - s % 10) % 10 <> right(d, 1)::int then return null; end if;
+  if n = 13 and d ~ '^(2|02|04)' then return null; end if;
+  if n = 14 and substr(d, 2) ~ '^(2|02|04|0+$)' then return null; end if;
+  return d;
+end;
+$$;
+create or replace function public.crm_fiscal_produtos_gtin() returns trigger language plpgsql set search_path = public as $$
+begin
+  new.gtin := public.crm_gtin_valido(new.gtin);
+  return new;
+end;
+$$;
+drop trigger if exists crm_fiscal_produtos_gtin on public.crm_fiscal_produtos;
+create trigger crm_fiscal_produtos_gtin before insert or update of gtin on public.crm_fiscal_produtos
+  for each row execute function public.crm_fiscal_produtos_gtin();
 alter table public.crm_fiscal_itens enable row level security;
 alter table public.crm_fiscal_produtos enable row level security;
 revoke all on public.crm_fiscal_itens, public.crm_fiscal_produtos from anon, public;

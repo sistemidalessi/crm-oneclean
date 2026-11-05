@@ -497,3 +497,13 @@ test('consulta cadastro da Sefaz-SP: mensagem, leitura da resposta e rota do ser
   const { ROTAS } = require('../servico-fiscal/servidor.js');
   assert.strictEqual(typeof ROTAS['POST /cadastro'], 'function');
 });
+
+test('código de barras que a Sefaz recusa (611) vira SEM GTIN', () => {
+  assert.strictEqual(N.gtinValido('7898924601051'), '7898924601051');
+  assert.strictEqual(N.gtinValido('17898918330360'), '17898918330360');
+  assert.strictEqual(N.gtinValido('78912342'), '78912342');
+  assert.strictEqual(N.gtinValido('0000000000000'), '');   // NF 1-2882 de 05/11/2026
+  assert.strictEqual(N.gtinValido('2002011007168'), '');   // uso interno de loja
+  assert.strictEqual(N.gtinValido('7898924601052'), '');   // dígito errado
+  assert.strictEqual(N.gtinValido('SEM GTIN'), '');
+});

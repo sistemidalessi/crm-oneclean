@@ -15,6 +15,17 @@ const HOMOLOGACAO_NOME = 'NF-E EMITIDA EM AMBIENTE DE HOMOLOGACAO - SEM VALOR FI
 const r2 = v => Math.round((Number(v) + Number.EPSILON) * 100) / 100;
 const num = v => (v == null || v === '' ? 0 : Number(v) || 0);
 const dig = v => String(v == null ? '' : v).replace(/\D/g, '');
+// código de barras que a Sefaz aceita (05/11/2026: NF 1-2882 rejeitada 611 "cEAN inválido" por "0000000000000"), ou ''.
+// Recusa tamanho fora de 8/12/13/14, só zeros, dígito verificador errado e prefixo de uso interno (2xx, 02, 04).
+function gtinValido(v) {
+  const d = dig(v), n = d.length;
+  if ([8, 12, 13, 14].indexOf(n) === -1 || /^0+$/.test(d)) return '';
+  let s = 0;
+  for (let i = 1; i < n; i++) s += Number(d[n - 1 - i]) * (i % 2 ? 3 : 1);
+  if ((10 - s % 10) % 10 !== Number(d[n - 1])) return '';
+  if ((n === 13 && /^(2|02|04)/.test(d)) || (n === 14 && /^(2|02|04|0+$)/.test(d.slice(1)))) return '';
+  return d;
+}
 const docLimpo = v => String(v == null ? '' : v).toUpperCase().replace(/[^0-9A-Z]/g, '');   // CNPJ pode ter letras (07/2026)
 // Texto do XML: sem quebra de linha nem espaço repetido, com os 5 escapes do XML (a Sefaz rejeita espaço nas pontas).
 // Com `max`, corta no tamanho máximo do XSD antes dos escapes (03/11/2026: razão social de 61 letras deu a rejeição 225).
@@ -287,8 +298,8 @@ function monta(nota, opc) {
   const dest = '<dest>' + docXml(de.doc) + tag('xNome', txt(homolog ? HOMOLOGACAO_NOME : de.nome, 60)) +
     (de2.logradouro ? enderecoXml('enderDest', de2) : '') + tag('indIEDest', ind) + (ind === '1' ? tag('IE', dig(de.ie)) : '') + tag('email', txt(de.email, 60)) + '</dest>';
   const det = (nota.itens || []).map((it, i) => {
-    const ci = c.itens[i], gtin = dig(it.gtin);
-    const ean = gtin && [8, 12, 13, 14].indexOf(gtin.length) !== -1 ? gtin : 'SEM GTIN';
+    const ci = c.itens[i];
+    const ean = gtinValido(it.gtin) || 'SEM GTIN';
     const prod = '<prod>' + tag('cProd', txt(it.codigo || String(i + 1), 60)) + tag('cEAN', ean) + tag('xProd', txt(it.descricao, 120)) + tag('NCM', dig(it.ncm)) +
       (it.cest ? tag('CEST', dig(it.cest)) : '') + (it.cBenef ? tag('cBenef', txt(it.cBenef)) : '') + (it.extipi ? tag('EXTIPI', dig(it.extipi)) : '') + tag('CFOP', dig(it.cfop)) + tag('uCom', txt(it.unidade || 'UN', 6)) + tag('qCom', d4(it.quantidade)) +
       tag('vUnCom', d4(it.valorUnitario)) + tag('vProd', d2(ci.vProd)) + tag('cEANTrib', ean) + tag('uTrib', txt(it.unidade || 'UN', 6)) + tag('qTrib', d4(it.quantidade)) +
@@ -343,4 +354,4 @@ const loteEnvio = (nfeXml, idLote) => '<enviNFe xmlns="' + NS + '" versao="4.00"
 // O <nfeProc> (nota + protocolo) é o arquivo que vale: vai para o cliente, para a contabilidade e para o CRM.
 const nfeProc = (nfeXml, protNFeXml) => '<?xml version="1.0" encoding="UTF-8"?><nfeProc xmlns="' + NS + '" versao="4.00">' + nfeXml + protNFeXml + '</nfeProc>';
 
-module.exports = { NS, HOMOLOGACAO_NOME, dvChave, chaveAcesso, codigoNumerico, rateia, calcula, monta, nfeCompleta, loteEnvio, nfeProc, txt, IBSCBS_2026, REFORMA_2027, regraReforma };
+module.exports = { NS, gtinValido, HOMOLOGACAO_NOME, dvChave, chaveAcesso, codigoNumerico, rateia, calcula, monta, nfeCompleta, loteEnvio, nfeProc, txt, IBSCBS_2026, REFORMA_2027, regraReforma };
