@@ -10029,3 +10029,321 @@ begin
   return public.crm_pedido_saida(r);
 end;
 $$;
+
+-- ==== Conciliação com o extrato do BB (05/11/2026) ====
+-- Conciliação automática do extrato do BB (05/11/2026, aprovada pelo Anderson em 04/11 à noite). A crm-bb lê o extrato
+-- pela API Extratos v2 (com o A1, pela VPS) e grava aqui (crm_fin_extrato_gravar); crm_fin_extrato_conciliar casa cada
+-- lançamento do banco com o Caixa:
+--   saldo, aplicação/resgate do BB Rende Fácil → fora da conta (o "Saldo Disponível" do BB já soma o investimento);
+--   o mesmo valor, no mesmo dia, já baixado no Caixa → conferido;
+--   "Cobrança" (crédito dos boletos) = soma dos títulos recebidos no dia → conferido;
+--   tarifa → baixa a tarifa aberta de mesmo valor (até 7 dias) ou lança "Tarifas bancárias" → lançado;
+--   o resto → "conferir", com sugestões (conta aberta de mesmo valor, título do mesmo CNPJ e valor).
+-- Na tela do Caixa (só admin): "Saldo no BB × Saldo no CRM" e o quadro "Extrato do BB: conferir" (ligar, lançar, ignorar).
+alter table public.crm_fin_lancamentos drop constraint if exists crm_fin_lancamentos_origem_check;
+alter table public.crm_fin_lancamentos add constraint crm_fin_lancamentos_origem_check check (origem = any (array['tela', 'recorrente', 'fkn', 'planilha', 'titulo', 'extrato']));
+create table if not exists public.crm_fin_extrato (
+  id bigserial primary key,
+  chave text not null unique,               -- data|sinal|valor|documento|lote|histórico|n (n = repetição da mesma linha)
+  data date not null,
+  movimento date,
+  tipo text,
+  sinal text,
+  valor numeric(14,2) not null,
+  historico text,
+  complemento text,
+  documento text,
+  codigo integer,
+  lote integer,
+  contrapartida text,
+  id_transacao text,
+  situacao text not null default 'conferir' check (situacao in ('conferir', 'conferido', 'lancado', 'ignorado', 'saldo')),
+  lancamento_ids uuid[] not null default '{}',
+  sugestoes jsonb,
+  obs text,
+  lido_em timestamptz not null default now(),
+  resolvido_em timestamptz,
+  resolvido_por uuid
+);
+create index if not exists crm_fin_extrato_data on public.crm_fin_extrato (data);
+create table if not exists public.crm_fin_extrato_saldo (
+  data date primary key,
+  saldo numeric(14,2) not null,             -- "Saldo Disponível" (SD): conta + investimento de resgate automático
+  conta numeric(14,2),
+  investimento numeric(14,2),
+  lido_em timestamptz not null default now()
+);
+alter table public.crm_fin_extrato enable row level security;
+alter table public.crm_fin_extrato_saldo enable row level security;
+drop policy if exists ler on public.crm_fin_extrato;
+create policy ler on public.crm_fin_extrato for select to authenticated using ((select public.crm_eh_admin()));
+drop policy if exists ler on public.crm_fin_extrato_saldo;
+create policy ler on public.crm_fin_extrato_saldo for select to authenticated using ((select public.crm_eh_admin()));
+revoke all on public.crm_fin_extrato, public.crm_fin_extrato_saldo from anon;
+grant select on public.crm_fin_extrato, public.crm_fin_extrato_saldo to authenticated;
+
+-- grava as linhas lidas (a chave não repete) e o saldo do dia; só a crm-bb (service_role)
+create or replace function public.crm_fin_extrato_gravar(p_linhas jsonb, p_saldo jsonb default null) returns integer
+language plpgsql security definer set search_path = public as $$
+declare n integer;
+begin
+  insert into public.crm_fin_extrato (chave, data, movimento, tipo, sinal, valor, historico, complemento, documento, codigo, lote, contrapartida, id_transacao, situacao)
+  select x.chave, x.data, x.movimento, x.tipo, x.sinal, x.valor, x.historico, x.complemento, x.documento, x.codigo, x.lote, x.contrapartida, x.id_transacao,
+         case when coalesce(x.tipo, '1') <> '1' or x.historico ~* '^(saldo anterior|saldo do dia|s a l d o)$' then 'saldo'
+              when x.historico ~* 'rende f' then 'ignorado' else 'conferir' end
+    from jsonb_to_recordset(coalesce(p_linhas, '[]'::jsonb)) as x(chave text, data date, movimento date, tipo text, sinal text, valor numeric, historico text,
+         complemento text, documento text, codigo integer, lote integer, contrapartida text, id_transacao text)
+   where x.chave is not null and x.data is not null
+  on conflict (chave) do nothing;
+  get diagnostics n = row_count;
+  if p_saldo is not null and (p_saldo->>'data') is not null and (p_saldo->>'saldo') is not null then
+    insert into public.crm_fin_extrato_saldo (data, saldo, conta, investimento, lido_em)
+    values ((p_saldo->>'data')::date, (p_saldo->>'saldo')::numeric, nullif(p_saldo->>'conta', '')::numeric, nullif(p_saldo->>'investimento', '')::numeric, now())
+    on conflict (data) do update set saldo = excluded.saldo, conta = excluded.conta, investimento = excluded.investimento, lido_em = now();
+  end if;
+  return n;
+end;
+$$;
+
+-- lançamento do Caixa já ligado a alguma linha do extrato
+create or replace function public.crm_fin_extrato_usado(p_id uuid) returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.crm_fin_extrato x where p_id = any(x.lancamento_ids));
+$$;
+
+create or replace function public.crm_fin_extrato_conciliar(p_desde date default null) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare x record; l record; ids uuid[]; soma numeric; feitos jsonb := '{"conferido":0,"lancado":0,"conferir":0}'::jsonb; sug jsonb; emp uuid; tp text;
+  desde date := coalesce(p_desde, (now() at time zone 'America/Sao_Paulo')::date - 10);
+begin
+  for x in select * from public.crm_fin_extrato where situacao = 'conferir' and data >= desde order by data, id loop
+    ids := null; l := null; emp := null;
+    tp := case when x.sinal = 'C' then 'entrada' else 'saida' end;
+    -- 1) o mesmo valor, no mesmo dia, já baixado no Caixa (e ainda não ligado a outra linha)
+    select array[l2.id] into ids from public.crm_fin_lancamentos l2
+     where l2.situacao = 'pago' and l2.baixa = 'caixa' and l2.pago_em = x.data and abs(l2.valor - x.valor) < 0.005
+       and l2.tipo = tp and not public.crm_fin_extrato_usado(l2.id)
+     order by (case when x.complemento <> '' and upper(l2.descricao) like '%' || upper(split_part(regexp_replace(x.complemento, '^\d\d/\d\d \d\d:\d\d (\d+ )?', ''), ' ', 1)) || '%' then 0 else 1 end), l2.baixado_em
+     limit 1;
+    if ids is not null then
+      update public.crm_fin_extrato set situacao = 'conferido', lancamento_ids = ids, sugestoes = null where id = x.id;
+      feitos := jsonb_set(feitos, '{conferido}', to_jsonb((feitos->>'conferido')::int + 1)); continue;
+    end if;
+    -- 2) crédito da cobrança = soma dos títulos recebidos no dia
+    if x.sinal = 'C' and x.historico ~* '^cobran' then
+      select array_agg(l2.id), sum(l2.valor) into ids, soma from public.crm_fin_lancamentos l2
+       where l2.situacao = 'pago' and l2.baixa = 'caixa' and l2.pago_em = x.data and l2.tipo = 'entrada' and l2.titulo_duplicata is not null
+         and not public.crm_fin_extrato_usado(l2.id);
+      if ids is not null and abs(soma - x.valor) < 0.02 then
+        update public.crm_fin_extrato set situacao = 'conferido', lancamento_ids = ids, sugestoes = null where id = x.id;
+        feitos := jsonb_set(feitos, '{conferido}', to_jsonb((feitos->>'conferido')::int + 1)); continue;
+      end if;
+      update public.crm_fin_extrato set sugestoes = jsonb_build_object('cobranca', jsonb_build_object('titulos_no_dia', coalesce(soma, 0), 'qtd', coalesce(array_length(ids, 1), 0))) where id = x.id;
+      feitos := jsonb_set(feitos, '{conferir}', to_jsonb((feitos->>'conferir')::int + 1)); continue;
+    end if;
+    -- 3) tarifa do banco: baixa a tarifa aberta de mesmo valor (até 7 dias) ou lança
+    if x.sinal = 'D' and (x.historico ~* 'tarifa|tar\.|servi.o cobran' or x.complemento ~* '^tar\.') then
+      select l2.* into l from public.crm_fin_lancamentos l2
+       where l2.tipo = 'saida' and l2.situacao = 'aberto' and l2.categoria = 'Tarifas bancárias' and abs(l2.valor - x.valor) < 0.005
+         and l2.vencimento between x.data - 7 and x.data + 7 and not public.crm_fin_extrato_usado(l2.id)
+       order by abs(l2.vencimento - x.data) limit 1;
+      if l.id is not null then
+        update public.crm_fin_lancamentos set situacao = 'pago', baixa = 'caixa', pago_em = x.data, baixado_em = now(), atualizado_em = now(),
+          observacoes = coalesce(observacoes || ' · ', '') || 'baixada pelo extrato do BB (' || to_char(x.data, 'DD/MM') || ')' where id = l.id;
+        ids := array[l.id];
+      else
+        insert into public.crm_fin_lancamentos (tipo, descricao, categoria, valor, vencimento, situacao, pago_em, baixa, baixado_em, origem, observacoes)
+        values ('saida', left(trim(x.historico || coalesce(' — ' || nullif(x.complemento, ''), '')), 200), 'Tarifas bancárias', x.valor, x.data, 'pago', x.data, 'caixa', now(), 'extrato',
+                'Lançada pelo extrato do BB')
+        returning array[id] into ids;
+      end if;
+      update public.crm_fin_extrato set situacao = 'lancado', lancamento_ids = ids, sugestoes = null where id = x.id;
+      feitos := jsonb_set(feitos, '{lancado}', to_jsonb((feitos->>'lancado')::int + 1)); continue;
+    end if;
+    -- 4) o resto fica para conferir, com sugestões
+    sug := '[]'::jsonb;
+    -- conta/entrada aberta de mesmo valor, perto da data (o ✓ que faltou dar no Caixa)
+    sug := sug || coalesce((select jsonb_agg(jsonb_build_object('id', l2.id, 'tipo', 'aberto', 'descricao', l2.descricao, 'vencimento', l2.vencimento) order by abs(l2.vencimento - x.data))
+      from (select * from public.crm_fin_lancamentos l3
+             where l3.situacao = 'aberto' and abs(l3.valor - x.valor) < 0.005 and l3.tipo = tp
+               and l3.vencimento between x.data - 20 and x.data + 20 and not public.crm_fin_extrato_usado(l3.id)
+             order by abs(l3.vencimento - x.data) limit 3) l2), '[]'::jsonb);
+    -- já baixado no Caixa em outro dia (data trocada)
+    sug := sug || coalesce((select jsonb_agg(jsonb_build_object('id', l2.id, 'tipo', 'outro_dia', 'descricao', l2.descricao, 'pago_em', l2.pago_em))
+      from (select * from public.crm_fin_lancamentos l3
+             where l3.situacao = 'pago' and l3.baixa = 'caixa' and abs(l3.valor - x.valor) < 0.005 and l3.tipo = tp
+               and l3.pago_em between x.data - 5 and x.data + 5 and l3.pago_em <> x.data and not public.crm_fin_extrato_usado(l3.id)
+             order by abs(l3.pago_em - x.data) limit 3) l2), '[]'::jsonb);
+    -- Pix/TED recebido de cliente: título aberto do mesmo CNPJ
+    if x.sinal = 'C' and coalesce(x.contrapartida, '') <> '' then
+      select id into emp from public.crm_empresas where regexp_replace(coalesce(cnpj, ''), '\D', '', 'g') = lpad(x.contrapartida, 14, '0') or regexp_replace(coalesce(cnpj, ''), '\D', '', 'g') = x.contrapartida limit 1;
+      if emp is not null then
+        sug := sug || coalesce((select jsonb_agg(jsonb_build_object('tipo', 'titulo', 'duplicata', t.duplicata, 'valor', t.valor, 'vencimento', t.vencimento, 'cliente', t.cliente_nome))
+          from public.crm_titulos t where t.empresa_id = emp and not t.abono), '[]'::jsonb);
+        sug := sug || jsonb_build_array(jsonb_build_object('tipo', 'cliente', 'empresa_id', emp, 'nome', (select nome from public.crm_empresas where id = emp)));
+      end if;
+    end if;
+    update public.crm_fin_extrato set sugestoes = case when jsonb_array_length(sug) > 0 then sug end where id = x.id;
+    feitos := jsonb_set(feitos, '{conferir}', to_jsonb((feitos->>'conferir')::int + 1));
+  end loop;
+  return feitos;
+end;
+$$;
+
+-- o que o administrador resolve na tela: ligar a um lançamento (dando o ✓ se estiver aberto), lançar, ignorar ou reabrir
+create or replace function public.crm_fin_extrato_resolver(p_id bigint, p_acao text, p_lancamento uuid default null, p_categoria text default null,
+  p_descricao text default null, p_obs text default null) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare x record; l record; novo uuid; tp text;
+begin
+  if not public.crm_eh_admin() then raise exception 'só o administrador'; end if;
+  select * into x from public.crm_fin_extrato where id = p_id for update;
+  if x.id is null then raise exception 'linha do extrato não encontrada'; end if;
+  tp := case when x.sinal = 'C' then 'entrada' else 'saida' end;
+  if p_acao = 'ligar' then
+    select * into l from public.crm_fin_lancamentos where id = p_lancamento for update;
+    if l.id is null then raise exception 'lançamento não encontrado'; end if;
+    if l.tipo <> tp then raise exception 'o lançamento é de outro tipo (entrada × saída)'; end if;
+    if l.situacao = 'aberto' then
+      update public.crm_fin_lancamentos set situacao = 'pago', baixa = 'caixa', pago_em = x.data, baixado_em = now(), atualizado_em = now(),
+        valor = x.valor,
+        observacoes = coalesce(observacoes || ' · ', '') || 'baixado pelo extrato do BB (' || to_char(x.data, 'DD/MM') || ')' where id = l.id;
+    elsif l.situacao = 'pago' and (l.pago_em is distinct from x.data or l.baixa <> 'caixa') then
+      update public.crm_fin_lancamentos set baixa = 'caixa', pago_em = x.data, atualizado_em = now(),
+        observacoes = coalesce(observacoes || ' · ', '') || 'data acertada pelo extrato do BB (' || to_char(x.data, 'DD/MM') || ')' where id = l.id;
+    end if;
+    update public.crm_fin_extrato set situacao = 'conferido', lancamento_ids = array_append(lancamento_ids, l.id), obs = p_obs, resolvido_em = now(), resolvido_por = auth.uid() where id = x.id;
+  elsif p_acao = 'lancar' then
+    if coalesce(p_categoria, '') = '' then raise exception 'escolha a categoria'; end if;
+    insert into public.crm_fin_lancamentos (tipo, descricao, categoria, valor, vencimento, situacao, pago_em, baixa, baixado_em, origem, observacoes, criado_por)
+    values (tp, left(coalesce(nullif(trim(p_descricao), ''), trim(x.historico || ' ' || coalesce(x.complemento, ''))), 200),
+            p_categoria, x.valor, x.data, 'pago', x.data, 'caixa', now(), 'extrato', 'Lançado pelo extrato do BB' || coalesce(' · ' || nullif(p_obs, ''), ''), auth.uid())
+    returning id into novo;
+    update public.crm_fin_extrato set situacao = 'lancado', lancamento_ids = array_append(lancamento_ids, novo), obs = p_obs, resolvido_em = now(), resolvido_por = auth.uid() where id = x.id;
+  elsif p_acao = 'ignorar' then
+    update public.crm_fin_extrato set situacao = 'ignorado', obs = p_obs, resolvido_em = now(), resolvido_por = auth.uid() where id = x.id;
+  elsif p_acao = 'reabrir' then
+    update public.crm_fin_extrato set situacao = 'conferir', lancamento_ids = '{}', obs = null, resolvido_em = null, resolvido_por = null where id = x.id;
+  else raise exception 'ação desconhecida';
+  end if;
+  return jsonb_build_object('ok', true);
+end;
+$$;
+
+revoke all on function public.crm_fin_extrato_gravar(jsonb, jsonb) from public, anon, authenticated;
+revoke all on function public.crm_fin_extrato_conciliar(date) from public, anon, authenticated;
+revoke all on function public.crm_fin_extrato_usado(uuid) from public, anon, authenticated;
+revoke all on function public.crm_fin_extrato_resolver(bigint, text, uuid, text, text, text) from public, anon;
+grant execute on function public.crm_fin_extrato_resolver(bigint, text, uuid, text, text, text) to authenticated;
+
+-- Conciliação do extrato do BB, 2ª parte (05/11/2026), depois da 1ª leitura real gravada:
+-- 1) a linha do extrato tem uma chave que não muda entre leituras (sem o valor: a "Cobrança" e os saldos do dia crescem
+--    ao longo do dia); a leitura seguinte atualiza o valor da linha que ainda está para conferir;
+-- 2) a "Cobrança" do dia (o BB credita em uma ou mais linhas) confere com a soma dos boletos baixados no Caixa naquele dia
+--    (04/11: 14.620,42 = 14.620,42; 05/11: 11.740,48 + 489,76 = 12.230,24).
+create or replace function public.crm_fin_extrato_gravar(p_linhas jsonb, p_saldo jsonb default null) returns integer
+language plpgsql security definer set search_path = public as $$
+declare n integer;
+begin
+  insert into public.crm_fin_extrato as f (chave, data, movimento, tipo, sinal, valor, historico, complemento, documento, codigo, lote, contrapartida, id_transacao, situacao)
+  select x.chave, x.data, x.movimento, x.tipo, x.sinal, x.valor, x.historico, x.complemento, x.documento, x.codigo, x.lote, x.contrapartida, x.id_transacao,
+         case when coalesce(x.tipo, '1') <> '1' or x.historico ~* '^(saldo anterior|saldo do dia|s a l d o)$' then 'saldo'
+              when x.historico ~* 'rende f' then 'ignorado' else 'conferir' end
+    from jsonb_to_recordset(coalesce(p_linhas, '[]'::jsonb)) as x(chave text, data date, movimento date, tipo text, sinal text, valor numeric, historico text,
+         complemento text, documento text, codigo integer, lote integer, contrapartida text, id_transacao text)
+   where x.chave is not null and x.data is not null
+  on conflict (chave) do update set valor = excluded.valor, complemento = excluded.complemento, contrapartida = excluded.contrapartida,
+        id_transacao = excluded.id_transacao, lido_em = now()
+   where f.situacao in ('conferir', 'saldo', 'ignorado') and (f.valor is distinct from excluded.valor or f.complemento is distinct from excluded.complemento);
+  get diagnostics n = row_count;
+  if p_saldo is not null and (p_saldo->>'data') is not null and (p_saldo->>'saldo') is not null then
+    insert into public.crm_fin_extrato_saldo (data, saldo, conta, investimento, lido_em)
+    values ((p_saldo->>'data')::date, (p_saldo->>'saldo')::numeric, nullif(p_saldo->>'conta', '')::numeric, nullif(p_saldo->>'investimento', '')::numeric, now())
+    on conflict (data) do update set saldo = excluded.saldo, conta = excluded.conta, investimento = excluded.investimento, lido_em = now();
+  end if;
+  return n;
+end;
+$$;
+
+create or replace function public.crm_fin_extrato_conciliar(p_desde date default null) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare x record; l record; ids uuid[]; soma numeric; banco numeric; feitos jsonb := '{"conferido":0,"lancado":0,"conferir":0}'::jsonb; sug jsonb; emp uuid; tp text;
+  desde date := coalesce(p_desde, (now() at time zone 'America/Sao_Paulo')::date - 10);
+begin
+  for x in select * from public.crm_fin_extrato where situacao = 'conferir' and data >= desde order by data, id loop
+    -- a linha pode ter sido resolvida junto com outra do mesmo dia (a Cobrança em duas linhas)
+    if (select situacao from public.crm_fin_extrato where id = x.id) <> 'conferir' then continue; end if;
+    ids := null; l := null; emp := null;
+    tp := case when x.sinal = 'C' then 'entrada' else 'saida' end;
+    -- Cobrança: todas as linhas do dia contra a soma dos boletos baixados no Caixa no dia
+    if x.sinal = 'C' and x.historico ~* '^cobran' then
+      select sum(valor) into banco from public.crm_fin_extrato where data = x.data and sinal = 'C' and historico ~* '^cobran' and situacao <> 'ignorado';
+      select array_agg(l2.id), sum(l2.valor) into ids, soma from public.crm_fin_lancamentos l2
+       where l2.situacao = 'pago' and l2.baixa = 'caixa' and l2.pago_em = x.data and l2.tipo = 'entrada' and l2.titulo_duplicata is not null and l2.origem = 'titulo';
+      if ids is not null and abs(soma - banco) < 0.02 then
+        update public.crm_fin_extrato set situacao = 'conferido', lancamento_ids = case when id = x.id then ids else '{}' end, sugestoes = null
+         where data = x.data and sinal = 'C' and historico ~* '^cobran' and situacao = 'conferir';
+        feitos := jsonb_set(feitos, '{conferido}', to_jsonb((feitos->>'conferido')::int + 1)); continue;
+      end if;
+      update public.crm_fin_extrato set sugestoes = jsonb_build_object('cobranca', jsonb_build_object('banco_no_dia', banco, 'boletos_no_caixa', coalesce(soma, 0),
+        'qtd', coalesce(array_length(ids, 1), 0))) where data = x.data and sinal = 'C' and historico ~* '^cobran' and situacao = 'conferir';
+      feitos := jsonb_set(feitos, '{conferir}', to_jsonb((feitos->>'conferir')::int + 1)); continue;
+    end if;
+    -- o mesmo valor, no mesmo dia, já baixado no Caixa (de preferência o de nome parecido)
+    select array[l2.id] into ids from public.crm_fin_lancamentos l2
+     where l2.situacao = 'pago' and l2.baixa = 'caixa' and l2.pago_em = x.data and abs(l2.valor - x.valor) < 0.005
+       and l2.tipo = tp and not public.crm_fin_extrato_usado(l2.id)
+     order by (case when coalesce(x.complemento, '') <> '' and upper(coalesce(l2.descricao, '') || ' ' || coalesce(l2.fornecedor, '')) like
+                 '%' || upper(split_part(regexp_replace(x.complemento, '^\d\d/\d\d \d\d:\d\d (\d+ )?', ''), ' ', 1)) || '%' then 0 else 1 end), l2.baixado_em
+     limit 1;
+    if ids is not null then
+      update public.crm_fin_extrato set situacao = 'conferido', lancamento_ids = ids, sugestoes = null where id = x.id;
+      feitos := jsonb_set(feitos, '{conferido}', to_jsonb((feitos->>'conferido')::int + 1)); continue;
+    end if;
+    -- tarifa do banco: dá baixa na tarifa aberta de mesmo valor ou lança
+    if x.sinal = 'D' and (x.historico ~* 'tarifa|tar\.|servi.o cobran' or x.complemento ~* '^tar\.') then
+      select l2.* into l from public.crm_fin_lancamentos l2
+       where l2.tipo = 'saida' and l2.situacao = 'aberto' and l2.categoria = 'Tarifas bancárias' and abs(l2.valor - x.valor) < 0.005
+         and l2.vencimento between x.data - 7 and x.data + 7 and not public.crm_fin_extrato_usado(l2.id)
+       order by abs(l2.vencimento - x.data) limit 1;
+      if l.id is not null then
+        update public.crm_fin_lancamentos set situacao = 'pago', baixa = 'caixa', pago_em = x.data, baixado_em = now(), atualizado_em = now(),
+          observacoes = coalesce(observacoes || ' · ', '') || 'baixada pelo extrato do BB (' || to_char(x.data, 'DD/MM') || ')' where id = l.id;
+        ids := array[l.id];
+      else
+        insert into public.crm_fin_lancamentos (tipo, descricao, categoria, valor, vencimento, situacao, pago_em, baixa, baixado_em, origem, observacoes)
+        values ('saida', left(trim(x.historico || coalesce(' — ' || nullif(x.complemento, ''), '')), 200), 'Tarifas bancárias', x.valor, x.data, 'pago', x.data, 'caixa', now(), 'extrato',
+                'Lançada pelo extrato do BB')
+        returning array[id] into ids;
+      end if;
+      update public.crm_fin_extrato set situacao = 'lancado', lancamento_ids = ids, sugestoes = null where id = x.id;
+      feitos := jsonb_set(feitos, '{lancado}', to_jsonb((feitos->>'lancado')::int + 1)); continue;
+    end if;
+    -- sem par: sugestões para o administrador (conta aberta de mesmo valor, o mesmo valor baixado em outro dia, títulos do CNPJ)
+    sug := '[]'::jsonb;
+    sug := sug || coalesce((select jsonb_agg(jsonb_build_object('id', l2.id, 'tipo', 'aberto', 'descricao', l2.descricao, 'vencimento', l2.vencimento) order by abs(l2.vencimento - x.data))
+      from (select * from public.crm_fin_lancamentos l3
+             where l3.situacao = 'aberto' and abs(l3.valor - x.valor) < 0.005 and l3.tipo = tp
+               and l3.vencimento between x.data - 20 and x.data + 20 and not public.crm_fin_extrato_usado(l3.id)
+             order by abs(l3.vencimento - x.data) limit 3) l2), '[]'::jsonb);
+    sug := sug || coalesce((select jsonb_agg(jsonb_build_object('id', l2.id, 'tipo', 'outro_dia', 'descricao', l2.descricao, 'pago_em', l2.pago_em))
+      from (select * from public.crm_fin_lancamentos l3
+             where l3.situacao = 'pago' and l3.baixa = 'caixa' and abs(l3.valor - x.valor) < 0.005 and l3.tipo = tp
+               and l3.pago_em between x.data - 5 and x.data + 5 and l3.pago_em <> x.data and not public.crm_fin_extrato_usado(l3.id)
+             order by abs(l3.pago_em - x.data) limit 3) l2), '[]'::jsonb);
+    if x.sinal = 'C' and coalesce(x.contrapartida, '') <> '' then
+      select id into emp from public.crm_empresas where regexp_replace(coalesce(cnpj, ''), '\D', '', 'g') in (lpad(x.contrapartida, 14, '0'), x.contrapartida) limit 1;
+      if emp is not null then
+        sug := sug || coalesce((select jsonb_agg(jsonb_build_object('tipo', 'titulo', 'duplicata', t.duplicata, 'valor', t.valor, 'vencimento', t.vencimento, 'cliente', t.cliente_nome))
+          from public.crm_titulos t where t.empresa_id = emp and not t.abono), '[]'::jsonb);
+        sug := sug || jsonb_build_array(jsonb_build_object('tipo', 'cliente', 'empresa_id', emp, 'nome', (select nome from public.crm_empresas where id = emp)));
+      end if;
+    end if;
+    update public.crm_fin_extrato set sugestoes = case when jsonb_array_length(sug) > 0 then sug end where id = x.id;
+    feitos := jsonb_set(feitos, '{conferir}', to_jsonb((feitos->>'conferir')::int + 1));
+  end loop;
+  return feitos;
+end;
+$$;
+
+-- agendador (de 30 em 30 minutos, das 7h15 às 21h45 em SP; aplicado em 05/11/2026)
+-- select cron.schedule('crm-bb-extrato', '15,45 10-23,0 * * *', $$select public.crm_bb_chamar('{"acao":"extrato_conciliar"}'::jsonb)$$);

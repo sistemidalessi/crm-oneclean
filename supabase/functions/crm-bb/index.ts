@@ -11,6 +11,8 @@
 //   POST { acao: 'baixar_canceladas' } baixa no banco o boleto de nota cancelada (02/11/2026): o cliente não consegue mais pagar
 //   POST { acao: 'vencidos' }        boletos em aberto já vencidos com linha digitável, juros e multa (cobrança automática, 04/11/2026)
 //   POST { acao: 'extrato', de?, ate?, bruto? }  extrato da conta pela VPS (com o A1, mTLS), 04/11/2026: lê e devolve os lançamentos
+//   POST { acao: 'extrato_conciliar', de?, ate? } lê o extrato, guarda em crm_fin_extrato e confere com o Caixa (05/11/2026;
+//                                    agendador crm-bb-extrato, de 30 em 30 min das 7h às 21h)
 //   POST { acao: 'ciclo' }           o do agendador (pg_cron crm-bb-ciclo, a cada 10 min das 7h às 20h50): prepara as parcelas
 //                                    das notas do CRM, registra, baixa os das notas canceladas e lê os pagos
 // Chaves só nos Secrets: BB_CLIENT_ID, BB_CLIENT_SECRET, BB_APP_KEY (developer_application_key).
@@ -348,25 +350,24 @@ Deno.serve(async (req) => {
       }
       return resposta(200, { n: l.length, boletos: out, ...(c.bruto ? { bruto } : {}) });
     }
-    // extrato da conta corrente (04/11/2026, conciliação bancária): { de?, ate?, bruto? }. Por enquanto só lê e devolve, para
-    // conferir o formato na 1ª leitura real; a conciliação no Caixa vem em seguida, com os nomes dos campos confirmados.
-    if (c.acao === 'extrato') {
+    // extrato da conta corrente (04/11/2026, conciliação bancária): { de?, ate?, bruto? } só lê e devolve
+    async function lerExtrato(deP: unknown, ateP: unknown, op: any = {}) {
       const ag = dig(b.agencia).slice(0, -1), cc = dig(b.conta).slice(0, -1);
       if (!ag || !cc) throw new Error('faltam agência e conta em Configurações → Integrações → Dados do convênio');
-      const ate = /^\d{4}-\d{2}-\d{2}$/.test(String(c.ate)) ? c.ate : hojeSP();
-      let de = /^\d{4}-\d{2}-\d{2}$/.test(String(c.de)) ? c.de : maisDias(ate, -2);
+      const ate = /^\d{4}-\d{2}-\d{2}$/.test(String(ateP)) ? String(ateP) : hojeSP();
+      let de = /^\d{4}-\d{2}-\d{2}$/.test(String(deP)) ? String(deP) : maisDias(ate, -2);
       if (de < maisDias(ate, -30)) de = maisDias(ate, -30);   // o BB aceita no máximo 31 dias por consulta
       // diagnóstico (04/11/2026, 1ª leitura deu 403 sem texto): { token_vps: true } pega o token pela VPS (com o certificado) e
       // { base: 'https://...bb.com.br/...' } troca o endereço da API
-      const escopo = String(c.escopo || 'extrato-info');
+      const escopo = String(op.escopo || 'extrato-info');
       let tk = '';
-      if (c.token_vps) {
+      if (op.token_vps) {
         const id = Deno.env.get('BB_CLIENT_ID') ?? '', seg = Deno.env.get('BB_CLIENT_SECRET') ?? '';
         const t = await viaVps({ url: OAUTH, metodo: 'POST', basic: id + ':' + seg, form: { grant_type: 'client_credentials', scope: escopo } });
-        if (t.status !== 200 || !t.json?.access_token) return resposta(200, { ok: false, etapa: 'token pela VPS', status: t.status, erro: String(t.json?.error_description || t.json?.error || t.texto || '').slice(0, 300) });
+        if (t.status !== 200 || !t.json?.access_token) return { ok: false, etapa: 'token pela VPS', status: t.status, erro: String(t.json?.error_description || t.json?.error || t.texto || '').slice(0, 300) };
         tk = t.json.access_token;
       } else tk = await tokenMtls(escopo);
-      const base = /^https:\/\/([a-z0-9-]+\.)*bb\.com\.br\//i.test(String(c.base || '')) ? String(c.base).replace(/\/$/, '') : EXTRATOS;
+      const base = /^https:\/\/([a-z0-9-]+\.)*bb\.com\.br\//i.test(String(op.base || '')) ? String(op.base).replace(/\/$/, '') : EXTRATOS;
       const lanc: any[] = []; let pagina = 1, ultimo: any = null;
       for (let volta = 0; volta < 30; volta++) {
         const u = base + '/conta-corrente/agencia/' + ag + '/conta/' + cc + '?numeroPaginaSolicitacao=' + pagina + '&quantidadeRegistroPaginaSolicitacao=120' +
@@ -374,7 +375,7 @@ Deno.serve(async (req) => {
         const r = await viaVps({ url: u, token: tk });
         ultimo = r;
         if (r.status === 404) break;   // sem lançamentos no período
-        if (r.status !== 200) return resposta(200, { ok: false, status: r.status, erro: msgBB(r.json, r.texto || ''), corpo: r.json || r.texto || null, base, escopo, de, ate });
+        if (r.status !== 200) return { ok: false, status: r.status, erro: msgBB(r.json, r.texto || ''), corpo: r.json || r.texto || null, base, escopo, de, ate };
         lanc.push(...(r.json?.listaLancamento || []));
         const prox = Number(r.json?.numeroPaginaProximo) || 0;
         if (!prox || prox <= pagina) break;
@@ -386,7 +387,40 @@ Deno.serve(async (req) => {
         documento: x.numeroDocumento ?? null, codigo: x.codigoHistorico ?? null, lote: x.numeroLote ?? null,
         contrapartida: dig(x.numeroCadastroPessoaFisicaCadastroNacPessoasJuridicasContrapartida ?? x.numeroCpfCnpjContrapartida) || null,
         id_transacao: String(x.textoIdentificadorUnicoTransacao ?? '').trim() || null }));
-      return resposta(200, { ok: true, de, ate, n: l.length, lancamentos: l, ...(c.bruto ? { bruto: lanc.slice(0, 5), pagina: ultimo?.json ? Object.keys(ultimo.json) : null } : {}) });
+      return { ok: true, de, ate, n: l.length, lancamentos: l, ...(op.bruto ? { bruto: lanc.slice(0, 5), pagina: ultimo?.json ? Object.keys(ultimo.json) : null } : {}) };
+    }
+    if (c.acao === 'extrato') return resposta(200, await lerExtrato(c.de, c.ate, c));
+    // conciliação (05/11/2026): lê o extrato (de ontem até hoje, ou { de, ate }), guarda cada linha com uma chave que não muda
+    // entre leituras (crm_fin_extrato_gravar: a "Cobrança" e os saldos do dia crescem e são atualizados), guarda o saldo do BB
+    // (conta + aplicação automática = "Saldo Disponivel") e confere com o Caixa (crm_fin_extrato_conciliar). O agendador
+    // crm-bb-extrato chama de 30 em 30 minutos; o botão "Ler o extrato agora" do Caixa também.
+    // Só entram as linhas a partir do início da conciliação (crm_config.dados.extrato.desde; padrão 05/11/2026: até 04/11 o
+    // Caixa foi conferido à mão com o PDF e bateu).
+    if (c.acao === 'extrato_conciliar') {
+      const desde = String(cfgL?.dados?.extrato?.desde || '2026-11-05');
+      const ate = /^\d{4}-\d{2}-\d{2}$/.test(String(c.ate)) ? String(c.ate) : hojeSP();
+      let de = /^\d{4}-\d{2}-\d{2}$/.test(String(c.de)) ? String(c.de) : maisDias(ate, -1);
+      if (de < desde) de = desde;
+      if (de > ate) return resposta(200, { ok: true, pulado: 'a conciliação começa em ' + desde });
+      const r: any = await lerExtrato(de, ate);
+      if (!r.ok) return resposta(200, r);
+      const vistos = new Map<string, number>(), linhas: any[] = [];
+      for (const x of r.lancamentos) {
+        if (!x.data || x.data < desde) continue;
+        const base = x.id_transacao ? 'id:' + x.id_transacao
+          : [x.data, x.sinal, x.documento, x.lote, x.codigo, x.historico, x.complemento].map(v => String(v ?? '')).join('|');
+        const n = (vistos.get(base) || 0) + 1; vistos.set(base, n);
+        linhas.push({ ...x, documento: x.documento == null ? null : String(x.documento), chave: base + '|' + n });
+      }
+      // saldo do BB: a linha "Saldo Disponivel" (tipo SD) do dia mais recente; conta = "S A L D O"; aplicação = resgate automático (RA)
+      const ult = r.lancamentos.filter((x: any) => x.tipo === 'SD').sort((a: any, z: any) => String(z.data).localeCompare(String(a.data)))[0];
+      const doDia = (pred: (x: any) => boolean) => { const y = r.lancamentos.find((x: any) => ult && x.data === ult.data && pred(x)); return y ? (y.sinal === 'D' ? -y.valor : y.valor) : null; };
+      const saldo = ult ? { data: ult.data, saldo: ult.sinal === 'D' ? -ult.valor : ult.valor, conta: doDia(x => /^s a l d o$/i.test(x.historico)), investimento: doDia(x => x.tipo === 'RA') } : null;
+      const { data: gravadas, error: e1 } = await db.rpc('crm_fin_extrato_gravar', { p_linhas: linhas, p_saldo: saldo });
+      if (e1) throw new Error('gravar o extrato: ' + e1.message);
+      const { data: conc, error: e2 } = await db.rpc('crm_fin_extrato_conciliar', { p_desde: desde });
+      if (e2) throw new Error('conciliar: ' + e2.message);
+      return resposta(200, { ok: true, de, ate, lidas: r.n, gravadas, saldo, conciliacao: conc });
     }
     if (c.acao === 'baixar_canceladas') return resposta(200, await baixarCanceladas());
     if (c.acao === 'registrar') return resposta(200, await registrar(Array.isArray(c.ids) ? c.ids : undefined));

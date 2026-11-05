@@ -1854,6 +1854,20 @@
       .or('situacao.in.(duvida,sem_titulo),and(situacao.eq.baixado,credito.gte.' + desde + ')').order('credito', { ascending: false }).limit(300)) || [];
   };
   Supa.prototype.bbSiteResolver = async function (nn, obs) { return unwrap(await this.sb.rpc('crm_bb_site_resolver', { p_nosso: nn, p_obs: obs })); };
+  // conciliação do extrato do BB (05/11/2026; só o administrador lê): as linhas desde a data (sem as de saldo) e o último saldo lido
+  Supa.prototype.extratoBB = async function (desde) {
+    const [linhas, saldo] = await Promise.all([
+      this.sb.from('crm_fin_extrato').select('id, data, sinal, valor, historico, complemento, documento, contrapartida, situacao, lancamento_ids, sugestoes, obs')
+        .neq('situacao', 'saldo').gte('data', desde).order('data', { ascending: false }).order('id').limit(600),
+      this.sb.from('crm_fin_extrato_saldo').select('data, saldo, conta, investimento, lido_em').order('data', { ascending: false }).limit(1)]);
+    return { linhas: unwrap(linhas) || [], saldo: (unwrap(saldo) || [])[0] || null };
+  };
+  Supa.prototype.extratoResolver = async function (id, acao, o) {
+    o = o || {};
+    return unwrap(await this.sb.rpc('crm_fin_extrato_resolver', { p_id: id, p_acao: acao, p_lancamento: o.lancamento || null, p_categoria: o.categoria || null,
+      p_descricao: o.descricao || null, p_obs: o.obs || null }));
+  };
+  Local.prototype.extratoBB = async function () { return { linhas: [], saldo: null }; };
   // pagamento de contas pelo BB (04/11/2026, pagar-bb.js): os envios dos últimos 60 dias, os pagamentos e os favorecidos do Pix
   Supa.prototype.pagLer = async function () {
     const desde = new Date(Date.now() - 60 * 86400000).toISOString();

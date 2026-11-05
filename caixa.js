@@ -36,6 +36,59 @@
   // titulos() (o "Recebi" e a frase acham ele) e no bloco "Em cartório".
   const titulosCaixa = () => titulos().filter(t => !t.cartorio_em);
 
+  // Conciliação com o extrato do BB (05/11/2026): a crm-bb lê o extrato de 30 em 30 minutos (pelo certificado A1, na VPS),
+  // guarda cada linha (crm_fin_extrato) e confere com o Caixa: mesmo valor no mesmo dia, a "Cobrança" do dia com a soma dos
+  // boletos, tarifa do banco lançada sozinha. O que não casa fica aqui para o administrador ligar, lançar ou ignorar.
+  let extrato = null;
+  const sinalV = x => (x.sinal === 'D' ? -1 : 1) * Number(x.valor || 0);
+  function blocoExtrato(b) {
+    if (!extrato) return '';
+    const l = extrato.linhas || [], pend = l.filter(x => x.situacao === 'conferir').sort((a, z) => a.data.localeCompare(z.data) || a.id - z.id);
+    const ok = l.filter(x => x.situacao === 'conferido' || x.situacao === 'lancado');
+    const sugs = x => {
+      const sg = x.sugestoes;
+      if (!sg) return '<small>nenhuma conta de mesmo valor perto dessa data</small>';
+      if (sg.cobranca) return '<small>Cobrança do BB no dia ' + esc(R.moeda(sg.cobranca.banco_no_dia)) + ' × boletos baixados no Caixa ' + esc(R.moeda(sg.cobranca.boletos_no_caixa)) +
+        ' (' + sg.cobranca.qtd + '): falta dar baixa em algum boleto desse dia, ou algum foi baixado em outro dia</small>';
+      return (Array.isArray(sg) ? sg : []).map(y => y.id ? b('cx-ext-ligar', x.id + '|' + y.id, (y.tipo === 'aberto' ? 'É esta: ' : 'É esta (baixada em ' + dm(y.pago_em) + '): ') + String(y.descricao || '').slice(0, 40) +
+            (y.vencimento ? ' · vence ' + dm(y.vencimento) : ''), 'sec', y.tipo === 'aberto' ? 'dá a baixa nesta conta no dia do extrato' : 'acerta o dia da baixa para o dia do extrato')
+          : y.tipo === 'titulo' ? '<small>título ' + esc(y.duplicata) + ' · ' + esc(R.moeda(y.valor)) + ' · vence ' + esc(dm(y.vencimento)) + '</small>'
+          : y.tipo === 'cliente' ? '<small>do cliente ' + esc(y.nome) + '</small>' : '').join(' ');
+    };
+    return (pend.length ? '<details class="cartao cx-venc" data-chave="extrato-bb" open><summary><strong>Extrato do BB: ' + pend.length + ' lançamento(s) para conferir</strong> <small>estão no banco e o CRM não achou no Caixa (mesmo valor no mesmo dia). Ligue à conta certa, lance ou ignore.</small></summary>' +
+        '<div class="tabela-rolagem"><table class="tabela"><tbody>' + pend.map(x => '<tr><td>' + esc(dm(x.data)) + '</td><td><strong>' + esc(x.historico) + '</strong>' + (x.complemento ? '<small>' + esc(x.complemento) + '</small>' : '') +
+          '<div class="cx-ext-sug">' + sugs(x) + '</div></td><td class="num ' + (x.sinal === 'D' ? 'cx-neg' : 'cx-pos') + '">' + esc(R.moeda(sinalV(x))) + '</td>' +
+          '<td class="acoes-linha">' + b('cx-ext-lancar', x.id, 'Lançar…') + b('cx-ext-ignorar', x.id, 'Ignorar…', 'sec') + '</td></tr>').join('') + '</tbody></table></div></details>' : '') +
+      faltaNoBanco(b) +
+      (ok.length ? '<details class="cartao cx-venc" data-chave="extrato-bb-ok"><summary><strong>Extrato do BB conferido (10 dias): ' + ok.length + ' lançamento(s)</strong> <small>batem com o Caixa' +
+        (ok.some(x => x.situacao === 'lancado') ? '; as tarifas do banco foram lançadas sozinhas' : '') + '</small></summary>' +
+        '<div class="tabela-rolagem"><table class="tabela"><tbody>' + ok.map(x => '<tr><td>' + esc(dm(x.data)) + '</td><td>' + esc(x.historico) + (x.complemento ? '<small>' + esc(x.complemento) + '</small>' : '') + '</td>' +
+          '<td>' + CRM.selo(x.situacao === 'lancado' ? 'lançado pelo extrato' : 'confere', x.situacao === 'lancado' ? 'azul' : 'verde') + '</td><td class="num">' + esc(R.moeda(sinalV(x))) + '</td></tr>').join('') +
+        '</tbody></table></div></details>' : '');
+  }
+  // o outro lado: baixado no Caixa (dia já fechado no banco) e que não apareceu no extrato — pagamento que não saiu, dia errado
+  function faltaNoBanco(b) {
+    const desde = ((E().cfg || {}).extrato || {}).desde || '2026-11-05';
+    const usados = new Set([].concat(...((extrato && extrato.linhas) || []).map(x => x.lancamento_ids || [])));
+    const lidos = new Set(((extrato && extrato.linhas) || []).map(x => x.data));
+    const l = (F.lancamentos || []).filter(x => x.situacao === 'pago' && x.baixa === 'caixa' && x.pago_em && x.pago_em >= desde && x.pago_em < hoje() &&
+      lidos.has(x.pago_em) && !usados.has(x.id)).sort((a, z) => a.pago_em.localeCompare(z.pago_em));
+    if (!l.length) return '';
+    return '<details class="cartao cx-venc" data-chave="extrato-bb-falta" open><summary><strong>No Caixa, mas não no extrato do BB: ' + l.length + '</strong> <small>baixados como pagos/recebidos num dia que o banco já fechou e que não aparecem no extrato: confira se saíram mesmo ou se o dia está errado (✎ muda o dia).</small></summary>' +
+      '<div class="tabela-rolagem"><table class="tabela"><tbody>' + l.map(x => '<tr><td>' + esc(dm(x.pago_em)) + '</td><td>' + esc(x.descricao) + (x.categoria ? '<small>' + esc(x.categoria) + '</small>' : '') + '</td>' +
+        '<td class="num ' + (x.tipo === 'saida' ? 'cx-neg' : 'cx-pos') + '">' + esc(R.moeda((x.tipo === 'saida' ? -1 : 1) * Number(x.valor || 0))) + '</td><td class="acoes-linha">' + b('cx-editar', x.id, '✎') + '</td></tr>').join('') +
+      '</tbody></table></div></details>';
+  }
+  function saldoBB(s) {
+    const sb = extrato && extrato.saldo;
+    if (!sb) return '';
+    const lido = sb.lido_em ? new Date(sb.lido_em).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).replace(',', ' às') : '';
+    const dif = s.saldo == null ? null : Math.round((s.saldo - Number(sb.saldo)) * 100) / 100;
+    return '<small class="cx-bb">no BB ' + esc(R.moeda(sb.saldo)) + (lido ? ' (lido ' + esc(lido) + ')' : '') + ' · ' +
+      (dif == null ? '' : Math.abs(dif) < 0.01 ? '<span class="cx-pos">✓ igual ao CRM</span>' : '<span class="cx-neg">diferença ' + esc(R.moeda(dif)) + '</span>') +
+      ' <button type="button" class="mini" data-acao="cx-ext-ler" title="lê o extrato do BB agora e confere com o Caixa (sozinho, de 30 em 30 minutos)">Ler o extrato agora</button></small>';
+  }
+
   let bbSite = null;
   function blocoSite(b, tot) {
     const l = bbSite || [], pend = l.filter(x => x.situacao === 'duvida' || x.situacao === 'sem_titulo'), feitos = l.filter(x => x.situacao === 'baixado');
@@ -54,6 +107,7 @@
     try { F = await CRM.store().carregarFin(); } catch (e) { if (!F) F = { recorrentes: [], lancamentos: [], saldos: [], regras: [], baixados: [], excluidos: [] }; CRM.falhou(e); }
     // boletos feitos no site do BB que o CRM leu como pagos (03/11/2026): os baixados sozinhos e os que pedem um olhar
     try { bbSite = CRM.store().bbSite ? await CRM.store().bbSite(R.somaDias(hoje(), -7)) : []; } catch (e) { bbSite = bbSite || []; }
+    try { extrato = CRM.store().extratoBB ? await CRM.store().extratoBB(R.somaDias(hoje(), -10)) : null; } catch (e) { extrato = extrato || null; }
     // previsão (ex.: material vendido à Agilité) que tem título igual do FKN: grava a ligação, para o
     // ✓ do título baixar a previsão em vez de criar outra entrada (caixa-calculo.js, ligacoesTitulos)
     try {
@@ -670,7 +724,7 @@
     const antigos = rvTodos.length - rv.length;
     const tot = l => l.reduce((t, x) => t + Number(x.valor || 0), 0);
     const b = (acao, id, rot, cls, dica) => '<button type="button" class="mini' + (cls ? ' ' + cls : '') + '" data-acao="' + acao + '" data-id="' + esc(id) + '"' + (dica ? ' title="' + esc(dica) + '"' : '') + '>' + esc(rot) + '</button>';
-    const bx = baixados(), site = blocoSite(b, tot);
+    const bx = baixados(), site = blocoExtrato(b) + blocoSite(b, tot);
     const recebidosJa = new Set(F.lancamentos.filter(l => l.titulo_duplicata && l.situacao === 'pago').map(l => l.titulo_duplicata));
     const cart = titulos().filter(t => t.cartorio_em && !recebidosJa.has(t.duplicata)).sort((a, b) => a.cartorio_em.localeCompare(b.cartorio_em));
     return site + (bx.length ? '<details class="cartao cx-venc cx-baixados" data-chave="baixados-fkn" open><summary><strong>Baixados no FKN, sem entrada no caixa: ' + bx.length + ' (' + esc(R.moeda(tot(bx))) + ')</strong> <small>saíram do contas a receber do FKN sem "Recebi" aqui — fora do saldo até você dizer. Entrou no banco? "Entrou". Abatimento, devolução ou cancelamento? "Não entrou".</small></summary>' +
@@ -822,7 +876,7 @@
         '<button type="button" class="btn sec" data-acao="ls-csv" data-id="cx-contas">Baixar planilha</button></p>' +
       (l.length ? barraSoma() + '<div class="tabela-rolagem"><table class="tabela cx-contas"><thead><tr><th class="cx-marca" data-acao="cx-marca-todas-celula"><input type="checkbox" data-acao="cx-marca-todas" title="marcar todas as da lista"' + (todos ? ' checked' : '') + '></th><th>' + (filtro.situacao === 'pagas' ? 'Pago em' : 'Vencimento') + '</th><th>Descrição</th><th>Categoria</th><th class="num">Valor</th><th>Situação</th><th></th></tr></thead><tbody>' +
         l.map(x => '<tr class="clicavel' + (marcados.has(x.id) ? ' cx-marcada' : '') + '" data-acao="cx-editar" data-id="' + esc(x.id) + '" tabindex="0"><td class="cx-marca" data-acao="cx-marca-celula" data-id="' + esc(x.id) + '" title="marcar para somar"><input type="checkbox" data-acao="cx-marca" data-id="' + esc(x.id) + '"' + (marcados.has(x.id) ? ' checked' : '') + ' aria-label="marcar para somar"></td><td>' + esc(R.dataBR(filtro.situacao === 'pagas' ? x.pago_em : x.vencimento)) + '</td>' +
-          '<td><strong>' + esc(x.descricao) + '</strong>' + (x.fornecedor || x.entre_empresas || x.origem !== 'tela' ? '<small>' + esc([x.fornecedor, x.entre_empresas ? 'entre empresas' : '', x.origem === 'recorrente' ? 'recorrente' : x.origem === 'fkn' ? 'do FKN' : x.origem === 'planilha' ? 'da planilha' : '', x.titulo_duplicata ? (x.situacao === 'pago' ? 'recebida pelo título ' : 'ligada ao título ') + x.titulo_duplicata : '', x.emprestimo ? 'empréstimo recebido (não é receita)' : '', x.espelho_ref ? 'veio do Caixa da Agilité' : x.espelho_par ? 'espelhado no Caixa da Agilité' : '',
+          '<td><strong>' + esc(x.descricao) + '</strong>' + (x.fornecedor || x.entre_empresas || x.origem !== 'tela' ? '<small>' + esc([x.fornecedor, x.entre_empresas ? 'entre empresas' : '', x.origem === 'recorrente' ? 'recorrente' : x.origem === 'fkn' ? 'do FKN' : x.origem === 'planilha' ? 'da planilha' : x.origem === 'extrato' ? 'do extrato do BB' : '', x.titulo_duplicata ? (x.situacao === 'pago' ? 'recebida pelo título ' : 'ligada ao título ') + x.titulo_duplicata : '', x.emprestimo ? 'empréstimo recebido (não é receita)' : '', x.espelho_ref ? 'veio do Caixa da Agilité' : x.espelho_par ? 'espelhado no Caixa da Agilité' : '',
             Number(x.juros) > 0 ? 'juros ' + R.moeda(x.juros) : ''].filter(Boolean).join(' · ')) + '</small>' : '') + '</td>' +
           '<td>' + esc(x.categoria || '') + (etqReemb(x) ? ' <span class="cx-etq-reemb">' + esc(etqReemb(x)) + '</span>' : '') + '</td><td class="num ' + (x.tipo === 'entrada' ? 'cx-pos' : 'cx-neg') + '">' + (x.tipo === 'entrada' ? '+' : '−') + esc(R.moeda(x.valor)) + '</td><td>' + seloSituacao(x, h) + '</td>' +
           '<td class="acoes-linha">' + (x.situacao === 'aberto' ? '<button type="button" class="mini" data-acao="cx-pagar" data-id="' + esc(x.id) + '">' + (x.tipo === 'entrada' ? 'Recebi' : 'Paguei') + ' hoje</button>' : x.situacao === 'pausado' ? '<button type="button" class="mini" data-acao="cx-voltar" data-id="' + esc(x.id) + '">Voltar para o caixa</button>' +
@@ -887,6 +941,7 @@
       return '<div class="cabecalho cx-cab"><div><h1>Caixa</h1><p class="sub">Banco do Brasil · contas a pagar, recorrentes e o dia a dia · só você vê esta tela</p></div>' +
         '<div class="cx-saldo"><span>Saldo agora</span><strong class="' + (s.saldo < 0 ? 'cx-neg' : '') + '">' + (s.saldo == null ? '—' : esc(R.moeda(s.saldo))) + '</strong>' +
         '<small>' + (s.ancora ? 'banco ' + esc(R.moeda(s.ancora.valor)) + ' em ' + esc(R.dataBR(s.ancora.data)) + (s.n ? ' · +' + esc(R.moeda(s.entradas)) + ' −' + esc(R.moeda(s.saidas)) + ' baixados aqui' : '') : 'informe o saldo do banco') + '</small>' +
+        saldoBB(s) +
         '<button type="button" class="btn sec" data-acao="cx-conferir">Conferir com o banco</button></div></div>' +
         '<nav class="cx-abas">' + aba('dia', 'Dia a dia') + aba('contas', 'Contas a pagar') + aba('recorrentes', 'Recorrentes') + aba('pausadas', 'Contas pausadas' + (pausadas ? ' (' + pausadas + ')' : '')) +
           (CRM.cobranca ? aba('cobranca', 'Cobrança' + (CRM.cobranca.contagem() ? ' (' + CRM.cobranca.contagem() + ')' : '')) : '') +
@@ -1061,6 +1116,38 @@
     },
     'cx-pagar': (id, el) => { fecha(); const l = lanc(id); if (l) pagar(l, diaDaBaixa(el && el.dataset.dia)).catch(CRM.falhou); },
     'cx-bx-entrou': id => { const x = baixados().find(y => y.id === id); if (x) formBaixado(x); },
+    'cx-ext-ler': () => {
+      CRM.toast('Lendo o extrato do BB…');
+      CRM.store().bb({ acao: 'extrato_conciliar' }).then(r => {
+        if (!r || !r.ok) { CRM.toast('O BB não respondeu: ' + ((r && (r.erro || r.status)) || 'erro'), true); return; }
+        const c = r.conciliacao || {};
+        CRM.toast('Extrato lido: ' + (c.conferido || 0) + ' conferido(s), ' + (c.lancado || 0) + ' lançado(s) sozinho(s), ' + (c.conferir || 0) + ' para conferir.');
+        lidoEm = 0; return carrega();
+      }).catch(CRM.falhou);
+    },
+    'cx-ext-ligar': id => {
+      const [lin, lanc] = String(id).split('|');
+      CRM.store().extratoResolver(Number(lin), 'ligar', { lancamento: lanc }).then(() => { CRM.toast('Ligado: a conta fica baixada no dia do extrato.'); lidoEm = 0; return carrega(); }).catch(CRM.falhou);
+    },
+    'cx-ext-lancar': id => {
+      const x = ((extrato && extrato.linhas) || []).find(y => y.id === Number(id));
+      if (!x) return;
+      const saida = x.sinal === 'D';
+      CRM.abrirForm({ titulo: (saida ? 'Saída' : 'Entrada') + ' do extrato · ' + dm(x.data) + ' · ' + R.moeda(x.valor),
+        intro: x.historico + (x.complemento ? ' — ' + x.complemento : '') + '\nEntra no Caixa como ' + (saida ? 'paga' : 'recebida') + ' em ' + R.dataBR(x.data) + '.',
+        campos: [{ nome: 'categoria', rotulo: 'Categoria', obrigatorio: true, sugestoes: saida ? CATEGORIAS_SAIDA : CATEGORIAS_ENTRADA },
+          { nome: 'descricao', rotulo: 'Descrição', largo: true }, { nome: 'obs', rotulo: 'Observação', largo: true }],
+        valores: { descricao: (x.complemento || x.historico || '').replace(/^\d\d\/\d\d \d\d:\d\d /, '') }, salvarTexto: 'Lançar',
+        aoSalvar: async v => { await CRM.store().extratoResolver(x.id, 'lancar', { categoria: v.categoria, descricao: v.descricao, obs: v.obs }); CRM.toast('Lançado no Caixa.'); lidoEm = 0; await carrega(); } });
+    },
+    'cx-ext-ignorar': id => {
+      const x = ((extrato && extrato.linhas) || []).find(y => y.id === Number(id));
+      if (!x) return;
+      CRM.abrirForm({ titulo: 'Ignorar no extrato · ' + dm(x.data) + ' · ' + R.moeda(x.valor), intro: x.historico + (x.complemento ? ' — ' + x.complemento : '') +
+          '\nSai desta lista sem mexer no Caixa (ex.: já está lançado de outro jeito, ou somado com outra conta).',
+        campos: [{ nome: 'obs', rotulo: 'Por quê', tipo: 'textarea', largo: true, obrigatorio: true }], salvarTexto: 'Ignorar',
+        aoSalvar: async v => { await CRM.store().extratoResolver(x.id, 'ignorar', { obs: v.obs }); CRM.toast('Tirado da lista.'); lidoEm = 0; await carrega(); } });
+    },
     'cx-bbsite-ok': nn => {
       const x = (bbSite || []).find(y => y.nosso_numero === nn);
       if (!x) return;

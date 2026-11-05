@@ -1413,3 +1413,7 @@ button.ordena.ativo { color: var(--marinho); }
 /* e-mail da nota ao cliente (04/11/2026): situação do envio na lista de NF-e */
 .tabela small.ok { color: var(--verde); }
 .tabela small.erro { color: var(--vermelho); }
+/* conciliação com o extrato do BB (05/11/2026) */
+.cx-saldo .cx-bb { display: block; margin-top: 2px; }
+.cx-ext-sug { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.cx-ext-sug small { display: inline; }
