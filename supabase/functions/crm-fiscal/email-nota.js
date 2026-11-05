@@ -36,11 +36,25 @@ export function texto(nfe, o) {
     'Segue a nota fiscal eletrônica nº ' + milhar(nfe.numero) + (nfe.serie ? ', série ' + nfe.serie : '') + ', emitida pela ' + o.empresa +
       (nfe.autorizada_em ? ' em ' + dataBR(nfe.autorizada_em) : '') + (nfe.valor != null ? ', no valor de ' + moeda(nfe.valor) : '') + '.',
     'Em anexo vão o XML (o arquivo que vale para a sua contabilidade) e a DANFE em PDF.',
+    // 05/11/2026 (Anderson: "o boleto vai junto com a entrega, mas às vezes demora a chegar na mão da pessoa"): o boleto do BB,
+    // já registrado, vai no mesmo e-mail
+    ...textoBoletos(o.boletos),
     'Chave de acesso: ' + chaveFmt(nfe.chave) + '\nConsulta na Sefaz: https://www.nfe.fazenda.gov.br/portal/consultaRecaptcha.aspx',
     'Qualquer dúvida, é só responder este e-mail' + (o.vendedor ? ' (vai para ' + o.vendedor + ')' : '') + '.',
     'Obrigado pela preferência!\n' + o.empresa
   ];
   return linhas.join('\n\n');
+}
+// o parágrafo dos boletos (o.boletos = [{ vencimento: 'aaaa-mm-dd', valor }]); sem boleto, nada
+const dataIso = iso => String(iso || '').slice(0, 10).split('-').reverse().join('/');
+export function textoBoletos(l) {
+  const b = (l || []).filter(x => x && x.vencimento);
+  if (!b.length) return [];
+  const um = b.length === 1;
+  return [(um ? 'Também vai o boleto do Banco do Brasil, já registrado no banco: vencimento ' + dataIso(b[0].vencimento) + ', ' + moeda(b[0].valor) + '.'
+    : 'Também vão os ' + b.length + ' boletos do Banco do Brasil, já registrados no banco: ' + b.map(x => dataIso(x.vencimento) + ' (' + moeda(x.valor) + ')').join(', ') + '.') +
+    ' Pode pagar pelo código de barras ou pelo Pix do QR Code impresso no boleto.' +
+    '\nAtenção: confira sempre se o beneficiário é ' + 'a empresa que emitiu a nota antes de pagar; na dúvida, fale com a gente.'];
 }
 export function html(nfe, o) {
   return '<div style="font-family:Arial,sans-serif;font-size:15px;line-height:1.5;color:#222;max-width:600px">' +
@@ -48,7 +62,7 @@ export function html(nfe, o) {
 }
 export function arquivos(nfe, empresa) {
   const base = (empresa + ' NF ' + nfe.numero).replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim();
-  return { xml: String(nfe.chave) + '-procNFe.xml', pdf: 'DANFE ' + base + '.pdf' };
+  return { xml: String(nfe.chave) + '-procNFe.xml', pdf: 'DANFE ' + base + '.pdf', boleto: 'Boleto ' + base + '.pdf' };
 }
 export function proporcaoPng(u8) {
   if (!u8 || u8.length < 24 || u8[1] !== 0x50 || u8[2] !== 0x4e || u8[3] !== 0x47) return 0;

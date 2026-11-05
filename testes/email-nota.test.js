@@ -25,7 +25,17 @@ test('assunto, texto e anexos', () => {
   assert.match(t, /3526 1163/);
   assert.match(t, /vai para Bruna/);
   assert.doesNotMatch(N.html(nfe, { empresa: 'A & B' }), /A & B/);
-  assert.deepEqual(N.arquivos(nfe, 'Distribuidora Exemplo'), { xml: nfe.chave + '-procNFe.xml', pdf: 'DANFE Distribuidora Exemplo NF 2871.pdf' });
+  assert.deepEqual(N.arquivos(nfe, 'Distribuidora Exemplo'), { xml: nfe.chave + '-procNFe.xml', pdf: 'DANFE Distribuidora Exemplo NF 2871.pdf', boleto: 'Boleto Distribuidora Exemplo NF 2871.pdf' });
+  assert.doesNotMatch(t, /boleto/i);
+});
+test('o boleto no texto do e-mail', () => {
+  const nfe = { numero: 2871, serie: 1, chave: '35261163237702000103550010000028711000028716', valor: 1234.5 };
+  const um = N.texto(nfe, { empresa: 'Distribuidora Exemplo', boletos: [{ vencimento: '2026-12-05', valor: 1234.5 }] });
+  assert.match(um, /Também vai o boleto do Banco do Brasil, já registrado no banco: vencimento 05\/12\/2026, R\$ 1\.234,50\./);
+  assert.match(um, /Pix do QR Code/);
+  const dois = N.texto(nfe, { empresa: 'Distribuidora Exemplo', boletos: [{ vencimento: '2026-12-05', valor: 617.25 }, { vencimento: '2027-01-04', valor: 617.25 }] });
+  assert.match(dois, /Também vão os 2 boletos .*05\/12\/2026 \(R\$ 617,25\), 04\/01\/2027 \(R\$ 617,25\)/);
+  assert.deepEqual(N.textoBoletos([]), []);
 });
 test('proporção do PNG pelo cabeçalho', () => {
   const u = new Uint8Array(24); u.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);

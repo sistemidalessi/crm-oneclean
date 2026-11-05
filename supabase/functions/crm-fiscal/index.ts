@@ -26,6 +26,8 @@ type Linha = Record<string, unknown>;
 // (node ferramentas/fixa-motor-notas.js troca o commit e o SHA-256; depois, publicar esta função de novo).
 const COMMIT = '64fb20ca0ba4608270cc21302eb31d8a9f3d8383';
 const HASHES: Record<string, string> = { 'danfe.js': '451328cf4a5bb951c178c535e124209369238a10ec5050dfc9e158c0c8472f3e' };
+// (05/11/2026) o boleto do e-mail é o MESMO desenho que a logística imprime: regras.js + cobranca.js (linha digitável) +
+// boleto.js + vendor/qrcode.js (QR do Pix), na mesma versão fixada; os SHA-256 entram pelo ferramentas/fixa-motor-notas.js
 const FONTE = 'https://raw.githubusercontent.com/sistemidalessi/crm-oneclean/' + COMMIT + '/';
 const EMPRESA = Deno.env.get('CRM_EMPRESA_NOME') ?? 'OneClean';
 const LOGO = Deno.env.get('CRM_LOGO') ?? 'assets/oneclean-logo.png';
@@ -348,6 +350,60 @@ async function logoDanfe() {
   } catch { LOGO_DANFE = null; }
   return LOGO_DANFE;
 }
+// carrega um arquivo do site na versão fixada (conferido pelo SHA-256) dentro do objeto g (o "window" do arquivo)
+async function carregaJs(nome: string, g: Linha) {
+  const r = await fetch(FONTE + nome);
+  if (!r.ok) throw new Error('não baixou ' + nome + ' (' + r.status + ')');
+  const codigo = await r.text();
+  if (!HASHES[nome] || await sha256(codigo) !== HASHES[nome]) throw new Error(nome + ' não confere com a versão fixada');
+  const m: Linha = { exports: {} };
+  new Function('module', 'exports', 'require', 'define', 'globalThis', 'window', codigo)(m, m.exports, undefined, undefined, g, g);
+  return m.exports;
+}
+// deno-lint-ignore no-explicit-any
+let BOL: any = null, QR: any = null;
+async function carregaBoleto() {
+  if (BOL) return BOL;
+  const g: Linha = {};
+  g.CRMRegras = await carregaJs('regras.js', g);       // o cobranca.js pede ao "window" o CRMRegras
+  g.CRMCobranca = await carregaJs('cobranca.js', g);   // e o boleto.js, o CRMCobranca (linha digitável)
+  BOL = await carregaJs('boleto.js', g);
+  try { QR = await carregaJs('vendor/qrcode.js', {}); } catch (e) { console.error('[crm-fiscal] qrcode: ' + (e as Error).message); QR = null; }
+  return BOL;
+}
+// a duplicata das parcelas da nota: "002862/01" na série 1 (a numeração do FKN) e "2-000012/01" nas outras
+const prefixoDup = (n: Linha) => (Number(n.serie) === 1 ? '' : String(n.serie || '') + '-') + String(n.numero).padStart(6, '0') + '/';
+// boletos da nota: os já registrados no BB e quantos ainda vão ser (título a registrar, ou preparado e não registrado)
+async function boletosDaNota(db: ReturnType<typeof createClient>, n: Linha) {
+  const { data: cfgL } = await db.from('crm_config').select('dados').eq('id', 1).maybeSingle();
+  const dados = ((cfgL as Linha | null)?.dados || {}) as Linha, b = (dados.boleto || {}) as Linha;
+  if (!b.ligado || b.caminho !== 'api') return { registrados: [] as Linha[], pendentes: 0, dados };
+  const pre = prefixoDup(n);
+  const { data: rows } = await db.from('crm_boletos_bb').select('duplicata, nosso_numero, documento, valor, vencimento, emissao, situacao, retorno')
+    .like('duplicata', pre + '%').in('situacao', ['preparado', 'registrado']).order('duplicata');
+  const l = (rows || []) as Linha[];
+  const { data: falta } = await db.rpc('crm_boleto_bb_a_registrar');
+  const aReg = ((falta || []) as string[]).filter(d => String(d).startsWith(pre)).length;
+  return { registrados: l.filter(x => x.situacao === 'registrado'), pendentes: aReg + l.filter(x => x.situacao === 'preparado').length, dados };
+}
+// o PDF dos boletos (uma página por parcela), com o pagador do destinatário da nota
+async function pdfBoletosNota(regs: Linha[], xml: string, dados: Linha) {
+  const B = await carregaBoleto(), Dn = await carregaDanfe();
+  const d = Dn.ler(xml) || {};
+  const dest = (d.destinatario || {}) as Linha;
+  const pg = { nome: String(dest.nome || ''), doc: dest.doc, endereco: dest.endereco };
+  const cfg = (dados.boleto || {}) as Linha, fis = (dados.fiscal || {}) as Linha, emit = (fis.emitente || {}) as Linha;
+  const aviso = B.avisoGolpe(emit, fis.aviso_golpe, cfg.convenio ? '001 (Banco do Brasil)' : '');
+  const hoje = new Date(Date.now() - 3 * 36e5).toISOString().slice(0, 10);
+  const pdf = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
+  regs.forEach((b, i) => {
+    if (i) pdf.addPage('a4', 'portrait');
+    const pix = B.pixDe(b);
+    const dd = B.montar(cfg, emit, { valor: b.valor, vencimento: b.vencimento, nosso_numero: b.nosso_numero, documento: b.documento, emissao: b.emissao, pix }, pg, { hoje });
+    B.desenha(pdf, dd, { aviso, qr: pix && QR ? B.qrDesenhador(QR, pix) : null });
+  });
+  return new Uint8Array(pdf.output('arraybuffer'));
+}
 async function pdfDanfe(xml: string) {
   const Dn = await carregaDanfe();
   const d = Dn.ler(xml);
@@ -360,11 +416,19 @@ async function pdfDanfe(xml: string) {
 // da empresa). Sozinha uma vez só, logo depois da autorização (crm_nfe.email_em marca a tentativa, para nunca ir em dobro);
 // pelo botão da tela (acao 'email_nota') vai de novo, para os e-mails que a pessoa escrever ou os do cadastro.
 // Resposta e remetente: o(a) vendedor(a) do pedido (ou da carteira do cliente; sem e-mail, o administrador).
+// 05/11/2026 (Anderson: "seria interessante ir junto o boleto"): o boleto do BB vai no mesmo e-mail. A automática ESPERA o
+// registro no banco (o agendador crm-nfe-email tenta de novo a cada 15 minutos e o ciclo do BB registra a cada 10); depois
+// de ESPERA_BOLETO minutos da autorização, vai sem o boleto que faltar (e o e-mail diz só os que foram).
+const ESPERA_BOLETO = 90;
 async function enviaEmailNota(db: ReturnType<typeof createClient>, nfeId: string, op: { para?: string; manual?: boolean } = {}) {
   const agora = new Date().toISOString();
   const { data: nRow } = await db.from('crm_nfe').select('id, ambiente, situacao, serie, numero, chave, valor, autorizada_em, proc_xml, pedido_id, empresa_id, email_em').eq('id', nfeId).maybeSingle();
   const nfe = nRow as Linha | null;
   if (!nfe || nfe.ambiente !== 'producao' || nfe.situacao !== 'autorizada' || !nfe.proc_xml) return { ok: false, erro: 'só nota de produção autorizada vai por e-mail' };
+  let bol: { registrados: Linha[]; pendentes: number; dados: Linha } = { registrados: [], pendentes: 0, dados: {} };
+  try { bol = await boletosDaNota(db, nfe); } catch (e) { console.error('[crm-fiscal] boletos da nota: ' + (e as Error).message); }
+  const minutos = (Date.now() - Date.parse(String(nfe.autorizada_em || agora))) / 60000;
+  if (!op.manual && bol.pendentes > 0 && minutos < ESPERA_BOLETO) return { ok: false, adiado: true, erro: 'esperando o registro do boleto no BB (' + bol.pendentes + ')' };
   if (!op.manual) {   // a automática: marca antes de mandar; se outra chamada já marcou, não manda de novo
     const { data: marcou } = await db.from('crm_nfe').update({ email_em: agora }).eq('id', nfeId).is('email_em', null).select('id');
     if (!marcou || !(marcou as Linha[]).length) return { ok: false, erro: 'já tentado' };
@@ -385,14 +449,21 @@ async function enviaEmailNota(db: ReturnType<typeof createClient>, nfeId: string
     const rem = vend || ((adms || []) as Linha[]).find(a => /@/.test(String(a.email || ''))) || null;
     if (!rem) return await fim({ ok: false, erro: 'nenhum remetente com e-mail (vendedor(a) ou administrador)' });
     const pdf = await pdfDanfe(String(nfe.proc_xml));
-    const arq = arquivos(nfe, EMPRESA), o = { empresa: EMPRESA, cliente: String(e.razao_social || e.nome || ''), vendedor: vend ? String(vend.nome) : '' };
+    const arq = arquivos(nfe, EMPRESA);
+    // os boletos registrados: se o desenho falhar, o e-mail vai assim mesmo com a nota (e o erro fica anotado)
+    let pdfBol: Uint8Array | null = null, erroBol = '';
+    if (bol.registrados.length) { try { pdfBol = await pdfBoletosNota(bol.registrados, String(nfe.proc_xml), bol.dados); } catch (err) { erroBol = String((err as Error).message || err); console.error('[crm-fiscal] boleto do e-mail: ' + erroBol); } }
+    const o = { empresa: EMPRESA, cliente: String(e.razao_social || e.nome || ''), vendedor: vend ? String(vend.nome) : '',
+      boletos: pdfBol ? bol.registrados.map(b => ({ vencimento: b.vencimento, valor: b.valor })) : [] };
     const r = await fetch('https://api.brevo.com/v3/smtp/email', { method: 'POST', headers: { 'api-key': brevo, 'content-type': 'application/json', accept: 'application/json' },
       body: JSON.stringify({ sender: { name: EMPRESA + ' · Nota fiscal', email: rem.email }, replyTo: { name: String(rem.nome), email: rem.email },
         to: lista.map(x => ({ email: x })), subject: assunto(nfe, EMPRESA), htmlContent: html(nfe, o), textContent: texto(nfe, o),
-        attachment: [{ name: arq.xml, content: base64(new TextEncoder().encode(String(nfe.proc_xml))) }, { name: arq.pdf, content: base64(pdf) }],
+        attachment: [{ name: arq.xml, content: base64(new TextEncoder().encode(String(nfe.proc_xml))) }, { name: arq.pdf, content: base64(pdf) }]
+          .concat(pdfBol ? [{ name: arq.boleto, content: base64(pdfBol) }] : []),
         tags: ['nfe'] }) });
     if (!r.ok) return await fim({ ok: false, para: lista.join(', '), erro: 'o Brevo recusou o e-mail (' + r.status + '): ' + (await r.text().catch(() => '')).slice(0, 200) });
-    return await fim({ ok: true, para: lista.join(', ') });
+    const obsBol = pdfBol ? ' · com ' + bol.registrados.length + ' boleto(s)' : erroBol ? ' · sem o boleto (erro: ' + erroBol.slice(0, 120) + ')' : bol.pendentes ? ' · sem o boleto (não registrado no BB a tempo)' : '';
+    return await fim({ ok: true, para: lista.join(', ') + obsBol, boletos: pdfBol ? bol.registrados.length : 0 });
   } catch (err) { return await fim({ ok: false, erro: 'e-mail: ' + String((err as Error).message || err) }); }
 }
 const emSegundoPlano = (p: Promise<unknown>) => {
@@ -409,8 +480,6 @@ async function gravaResultado(db: ReturnType<typeof createClient>, nfeId: string
   const { data } = await db.from('crm_nfe').update(patch).eq('id', nfeId).select().single();
   const nfe = data as Linha;
   await lancaGnre(db, nfe).catch(() => null);
-  // a nota autorizada vai sozinha ao e-mail do cliente (XML + DANFE), sem segurar a resposta da emissão
-  if (nfe && nfe.ambiente === 'producao' && nfe.situacao === 'autorizada' && nfe.proc_xml && !nfe.email_em) emSegundoPlano(enviaEmailNota(db, String(nfe.id)));
   // Homologação (teste, sem valor fiscal) NUNCA entra no CRM: nem estoque, nem título, nem comissão; o pedido não muda.
   if (nfe && nfe.ambiente === 'producao' && nfe.situacao === 'autorizada' && nfe.proc_xml && !nfe.nota_id) {
     const ent = await entregaAoCrm(db, 'NFe' + nfe.chave + '-procNFe.xml', String(nfe.proc_xml));
@@ -419,9 +488,21 @@ async function gravaResultado(db: ReturnType<typeof createClient>, nfeId: string
       await db.from('crm_nfe').update({ nota_id: (nota as Linha).id }).eq('id', nfeId);
       if (nfe.pedido_id) await db.from('crm_pedidos').update({ situacao: 'faturado', nota_id: (nota as Linha).id, faturado_em: new Date().toISOString(), atualizado_por: eu, atualizado_em: new Date().toISOString() }).eq('id', nfe.pedido_id);
     }
+    if (!nfe.email_em) emSegundoPlano(depoisDaNota(db, String(nfe.id)));
     return Object.assign({}, nfe, { nota_id: nota ? (nota as Linha).id : null, entrega: ent });
   }
+  if (nfe && nfe.ambiente === 'producao' && nfe.situacao === 'autorizada' && nfe.proc_xml && !nfe.email_em) emSegundoPlano(depoisDaNota(db, String(nfe.id)));
   return nfe;
+}
+// a nota autorizada vai sozinha ao e-mail do cliente (XML + DANFE + boleto), sem segurar a resposta da emissão: depois que
+// os títulos nasceram, pede ao BB o registro dos boletos (o mesmo ciclo do agendador) e manda; se o banco ainda não
+// registrou, o agendador crm-nfe-email manda depois (enviaEmailNota espera até ESPERA_BOLETO minutos)
+async function depoisDaNota(db: ReturnType<typeof createClient>, nfeId: string) {
+  try {
+    const u = Deno.env.get('SUPABASE_URL')!, k = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    await fetch(u + '/functions/v1/crm-bb', { method: 'POST', headers: { Authorization: 'Bearer ' + k, 'Content-Type': 'application/json' }, body: JSON.stringify({ acao: 'ciclo' }), signal: AbortSignal.timeout(60000) });
+  } catch (e) { console.error('[crm-fiscal] ciclo do BB antes do e-mail: ' + (e as Error).message); }
+  return enviaEmailNota(db, nfeId);
 }
 // DIFAL (23/10/2026): nota de produção autorizada para consumidor de outra UF vira a conta da guia GNRE no Caixa (paga
 // antes de a mercadoria sair; a guia acompanha a nota). Uma por nota: a chave fica na descrição.
