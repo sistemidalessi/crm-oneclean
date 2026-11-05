@@ -1867,6 +1867,14 @@
     return unwrap(await this.sb.rpc('crm_fin_extrato_resolver', { p_id: id, p_acao: acao, p_lancamento: o.lancamento || null, p_categoria: o.categoria || null,
       p_descricao: o.descricao || null, p_obs: o.obs || null }));
   };
+  // o que a cobrança automática fez por título (05/11/2026): boletos atualizados (crm_boletos, origem auto) e avisos do cartório
+  Supa.prototype.cobrancaFeita = async function (desde) {
+    const [b, a] = await Promise.all([
+      this.sb.from('crm_boletos').select('duplicata, cli_status, cli_em, criado_em').eq('origem', 'auto').gte('criado_em', desde).limit(2000),
+      this.sb.from('crm_cobranca_avisos').select('duplicatas, enviado_em, prazo').gte('enviado_em', desde).limit(2000)]);
+    return { boletos: unwrap(b) || [], avisos: unwrap(a) || [] };
+  };
+  Local.prototype.cobrancaFeita = async function () { return { boletos: [], avisos: [] }; };
   Local.prototype.extratoBB = async function () { return { linhas: [], saldo: null }; };
   // pagamento de contas pelo BB (04/11/2026, pagar-bb.js): os envios dos últimos 60 dias, os pagamentos e os favorecidos do Pix
   Supa.prototype.pagLer = async function () {

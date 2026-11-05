@@ -362,3 +362,23 @@ test('reembolso à Agilité: etiqueta do que é (benefícios, salários, Cesta I
   assert.equal(R('Reembolso à Agilité — material'), '');
   assert.equal(F.etiquetaReembolso({ categoria: 'Aluguel', descricao: 'vale' }), '');
 });
+
+test('título em atraso sem data combinada vai para o próximo dia útil, vermelho e fora do saldo (05/11/2026)', () => {
+  const hoje = '2026-11-05'; // quinta
+  const tits = [{ duplicata: '002570/01', cliente_nome: 'Jardim Celeste', vencimento: '2026-11-02', valor: 2647.2 },
+    { duplicata: '001333/01', cliente_nome: 'Antigo', vencimento: '2026-06-17', valor: 100 },
+    { duplicata: '002552/01', cliente_nome: 'Bola de Neve', vencimento: '2026-10-28', previsao: '2026-11-03', valor: 678.35 }];
+  // sem a opção (leitura da Agilité e do CEO): continua fora da grade
+  assert.equal(C.itensGrade(hoje, '2026-11-20', hoje, [], tits, { d1: true }).length, 0);
+  const opc = { d1: true, atrasoNaGrade: true, desde: '2026-10-01', cobranca: t => t.duplicata === '002570/01' ? 'aviso do cartório 05/11' : '' };
+  const it = C.itensGrade(hoje, '2026-11-20', hoje, [], tits, opc);
+  assert.deepEqual(it.map(x => x.ref.duplicata).sort(), ['002552/01', '002570/01'], 'o vencido antes do corte fica fora');
+  it.forEach(x => { assert.equal(x.data, '2026-11-06'); assert.ok(x.atrasado && x.semSaldo); });
+  assert.match(it.find(x => x.ref.duplicata === '002570/01').obs, /aviso do cartório 05\/11/);
+  assert.match(it.find(x => x.ref.duplicata === '002552/01').obs, /cobrança ainda não enviada/);
+  // sexta: vai para segunda
+  assert.equal(C.itensGrade('2026-11-06', '2026-11-20', '2026-11-06', [], tits, opc)[0].data, '2026-11-09');
+  // fora do saldo previsto
+  const s = { saldo: 1000, ancora: { data: '2026-10-30' } };
+  assert.equal(C.saldosGrade(['2026-11-06'], hoje, s, [], it)['2026-11-06'], 1000);
+});

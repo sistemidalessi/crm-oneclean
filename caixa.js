@@ -40,6 +40,17 @@
   // guarda cada linha (crm_fin_extrato) e confere com o Caixa: mesmo valor no mesmo dia, a "Cobrança" do dia com a soma dos
   // boletos, tarifa do banco lançada sozinha. O que não casa fica aqui para o administrador ligar, lançar ou ignorar.
   let extrato = null;
+  let cobFeita = null;
+  // "boleto atualizado enviado 04/11 por e-mail · aviso do cartório 05/11 (prazo 10/11)": o último de cada um
+  const diaSP = ts => ts ? new Date(Date.parse(ts) - 3 * 3600e3).toISOString().slice(0, 10) : '';
+  function cobrancaDo(t) {
+    if (!cobFeita) return '';
+    const b = (cobFeita.boletos || []).filter(x => x.duplicata === t.duplicata).sort((a, c) => String(c.criado_em).localeCompare(String(a.criado_em)))[0];
+    const a = (cobFeita.avisos || []).filter(x => (x.duplicatas || []).indexOf(t.duplicata) >= 0).sort((x, c) => String(c.enviado_em).localeCompare(String(x.enviado_em)))[0];
+    const canal = x => x === 'enviado' ? ' por WhatsApp' : x === 'email' ? ' por e-mail' : '';
+    return [b ? 'boleto atualizado enviado ' + dm(diaSP(b.cli_em || b.criado_em)) + canal(b.cli_status) : '',
+      a ? 'aviso do cartório ' + dm(diaSP(a.enviado_em)) + (a.prazo ? ' (prazo ' + dm(a.prazo) + ')' : '') : ''].filter(Boolean).join(' · ');
+  }
   const sinalV = x => (x.sinal === 'D' ? -1 : 1) * Number(x.valor || 0);
   function blocoExtrato(b) {
     if (!extrato) return '';
@@ -107,6 +118,8 @@
     try { F = await CRM.store().carregarFin(); } catch (e) { if (!F) F = { recorrentes: [], lancamentos: [], saldos: [], regras: [], baixados: [], excluidos: [] }; CRM.falhou(e); }
     // boletos feitos no site do BB que o CRM leu como pagos (03/11/2026): os baixados sozinhos e os que pedem um olhar
     try { bbSite = CRM.store().bbSite ? await CRM.store().bbSite(R.somaDias(hoje(), -7)) : []; } catch (e) { bbSite = bbSite || []; }
+    // o que a cobrança automática já fez por título (boleto atualizado, aviso do cartório): vai no título em atraso da grade
+    try { cobFeita = CRM.store().cobrancaFeita ? await CRM.store().cobrancaFeita(R.somaDias(hoje(), -60)) : null; } catch (e) { cobFeita = cobFeita || null; }
     try { extrato = CRM.store().extratoBB ? await CRM.store().extratoBB(R.somaDias(hoje(), -10)) : null; } catch (e) { extrato = extrato || null; }
     // previsão (ex.: material vendido à Agilité) que tem título igual do FKN: grava a ligação, para o
     // ✓ do título baixar a previsão em vez de criar outra entrada (caixa-calculo.js, ligacoesTitulos)
@@ -264,7 +277,7 @@
         titulo: 'Título a receber', intro: nomeTitulo(t) + ' · duplicata ' + t.duplicata + ' · ' + R.moeda(t.valor) +
           ((lig => lig ? '\nÉ a previsão "' + lig.descricao + '" (mesmo valor): receber o título dá baixa nela.' : '')(ligadasPorTitulo(F.lancamentos, titulos(), nomeTitulo).get(t.duplicata))) + '\nVence ' + R.dataBR(t.vencimento) +
           (t.previsao && t.previsao >= hoje() && posterga(t.previsao) < creditoTitulo(t.vencimento, d1()) ? ' · o cliente adiantou: remarcado para ' + R.dataBR(t.previsao)
-            : t.previsao ? ' · em atraso, remarcado para ' + R.dataBR(t.previsao) : atrasado ? ' · em atraso' : ', cai na conta ' + R.dataBR(creditoTitulo(t.vencimento, d1()))) +
+            : t.previsao ? ' · em atraso, remarcado para ' + R.dataBR(t.previsao) : atrasado ? ' · em atraso' + ((f => f ? ' · ' + f : ' · cobrança ainda não enviada')(cobrancaDo(t))) + '. Sem data combinada, fica no próximo dia útil da grade, fora do saldo previsto' : ', cai na conta ' + R.dataBR(creditoTitulo(t.vencimento, d1()))) +
           '.\nO título sai do contas a receber quando a listagem do FKN mostrar que foi pago.' +
           (t.cartorio_em ? '\nEM CARTÓRIO desde ' + R.dataBR(t.cartorio_em) + (t.cartorio_obs ? ' — ' + t.cartorio_obs : '') + ': fora da previsão até o cliente pagar.' : ''),
         campos: [{ nome: 'dia', rotulo: 'Recebido em', tipo: 'data' }, { nome: 'valor', rotulo: 'Valor que entrou (R$)', tipo: 'numero', ajuda: 'com juros ou só uma parte? ponha o que caiu na conta' },
@@ -655,14 +668,14 @@
     const k = x.chave + '|' + dia;
     return '<div class="cx-it ' + (x.secao === 'entrada' ? 'cx-ent' : 'cx-sai') + ' ' + x.estado + (naGrade.has(k) ? ' cx-sel' : '') + (x.atrasado ? ' atrasado' : '') + (x.adiantado ? ' adiantado' : '') + (x.emprestimo ? ' emprestimo' : '') + (ok ? ' comok' : '') + '"' + arrasta + '>' + ok +
       '<button type="button" class="cx-corpo" data-acao="cx-item" data-id="' + esc(x.chave) + '" data-dia="' + esc(dia) + '" data-k="' + esc(k) + '" data-valor="' + Number(x.valor || 0) + '" data-secao="' + esc(x.secao) + '" title="' + esc(x.titulo + (x.obs ? ' — ' + x.obs : '') + ' (Ctrl+clique soma)') + '">' +
-      '<span class="t">' + (x.adiantado ? '<span class="cx-adi">⏩ adiantado</span> ' : '') + (x.emprestimo ? '<span class="cx-etq-emp">🔁 ' + (x.ref && x.ref.categoria === 'Transferência entre empresas' ? 'entre empresas' : x.secao === 'entrada' ? 'empréstimo' : 'devolução') + '</span> ' : '') + (x.tipo === 'lanc' && etqReemb(x.ref) ? '<span class="cx-etq-reemb">↩ reembolso · ' + esc(etqReemb(x.ref)) + '</span> ' : '') + (x.ref && x.ref.anexos && x.ref.anexos.length ? '📎 ' : '') + esc(x.titulo) + '</span>' + (x.obs ? '<span class="o">' + esc(x.obs) + '</span>' : '') + '<span class="v">' + esc(R.moeda(x.valor)) + '</span></button></div>';
+      '<span class="t">' + (x.semSaldo ? '<span class="cx-atr">⚠ em atraso</span> ' : '') + (x.adiantado ? '<span class="cx-adi">⏩ adiantado</span> ' : '') + (x.emprestimo ? '<span class="cx-etq-emp">🔁 ' + (x.ref && x.ref.categoria === 'Transferência entre empresas' ? 'entre empresas' : x.secao === 'entrada' ? 'empréstimo' : 'devolução') + '</span> ' : '') + (x.tipo === 'lanc' && etqReemb(x.ref) ? '<span class="cx-etq-reemb">↩ reembolso · ' + esc(etqReemb(x.ref)) + '</span> ' : '') + (x.ref && x.ref.anexos && x.ref.anexos.length ? '📎 ' : '') + esc(x.titulo) + '</span>' + (x.obs ? '<span class="o">' + esc(x.obs) + '</span>' : '') + '<span class="v">' + esc(R.moeda(x.valor)) + '</span></button></div>';
   }
   function grade(s) {
     const h = hoje();
     const de = inicio || R.somaDias(h, -1);
     const dias = Array.from({ length: 15 }, (_, i) => R.somaDias(de, i));
     const ate = dias[dias.length - 1];
-    const opc = { d1: d1(), nome: nomeTitulo };
+    const opc = { d1: d1(), nome: nomeTitulo, atrasoNaGrade: true, desde: (E().cfg || {}).caixa_receber_desde || '', cobranca: cobrancaDo };
     const itens = itensGrade(de, ate, h, F.lancamentos, titulosCaixa(), opc);
     const previstos = ate >= h ? itensGrade(h, ate, h, F.lancamentos, titulosCaixa(), opc) : [];
     const saldos = saldosGrade(dias, h, s, F.lancamentos, previstos);
@@ -680,7 +693,7 @@
       return '<td data-dia="' + d + '" class="' + (d === h ? 'hoje' : '') + (n ? ' ' + n.cls : '') + '">' + cards +
         '<button type="button" class="cx-add" data-acao="cx-add" data-id="' + secao + '" data-dia="' + d + '" title="Lançar ' + (secao === 'entrada' ? 'entrada' : 'saída') + ' em ' + dm(d) + '">+</button></td>';
     }).join('');
-    const total = secao => dias.map(d => { const v = itens.filter(x => x.data === d && x.secao === secao && x.estado !== 'fora').reduce((t, x) => t + x.valor, 0); return '<td class="num">' + (v ? esc(R.moeda(v)) : '') + '</td>'; }).join('');
+    const total = secao => dias.map(d => { const v = itens.filter(x => x.data === d && x.secao === secao && x.estado !== 'fora' && !x.semSaldo).reduce((t, x) => t + x.valor, 0); return '<td class="num">' + (v ? esc(R.moeda(v)) : '') + '</td>'; }).join('');
     const saldoRow = dias.map(d => '<td class="num' + (saldos[d] != null && saldos[d] < 0 ? ' cx-neg' : '') + '"><strong>' + (saldos[d] == null ? '—' : esc(R.moeda(saldos[d]))) + '</strong></td>').join('');
     return '<section class="cartao cx-grade-cartao"><h2>Fluxo de caixa <small>' + esc(R.dataBR(de)) + ' a ' + esc(R.dataBR(ate)) + '</small><span class="flex"></span>' +
       '<button type="button" class="mini" data-acao="cx-nav" data-id="-15">◀ 15 dias</button><button type="button" class="mini" data-acao="cx-nav" data-id="0">Hoje</button>' +
@@ -689,7 +702,7 @@
       barraGrade() +
       '<p class="cx-legenda"><span class="cx-it cx-ent feito"><span class="cx-corpo">aconteceu</span></span><span class="cx-it cx-sai previsto"><span class="cx-corpo">previsto</span></span>' +
       '<span class="cx-it cx-sai fora"><span class="cx-corpo">pago fora do caixa</span></span>' +
-      '<span class="cx-it cx-ent previsto atrasado"><span class="cx-corpo">em atraso, remarcado</span></span>' +
+      '<span class="cx-it cx-ent previsto atrasado"><span class="cx-corpo">em atraso (⚠ sem data: no próximo dia útil, fora do saldo)</span></span>' +
       '<span class="cx-it cx-ent previsto adiantado"><span class="cx-corpo">⏩ o cliente adiantou</span></span>' +
       '<span class="cx-it cx-ent previsto emprestimo"><span class="cx-corpo">🔁 empréstimo (entra e volta)</span></span>' +
       '<span class="cx-it cx-ent feito emprestimo"><span class="cx-corpo">🔁 empréstimo já pago</span></span>' +

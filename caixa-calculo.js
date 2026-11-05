@@ -220,7 +220,18 @@
     (titulos || []).forEach(t => {
       if (recebidos.has(t.duplicata)) return;
       const cr = diaDoTitulo(t, hoje, opc.d1);
-      if (cr < hoje) return;
+      if (cr < hoje) {
+        // Em atraso sem data combinada (05/11/2026, Anderson: "joga para o dia seguinte, como vermelho, como em
+        // atraso, para eu também visualizar"): o título vai para o dia em que cairia na conta se o cliente pagasse
+        // hoje (o próximo dia útil) e anda um dia a cada dia até ser pago, em vermelho, com o que a cobrança já
+        // fez. Fica FORA do saldo previsto (ninguém prometeu pagar); remarcar para uma data o põe no saldo.
+        if (!opc.atrasoNaGrade || (opc.desde && t.vencimento < opc.desde)) return;
+        const dia = creditoTitulo(hoje, opc.d1), feito = opc.cobranca ? opc.cobranca(t) : '';
+        add({ chave: 'tit:' + t.duplicata, tipo: 'titulo', secao: 'entrada', data: dia, titulo: (opc.nome ? opc.nome(t) : t.cliente_nome || 'Cliente') + ' · ' + t.duplicata,
+          valor: r2(t.valor), estado: 'previsto', atrasado: true, semSaldo: true, ref: t, ligada: null,
+          obs: 'em atraso: venceu ' + dm(t.vencimento) + (feito ? ' · ' + feito : ' · cobrança ainda não enviada') + ' · fora do saldo previsto' });
+        return;
+      }
       const lig = ligadas.get(t.duplicata);
       const rem = remarcado(t, hoje), adi = adiantado(t, hoje, opc.d1);
       add({ chave: 'tit:' + t.duplicata, tipo: 'titulo', secao: 'entrada', data: cr, titulo: (opc.nome ? opc.nome(t) : t.cliente_nome || 'Cliente') + ' · ' + t.duplicata + (lig ? ' · ' + lig.descricao : ''),
@@ -245,7 +256,7 @@
       }
       let v = s.saldo;
       (lancs || []).forEach(l => { if (contaNoSaldo(l, s.ancora) && l.pago_em > hoje && l.pago_em <= d) v += sinal(l); });
-      (previstos || []).forEach(x => { if (x.estado === 'previsto' && x.data >= hoje && x.data <= d) v += (x.secao === 'entrada' ? 1 : -1) * x.valor; });
+      (previstos || []).forEach(x => { if (x.estado === 'previsto' && !x.semSaldo && x.data >= hoje && x.data <= d) v += (x.secao === 'entrada' ? 1 : -1) * x.valor; });
       out[d] = r2(v);
     });
     return out;
