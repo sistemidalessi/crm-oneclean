@@ -4399,7 +4399,9 @@ begin
   if d ? 'cest' and nullif(regexp_replace(coalesce(d ->> 'cest', ''), '\D', '', 'g'), '') is not null and regexp_replace(d ->> 'cest', '\D', '', 'g') !~ '^\d{7}$' then raise exception 'CEST com 7 números'; end if;
   if d ? 'gtin' and nullif(regexp_replace(coalesce(d ->> 'gtin', ''), '\D', '', 'g'), '') is not null and regexp_replace(d ->> 'gtin', '\D', '', 'g') !~ '^(\d{8}|\d{12,14})$' then raise exception 'código de barras com 8, 12, 13 ou 14 números'; end if;
   if d ? 'origem' and coalesce(d ->> 'origem', '') !~ '^[0-8]$' then raise exception 'origem de 0 a 8'; end if;
-  if d ? 'fornecedor_cod' and nullif(d ->> 'fornecedor_cod', '') is not null then
+  -- 05/11/2026: só confere quando o fornecedor muda (os produtos do FKN traziam fornecedores fora do cadastro)
+  if d ? 'fornecedor_cod' and nullif(d ->> 'fornecedor_cod', '') is not null
+     and (select ant_f.fornecedor_cod from public.crm_estoque ant_f where ant_f.codigo = upper(btrim(p_codigo))) is distinct from d ->> 'fornecedor_cod' then
     select nome into fn from public.crm_fornecedores where codigo = d ->> 'fornecedor_cod';
     if fn is null then raise exception 'fornecedor % não cadastrado', d ->> 'fornecedor_cod'; end if;
   end if;
@@ -10347,3 +10349,12 @@ $$;
 
 -- agendador (de 30 em 30 minutos, das 7h15 às 21h45 em SP; aplicado em 05/11/2026)
 -- select cron.schedule('crm-bb-extrato', '15,45 10-23,0 * * *', $$select public.crm_bb_chamar('{"acao":"extrato_conciliar"}'::jsonb)$$);
+
+-- 05/11/2026 (Wellington: "fornecedor 00061 não cadastrado" ao salvar o índice): os fornecedores que vieram do FKN com os
+-- produtos entram no cadastro com código e nome (aplicado em 05/11: 15 → 103)
+insert into public.crm_fornecedores (codigo, nome, ativo, obs, atualizado_em)
+select e.fornecedor_cod, max(e.fornecedor), true, 'veio do cadastro de produtos do FKN (05/11/2026)', now()
+  from public.crm_estoque e
+ where coalesce(e.fornecedor_cod, '') <> '' and coalesce(e.fornecedor, '') <> ''
+   and not exists (select 1 from public.crm_fornecedores f where f.codigo = e.fornecedor_cod)
+ group by e.fornecedor_cod;
