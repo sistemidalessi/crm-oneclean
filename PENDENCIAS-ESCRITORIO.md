@@ -71,5 +71,3 @@ A mesma lista resumida está no `PENDENCIAS-ESCRITORIO.md` do `agilite-sistema-g
       é só o "fiquei sabendo" à Sefaz, não confirma nem recusa a compra.)
 - [ ] **Especialista no alto das telas** (18/10): conferir se ficou do jeito que você queria.
 - [ ] **Primeira pergunta real à IA** (clicar no Clean e perguntar): conferir se responde certo.
-- [ ] **Certificado A1 novo (válido até 28/10/2027):** instalado na VPS e no FKN/UniNFe em 28/10 e conferido. Falta só apagar o
-      antigo da VPS **em 05/11** (o Claude avisa): `rm /etc/oneclean-fiscal/oneclean-ate-2026-12-23.pfx /etc/oneclean-fiscal/senha-ate-2026-12-23.txt`.
