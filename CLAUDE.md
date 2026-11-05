@@ -118,6 +118,10 @@ motorista, pela logística e como app instalado (PWA).
 - `supabase/schema.sql` é a fonte da verdade, idempotente (roda de novo sem perder dado). Coluna nova:
   `alter table ... add column if not exists` no `schema.sql` + campo no formulário. Tipo novo de atividade:
   `TIPOS_ATIVIDADE` em `regras.js` **e** o `check` de `crm_atividades.tipo`. Mesmo para situações e status.
+- **Função que já existe: copiar do BANCO antes de mudar** (`select pg_get_functiondef(...)`), não do `schema.sql`, e todo
+  remendo aplicado no banco vai também para o `schema.sql` no mesmo commit. Depois, `node ferramentas/confere-funcoes.js`
+  e rodar o SQL: tem de voltar `[]`. (05/11/2026: a trava SEM CADASTRO, que estava só no banco, sumiu quando o
+  `crm_pedidos_atualizar` foi regravado a partir do arquivo; o pedido 87 saiu com item CONSULTOR sem travar.)
 - **Permissões na RLS, não na tela.** Papéis: admin, gestor, vendedor, comprador, logística, motorista
   (`crm_eh_admin/gestor/membro/ativo/comprador/logistica/motorista()`, `crm_eh_estoque_op()`). O cliente espelha
   só para esconder botões. Ao criar política nova: copiar o formato das que existem.

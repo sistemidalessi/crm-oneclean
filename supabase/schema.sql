@@ -2661,6 +2661,16 @@ $$;
 revoke all on function public.crm_pedido_itens_norm(jsonb) from public, anon, authenticated;
 
 -- Bloqueios de todos os pedidos em aberto (e o casamento com as notas que chegaram). Barato: roda ao abrir as telas.
+-- Item genérico (04/11/2026): produto "CONSULTOR …" (620000 a 620005), usado para item novo ainda sem cadastro. O pedido com ele
+-- ganha a trava SEM CADASTRO, que ninguém libera (nem pelo CEO): troca-se o item pelo produto cadastrado.
+create or replace function public.crm_produto_generico(p_codigo text) returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.crm_estoque e where e.codigo = regexp_replace(coalesce(p_codigo, ''), '\.\d+$', '')
+                  and e.descricao ~* '^\s*CONSULTOR\M');
+$$;
+revoke execute on function public.crm_produto_generico(text) from public, anon;
+grant execute on function public.crm_produto_generico(text) to authenticated, service_role;
+
 create or replace function public.crm_pedidos_atualizar() returns integer language plpgsql security definer set search_path = public as $$
 -- PREÇO (16/10, Anderson; regra trocada em 03/11/2026, também do Anderson): vale a MARGEM GERAL do pedido ("às vezes a
 -- gente tira um pouco de um item para ganhar no outro"), não item a item. Bloqueia se: algum item sem preço; a margem dos
@@ -2704,6 +2714,8 @@ begin
       case when p.id in (select pedido_id from f) then 'ESTOQUE' end,
       case when exists (select 1 from public.crm_titulos t where t.empresa_id = p.empresa_id and coalesce(t.previsao, t.vencimento) < hoje and not t.abono) then 'ATRASO' end,
       case when not p.entrada_ok and coalesce(p.dados->>'pagamento', '') ~* '(vista|antecipad|pix|transfer|dep[oó]sito)' and coalesce(p.dados->>'pagamento', '') !~* '[0-9]+ *(dias|ddl)' then 'SEM ENTRADA' end,
+      -- 04/11/2026; sumiu em 04/11 à noite (a função foi regravada deste arquivo sem ela) e voltou em 05/11: NÃO TIRAR
+      case when exists (select 1 from jsonb_array_elements(p.itens) i where public.crm_produto_generico(i->>'codigo')) then 'SEM CADASTRO' end,
       case when trava and (coalesce(mg.sem_preco, false)
              or (coalesce(mg.rec_c, 0) > 0 and (mg.rec_c - mg.cus_c) / mg.rec_c * 100 < mmin - 0.005 and mg.rec_c < mg.min_c - 0.000001)
              or (coalesce(mg.tab_t, 0) > 0 and mg.rec_t < round(mg.tab_t * (1 + neg / 100), 2) - 0.005)) then 'PREÇO' end,
@@ -2862,19 +2874,25 @@ grant execute on function public.crm_pedido_situacao(uuid, text, text) to authen
 -- novo volta a segurar. p_liberar = false desfaz. Entrada recebida (SEM ENTRADA): os mesmos.
 create or replace function public.crm_pedido_liberar(p_id uuid, p_liberar boolean, p_entrada boolean) returns jsonb language plpgsql security definer set search_path = public as $$
 declare r public.crm_pedidos;
+  fin constant text[] := array['SEM ANÁLISE', 'PRAZO', 'LIMITE', 'ATRASO', 'SEM ENTRADA'];
 begin
   if not (public.crm_eh_gestor() or public.crm_eh_logistica()) then raise exception 'só a gestora, a logística ou o administrador libera pedido'; end if;
   select * into r from public.crm_pedidos where id = p_id for update;
   if r.id is null then raise exception 'pedido não encontrado'; end if;
   if r.situacao <> 'aberto' then raise exception 'só se libera pedido em aberto'; end if;
-  if p_entrada is not null then update public.crm_pedidos set entrada_ok = p_entrada where id = p_id; end if;
+  -- 04/11/2026: confirmar a entrada (pagamento antecipado) é do financeiro: só o administrador
+  if p_entrada is not null then
+    if not public.crm_eh_admin() then raise exception 'a entrada do pagamento só o administrador confirma'; end if;
+    update public.crm_pedidos set entrada_ok = p_entrada where id = p_id;
+  end if;
   perform public.crm_pedidos_atualizar();
   select * into r from public.crm_pedidos where id = p_id;
-  -- Crédito (27/10/2026): SEM ANÁLISE, PRAZO e LIMITE só o administrador libera; a gestora e a logística liberam o resto.
+  -- Financeiro (crédito desde 27/10/2026; atraso e entrada desde 04/11/2026): só o administrador libera; a gestora e a
+  -- logística liberam o resto. SEM CADASTRO ninguém libera: troca-se o item pelo produto cadastrado.
   if p_liberar is not null then
     update public.crm_pedidos set liberado = case when not p_liberar then '{}'
-        when public.crm_eh_admin() then r.bloqueios
-        else array(select b from unnest(r.bloqueios) b where b <> all(array['SEM ANÁLISE', 'PRAZO', 'LIMITE']) or b = any(r.liberado)) end,
+        when public.crm_eh_admin() then array(select b from unnest(r.bloqueios) b where b <> 'SEM CADASTRO')
+        else array(select b from unnest(r.bloqueios) b where (b <> all(fin) and b <> 'SEM CADASTRO') or b = any(r.liberado)) end,
       liberado_por = case when p_liberar then auth.uid() end, liberado_em = case when p_liberar then now() end, atualizado_em = now() where id = p_id;
   end if;
   select * into r from public.crm_pedidos where id = p_id;
@@ -5954,6 +5972,12 @@ begin
     update public.crm_ceo_acoes set ok = true, detalhe = 'já estava liberado' where id = aid;
     return jsonb_build_object('ok', true, 'ja_estava', true, 'pedido', public.crm_ceo_pedido_json(r));
   end if;
+  if 'SEM CADASTRO' = any(pend) then
+    update public.crm_ceo_acoes set detalhe = 'item sem cadastro' where id = aid;
+    return jsonb_build_object('ok', false, 'erro', 'o pedido tem item sem cadastro (CONSULTOR): troque o item no CRM pelo produto cadastrado', 'pedido', public.crm_ceo_pedido_json(r));
+  end if;
+  -- só libera o que o Anderson viu na hora do "liberar N" (revisão de segurança de 24/10: um bloqueio novo nos 10 min
+  -- da confirmação não sai junto sem ser visto)
   if pend is distinct from array(select x from unnest(coalesce(p_esperado, '{}')) x order by x) then
     update public.crm_ceo_acoes set detalhe = 'bloqueios mudaram: ' || array_to_string(pend, ', ') where id = aid;
     return jsonb_build_object('ok', false, 'erro', 'os bloqueios do pedido mudaram desde a pergunta (agora: ' || array_to_string(pend, ', ') || '); peça de novo', 'pedido', public.crm_ceo_pedido_json(r));
@@ -7830,7 +7854,8 @@ begin
 
   -- o que ficou 3 listas sem ser tratado volta para a base
   update public.crm_prospec_sugestoes s set situacao = 'expirada'
-   where s.situacao in ('nova', 'amanha')
+   where s.situacao in ('nova', 'amanha') and s.respondeu_em is null
+     and (s.mandou_em is null or s.mandou_em < now() - interval '7 days')   -- 02/11/2026: a mandada espera 7 dias pela resposta
      and (select count(distinct x.dia) from public.crm_prospec_sugestoes x where x.dia > s.dia and x.dia < v_dia) >= 2;
   get diagnostics expiradas = row_count;
 
@@ -10441,3 +10466,124 @@ do $$ begin
   perform cron.unschedule(jobid) from cron.job where jobname = 'crm-contador';
   perform cron.schedule('crm-contador', '5 12 2 * *', 'select public.crm_contador_tick()');
 end $$;
+
+-- =====================================================================================================================
+-- 05/11/2026: versões que valem no banco e que este arquivo tinha velhas ou não tinha (achadas pelo
+-- ferramentas/confere-funcoes.js depois que a trava SEM CADASTRO sumiu ao regravar o crm_pedidos_atualizar deste arquivo).
+-- REGRA: antes de "create or replace" de uma função que já existe, copiar a definição do BANCO (pg_get_functiondef), não
+-- daqui; e depois de mudar, rodar o confere-funcoes.js. Assim um remendo aplicado só no banco não se perde.
+
+-- separação: pedido pausado não vai ao bolão (03/11/2026)
+create or replace function public.crm_bolao_montar(p_pedidos uuid[], p_obs text) returns bigint language plpgsql security definer set search_path = public as $$
+declare bid bigint; r record;
+begin
+  if not (public.crm_eh_logistica() or public.crm_eh_gestor()) then raise exception 'só a logística ou a gestora'; end if;
+  if coalesce(array_length(p_pedidos, 1), 0) = 0 then raise exception 'escolha os pedidos'; end if;
+  perform public.crm_pedidos_atualizar();
+  for r in select id, numero, situacao, bloqueios, liberado, public.crm_pedido_pausado(crm_pedidos) pausado from public.crm_pedidos where id = any(p_pedidos) for update loop
+    if r.situacao <> 'aberto' then raise exception 'o pedido % não está em aberto', r.numero; end if;
+    if r.pausado then raise exception 'o pedido % está pausado: retome antes de separar', r.numero; end if;
+    if exists (select 1 from unnest(r.bloqueios) b where b <> all(r.liberado)) then raise exception 'o pedido % está bloqueado: a gestora precisa liberar', r.numero; end if;
+  end loop;
+  if (select count(*) from public.crm_pedidos where id = any(p_pedidos)) <> array_length(p_pedidos, 1) then raise exception 'pedido não encontrado'; end if;
+  insert into public.crm_boloes (observacao) values (nullif(btrim(coalesce(p_obs, '')), '')) returning id into bid;
+  update public.crm_pedidos set situacao = 'separacao', bolao_id = bid, atualizado_por = auth.uid(), atualizado_em = now() where id = any(p_pedidos);
+  return bid;
+end;
+$$;
+
+-- rota do dia com o caminhão (03/11/2026): o retorno mudou, por isso o drop
+drop function if exists public.crm_rota_dia(date);
+create or replace function public.crm_rota_dia(p_dia date)
+ returns table(id uuid, nota_id uuid, numero integer, empresa_id uuid, cliente text, endereco text, bairro text, cidade text, valor numeric, vendedor text, motorista_id uuid, ordem integer, liberada boolean, situacao text, obs text, canhoto text, entregue_em timestamp with time zone, cli_status text, cli_erro text, cli_em timestamp with time zone, cli_proximo_em timestamp with time zone, veiculo_id bigint, veiculo text)
+ language plpgsql stable security definer set search_path to 'public'
+as $function$
+begin
+  if not (public.crm_eh_gestor() or public.crm_eh_logistica()) then raise exception 'só a logística'; end if;
+  return query
+    select x.id, x.nota_id, n.numero::integer, x.empresa_id,
+      coalesce(e.nome, n.cliente_nome) || coalesce(' — ' || nullif(btrim(coalesce(en.v->>'local', '')), ''), ''),
+      coalesce(public.crm_entrega_texto(en.v), public.crm_endereco_texto(e)),
+      case when en.v is not null then nullif(btrim(en.v->>'bairro'), '') else e.bairro end,
+      coalesce(case when en.v is not null then nullif(btrim(en.v->>'cidade'), '') end, e.cidade, n.cidade), n.valor_total,
+      case when upper(n.vendedor_nome) = 'DIRETO' then 'Venda direta' else coalesce(u.nome, n.vendedor_nome) end, x.motorista_id, x.ordem, x.liberada, x.situacao, x.obs, x.canhoto, x.entregue_em, x.cli_status, x.cli_erro, x.cli_em, x.cli_proximo_em,
+      x.veiculo_id, v.nome || coalesce(' ' || nullif(btrim(v.placa), ''), '')
+      from public.crm_entregas x
+      join public.crm_notas n on n.id = x.nota_id
+      left join public.crm_empresas e on e.id = x.empresa_id
+      left join lateral (select public.crm_entrega_da_nota(n.id) v) en on true
+      left join public.crm_usuarios u on u.user_id = n.vendedor_id
+      left join public.crm_veiculos v on v.id = x.veiculo_id
+     where x.dia = p_dia
+     order by x.motorista_id nulls last, x.ordem, n.numero;
+end $function$;
+revoke all on function public.crm_rota_dia(date) from public, anon;
+grant execute on function public.crm_rota_dia(date) to authenticated, service_role;
+
+-- entrega confirmada sem internet guarda a hora real (04/11/2026): p_em (até 2 dias atrás); a de 4 argumentos chama esta
+create or replace function public.crm_entrega_confirmar(p_id uuid, p_situacao text, p_obs text, p_canhoto text, p_em timestamptz)
+returns public.crm_entregas language plpgsql security definer set search_path = public as $$
+declare r public.crm_entregas; antes text; quem uuid; nf integer; cli text; op boolean := public.crm_eh_gestor() or public.crm_eh_logistica();
+  quando timestamptz := case when p_em is null or p_em > now() or p_em < now() - interval '2 days' then now() else p_em end;
+begin
+  if not public.crm_eh_ativo() then raise exception 'sem acesso'; end if;
+  select * into r from public.crm_entregas where id = p_id;
+  if not found then raise exception 'entrega não encontrada'; end if;
+  if not (r.motorista_id = auth.uid() or op) then raise exception 'esta entrega não é sua'; end if;
+  if p_situacao not in ('entregue', 'problema') then raise exception 'situação inválida'; end if;
+  if coalesce(btrim(p_canhoto), '') = '' or p_canhoto !~ ('^canhotos/\d{4}-\d{2}-\d{2}/' || r.id::text || '-[a-z0-9]+\.jpg$')
+     or not exists (select 1 from storage.objects o where o.bucket_id = 'crm-canhotos' and o.name = p_canhoto and (op or o.owner = auth.uid())) then
+    raise exception 'falta a foto do canhoto';
+  end if;
+  if p_situacao = 'problema' and coalesce(btrim(p_obs), '') = '' then raise exception 'conte o que aconteceu na observação'; end if;
+  antes := r.situacao;
+  update public.crm_entregas set situacao = p_situacao, obs = nullif(btrim(coalesce(p_obs, '')), ''), canhoto = p_canhoto,
+    entregue_em = coalesce(entregue_em, quando), entregue_por = auth.uid()
+   where id = p_id returning * into r;
+  if p_situacao = 'problema' and antes is distinct from 'problema' then
+    select coalesce(n.vendedor_id, e.responsavel_id), n.numero, e.nome into quem, nf, cli
+      from public.crm_notas n left join public.crm_empresas e on e.id = coalesce(r.empresa_id, n.empresa_id) where n.id = r.nota_id;
+    if quem is not null then
+      insert into public.crm_atividades (empresa_id, responsavel_id, tipo, descricao, data_hora, automatica, criado_por)
+      values (r.empresa_id, quem, 'tarefa', 'Entrega com problema' || coalesce(' (NF ' || nf || ')', '') || ': ' || r.obs ||
+        '. Fale com o cliente' || coalesce(' ' || cli, '') || ' e combine com a logística.', now(), true, auth.uid());
+    end if;
+  end if;
+  return r;
+end $$;
+create or replace function public.crm_entrega_confirmar(p_id uuid, p_situacao text, p_obs text, p_canhoto text)
+returns public.crm_entregas language sql security definer set search_path = public as $$
+  select public.crm_entrega_confirmar(p_id, p_situacao, p_obs, p_canhoto, null::timestamptz);
+$$;
+revoke all on function public.crm_entrega_confirmar(uuid, text, text, text, timestamptz) from public, anon;
+grant execute on function public.crm_entrega_confirmar(uuid, text, text, text, timestamptz) to authenticated, service_role;
+revoke all on function public.crm_entrega_confirmar(uuid, text, text, text) from public, anon;
+grant execute on function public.crm_entrega_confirmar(uuid, text, text, text) to authenticated, service_role;
+
+-- dígito do CNPJ (aceita o alfanumérico, 16/10/2026)
+create or replace function public.crm_cnpj_dv(c text) returns boolean language plpgsql immutable set search_path = public as $$
+declare n int; k int; s int; r int;
+begin
+  if c is null or c !~ '^[0-9A-Z]{12}[0-9]{2}$' then return false; end if;
+  for n in 12..13 loop
+    s := 0;
+    for k in 1..n loop
+      s := s + (ascii(substr(c, k, 1)) - 48) * (2 + ((n - k) % 8));
+    end loop;
+    r := s % 11;
+    if (case when r < 2 then 0 else 11 - r end) <> ascii(substr(c, n + 1, 1)) - 48 then return false; end if;
+  end loop;
+  return true;
+end $$;
+
+-- títulos vencidos por cliente (dias do maior atraso), para a gestão e a carteira de cada um
+create or replace function public.crm_titulos_vencidos() returns table(empresa_id uuid, atraso integer)
+language sql stable security definer set search_path = public as $$
+  select t.empresa_id, max(((now() at time zone 'America/Sao_Paulo')::date - t.vencimento))::integer
+    from public.crm_titulos t
+   where t.empresa_id is not null and t.vencimento < (now() at time zone 'America/Sao_Paulo')::date
+     and (public.crm_eh_gestor() or (public.crm_eh_membro() and t.empresa_id in (select public.crm_empresas_minhas())))
+   group by t.empresa_id;
+$$;
+revoke all on function public.crm_titulos_vencidos() from public, anon;
+grant execute on function public.crm_titulos_vencidos() to authenticated, service_role;
