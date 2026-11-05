@@ -560,7 +560,8 @@
   // No galpão × reservado × disponível (05/11/2026, Anderson/Edson: "clica no saldo e enxerga um saldo; clica no produto e não
   // bate"): o saldo do livro é o físico, que só baixa na nota; o pedido confirmado reserva (orçamento não) e o disponível é o
   // físico menos o reservado, o mesmo número da ficha do produto e do pedido.
-  const dispDe = cod => { const d = (nomesOp || []).find(x => x.codigo === cod); return d || null; };
+  let dispMapa = null, dispDe_de = null;
+  const dispDe = cod => { if (dispDe_de !== nomesOp) { dispDe_de = nomesOp; dispMapa = new Map((nomesOp || []).map(x => [x.codigo, x])); } return dispMapa.get(cod) || null; };
   const colsDisp = () => '<th class="num" title="o que os pedidos confirmados (liberados, em separação ou separados, ainda sem nota) já seguram">Reservado</th><th class="num" title="no galpão − reservado: o que dá para vender">Disponível</th>';
   const celsDisp = x => { const d = dispDe(x.codigo); if (!d) return '<td class="num">—</td><td class="num">—</td>';
     const disp = Number(d.disponivel); return '<td class="num">' + (Number(d.reservado) ? qtd(d.reservado) : '—') + '</td><td class="num' + (disp < 0 ? ' neg' : '') + '"><strong>' + qtd(disp) + '</strong></td>'; };
@@ -598,7 +599,9 @@
   const casa = (x, q) => !q || R.normaliza((x.descricao || '') + ' ' + x.codigo).indexOf(q) !== -1;
   function estoqueRel(linhas) {
     const q = R.normaliza(rel.busca);
-    return linhas.filter(x => x.saldo != null && casa(x, q) && (!rel.soSaldo || Number(x.saldo) !== 0))
+    // "só os que têm saldo" fica com quem tem estoque no galpão OU disponível diferente de zero (o negativo entra: 05/11/2026)
+    const dispo = x => { const d = dispDe(x.codigo); return d ? Number(d.disponivel) : Number(x.saldo); };
+    return linhas.filter(x => x.saldo != null && casa(x, q) && (!rel.soSaldo || Number(x.saldo) !== 0 || dispo(x) !== 0))
       .sort((a, b) => String(a.descricao || a.codigo).localeCompare(String(b.descricao || b.codigo), 'pt-BR'));
   }
   function vendasRel() {
@@ -702,9 +705,10 @@
       (vista !== 'estoque' ? '' : '<section class="cartao"><h2>Estoque atual <small>' + est.length + ' produto(s)</small></h2>' +
       '<p class="acoes"><label class="filtro-inline"><input type="checkbox" data-rel-so' + (rel.soSaldo ? ' checked' : '') + '> só os que têm saldo (tira os zerados)</label> ' +
       '<button type="button" class="btn sec" data-acao="es-rel-estoque-csv">Baixar planilha</button></p>' +
-      (est.length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Código</th><th>Produto</th><th>Unidade</th><th class="num">Quantidade em estoque</th></tr></thead><tbody>' +
+      '<p class="dica">' + dicaDisp.trim() + '</p>' +
+      (est.length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Código</th><th>Produto</th><th>Unidade</th><th class="num">No galpão</th>' + colsDisp() + '</tr></thead><tbody>' +
         est.slice(0, mostra).map(x => '<tr><td>' + esc(x.codigo) + '</td><td>' + esc(R.nomeDeItem(x.descricao || x.codigo)) + '</td><td>' + esc(x.unidade || '') + '</td>' +
-          '<td class="num' + (+x.saldo < 0 ? ' neg' : '') + '">' + qtd(x.saldo) + '</td></tr>').join('') + '</tbody></table></div>' +
+          '<td class="num' + (+x.saldo < 0 ? ' neg' : '') + '">' + qtd(x.saldo) + '</td>' + celsDisp(x) + '</tr>').join('') + '</tbody></table></div>' +
         (est.length > mostra ? '<p class="dica">Mostrando ' + mostra + ' de ' + est.length + '; a planilha leva todos.</p>' : '') : '<p class="vazio">Nada aqui.</p>') + '</section>') +
       (vista !== 'ano' ? '' : '<section class="cartao"><h2>Vendas do ano, mês a mês <small>' + (vend ? vend.length + ' produto(s)' : 'carregando…') + '</small></h2>' +
       '<p class="dica">' + (comValorAno ? 'Valor (R$) e quantidade' : 'Quantidade') + ' vendida de cada produto em cada mês, pelas notas de venda (sem as canceladas), como a venda anual por produto do FKN. A caixa vendida com o código da unidade conta em unidades.</p>' +
@@ -1433,7 +1437,8 @@
     },
     'es-rel-estoque-csv': () => {
       const l = estoqueRel(S.junta(saldo || [], fkn));
-      CRM.baixarCSV('estoque-atual', ['Código', 'Produto', 'Unidade', 'Quantidade em estoque'], l.map(x => [x.codigo, x.descricao || '', x.unidade || '', x.saldo]));
+      CRM.baixarCSV('estoque-atual', ['Código', 'Produto', 'Unidade', 'No galpão', 'Reservado (pedidos)', 'Disponível'],
+        l.map(x => { const d = dispDe(x.codigo); return [x.codigo, x.descricao || '', x.unidade || '', x.saldo, d ? Number(d.reservado) || 0 : '', d ? Number(d.disponivel) : '']; }));
     },
     'es-rel-vendas-csv': () => {
       const l = vendasRel(), comV = rel.comValor && l.some(x => Array.isArray(x.valores));
