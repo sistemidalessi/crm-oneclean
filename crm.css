@@ -1418,3 +1418,6 @@ button.ordena.ativo { color: var(--marinho); }
 .cx-saldo .cx-bb { display: block; margin-top: 2px; }
 .cx-ext-sug { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
 .cx-ext-sug small { display: inline; }
+/* NF-e: consulta recolhível e o quadro da contabilidade (05/11/2026) */
+.nf-consulta-fechada h2 { margin-bottom: 0; }
+.nf-contador-emails input { min-width: min(420px, 100%); }

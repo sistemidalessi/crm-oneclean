@@ -1419,6 +1419,12 @@
   // NF-e emitida pelo CRM (Fase 4): a Edge Function crm-fiscal faz tudo que fala com a Sefaz (pelo serviço fiscal da VPS);
   // a leitura é direta (administrador, gestora e logística, pela RLS). Os XML vêm só quando pedidos (DANFE, fechamento).
   const NFE_COLUNAS = 'id,ambiente,serie,numero,pedido_id,empresa_id,chave,situacao,cstat,motivo,protocolo,autorizada_em,valor,totais,avisos,nota_id,eventos,tentativas,inutilizada_em,criado_por,criado_em,atualizado_em,outra_id,tipo,email_em,email_ok,email_para,email_erro';
+  // fechamento do mês para a contabilidade (05/11/2026): Edge Function crm-contador (só o administrador)
+  Supa.prototype.contador = async function (corpo) {
+    const r = await this.sb.functions.invoke('crm-contador', { body: corpo });
+    if (r.error) throw await erroDaFuncao(r);
+    return r.data;
+  };
   Supa.prototype.fiscal = async function (corpo) {
     const r = await this.sb.functions.invoke('crm-fiscal', { body: corpo });
     if (r.error) throw await erroDaFuncao(r);
@@ -1649,6 +1655,7 @@
   Local.prototype.nfes = async function () { return this._nfeL().slice().sort((a, b) => String(b.criado_em).localeCompare(String(a.criado_em))).map(n => Object.assign({}, n)); };
   Local.prototype.nfeXml = async function (id) { const n = this._nfeL().find(x => x.id === id); return { chave: n && n.chave, proc_xml: null, nfe_xml: null }; };
   Local.prototype.nfesDoMes = async function () { return []; };
+  Local.prototype.contador = async function () { return Promise.reject(new Error('o fechamento para a contabilidade só funciona com o Supabase ligado')); };
   Local.prototype.outraOrigem = async function () { return []; };
   Local.prototype.outraCriar = async function () { throw new Error('as outras notas só funcionam ligadas ao banco'); };
   Local.prototype.outras = async function () { return []; };

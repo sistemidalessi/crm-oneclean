@@ -232,6 +232,14 @@
   // estado da tela
   let nfes = null, inuts = [], semUso = [], carregando = false, saude = null, sefaz = null, testando = '', certFkn = null, virada = null;
   const f = { mes: M.mesSP(new Date().toISOString()), amb: null };
+  // Contabilidade (05/11/2026): o mês do fechamento abre no mês anterior (o que vai à contabilidade)
+  f.mes = (([a, m]) => (m === 1 ? (a - 1) + '-12' : a + '-' + String(m - 1).padStart(2, '0')))(f.mes.split('-').map(Number));
+  let contSit = null, contLendo = false;
+  // A consulta de notas abre recolhida (05/11/2026, Anderson: "a lista já está bem comprida… pôr uma opção para recolher e,
+  // quando eu quisesse consultar, eu abria"): fechada não pesquisa nada; a escolha fica lembrada neste navegador.
+  const LS_CONSULTA = 'crm_nf_consulta_aberta';
+  let consultaAberta = (() => { try { return raiz.localStorage.getItem(LS_CONSULTA) === '1'; } catch (e) { return false; } })();
+  const lembraConsulta = v => { consultaAberta = v; try { raiz.localStorage.setItem(LS_CONSULTA, v ? '1' : '0'); } catch (e) { /* sem armazenamento */ } };
 
   async function carrega() {
     if (carregando) return;
@@ -467,10 +475,13 @@
     return '<p class="nf-sequencia">' + l.join('<br>') + (hom ? '<br><small>Homologação (teste): próxima ' + hom.serie + '-' + hom.proximo + '</small>' : '') + '</p>';
   }
   function telaConsulta() {
+    if (!consultaAberta) return '<section class="cartao nf-consulta-fechada"><h2>Consultar notas fiscais <small>todas: as do FKN e as do CRM</small><span class="flex"></span>' +
+      '<button type="button" class="btn sec" data-acao="nf-consulta-abrir">Abrir a consulta</button></h2></section>';
     const st = CRM.Lista.estado(LS);
     if ((!busca || busca.k !== chaveBusca(st)) && !buscando) setTimeout(() => buscaNotas(false), 0);
     const l = busca && busca.k === chaveBusca(st) ? busca.notas : null;
-    return '<section class="cartao"><h2>Consultar notas fiscais <small>todas: as do FKN e as do CRM</small></h2>' + telaSequencia() +
+    return '<section class="cartao"><h2>Consultar notas fiscais <small>todas: as do FKN e as do CRM</small><span class="flex"></span>' +
+      '<button type="button" class="btn sec" data-acao="nf-consulta-recolher">Recolher</button></h2>' + telaSequencia() +
       CRM.Lista.barra(LS, { periodo: true, rotuloPeriodo: 'Emitida de', placeholder: 'Número (2791 ou 2-15), cliente, CNPJ, cidade ou chave', csv: false,
         sel: [['', 'Todas']].concat(serie() === 1 ? [['1', 'Série 1']] : [['1', 'Série 1 (FKN)'], [String(serie()), 'Série ' + serie() + ' (CRM)']]).concat([['valida', 'Só as válidas'], ['cancelada', 'Só as canceladas']]),
         extra: '<button type="button" class="btn sec" data-acao="nf-consulta-csv">Baixar planilha</button>' }) +
@@ -487,6 +498,27 @@
       '</section>';
   }
 
+  // Contabilidade: o ZIP do mês com os XML de todas as notas (FKN e CRM, inclusive as devoluções que a empresa emitiu) e a
+  // relação das canceladas, denegadas e inutilizadas, pela Edge Function crm-contador; e o envio automático no dia 2.
+  function telaContador() {
+    if (!contSit && !contLendo) { contLendo = true; CRM.store().contador({ acao: 'situacao' }).then(r => { contSit = r || {}; CRM.render(); }).catch(() => { contSit = { erro: true }; CRM.render(); }); }
+    const s = contSit || {}, env = (s.envios || []).slice(0, 4);
+    const mesBR = m => String(m || '').split('-').reverse().join('/');
+    return '<section class="cartao nf-contador"><h2>Contabilidade: XML do mês <small>todas as notas emitidas (FKN e CRM) e a relação das canceladas, denegadas e inutilizadas</small></h2>' +
+      '<p class="acoes"><label>Mês <input type="month" value="' + esc(f.mes) + '" data-nf-mes></label> ' +
+      '<button type="button" class="btn" data-acao="nf-fechamento">Baixar o ZIP do mês</button> ' +
+      '<button type="button" class="btn sec" data-acao="nf-contador-enviar"' + ((s.emails || []).length ? '' : ' disabled title="ponha antes o e-mail da contabilidade"') + '>✉ Mandar à contabilidade</button></p>' +
+      (contSit ? '<p class="acoes"><label class="nf-contador-emails">E-mail(s) da contabilidade <input type="text" data-nf-cont-emails value="' + esc((s.emails || []).join('; ')) + '" placeholder="contabilidade@exemplo.com.br; outro@exemplo.com.br"></label> ' +
+        '<label class="check"><input type="checkbox" data-nf-cont-ligado' + (s.ligado ? ' checked' : '') + '> mandar sozinho todo dia 2 (o mês anterior)</label> ' +
+        '<button type="button" class="btn sec" data-acao="nf-contador-salvar">Salvar</button></p>' +
+        (s.ligado ? '<p class="dica">Ligado: no dia 2 de cada mês, às 9h, o ZIP do mês anterior vai sozinho para ' + esc((s.emails || []).join(', ')) + ' (uma vez por mês).</p>' : '') +
+        (env.length ? '<p class="dica">Últimos envios: ' + env.map(e => esc(mesBR(e.mes)) + ' ' + (e.ok ? '✓' : '✗') + ' em ' + esc(quando(e.enviado_em)) + (e.origem === 'agendador' ? ' (automático)' : '') +
+          (e.ok ? ', ' + e.notas + ' nota(s)' : ' — ' + esc(e.erro || '')) ).join(' · ') + '</p>' : '') : '<p class="dica">Carregando…</p>') + '</section>';
+  }
+  const baixaB64 = (nome, b64) => { const bin = atob(b64), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); CRM.baixar(nome, new Blob([u], { type: 'application/zip' })); };
+  const resumoTxt = r => r.notas + ' nota(s): ' + r.autorizadas + ' autorizada(s), ' + moeda(r.valor) + ' de saída; ' + r.canceladas + ' cancelada(s), ' + r.denegadas + ' denegada(s), ' +
+    r.inutilizadas + ' inutilização(ões)' + (r.sem_xml && r.sem_xml.length ? '. Sem XML no CRM: ' + r.sem_xml.map(x => x.serie + '-' + x.numero).join(', ') + ' (pegar no FKN/UniNFe)' : '');
+
   function tela() {
     if (nfes === null) { setTimeout(carrega, 0); return '<div class="cartao"><p class="vazio">Carregando as notas…</p></div>'; }
     const amb = ambiente();
@@ -499,7 +531,7 @@
       () => l.map(n => [n.serie, n.numero, n.ambiente, CRM.nomeEmpresa(n.empresa_id), pedidoNum(n) || '', n.valor, (M.SITUACAO[M.situacaoDe(n)] || [n.situacao])[0], n.motivo || '', quando(n.autorizada_em || n.atualizado_em || n.criado_em), n.chave || '']));
     const pend = nfes.filter(n => n.situacao === 'pendente' && !n.inutilizada_em);
     const chip = (v, t) => '<button type="button" class="chip-filtro' + (f.amb === v ? ' ativo' : '') + '" data-acao="nf-amb" data-id="' + v + '">' + esc(t) + '</button>';
-    return telaConsulta() + '<section class="cartao"><h2>NF-e emitidas pelo CRM <small>série ' + serie() + ' · últimos 90 dias e as pendentes, com as ações (consultar, carta de correção, cancelar)</small></h2>' +
+    return (CRM.ehAdmin() ? telaContador() : '') + telaConsulta() + '<section class="cartao"><h2>NF-e emitidas pelo CRM <small>série ' + serie() + ' · últimos 90 dias e as pendentes, com as ações (consultar, carta de correção, cancelar)</small></h2>' +
       '<p>' + seloAmb(amb) + ' ' + (fiscalCfg().emitente ? '' : '<strong>O emitente ainda não foi configurado</strong> (aba Fiscal, só o administrador).') + '</p>' +
       (pend.length ? '<p class="alerta"><strong>' + pend.length + ' nota(s) sem resposta da Sefaz.</strong> Clique em "Consultar": se a Sefaz não recebeu, o CRM reenvia o MESMO XML (nunca emita outra para o mesmo pedido antes disso).</p>' : '') +
       '<div class="chips">' + chip('', 'Todas') + chip('producao', 'Produção') + chip('homologacao', 'Homologação') + '</div>' +
@@ -508,9 +540,7 @@
       (l.length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>NF</th><th>Cliente</th><th class="num">Valor</th><th>Situação</th><th>Quando</th><th></th></tr></thead><tbody>' +
         CRM.Lista.corta('nf-crm', l, 100).map(linhaNfe).join('') + '</tbody></table></div>' + CRM.Lista.mais('nf-crm', l, 100) +
         (nfes.length >= 1000 ? '<p class="dica">A lista traz até 1.000 notas do CRM; as mais antigas estão em "Consultar notas fiscais", acima.</p>' : '') : l0.length ? '<p class="vazio">Nenhuma nota com essa pesquisa.</p>' : '<p class="vazio">Nenhuma nota emitida pelo CRM ainda. A nota sai do pedido: abra o pedido separado e clique em "Emitir NF-e".</p>') + '</section>' +
-      (CRM.ehAdmin() ? '<section class="cartao"><h2>Fechamento do mês para o contador</h2>' +
-        '<p>ZIP com os XML de saída emitidos pelo CRM (produção), os eventos de cancelamento e de correção, as inutilizações e a relação de canceladas e inutilizadas.' + (CRM.fknDesligado && CRM.fknDesligado() ? '' : ' As notas da série 1 o FKN continua mandando como sempre.') + '</p>' +
-        '<p class="acoes"><input type="month" value="' + esc(f.mes) + '" data-nf-mes> <button type="button" class="btn" data-acao="nf-fechamento">Baixar o ZIP do mês</button></p></section>' : '') +
+
       (ehOp() ? '<section class="cartao"><h2>Outras notas</h2>' +
         '<p>Devoluções saem da nota original (os valores e os impostos vêm dela, na proporção do que volta). Bonificação e entrega futura saem do pedido: botão "Outra operação…" no pedido.</p>' +
         '<p class="acoes"><button type="button" class="btn sec" data-acao="nf-devolucao" data-id="devolucao_fornecedor">Devolução a fornecedor…</button> ' +
@@ -1214,11 +1244,33 @@
       } }); },
     'nf-fechamento': async () => {
       try {
-        const [l, ins] = await Promise.all([CRM.store().nfesDoMes(f.mes), CRM.store().nfeInutilizacoes()]);
-        const r = M.fechamento(l, ins, f.mes);
-        if (!r.notas && !r.inutilizadas) { CRM.toast('Nenhuma nota de produção emitida pelo CRM em ' + f.mes.split('-').reverse().join('/') + '.', true); return; }
-        CRM.baixar('xml-saida-crm-' + f.mes + '.zip', new Blob([M.zip(r.arquivos)], { type: 'application/zip' }));
-        CRM.toast(r.notas + ' nota(s) (' + r.autorizadas + ' autorizadas, ' + moeda(r.valor) + '; ' + r.canceladas + ' canceladas), ' + r.inutilizadas + ' inutilização(ões). Mande o ZIP ao contador.');
+        CRM.toast('Montando o ZIP de ' + f.mes.split('-').reverse().join('/') + ' com os XML guardados no CRM…');
+        const r = await CRM.store().contador({ acao: 'zip', mes: f.mes });
+        if (!r.resumo.notas && !r.resumo.inutilizadas) { CRM.toast('Nenhuma nota emitida em ' + f.mes.split('-').reverse().join('/') + '.', true); return; }
+        baixaB64(r.nome, r.base64);
+        CRM.toast(resumoTxt(r.resumo) + '.', !!(r.resumo.sem_xml && r.resumo.sem_xml.length));
+      } catch (e) { CRM.falhou(e); }
+    },
+    'nf-consulta-abrir': () => { lembraConsulta(true); CRM.render(); },
+    'nf-consulta-recolher': () => { lembraConsulta(false); CRM.render(); },
+    'nf-contador-salvar': async () => {
+      try {
+        const c = document, emails = (c.querySelector('[data-nf-cont-emails]') || {}).value || '', ligado = !!((c.querySelector('[data-nf-cont-ligado]') || {}).checked);
+        const r = await CRM.store().contador({ acao: 'config', emails, ligado });
+        contSit = Object.assign({}, contSit, { emails: r.emails, ligado: r.ligado });
+        CRM.render();
+        CRM.toast(r.emails.length ? 'Salvo: ' + r.emails.join(', ') + (r.ligado ? '. Vai sozinho todo dia 2.' : '. Envio automático desligado.') : 'Nenhum e-mail válido.', !r.emails.length);
+      } catch (e) { CRM.falhou(e); }
+    },
+    'nf-contador-enviar': async () => {
+      const mesBR = f.mes.split('-').reverse().join('/');
+      if (!confirm('Mandar à contabilidade (' + ((contSit && contSit.emails) || []).join(', ') + ') o ZIP com os XML de ' + mesBR + '?')) return;
+      try {
+        CRM.toast('Montando e mandando o ZIP de ' + mesBR + '…');
+        const r = await CRM.store().contador({ acao: 'enviar', mes: f.mes });
+        contSit = null; contLendo = false;
+        CRM.render();
+        CRM.toast('Mandado para ' + r.para.join(', ') + ': ' + resumoTxt(r.resumo) + '.');
       } catch (e) { CRM.falhou(e); }
     }
   });
