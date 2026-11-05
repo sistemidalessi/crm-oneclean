@@ -612,7 +612,8 @@
     }
     botoes.push('<button type="button" class="btn sec" data-acao="pd-imprimir" data-id="' + esc(p.id) + '">Imprimir</button>');
     if (CRM.fichas && CRM.fichas.baixarPdfPedido) botoes.push('<button type="button" class="btn sec" data-acao="pd-pdf" data-id="' + esc(p.id) + '" title="salva o pedido em PDF, para mandar ao cliente ou guardar">📄 Baixar PDF</button>');
-    if (CRM.fichas && CRM.fichas.baixarPdfPedido && CRM.ehAdmin() && !E().cfg.proposta_fotos) botoes.push('<button type="button" class="btn sec" data-acao="pd-pdf-fotos" data-id="' + esc(p.id) + '" title="Só para você ver como fica: o mesmo PDF com a foto de cada produto">📷 PDF com fotos (teste)</button>');
+    // 05/11/2026: com fotos para toda a equipe (a vendedora escolhe qual dos dois PDFs manda ao cliente)
+    if (CRM.fichas && CRM.fichas.baixarPdfPedido && !E().cfg.proposta_fotos) botoes.push('<button type="button" class="btn sec" data-acao="pd-pdf-fotos" data-id="' + esc(p.id) + '" title="O mesmo PDF com a foto de cada produto, para mandar ao cliente com as fotos">📷 PDF com fotos</button>');
     if (ehVenda() && p.negocio_id && CRM.negocio(p.negocio_id)) botoes.push('<button type="button" class="mini" data-acao="abrir-negocio" data-id="' + esc(p.negocio_id) + '">negócio</button>');
     const campo = (rot, v) => '<dt>' + esc(rot) + '</dt><dd>' + esc(v == null || v === '' ? '—' : v) + '</dd>';
     const abas = [['dados', 'Dados cadastrais'], ['produtos', 'Produtos'], ['comentarios', 'Comentários' + ((p.comentarios || []).length ? ' (' + p.comentarios.length + ')' : '')]];
