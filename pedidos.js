@@ -603,6 +603,13 @@
     if (ehOp() && ['aberto', 'separacao', 'separado'].indexOf(p.situacao) !== -1) botoes.push('<button type="button" class="btn sec" data-acao="pd-faturar" data-id="' + esc(p.id) + '" title="ligar a nota que o FKN emitiu">Faturar (nota do FKN)…</button>');
     if (CRM.ehGestor() && p.situacao === 'faturado') botoes.push('<button type="button" class="btn sec" data-acao="pd-desfaturar" data-id="' + esc(p.id) + '">Desfazer faturado</button>');
     if ((p.situacao === 'aberto' && ehVenda()) || (ehOp() && ['separacao', 'separado'].indexOf(p.situacao) !== -1)) botoes.push('<button type="button" class="btn perigo" data-acao="pd-cancelar" data-id="' + esc(p.id) + '">Cancelar pedido</button>');
+    // pedido faturado: a nota dele para quem vende (05/11/2026; o servidor confere a carteira — fichas.js nota-pdf/xml/reenviar)
+    const notaP = p.situacao === 'faturado' && p.nota_id ? (E().D.notas || []).find(x => x.id === p.nota_id) : null;
+    if (notaP && !notaP.cancelada && String(notaP.chave || '').length === 44 && (ehVenda() || ehLog())) {
+      botoes.push('<button type="button" class="btn sec" data-acao="nota-pdf" data-id="' + esc(notaP.chave) + '" title="A DANFE com o boleto do BB, o mesmo PDF que o cliente recebe por e-mail">📄 DANFE e boleto (NF ' + esc(notaP.numero) + ')</button>');
+      botoes.push('<button type="button" class="btn sec" data-acao="nota-xml" data-id="' + esc(notaP.chave) + '">XML da nota</button>');
+      botoes.push('<button type="button" class="btn sec" data-acao="nota-reenviar" data-id="' + esc(notaP.chave) + '" title="Manda de novo ao cliente o e-mail com o XML, a DANFE e o boleto">✉ Reenviar a nota ao cliente</button>');
+    }
     botoes.push('<button type="button" class="btn sec" data-acao="pd-imprimir" data-id="' + esc(p.id) + '">Imprimir</button>');
     if (CRM.fichas && CRM.fichas.baixarPdfPedido) botoes.push('<button type="button" class="btn sec" data-acao="pd-pdf" data-id="' + esc(p.id) + '" title="salva o pedido em PDF, para mandar ao cliente ou guardar">📄 Baixar PDF</button>');
     if (CRM.fichas && CRM.fichas.baixarPdfPedido && CRM.ehAdmin() && !E().cfg.proposta_fotos) botoes.push('<button type="button" class="btn sec" data-acao="pd-pdf-fotos" data-id="' + esc(p.id) + '" title="Só para você ver como fica: o mesmo PDF com a foto de cada produto">📷 PDF com fotos (teste)</button>');

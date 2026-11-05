@@ -175,7 +175,7 @@
               (R.num(e.ciclo_recompra_dias) ? ' <small>(ciclo definido no cadastro: ' + R.num(e.ciclo_recompra_dias) + ' dias)</small>' : '')
               : r.compras > 1 ? ' · compra a cada ~' + intervaloMedio(r.datasCompras || ganhos.map(n => n.fechado_em)) + ' dias' : '') +
             (r.fonteCompras === 'notas' ? '<br><small>pelas notas fiscais</small>' : '') + '</p>' + itensDaFicha(e) : '') +
-          (notas.length ? '<div class="notas-cliente"><h3>Notas fiscais <small>' + notas.length + '</small></h3>' + notas.slice(0, 15).map(itemNota).join('') +
+          (notas.length ? '<div class="notas-cliente"><h3>Notas fiscais <small>' + notas.length + '</small></h3>' + notas.slice(0, 15).map(n => itemNota(n, pode)).join('') +
             (notas.length > 15 ? '<p class="mais">mostrando as 15 mais recentes</p>' : '') + '</div>' : '') +
           (fechados.length ? '<ul class="lista">' + fechados.slice(0, 30).map(n => '<li><button type="button" class="linha" data-acao="abrir-negocio" data-id="' + esc(n.id) + '"><strong>' + esc(n.titulo) + '</strong>' +
             '<small>' + CRM.seloStatus(n.status) + ' ' + esc(R.dataBR(n.fechado_em)) + ' · ' + esc(R.moeda(n.valor)) + (n.motivo_perda ? ' · ' + esc(n.motivo_perda) : '') + '</small></button></li>').join('') + '</ul>' : (notas.length ? '' : '<p class="vazio">Nenhum ainda.</p>')) + '</section>' +
@@ -187,12 +187,27 @@
     if (CRM.credito) CRM.credito.preencheFicha(dlg, e.id);
   }
 
-  function itemNota(n) {
+  // pode = a pessoa vê a carteira deste cliente (05/11/2026: a vendedora baixa a DANFE com o boleto, o XML e reenvia o e-mail da
+  // nota; o servidor confere a carteira de novo — crm-fiscal, ações nota_pdf / nota_xml / nota_reenviar)
+  function itemNota(n, pode) {
     const itens = (E().ix.porNota.get(n.id) || []).slice().sort((a, b) => a.ordem - b.ordem);
+    const ch = String(n.chave || '');
+    const bts = pode && !n.cancelada && ch.length === 44 ? '<p class="acoes nota-acoes">' +
+      '<button type="button" class="mini" data-acao="nota-pdf" data-id="' + esc(ch) + '" title="A DANFE com o boleto do BB (se houver), o mesmo PDF que o cliente recebe por e-mail">📄 DANFE e boleto</button>' +
+      '<button type="button" class="mini" data-acao="nota-xml" data-id="' + esc(ch) + '" title="O arquivo XML da nota (o que vale para a contabilidade do cliente)">XML</button>' +
+      '<button type="button" class="mini" data-acao="nota-reenviar" data-id="' + esc(ch) + '" title="Manda de novo ao cliente o e-mail com o XML, a DANFE e o boleto">✉ Reenviar ao cliente</button></p>' : '';
     return '<details><summary>' + esc(R.dataBR(R.diaLocal(n.emitida_em))) + ' · NF ' + esc(n.numero || '') + (n.cancelada ? ' <span class="selo vermelho">cancelada</span>' : '') +
-      '<strong>' + esc(R.moeda(n.valor_total)) + '</strong></summary><ul>' +
+      '<strong>' + esc(R.moeda(n.valor_total)) + '</strong></summary>' + bts + '<ul>' +
       itens.map(it => '<li>' + esc(R.numero(it.quantidade)) + ' ' + esc(it.unidade || '') + ' · ' + esc(it.descricao) + ' — ' + esc(R.moeda(it.valor_total)) + '</li>').join('') + '</ul></details>';
   }
+  // os arquivos da nota pelo servidor (a nota do CRM e as do FKN, com o XML guardado)
+  const notaDaChave = ch => (E().D.notas || []).find(x => x.chave === ch) || null;
+  async function notaArquivo(acao, ch, para) {
+    const st = CRM.store();
+    if (!st.fiscal) throw new Error('as notas só abrem com o Supabase ligado');
+    return st.fiscal(Object.assign({ acao, chave: ch }, para ? { para } : {}));
+  }
+  const pdfDeBase64 = b64 => { const bin = atob(b64), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return new Blob([u], { type: 'application/pdf' }); };
 
   function itensDaFicha(e) {
     const itens = R.itensHabituais(E().ix, e.id);
@@ -1665,6 +1680,24 @@
       } catch (e) { CRM.falhou(e); }
     },
     'editar-item': id => fichas.formItem(E().ix.porId.negocio_itens.get(id), abertoNegocio),
+    'nota-pdf': ch => {
+      CRM.toast('Montando a DANFE…');
+      notaArquivo('nota_pdf', ch).then(r => { CRM.baixar(r.nome || 'DANFE.pdf', pdfDeBase64(r.pdf)); CRM.toast(r.boletos ? 'DANFE com ' + r.boletos + ' boleto(s) baixada.' : 'DANFE baixada (esta nota não tem boleto registrado no BB).'); }).catch(CRM.falhou);
+    },
+    'nota-xml': ch => { notaArquivo('nota_xml', ch).then(r => CRM.baixar(r.nome || ch + '.xml', r.xml, 'application/xml')).catch(CRM.falhou); },
+    'nota-reenviar': ch => {
+      const n = notaDaChave(ch), e = n && n.empresa_id ? CRM.empresa(n.empresa_id) : null;
+      const padrao = e ? (String(e.email_nfe || '').trim() || String(e.email || '').trim()) : '';
+      CRM.abrirForm({ titulo: 'Reenviar a NF ' + (n ? n.numero : '') + ' ao cliente',
+        intro: 'Vai o e-mail da nota com o XML, a DANFE e o boleto do BB (se a nota tiver), em seu nome. A resposta do cliente chega a você.',
+        campos: [{ nome: 'para', rotulo: 'Para (um ou mais e-mails, separados por ; )', obrigatorio: true, largo: true, dica: 'o "E-mail para a nota fiscal" do cadastro; pode trocar para quem pediu' }],
+        valores: { para: padrao }, salvarTexto: 'Reenviar',
+        aoSalvar: async v => {
+          const r = await notaArquivo('nota_reenviar', ch, v.para);
+          if (!r || !r.ok) throw new Error((r && r.erro) || 'o e-mail não saiu');
+          CRM.toast('Reenviada para ' + r.para + '.');
+        } });
+    },
     'nova-proposta': () => fichas.formProposta(null, CRM.negocio(abertoNegocio)),
     'editar-proposta': id => fichas.formProposta(E().ix.porId.propostas.get(id), CRM.negocio(abertoNegocio)),
     'imprimir-proposta': id => fichas.imprimirProposta(E().ix.porId.propostas.get(id)),
