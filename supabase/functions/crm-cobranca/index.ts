@@ -131,7 +131,7 @@ Deno.serve(async (req) => {
     if (!u || !u.ativo || u.papel !== 'admin') return resposta(403, { erro: 'só o administrador' });
     eu = u as Linha;
   }
-  if (agendador && c.acao !== 'rodar' && c.acao !== 'previa_boletos') return resposta(403, { erro: 'o agendador só roda' });
+  if (agendador && c.acao !== 'rodar' && c.acao !== 'previa_boletos' && c.acao !== 'correcao_transferencia') return resposta(403, { erro: 'o agendador só roda' });
 
   const token = Deno.env.get('WHATSAPP_TOKEN') ?? '', phoneId = Deno.env.get('WHATSAPP_PHONE_ID') ?? '', wabaId = Deno.env.get('WHATSAPP_WABA_ID') ?? '';
   const brevo = Deno.env.get('BREVO_API_KEY') ?? '';
@@ -334,6 +334,49 @@ Deno.serve(async (req) => {
         foraN.push({ ...f, nome });
       }
       return { feitos, fora: foraN, sem: sem.map((x: Linha) => ({ nosso_numero: (x.boleto as Linha).nosso_numero, valor: (x.boleto as Linha).valor, vencimento: (x.boleto as Linha).vencimento, candidatos: x.candidatos })), pdf1, lidos: ((jb as Linha).boletos as Linha[] || []).length };
+    }
+    // Correção para quem paga por transferência e recebeu o boleto atualizado (05/11/2026, SESI São Bernardo, NF 2585: o boleto
+    // foi baixado no BB): um e-mail, em nome do(a) vendedor(a), pedindo para desconsiderar o boleto, com o valor de hoje e a
+    // conta. Só para título de portador transferência que já recebeu boleto atualizado; uma vez por título.
+    if (c.acao === 'correcao_transferencia') {
+      const dup = String(c.duplicata || '');
+      const t = ((tit || []) as Linha[]).find(x => String(x.duplicata) === dup);
+      if (!t) return resposta(404, { erro: 'título vencido não encontrado' });
+      if (!porTransferencia(t)) return resposta(400, { erro: 'o título não é pago por transferência' });
+      const { data: bols } = await db.from('crm_boletos').select('id, criado_em, encargos').eq('duplicata', dup).eq('origem', 'auto');
+      if (!bols || !bols.length) return resposta(400, { erro: 'o cliente não recebeu boleto atualizado deste título' });
+      if (((bols as Linha[]).some(b => (b.encargos || {}).correcao_em))) return resposta(200, { ok: true, ja_enviado: true });
+      const { data: e } = await db.from('crm_empresas').select('id, nome, responsavel_id, whatsapp, telefone, email').eq('id', t.empresa_id).maybeSingle();
+      const { data: cs } = await db.from('crm_contatos').select('empresa_id, nome, whatsapp, celular, telefone, email').eq('empresa_id', t.empresa_id);
+      const emp = (e || {}) as Linha, contatos = (cs || []) as Linha[], emails = emailsDoCliente(emp, contatos);
+      if (!emails.length) return resposta(400, { erro: 'o cliente não tem e-mail no cadastro' });
+      let vend = ((vends || []) as Linha[]).find(y => y.user_id === emp.responsavel_id && y.ativo) as Linha | undefined;
+      if (!vend && emp.responsavel_id) { const { data } = await db.from('crm_usuarios').select('user_id, nome, telefone, email, ativo').eq('user_id', emp.responsavel_id).maybeSingle(); if (data && data.ativo) vend = data as Linha; }
+      const rem = vend && /@/.test(String(vend.email || '')) ? vend : admin0;
+      if (!brevo || !rem || !/@/.test(String(rem.email || ''))) return resposta(503, { erro: 'o e-mail (Brevo) ou o remetente não estão prontos' });
+      const a = valorAtualizado([t], hoje, (dados.boleto || {}) as Linha);
+      const bolCfg2 = (dados.boleto || {}) as Linha, emit2 = (((dados.fiscal || {}) as Linha).emitente || {}) as Linha;
+      const conta2 = contaTexto({ agencia: bolCfg2.agencia, conta: bolCfg2.conta, razao: emit2.razao, cnpj: emit2.cnpj });
+      const contato = contatos.find(y => emailsDoCliente(null, [y]).length) || contatos[0] || null;
+      const doc = t.nota_numero ? 'NF ' + t.nota_numero : 'duplicata ' + t.duplicata;
+      const venc = String(t.vencimento).split('-').reverse().join('/');
+      const telV = telWa(String((vend || {}).telefone || ''));
+      const texto = ['Olá, ' + (primeiro(contato && contato.nome) || String(emp.nome || '')) + '! Aqui é ' + (primeiro(rem.nome) || 'o financeiro') + ', da ' + EMPRESA + '.',
+        'Hoje cedo enviamos por engano um boleto atualizado da ' + doc + ', vencida em ' + venc + '. Como o pagamento de vocês é por transferência, por favor desconsiderem esse boleto: ele já foi cancelado no banco.',
+        paragrafoTransferencia(a, conta2),
+        'Desculpe o transtorno. Qualquer dúvida, é só responder este e-mail' + (telV ? ' ou me chamar no WhatsApp ' + telBR(telV) : '') + '. Agradecemos a parceria!'].join('\n\n');
+      const html = '<div style="font-family:Arial,sans-serif;font-size:15px;line-height:1.5;color:#222;max-width:600px">' +
+        texto.split('\n\n').map(x => '<p>' + x.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</p>').join('') + '<p style="color:#777;font-size:12px">' + EMPRESA + ' · financeiro</p></div>';
+      const r = await fetch('https://api.brevo.com/v3/smtp/email', { method: 'POST', headers: { 'api-key': brevo, 'content-type': 'application/json', accept: 'application/json' },
+        body: JSON.stringify({ sender: { name: String(rem.nome) + ' · ' + EMPRESA, email: rem.email }, replyTo: { name: String(rem.nome), email: rem.email },
+          to: emails.map((x: string) => ({ email: x })), subject: EMPRESA + ' · ' + doc + ': pagamento por transferência (desconsiderar o boleto)',
+          htmlContent: html, textContent: texto + '\n\n' + EMPRESA + ' · financeiro', tags: ['cobranca', 'correcao'] }) });
+      if (!r.ok) return resposta(502, { erro: 'o Brevo recusou (' + r.status + ')' });
+      const agora = new Date().toISOString();
+      for (const b of bols as Linha[]) await db.from('crm_boletos').update({ encargos: Object.assign({}, b.encargos || {}, { correcao_em: agora, correcao_valor: a.total }) }).eq('id', b.id);
+      await db.from('crm_atividades').insert({ empresa_id: t.empresa_id, tipo: 'email', concluida: true, concluida_em: agora, automatica: true, responsavel_id: (vend || {}).user_id || null,
+        descricao: 'Correção enviada ao cliente (e-mail): desconsiderar o boleto atualizado da ' + doc + ' (cancelado no banco); pagar por transferência ' + moeda(a.total) + ' com multa e juros até ' + hoje.split('-').reverse().join('/') + '.' });
+      return resposta(200, { ok: true, para: emails, valor: a.total, remetente: rem.email });
     }
     if (c.acao === 'previa_boletos') {
       const r = await boletosDeHoje(false);
