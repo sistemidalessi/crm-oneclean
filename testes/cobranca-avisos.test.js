@@ -73,3 +73,21 @@ test('celulares e e-mails do cliente: contatos antes da empresa, só celular, se
   assert.deepStrictEqual(A.celularesDoCliente(emp, cts), ['5511988887777', '5521977776666']);
   assert.deepStrictEqual(A.emailsDoCliente(emp, cts), ['compras@cliente.com', 'fin@cliente.com', 'maria@cliente.com']);
 });
+
+test('título pago por transferência: valor com multa e juros e a conta no aviso, sem boleto (05/11/2026)', () => {
+  assert.ok(A.porTransferencia({ portador: 'TRANSFERENCI' }) && A.porTransferencia({ portador: 'PIX' }));
+  assert.ok(!A.porTransferencia({ portador: 'BOLETO' }) && !A.porTransferencia({}));
+  const a = A.valorAtualizado([{ valor: 800, vencimento: '2026-11-04' }], '2026-11-07', { multa_pct: 5, juros_mes_pct: 2 });
+  assert.deepStrictEqual(a, { original: 800, multa: 40, juros: 1.6, total: 841.6 });
+  assert.strictEqual(A.valorAtualizado([{ valor: 800, vencimento: '2026-11-07' }], '2026-11-07', { multa_pct: 5, juros_mes_pct: 2 }).total, 800, 'no dia do vencimento, sem encargos');
+  const conta = A.contaTexto({ agencia: '1234-5', conta: '99999-9', razao: 'Empresa Exemplo Ltda', cnpj: '11222333000181' });
+  assert.strictEqual(conta, 'Banco do Brasil, agência 1234-5, conta corrente 99999-9 · favorecido EMPRESA EXEMPLO LTDA · chave Pix (CNPJ) 11.222.333/0001-81');
+  assert.strictEqual(A.valorTransferencia(a), 'R$ 841,60 (com multa e juros até hoje)');
+  const p = A.parametros({ cliente: 'Maria', vendedora: 'Renata', titulos: [{ nota_numero: 1, valor: 800, vencimento: '2026-11-04' }], valor: 800, prazo: '2026-11-14' });
+  p[3] = A.valorTransferencia(a);
+  const t = A.textoEmailTransferencia(A.CORPO('Exemplo'), p, '', A.paragrafoTransferencia(a, conta));
+  assert.ok(!/boleto/i.test(t), 'o e-mail não fala de boleto: ' + t);
+  assert.match(t, /no valor de R\$ 841,60 \(com multa e juros até hoje\)/);
+  assert.match(t, /Para regularizar, faça a transferência ou o Pix de R\$ 841,60 \(o valor de R\$ 800,00 com multa de R\$ 40,00 e juros de R\$ 1,60 até hoje\) para: Banco do Brasil, agência 1234-5/);
+  assert.ok(t.indexOf('Para regularizar') < t.indexOf('Se quiser combinar o pagamento'), 'a conta vem antes do fecho');
+});

@@ -19,7 +19,8 @@
 // (crm_interno.cobranca_cfg) e é conferida por crm_cobranca_senha_ok; só roda se dados.cobranca_aviso.ligado = true.
 // Deploy: verify_jwt DESLIGADO (o agendador não tem login; a função confere a senha ou o login do administrador).
 import { createClient } from 'npm:@supabase/supabase-js@2.116.0';
-import { quemRecebe, prazoUtil, parametros, textoFinal, textoEmail, CORPO, alertasCartorio, celularesDoCliente, emailsDoCliente, telWa, moeda, docsTexto } from './avisos.js';
+import { quemRecebe, prazoUtil, parametros, textoFinal, textoEmail, CORPO, alertasCartorio, celularesDoCliente, emailsDoCliente, telWa, moeda, docsTexto,
+  porTransferencia, valorAtualizado, contaTexto, valorTransferencia, paragrafoTransferencia, textoEmailTransferencia } from './avisos.js';
 import { casa, quemRecebeBoleto, pdfBoletos, parametrosBoleto, CORPO_BOLETO, textoEmailBoleto, resumoRodada, mod11 } from './atualizado.js';
 import { jsPDF } from 'npm:jspdf@2.5.2';
 
@@ -164,7 +165,7 @@ Deno.serve(async (req) => {
     }
 
     // títulos e o que já foi avisado
-    const { data: tit } = await db.from('crm_titulos').select('id, duplicata, nota_numero, parcela, empresa_id, vencimento, valor, previsao, cartorio_em').lt('vencimento', hoje);
+    const { data: tit } = await db.from('crm_titulos').select('id, duplicata, nota_numero, parcela, empresa_id, vencimento, valor, previsao, cartorio_em, portador').lt('vencimento', hoje);
     const { data: avs } = await db.from('crm_cobranca_avisos').select('*').order('enviado_em', { ascending: false }).limit(2000);
     const avisos = (avs || []) as Linha[];
     const { data: pagosB } = await db.from('crm_boletos').select('empresa_id, duplicata').not('cli_pagou_em', 'is', null);
@@ -190,6 +191,9 @@ Deno.serve(async (req) => {
     const admin0 = ((adms || []) as Linha[])[0] || null;
     const prazo = prazoUtil(hoje, prazoDias);
     const corpo = CORPO(EMPRESA);
+    // quem paga por transferência (05/11/2026): o aviso leva o valor com multa e juros e a conta, nunca boleto
+    const bolCfg = (dados.boleto || {}) as Linha, emitCfg = (((dados.fiscal || {}) as Linha).emitente || {}) as Linha;
+    const conta = contaTexto({ agencia: bolCfg.agencia, conta: bolCfg.conta, razao: emitCfg.razao, cnpj: emitCfg.cnpj });
     const monta = lista.map(x => {
       const e = ((emps || []) as Linha[]).find(y => y.id === x.empresa_id) || {} as Linha;
       const contatos = ((cts || []) as Linha[]).filter(y => y.empresa_id === x.empresa_id);
@@ -198,8 +202,10 @@ Deno.serve(async (req) => {
       const contato = contatos.find(y => celularesDoCliente(null, [y]).length) || contatos[0] || null;
       const p = parametros({ cliente: primeiro(contato && contato.nome) || String(e.nome || ''), vendedora: primeiro(v.nome) || 'o financeiro', titulos: x.titulos, valor: x.valor, prazo });
       const telV = telWa(v.telefone);
-      return { ...x, empresa: e, vendedor: v, celular: celulares[0] || '', emails, p, texto: textoFinal(corpo, p), telV,
-        email: textoEmail(corpo, p, telV ? telBR(telV) : '') };
+      const transf = (x.titulos as Linha[]).some(porTransferencia) ? valorAtualizado(x.titulos, hoje, bolCfg) : null;
+      if (transf) p[3] = valorTransferencia(transf);
+      return { ...x, empresa: e, vendedor: v, celular: celulares[0] || '', emails, p, texto: textoFinal(corpo, p), telV, transf,
+        email: transf ? textoEmailTransferencia(corpo, p, telV ? telBR(telV) : '', paragrafoTransferencia(transf, conta)) : textoEmail(corpo, p, telV ? telBR(telV) : '') };
     });
 
     // ------------------------------------------------------------ boleto vencido atualizado (1º dia de atraso)
@@ -208,7 +214,10 @@ Deno.serve(async (req) => {
       const rb = await fetch(url + '/functions/v1/crm-bb', { method: 'POST', headers: { Authorization: 'Bearer ' + servico, 'Content-Type': 'application/json' }, body: JSON.stringify({ acao: 'vencidos', dias: 60 }) });
       const jb = await rb.json().catch(() => ({}));
       if (!rb.ok) throw new Error('leitura dos vencidos no BB: ' + String((jb as Linha).erro || rb.status));
-      const titulos = titCob;
+      // quem paga por transferência nunca recebe boleto atualizado, mesmo que o BB ainda tenha um boleto do título (05/11/2026)
+      const titulos = titCob.filter(t => !porTransferencia(t));
+      const foraTransf = titCob.filter(t => porTransferencia(t) && !t.cartorio_em)
+        .map(t => ({ empresa_id: t.empresa_id, duplicata: t.duplicata, nota_numero: t.nota_numero, valor: t.valor, motivo: 'paga por transferência: o aviso leva o valor com multa e juros e a conta, sem boleto' }));
       const ids = [...new Set(titulos.map(t => t.empresa_id).filter(Boolean))] as string[];
       const docs = new Map<string, string>();
       for (let i = 0; i < ids.length; i += 200) {
@@ -319,7 +328,7 @@ Deno.serve(async (req) => {
         feitos.push({ empresa: emp.nome, docs, total: env.total, enviado: true, canais });
       }
       const foraN = [];
-      for (const f of (fora as Linha[]).concat(foraParcial as Linha[])) {
+      for (const f of (fora as Linha[]).concat(foraParcial as Linha[], foraTransf as Linha[])) {
         let nome = nomes.get(String(f.empresa_id));
         if (!nome) { const { data } = await db.from('crm_empresas').select('nome').eq('id', f.empresa_id).maybeSingle(); nome = data ? String(data.nome) : ''; }
         foraN.push({ ...f, nome });
@@ -415,6 +424,7 @@ Deno.serve(async (req) => {
       await db.from('crm_atividades').insert({ empresa_id: m.empresa_id, tipo: canais[0] === 'WhatsApp' ? 'whatsapp' : 'email', concluida: true,
         concluida_em: new Date().toISOString(), automatica: true, responsavel_id: m.vendedor.user_id || null,
         descricao: 'Aviso de atraso enviado ao cliente (' + canais.join(' e ') + '): ' + docsTexto(m.titulos) + ', ' + moeda(m.valor) +
+          (m.transf ? ' (por transferência: ' + moeda(m.transf.total) + ' com multa e juros, sem boleto)' : '') +
           '. Prazo antes do cartório: ' + prazo.split('-').reverse().join('/') + '. Se o cliente procurar, negocie e avise o financeiro.' });
       feitos.push({ empresa: m.empresa.nome, enviado: true, canais, erro });
     }

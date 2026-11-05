@@ -79,6 +79,43 @@ export function parametros({ cliente, vendedora, titulos, valor, prazo }) {
   return [cliente || 'tudo bem', vendedora || 'o financeiro', docsTexto(titulos), moeda(valor), diaLongo(prazo)];
 }
 export function textoFinal(corpo, p) { return corpo.replace(/\{\{(\d)\}\}/g, (_, n) => p[Number(n) - 1] || ''); }
+// Título pago por TRANSFERÊNCIA/Pix (05/11/2026, Anderson: o SESI "é transferência, não é boleto… cobrar somente o valor com
+// juros, fazer a transferência"): o portador do título diz (FKN "TRANSFERENCI"). Ele nunca recebe boleto atualizado; o aviso
+// leva o valor com a multa e os juros do boleto (Configurações → boleto: multa_pct, juros_mes_pct, ao dia corrido) e a conta.
+export const porTransferencia = t => /transf|pix|dep[oó]sito/i.test(String((t && t.portador) || ''));
+const r2 = v => Math.round((Number(v) || 0) * 100) / 100;
+export function valorAtualizado(titulos, hoje, cfg) {
+  const multaPct = Number((cfg || {}).multa_pct) || 0, jurosMes = Number((cfg || {}).juros_mes_pct) || 0;
+  let original = 0, multa = 0, juros = 0;
+  for (const t of titulos || []) {
+    const v = r2(t.valor), dias = Math.max(0, Math.round((dia(hoje) - dia(t.vencimento)) / 864e5));
+    original += v;
+    if (dias > 0) { multa += r2(v * multaPct / 100); juros += r2(v * jurosMes / 100 / 30 * dias); }
+  }
+  return { original: r2(original), multa: r2(multa), juros: r2(juros), total: r2(original + multa + juros) };
+}
+const docFmt = d => String(d || '').replace(/\D/g, '').replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
+// a conta para a transferência (a mesma do orçamento em Pix/transferência: o banco do boleto e o CNPJ como chave Pix)
+export function contaTexto({ agencia, conta, razao, cnpj }) {
+  return ['Banco do Brasil' + (agencia ? ', agência ' + agencia : '') + (conta ? ', conta corrente ' + conta : ''),
+    razao ? 'favorecido ' + String(razao).toUpperCase() : '', cnpj ? 'chave Pix (CNPJ) ' + docFmt(cnpj) : ''].filter(Boolean).join(' · ');
+}
+// o valor do aviso ({{4}}) e o parágrafo do e-mail para quem paga por transferência
+export function valorTransferencia(a) {
+  return moeda(a.total) + (a.total > a.original ? ' (com multa e juros até hoje)' : '');
+}
+export function paragrafoTransferencia(a, conta) {
+  return 'Para regularizar, faça a transferência ou o Pix de ' + moeda(a.total) +
+    (a.total > a.original ? ' (o valor de ' + moeda(a.original) + ' com multa de ' + moeda(a.multa) + ' e juros de ' + moeda(a.juros) + ' até hoje)' : '') +
+    ' para: ' + conta + '. Depois, por favor, responda este e-mail com o comprovante.';
+}
+// e-mail do aviso para quem paga por transferência: o parágrafo da conta antes do fecho, e o fecho sem "boleto atualizado"
+export function textoEmailTransferencia(corpo, p, tel, paragrafo) {
+  const t = textoEmail(corpo, p, tel).replace('Se precisar do boleto atualizado ou quiser combinar o pagamento', 'Se quiser combinar o pagamento');
+  const i = t.lastIndexOf('\n\n');
+  return i < 0 ? t + '\n\n' + paragrafo : t.slice(0, i) + '\n\n' + paragrafo + t.slice(i);
+}
+
 // no e-mail não há botão: o fim do texto troca para responder o e-mail
 export function textoEmail(corpo, p, tel) {
   return textoFinal(corpo, p)
