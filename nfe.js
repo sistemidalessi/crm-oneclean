@@ -9,6 +9,18 @@
 (function (raiz) {
   'use strict';
   const R = raiz.CRMRegras || (typeof require !== 'undefined' ? require('./regras.js') : null);
+  // Dia da emissão em São Paulo (04/11/2026: nota das 21h06 saía com o título do dia seguinte, porque o servidor da crm-notas
+  // conta em UTC, e o BB recusava o boleto: "data de emissão não pode ser superior a data atual"). O dhEmi já vem com o fuso
+  // (-03:00): vale a data escrita nele; sem fuso, o dia em America/Sao_Paulo.
+  function diaSP(momento) {
+    if (!momento) return null;
+    const s = String(momento), m = /^(\d{4}-\d{2}-\d{2})(T[\d:.]+(-03:00))?$/.exec(s);
+    if (m && (m[3] || s.length === 10)) return m[1];
+    const d = new Date(s);
+    if (isNaN(d)) return null;
+    try { return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d); }
+    catch (e) { return new Date(d.getTime() - 3 * 36e5).toISOString().slice(0, 10); }
+  }
   const uuid = () => (raiz.CRMDados ? raiz.CRMDados.uuid() : require('crypto').randomUUID());
 
   // ------------------------------------------------------------ leitura do XML
@@ -441,7 +453,7 @@
         d.parcelas.forEach(pc => {
           plano.criar.titulos.push({ duplicata: prefixoDup(d.numero, d.serie) + '/' + String(pc.n).padStart(2, '0'), nota_numero: d.numero, parcela: pc.n,
             empresa_id: n.empresa_id || null, cliente_doc: d.cliente.doc || null, cliente_nome: texto(d.cliente.nome), vendedor_nome: texto(d.vendedor),
-            emitida_em: R.diaLocal(n.emitida_em), vencimento: pc.vencimento, valor: pc.valor, portador: PAGAMENTO[d.forma_pagamento] || null, origem: 'nota' });
+            emitida_em: diaSP(d.emitida_em || n.emitida_em), vencimento: pc.vencimento, valor: pc.valor, portador: PAGAMENTO[d.forma_pagamento] || null, origem: 'nota' });
           conta('titulos', 'criados');
         });
         resumo.titulosNovos = (resumo.titulosNovos || 0) + d.parcelas.length;

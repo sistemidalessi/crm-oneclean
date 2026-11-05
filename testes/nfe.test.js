@@ -347,6 +347,9 @@ test('títulos das parcelas da nota (cobr/dup): duplicata "002527/01", não dupl
   assert.equal(pl.criar.titulos[0].empresa_id, pl.criar.notas[0].empresa_id, 'título no cliente da nota');
   assert.equal(pl.criar.titulos[0].cliente_doc, '44555666000199');
   assert.equal(pl.resumoNotas.titulosNovos, 3);
+  // nota emitida às 21h06 em SP (00h06 em UTC): o título fica com o dia de SP, senão o BB recusa o boleto (04/11/2026)
+  const noite = N.lerXml(xml({ n: 2876, dest: 'CLIENTE EXEMPLO LTDA', cnpjDest: '44555666000199', itens: it, cobr: COBR, data: '2026-11-04T21:06:07-03:00' }));
+  assert.equal(N.planeja(base(), [noite], {}).criar.titulos[0].emitida_em, '2026-11-04');
   // À vista (sem cobr) ou remessa: nenhum título.
   assert.equal(N.planeja(base(), [N.lerXml(xml({ n: 2528, dest: 'X', cnpjDest: '44555666000199', itens: it }))], {}).criar.titulos.length, 0);
   assert.equal(N.planeja(base(), [N.lerXml(xml({ n: 2529, dest: 'X', cnpjDest: '44555666000199', itens: [Object.assign({}, it[0], { cfop: '5949' })], cobr: COBR }))], {}).criar.titulos.length, 0);

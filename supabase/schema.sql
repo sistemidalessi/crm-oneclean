@@ -8111,7 +8111,7 @@ begin
     n := public.crm_boleto_proximo_int(conv, cfg);
     insert into public.crm_boletos_bb (convenio, seq, nosso_numero, titulo_id, nota_numero, parcela, empresa_id, valor, vencimento, emissao, duplicata, documento, situacao, caminho)
     values (conv, n, conv || lpad(n::text, 10, '0'), t.id, t.nota_numero, t.parcela, t.empresa_id, t.valor, t.vencimento,
-            least(coalesce(t.emitida_em, hoje), t.vencimento), t.duplicata, left(t.duplicata, 15), 'preparado', cfg ->> 'caminho');
+            least(coalesce(t.emitida_em, hoje), hoje, t.vencimento), t.duplicata, left(t.duplicata, 15), 'preparado', cfg ->> 'caminho');   -- nunca depois de hoje em SP (04/11/2026)
     feitos := feitos + 1;
   end loop;
   return jsonb_build_object('preparados', feitos, 'pulados', pulados);
