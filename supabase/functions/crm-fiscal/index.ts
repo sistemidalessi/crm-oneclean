@@ -546,7 +546,9 @@ Deno.serve(async (req) => {
     if (c.acao !== 'email_pendentes') return resposta(400, { erro: 'o agendador só manda os e-mails pendentes' });
     const desde = /^\d{4}-\d{2}-\d{2}$/.test(String(c.desde || '')) ? String(c.desde) + 'T00:00:00-03:00' : new Date(Date.now() - 2 * 864e5).toISOString();
     const { data: pend } = await db.from('crm_nfe').select('id, numero').eq('ambiente', 'producao').eq('situacao', 'autorizada').is('email_em', null)
-      .gte('autorizada_em', desde).order('autorizada_em').limit(30);
+      .gte('autorizada_em', desde).order('autorizada_em').limit(6);
+    // no máximo 6 por chamada (05/11/2026: 14 notas com DANFE e boleto numa chamada passaram do limite da função, que foi
+    // encerrada no meio); o resto vai na chamada seguinte do agendador, 15 minutos depois
     const res: Linha[] = [];
     for (const n of (pend || []) as Linha[]) res.push(Object.assign({ numero: n.numero }, await enviaEmailNota(db, String(n.id))));
     return resposta(200, { mandadas: res.filter(r => r.ok).length, total: res.length, notas: res });
