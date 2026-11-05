@@ -8,7 +8,8 @@
 //        crm_ceo_resumo(), que só o service_role executa. Mesma senha.) 25/10/2026: junta `fiscal` (crm_ceo_fiscal() e a
 //        validade do certificado A1, pelo /saude do serviço fiscal) para o Diretor Fiscal do painel; e `analises`: os
 //        textos de hoje do Gerente de Vendas (equipe), do Comprador e da Logística, para o CEO do grupo (os que já saíram).
-//        04/11/2026: junta `cobranca` (a rodada de hoje da cobrança automática: boletos atualizados e avisos, com o resumo pronto).
+//        04/11/2026: junta `cobranca` (a rodada de hoje da cobrança automática: boletos atualizados e avisos, com o resumo pronto);
+//        05/11/2026: e `cobranca_anterior` (a última rodada antes de hoje, para o resumo das 7h).
 // A senha é gerada pelo administrador em Configurações → Integrações → "Leitura do Caixa" (aparece uma
 // vez só; aqui fica só o SHA-256, em crm_integracoes com uso = 'caixa'). Sem senha ou com senha errada:
 // 401 e nada mais. Só GET (o resto: 405). Não grava nada, nem registro de uso.
@@ -200,17 +201,19 @@ Deno.serve(async (req) => {
     const url = new URL(req.url);
     if (url.searchParams.get('parte') === 'ceo') {
       const hoje = hojeSP(), corta = (x: { texto?: string; em?: string } | null) => (x && x.texto ? { texto: String(x.texto).slice(0, 2500), em: x.em || null } : null);
-      const [{ data, error }, fisc, cert, av, ac, al, cob] = await Promise.all([db.rpc('crm_ceo_resumo'), db.rpc('crm_ceo_fiscal'), certificadoA1(),
+      const [{ data, error }, fisc, cert, av, ac, al, cob, cobAnt] = await Promise.all([db.rpc('crm_ceo_resumo'), db.rpc('crm_ceo_fiscal'), certificadoA1(),
         db.from('crm_ia_analises_vendas').select('texto, em').eq('dia', hoje).eq('chave', 'equipe').maybeSingle(),
         db.from('crm_ia_analises').select('texto, em').eq('dia', hoje).eq('tipo', 'compras').maybeSingle(),
         db.from('crm_ia_analises_areas').select('texto, em').eq('dia', hoje).eq('area', 'logistica').maybeSingle(),
         // 04/11/2026: a rodada de cobrança de hoje (boletos atualizados, avisos do cartório), para o CEO mandar ao Anderson em destaque
-        db.from('crm_cobranca_rodadas').select('dia, resumo, dados, atualizado_em').eq('dia', hoje).maybeSingle()]);
+        db.from('crm_cobranca_rodadas').select('dia, resumo, dados, atualizado_em').eq('dia', hoje).maybeSingle(),
+        // 05/11/2026: a última rodada antes de hoje, para o bloco da cobrança no resumo das 7h
+        db.from('crm_cobranca_rodadas').select('dia, resumo, dados, atualizado_em').lt('dia', hoje).order('dia', { ascending: false }).limit(1).maybeSingle()]);
       if (error) throw new Error('crm_ceo_resumo: ' + error.message);
       if (fisc.error) console.error('[crm-caixa-leitura] crm_ceo_fiscal: ' + fisc.error.message);
       return resposta(200, Object.assign({}, data, { fiscal: Object.assign({}, fisc.data || {}, { certificado_a1: cert }),
         analises: { dia: hoje, vendas: corta(av.data), compras: corta(ac.data), logistica: corta(al.data) },
-        cobranca: cobrancaDe(cob.data) }));
+        cobranca: cobrancaDe(cob.data), cobranca_anterior: cobrancaDe(cobAnt.data) }));
     }
     if (url.searchParams.get('parte') === 'pessoal') {
       const de = String(url.searchParams.get('de') || ''), ate = String(url.searchParams.get('ate') || '');

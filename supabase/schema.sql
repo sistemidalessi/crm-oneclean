@@ -5848,6 +5848,7 @@ begin
   return jsonb_build_object('numero', r.numero, 'situacao', r.situacao, 'valor_total', r.valor_total, 'entrega', r.entrega, 'criado_em', r.criado_em,
     'cliente', (select e.nome from public.crm_empresas e where e.id = r.empresa_id),
     'vendedor', (select u.nome from public.crm_usuarios u where u.user_id = r.vendedor_id),
+    'pagamento', nullif(left(coalesce(r.dados->>'pagamento', ''), 80), ''), -- forma de pagamento (05/11/2026, aviso do pedido travado no CEO)
     'bloqueios', coalesce((select jsonb_agg(b) from unnest(r.bloqueios) b where b <> all (r.liberado)), '[]'::jsonb));
 end;
 $$;
