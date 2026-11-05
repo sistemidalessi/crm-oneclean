@@ -1048,7 +1048,7 @@
       .concat(comCusto ? [{ nome: 'custo_compra', rotulo: 'Preço de compra, R$', tipo: 'numero', vazioNulo: true },
         { nome: 'indice_custo', rotulo: 'Índice de custo, %', tipo: 'numero', vazioNulo: true, ajuda: 'o que o fornecedor pesa a mais (frete, IPI, taxa): 8 = 8% sobre a compra; vazio ou 0 = sem índice' },
         { nome: 'custo_unit', rotulo: 'Preço de custo (compra + índice), R$', tipo: 'numero', vazioNulo: true },
-        { nome: 'acrescimo', rotulo: 'Acréscimo sobre o custo, %', tipo: 'numero', vazioNulo: true, ajuda: 'digite o % e o preço se calcula; ou digite o preço e o % se acerta' }] : [])
+        { nome: 'acrescimo', rotulo: 'Acréscimo sobre o custo, %', tipo: 'numero', vazioNulo: true, ajuda: 'padrão 30%: mudar a compra ou o índice refaz o preço com ele; digitar o preço acerta o %' }] : [])
       .concat([{ nome: 'preco_venda', rotulo: 'Preço de venda (tabela A), R$', tipo: 'numero', obrigatorio: true, vazioNulo: true },
         { nome: 'estoque_min', rotulo: 'Estoque mínimo', tipo: 'numero', passo: '1', vazioNulo: true },
         { nome: 'estoque_max', rotulo: 'Estoque máximo', tipo: 'numero', passo: '1', vazioNulo: true }])
@@ -1062,8 +1062,12 @@
         { tipo: 'secao', rotulo: 'Embalagem de compra (se vier em caixa ou fardo)' },
         { nome: 'emb_unidade', rotulo: 'Embalagem (CX, FD, PCT)' }, { nome: 'emb_fator', rotulo: 'Quantas unidades vêm nela', tipo: 'numero', passo: '1', vazioNulo: true }] : []);
     const c0 = Number(v0.custo_unit) || 0, p0 = Number(v0.preco_venda) || 0;
+    const acrescPadrao = (CRM.estado.cfg && CRM.estado.cfg.acrescimo_padrao != null && CRM.estado.cfg.acrescimo_padrao !== '') ? Number(CRM.estado.cfg.acrescimo_padrao) : 30;
     const valores = Object.assign({}, v0, { ncm: v0.ncm ? String(v0.ncm).replace(/^(\d{4})(\d{2})(\d{2})$/, '$1.$2.$3') : '', fornecedor_cod: v0.fornecedor_cod ? String(v0.fornecedor_cod) : '',
-      acrescimo: c0 > 0 && p0 > 0 ? Math.round((p0 / c0 - 1) * 10000) / 100 : '' });
+      // 05/11/2026 (Wellington: "o acréscimo sobre o custo sempre tem que ser de 30%"): o acréscimo abre no padrão (30%), não mais
+      // tirado do preço de hoje (o Veja abria com 9,16% e, ao zerar o índice, o preço caía junto). O preço só muda quando se mexe
+      // na compra, no índice ou no acréscimo, ou no botão "Usar 30%" do aviso.
+      acrescimo: acrescPadrao });
     const margemMin = (CRM.estado.cfg && CRM.estado.cfg.margem_minima != null && CRM.estado.cfg.margem_minima !== '') ? Number(CRM.estado.cfg.margem_minima) : 23;
     CRM.abrirForm({
       titulo: novo ? 'Novo produto' : 'Cadastro de ' + R.nomeDeItem(v0.descricao || cod),
@@ -1084,6 +1088,23 @@
         const peloIndice = () => { const c = num('custo_compra'); if (c > 0) el('custo_unit').value = (Math.round(c * (1 + num('indice_custo') / 100) * 10000) / 10000).toFixed(4).replace(/0{1,2}$/, ''); pelaPorcentagem(); };
         const pelaPorcentagem = () => { const c = num('custo_unit'); if (c > 0 && el('acrescimo').value !== '') el('preco_venda').value = (Math.round(c * (1 + num('acrescimo') / 100) * 100) / 100).toFixed(2); margem(); };
         const peloPreco = () => { const c = num('custo_unit'), p = num('preco_venda'); el('acrescimo').value = c > 0 && p > 0 ? (Math.round((p / c - 1) * 10000) / 100).toFixed(2) : ''; margem(); };
+        // aviso embaixo do acréscimo: o preço de hoje fora do acréscimo escrito (ex.: 9,16% no lugar de 30%) e o botão para acertar
+        const avAc = form.querySelector('[data-aviso="acrescimo"]');
+        const confereAcrescimo = () => {
+          if (!avAc) return;
+          const c = num('custo_unit'), p = num('preco_venda'), a = num('acrescimo');
+          if (!(c > 0 && p > 0) || el('acrescimo').value === '') { avAc.hidden = true; return; }
+          const certo = Math.round(c * (1 + a / 100) * 100) / 100;
+          if (Math.abs(certo - p) < 0.011) { avAc.hidden = true; return; }
+          const hoje = (p / c - 1) * 100;
+          avAc.innerHTML = 'O preço de venda está ' + hoje.toFixed(2).replace('.', ',') + '% sobre o custo. Com ' + String(a).replace('.', ',') + '%: R$ ' +
+            certo.toFixed(2).replace('.', ',') + ' <button type="button" class="mini" data-usa-acrescimo>Usar ' + String(a).replace('.', ',') + '%</button>';
+          avAc.className = 'aviso-campo' + (hoje < a ? ' neg' : ''); avAc.hidden = false;
+          const bt = avAc.querySelector('[data-usa-acrescimo]');
+          if (bt) bt.addEventListener('click', () => { el('preco_venda').value = certo.toFixed(2); margem(); confereAcrescimo(); });
+        };
+        form.addEventListener('input', () => setTimeout(confereAcrescimo, 0));
+        setTimeout(confereAcrescimo, 0);
         el('custo_compra').addEventListener('input', peloIndice);
         el('indice_custo').addEventListener('input', peloIndice);
         el('custo_unit').addEventListener('input', () => { const c = num('custo_compra'), u = num('custo_unit'); if (c > 0 && u > 0) el('indice_custo').value = (Math.round((u / c - 1) * 1000) / 10).toFixed(1); pelaPorcentagem(); });

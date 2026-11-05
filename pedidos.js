@@ -966,7 +966,14 @@
     }
     const l = ed.linha;
     if (d && ehLivre(d) && l.codigo === d.codigo && l.descricao) { /* o mesmo item genérico: fica a descrição escrita */ }
-    else if (d) Object.assign(l, { codigo: d.codigo, descricao: d.descricao, unidade: d.unidade || '', preco: l.preco || (d.preco_venda ? Number(d.preco_venda) : '') });
+    // 05/11/2026 (equipe: "trocar o produto na mesma linha mantém o preço do anterior"): produto diferente traz o preço dele
+    // e zera o desconto; o preço digitado só fica quando é o mesmo produto
+    else if (d) {
+      const outro = l.codigo !== d.codigo;
+      Object.assign(l, { codigo: d.codigo, descricao: d.descricao, unidade: d.unidade || '',
+        preco: !outro && l.preco !== '' && l.preco != null ? l.preco : (d.preco_venda ? Number(d.preco_venda) : '') });
+      if (outro) l.desconto = 0;
+    }
     else Object.assign(l, { codigo: '', descricao: String(texto || '').trim(), unidade: '' });
   }
   // Lê a linha de digitação. Cada linha tem um número (seq): o Enter grava o item e o navegador ainda dispara o
@@ -1335,7 +1342,8 @@
       const c = document.querySelector('.pd-janela'); if (c) leLinha(c);
       // o que foi digitado no campo do produto (sem ter escolhido da lista) já entra como busca
       const pr = document.querySelector('#pdProd'), digitado = pr && pr.value.indexOf(' — ') === -1 ? pr.value.trim() : '';
-      CRM.produtos.escolher(cod => { if (!ed) return; linhaNova(); escolheProduto(cod); CRM.render(); setTimeout(() => { const q = document.querySelector('#pdQtd'); if (q) q.focus(); }, 80); }, digitado);
+      // editando um item (✎), a foto escolhida troca o produto da mesma linha e fica a quantidade
+      CRM.produtos.escolher(cod => { if (!ed) return; if (ed.sel == null) linhaNova(); escolheProduto(cod); CRM.render(); setTimeout(() => { const q = document.querySelector('#pdQtd'); if (q) q.focus(); }, 80); }, digitado);
     },
     'pd-item-editar': i => { const it = ed.itens[Number(i)]; linhaNova(); ed.sel = Number(i); ed.linha = { codigo: it.codigo || '', descricao: it.descricao, unidade: it.unidade || '', quantidade: it.quantidade, preco: it.preco, desconto: it.desconto }; CRM.render(); },
     'pd-item-excluir': i => { ed.itens.splice(Number(i), 1); ed.sel = null; CRM.render(); },

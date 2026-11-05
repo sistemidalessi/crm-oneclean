@@ -255,8 +255,35 @@
   const doMotorista = k => (dados.rota || []).filter(x => (x.motorista_id || '') === (k || '')).sort((a, b) => (a.ordem || 0) - (b.ordem || 0) || (a.numero || 0) - (b.numero || 0));
 
   // ============================================================ motorista
-  const m = { dia: null, aberta: null, foto: null, fotoUrl: '', como: 'entregue', obs: '', enviando: false };
+  const m = { dia: null, aberta: null, foto: null, fotoUrl: '', fotoDados: '', como: 'entregue', obs: '', enviando: false };
   let minha = null, carregandoM = false, lidoM = 0;
+  // 05/11/2026 (motoristas: "a opção do canhoto assinado some pra nós"): no Android, abrir a câmera pode tirar o navegador da
+  // memória; na volta a página recarregava na lista da rota, sem a entrega aberta e sem a foto. A confirmação em andamento
+  // (parada, foto já reduzida, como foi, observação) fica guardada no celular e volta sozinha.
+  const CHAVE_ABERTA = 'crm_rota_aberta';
+  function guardaAberta() {
+    try {
+      if (!m.aberta) { raiz.localStorage.removeItem(CHAVE_ABERTA); return; }
+      raiz.localStorage.setItem(CHAVE_ABERTA, JSON.stringify({ user: meuIdM(), dia: m.dia, id: m.aberta, como: m.como, obs: m.obs, foto: m.fotoDados || '', em: Date.now() }));
+    } catch (e) { /* celular sem espaço: segue sem guardar */ }
+  }
+  function voltaAberta() {
+    try {
+      const g = JSON.parse(raiz.localStorage.getItem(CHAVE_ABERTA) || 'null');
+      if (!g || g.user !== meuIdM() || g.dia !== m.dia || Date.now() - g.em > 12 * 3600000) { raiz.localStorage.removeItem(CHAVE_ABERTA); return; }
+      const y = (minha || []).find(z => z.id === g.id);
+      if (!y || X.feita(y)) { raiz.localStorage.removeItem(CHAVE_ABERTA); return; }
+      m.aberta = g.id; m.como = g.como || 'entregue'; m.obs = g.obs || '';
+      if (g.foto) { m.fotoDados = g.foto; m.fotoUrl = g.foto; m.foto = blobDe(g.foto); }
+    } catch (e) { /* nada guardado */ }
+  }
+  function blobDe(dataUrl) {
+    const [cab, b64] = String(dataUrl).split(','), tipo = (/data:([^;]+)/.exec(cab) || [])[1] || 'image/jpeg';
+    const bin = atob(b64), u = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+    return new Blob([u], { type: tipo });
+  }
+  const dadosDe = b => new Promise((ok, erro) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = erro; r.readAsDataURL(b); });
   // ---- sem internet (04/11/2026): a rota guardada no celular e a fila das confirmações (rota-offline-fila.js)
   const FR = raiz.CRMFilaRota;
   let semSinal = false, guardadaEm = null, naFila = 0, enviandoFila = false;
@@ -307,10 +334,11 @@
       // o que está na fila aparece como feito até o envio
       if (naFila) { const fila = new Map((await FR.lista()).map(r => [r.id, r])); minha.forEach(y => { const r = fila.get(y.id); if (r && y.situacao === 'pendente') { y.situacao = r.como; y.entregue_em = r.em; y.na_fila = true; } }); }
       guardaRota(minha);
+      if (!m.aberta) voltaAberta();
       if (naFila) setTimeout(enviaFila, 0);
     } catch (e) {
       const g = FR && FR.rotaGuardada();
-      if (FR && FR.semRede(e) && g && g.user === meuIdM() && g.dia === m.dia) { minha = g.l; semSinal = true; guardadaEm = g.em; await contaFila(); }
+      if (FR && FR.semRede(e) && g && g.user === meuIdM() && g.dia === m.dia) { minha = g.l; semSinal = true; guardadaEm = g.em; await contaFila(); if (!m.aberta) voltaAberta(); }
       else { minha = minha || []; if (!silencio) CRM.falhou(e); }
     }
     carregandoM = false;
@@ -378,7 +406,7 @@
     m.enviando = true; CRM.render();
     const foto = await reduz(m.foto);
     const proxNome = (X.proxima(minha.filter(y => y.id !== x.id && !X.feita(y))) || {}).cliente;
-    const limpa = () => { m.aberta = null; m.foto = null; if (m.fotoUrl) URL.revokeObjectURL(m.fotoUrl); m.fotoUrl = ''; m.obs = ''; m.como = 'entregue'; };
+    const limpa = () => { m.aberta = null; m.foto = null; if (m.fotoUrl && !m.fotoDados) URL.revokeObjectURL(m.fotoUrl); m.fotoUrl = ''; m.fotoDados = ''; m.obs = ''; m.como = 'entregue'; guardaAberta(); };
     try {
       const caminho = await st().canhotoSubir(foto, x.id, m.dia);
       await st().entregaConfirmar(x.id, m.como, m.obs, caminho);
@@ -463,9 +491,9 @@
       })().catch(e => { if (w) w.close(); CRM.falhou(e); });
     },
     'mt-atualizar': () => { carregandoM = false; carregaM(); },
-    'mt-abrir': id => { m.aberta = id; m.foto = null; m.fotoUrl = ''; m.obs = ''; m.como = 'entregue'; CRM.render(); raiz.scrollTo && raiz.scrollTo(0, 0); },
-    'mt-voltar': () => { m.aberta = null; CRM.render(); },
-    'mt-como': id => { m.como = id === 'problema' ? 'problema' : 'entregue'; CRM.render(); },
+    'mt-abrir': id => { m.aberta = id; m.foto = null; m.fotoUrl = ''; m.fotoDados = ''; m.obs = ''; m.como = 'entregue'; guardaAberta(); CRM.render(); raiz.scrollTo && raiz.scrollTo(0, 0); },
+    'mt-voltar': () => { m.aberta = null; m.foto = null; m.fotoUrl = ''; m.fotoDados = ''; guardaAberta(); CRM.render(); },
+    'mt-como': id => { m.como = id === 'problema' ? 'problema' : 'entregue'; guardaAberta(); CRM.render(); },
     'mt-confirmar': () => { confirmar(); }
   });
 
@@ -495,12 +523,14 @@
       if (inp) inp.addEventListener('change', () => {
         const fl = inp.files && inp.files[0];
         if (!fl) return;
-        if (m.fotoUrl) URL.revokeObjectURL(m.fotoUrl);
-        m.foto = fl; m.fotoUrl = URL.createObjectURL(fl);
+        if (m.fotoUrl && !m.fotoDados) URL.revokeObjectURL(m.fotoUrl);
+        m.foto = fl; m.fotoUrl = URL.createObjectURL(fl); m.fotoDados = '';
         CRM.render();
+        // a foto já reduzida fica guardada no celular junto com a entrega aberta (volta se a página recarregar)
+        reduz(fl).then(dadosDe).then(d => { if (m.foto !== fl) return; m.fotoDados = d; guardaAberta(); }).catch(() => {});
       });
       const ob = c.querySelector('[data-mt-obs]');
-      if (ob) ob.addEventListener('input', () => { m.obs = ob.value; });
+      if (ob) ob.addEventListener('input', () => { m.obs = ob.value; guardaAberta(); });
       if (CRM.aplicaBarras) CRM.aplicaBarras(c);
     }
   };
