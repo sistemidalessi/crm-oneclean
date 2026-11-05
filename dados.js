@@ -1881,7 +1881,12 @@
     return unwrap(await this.sb.from('crm_entregas').update({ veiculo_id: veiculoId || null }).eq('dia', dia).eq('motorista_id', motoristaId).select('id'));
   };
   Supa.prototype.entregaApagar = async function (id) { unwrap(await this.sb.from('crm_entregas').delete().eq('id', id).eq('situacao', 'pendente')); };
-  Supa.prototype.rotaLiberar = async function (dia) { return unwrap(await this.sb.from('crm_entregas').update({ liberada: true }).eq('dia', dia).eq('liberada', false).not('motorista_id', 'is', null).select('id')); };
+  // motorista (opcional, 05/11/2026): manda só a rota dele
+  Supa.prototype.rotaLiberar = async function (dia, motorista) {
+    let q = this.sb.from('crm_entregas').update({ liberada: true }).eq('dia', dia).eq('liberada', false);
+    q = motorista ? q.eq('motorista_id', motorista) : q.not('motorista_id', 'is', null);
+    return unwrap(await q.select('id'));
+  };
   Supa.prototype.canhotoSubir = async function (blob, entregaId, dia) {
     const caminho = 'canhotos/' + dia + '/' + entregaId + '-' + Date.now().toString(36) + '.jpg';
     const r = await this.sb.storage.from('crm-canhotos').upload(caminho, blob, { contentType: blob.type || 'image/jpeg', upsert: false });
@@ -1946,7 +1951,7 @@
   };
   Local.prototype.entregasVeiculo = async function (dia, motoristaId, veiculoId) { return this.entregaMuda(l => l.filter(x => x.dia === dia && x.motorista_id === motoristaId).map(x => { x.veiculo_id = veiculoId || null; return { id: x.id }; })); };
   Local.prototype.entregaApagar = async function (id) { this.entregaMuda(l => { const i = l.findIndex(y => y.id === id && y.situacao === 'pendente'); if (i >= 0) l.splice(i, 1); }); };
-  Local.prototype.rotaLiberar = async function (dia) { return this.entregaMuda(l => l.filter(x => x.dia === dia && x.motorista_id && !x.liberada).map(x => { x.liberada = true; return { id: x.id }; })); };
+  Local.prototype.rotaLiberar = async function (dia, motorista) { return this.entregaMuda(l => l.filter(x => x.dia === dia && x.motorista_id && (!motorista || x.motorista_id === motorista) && !x.liberada).map(x => { x.liberada = true; return { id: x.id }; })); };
   Local.prototype.canhotoSubir = async function (blob, entregaId, dia) {
     const dataUrl = await new Promise((ok, erro) => { const f = new FileReader(); f.onload = () => ok(f.result); f.onerror = erro; f.readAsDataURL(blob); });
     const caminho = 'canhotos/' + dia + '/' + entregaId + '-' + Date.now().toString(36) + '.jpg', a = lsObj('crm_canhotos');

@@ -179,6 +179,12 @@
           '</select></label>' + (vid ? '' : ' <small class="neg">sem caminhão</small>'))(veicDoMot(k)) : '') +
         (l.length > 1 && l.some(x => !X.feita(x)) ? '<button type="button" class="mini" data-acao="rt-bairro" data-id="' + esc(k) + '">Ordenar por bairro</button>' : '') +
         ' <button type="button" class="mini" data-acao="rt-romaneio" data-id="' + esc(k) + '" title="folha para o motorista: clientes, endereços de entrega e notas, na ordem da rota">🖨 Romaneio</button></div>' +
+      // 05/11/2026 (Anderson: a rota do Erick estava montada e não aparecia no celular dele): parada que mudou de motorista ou
+      // entrou depois do "Mandar a rota" fica "não mandada"; o aviso e o botão ficam no próprio cartão do motorista
+      (k ? (nm => { const pend = l.filter(x => !x.liberada && !X.feita(x)).length, nome = esc(R.primeiroNome(nomeMot(k) || 'motorista'));
+        return pend ? '<div class="rt-aviso">⚠ <strong>' + pend + ' parada(s) ainda não mandada(s):</strong> ' + nome + ' não vê' + (pend === l.length ? ' a rota' : ' essas paradas') + ' no celular. ' +
+            '<button type="button" class="btn" data-acao="rt-liberar-um" data-id="' + esc(k) + '">📤 Mandar a rota do ' + nome + '</button></div>'
+          : l.length ? '<p class="rt-ok">✓ Rota no celular do ' + nome + '</p>' : ''; })() : '') +
       '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Ordem</th><th>Cliente e endereço</th><th>Nota</th><th>Motorista</th><th>Situação</th></tr></thead><tbody>' +
       l.map((x, i) => {
         const s = SIT[x.situacao] || [x.situacao, ''], ag = X.seloAgradecimento(x);
@@ -433,6 +439,11 @@
     'rt-descer': id => { const x = daRota(id); const p = x && X.move(doMotorista(x.motorista_id), id, 1); if (p) regravaOrdem(p).catch(CRM.falhou); },
     'rt-bairro': k => { const l = doMotorista(k); const feitas = l.filter(X.feita), resto = X.porBairro(l.filter(x => !X.feita(x))); regravaOrdem(feitas.concat(resto).map((x, i) => ({ id: x.id, ordem: i + 1 }))).catch(CRM.falhou); },
     'rt-tirar': id => { const x = daRota(id); if (!x || !confirm('Tirar a NF ' + x.numero + ' (' + x.cliente + ') da rota? Ela volta para "Notas para pôr na rota".')) return; st().entregaApagar(id).then(recarrega).catch(CRM.falhou); },
+    'rt-liberar-um': k => {
+      const l = (dados.rota || []).filter(x => x.motorista_id === k && !x.liberada);
+      if (!l.length) return;
+      st().rotaLiberar(f.dia, k).then(recarrega).then(() => CRM.toast('Rota mandada: ' + R.primeiroNome(nomeMot(k)) + ' já vê as paradas no celular.')).catch(CRM.falhou);
+    },
     'rt-liberar': () => {
       const l = (dados.rota || []).filter(x => x.motorista_id && !x.liberada);
       if (!l.length) return;
