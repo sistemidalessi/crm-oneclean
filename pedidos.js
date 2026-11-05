@@ -348,7 +348,9 @@
   const notaNumero = p => { if (!p.nota_id) return null; const n = (E().D.notas || []).find(x => x.id === p.nota_id); return n ? n.numero : null; };
   const faltasDe = id => faltas.filter(x => x.pedido_id === id);
   const ctxDe = vendedorId => ({ tabela: P.tabelaDe(E().cfg), plano: P.planoDoUsuario(E().cfg, vendedorId), margemMinima: P.margemMinima(E().cfg) });
-  const podeEditar = p => p.situacao === 'aberto' && ehVenda() && (CRM.ehGestor() || p.vendedor_id === CRM.meuId() || !!CRM.empresa(p.empresa_id));
+  // 05/11/2026 (Anderson): a logística também lança e corrige pedido dos clientes de venda direta (carteira do administrador:
+  // Uniserv e os outros "DIRETO"); o banco confere (crm_venda_direta) e põe o pedido no nome do administrador
+  const podeEditar = p => p.situacao === 'aberto' && (ehVenda() ? (CRM.ehGestor() || p.vendedor_id === CRM.meuId() || !!CRM.empresa(p.empresa_id)) : ehLog() && !!CRM.empresa(p.empresa_id));
 
   function imprimir(html, titulo) {
     const el = document.getElementById('impressao');
@@ -376,7 +378,8 @@
     const vs = vistas();
     if (!f.ver || !vs.some(v => v[0] === f.ver)) f.ver = ehLog() ? 'separacao' : CRM.ehComprador() ? 'faltas' : 'lista';
     return '<div class="cabecalho"><div><h1>Pedidos</h1><p class="sub">orçamento → pedido (reserva o estoque) → liberação → lista de separação → nota · do jeito do FKN, com o disponível de cada produto</p></div>' +
-      '<div class="acoes">' + (ehVenda() ? '<button type="button" class="btn" data-acao="pd-novo">+ Novo orçamento / pedido</button>' : '') +
+      '<div class="acoes">' + (ehVenda() ? '<button type="button" class="btn" data-acao="pd-novo">+ Novo orçamento / pedido</button>' :
+        ehLog() ? '<button type="button" class="btn" data-acao="pd-novo" title="Clientes de venda direta (sem vendedora), como a Uniserv">+ Novo pedido (venda direta)</button>' : '') +
       '<button type="button" class="btn sec" data-acao="pd-recarregar"' + (carregando ? ' disabled' : '') + '>Atualizar</button></div></div>' +
       '<div class="chips pd-vistas">' + vs.map(v => '<button type="button" class="chip-filtro' + (f.ver === v[0] ? ' ativo' : '') + '" data-acao="pd-ver" data-id="' + v[0] + '">' + esc(v[1]) +
         (v[0] === 'faltas' && faltas.length ? ' <span class="bolinha vermelha">' + new Set(faltas.map(x => x.base)).size + '</span>' : '') + '</button>').join('') + '</div>';
@@ -941,7 +944,7 @@
     const titulo = x.id ? 'Pedido ' + x.numero : x.proposta_id ? 'Orçamento ' + (x.dados.numero_orcamento || '') + ' → pedido' : 'Novo orçamento / pedido';
     return '<section class="cartao pd-janela"><header class="pd-topo"><button type="button" class="btn sec" data-acao="pd-ed-sair">← Sair sem gravar</button><h2>' + esc(titulo) + (e ? ' · ' + esc(e.nome) : '') + '</h2></header>' +
       '<div class="chips">' + abas.map(a => '<button type="button" class="chip-filtro' + (x.aba === a[0] ? ' ativo' : '') + '" data-acao="pd-aba-ed" data-id="' + a[0] + '">' + esc(a[1]) + '</button>').join('') + '</div>' +
-      corpo + '<p class="acoes pd-gravar">' + (!x.id ? '<button type="button" class="btn sec" data-acao="pd-salvar-orcamento">Salvar orçamento e gerar o PDF</button> ' : '') +
+      corpo + '<p class="acoes pd-gravar">' + (!x.id && !ehLog() ? '<button type="button" class="btn sec" data-acao="pd-salvar-orcamento">Salvar orçamento e gerar o PDF</button> ' : '') +
       '<button type="button" class="btn verde" data-acao="pd-gravar">' + (x.id ? 'Gravar as alterações do pedido' : 'Gravar pedido (reserva o estoque)') + '</button></p>' +
       '<p class="dica">Orçamento: vai para o negócio do cliente e sai no PDF da empresa (WhatsApp/e-mail na ficha). Pedido: reserva o estoque e pode ficar <strong>bloqueado</strong>: falta de produto ou preço abaixo da tabela, a gestora ou a logística liberam; crédito, duplicata em atraso ou pagamento antecipado (financeiro), só o administrador; item genérico (CONSULTOR), ninguém libera: troque pelo produto cadastrado.</p></section>';
   }
@@ -1244,7 +1247,7 @@
         if (!e) { CRM.toast('Escolha o cliente na lista (digite parte do nome ou o CNPJ).', true); return; }
         ed.empresa_id = e.id; ed.dados.entrega = P.entregaDoCliente(e); if (!String(ed.dados.texto_nota || '').trim() && e.obs_nota) ed.dados.texto_nota = e.obs_nota;   // texto fixo do cliente na nota (horário de recebimento; 03/11/2026)
         if (!String(ed.dados.pagamento || '').trim()) ed.dados.pagamento = ultimoPagamento(e.id);
-        if (!CRM.ehGestor() || !ed.vendedor_id) ed.vendedor_id = CRM.ehGestor() ? e.responsavel_id || CRM.meuId() : CRM.meuId();
+        if (!CRM.ehGestor() || !ed.vendedor_id) ed.vendedor_id = CRM.ehGestor() || ehLog() ? e.responsavel_id || CRM.meuId() : CRM.meuId();
         const abertoNeg = CRM.doEmpresa('negocios', e.id).filter(n => n.status === 'aberto' && ((CRM.etapa(n.etapa_id) || {}).funil || 'Vendas') === funilVendas());
         if (!ed.negocio_id && abertoNeg.length === 1) ed.negocio_id = abertoNeg[0].id;
         CRM.render();

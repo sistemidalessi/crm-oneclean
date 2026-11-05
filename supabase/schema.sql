@@ -5296,7 +5296,7 @@ create or replace trigger crm_titulos_guarda before insert or update on public.c
 create or replace function public.crm_pedido_itens_norm(p_itens jsonb) returns jsonb language plpgsql stable security definer set search_path = public as $$
 declare x jsonb; out jsonb := '[]'::jsonb; cod text; base text; un text; eu text; f numeric; q numeric; pr numeric; d numeric; e record; k int := 0; emb boolean;
 begin
-  if not public.crm_eh_membro() then raise exception 'só a equipe de vendas'; end if;
+  if not (public.crm_eh_membro() or public.crm_eh_logistica()) then raise exception 'só a equipe de vendas e a logística'; end if;
   for x in select value from jsonb_array_elements(coalesce(p_itens, '[]'::jsonb)) loop
     k := k + 1;
     cod := nullif(upper(btrim(coalesce(x->>'codigo', ''))), '');
@@ -9966,3 +9966,66 @@ do $$ begin
     perform cron.schedule('crm-qualificacao', '40 8 * * *', 'select public.crm_qualificacao_calcular()');   -- 5h40 em SP
   end if;
 end $$;
+
+-- 05/11/2026 (Anderson: "Logística também"): a logística lança pedido dos clientes de VENDA DIRETA — os da carteira do
+-- administrador (Uniserv e os outros sem vendedora; nas notas do FKN, "DIRETO"). Só pedido (orçamento continua com vendas);
+-- o pedido fica no nome do responsável do cliente (o administrador = Direto); custo e margem continuam escondidos.
+create or replace function public.crm_venda_direta(e uuid) returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.crm_empresas x join public.crm_usuarios u on u.user_id = x.responsavel_id
+                  where x.id = e and u.papel = 'admin');
+$$;
+revoke all on function public.crm_venda_direta(uuid) from public, anon;
+grant execute on function public.crm_venda_direta(uuid) to authenticated;
+
+create or replace function public.crm_ve_empresa(e uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select public.crm_eh_gestor()
+      or (public.crm_eh_membro() and (
+            exists (select 1 from public.crm_empresas where id = e and responsavel_id = auth.uid())
+         or exists (select 1 from public.crm_negocios where empresa_id = e and responsavel_id = auth.uid())))
+      or (public.crm_eh_logistica() and public.crm_venda_direta(e));
+$$;
+
+-- a logística lê os clientes de venda direta (para escolher no pedido)
+drop policy if exists le on public.crm_empresas;
+create policy le on public.crm_empresas for select to authenticated
+  using ((select public.crm_eh_gestor()) or ((select public.crm_eh_membro()) and responsavel_id = (select auth.uid())) or id in (select public.crm_empresas_minhas())
+         or ((select public.crm_eh_logistica()) and responsavel_id in (select u.user_id from public.crm_usuarios u where u.papel = 'admin')));
+
+create or replace function public.crm_pedido_gravar(p jsonb) returns jsonb language plpgsql security definer set search_path = public as $$
+declare r public.crm_pedidos; emp uuid := nullif(p->>'empresa_id', '')::uuid; its jsonb; vp numeric; fr numeric; vend uuid; pid uuid := nullif(p->>'id', '')::uuid;
+  logi boolean := public.crm_eh_logistica();
+begin
+  if not (public.crm_eh_membro() or logi) then raise exception 'só a equipe de vendas faz pedido'; end if;
+  if emp is null or not public.crm_ve_empresa(emp) then raise exception '%', case when logi then 'a logística lança pedido só dos clientes de venda direta' else 'cliente fora da sua carteira' end; end if;
+  if pid is not null then
+    select * into r from public.crm_pedidos where id = pid for update;
+    if r.id is null then raise exception 'pedido não encontrado'; end if;
+    if r.situacao <> 'aberto' then raise exception 'o pedido % já está %: peça à logística para voltar ao aberto', r.numero, r.situacao; end if;
+    if not (public.crm_eh_gestor() or r.vendedor_id = auth.uid() or public.crm_ve_empresa(r.empresa_id)) then raise exception 'pedido de outra carteira'; end if;
+  end if;
+  its := public.crm_pedido_itens_norm(p->'itens');
+  if jsonb_array_length(its) = 0 then raise exception 'o pedido não tem itens'; end if;
+  select coalesce(sum((i->>'total')::numeric), 0) into vp from jsonb_array_elements(its) i;
+  fr := greatest(coalesce(nullif(p->>'frete', '')::numeric, 0), 0);
+  vend := case when public.crm_eh_gestor() then coalesce(nullif(p->>'vendedor_id', '')::uuid, r.vendedor_id, auth.uid())
+               when logi then coalesce(r.vendedor_id, (select responsavel_id from public.crm_empresas where id = emp))
+               else coalesce(r.vendedor_id, auth.uid()) end;
+  if pid is null then
+    insert into public.crm_pedidos (empresa_id, negocio_id, proposta_id, vendedor_id, tipo, entrega, itens, valor_produtos, frete, valor_total, dados, atualizado_por)
+    values (emp, case when logi then null else nullif(p->>'negocio_id', '')::uuid end, case when logi then null else nullif(p->>'proposta_id', '')::uuid end,
+      vend, coalesce(nullif(p->>'tipo', ''), 'normal'),
+      nullif(p->>'entrega', '')::date, its, vp, fr, vp + fr, coalesce(p->'dados', '{}'::jsonb), auth.uid())
+    returning * into r;
+  else
+    update public.crm_pedidos set empresa_id = emp, negocio_id = case when logi then negocio_id else coalesce(nullif(p->>'negocio_id', '')::uuid, negocio_id) end, vendedor_id = vend,
+      tipo = coalesce(nullif(p->>'tipo', ''), tipo), entrega = nullif(p->>'entrega', '')::date, itens = its, valor_produtos = vp, frete = fr,
+      valor_total = vp + fr, dados = coalesce(p->'dados', dados), liberado = '{}', liberado_por = null, liberado_em = null,
+      atualizado_por = auth.uid(), atualizado_em = now()
+    where id = pid returning * into r;
+  end if;
+  perform public.crm_pedidos_atualizar();
+  select * into r from public.crm_pedidos where id = r.id;
+  return public.crm_pedido_saida(r);
+end;
+$$;
