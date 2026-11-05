@@ -31,6 +31,12 @@ commits em pt-BR. O que o sistema faz, do ponto de vista de quem usa, está no
 - Planos e documentos da empresa ficam no repositório **privado** `sistemi-dalessi` (`docs/plano-sair-do-fkn.md`,
   `docs/oneclean/…`: fiscal, concorrentes, SQL para o SQL Editor). **Este repositório é público.**
 
+## Regra fixa: pedido de cliente
+
+- **Produto, quantidade e preço de um pedido de cliente só a vendedora muda.** Nunca alterar nem sugerir alterar (nem
+  para tirar trava de estoque): o pedido sairia diferente do que o cliente fechou (Anderson, 05/11/2026). Pode o acerto
+  técnico que não muda o que foi vendido (código do mesmo produto, unidade, regra fiscal, forma de pagamento que ele disser).
+
 ## O que é
 
 CRM de equipe de vendas no estilo do Agendor, feito como **produto** da Sistemi Dalessi. Primeira
