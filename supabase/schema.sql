@@ -10359,3 +10359,57 @@ select e.fornecedor_cod, max(e.fornecedor), true, 'veio do cadastro de produtos 
  where coalesce(e.fornecedor_cod, '') <> '' and coalesce(e.fornecedor, '') <> ''
    and not exists (select 1 from public.crm_fornecedores f where f.codigo = e.fornecedor_cod)
  group by e.fornecedor_cod;
+-- Fechamento do mês para a contabilidade (05/11/2026, pedido do Anderson): os XML do mês (FKN e CRM) e a relação das
+-- canceladas, denegadas e inutilizadas, pela Edge Function crm-contador; no dia 2 de cada mês vai sozinho (mês anterior).
+-- Aplicado em 05/11/2026 (migração crm_contador). Sem revoke: as funções conferem quem chama.
+
+-- as chaves dos XML do mês no bucket (nfe/<chave>.xml), do emitente, modelo 55; só o servidor (service_role)
+create or replace function public.crm_contador_chaves(p_mes text, p_cnpj text)
+returns table (chave text) language plpgsql stable security definer set search_path = public, storage as $$
+begin
+  if coalesce(auth.role(), '') <> 'service_role' then raise exception 'só o servidor'; end if;
+  if p_mes !~ '^\d{4}-\d{2}$' or p_cnpj !~ '^\d{14}$' then raise exception 'mês ou CNPJ inválido'; end if;
+  return query select substr(o.name, 5, 44) from storage.objects o
+   where o.bucket_id = 'crm-notas-xml' and o.name like 'nfe/__' || substr(p_mes, 3, 2) || substr(p_mes, 6, 2) || p_cnpj || '55%.xml'
+     and length(o.name) = 52;
+end;
+$$;
+
+create table if not exists public.crm_contador_envios (
+  id          bigserial primary key,
+  mes         text not null,                 -- AAAA-MM
+  para        text[] not null default '{}',
+  ok          boolean not null default false,
+  erro        text,
+  notas       integer,
+  canceladas  integer,
+  valor       numeric(14,2),
+  tamanho     integer,                       -- bytes do ZIP
+  arquivo     text,                          -- crm-notas-xml/contador/AAAA-MM.zip
+  origem      text,                          -- tela | agendador
+  resumo      jsonb,
+  enviado_por uuid,
+  enviado_em  timestamptz not null default now()
+);
+create index if not exists crm_contador_envios_mes on public.crm_contador_envios (mes, enviado_em desc);
+alter table public.crm_contador_envios enable row level security;
+drop policy if exists ler on public.crm_contador_envios;
+create policy ler on public.crm_contador_envios for select to authenticated using ((select public.crm_eh_admin()));
+
+-- o agendador: chama a crm-contador com a senha do agendador da cobrança (o endereço sai do da crm-cobranca)
+create or replace function public.crm_contador_tick() returns void language plpgsql security definer set search_path = public as $$
+declare c record;
+begin
+  if coalesce(auth.role(), '') in ('anon', 'authenticated') then raise exception 'só o agendador'; end if;
+  select * into c from crm_interno.cobranca_cfg where id = 1;
+  if c.url is null then return; end if;
+  perform net.http_post(url := replace(c.url, '/crm-cobranca', '/crm-contador'), body := jsonb_build_object('acao', 'rodar', 'origem', 'agendador'),
+    headers := jsonb_build_object('Content-Type', 'application/json', 'Authorization', 'Bearer ' || c.senha), timeout_milliseconds := 150000);
+end;
+$$;
+
+-- dia 2 de cada mês, 9h05 em São Paulo (12h05 UTC)
+do $$ begin
+  perform cron.unschedule(jobid) from cron.job where jobname = 'crm-contador';
+  perform cron.schedule('crm-contador', '5 12 2 * *', 'select public.crm_contador_tick()');
+end $$;
