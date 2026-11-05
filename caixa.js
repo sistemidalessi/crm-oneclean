@@ -955,7 +955,8 @@
         '<div class="cx-saldo"><span>Saldo agora</span><strong class="' + (s.saldo < 0 ? 'cx-neg' : '') + '">' + (s.saldo == null ? '—' : esc(R.moeda(s.saldo))) + '</strong>' +
         '<small>' + (s.ancora ? 'banco ' + esc(R.moeda(s.ancora.valor)) + ' em ' + esc(R.dataBR(s.ancora.data)) + (s.n ? ' · +' + esc(R.moeda(s.entradas)) + ' −' + esc(R.moeda(s.saidas)) + ' baixados aqui' : '') : 'informe o saldo do banco') + '</small>' +
         saldoBB(s) +
-        '<button type="button" class="btn sec" data-acao="cx-conferir">Conferir com o banco</button></div></div>' +
+        '<div class="cx-saldo-botoes">' + (CRM.botaoOcultar ? CRM.botaoOcultar() : '') +
+        '<button type="button" class="btn sec" data-acao="cx-conferir">Conferir com o banco</button></div></div></div>' +
         '<nav class="cx-abas">' + aba('dia', 'Dia a dia') + aba('contas', 'Contas a pagar') + aba('recorrentes', 'Recorrentes') + aba('pausadas', 'Contas pausadas' + (pausadas ? ' (' + pausadas + ')' : '')) +
           (CRM.cobranca ? aba('cobranca', 'Cobrança' + (CRM.cobranca.contagem() ? ' (' + CRM.cobranca.contagem() + ')' : '')) : '') +
           aba('receber', 'A receber') + (CRM.pagarbb ? aba('pagarbb', 'Pagar no BB') : '') +

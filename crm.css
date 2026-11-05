@@ -1424,3 +1424,9 @@ button.ordena.ativo { color: var(--marinho); }
 /* respiro entre a coluna de número (alinhada à direita) e a de texto que vem depois (05/11/2026, Anderson: "dá uma alinhada") */
 .tabela td.num + td:not(.num), .tabela th.num + th:not(.num) { padding-left: 32px; }
 .tabela td:not(.num) + td.num, .tabela th:not(.num) + th.num { padding-left: 24px; }
+
+/* "Esconder valores" do sistema inteiro (05/11/2026, ocultar.js): valores em reais borrados; nomes e datas legíveis */
+.valores-ocultos .valor-oculto { filter: blur(6px); user-select: none; }
+.valores-ocultos input[data-moeda]:not(:focus) { filter: blur(5px); }
+.cx-saldo-botoes { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+@media print { .valores-ocultos .valor-oculto { visibility: hidden; } }

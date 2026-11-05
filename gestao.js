@@ -377,8 +377,7 @@
   // Tabela de Compras enxuta por padrão (18/10/2026, "telas com muita coisa mais suaves"): a escolha fica no navegador.
   let todasColunas = false;
   try { todasColunas = localStorage.getItem('crm_compras_colunas') === 'todas'; } catch (e) { /* sem armazenamento */ }
-  // "Esconder números" da Gestão (28/10/2026, pedido do Anderson): começa mostrando e volta a mostrar ao recarregar a página
-  let ocultarNumeros = false;
+  // "Esconder números" da Gestão (28/10/2026): desde 05/11 é o "Esconder valores" do sistema inteiro (ocultar.js)
   let extra = {};          // { fornecedores, produtoForn, custoHist } (carregaEstoque)
   async function carregaEstoque() {
     if (lendoEstoque) return;
@@ -481,10 +480,9 @@
       const nomeMes = new Date(hoje + 'T12:00:00').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
       const semNotas = !(E().D.notas || []).length;
 
-      return '<div class="gestao-tela' + (ocultarNumeros ? ' numeros-ocultos' : '') + '">' +
+      return '<div class="gestao-tela' + (CRM.valoresOcultos && CRM.valoresOcultos() ? ' numeros-ocultos' : '') + '">' +
         '<div class="cabecalho"><div><h1>Gestão</h1><p class="sub">Resumo de ' + esc(nomeMes) + ' até hoje · faturamento pelas notas fiscais · só você vê esta tela</p></div><span class="flex"></span>' +
-        '<button type="button" class="btn sec" data-acao="gestao-numeros" aria-pressed="' + ocultarNumeros + '" title="Borra os valores da tela (para quando alguém estiver olhando); volta a mostrar ao clicar de novo ou ao recarregar a página">' +
-        (ocultarNumeros ? '👁 Mostrar números' : '🙈 Esconder números') + '</button></div>' +
+        (CRM.botaoOcultar ? CRM.botaoOcultar() : '') + '</div>' +
         (semNotas ? '<div class="cartao"><p class="vazio">Sem notas fiscais importadas: o faturamento, os tops e as compras aparecem quando as notas entrarem.</p></div>' : '') +
         // ---- números do mês
         '<section class="kpis">' +
@@ -548,7 +546,7 @@
     depois() {
       if (CRM.depoisReceber) CRM.depoisReceber();
       // escondido, o valor também não aparece ao passar o mouse nas colunas do gráfico
-      if (ocultarNumeros) document.querySelectorAll('.numeros-ocultos [title]').forEach(el => { if (!el.closest('button[data-acao="gestao-numeros"]')) el.removeAttribute('title'); });
+      if (CRM.valoresOcultos && CRM.valoresOcultos()) document.querySelectorAll('.numeros-ocultos [title]').forEach(el => { if (!el.closest('[data-acao="valores-ocultar"]')) el.removeAttribute('title'); });
     }
   };
 
@@ -1002,7 +1000,7 @@
       CRM.render();
       const t = document.querySelector('.filtros-compras'); if (t && t.scrollIntoView) t.scrollIntoView({ block: 'start' });
     },
-    'gestao-numeros': () => { ocultarNumeros = !ocultarNumeros; CRM.render(); },
+    'gestao-numeros': () => CRM.ocultarValores && CRM.ocultarValores(),
     'compras-colunas': () => { todasColunas = !todasColunas; try { localStorage.setItem('crm_compras_colunas', todasColunas ? 'todas' : ''); } catch (e) { /* sem armazenamento */ } CRM.render(); },
     'compras-forn-editar': cod => formFornecedor(cod),
     'compras-troca-forn': cod => formTrocaForn(cod),
