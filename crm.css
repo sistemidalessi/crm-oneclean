@@ -1421,3 +1421,6 @@ button.ordena.ativo { color: var(--marinho); }
 /* NF-e: consulta recolhível e o quadro da contabilidade (05/11/2026) */
 .nf-consulta-fechada h2 { margin-bottom: 0; }
 .nf-contador-emails input { min-width: min(420px, 100%); }
+/* respiro entre a coluna de número (alinhada à direita) e a de texto que vem depois (05/11/2026, Anderson: "dá uma alinhada") */
+.tabela td.num + td:not(.num), .tabela th.num + th:not(.num) { padding-left: 32px; }
+.tabela td:not(.num) + td.num, .tabela th:not(.num) + th.num { padding-left: 24px; }

@@ -239,6 +239,10 @@
   // quando eu quisesse consultar, eu abria"): fechada não pesquisa nada; a escolha fica lembrada neste navegador.
   const LS_CONSULTA = 'crm_nf_consulta_aberta';
   let consultaAberta = (() => { try { return raiz.localStorage.getItem(LS_CONSULTA) === '1'; } catch (e) { return false; } })();
+  // a lista "NF-e emitidas pelo CRM" também recolhe (05/11/2026); para o administrador abre recolhida, para a logística aberta
+  const LS_LISTA = 'crm_nf_lista_aberta';
+  const listaAberta = () => { try { const v = raiz.localStorage.getItem(LS_LISTA); return v == null ? !CRM.ehAdmin() : v === '1'; } catch (e) { return !CRM.ehAdmin(); } };
+  const lembraLista = v => { try { raiz.localStorage.setItem(LS_LISTA, v ? '1' : '0'); } catch (e) { /* sem armazenamento */ } };
   const lembraConsulta = v => { consultaAberta = v; try { raiz.localStorage.setItem(LS_CONSULTA, v ? '1' : '0'); } catch (e) { /* sem armazenamento */ } };
 
   async function carrega() {
@@ -531,15 +535,7 @@
       () => l.map(n => [n.serie, n.numero, n.ambiente, CRM.nomeEmpresa(n.empresa_id), pedidoNum(n) || '', n.valor, (M.SITUACAO[M.situacaoDe(n)] || [n.situacao])[0], n.motivo || '', quando(n.autorizada_em || n.atualizado_em || n.criado_em), n.chave || '']));
     const pend = nfes.filter(n => n.situacao === 'pendente' && !n.inutilizada_em);
     const chip = (v, t) => '<button type="button" class="chip-filtro' + (f.amb === v ? ' ativo' : '') + '" data-acao="nf-amb" data-id="' + v + '">' + esc(t) + '</button>';
-    return (CRM.ehAdmin() ? telaContador() : '') + telaConsulta() + '<section class="cartao"><h2>NF-e emitidas pelo CRM <small>série ' + serie() + ' · últimos 90 dias e as pendentes, com as ações (consultar, carta de correção, cancelar)</small></h2>' +
-      '<p>' + seloAmb(amb) + ' ' + (fiscalCfg().emitente ? '' : '<strong>O emitente ainda não foi configurado</strong> (aba Fiscal, só o administrador).') + '</p>' +
-      (pend.length ? '<p class="alerta"><strong>' + pend.length + ' nota(s) sem resposta da Sefaz.</strong> Clique em "Consultar": se a Sefaz não recebeu, o CRM reenvia o MESMO XML (nunca emita outra para o mesmo pedido antes disso).</p>' : '') +
-      '<div class="chips">' + chip('', 'Todas') + chip('producao', 'Produção') + chip('homologacao', 'Homologação') + '</div>' +
-      (l0.length ? CRM.Lista.barra('nf-crm', { periodo: true, total: l0.length, achados: l.length, placeholder: 'Número, cliente, pedido, chave ou motivo',
-        sel: [['', 'Todas as situações']].concat(Object.keys(M.SITUACAO).map(k => [k, M.SITUACAO[k][0]])) }) : '') +
-      (l.length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>NF</th><th>Cliente</th><th class="num">Valor</th><th>Situação</th><th>Quando</th><th></th></tr></thead><tbody>' +
-        CRM.Lista.corta('nf-crm', l, 100).map(linhaNfe).join('') + '</tbody></table></div>' + CRM.Lista.mais('nf-crm', l, 100) +
-        (nfes.length >= 1000 ? '<p class="dica">A lista traz até 1.000 notas do CRM; as mais antigas estão em "Consultar notas fiscais", acima.</p>' : '') : l0.length ? '<p class="vazio">Nenhuma nota com essa pesquisa.</p>' : '<p class="vazio">Nenhuma nota emitida pelo CRM ainda. A nota sai do pedido: abra o pedido separado e clique em "Emitir NF-e".</p>') + '</section>' +
+    const depoisDaLista = () => '' +
 
       (ehOp() ? '<section class="cartao"><h2>Outras notas</h2>' +
         '<p>Devoluções saem da nota original (os valores e os impostos vêm dela, na proporção do que volta). Bonificação e entrega futura saem do pedido: botão "Outra operação…" no pedido.</p>' +
@@ -554,6 +550,20 @@
             ' <button type="button" class="mini" data-acao="nf-inutilizar" data-id="' + esc(u.serie + ':' + u.numero) + '">Inutilizar</button></li>').join('') + '</ul>' : '') +
         (inuts.length ? (inuts.length > 20 ? '<p class="dica">As 20 mais recentes de ' + inuts.length + ' (todas vão no ZIP do mês para o contador).</p>' : '') + '<ul class="lista">' + inuts.slice(0, 20).map(i => '<li>' + esc('Série ' + i.serie + ', ' + (i.de === i.ate ? 'nº ' + i.de : 'nº ' + i.de + ' a ' + i.ate) + ' · ' + (i.ambiente === 'producao' ? 'produção' : 'homologação') + ' · ' + quando(i.criado_em) + ' · ' + (i.cstat || '') + ' ' + (i.motivo || '')) + '</li>').join('') + '</ul>' : '') +
         '<p class="acoes"><button type="button" class="btn sec" data-acao="nf-inutilizar">Inutilizar números…</button></p></section>' : '');
+    const tituloLista = '<h2>NF-e emitidas pelo CRM <small>série ' + serie() + ' · últimos 90 dias e as pendentes, com as ações (consultar, carta de correção, cancelar)</small><span class="flex"></span>' +
+      '<button type="button" class="btn sec" data-acao="' + (listaAberta() ? 'nf-lista-recolher">Recolher' : 'nf-lista-abrir">Abrir a lista (' + l0.length + ')') + '</button></h2>';
+    if (!listaAberta()) return (CRM.ehAdmin() ? telaContador() : '') + telaConsulta() + '<section class="cartao nf-consulta-fechada">' + tituloLista +
+      (pend.length ? '<p class="alerta"><strong>' + pend.length + ' nota(s) sem resposta da Sefaz.</strong> Abra a lista e clique em "Consultar".</p>' : '') + '</section>' + depoisDaLista();
+    return (CRM.ehAdmin() ? telaContador() : '') + telaConsulta() + '<section class="cartao">' + tituloLista +
+      '<p>' + seloAmb(amb) + ' ' + (fiscalCfg().emitente ? '' : '<strong>O emitente ainda não foi configurado</strong> (aba Fiscal, só o administrador).') + '</p>' +
+      (pend.length ? '<p class="alerta"><strong>' + pend.length + ' nota(s) sem resposta da Sefaz.</strong> Clique em "Consultar": se a Sefaz não recebeu, o CRM reenvia o MESMO XML (nunca emita outra para o mesmo pedido antes disso).</p>' : '') +
+      '<div class="chips">' + chip('', 'Todas') + chip('producao', 'Produção') + chip('homologacao', 'Homologação') + '</div>' +
+      (l0.length ? CRM.Lista.barra('nf-crm', { periodo: true, total: l0.length, achados: l.length, placeholder: 'Número, cliente, pedido, chave ou motivo',
+        sel: [['', 'Todas as situações']].concat(Object.keys(M.SITUACAO).map(k => [k, M.SITUACAO[k][0]])) }) : '') +
+      (l.length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>NF</th><th>Cliente</th><th class="num">Valor</th><th>Situação</th><th>Quando</th><th></th></tr></thead><tbody>' +
+        CRM.Lista.corta('nf-crm', l, 100).map(linhaNfe).join('') + '</tbody></table></div>' + CRM.Lista.mais('nf-crm', l, 100) +
+        (nfes.length >= 1000 ? '<p class="dica">A lista traz até 1.000 notas do CRM; as mais antigas estão em "Consultar notas fiscais", acima.</p>' : '') : l0.length ? '<p class="vazio">Nenhuma nota com essa pesquisa.</p>' : '<p class="vazio">Nenhuma nota emitida pelo CRM ainda. A nota sai do pedido: abra o pedido separado e clique em "Emitir NF-e".</p>') + '</section>' +
+      depoisDaLista();
   }
 
   // Botão e notas do pedido (tela do pedido em pedidos.js).
@@ -1252,6 +1262,8 @@
       } catch (e) { CRM.falhou(e); }
     },
     'nf-consulta-abrir': () => { lembraConsulta(true); CRM.render(); },
+    'nf-lista-abrir': () => { lembraLista(true); CRM.render(); },
+    'nf-lista-recolher': () => { lembraLista(false); CRM.render(); },
     'nf-consulta-recolher': () => { lembraConsulta(false); CRM.render(); },
     'nf-contador-salvar': async () => {
       try {

@@ -638,7 +638,7 @@
       const l = filtraProdutos(c);
       ultimo = Object.assign({}, ultimo || {}, { c, filtrados: l });
       CRM.comprasAtual = () => (estoque ? c : null); // a oferta de queima de estoque (ofertas.js) monta a partir daqui
-      CRM.comprasRecarregar = () => { estoque = null; }; // pedido ao fornecedor registrado (compras-pedidos.js): refaz a sugestão
+      CRM.comprasRecarregar = () => { estoque = null; faltasCompras = null; }; // pedido ao fornecedor registrado (compras-pedidos.js): refaz a sugestão
       const dono = doCrm();
       const botao = dono ? '' : '<label class="btn sec arquivo" title="No FKN: Listagem cadastral de produtos (SIFN108), salvar em CSV. O CSV simples de estoque também serve.">Atualizar estoque (listagem do FKN)<input type="file" id="gEstoque" accept=".csv,.txt,text/csv"></label>';
       const velho = !dono && e && e.em && R.diasEntre(R.diaLocal(e.em), hoje) > 3;
@@ -664,7 +664,7 @@
           kpi('Em falta', String(c.ruptura.length), 'vendeu em 90 dias e está zerado', c.ruptura.length ? 'vermelho' : '', 'compras-kpi', 'falta') +
           kpi('Estoque parado', R.moeda(e.valorParado), c.parado.length + ' produtos sem venda em 90 dias', '', 'compras-kpi', 'parado') +
           kpi('Curva A', String(c.abc.A.length), 'produtos que fazem 80% do faturamento', '', 'compras-kpi', 'A') +
-        '</section>' : '') + (e ? painelComprador(c) : '') + (CRM.ofertas ? CRM.ofertas.botaoCompras(c) : '') +
+        '</section>' : '') + quadroFaltas() + (e ? painelComprador(c) : '') + (CRM.ofertas ? CRM.ofertas.botaoCompras(c) : '') +
         '<section class="cartao"><div class="filtros-compras">' +
           '<input type="search" id="cBusca" placeholder="Pesquisar produto ou código" value="' + esc(fc.busca) + '" aria-label="Pesquisar produto ou código">' +
           '<select id="cMostrar" aria-label="O que mostrar">' + CRM.opcoesHTML(MOSTRAR, fc.mostrar) + '</select>' +
@@ -809,6 +809,34 @@
   }
 
   // Painel do comprador: o que pedir hoje, o preço de compra que subiu, o que vende sem fornecedor e a análise pela IA.
+  // Faltando para pedidos de clientes (05/11/2026, Anderson): o que os pedidos confirmados pedem e o estoque não tem, com o
+  // cliente de cada um. "Agora" são os pedidos em andamento; os pausados (entrega futura, como a Santa Casa) ficam à parte,
+  // para o comprador decidir quando comprar. A sugestão de pedido já conta os dois (o estoque desconta o reservado).
+  let faltasCompras = null, lendoFaltas = false;
+  function quadroFaltas() {
+    if (!CRM.pedidos || !CRM.pedidos.faltasResumo) return '';
+    if (faltasCompras === null && !lendoFaltas) {
+      lendoFaltas = true;
+      CRM.pedidos.faltasResumo().then(l => { faltasCompras = l || []; lendoFaltas = false; CRM.render(); }).catch(() => { faltasCompras = []; lendoFaltas = false; });
+    }
+    if (!faltasCompras) return '';
+    const un = g => (g.unidade ? ' ' + esc(g.unidade) : '');
+    const quem = (g, fut) => g.pedidos.filter(p => !!p.pausado === fut).map(p => 'pedido ' + p.numero + ' · ' + esc(p.cliente) + ' (' + qtd(p.qtd) + un(g) + ')').join('<br>');
+    const linha = (g, fut) => { const falta = fut ? g.futura : g.agora, cobre = g.a_caminho >= falta && falta > 0;
+      return '<tr><td><strong>' + esc(R.nomeDeItem(g.descricao)) + '</strong><small>' + esc(g.base) + '</small></td><td class="num"><strong class="neg">' + qtd(falta) + un(g) + '</strong></td>' +
+        '<td class="num">' + (g.a_caminho ? qtd(g.a_caminho) + un(g) + (cobre ? '<br>' + CRM.selo('a caminho cobre', 'verde') : '<br>' + CRM.selo('não cobre', 'ambar')) : '<span class="neg">nada pedido</span>') + '</td>' +
+        '<td><small>' + quem(g, fut) + '</small></td></tr>'; };
+    const agora = faltasCompras.filter(g => g.agora > 0).sort((a, b) => (a.a_caminho >= a.agora) - (b.a_caminho >= b.agora) || b.pedidos.length - a.pedidos.length);
+    const futura = faltasCompras.filter(g => g.futura > 0);
+    const tab = (l, fut) => '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Produto</th><th class="num">' + (fut ? 'Falta (entrega futura)' : 'Falta') + '</th><th class="num">A caminho</th><th>Pedidos e clientes</th></tr></thead><tbody>' +
+      l.map(g => linha(g, fut)).join('') + '</tbody></table></div>';
+    const semPedido = agora.filter(g => g.a_caminho < g.agora).length;
+    return '<section class="cartao compras-faltas"><h2>Faltando para pedidos de clientes <small>' + agora.length + ' produto(s)' + (semPedido ? ' · ' + semPedido + ' sem compra que cubra' : '') + '</small></h2>' +
+      (agora.length ? '<p class="dica">Pedidos confirmados que o estoque não atende. Primeiro os que não têm compra a caminho que cubra. Para comprar: <a href="#comprasPorForn">Pedido por fornecedor</a> (a sugestão já conta estas faltas) → Registrar pedido.</p>' + tab(agora, false)
+        : '<p class="vazio">Nenhum pedido em andamento esperando produto. 👍</p>') +
+      (futura.length ? '<details class="compras-futuras"><summary><strong>Para entregas futuras (pedidos pausados): ' + futura.length + ' produto(s)</strong> <small>a sugestão também conta: compre quando a entrega estiver perto</small></summary>' + tab(futura, true) + '</details>' : '') +
+      '</section>';
+  }
   function painelComprador(c) {
     const ph = c.pedirHoje || [], cs = c.custoSubiu || [], sf = c.semFornecedor || [];
     const temIA = CRM.turma && CRM.turma.perguntar && CRM.store().assistente;

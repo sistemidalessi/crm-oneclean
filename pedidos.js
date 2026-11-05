@@ -1171,7 +1171,24 @@
   }
 
   const fechaFichas = () => ['#dlgNegocio', '#dlgEmpresa', '#dlgLista'].forEach(s => { const d = document.querySelector(s); if (d && d.open) d.close(); });
+  // As faltas agrupadas por produto, para a tela de Compras (05/11/2026, Anderson: o comprador precisa ver para quem é a
+  // falta e separar as entregas futuras): agora = pedidos em andamento; futura = pedidos pausados (entrega futura).
+  async function faltasResumo() {
+    if (peds === null) await carrega(true);
+    const m = new Map();
+    faltas.forEach(x => {
+      const p = ped(x.pedido_id); if (!p) return;
+      const it = (p.itens || [])[x.idx] || {}, q = num(x.falta) * num(it.fator || 1), pz = P.pausado(p);
+      if (!m.has(x.base)) { const d = porCod.get(x.base) || {}; m.set(x.base, { base: x.base, descricao: d.descricao || x.base, unidade: d.unidade || '', disponivel: num(d.disponivel), a_caminho: num(d.a_caminho), agora: 0, futura: 0, pedidos: [] }); }
+      const g = m.get(x.base);
+      if (pz) g.futura += q; else g.agora += q;
+      g.pedidos.push({ numero: p.numero, cliente: nomeCliente(p), qtd: q, pausado: pz, entrega: p.entrega || null });
+    });
+    return [...m.values()];
+  }
+
   CRM.pedidos = {
+    faltasResumo,
     deProposta: async pid => {
       const pr = (E().D.propostas || []).find(p => p.id === pid); if (!pr) return;
       fechaFichas(); E().aba = 'pedidos'; aberto = null;

@@ -491,8 +491,8 @@
         devolucoes = await leDevolucoes(st);
         carregando = false; CRM.render(); return;
       }
-      [saldo, fkn, fotos, compras, dfe, dfeEst] = await Promise.all([st.estoqueSaldo(), st.estoque(), st.estoqueFotos(60), st.compras ? st.compras(1000).catch(() => []) : [],
-        st.dfe ? st.dfe().catch(() => []) : [], st.dfeEstado ? st.dfeEstado().catch(() => null) : null]);
+      [saldo, fkn, fotos, compras, dfe, dfeEst, nomesOp] = await Promise.all([st.estoqueSaldo(), st.estoque(), st.estoqueFotos(60), st.compras ? st.compras(1000).catch(() => []) : [],
+        st.dfe ? st.dfe().catch(() => []) : [], st.dfeEstado ? st.dfeEstado().catch(() => null) : null, st.estoqueDisponivel ? st.estoqueDisponivel().catch(() => []) : []]);
       [fornDocs, fornCad, itensProd] = await Promise.all([st.fornecedorDocs ? st.fornecedorDocs().catch(() => []) : [], st.fornecedores ? st.fornecedores().catch(() => []) : [],
         st.comprasItensProduto && compras.some(c => c.situacao === 'pendente') ? st.comprasItensProduto().catch(() => []) : []]);
       const idsPend = compras.filter(c => c.situacao === 'pendente').map(c => c.id);
@@ -557,27 +557,35 @@
       (CRM.produtos ? kpi('Fotos e fichas', '📷', 'foto, ficha técnica e FISPQ de cada produto (a IA procura, você aprova)', '', 'fotos') : '') + '</div>';
   }
 
+  // No galpão × reservado × disponível (05/11/2026, Anderson/Edson: "clica no saldo e enxerga um saldo; clica no produto e não
+  // bate"): o saldo do livro é o físico, que só baixa na nota; o pedido confirmado reserva (orçamento não) e o disponível é o
+  // físico menos o reservado, o mesmo número da ficha do produto e do pedido.
+  const dispDe = cod => { const d = (nomesOp || []).find(x => x.codigo === cod); return d || null; };
+  const colsDisp = () => '<th class="num" title="o que os pedidos confirmados (liberados, em separação ou separados, ainda sem nota) já seguram">Reservado</th><th class="num" title="no galpão − reservado: o que dá para vender">Disponível</th>';
+  const celsDisp = x => { const d = dispDe(x.codigo); if (!d) return '<td class="num">—</td><td class="num">—</td>';
+    const disp = Number(d.disponivel); return '<td class="num">' + (Number(d.reservado) ? qtd(d.reservado) : '—') + '</td><td class="num' + (disp < 0 ? ' neg' : '') + '"><strong>' + qtd(disp) + '</strong></td>'; };
+  const dicaDisp = ' <strong>No galpão</strong> é o que está fisicamente no estoque (baixa quando a nota sai); <strong>reservado</strong> é o que os pedidos confirmados já seguram (orçamento não reserva); <strong>disponível</strong> = no galpão − reservado, o mesmo número da ficha do produto.';
   function telaSaldo(linhas) {
     const q = R.normaliza(filtro.busca);
     const l = linhas.filter(x => (!q || R.normaliza(x.descricao + ' ' + x.codigo + ' ' + (x.fornecedor || '')).indexOf(q) !== -1) && (!filtro.soDif || dono() || (x.dif != null && Math.abs(x.dif) >= 0.0005)))
       .sort((a, b) => String(a.descricao).localeCompare(String(b.descricao), 'pt-BR'));
     if (op()) return '<section class="cartao"><h2>Saldo por produto <small>' + l.length + ' produto(s)</small></h2>' +
-      '<p class="dica">O saldo do CRM: cada nota de venda dá a saída, cada entrada de nota de compra soma e cada contagem acerta. ☰ mostra os movimentos; ✎ acerta o saldo de um produto.</p>' +
+      '<p class="dica">O saldo do CRM: cada nota de venda dá a saída, cada entrada de nota de compra soma e cada contagem acerta. ☰ mostra os movimentos; ✎ acerta o saldo de um produto.' + dicaDisp + '</p>' +
       '<p class="acoes"><input type="search" placeholder="Procurar produto ou código" value="' + esc(filtro.busca) + '" data-es-busca class="of-busca"></p>' +
-      (l.length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Produto</th><th class="num">Saldo</th><th>Último movimento</th><th></th></tr></thead><tbody>' +
+      (l.length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Produto</th><th class="num">No galpão</th>' + colsDisp() + '<th>Último movimento</th><th></th></tr></thead><tbody>' +
         l.slice(0, 300).map(x => '<tr><td><strong>' + esc(R.nomeDeItem(x.descricao || x.codigo)) + '</strong><small>' + esc(x.codigo) + (x.unidade ? ' · ' + esc(x.unidade) : '') + '</small></td>' +
-          '<td class="num">' + qtd(x.saldo) + '</td><td>' + esc(quando(x.ultMov)) + '</td>' +
+          '<td class="num">' + qtd(x.saldo) + '</td>' + celsDisp(x) + '<td>' + esc(quando(x.ultMov)) + '</td>' +
           '<td class="num">' + (x.saldo != null ? '<button type="button" class="mini" data-acao="es-movs" data-id="' + esc(x.codigo) + '" title="Movimentos">☰</button>' +
             '<button type="button" class="mini" data-acao="es-ajustar" data-id="' + esc(x.codigo) + '" title="Acertar o saldo">✎</button>' : '') + '</td></tr>').join('') +
         '</tbody></table></div>' + (l.length > 300 ? '<p class="dica">Mostrando 300 de ' + l.length + '; use a busca.</p>' : '') : '<p class="vazio">Nada aqui.</p>') + '</section>';
     const d = dono();
     return '<section class="cartao"><h2>Saldo por produto <small>' + l.length + ' produto(s)</small></h2>' +
-      (d ? '<p class="dica">O saldo de cada produto: cada nota de venda dá a saída, cada entrada de nota de compra soma (e refaz o custo médio) e cada contagem acerta. ☰ mostra os movimentos; ✎ acerta o saldo.</p>' : '<p class="dica">"FKN agora" é o "atual" da última listagem; a diferença daqui pode ser só uma nota emitida depois dela. A conferência de verdade, na mesma hora, está em "Última conferência".</p>') +
+      (d ? '<p class="dica">O saldo de cada produto: cada nota de venda dá a saída, cada entrada de nota de compra soma (e refaz o custo médio) e cada contagem acerta. ☰ mostra os movimentos; ✎ acerta o saldo.' + dicaDisp + '</p>' : '<p class="dica">"FKN agora" é o "atual" da última listagem; a diferença daqui pode ser só uma nota emitida depois dela. A conferência de verdade, na mesma hora, está em "Última conferência".</p>') +
       '<p class="acoes"><input type="search" placeholder="Procurar produto, código ou fornecedor" value="' + esc(filtro.busca) + '" data-es-busca class="of-busca"> ' +
       (d ? '' : '<label class="filtro-inline"><input type="checkbox" data-es-sodif' + (filtro.soDif ? ' checked' : '') + '> só com diferença</label>') + '</p>' +
-      (l.length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Produto</th><th class="num">' + (d ? 'Saldo' : 'Saldo CRM</th><th class="num">FKN agora</th><th class="num">Diferença') + '</th><th class="num">Custo médio</th><th>Último movimento</th><th></th></tr></thead><tbody>' +
+      (l.length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Produto</th><th class="num">' + (d ? 'No galpão</th>' + colsDisp().replace(/<\/th>$/, '') : 'Saldo CRM</th><th class="num">FKN agora</th><th class="num">Diferença') + '</th><th class="num">Custo médio</th><th>Último movimento</th><th></th></tr></thead><tbody>' +
         l.slice(0, 300).map(x => '<tr><td>' + (CRM.produtos ? '<button type="button" class="pd-info-foto" data-acao="pf-ficha" data-id="' + esc(x.codigo) + '" title="Ficha e foto">' + CRM.produtos.miniatura(x.codigo) + '</button>' : '') + '<strong>' + esc(R.nomeDeItem(x.descricao || x.codigo)) + '</strong><small>' + esc(x.codigo) + (x.unidade ? ' · ' + esc(x.unidade) : '') + (x.fornecedor ? ' · ' + esc(x.fornecedor) : '') + '</small></td>' +
-          '<td class="num' + (d && +x.saldo < 0 ? ' neg' : '') + '">' + qtd(x.saldo) + '</td>' + (d ? '' : '<td class="num">' + qtd(x.fkn) + '</td>' +
+          '<td class="num' + (d && +x.saldo < 0 ? ' neg' : '') + '">' + qtd(x.saldo) + '</td>' + (d ? celsDisp(x) : '<td class="num">' + qtd(x.fkn) + '</td>' +
           '<td class="num">' + (x.dif == null ? '—' : Math.abs(x.dif) < 0.0005 ? '✓' : '<strong>' + qtd(x.dif) + '</strong>') + '</td>') +
           '<td class="num">' + (x.custo == null ? '—' : R.moeda(x.custo)) + '</td><td>' + esc(quando(x.ultMov)) + '</td>' +
           '<td class="num">' + (x.saldo != null ? '<button type="button" class="mini" data-acao="es-movs" data-id="' + esc(x.codigo) + '" title="Movimentos">☰</button>' +
