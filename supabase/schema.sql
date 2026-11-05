@@ -10587,3 +10587,63 @@ language sql stable security definer set search_path = public as $$
 $$;
 revoke all on function public.crm_titulos_vencidos() from public, anon;
 grant execute on function public.crm_titulos_vencidos() to authenticated, service_role;
+
+-- 05/11/2026 (Anderson: "veio bloqueado por prazo… onde está o bloqueio? o que a vendedora está pedindo?"): o porquê da trava
+-- de crédito do pedido, com as mesmas contas do crm_pedidos_atualizar (prazo pela crm_credito_prazo; no limite, os títulos em
+-- aberto + os pedidos a prazo do cliente feitos antes + este). Na janela de crédito aberta pelo pedido (e pela lista Para
+-- analisar), no aviso do pedido, na mensagem "Pedir a análise" e no aviso do CEO (crm_ceo_pedido_json.motivo).
+create or replace function public.crm_pedido_credito_motivo(p_id uuid) returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare p public.crm_pedidos; c public.crm_credito; pz integer; tit numeric; outros numeric; usado numeric; txt text[] := '{}';
+  dia date;
+begin
+  select * into p from public.crm_pedidos where id = p_id;
+  if p.id is null then return null; end if;
+  if not (coalesce(auth.role(), '') = 'service_role' or public.crm_eh_admin() or public.crm_eh_gestor() or public.crm_eh_logistica() or public.crm_ve_empresa(p.empresa_id)) then raise exception 'sem acesso'; end if;
+  dia := (p.criado_em at time zone 'America/Sao_Paulo')::date;
+  pz := public.crm_credito_prazo(p.dados->>'pagamento', dia);
+  select * into c from public.crm_credito where empresa_id = p.empresa_id;
+  tit := coalesce((select sum(t.valor) from public.crm_titulos t where t.empresa_id = p.empresa_id and not t.abono), 0);
+  outros := coalesce((select sum(o.valor_total) from public.crm_pedidos o where o.empresa_id = p.empresa_id and o.id <> p.id
+              and o.situacao in ('aberto', 'separacao', 'separado') and (o.criado_em, o.numero) < (p.criado_em, p.numero)
+              and public.crm_credito_prazo(o.dados->>'pagamento', (o.criado_em at time zone 'America/Sao_Paulo')::date) is not null), 0);
+  usado := tit + outros + p.valor_total;
+  if 'SEM ANÁLISE' = any(p.bloqueios) then
+    txt := txt || (case when c.empresa_id is null then 'O cliente ainda não tem análise de crédito e o pedido é a prazo.'
+                        else 'A ficha de crédito do cliente está "em análise" e o pedido é a prazo.' end);
+  end if;
+  if 'PRAZO' = any(p.bloqueios) then
+    txt := txt || (case when c.situacao = 'vista' then 'A ficha do cliente é só à vista e o pedido é a prazo (' || coalesce(nullif(p.dados->>'pagamento', ''), 'sem forma') || ').'
+                        else 'O pedido pede ' || pz || ' dias (' || coalesce(nullif(p.dados->>'pagamento', ''), 'sem forma') || ') e a ficha do cliente permite '
+                             || coalesce(c.prazo_max::text, '?') || ': passa ' || (pz - coalesce(c.prazo_max, 0)) || ' dias.' end);
+  end if;
+  if 'LIMITE' = any(p.bloqueios) then
+    txt := txt || ('Com este pedido o cliente fica com ' || to_char(usado, 'FM999G999G990D00') || ' a prazo (títulos em aberto '
+      || to_char(tit, 'FM999G999G990D00') || case when outros > 0 then ' + pedidos anteriores ' || to_char(outros, 'FM999G999G990D00') else '' end
+      || ' + este ' || to_char(p.valor_total, 'FM999G999G990D00') || ') e o limite é ' || to_char(coalesce(c.limite, 0), 'FM999G999G990D00')
+      || ': passa ' || to_char(usado - coalesce(c.limite, 0), 'FM999G999G990D00') || '.');
+  end if;
+  return jsonb_build_object('numero', p.numero, 'valor', p.valor_total, 'pagamento', p.dados->>'pagamento', 'prazo_pedido', pz,
+    'ficha', case when c.empresa_id is null then null else jsonb_build_object('situacao', c.situacao, 'limite', c.limite, 'prazo_max', c.prazo_max) end,
+    'titulos', tit, 'pedidos_antes', outros, 'usado_com_este', usado,
+    'travas', to_jsonb(array(select b from unnest(p.bloqueios) b where b in ('SEM ANÁLISE', 'PRAZO', 'LIMITE') and b <> all(p.liberado))),
+    'textos', to_jsonb(txt));
+end;
+$$;
+revoke all on function public.crm_pedido_credito_motivo(uuid) from public, anon;
+grant execute on function public.crm_pedido_credito_motivo(uuid) to authenticated, service_role;
+
+create or replace function public.crm_ceo_pedido_json(r public.crm_pedidos) returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if coalesce(auth.role(), '') <> 'service_role' then raise exception 'só o servidor'; end if;
+  return jsonb_build_object('numero', r.numero, 'situacao', r.situacao, 'valor_total', r.valor_total, 'entrega', r.entrega, 'criado_em', r.criado_em,
+    'cliente', (select e.nome from public.crm_empresas e where e.id = r.empresa_id),
+    'vendedor', (select u.nome from public.crm_usuarios u where u.user_id = r.vendedor_id),
+    'pagamento', nullif(left(coalesce(r.dados->>'pagamento', ''), 80), ''), -- forma de pagamento (05/11/2026, aviso do pedido travado no CEO)
+    'bloqueios', coalesce((select jsonb_agg(b) from unnest(r.bloqueios) b where b <> all (r.liberado)), '[]'::jsonb),
+    -- o porquê da trava de crédito (05/11/2026): "O pedido pede 62 dias … a ficha permite 35"
+    'motivo', case when r.bloqueios && array['SEM ANÁLISE', 'PRAZO', 'LIMITE'] then
+      nullif(left(array_to_string(array(select jsonb_array_elements_text(public.crm_pedido_credito_motivo(r.id)->'textos')), ' '), 300), '') end);
+end;
+$$;

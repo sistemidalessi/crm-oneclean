@@ -1430,3 +1430,6 @@ button.ordena.ativo { color: var(--marinho); }
 .valores-ocultos input[data-moeda]:not(:focus) { filter: blur(5px); }
 .cx-saldo-botoes { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
 @media print { .valores-ocultos .valor-oculto { visibility: hidden; } }
+/* Janela de crédito aberta pelo pedido (05/11/2026): o que o pedido pede e por que travou, em destaque no alto */
+.cred-pedido { background: #fff4e5; border: 1px solid #f0c27a; border-left: 4px solid #d98a00; border-radius: 8px; padding: 10px 14px; margin: 0 0 12px; color: #4a3200; }
+.cred-pedido p { margin: 4px 0; }

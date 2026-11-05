@@ -314,7 +314,8 @@
         '<div class="tabela-rolagem"><table class="tabela"><tbody>' +
         pend.map(p => '<tr>' + (viaApi() ? '<td class="cred-marca-td"><input type="checkbox" class="cred-marca" value="' + esc(p.empresa_id) + '" aria-label="marcar ' + esc(p.nome) + '"></td>' : '') + '<td><button type="button" class="link" data-acao="abrir-empresa" data-id="' + esc(p.empresa_id) + '">' + esc(p.nome) + '</button><small>' + esc(p.cnpj || '') + ' · cadastro ' + esc(R.dataBR(R.diaLocal(p.criado_em))) + '</small></td>' +
           '<td>' + ((p.pedidos || []).map(x => 'pedido ' + x.numero + ' · ' + R.moeda(x.valor) + ' · ' + (x.bloqueios || []).filter(b => BLOQUEIOS.indexOf(b) !== -1).join(', ')).map(esc).join('<br>') || '<small>cliente novo sem análise</small>') + '</td>' +
-          '<td class="acoes-linha">' + linkConsultar(p.empresa_id, 'Analisar', 'mini', 'cred-analisar-site') + '</td></tr>').join('') +
+          // 05/11/2026: com o 1º pedido travado, a janela já diz o que o pedido pede (empresa:pedido)
+          '<td class="acoes-linha">' + linkConsultar(p.empresa_id + ((p.pedidos || [])[0] ? ':' + p.pedidos[0].id : ''), 'Analisar', 'mini', 'cred-analisar-site') + '</td></tr>').join('') +
         '</tbody></table></div></section>' : '') +
       (sug.length ? '<section class="cartao"><h2>Clientes que já compram <small>' + sug.length + ' sem ficha · sugestão pelo histórico</small></h2>' +
         '<p>Limite = 2 × a maior compra do mês nos últimos 12 meses (de 500 em 500), prazo = o maior que o cliente usa hoje (mínimo 28 dias). Quem tem título vencido fica "em análise". Revisão em 6 meses.</p>' +
@@ -404,11 +405,26 @@
 
   // Formulário da análise: consulta (PDF lido pela IA) → proposta pela política → aprovar.
   // depois (03/11/2026): chamado depois de aprovar — o pedido que abriu a análise recarrega e diz o que sobrou da trava.
-  async function analisar(id, siteAberto, consultaJa, depois) {
+  // pedidoId (05/11/2026, Anderson: "o que a vendedora está pedindo para eu analisar? está faltando informação"): aberta pelo
+  // pedido, a janela diz no alto o que o pedido pede e por que travou (crm_pedido_credito_motivo) e o que precisa para liberar.
+  async function analisar(id, siteAberto, consultaJa, depois, pedidoId) {
     const e = CRM.empresa(id);
     if (!e) { CRM.toast('Cliente não encontrado (fora da sua lista?).', true); return; }
-    let atual = null;
+    let atual = null, mot = null;
     try { atual = await CRM.store().creditoVer(id); } catch (err) { /* sem ficha */ }
+    if (pedidoId && CRM.store().pedidoCreditoMotivo) { try { mot = await CRM.store().pedidoCreditoMotivo(pedidoId); } catch (err) { /* segue sem */ } }
+    const precisa = m => {
+      if (!m) return [];
+      const l = [], tr = m.travas || [];
+      if (tr.indexOf('PRAZO') !== -1 && m.prazo_pedido > 0) l.push('situação "A prazo" com prazo máximo de pelo menos ' + m.prazo_pedido + ' dias');
+      if (tr.indexOf('LIMITE') !== -1) l.push('limite de pelo menos ' + R.moeda(m.usado_com_este));
+      if (tr.indexOf('SEM ANÁLISE') !== -1) l.push('a ficha aprovada a prazo' + (m.prazo_pedido > 0 ? ', com prazo de pelo menos ' + m.prazo_pedido + ' dias' : '') + ' e limite de pelo menos ' + R.moeda(m.usado_com_este));
+      return l;
+    };
+    const blocoPedido = mot ? '<div class="alerta cred-pedido"><p><strong>Pedido ' + esc(mot.numero) + ':</strong> ' + esc(R.moeda(mot.valor)) + ' · ' + esc(mot.pagamento || 'sem forma de pagamento') +
+      (mot.prazo_pedido > 0 ? ' · ' + mot.prazo_pedido + ' dias' : '') + ' · a prazo com este pedido: ' + esc(R.moeda(mot.usado_com_este)) + '</p>' +
+      ((mot.textos || []).length ? '<p><strong>Por que travou:</strong> ' + esc(mot.textos.join(' ')) + '</p>' : '<p>O pedido não tem mais trava de crédito.</p>') +
+      (precisa(mot).length ? '<p><strong>Para liberar este pedido:</strong> ' + esc(precisa(mot).join('; ')) + '. Ou peça à vendedora para mudar a forma de pagamento.</p>' : '') + '</div>' : '';
     const ficha = atual && atual.situacao !== 'sem_ficha' ? atual : null;
     const s = (painel && (painel.sugestoes || []).find(x => x.empresa_id === id)) || null;
     const ctx = { maior_mes: s ? s.maior_mes : 0, vencido: s ? s.vencido : (ficha ? 0 : 0), hoje: CRM.hoje() };
@@ -420,7 +436,7 @@
       : s ? { situacao: s.situacao, limite: s.limite, prazo_max: s.prazo_max } : { situacao: 'analise' };
     CRM.abrirForm({
       titulo: 'Crédito: ' + e.nome, largura: 'largo',
-      htmlAntes: '<div class="cred-form"><p>' + esc(e.cnpj || 'sem CNPJ') + (ficha ? ' · ficha de ' + esc(R.dataBR(ficha.analisado_em)) + ' · usado hoje ' + esc(R.moeda(ficha.usado || 0)) : s ? ' · em aberto ' + esc(R.moeda(s.aberto)) : '') + '</p>' +
+      htmlAntes: blocoPedido + '<div class="cred-form"><p>' + esc(e.cnpj || 'sem CNPJ') + (ficha ? ' · ficha de ' + esc(R.dataBR(ficha.analisado_em)) + ' · usado hoje ' + esc(R.moeda(ficha.usado || 0)) : s ? ' · em aberto ' + esc(R.moeda(s.aberto)) : '') + '</p>' +
         (siteAberto ? '<p class="dica"><strong>O site da consulta abriu numa aba nova, com o CNPJ copiado:</strong> cole no Documento (Ctrl+V), clique em Consulta, baixe o PDF e solte aqui.</p>' : '') +
         '<div class="cred-passos">' + (CRM.store().creditoRekta ? '<button type="button" class="btn" id="credApi" title="A Rekta responde direto ao CRM (cada consulta é cobrada pela Rekta: ' + R.moeda(precoApi()) + ')">Consultar na Rekta pela API (' + R.moeda(precoApi()) + ')</button>' : '') +
         (viaApi() ? '' : linkConsultar(id, siteAberto ? 'Abrir o site de novo' : 'Ou: abrir o site (copia o CNPJ)', 'btn sec')) +
@@ -719,9 +735,10 @@
     'cred-auto': id => { consultaAuto(id).catch(CRM.falhou); },
     'cred-pedir': id => pedirOutro(id),
     'cred-responder': id => { responder(id).catch(CRM.falhou); },
-    'cred-analisar': id => { analisar(id).catch(CRM.falhou); },
-    'cred-analisar-site': id => { consultar(id); analisar(id, true).catch(CRM.falhou); },
-    'cred-analisar-api': id => { analisar(id, false, true).catch(CRM.falhou); },
+    // id = "empresa" ou "empresa:pedido" (a lista Para analisar manda o 1º pedido travado do cliente)
+    'cred-analisar': id => { const [e, ped] = String(id).split(':'); analisar(e, false, false, null, ped).catch(CRM.falhou); },
+    'cred-analisar-site': id => { const [e, ped] = String(id).split(':'); consultar(e); analisar(e, true, false, null, ped).catch(CRM.falhou); },
+    'cred-analisar-api': id => { const [e, ped] = String(id).split(':'); analisar(e, false, true, null, ped).catch(CRM.falhou); },
     'cred-lote': () => { analisarLote([].slice.call(document.querySelectorAll('.cred-marca:checked')).map(x => x.value)).catch(CRM.falhou); },
     'cred-buscar': () => {
       const t = String((document.querySelector('#credBusca') || {}).value || '').trim();

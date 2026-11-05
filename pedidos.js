@@ -639,6 +639,7 @@
         (p.dados.pausado.motivo ? ' · ' + esc(p.dados.pausado.motivo) : '') + (p.dados.pausado.por ? ' · por ' + esc(p.dados.pausado.por) : '') + '. Não vai à separação nem à nota.</p>' : '') +
       (bAbertos.length ? '<p class="alerta">Bloqueado por: <strong>' + esc(bAbertos.map(b => P.ROTULO_BLOQUEIO[b] || b).join(', ')) + '</strong>.' + (bAbertos.some(b => b !== 'SEM CADASTRO' && P.FINANCEIRO.indexOf(b) === -1) ? (gest ? ' Confira e clique em "Liberar".' : ' Estoque e preço, quem libera é a gestora ou a logística.') : '') +
         (bAbertos.indexOf('SEM CADASTRO') !== -1 ? ' <strong>O item genérico (CONSULTOR) não vai à separação nem à nota:</strong> peça o cadastro do produto ao comprador e troque o item no pedido (ninguém libera esta trava).' : '') +
+        (bAbertos.some(b => ['SEM ANÁLISE', 'PRAZO', 'LIMITE'].indexOf(b) !== -1) && textoMotivo(motivoCredito(p)) ? ' <strong>' + esc(textoMotivo(motivoCredito(p))) + '</strong>' : '') +
         (bAbertos.some(b => P.FINANCEIRO.indexOf(b) !== -1) ? ' O financeiro (' + esc(bAbertos.filter(b => P.FINANCEIRO.indexOf(b) !== -1).map(b => P.ROTULO_BLOQUEIO[b]).join(', ')) + ') só o administrador libera.' + (CRM.ehAdmin() && CRM.credito && CRM.credito.analisar && bAbertos.some(b => ['SEM ANÁLISE', 'PRAZO', 'LIMITE'].indexOf(b) !== -1) ?
           ' <button type="button" class="btn" data-acao="pd-credito" data-id="' + esc(p.id) + '" title="Abre a análise de crédito deste cliente aqui mesmo; ao aprovar, a trava do crédito sai do pedido">💳 Analisar o crédito do cliente</button>' : '') +
           avisoCredito(p, bAbertos, t) : '') + '</p>' : '') +
@@ -697,6 +698,17 @@
 
   // 03/11/2026 (pedido do Anderson): quem trava no crédito (só o administrador libera) chama o administrador na hora, pelo
   // WhatsApp dele, com o pedido, o cliente, o valor, a forma de pagamento e a trava já escritos.
+  // 05/11/2026 (Anderson: "veio bloqueado por prazo… onde está o bloqueio?"): o porquê da trava de crédito, do banco
+  // (crm_pedido_credito_motivo: prazo pedido × ficha, uso × limite). Guardado por pedido + travas; busca uma vez e redesenha.
+  const motivos = new Map();
+  function motivoCredito(p) {
+    const k = p.id + '|' + (p.bloqueios || []).join(',') + '|' + ((p.dados || {}).pagamento || '') + '|' + p.valor_total;
+    if (motivos.has(k)) return motivos.get(k);
+    motivos.set(k, null);
+    if (CRM.store().pedidoCreditoMotivo) CRM.store().pedidoCreditoMotivo(p.id).then(m => { motivos.set(k, m || null); if (m && (m.textos || []).length) CRM.render(); }).catch(() => {});
+    return null;
+  }
+  const textoMotivo = m => (m && (m.textos || []).length ? m.textos.join(' ') : '');
   // endereço do CRM + "#pedido=N": abre direto no pedido (app.js)
   const linkPedido = n => location.origin + location.pathname.replace(/[^/]*$/, '') + '#pedido=' + n;
   function avisoCredito(p, bAbertos, t) {
@@ -708,7 +720,7 @@
     // 04/11/2026: a mensagem chegou cortada logo depois de "separa." (sem a assinatura e sem o link): o link vem logo depois da
     // trava, e o texto não leva travessão, emoji nem quebra de linha (o WhatsApp do computador cortava ali).
     const txt = 'Olá, ' + String(adm.nome || '').split(' ')[0] + '! O pedido ' + p.numero + ' de ' + nomeCliente(p) + ' (' + R.moeda(t.geral) + (d.pagamento ? ', ' + d.pagamento : '') +
-      ') está travado no financeiro: ' + travas + '. Abrir o pedido no CRM: ' + linkPedido(p.numero) + ' . Pode analisar? Assim a gente já separa. (' + (CRM.nomeUsuario(CRM.meuId()) || 'equipe') + ')';
+      ') está travado no financeiro: ' + travas + '.' + (textoMotivo(motivoCredito(p)) ? ' ' + textoMotivo(motivoCredito(p)) : '') + ' Abrir o pedido no CRM: ' + linkPedido(p.numero) + ' . Pode analisar? Assim a gente já separa. (' + (CRM.nomeUsuario(CRM.meuId()) || 'equipe') + ')';
     // 04/11/2026: cliente SEM ANÁLISE: a própria vendedora consulta (a política libera até o teto, credito.js 'cred-auto')
     const consulta = bAbertos.indexOf('SEM ANÁLISE') !== -1 && CRM.store().creditoAuto && ['vendedor', 'gestor'].indexOf(CRM.papel()) !== -1
       ? ' <button type="button" class="btn" data-acao="cred-auto" data-id="' + esc(p.empresa_id) + '">💳 Consultar o crédito</button>' : '';
@@ -1319,13 +1331,14 @@
       const p = (peds || []).find(x => x.id === id); if (!p || !p.empresa_id) return;
       const semFicha = (p.bloqueios || []).indexOf('SEM ANÁLISE') !== -1;
       CRM.credito.analisar(p.empresa_id, false, semFicha, async () => {
+        motivos.clear();
         await recarrega();
         const q = (peds || []).find(x => x.id === id), resto = q ? (q.bloqueios || []).filter(b => !(q.liberado || []).includes(b)) : [];
         const cred = resto.filter(b => ['SEM ANÁLISE', 'PRAZO', 'LIMITE'].indexOf(b) !== -1);
         CRM.toast(!q ? 'Crédito gravado.' : cred.length ? 'Crédito gravado, mas o pedido ' + q.numero + ' continua travado em: ' + cred.map(b => P.ROTULO_BLOQUEIO[b] || b).join(', ') + ' (confira limite e prazo).'
           : resto.length ? 'Crédito liberado. O pedido ' + q.numero + ' ainda tem: ' + resto.map(b => P.ROTULO_BLOQUEIO[b] || b).join(', ') + ' — confira e clique em "Liberar".'
           : 'Crédito liberado: o pedido ' + q.numero + ' está livre.', cred.length > 0);
-      }).catch(CRM.falhou);
+      }, p.id).catch(CRM.falhou);
     },
     'pd-aba-ped': id => { abaPed = id; CRM.render(); },
     'pd-novo': () => { aberto = null; ed = novoEd(); CRM.render(); },

@@ -1238,6 +1238,8 @@
   // contas a pagar de fornecedor do comprador (03/11/2026)
   Supa.prototype.fornecedoresPagar = async function (pagosDesde) { return unwrap(await this.sb.rpc('crm_fin_fornecedores_ler', { p_pagos_desde: pagosDesde || null })); };
   Supa.prototype.fornecedorPagarEditar = async function (id, p, motivo) { return unwrap(await this.sb.rpc('crm_fin_fornecedor_editar', { p_id: id, p, p_motivo: motivo })); };
+  // 05/11/2026: o porquê da trava de crédito do pedido (prazo pedido × ficha, uso × limite)
+  Supa.prototype.pedidoCreditoMotivo = async function (id) { return unwrap(await this.sb.rpc('crm_pedido_credito_motivo', { p_id: id })); };
   Supa.prototype.pedidoPausar = async function (id, pausar, ate, motivo) { return unwrap(await this.sb.rpc('crm_pedido_pausar', { p_id: id, p_pausar: !!pausar, p_ate: ate || null, p_motivo: motivo || null })); };
   Supa.prototype.pedidoDados = async function (id, p) { return unwrap(await this.sb.rpc('crm_pedido_dados', { p_id: id, p })); };
   Supa.prototype.pedidoFalta = async function (id, itens, obs) { return unwrap(await this.sb.rpc('crm_pedido_falta', { p_id: id, p_itens: itens, p_obs: obs || null })); };
@@ -1341,6 +1343,7 @@
   };
   Local.prototype.fornecedoresPagar = async function () { return []; };   // o Caixa não existe no modo local
   Local.prototype.fornecedorPagarEditar = async function () { throw new Error('só com o banco'); };
+  Local.prototype.pedidoCreditoMotivo = async function () { return null; };
   Local.prototype.pedidoPausar = async function (id, pausar, ate, motivo) {
     const r = this._ped(id); r.dados = Object.assign({}, r.dados || {});
     if (pausar) r.dados.pausado = { ate: ate || null, motivo: motivo || null, por: 'Administrador (modo local)', em: new Date().toISOString() }; else delete r.dados.pausado;
