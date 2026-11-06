@@ -11197,14 +11197,16 @@ $$;
 -- o calendário padrão (Lucro Real, comércio em SP). "conferir": o dia depende do enquadramento e o contador confirma.
 create or replace function crm_interno.fiscal_calendario_padrao() returns jsonb language sql immutable as $$
   select '[
-    {"chave":"icms","titulo":"ICMS próprio (guia GARE, Sefaz-SP)","tipo":"guia","regra":"dia","dia":20,"meses":1,"guia":"\\m(icms|gare)\\M","conferir":true,
-     "nota":"o dia em SP sai do código de prazo (CPR) do CNAE principal na Agenda Tributária Paulista: confirmar com o contador e acertar aqui"},
+    {"chave":"icms","titulo":"ICMS próprio (guia GARE, Sefaz-SP)","tipo":"guia","regra":"dia","dia":20,"meses":1,"prorroga":true,"guia":"\\m(icms|gare)\\M",
+     "nota":"CPR 1200 (CNAE 47890): dia 20 do mês seguinte, prorroga para o dia útil seguinte (RICMS/2000 Anexo IV arts. 2º VI e 3º V e; art. 596)"},
+    {"chave":"icms_st","titulo":"ICMS-ST retido nas vendas (GARE, CPR 1200)","tipo":"guia","regra":"dia","dia":20,"meses":1,"prorroga":true,"guia":"\\m(icms[- ]?st|substitui)","so_com_st":true,
+     "nota":"só no mês em que alguma nota da OneClean reteve ICMS-ST (substituto); não é coberto pelos créditos (Anexo IV art. 3º §§ 1º e 2º)"},
     {"chave":"pis_cofins","titulo":"PIS e COFINS (DARF)","tipo":"guia","regra":"dia","dia":25,"meses":1,"guia":"\\m(pis|cofins)\\M","nota":"Lei 11.933/2009: dia 25 do mês seguinte; antecipa se não for dia útil"},
     {"chave":"irpj_csll","titulo":"IRPJ e CSLL por estimativa (DARF)","tipo":"guia","regra":"ultimo_util","meses":1,"guia":"\\m(irpj|csll)\\M","nota":"Lei 9.430/1996 art. 6º: último dia útil do mês seguinte"},
     {"chave":"dctfweb","titulo":"DCTFWeb (declaração)","tipo":"declaracao","regra":"ultimo_util","meses":1,"nota":"IN RFB 2.237/2024 alterada pela 2.248/2025: último dia útil do mês seguinte"},
     {"chave":"reinf","titulo":"EFD-Reinf (declaração)","tipo":"declaracao","regra":"dia","dia":15,"meses":1,"nota":"IN RFB 2.043/2021: dia 15 do mês seguinte; antecipa se não for dia útil"},
     {"chave":"efd_contrib","titulo":"EFD-Contribuições (SPED PIS/COFINS)","tipo":"declaracao","regra":"util","util":10,"meses":2,"nota":"IN RFB 1.252/2012: 10º dia útil do 2º mês seguinte"},
-    {"chave":"efd_icms","titulo":"EFD ICMS/IPI (SPED Fiscal, Sefaz-SP)","tipo":"declaracao","regra":"dia","dia":20,"meses":1,"conferir":true,"nota":"dia a confirmar com o contador"},
+    {"chave":"efd_icms","titulo":"EFD ICMS/IPI (SPED Fiscal, Sefaz-SP)","tipo":"declaracao","regra":"dia","dia":20,"meses":1,"nota":"Portaria CAT 147/2009 art. 10: dia 20 do mês seguinte, sem prorrogação (transmissão pela internet): cai antes se o dia 20 não for útil. A GIA acabou para o RPA em 01/01/2026 (Portaria SRE 2/2025)"},
     {"chave":"ecd","titulo":"ECD (escrituração contábil do ano)","tipo":"declaracao","regra":"anual_ultimo_util","mes":6,"nota":"último dia útil de junho do ano seguinte"},
     {"chave":"ecf","titulo":"ECF (escrituração fiscal do ano)","tipo":"declaracao","regra":"anual_ultimo_util","mes":7,"nota":"último dia útil de julho do ano seguinte"}
   ]'::jsonb;
@@ -11247,6 +11249,8 @@ begin
       venc := crm_interno.fiscal_vencimento(p, comp);
       if venc is null or venc < p_de or venc > p_ate then continue; end if;
       compt := to_char(comp, 'YYYY-MM');
+      if coalesce((p ->> 'so_com_st')::boolean, false) and not exists (select 1 from public.crm_fiscal_itens fi where fi.emitida_em >= comp and fi.emitida_em < comp + interval '1 month'
+           and (fi.cfop like '5%' or fi.cfop like '6%') and coalesce(fi.v_icms_st, 0) > 0) then continue; end if;
       select * into m from public.crm_fiscal_marcas where chave = p ->> 'chave' and competencia = compt;
       ok := false; sit := null;
       if p ->> 'tipo' = 'guia' then
