@@ -83,6 +83,13 @@ async function enviaNota(db: Db, nfe: Linha, cfg: { gnre: Linha; fiscal: Linha }
     const g0 = ja.get(String(x.receita));
     if (g0 && ['gerada', 'paga', 'cancelada'].includes(String(g0.situacao))) { out.push({ id: g0.id, receita: x.receita, situacao: g0.situacao, ja: true }); continue; }
     if (g0 && !forcar && (g0.situacao === 'rejeitada' || (g0.situacao === 'enviada' && g0.recibo))) { out.push({ id: g0.id, receita: x.receita, situacao: g0.situacao, ja: true, motivo: g0.motivo }); continue; }
+    // "Gerar agora" (forcar) numa guia já enviada com recibo (06/11/2026): só busca o resultado. Reenviar gerava uma segunda
+    // guia para a mesma nota e o Caixa ficava com o código de barras da última. Reenvia só se está parada há mais de 24 h.
+    if (g0 && forcar && g0.situacao === 'enviada' && g0.recibo && Date.now() - Date.parse(String(g0.enviado_em || g0.atualizado_em)) < 864e5) {
+      await buscaResultado(db, g0);
+      out.push({ id: g0.id, receita: x.receita, situacao: 'enviada', ja: true, consultada: true });
+      continue;
+    }
     const linha = Object.assign({}, comum, { receita: x.receita, valor: x.valor, valor_fcp: Number(x.valorFcp || 0), tentativas: Number((g0 && g0.tentativas) || 0) + 1 });
     try {
       // guia com 2 itens (DIFAL + FCP do RS) só no serviço fiscal 2026-11-06b ou mais novo (o 06a mandaria só o 1º item)

@@ -107,13 +107,13 @@ Deno.serve(async (req) => {
   const url = Deno.env.get('SUPABASE_URL')!;
   const db = createClient(url, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } });
   const bearer = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
-  let ok = false, papel: string | null = null;
+  let ok = false, papel: string | null = null, agendador = false, soContagens = false;
   // a crm-cobranca (04/11/2026) chama a leitura dos vencidos com a chave de serviço do próprio projeto
   const servico = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
   if (servico && bearer === servico) ok = true;
   else if (bearer.length >= 32 && bearer.split('.').length !== 3) {
     const { data } = await db.rpc('crm_bb_senha_ok', { p: bearer });
-    ok = data === true;
+    ok = data === true; agendador = ok;
   } else {
     const comoUsuario = createClient(url, Deno.env.get('SUPABASE_ANON_KEY')!, { global: { headers: { Authorization: 'Bearer ' + bearer } }, auth: { persistSession: false } });
     const { data: u } = await comoUsuario.auth.getUser();
@@ -121,8 +121,11 @@ Deno.serve(async (req) => {
   }
   let c: any; try { c = await req.json(); } catch { return resposta(400, { erro: 'corpo inválido' }); }
   // o ciclo (registrar o que falta e ler os pagos) também por quem gera a DANFE: gestora e logística
-  if (!ok && c?.acao === 'ciclo' && ['gestor', 'logistica'].includes(String(papel))) ok = true;
+  if (!ok && c?.acao === 'ciclo' && ['gestor', 'logistica'].includes(String(papel))) { ok = true; soContagens = true; }
   if (!ok) return resposta(401, { erro: 'só o administrador' });
+  // a senha do agendador (crm_bb_chamar) só serve para o que os agendamentos mandam (06/11/2026): antes ela liberava
+  // todas as ações, inclusive registrar e o extrato com base/token. Quem chama com a chave de serviço segue livre.
+  if (agendador && !['ciclo', 'extrato_conciliar'].includes(String(c?.acao))) return resposta(401, { erro: 'só o administrador' });
   const { data: cfgL } = await db.from('crm_config').select('dados').eq('id', 1).maybeSingle();
   const b = cfgL?.dados?.boleto || {}, emit = cfgL?.dados?.fiscal?.emitente || {};
 
@@ -433,6 +436,10 @@ Deno.serve(async (req) => {
       const bx = await baixarCanceladas();
       const reg = await registrar();
       const pg = await pagos(5);
+      // gestora e logística (06/11/2026): só as contagens e as parcelas de fora; o detalhe dos boletos pagos (cliente, valor,
+      // data do crédito) é de título, que é só do administrador
+      if (soContagens) return resposta(200, { preparados: prep?.preparados || 0, pulados: prep?.pulados || [],
+        registro: { registrados: (reg as any)?.registrados || 0, erros: (reg as any)?.erros || 0 }, pagos: { liquidados: (pg as any)?.liquidados || 0 } });
       return resposta(200, { preparados: prep?.preparados || 0, pulados: prep?.pulados || [], baixas: bx, registro: reg, pagos: pg });
     }
     return resposta(400, { erro: 'ação desconhecida' });

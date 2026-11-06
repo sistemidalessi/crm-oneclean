@@ -330,6 +330,12 @@ Deno.serve(async (req) => {
       if (error) throw new Error(error.message);
       return resposta(200, data);
     }
+    // diretrizes e teto da IA também gastam o nonce (06/11/2026): sem isso, o mesmo corpo assinado, reenviado dentro dos
+    // 5 minutos, voltava uma lista de diretrizes ou um teto antigo. O servidor da Agilité manda um nonce novo a cada envio.
+    if (c.acao === 'diretrizes' || c.acao === 'ia_limite') {
+      const { error: e0 } = await db.from('crm_ceo_acoes').insert({ nonce: c.nonce, acao: c.acao, ok: true });
+      if (e0) throw new Error(e0.message);
+    }
     if (c.acao === 'diretrizes') return await diretrizes(db, c.lista);
     if (c.acao === 'ia_limite') return await iaLimite(db, c);
     if (c.acao === 'caixa_conferir') return await caixaConferir(db, c.itens);
