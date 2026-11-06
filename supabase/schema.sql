@@ -5301,7 +5301,9 @@ create or replace function public.crm_config_guarda() returns trigger language p
 declare k text;
 begin
   if current_user <> 'authenticated' or public.crm_eh_admin() then return new; end if;
-  foreach k in array array['fiscal', 'boleto', 'comissao_planos', 'comissao_usuarios', 'tabela_precos', 'margem_minima', 'pedido_trava_preco', 'cobranca_aviso', 'cobranca_prazo_cartorio', 'credito'] loop
+  foreach k in array array['fiscal', 'boleto', 'comissao_planos', 'comissao_usuarios', 'tabela_precos', 'margem_minima', 'pedido_trava_preco', 'cobranca_aviso', 'cobranca_prazo_cartorio', 'credito',
+                          -- 06/11/2026: pagamento pelo BB (conta, contrato, ambiente), boleto automático aos clientes e extrato só o admin
+                          'pagamentos', 'cobranca_boleto', 'extrato'] loop
     if tg_op = 'UPDATE' and old.dados ? k then new.dados := jsonb_set(coalesce(new.dados, '{}'::jsonb), array[k], old.dados -> k);
     else new.dados := coalesce(new.dados, '{}'::jsonb) - k; end if;
   end loop;

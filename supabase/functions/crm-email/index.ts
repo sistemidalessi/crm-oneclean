@@ -110,8 +110,12 @@ Deno.serve(async (req) => {
   try { sair = new URL(String(c.sair_url ?? '')); } catch { return resposta(400, { erro: 'endereço de descadastro inválido' }); }
   const origem = req.headers.get('origin');
   if (sair.protocol !== 'https:' && sair.hostname !== 'localhost') return resposta(400, { erro: 'endereço de descadastro inválido' });
-  const origemEsperada = Deno.env.get('CRM_ORIGEM') ?? origem; // sem cabeçalho Origin (chamada direta), só o site do CRM
-  if (sair.origin !== origemEsperada) return resposta(400, { erro: 'endereço de descadastro de outro site' });
+  // origem do site do CRM FIXA (06/11/2026): o Origin de quem chama não vale (numa chamada direta vem o que a pessoa quiser,
+  // e o botão e o logo do e-mail da OneClean apontariam para fora). CRM_ORIGEM troca a lista, ex. no domínio próprio.
+  // O Origin só serve para teste em localhost (link para localhost não engana ninguém).
+  const origens = (Deno.env.get('CRM_ORIGEM') || 'https://sistemidalessi.github.io,https://crm.oneclean.com.br').split(',').map(s => s.trim());
+  const teste = sair.hostname === 'localhost' && origem === sair.origin;
+  if (!origens.includes(sair.origin) && !teste) return resposta(400, { erro: 'endereço de descadastro de outro site' });
 
   // a empresa, com o login de quem chama: se a RLS não deixa ver, não envia
   const { data: emp } = await comoUsuario.from('crm_empresas').select('id, nome, email, responsavel_id, email_sair_em').eq('id', String(c.empresa_id ?? '')).maybeSingle();

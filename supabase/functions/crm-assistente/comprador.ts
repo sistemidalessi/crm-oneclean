@@ -85,7 +85,7 @@ Se uma parte não tiver nada, pule. Sem introdução.`;
 
 // deno-lint-ignore no-explicit-any
 type Linha = Record<string, any>;
-type Ctx = { u: SupabaseClient; papel: string; meuId: string; hoje: string };
+type Ctx = { u: SupabaseClient; papel: string; meuId: string; hoje: string; consultasCaixa?: number };
 type Ajuda = {
   tudo: <T>(q: (de: number, ate: number) => PromiseLike<{ data: T[] | null; error: unknown }>, max?: number) => Promise<T[]>;
   obj: (props: Record<string, unknown>, req: string[]) => Record<string, unknown>;
@@ -251,7 +251,11 @@ export function ferramentasComprador(h: Ajuda) {
       papeis: ['admin', 'comprador'],
       def: { name: 'vencimento_sugerido', description: 'A partir de que dia o pagamento de um pedido ao fornecedor cabe no caixa (a mesma previsão da tela do Caixa). Devolve SÓ a data e uma frase, nunca saldo nem valor do caixa.', strict: true,
         input_schema: obj({ valor: { type: 'number', description: 'total do pedido em reais' }, prazo_minimo_dias: { type: 'integer', description: 'menor prazo aceitável, em dias a partir de hoje (0 = 7)' }, prazo_maximo_dias: { type: 'integer', description: 'maior prazo que o fornecedor costuma dar (0 = 45; até 75)' } }, ['valor', 'prazo_minimo_dias', 'prazo_maximo_dias']) },
-      async roda(_c: Ctx, i: Linha) {
+      async roda(c: Ctx, i: Linha) {
+        // no máximo 2 por pergunta (06/11/2026): pedindo de novo com valores diferentes daria para descobrir o saldo
+        // previsto do Caixa, que é só do administrador
+        c.consultasCaixa = (c.consultasCaixa || 0) + 1;
+        if (c.consultasCaixa > 2) return { erro: 'a previsão do caixa já foi consultada nesta pergunta; use a data que veio' };
         const valor = Number(i.valor), de = Number(i.prazo_minimo_dias) > 0 ? Math.round(Number(i.prazo_minimo_dias)) : 7;
         const ate = Math.min(75, Number(i.prazo_maximo_dias) > 0 ? Math.round(Number(i.prazo_maximo_dias)) : 45);
         if (!(valor > 0)) return { erro: 'informe o valor do pedido' };
