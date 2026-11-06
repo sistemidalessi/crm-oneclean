@@ -7,7 +7,7 @@
   'use strict';
   const CRM = window.CRM, R = window.CRMRegras;
   const { esc } = CRM;
-  let sit = null, carregando = false, erro = null;
+  let sit = null, carregando = false, erro = null, gn = null;
 
   const quando = v => { if (!v) return '—'; const d = new Date(String(v).replace(' ', 'T')); return isNaN(d) ? esc(v) : esc(R.dataBR(R.diaLocal(d.toISOString())) + ' ' + R.horaLocal(d.toISOString())); };
   const dataBR = iso => String(iso || '').slice(0, 10).split('-').reverse().join('/');
@@ -17,6 +17,7 @@
   async function carrega() {
     if (carregando) return; carregando = true;
     try { sit = await CRM.store().fiscalAgentes({ acao: 'situacao' }); erro = null; } catch (e) { erro = e.message; }
+    try { gn = await leGnre(); } catch (e) { gn = { erro: e.message }; }
     carregando = false; CRM.render();
   }
 
@@ -48,6 +49,45 @@
     await carrega();
   }
 
+  // GNRE do DIFAL (06/11/2026): as guias que o robô gerou (crm_gnre), as notas com DIFAL dos últimos 60 dias e a chave do robô
+  async function leGnre() {
+    const sb = CRM.store().sb, desde = new Date(Date.now() - 60 * 864e5).toISOString();
+    const [g, n, c] = await Promise.all([
+      sb.from('crm_gnre').select('id, nfe_id, nota, uf, receita, valor, valor_fcp, situacao, motivo, linha_digitavel, pdf_caminho, vencimento, gerada_em, atualizado_em').order('criado_em', { ascending: false }).limit(100),
+      sb.from('crm_nfe').select('id, serie, numero, ambiente, autorizada_em, totais').eq('situacao', 'autorizada').eq('ambiente', 'producao').gte('autorizada_em', desde).order('autorizada_em', { ascending: false }).limit(1500),
+      sb.from('crm_config').select('dados').eq('id', 1).maybeSingle()]);
+    if (g.error) throw g.error;
+    const difal = ((n.data) || []).filter(x => Number((x.totais || {}).vICMSUFDest || 0) + Number((x.totais || {}).vFCPUFDest || 0) > 0);
+    return { guias: g.data || [], notas: difal, cfg: ((c.data && c.data.dados) || {}).gnre || {} };
+  }
+  const SIT_GNRE = { preparada: ['preparada', 'cinza'], enviada: ['no portal…', 'ambar'], gerada: ['gerada: pagar', 'ambar'], paga: ['paga', 'verde'], rejeitada: ['recusada', 'vermelho'], erro: ['erro', 'vermelho'], cancelada: ['cancelada', 'cinza'] };
+  function gnreHtml() {
+    if (!gn) return '';
+    if (gn.erro) return '<section class="cartao"><h2>GNRE do DIFAL</h2><p class="vazio">Não consegui ler as guias: ' + esc(gn.erro) + '</p></section>';
+    const lig = gn.cfg.ligado === true, porNota = {};
+    gn.guias.forEach(g => { (porNota[g.nfe_id] = porNota[g.nfe_id] || []).push(g); });
+    const semGuia = gn.notas.filter(x => !porNota[x.id]);
+    const moeda = v => R.moeda(Number(v || 0));
+    return '<section class="cartao"><h2>GNRE do DIFAL</h2>' +
+      '<p>Venda a consumidor final de outro estado (hoje, o RS) paga o ICMS DIFAL por nota, <strong>antes de a mercadoria sair</strong>. Com o robô ligado, ' +
+      'a guia sai sozinha no Portal GNRE uns minutos depois da NF-e autorizada: o código de barras vai para a conta "GNRE DIFAL" do Caixa e o PDF fica no 📎. ' +
+      '<strong>Pagar é sempre um clique seu</strong> (no Caixa, "Pagar no BB", ou no app do banco). No RS, o aromatizante paga também o FCP (2%) numa guia própria.</p>' +
+      '<p>' + (lig ? CRM.selo('robô ligado', 'verde') : CRM.selo('robô desligado', 'cinza')) + ' ' +
+      '<button type="button" class="btn ' + (lig ? 'sec' : 'ouro') + '" data-acao="gnre-ligar" data-id="' + (lig ? 'nao' : 'sim') + '">' + (lig ? 'Desligar o robô' : 'Ligar o robô') + '</button> ' +
+      '<button type="button" class="btn sec" data-acao="gnre-config">Conferir as regras do RS no portal</button></p>' +
+      (lig ? '' : '<p class="dica">Antes de ligar: o CNPJ da OneClean habilitado no Portal GNRE (Automação → Solicitar uso do WebService) e o serviço fiscal da VPS na versão 2026-11-06a ou mais nova. O "Gerar agora" de cada nota funciona mesmo com o robô desligado.</p>') +
+      (gn.cfg.consulta ? '<p class="dica">Regras conferidas no portal: ' + Object.keys(gn.cfg.consulta).map(k => esc(k) + ' (' + esc(String(gn.cfg.consulta[k].codigo || '?')) + ', ' + quando(gn.cfg.consulta[k].em) + ')').join(' · ') + '</p>' : '') +
+      (gn.guias.length || semGuia.length ? '<table class="tabela"><thead><tr><th>NF</th><th>UF</th><th>Guia</th><th class="num">Valor</th><th>Situação</th><th>Linha digitável / motivo</th><th></th></tr></thead><tbody>' +
+        semGuia.map(x => '<tr><td>' + esc(x.serie + '-' + x.numero) + '</td><td>—</td><td>—</td><td class="num">' + moeda(Number(x.totais.vICMSUFDest || 0) + Number(x.totais.vFCPUFDest || 0)) + '</td><td>' +
+          CRM.selo('sem guia', 'vermelho') + '</td><td><small>autorizada ' + quando(x.autorizada_em) + '</small></td><td><button type="button" class="btn mini" data-acao="gnre-gerar" data-id="' + esc(x.id) + '">Gerar agora</button></td></tr>').join('') +
+        gn.guias.map(g => { const s = SIT_GNRE[g.situacao] || [g.situacao, 'cinza'];
+          return '<tr><td>' + esc(g.nota || '') + '</td><td>' + esc(g.uf) + '</td><td>' + (g.receita === '100129' ? 'FCP' : 'DIFAL') + '</td><td class="num">' + moeda(Number(g.valor) + Number(g.valor_fcp || 0)) + '</td><td>' + CRM.selo(s[0], s[1]) + '</td><td><small>' +
+            esc(g.situacao === 'gerada' || g.situacao === 'paga' ? (g.linha_digitavel || '') + (g.vencimento ? ' · até ' + dataBR(g.vencimento) : '') : (g.motivo || '')) + '</small></td><td>' +
+            (g.pdf_caminho ? '<button type="button" class="mini" data-acao="gnre-pdf" data-id="' + esc(g.id) + '">PDF</button> ' : '') +
+            (['erro', 'rejeitada', 'enviada'].includes(g.situacao) ? '<button type="button" class="mini" data-acao="gnre-gerar" data-id="' + esc(g.nfe_id) + '">gerar de novo</button>' : '') + '</td></tr>'; }).join('') +
+        '</tbody></table>' : '<p class="vazio">Nenhuma nota com DIFAL nos últimos 60 dias.</p>') + '</section>';
+  }
+
   const nivel = p => p.nivel === 'grave' ? CRM.selo('grave', 'vermelho') : CRM.selo('atenção', 'ambar');
 
   function tela() {
@@ -77,6 +117,8 @@
       (ab.length ? '<table class="tabela"><thead><tr><th></th><th>Área</th><th>O que travou</th><th>O que fazer</th><th>Desde</th></tr></thead><tbody>' +
         ab.map(p => '<tr><td>' + nivel(p) + '</td><td>' + esc(p.area) + '</td><td>' + esc(p.texto) + '</td><td><small>' + esc(p.fazer || '') + '</small></td><td>' + quando(p.primeiro_em) + '</td></tr>').join('') + '</tbody></table>'
         : '<p class="vazio">Nada travado agora.</p>') + '</section>' +
+
+      gnreHtml() +
 
       '<section class="cartao"><h2>Prazos (10 dias para trás e 30 para frente)</h2>' +
       '<p class="dica">Cada prazo diz a situação pelo dado real: guia lançada no Caixa, XML enviado ao contador, contas e títulos do dia. Declaração que só o contador entrega fica "a confirmar" até você marcar. Sem a prova, o prazo vira aviso no dia anterior e grave no dia.</p>' +
@@ -154,6 +196,38 @@
   CRM.ajustes.secao('agentes', 'Fiscal dos agentes', tela, depois, 'historico');
   Object.assign(CRM.acoes, {
     'agentes-atualizar': () => { sit = null; erro = null; CRM.render(); },
+    'gnre-gerar': async id => {
+      CRM.toast('Mandando ao Portal GNRE… (leva uns 40 segundos)');
+      try {
+        const r = await CRM.store().gnre({ acao: 'gerar', nfe_id: id });
+        const res = (r.resultados || []).concat((r.enviadas || []).filter(x => x.situacao !== 'enviada'));
+        const ger = res.filter(x => x.situacao === 'gerada').length, ruim = res.find(x => x.motivo);
+        CRM.toast(ger ? 'GNRE gerada: o código de barras já está na conta do Caixa.' : ruim ? 'A guia não saiu: ' + ruim.motivo : 'Enviada; o resultado chega na próxima volta do robô (até 10 min).');
+      } catch (e) { CRM.falhou(e); }
+      await carrega();
+    },
+    'gnre-pdf': async id => {
+      const w = window.open('', '_blank');
+      try { const r = await CRM.store().gnre({ acao: 'pdf', id }); if (w) w.location = r.url; else window.open(r.url, '_blank'); } catch (e) { if (w) w.close(); CRM.falhou(e); }
+    },
+    'gnre-ligar': async v => {
+      try {
+        const atual = (gn && gn.cfg) || {};
+        if (v === 'sim' && !confirm('Ligar o robô da GNRE? A partir de agora, cada NF-e com DIFAL gera a guia sozinha no Portal GNRE (pagar continua sendo com você).')) return;
+        await CRM.salvarConfig({ gnre: Object.assign({}, atual, { ligado: v === 'sim' }) });
+        CRM.toast(v === 'sim' ? 'Robô da GNRE ligado.' : 'Robô da GNRE desligado.');
+      } catch (e) { CRM.falhou(e); }
+      await carrega();
+    },
+    'gnre-config': async () => {
+      CRM.toast('Consultando as regras do RS no Portal GNRE…');
+      try {
+        const a = await CRM.store().gnre({ acao: 'configuf', uf: 'RS', receita: '100102' });
+        const b = await CRM.store().gnre({ acao: 'configuf', uf: 'RS', receita: '100129' });
+        CRM.toast('Portal respondeu: DIFAL ' + (a.codigo || '?') + ' ' + (a.descricao || '') + ' · FCP ' + (b.codigo || '?') + ' ' + (b.descricao || '') + '. Me chame para eu conferir as regras com a resposta.');
+      } catch (e) { CRM.falhou(e); }
+      await carrega();
+    },
     'agentes-prazo': async id => {
       const [chave, comp, situ] = String(id).split('|');
       try { await rpc('crm_fiscal_marcar_prazo', { p_chave: chave, p_competencia: comp, p_situacao: situ || null }); await carrega(); } catch (e) { CRM.falhou(e); }

@@ -10756,6 +10756,7 @@ begin
         ('crm-bb-extrato',       'Extrato do BB',                8, 22, 70,  null, false, 'grave'),
         ('crm-nfe-email',        'E-mail das NF-e',              8, 22, 45,  null, false, 'grave'),
         ('crm-bb-pagar-ciclo',   'Pagamentos pelo BB',           8, 22, 30,  null, false, 'atencao'),
+        ('crm-gnre',             'GNRE do DIFAL',                8, 21, 30,  null, false, 'grave'),
         ('crm-leads-sugeridos',  'Leads sugeridos',              null, null, null, 7, true, 'grave'),
         ('crm-cobranca-avisos',  'Cobrança automática',          null, null, null, 10, true, 'grave'),
         ('crm-qualificacao',     'Estrelas dos clientes',        null, null, null, 7, false, 'atencao'),
@@ -11023,6 +11024,36 @@ begin
     end loop;
   exception when others then
     achados := achados || crm_interno.fiscal_p('conferencia:certidoes', 'Certidões', 'atencao', 'O fiscal não conseguiu conferir as certidões (' || left(sqlerrm, 120) || ').', 'Me chamar: a conferência quebrou.');
+  end;
+
+  -- 16b. GNRE do DIFAL (06/11/2026): guia recusada ou com erro, nota com DIFAL sem guia (robô ligado), guia gerada e não paga
+  begin
+    for r in select g.id, g.nota, g.uf, g.situacao, g.motivo, g.valor, g.valor_fcp from public.crm_gnre g
+              where g.situacao in ('rejeitada', 'erro') and g.ambiente = 'producao' and (g.situacao = 'rejeitada' or g.tentativas >= 2) loop
+      achados := achados || crm_interno.fiscal_p('gnre:' || r.id, 'GNRE do DIFAL', 'grave',
+        'A GNRE do DIFAL da NF ' || r.nota || ' (' || r.uf || ', ' || crm_interno.fiscal_reais(r.valor + r.valor_fcp) || ') não saiu: ' || left(coalesce(r.motivo, 'sem motivo'), 160) || '.',
+        'Me chamar com esse motivo. A mercadoria só sai com a guia paga (se for urgente, fazer a guia no Portal GNRE à mão).');
+    end loop;
+    if coalesce((cfg -> 'gnre' ->> 'ligado')::boolean, false) then
+      select count(*), string_agg(nf.serie || '-' || nf.numero, ', ') into n, lst from public.crm_nfe nf
+       where nf.ambiente = 'producao' and nf.situacao = 'autorizada' and nf.autorizada_em between now() - interval '20 days' and now() - interval '1 hour'
+         and coalesce((nf.totais ->> 'vICMSUFDest')::numeric, 0) + coalesce((nf.totais ->> 'vFCPUFDest')::numeric, 0) > 0
+         and (select count(*) from public.crm_gnre g where g.nfe_id = nf.id and g.situacao in ('gerada', 'paga', 'cancelada', 'rejeitada', 'erro'))
+             < (case when coalesce((nf.totais ->> 'vICMSUFDest')::numeric, 0) > 0 then 1 else 0 end) + (case when coalesce((nf.totais ->> 'vFCPUFDest')::numeric, 0) > 0 then 1 else 0 end);
+      if n > 0 then
+        achados := achados || crm_interno.fiscal_p('gnre:sem-guia', 'GNRE do DIFAL', 'grave',
+          'Nota com DIFAL autorizada há mais de 1 hora sem GNRE: NF ' || lst || '. O robô devia ter gerado a guia.', 'Me chamar: conferir o agendador crm-gnre e o serviço fiscal.');
+      end if;
+    end if;
+    select count(*), string_agg(g.nota, ', ') into n, lst from public.crm_gnre g left join public.crm_fin_lancamentos l on l.id = g.lancamento_id
+     where g.situacao = 'gerada' and g.ambiente = 'producao' and coalesce(l.situacao, 'aberto') <> 'pago' and coalesce(g.vencimento, (g.gerada_em at time zone 'America/Sao_Paulo')::date) < hoje;
+    if n > 0 then
+      achados := achados || crm_interno.fiscal_p('gnre:nao-paga', 'GNRE do DIFAL', 'grave',
+        'GNRE gerada e não paga no dia (NF ' || lst || '): o ICMS DIFAL é devido antes da saída da mercadoria.',
+        'Pagar a guia (Caixa → a conta "GNRE DIFAL", com o código de barras) e dar o ✓; se a guia venceu, gerar de novo em Fiscal → GNRE.');
+    end if;
+  exception when others then
+    achados := achados || crm_interno.fiscal_p('conferir:gnre', F, 'atencao', 'Não consegui conferir a GNRE: ' || left(sqlerrm, 120), 'Me chamar.');
   end;
 
   -- 17. externos (certificado A1, serviço fiscal, fiscal da Agilité): vêm da Edge Function
@@ -11336,3 +11367,92 @@ revoke all on function public.crm_fiscal_prazos(date, date) from public, anon;
 revoke all on function public.crm_fiscal_marcar_prazo(text, text, text) from public, anon;
 revoke all on function public.crm_fiscal_certidao(text, date, text) from public, anon;
 revoke all on public.crm_fiscal_marcas, public.crm_fiscal_certidoes from anon;
+
+-- ============================================================ GNRE do DIFAL (06/11/2026)
+-- Pedido do Anderson: "pode montar o robô da GNRE do DIFAL". Nota de produção autorizada para consumidor final não contribuinte
+-- de outra UF (hoje o RS) → a Edge Function crm-gnre gera a guia no Portal GNRE pelo serviço fiscal (servico-fiscal/gnre.js,
+-- TLS mútuo com o A1), guarda o PDF (crm-caixa-anexos, gnre/<chave>-<receita>.pdf) e põe o código de barras na conta do Caixa.
+-- Uma linha por nota e receita: 100102 = ICMS DIFAL; 100129 = FCP da UF de destino (guia própria no RS). Pagar é clique do Anderson.
+create table if not exists public.crm_gnre (
+  id uuid primary key default gen_random_uuid(),
+  nfe_id uuid not null references public.crm_nfe(id),
+  receita text not null default '100102',
+  ambiente text not null default 'producao',
+  nota text,                         -- '1-2901'
+  chave text,                        -- chave da NF-e (documento de origem)
+  uf text not null,                  -- UF favorecida
+  valor numeric(14,2) not null,      -- valor da guia (o DIFAL na 100102, o FCP na 100129)
+  valor_fcp numeric(14,2) not null default 0,   -- só quando o FCP vai junto na mesma guia
+  vencimento date,
+  situacao text not null default 'preparada' check (situacao in ('preparada', 'enviada', 'gerada', 'rejeitada', 'erro', 'paga', 'cancelada')),
+  recibo text,                       -- número do recibo do lote na GNRE
+  codigo_barras text,
+  linha_digitavel text,
+  numero_controle text,
+  pdf_caminho text,                  -- bucket crm-caixa-anexos: gnre/<chave>-<receita>.pdf (o 📎 da conta no Caixa)
+  motivo text,
+  tentativas int not null default 0,
+  lancamento_id uuid,                -- a conta no Caixa
+  retorno jsonb,
+  enviado_em timestamptz,
+  gerada_em timestamptz,
+  criado_em timestamptz not null default now(),
+  atualizado_em timestamptz not null default now(),
+  constraint crm_gnre_nfe_receita_key unique (nfe_id, receita)
+);
+alter table public.crm_gnre enable row level security;
+do $p$ begin
+  create policy ler on public.crm_gnre for select to authenticated using ((select public.crm_eh_admin()) or (select public.crm_eh_logistica()));
+exception when duplicate_object then null; end $p$;
+revoke all on public.crm_gnre from anon;
+
+-- o agendador (de 10 em 10 min, 7h–21h): encerra a guia paga no Caixa e chama a crm-gnre só quando há guia que falta ou
+-- esperando o resultado (a mesma senha do agendador do BB, crm_interno.bb_cfg)
+create or replace function public.crm_gnre_tick() returns void language plpgsql security definer set search_path = public as $$
+declare c record;
+begin
+  if coalesce(auth.role(), '') in ('anon', 'authenticated') then raise exception 'só o agendador'; end if;
+  -- a conta da guia paga no Caixa (✓ ou "Pagar no BB") encerra a guia
+  update public.crm_gnre g set situacao = 'paga', atualizado_em = now()
+    from public.crm_fin_lancamentos l
+   where l.id = g.lancamento_id and g.situacao = 'gerada' and l.situacao = 'pago';
+  if not coalesce((select (dados -> 'gnre' ->> 'ligado')::boolean from public.crm_config where id = 1), false) then return; end if;
+  -- há nota com DIFAL (e FCP) com guia que falta, ou guia esperando o resultado
+  if not exists (
+       select 1 from public.crm_nfe n
+        where n.ambiente = 'producao' and n.situacao = 'autorizada' and n.autorizada_em > now() - interval '20 days'
+          and coalesce((n.totais ->> 'vICMSUFDest')::numeric, 0) + coalesce((n.totais ->> 'vFCPUFDest')::numeric, 0) > 0
+          and (select count(*) from public.crm_gnre g where g.nfe_id = n.id
+                 and (g.situacao in ('gerada', 'paga', 'cancelada', 'rejeitada')
+                      or (g.situacao = 'erro' and (g.tentativas >= 6 or g.atualizado_em > now() - interval '30 minutes'))))
+              < (case when coalesce((n.totais ->> 'vICMSUFDest')::numeric, 0) > 0 then 1 else 0 end) + (case when coalesce((n.totais ->> 'vFCPUFDest')::numeric, 0) > 0 then 1 else 0 end))
+     then return; end if;
+  select * into c from crm_interno.bb_cfg where id = 1;
+  if c.url is null or c.anon is null then return; end if;
+  perform net.http_post(url := replace(c.url, '/crm-bb', '/crm-gnre'), body := jsonb_build_object('acao', 'ciclo', 'origem', 'agendador'),
+    headers := jsonb_build_object('Content-Type', 'application/json', 'Authorization', 'Bearer ' || c.anon, 'x-crm-agendador', c.senha), timeout_milliseconds := 150000);
+end;
+$$;
+
+-- o retorno do GnreConfigUF de uma UF/receita (só a Edge Function, com a chave de serviço): fica em crm_config.dados.gnre.consulta
+create or replace function public.crm_gnre_config_uf(p_uf text, p_receita text, p_retorno jsonb) returns void language plpgsql security definer set search_path = public as $$
+begin
+  if coalesce(auth.role(), '') in ('anon', 'authenticated') then raise exception 'só o servidor'; end if;
+  update public.crm_config set dados = jsonb_set(coalesce(dados, '{}'::jsonb), '{gnre}',
+      coalesce(dados -> 'gnre', '{}'::jsonb) || jsonb_build_object('consulta', coalesce(dados -> 'gnre' -> 'consulta', '{}'::jsonb)
+        || jsonb_build_object(upper(p_uf) || ':' || p_receita, jsonb_build_object('em', now(), 'codigo', p_retorno -> 'codigo', 'descricao', p_retorno -> 'descricao', 'bruto', left(p_retorno ->> 'bruto', 8000)))))
+   where id = 1;
+end;
+$$;
+revoke all on function public.crm_gnre_tick() from public, anon, authenticated;
+revoke all on function public.crm_gnre_config_uf(text, text, jsonb) from public, anon, authenticated;
+
+-- desligado até o Anderson habilitar o CNPJ no Portal GNRE e o serviço fiscal da VPS ter a rota /gnre
+update public.crm_config set dados = jsonb_set(coalesce(dados, '{}'::jsonb), '{gnre}', '{"ligado": false, "ambiente": "producao"}'::jsonb || coalesce(dados -> 'gnre', '{}'::jsonb))
+ where id = 1;
+
+do $c$ begin
+  if not exists (select 1 from cron.job where jobname = 'crm-gnre') then
+    perform cron.schedule('crm-gnre', '*/10 10-23,0 * * *', 'select public.crm_gnre_tick()');
+  end if;
+end $c$;

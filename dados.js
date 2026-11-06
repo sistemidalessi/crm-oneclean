@@ -1052,6 +1052,13 @@
     if (r.error) throw await erroDaFuncao(r);
     return r.data;
   };
+  // GNRE do DIFAL (06/11/2026): Edge Function crm-gnre (administrador e logística)
+  Supa.prototype.gnre = async function (corpo) {
+    const r = await this.sb.functions.invoke('crm-gnre', { body: corpo });
+    if (r.error) throw await erroDaFuncao(r);
+    return r.data;
+  };
+  Local.prototype.gnre = async function () { return Promise.reject(new Error('a GNRE só funciona com o Supabase ligado')); };
   Local.prototype.fiscalAgentes = async function () { return Promise.reject(new Error('o fiscal dos agentes só funciona com o Supabase ligado')); };
   Local.prototype.cobranca = async function (corpo) { return corpo && corpo.acao === 'situacao' ? { local: true, avisos: [] } : Promise.reject(new Error('o aviso de atraso só funciona com o Supabase ligado')); };
   Supa.prototype.email = async function (corpo) {

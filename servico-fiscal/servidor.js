@@ -27,8 +27,9 @@ const PD = require('./pedido');
 const O = require('./outras');
 const D = require('./dfe');
 const BB = require('./bb');
+const G = require('./gnre');
 
-const VERSAO = '2026-11-05a';
+const VERSAO = '2026-11-06a';
 const env = process.env;
 let cert = null;   // { certPem, keyPem, dados }
 
@@ -135,7 +136,9 @@ const ROTAS = {
   // resposta definitiva à nota de compra (confirmacao | desconhecimento | nao_realizada, esta com justificativa)
   'POST /manifestar': async b => D.manifesta(cfgSefaz(b.ambiente), { cnpj: b.cnpj, chave: b.chave, quando: agoraSP(), tipo: b.tipo, justificativa: b.justificativa }),
   // Banco do Brasil com o A1 (04/11/2026): extrato da conta (conciliação) e, depois, pagamentos. Ver bb.js.
-  'POST /bb': async b => BB.chama(cfgSefaz('producao'), b)
+  'POST /bb': async b => BB.chama(cfgSefaz('producao'), b),
+  // GNRE do DIFAL (06/11/2026): lote, resultado (linha digitável, código de barras, Pix e PDF) e configuração da UF. Ver gnre.js.
+  'POST /gnre': async b => G.rota(cfgSefaz(b.ambiente === 'homologacao' ? 'homologacao' : 'producao'), b)
 };
 
 function autorizado(req) {
