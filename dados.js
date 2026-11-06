@@ -1968,6 +1968,10 @@
     return unwrap(await this.sb.rpc('crm_fin_extrato_resolver', { p_id: id, p_acao: acao, p_lancamento: o.lancamento || null, p_categoria: o.categoria || null,
       p_descricao: o.descricao || null, p_obs: o.obs || null }));
   };
+  // 06/11/2026: uma linha do banco = soma de vários lançamentos (Pix que junta várias contas)
+  Supa.prototype.extratoLigarSoma = async function (id, ids) {
+    return unwrap(await this.sb.rpc('crm_fin_extrato_ligar_soma', { p_id: id, p_ids: ids }));
+  };
   // o que a cobrança automática fez por título (05/11/2026): boletos atualizados (crm_boletos, origem auto) e avisos do cartório
   Supa.prototype.cobrancaFeita = async function (desde) {
     const [b, a] = await Promise.all([

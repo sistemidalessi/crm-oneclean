@@ -10791,9 +10791,42 @@ begin
 end;
 $$;
 
+-- 06/11/2026: uma linha do banco = soma de vários lançamentos (Pix que junta várias contas). Busca em profundidade, maior
+-- valor primeiro, cortando quando o que sobra não alcança o alvo; no máximo 16 lançamentos por busca.
+create or replace function public.crm_fin_soma_dfs(v bigint[], suf bigint[], i int, resto bigint, esc int[])
+returns int[] language plpgsql immutable set search_path = public as $$
+declare r int[];
+begin
+  if resto = 0 then return esc; end if;
+  if resto < 0 or i > coalesce(array_length(v, 1), 0) or suf[i] < resto then return null; end if;
+  if v[i] <= resto then
+    r := public.crm_fin_soma_dfs(v, suf, i + 1, resto - v[i], esc || i);
+    if r is not null then return r; end if;
+  end if;
+  return public.crm_fin_soma_dfs(v, suf, i + 1, resto, esc);
+end;
+$$;
+
+create or replace function public.crm_fin_soma_achar(p_ids uuid[], p_vals numeric[], p_alvo numeric)
+returns uuid[] language plpgsql immutable set search_path = public as $$
+declare n int := coalesce(array_length(p_ids, 1), 0); v bigint[]; suf bigint[]; k int; r int[];
+begin
+  if n < 2 or n > 16 or p_alvo is null then return null; end if;
+  v := array(select round(x * 100)::bigint from unnest(p_vals) x);
+  suf := array_fill(0::bigint, array[n + 1]);
+  for k in reverse n..1 loop suf[k] := suf[k + 1] + v[k]; end loop;
+  r := public.crm_fin_soma_dfs(v, suf, 1, round(p_alvo * 100)::bigint, '{}');
+  if r is null or coalesce(array_length(r, 1), 0) < 2 then return null; end if;
+  return array(select p_ids[j] from unnest(r) j);
+end;
+$$;
+revoke all on function public.crm_fin_soma_dfs(bigint[], bigint[], int, bigint, int[]) from public, anon, authenticated;
+revoke all on function public.crm_fin_soma_achar(uuid[], numeric[], numeric) from public, anon, authenticated;
+
 create or replace function public.crm_fin_extrato_conciliar(p_desde date default null) returns jsonb
 language plpgsql security definer set search_path = public as $$
 declare x record; l record; ids uuid[]; soma numeric; banco numeric; feitos jsonb := '{"conferido":0,"lancado":0,"conferir":0}'::jsonb; sug jsonb; emp uuid; tp text;
+  nome text; grp int; cids uuid[]; cvals numeric[]; sug_soma jsonb;
   desde date := coalesce(p_desde, (now() at time zone 'America/Sao_Paulo')::date - 10);
 begin
   for x in select * from public.crm_fin_extrato where situacao = 'conferir' and data >= desde order by data, id loop
@@ -10845,8 +10878,35 @@ begin
       update public.crm_fin_extrato set situacao = 'lancado', lancamento_ids = ids, sugestoes = null where id = x.id;
       feitos := jsonb_set(feitos, '{lancado}', to_jsonb((feitos->>'lancado')::int + 1)); continue;
     end if;
+    -- 06/11/2026: um Pix ou pagamento que junta vários lançamentos do mesmo dia (ex.: um Pix à empresa irmã que paga várias contas).
+    -- Procura primeiro entre as transferências entre empresas do dia, depois entre os de nome parecido com o do banco: achou a
+    -- soma exata, confere sozinho. Entre todos os do dia, só sugere (o administrador confirma com um clique).
+    nome := upper(split_part(regexp_replace(coalesce(x.complemento, ''), '^\d\d/\d\d \d\d:\d\d (\d+ )?', ''), ' ', 1));
+    ids := null; grp := 0; sug_soma := null;
+    while ids is null and grp < 3 loop
+      grp := grp + 1;
+      if grp = 2 and length(nome) < 4 then continue; end if;
+      select array_agg(c.id order by c.valor desc), array_agg(c.valor order by c.valor desc) into cids, cvals
+        from (select l3.id, l3.valor from public.crm_fin_lancamentos l3
+               where l3.situacao = 'pago' and l3.baixa = 'caixa' and l3.pago_em = x.data and l3.tipo = tp and l3.valor < x.valor
+                 and not public.crm_fin_extrato_usado(l3.id)
+                 and case grp when 1 then l3.entre_empresas
+                              when 2 then upper(coalesce(l3.descricao, '') || ' ' || coalesce(l3.fornecedor, '')) like '%' || nome || '%'
+                              else true end
+               order by l3.valor desc limit 16) c;
+      ids := public.crm_fin_soma_achar(cids, cvals, x.valor);
+    end loop;
+    if ids is not null and grp < 3 then
+      update public.crm_fin_extrato set situacao = 'conferido', lancamento_ids = ids, sugestoes = null,
+          obs = 'soma de ' || array_length(ids, 1) || ' lançamentos do dia' where id = x.id;
+      feitos := jsonb_set(feitos, '{conferido}', to_jsonb((feitos->>'conferido')::int + 1)); continue;
+    end if;
+    if ids is not null then
+      sug_soma := jsonb_build_object('tipo', 'soma', 'ids', to_jsonb(ids), 'itens',
+        (select jsonb_agg(jsonb_build_object('descricao', l3.descricao, 'valor', l3.valor) order by l3.valor desc) from public.crm_fin_lancamentos l3 where l3.id = any(ids)));
+    end if;
     -- sem par: sugestões para o administrador (conta aberta de mesmo valor, o mesmo valor baixado em outro dia, títulos do CNPJ)
-    sug := '[]'::jsonb;
+    sug := case when sug_soma is null then '[]'::jsonb else jsonb_build_array(sug_soma) end;
     sug := sug || coalesce((select jsonb_agg(jsonb_build_object('id', l2.id, 'tipo', 'aberto', 'descricao', l2.descricao, 'vencimento', l2.vencimento) order by abs(l2.vencimento - x.data))
       from (select * from public.crm_fin_lancamentos l3
              where l3.situacao = 'aberto' and abs(l3.valor - x.valor) < 0.005 and l3.tipo = tp
@@ -10871,6 +10931,35 @@ begin
   return feitos;
 end;
 $$;
+
+-- 06/11/2026: o administrador junta à mão uma linha do banco com vários lançamentos ("Juntar lançamentos…" ou a sugestão
+-- "São estes N"). A soma tem que bater no centavo; o que estiver em aberto ganha a baixa no dia do extrato.
+create or replace function public.crm_fin_extrato_ligar_soma(p_id bigint, p_ids uuid[]) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare x record; tp text; soma numeric; n int;
+begin
+  if not public.crm_eh_admin() then raise exception 'só o administrador'; end if;
+  select * into x from public.crm_fin_extrato where id = p_id for update;
+  if x.id is null then raise exception 'linha do extrato não encontrada'; end if;
+  if x.situacao <> 'conferir' then raise exception 'esta linha do extrato já foi resolvida'; end if;
+  if coalesce(array_length(p_ids, 1), 0) < 2 then raise exception 'escolha pelo menos dois lançamentos'; end if;
+  tp := case when x.sinal = 'C' then 'entrada' else 'saida' end;
+  select count(*), sum(valor) into n, soma from public.crm_fin_lancamentos
+   where id = any(p_ids) and tipo = tp and situacao in ('pago', 'aberto') and not public.crm_fin_extrato_usado(id);
+  if n <> (select count(distinct u) from unnest(p_ids) u) then raise exception 'algum lançamento não serve (é de outro tipo, já está ligado ao extrato ou foi excluído)'; end if;
+  if abs(soma - x.valor) >= 0.005 then
+    raise exception 'a soma dos escolhidos (%) não bate com o banco (%)', translate(to_char(soma, 'FM999,999,990.00'), ',.', '.,'), translate(to_char(x.valor, 'FM999,999,990.00'), ',.', '.,');
+  end if;
+  update public.crm_fin_lancamentos set situacao = 'pago', baixa = 'caixa', pago_em = x.data, baixado_em = coalesce(baixado_em, now()), atualizado_em = now(),
+      observacoes = coalesce(observacoes || ' · ', '') || 'baixado pelo extrato do BB (' || to_char(x.data, 'DD/MM') || ', junto com outros ' || (n - 1) || ')'
+   where id = any(p_ids) and (situacao <> 'pago' or pago_em is distinct from x.data or baixa is distinct from 'caixa');
+  update public.crm_fin_extrato set situacao = 'conferido', lancamento_ids = array(select distinct u from unnest(p_ids) u), sugestoes = null,
+      obs = 'soma de ' || n || ' lançamentos (junto à mão)', resolvido_em = now(), resolvido_por = auth.uid() where id = x.id;
+  return jsonb_build_object('ok', true, 'n', n);
+end;
+$$;
+revoke all on function public.crm_fin_extrato_ligar_soma(bigint, uuid[]) from public, anon;
+grant execute on function public.crm_fin_extrato_ligar_soma(bigint, uuid[]) to authenticated;
 
 -- agendador (de 30 em 30 minutos, das 7h15 às 21h45 em SP; aplicado em 05/11/2026)
 -- select cron.schedule('crm-bb-extrato', '15,45 10-23,0 * * *', $$select public.crm_bb_chamar('{"acao":"extrato_conciliar"}'::jsonb)$$);

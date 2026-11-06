@@ -61,7 +61,10 @@
       if (!sg) return '<small>nenhuma conta de mesmo valor perto dessa data</small>';
       if (sg.cobranca) return '<small>Cobrança do BB no dia ' + esc(R.moeda(sg.cobranca.banco_no_dia)) + ' × boletos baixados no Caixa ' + esc(R.moeda(sg.cobranca.boletos_no_caixa)) +
         ' (' + sg.cobranca.qtd + '): falta dar baixa em algum boleto desse dia, ou algum foi baixado em outro dia</small>';
-      return (Array.isArray(sg) ? sg : []).map(y => y.id ? b('cx-ext-ligar', x.id + '|' + y.id, (y.tipo === 'aberto' ? 'É esta: ' : 'É esta (baixada em ' + dm(y.pago_em) + '): ') + String(y.descricao || '').slice(0, 40) +
+      // 06/11/2026: um Pix que junta vários lançamentos do dia (a conciliação achou a soma exata)
+      return (Array.isArray(sg) ? sg : []).map(y => y.tipo === 'soma' ? b('cx-ext-soma', String(x.id), 'São estes ' + (y.ids || []).length + ': ' +
+            (y.itens || []).map(i => String(i.descricao || '').slice(0, 28) + ' ' + R.moeda(i.valor)).join(' + '), 'sec', 'liga esta linha do banco aos lançamentos que somam o mesmo valor')
+          : y.id ? b('cx-ext-ligar', x.id + '|' + y.id, (y.tipo === 'aberto' ? 'É esta: ' : 'É esta (baixada em ' + dm(y.pago_em) + '): ') + String(y.descricao || '').slice(0, 40) +
             (y.vencimento ? ' · vence ' + dm(y.vencimento) : ''), 'sec', y.tipo === 'aberto' ? 'dá a baixa nesta conta no dia do extrato' : 'acerta o dia da baixa para o dia do extrato')
           : y.tipo === 'titulo' ? '<small>título ' + esc(y.duplicata) + ' · ' + esc(R.moeda(y.valor)) + ' · vence ' + esc(dm(y.vencimento)) + '</small>'
           : y.tipo === 'cliente' ? '<small>do cliente ' + esc(y.nome) + '</small>' : '').join(' ');
@@ -69,7 +72,7 @@
     return (pend.length ? '<details class="cartao cx-venc" data-chave="extrato-bb" open><summary><strong>Extrato do BB: ' + pend.length + ' lançamento(s) para conferir</strong> <small>estão no banco e o CRM não achou no Caixa (mesmo valor no mesmo dia). Ligue à conta certa, lance ou ignore.</small></summary>' +
         '<div class="tabela-rolagem"><table class="tabela"><tbody>' + pend.map(x => '<tr><td>' + esc(dm(x.data)) + '</td><td><strong>' + esc(x.historico) + '</strong>' + (x.complemento ? '<small>' + esc(x.complemento) + '</small>' : '') +
           '<div class="cx-ext-sug">' + sugs(x) + '</div></td><td class="num ' + (x.sinal === 'D' ? 'cx-neg' : 'cx-pos') + '">' + esc(R.moeda(sinalV(x))) + '</td>' +
-          '<td class="acoes-linha">' + b('cx-ext-lancar', x.id, 'Lançar…') + b('cx-ext-ignorar', x.id, 'Ignorar…', 'sec') + '</td></tr>').join('') + '</tbody></table></div></details>' : '') +
+          '<td class="acoes-linha">' + b('cx-ext-lancar', x.id, 'Lançar…') + b('cx-ext-juntar', x.id, 'Juntar lançamentos…', 'sec') + b('cx-ext-ignorar', x.id, 'Ignorar…', 'sec') + '</td></tr>').join('') + '</tbody></table></div></details>' : '') +
       faltaNoBanco(b) +
       (ok.length ? '<details class="cartao cx-venc" data-chave="extrato-bb-ok"><summary><strong>Extrato do BB conferido (10 dias): ' + ok.length + ' lançamento(s)</strong> <small>batem com o Caixa' +
         (ok.some(x => x.situacao === 'lancado') ? '; as tarifas do banco foram lançadas sozinhas' : '') + '</small></summary>' +
@@ -77,17 +80,29 @@
           '<td>' + CRM.selo(x.situacao === 'lancado' ? 'lançado pelo extrato' : 'confere', x.situacao === 'lancado' ? 'azul' : 'verde') + '</td><td class="num">' + esc(R.moeda(sinalV(x))) + '</td></tr>').join('') +
         '</tbody></table></div></details>' : '');
   }
-  // o outro lado: baixado no Caixa (dia já fechado no banco) e que não apareceu no extrato — pagamento que não saiu, dia errado
-  function faltaNoBanco(b) {
+  // o outro lado: baixado no Caixa e que não apareceu no extrato — pagamento que não saiu, dia errado, valor errado.
+  // 06/11/2026 (devolução à empresa irmã dada como paga inteira, e só parte saiu do banco): vale também para HOJE, quando o extrato foi
+  // lido depois do ✓ (Pix e boleto aparecem na hora). Tarifa só depois de 5 dias (o BB cobra a tarifa de Pix agrupada,
+  // dias depois); rendimento da aplicação não vem como linha no extrato.
+  function semLinhaNoBanco() {
+    if (!extrato) return [];
     const desde = ((E().cfg || {}).extrato || {}).desde || '2026-11-05';
     const usados = new Set([].concat(...((extrato && extrato.linhas) || []).map(x => x.lancamento_ids || [])));
     const lidos = new Set(((extrato && extrato.linhas) || []).map(x => x.data));
-    const l = (F.lancamentos || []).filter(x => x.situacao === 'pago' && x.baixa === 'caixa' && x.pago_em && x.pago_em >= desde && x.pago_em < hoje() &&
-      lidos.has(x.pago_em) && !usados.has(x.id)).sort((a, z) => a.pago_em.localeCompare(z.pago_em));
+    const sb = extrato.saldo || {}, lidoHoje = sb.data === hoje() && sb.lido_em ? Date.parse(sb.lido_em) : 0;
+    return (F.lancamentos || []).filter(x => x.situacao === 'pago' && x.baixa === 'caixa' && x.pago_em && x.pago_em >= desde && !usados.has(x.id) &&
+      x.categoria !== 'Rendimentos' && (x.categoria !== 'Tarifas bancárias' || x.pago_em <= R.somaDias(hoje(), -5)) &&
+      (x.pago_em < hoje() ? lidos.has(x.pago_em) : x.pago_em === hoje() && lidoHoje && x.baixado_em && Date.parse(x.baixado_em) < lidoHoje))
+      .sort((a, z) => a.pago_em.localeCompare(z.pago_em) || Number(z.valor) - Number(a.valor));
+  }
+  function faltaNoBanco(b) {
+    const l = semLinhaNoBanco();
     if (!l.length) return '';
-    return '<details class="cartao cx-venc" data-chave="extrato-bb-falta" open><summary><strong>No Caixa, mas não no extrato do BB: ' + l.length + '</strong> <small>baixados como pagos/recebidos num dia que o banco já fechou e que não aparecem no extrato: confira se saíram mesmo ou se o dia está errado (✎ muda o dia).</small></summary>' +
+    const tot = l.reduce((t, x) => t + (x.tipo === 'saida' ? -1 : 1) * Number(x.valor || 0), 0);
+    return '<details class="cartao cx-venc cx-alerta" data-chave="extrato-bb-falta" open><summary><strong>⚠ Pago no Caixa, mas não saiu no banco: ' + l.length + ' (' + esc(R.moeda(tot)) + ')</strong> <small>dados como pagos/recebidos e que não aparecem no extrato do BB já lido. Não saiu? "Não saiu: reabrir". Saiu junto com outros num Pix só? Use "Juntar lançamentos…" na linha do banco. Dia ou valor errado? ✎.</small></summary>' +
       '<div class="tabela-rolagem"><table class="tabela"><tbody>' + l.map(x => '<tr><td>' + esc(dm(x.pago_em)) + '</td><td>' + esc(x.descricao) + (x.categoria ? '<small>' + esc(x.categoria) + '</small>' : '') + '</td>' +
-        '<td class="num ' + (x.tipo === 'saida' ? 'cx-neg' : 'cx-pos') + '">' + esc(R.moeda((x.tipo === 'saida' ? -1 : 1) * Number(x.valor || 0))) + '</td><td class="acoes-linha">' + b('cx-editar', x.id, '✎') + '</td></tr>').join('') +
+        '<td class="num ' + (x.tipo === 'saida' ? 'cx-neg' : 'cx-pos') + '">' + esc(R.moeda((x.tipo === 'saida' ? -1 : 1) * Number(x.valor || 0))) + '</td><td class="acoes-linha">' +
+        b('cx-ext-naosaiu', x.id, 'Não saiu: reabrir', 'sec', 'volta a conta para "em aberto" (o ✓ foi dado, mas o dinheiro não saiu/entrou)') + b('cx-editar', x.id, '✎') + '</td></tr>').join('') +
       '</tbody></table></div></details>';
   }
   function saldoBB(s) {
@@ -96,7 +111,9 @@
     const lido = sb.lido_em ? new Date(sb.lido_em).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).replace(',', ' às') : '';
     const dif = s.saldo == null ? null : Math.round((s.saldo - Number(sb.saldo)) * 100) / 100;
     return '<small class="cx-bb">no BB ' + esc(R.moeda(sb.saldo)) + (lido ? ' (lido ' + esc(lido) + ')' : '') + ' · ' +
-      (dif == null ? '' : Math.abs(dif) < 0.01 ? '<span class="cx-pos">✓ igual ao CRM</span>' : '<span class="cx-neg">diferença ' + esc(R.moeda(dif)) + '</span>') +
+      (dif == null ? '' : Math.abs(dif) < 0.01 ? '<span class="cx-pos">✓ igual ao CRM</span>' : '<span class="cx-neg">diferença ' + esc(R.moeda(dif)) +
+        (() => { const n = semLinhaNoBanco().length, p = ((extrato && extrato.linhas) || []).filter(x => x.situacao === 'conferir').length;
+          return n || p ? ' (veja abaixo: ' + [n ? n + ' pago(s) no Caixa sem linha no banco' : '', p ? p + ' do banco para conferir' : ''].filter(Boolean).join(', ') + ')' : ''; })() + '</span>') +
       ' <button type="button" class="mini" data-acao="cx-ext-ler" title="lê o extrato do BB agora e confere com o Caixa (sozinho, de 30 em 30 minutos)">Ler o extrato agora</button></small>';
   }
 
@@ -1154,11 +1171,55 @@
         valores: { descricao: (x.complemento || x.historico || '').replace(/^\d\d\/\d\d \d\d:\d\d /, '') }, salvarTexto: 'Lançar',
         aoSalvar: async v => { await CRM.store().extratoResolver(x.id, 'lancar', { categoria: v.categoria, descricao: v.descricao, obs: v.obs }); CRM.toast('Lançado no Caixa.'); lidoEm = 0; await carrega(); } });
     },
+    // 06/11/2026: uma linha do banco = vários lançamentos (a sugestão "São estes N" ou escolhendo à mão)
+    'cx-ext-soma': id => {
+      const x = ((extrato && extrato.linhas) || []).find(y => y.id === Number(id));
+      const sg = x && Array.isArray(x.sugestoes) ? x.sugestoes.find(y => y.tipo === 'soma') : null;
+      if (!sg || !confirm('Ligar ' + R.moeda(x.valor) + ' do banco (' + dm(x.data) + ') a estes ' + sg.ids.length + ' lançamentos?\n\n' +
+        (sg.itens || []).map(i => '• ' + i.descricao + ': ' + R.moeda(i.valor)).join('\n'))) return;
+      CRM.store().extratoLigarSoma(x.id, sg.ids).then(() => { CRM.toast('Conferido: a linha do banco é a soma dos ' + sg.ids.length + ' lançamentos.'); lidoEm = 0; return carrega(); }).catch(CRM.falhou);
+    },
+    'cx-ext-juntar': id => {
+      const x = ((extrato && extrato.linhas) || []).find(y => y.id === Number(id));
+      if (!x) return;
+      const tp = x.sinal === 'D' ? 'saida' : 'entrada';
+      const usados = new Set([].concat(...((extrato && extrato.linhas) || []).map(y => y.lancamento_ids || [])));
+      // os do mesmo tipo, pagos naquele dia ou em aberto perto dele, ainda sem linha do banco
+      const cand = (F.lancamentos || []).filter(l => l.tipo === tp && !usados.has(l.id) && Number(l.valor) <= Number(x.valor) + 0.005 &&
+        ((l.situacao === 'pago' && l.baixa === 'caixa' && l.pago_em === x.data) || (l.situacao === 'aberto' && l.vencimento >= R.somaDias(x.data, -10) && l.vencimento <= R.somaDias(x.data, 10))))
+        .sort((a, z) => (a.situacao === 'pago' ? 0 : 1) - (z.situacao === 'pago' ? 0 : 1) || Number(z.valor) - Number(a.valor)).slice(0, 60);
+      if (!cand.length) { CRM.toast('Nenhum lançamento desse tipo pago em ' + dm(x.data) + ' ou em aberto perto dessa data.', true); return; }
+      const total = v => cand.reduce((t, l, i) => t + (v['l' + i] ? Number(l.valor) : 0), 0);
+      CRM.abrirForm({ titulo: 'Juntar lançamentos · ' + dm(x.data) + ' · ' + R.moeda(x.valor),
+        intro: x.historico + (x.complemento ? ' — ' + x.complemento : '') + '\nMarque os lançamentos que saíram juntos neste valor. A soma tem que bater no centavo; os que estão em aberto ganham a baixa em ' + R.dataBR(x.data) + '.',
+        campos: [{ nome: 'soma', tipo: 'info', rotulo: 'Marcados: R$ 0,00 de ' + R.moeda(x.valor) }].concat(cand.map((l, i) => ({ nome: 'l' + i, tipo: 'checkbox', largo: true,
+          rotulo: R.moeda(l.valor) + ' · ' + String(l.descricao || '').slice(0, 60) + (l.situacao === 'pago' ? ' (pago em ' + dm(l.pago_em) + ')' : ' (em aberto, vence ' + dm(l.vencimento) + ')') }))),
+        valores: {}, salvarTexto: 'Juntar',
+        extras: form => {
+          const info = form.querySelector('p.info');
+          const atual = () => { const v = {}; cand.forEach((l, i) => { v['l' + i] = form.elements['l' + i] && form.elements['l' + i].checked; });
+            const t = Math.round(total(v) * 100) / 100, ok = Math.abs(t - Number(x.valor)) < 0.005;
+            if (info) { info.textContent = 'Marcados: ' + R.moeda(t) + ' de ' + R.moeda(x.valor) + (ok ? ' ✓ bate' : ' · falta ' + R.moeda(Number(x.valor) - t)); info.style.color = ok ? 'var(--ok, #2e7d32)' : ''; } };
+          form.addEventListener('change', atual); atual();
+        },
+        aoSalvar: async v => {
+          const ids = cand.filter((l, i) => v['l' + i]).map(l => l.id);
+          if (ids.length < 2) throw new Error('Marque pelo menos dois lançamentos (um só: use o "É esta" ou o ✓ da conta).');
+          if (Math.abs(total(v) - Number(x.valor)) >= 0.005) throw new Error('A soma dos marcados (' + R.moeda(total(v)) + ') não bate com o banco (' + R.moeda(x.valor) + ').');
+          await CRM.store().extratoLigarSoma(x.id, ids); CRM.toast('Conferido: ' + ids.length + ' lançamentos ligados a esta linha do banco.'); lidoEm = 0; await carrega();
+        } });
+    },
+    'cx-ext-naosaiu': id => {
+      const l = lanc(id);
+      if (!l || !confirm('"' + l.descricao + '" (' + R.moeda(l.valor) + ') está como ' + (l.tipo === 'entrada' ? 'recebido' : 'pago') + ' em ' + dm(l.pago_em) +
+        ', mas não aparece no extrato do BB.\n\nVoltar para "em aberto"?' + (l.entre_empresas ? '\n\n(Transferência entre empresas: o espelho avisa a Agilité.)' : ''))) return;
+      CRM.acoes['cx-desfazer'](id);
+    },
     'cx-ext-ignorar': id => {
       const x = ((extrato && extrato.linhas) || []).find(y => y.id === Number(id));
       if (!x) return;
       CRM.abrirForm({ titulo: 'Ignorar no extrato · ' + dm(x.data) + ' · ' + R.moeda(x.valor), intro: x.historico + (x.complemento ? ' — ' + x.complemento : '') +
-          '\nSai desta lista sem mexer no Caixa (ex.: já está lançado de outro jeito, ou somado com outra conta).',
+          '\nSai desta lista sem mexer no Caixa e sem conferir nada. Se este valor junta várias contas num Pix só, NÃO ignore: use "Juntar lançamentos…", que confere a soma no centavo.',
         campos: [{ nome: 'obs', rotulo: 'Por quê', tipo: 'textarea', largo: true, obrigatorio: true }], salvarTexto: 'Ignorar',
         aoSalvar: async v => { await CRM.store().extratoResolver(x.id, 'ignorar', { obs: v.obs }); CRM.toast('Tirado da lista.'); lidoEm = 0; await carrega(); } });
     },

@@ -806,6 +806,8 @@ table.cx-grade td.alvo { outline: 2px dashed var(--azul); outline-offset: -3px; 
 .cx-venc > summary { cursor: pointer; }
 .cx-venc > summary small { color: var(--suave); }
 .cx-venc td small { display: block; color: var(--suave); }
+.cx-alerta { border-left: 4px solid var(--vermelho); }
+.cx-alerta > summary strong { color: var(--vermelho); }
 tr.apagado td { opacity: .55; }
 @media (max-width: 700px) { .cx-saldo { align-items: flex-start; width: 100%; } }
 .cx-frases { padding: 10px 14px; }
