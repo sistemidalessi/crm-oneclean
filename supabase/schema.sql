@@ -11511,3 +11511,27 @@ begin
   return n;
 end;
 $$;
+
+-- =====================================================================
+-- Visitante (anon) sem privilégio em tabela, view ou sequência nenhuma (06/11/2026)
+-- Regra deste CLAUDE.md ("anon sem privilégio em tabela nenhuma"). Até aqui o revoke ia tabela por tabela
+-- nas listas acima, e o padrão do Supabase dá tudo ao anon em toda tabela nova: 37 tabelas e 30 sequências
+-- criadas depois ficaram com anon (o RLS segurava, nenhuma política alcança o anon). Agora o padrão não dá
+-- mais nada ao anon, e este bloco limpa o que já existe. Fica no FIM do arquivo de propósito: roda depois
+-- de todas as tabelas. Conferido pelo fim do teste-rls/ataque.sql.
+-- =====================================================================
+alter default privileges for role postgres in schema public revoke all on tables from anon;
+alter default privileges for role postgres in schema public revoke all on sequences from anon;
+do $anon$
+declare r record;
+begin
+  for r in select c.oid::regclass as obj, c.relkind from pg_class c join pg_namespace n on n.oid = c.relnamespace
+            where n.nspname = 'public' and c.relkind in ('r', 'p', 'v', 'm', 'f', 'S')
+  loop
+    if r.relkind = 'S' then
+      execute format('revoke all on sequence %s from anon', r.obj);
+    else
+      execute format('revoke all on %s from anon', r.obj);
+    end if;
+  end loop;
+end $anon$;

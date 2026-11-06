@@ -373,3 +373,19 @@ select case when exists (select 1 from crm_pedidos where numero = 990001 and 'SE
 select public.crm_ceo_pedido_liberar(990001, 'nonce-teste-0000000001'); -- FALHA (nonce repetido)
 select case when count(*) = 1 then 'nonce não repete' else 'nonce repetiu (NÃO devia)' end from crm_ceo_acoes where nonce = 'nonce-teste-0000000001';
 select set_config('request.jwt.claim.role', '', false);
+
+-- 06/11/2026: regra geral, não tabela por tabela: nenhuma tabela, view ou sequência dá privilégio ao anon
+-- (tabela nova que esquecer o revoke cai aqui; o bloco do fim do schema.sql cuida disso)
+reset role;
+select 'anon com privilégio em ' || c.relname || ' (NÃO devia)'
+  from pg_class c join pg_namespace n on n.oid = c.relnamespace
+ where n.nspname = 'public' and c.relkind in ('r', 'p', 'v', 'm', 'f')
+   and (has_table_privilege('anon', c.oid, 'SELECT') or has_table_privilege('anon', c.oid, 'INSERT')
+     or has_table_privilege('anon', c.oid, 'UPDATE') or has_table_privilege('anon', c.oid, 'DELETE')
+     or has_table_privilege('anon', c.oid, 'TRUNCATE'))
+union all
+select 'anon com privilégio na sequência ' || c.relname || ' (NÃO devia)'
+  from pg_class c join pg_namespace n on n.oid = c.relnamespace
+ where n.nspname = 'public' and c.relkind = 'S'
+   and (has_sequence_privilege('anon', c.oid, 'USAGE') or has_sequence_privilege('anon', c.oid, 'SELECT')
+     or has_sequence_privilege('anon', c.oid, 'UPDATE'));
