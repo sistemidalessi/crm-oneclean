@@ -38,3 +38,19 @@ test('preço parecido, sem custo atual ou item fora do estoque: nada', () => {
   assert.deepStrictEqual(S.custosSuspeitos(itens, [{ id: 'd', codigo: 'x', fator: 1 }], new Map()), []);
   assert.deepStrictEqual(S.custosSuspeitos(itens, [{ id: 'd', codigo: 'x', fator: 1, ignorar: true }], new Map([['x', 1]])), []);
 });
+
+// 06/11/2026, NF 7569 da Distribuidora Guimarães: o saco de lixo infectante ligado ao saco alvejado (pano) sugeria "5 por
+// embalagem"; o certo era trocar o produto para o 370044, de custo igual ao da nota
+test('item ligado ao produto errado: sugere o produto de mesmo custo antes do número da embalagem', () => {
+  const itens = [{ id: 'g', descricao: 'SACO 50 BRANCO INFECTANTE', quantidade: 70, valor_total: 1703.10, ipi: 0, st: 0, frete: 0, outras: 0 }];
+  const custo = new Map([['240003', 5.05], ['370044', 24.33], ['370029', 30.78], ['150020', 24.4]]);
+  const produtos = [{ codigo: '240003', descricao: 'SACO ALVEJADO 50 X 70  BRANCO DIAMANTE' }, { codigo: '370044', descricao: 'SACO P/ LIXO 50 LTS 0,022 INFECT EMBALAC' },
+    { codigo: '370029', descricao: 'SACO P/ LIXO 100 LTS  INFECTANTE VRMLH.' }, { codigo: '150020', descricao: 'COPO 50 ML BRANCO' }];
+  const r = S.custosSuspeitos(itens, [{ id: 'g', codigo: '240003', fator: 1 }], custo, produtos);
+  assert.strictEqual(r.length, 1);
+  assert.strictEqual(r[0].produto, '370044');
+  assert.strictEqual(r[0].sugestao, null);
+  assert.match(r[0].texto, /parece outro produto: 370044/);
+  // sem o cadastro (ou sem produto parecido), continua sugerindo o número da embalagem
+  assert.strictEqual(S.custosSuspeitos(itens, [{ id: 'g', codigo: '240003', fator: 1 }], custo)[0].produto, undefined);
+});

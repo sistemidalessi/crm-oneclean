@@ -6542,6 +6542,46 @@ alter table public.crm_boletos_bb add column if not exists instrucao_em timestam
 alter table public.crm_boletos_bb add column if not exists instrucao_remessa integer;
 alter table public.crm_boletos_bb add column if not exists motivo text;
 alter table public.crm_boletos_bb add column if not exists caixa_lancamento uuid;
+
+-- 06/11/2026 (Anderson, NF 1-2888 da MBS: 20 CX de interfolha em vez de 20 pacotes; "pode fazer a opção 2"): a devolução
+-- abate o título no CRM, mas o boleto registrado no BB continuava com o valor cheio. Agora o ciclo da crm-bb (10 em 10 min)
+-- pergunta ao banco quais boletos registrados pela API têm devolução lançada na nota e o título menor que o boleto, e dá o
+-- abatimento no BB (ou baixa o boleto, se a devolução zerou o título).
+
+alter table public.crm_boletos_bb add column if not exists abatimento numeric(12,2) not null default 0;
+alter table public.crm_boletos_bb add column if not exists abatimento_em timestamptz;
+
+-- O que ajustar no BB por causa de devolução. Só boleto registrado pela API, de nota que tem devolução já lançada:
+--   devolução de cliente emitida pela OneClean (crm_nfe_outras com efeitos aplicados) ou emitida pelo cliente e com a
+--   entrada dada (crm_compras devolucao, situacao lancada). Título zerado (abono) → 'baixar'; título menor que o boleto
+--   menos o abatimento já dado → 'abater' (o abatimento novo é o boleto menos o título).
+create or replace function public.crm_boleto_bb_ajustes() returns table (id uuid, nosso_numero text, duplicata text, nota_numero bigint,
+  valor numeric, abatimento_atual numeric, titulo_valor numeric, acao text, abatimento numeric)
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if coalesce(auth.role(), '') <> 'service_role' then raise exception 'só o serviço do boleto'; end if;
+  return query
+  with b as (
+    select bb.id, bb.nosso_numero, bb.duplicata, bb.nota_numero::bigint nn, bb.valor, bb.abatimento,
+           case when bb.duplicata ~ '^\d+-' then split_part(bb.duplicata, '-', 1)::int else 1 end serie
+      from public.crm_boletos_bb bb
+     where bb.situacao = 'registrado' and bb.caminho = 'api'),
+  com as (
+    select b.*, t.valor tv, t.abono, n.chave
+      from b join public.crm_titulos t on t.duplicata = b.duplicata
+      join public.crm_notas n on n.numero = b.nn and coalesce(nullif(n.serie, '')::int, 1) = b.serie
+     where exists (select 1 from public.crm_nfe_outras o where o.tipo = 'devolucao_cliente' and o.ref_chave = n.chave and o.efeitos_em is not null)
+        or exists (select 1 from public.crm_compras c where c.devolucao and c.situacao = 'lancada' and c.ref_chave = n.chave))
+  select com.id, com.nosso_numero, com.duplicata, com.nn, com.valor, com.abatimento, com.tv,
+         case when com.abono then 'baixar' else 'abater' end,
+         case when com.abono then com.valor else round(com.valor - com.tv, 2) end
+    from com
+   where com.abono or round(com.valor - com.tv, 2) > com.abatimento + 0.004;
+end;
+$$;
+revoke all on function public.crm_boleto_bb_ajustes() from public, anon, authenticated;
+grant execute on function public.crm_boleto_bb_ajustes() to service_role;
+
 -- um boleto vivo por parcela (o que deu erro, foi baixado ou cancelado pode ganhar outro)
 create unique index if not exists crm_boletos_bb_dup_vivo on public.crm_boletos_bb (duplicata) where situacao in ('preparado', 'registrado', 'pago');
 

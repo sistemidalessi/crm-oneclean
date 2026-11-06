@@ -21,7 +21,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.116.0';
 import { quemRecebe, prazoUtil, parametros, textoFinal, textoEmail, CORPO, alertasCartorio, celularesDoCliente, emailsDoCliente, telWa, moeda, docsTexto,
   porTransferencia, valorAtualizado, contaTexto, valorTransferencia, paragrafoTransferencia, textoEmailTransferencia } from './avisos.js';
-import { casa, quemRecebeBoleto, pdfBoletos, parametrosBoleto, CORPO_BOLETO, textoEmailBoleto, resumoRodada, mod11 } from './atualizado.js';
+import { casa, quemRecebeBoleto, valorCobrado, pdfBoletos, parametrosBoleto, CORPO_BOLETO, textoEmailBoleto, resumoRodada, mod11 } from './atualizado.js';
 import { jsPDF } from 'npm:jspdf@2.5.2';
 
 const CORS = {
@@ -35,8 +35,8 @@ const MODELO = 'cobranca_atraso';
 const MODELO_BOLETO = 'boleto_vencido';
 const BOTAO_FALAR_B = 'Falar comigo';   // o mesmo do boleto_cliente: crm-pdf?f=<boleto> abre o WhatsApp do(a) vendedor(a)
 const BUCKET = 'crm-boletos';
-const COMMIT = '12f4fb60a3847dfa153eba7c49f508939899528d';
-const HASHES: Record<string, string> = { 'boleto.js': 'a4d5a17b2adffb76049727c715007b28dfb64d7ea3e70e9e24823c1b8efd5f92' };
+const COMMIT = '91ac627d0a0538f345cfc5f06aacbc1ae10d7ce9';
+const HASHES: Record<string, string> = { 'boleto.js': 'bc6d48f11afe7891618be81fe3cecda8fd5f3744fdaf7be29478a8f3db85b53c' };
 const FONTE = 'https://raw.githubusercontent.com/sistemidalessi/crm-oneclean/' + COMMIT + '/';
 const EMPRESA = Deno.env.get('CRM_EMPRESA_NOME') ?? 'OneClean';
 const BOTAO_FALAR = 'Falar com quem me atende';
@@ -272,7 +272,7 @@ Deno.serve(async (req) => {
         const agora = new Date().toISOString();
         const { data: regs, error: eIns } = await db.from('crm_boletos').insert(env.itens.map((x: Linha) => {
           const t = x.titulo as Linha, b = x.boleto as Linha;
-          return { duplicata: t.duplicata, empresa_id: t.empresa_id, nota_numero: t.nota_numero, valor_original: b.valor, valor: x.total, vencimento: t.vencimento,
+          return { duplicata: t.duplicata, empresa_id: t.empresa_id, nota_numero: t.nota_numero, valor_original: valorCobrado(b), valor: x.total, vencimento: t.vencimento,
             linha_digitavel: String(b.linha || ''), arquivo, origem: 'auto', encargos: { multa: x.multa, juros: x.juros, dias: x.dias, ate: hoje, nosso_numero: b.nosso_numero },
             avisado_em: agora, cobrado_em: agora };
         })).select('id');
