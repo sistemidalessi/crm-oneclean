@@ -1305,7 +1305,8 @@
             '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Item da nota</th><th>Produto nosso</th><th title="Quantas unidades do nosso estoque vêm em 1 unidade da nota (o antigo &quot;fator&quot;)">Vem quantas na embalagem?</th><th></th></tr></thead><tbody>' + itens.map(linhaI).join('') + '</tbody></table></div>' +
             (fat ? blocoParcelas(c, fknContas) : ''),
           salvarTexto: pend ? (dv ? 'Dar entrada da devolução' : 'Dar entrada no estoque') : corrige ? 'Salvar a correção' : 'Fechar',
-          rodape: pend && !dv && (CRM.ehAdmin() || CRM.ehComprador()) ? '<button type="button" class="btn sec" data-acao="es-compra-mao" data-id="' + esc(id) + '" title="Quando os itens do XML não batem com o que veio (ex.: uma linha só com &quot;diversos&quot;)">Os itens não batem: lançar à mão</button>' : '',
+          rodape: pend && !dv && (CRM.ehAdmin() || CRM.ehComprador()) ? '<button type="button" class="btn sec" data-acao="es-compra-mao" data-id="' + esc(id) + '" title="Quando os itens do XML não batem com o que veio (ex.: uma linha só com &quot;diversos&quot;)">Os itens não batem: lançar à mão</button>'
+            : corrige ? '<button type="button" class="btn perigo" data-acao="es-compra-desfazer" data-id="' + esc(id) + '" title="Tira do estoque o que entrou, apaga as contas a pagar abertas desta nota e a nota volta a pendente, para dar a entrada de novo">Desfazer a entrada</button>' : '',
           extras: form => {
             const atualiza = it => {
               const cod = form.elements['c_' + it.id].value.trim(), fat = Number(form.elements['f_' + it.id].value) || 0;
@@ -1386,6 +1387,20 @@
     },
     // Nota lançada à mão (28/10/2026, Wellington: "Polar, Leal e Mavi mandam XML, porém não dá para importar, pois itens e
     // valores não batem"): o comprador digita código, quantidade (na unidade do estoque) e valor de cada produto que veio.
+    // 06/11/2026 (Wellington, NF 23065 da Leal lançada à mão pela metade): a entrada inteira volta atrás e a nota fica pendente
+    'es-compra-desfazer': async id => {
+      const c = compras.find(x => x.id === id); if (!c) return;
+      const mot = raiz.prompt('Desfazer a entrada da NF ' + c.numero + ' (' + (c.fornecedor_nome || '') + ')?\n\n' +
+        'O que entrou sai do estoque (o custo médio é refeito), as contas a pagar abertas desta nota saem do Caixa e a nota volta a "pendente" para você dar a entrada de novo' +
+        (c.manual ? ' (volta também o item do XML; o lançamento à mão se faz de novo)' : '') + '.\n\nDiga o motivo:', '');
+      if (mot == null) return;
+      try {
+        const r = await CRM.store().compraDesfazer(id, mot);
+        const dlg = raiz.document && raiz.document.getElementById('dlgForm'); if (dlg && dlg.open) dlg.close();
+        CRM.toast('Entrada da NF ' + c.numero + ' desfeita: ' + r.estornos + ' item(ns) tirado(s) do estoque' + (r.contas_apagadas ? ', ' + r.contas_apagadas + ' conta(s) a pagar apagada(s)' : '') + '. A nota está pendente de novo.');
+        compras = await CRM.store().compras(1000); saldo = null; carrega(); CRM.render();
+      } catch (e) { CRM.falhou(e); }
+    },
     'es-compra-mao': async id => {
       const c = compras.find(x => x.id === id); if (!c) return;
       try {
@@ -1432,6 +1447,16 @@
               soma.innerHTML = 'Soma: <strong>' + R.moeda(t) + '</strong> · total da nota ' + R.moeda(total) + (t && Math.abs(dif) >= 0.01 ? ' · <span class="neg">diferença ' + R.moeda(dif) + '</span>' : t ? ' ✓' : '');
             };
             corpo.addEventListener('input', atualiza);
+            // 06/11/2026 (Wellington, NF 23065 da Leal: "ele puxou e salvou sem eu ter dado a entrada nos outros itens"): Enter num
+            // campo (ex.: ao escolher o produto da lista) enviava o formulário e dava a entrada pela metade. Agora o Enter só passa
+            // para o próximo campo; a entrada sai só no botão.
+            form.addEventListener('keydown', ev => {
+              if (ev.key !== 'Enter' || !ev.target || ev.target.tagName !== 'INPUT') return;
+              ev.preventDefault();
+              const campos = [...form.querySelectorAll('input:not([type=hidden]):not([disabled]), select, textarea')];
+              const prox = campos[campos.indexOf(ev.target) + 1];
+              if (prox) prox.focus();
+            });
             form.querySelector('[data-mmais]').addEventListener('click', () => { corpo.insertAdjacentHTML('beforeend', Array.from({ length: 5 }, (_, k) => linha(n + k)).join('')); n += 5; atualiza(); });
             atualiza();
             lerParcelas = fat ? ligaParcelas(form, c) : null;
@@ -1453,6 +1478,8 @@
             if (Math.abs(dif) > Math.max(1, total * 0.005) && !confirm('A soma dos produtos (' + R.moeda(t) + ') é diferente do total da nota (' + R.moeda(total) + '): diferença de ' + R.moeda(dif) +
               '.\n\nO estoque fica com os valores que você digitou; ' + (fat ? 'o contas a pagar, com as parcelas de baixo' : 'as parcelas continuam as da nota') + '. Dar entrada assim mesmo?')) return false;
             if (trocados.length && !confirm('Acertei o zero da frente: ' + trocados.join(', ') + '.\n\nDar entrada assim?')) return false;
+            if (!confirm('Dar entrada no estoque com ' + linhas.length + ' produto(s)?\n\n' + linhas.map(x => '· ' + x.codigo + ' ' + (nomeDe.get(x.codigo) || '') + ' — ' + qtd(x.quantidade) + ' · ' + R.moeda(x.valor)).join('\n') +
+              '\n\nSoma: ' + R.moeda(t) + '. Faltou algum item? Clique em Cancelar e complete antes.')) return false;
             const parcelas = parcelasParaGravar(lerParcelas, c);
             if (parcelas === false) return false;
             const r = await st.compraLancarManual(id, linhas, v.motivo || '', parcelas || null);

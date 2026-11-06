@@ -9582,6 +9582,61 @@ end $$;
 revoke all on function public.crm_compra_corrigir(uuid, jsonb) from public, anon;
 grant execute on function public.crm_compra_corrigir(uuid, jsonb) to authenticated;
 
+-- Desfazer a entrada da nota de compra (06/11/2026, Wellington): estorno, contas a pagar abertas apagadas, volta a pendente.
+create or replace function public.crm_compra_desfazer(p_compra uuid, p_motivo text) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare c record; m record; s record; cm numeric; n int := 0; apag int := 0; solt int := 0; agora timestamptz := now(); mot text;
+begin
+  if not (public.crm_eh_admin() or public.crm_eh_comprador()) then raise exception 'só o administrador e o comprador desfazem a entrada'; end if;
+  mot := left(btrim(coalesce(p_motivo, '')), 300);
+  if length(mot) < 5 then raise exception 'diga o motivo (pelo menos 5 letras)'; end if;
+  select * into c from public.crm_compras where id = p_compra for update;
+  if c.id is null then raise exception 'nota de compra não encontrada'; end if;
+  if c.situacao <> 'lancada' then raise exception 'esta nota não teve entrada'; end if;
+  if coalesce(c.devolucao, false) then raise exception 'devolução de cliente não se desfaz por aqui (mexe nos títulos da venda): fale com o administrador'; end if;
+  if exists (select 1 from public.crm_fin_lancamentos l where l.compra_id = c.id and l.situacao = 'pago') then
+    raise exception 'já tem parcela desta nota paga no Caixa: desfaça o pagamento antes (ou corrija só os itens com "Salvar a correção")'; end if;
+  -- estoque: estorno de cada entrada desta nota que ainda não foi estornada
+  for m in select mv.* from public.crm_estoque_mov mv
+            where mv.tipo = 'entrada'
+              and (mv.compra_item_id in (select id from public.crm_compra_itens where compra_id = c.id)
+                   or mv.compra_item_corr in (select id from public.crm_compra_itens where compra_id = c.id))
+              and not exists (select 1 from public.crm_estoque_mov e where e.estorno_de = mv.id)
+            order by mv.criado_em loop
+    select * into s from public.crm_estoque_saldo where codigo = m.codigo for update;
+    if s.saldo - m.quantidade > 0 and s.custo_medio is not null and coalesce(m.custo_unit, 0) > 0 then
+      cm := round((s.saldo * s.custo_medio - m.quantidade * m.custo_unit) / (s.saldo - m.quantidade), 4);
+      if cm > 0 then update public.crm_estoque_saldo set custo_medio = cm where codigo = m.codigo; end if;
+    end if;
+    insert into public.crm_estoque_mov (codigo, quando, tipo, quantidade, custo_unit, estorno_de, motivo)
+    values (m.codigo, agora, 'estorno', -m.quantidade, m.custo_unit, m.id,
+      left('Entrada desfeita NF ' || coalesce(c.numero::text, '?') || ': ' || mot, 200));
+    n := n + 1;
+  end loop;
+  -- contas a pagar: as do FKN só se soltam; as criadas pela entrada saem (cópia guardada)
+  update public.crm_fin_lancamentos set compra_id = null, parcela = null where compra_id = c.id and chave_fkn is not null;
+  get diagnostics solt = row_count;
+  insert into public.crm_fin_excluidos (lancamento_id, chave_fkn, descricao, valor, vencimento, dados, excluido_em, excluido_por)
+    select l.id, l.chave_fkn, l.descricao, l.valor, l.vencimento, to_jsonb(l) || jsonb_build_object('motivo', 'entrada da NF desfeita: ' || mot), agora, auth.uid()
+      from public.crm_fin_lancamentos l where l.compra_id = c.id;
+  delete from public.crm_fin_lancamentos where compra_id = c.id;
+  get diagnostics apag = row_count;
+  -- nota lançada à mão: voltam os itens do XML
+  if c.manual is not null and jsonb_typeof(c.itens_xml) = 'array' then
+    delete from public.crm_compra_itens where compra_id = c.id;
+    insert into public.crm_compra_itens select (jsonb_populate_record(null::public.crm_compra_itens, x)).* from jsonb_array_elements(c.itens_xml) x;
+  end if;
+  update public.crm_compras set situacao = 'pendente', lancada_em = null, lancada_por = null, manual = null,
+    parcelas = case when c.parcelas_acerto is not null and c.parcelas_xml is not null then c.parcelas_xml else c.parcelas end,
+    parcelas_acerto = null, atualizado_em = agora,
+    obs = left(coalesce(obs || ' · ', '') || 'entrada desfeita em ' || to_char(agora at time zone 'America/Sao_Paulo', 'DD/MM HH24:MI') || ': ' || mot, 500)
+   where id = c.id;
+  return jsonb_build_object('ok', true, 'estornos', n, 'contas_apagadas', apag, 'contas_soltas', solt, 'manual', c.manual is not null);
+end;
+$$;
+revoke all on function public.crm_compra_desfazer(uuid, text) from public, anon;
+grant execute on function public.crm_compra_desfazer(uuid, text) to authenticated;
+
 -- ============================================================ 04/11/2026: Diretor de Vendas, parado pelo último contato
 -- Diretor de Vendas: "parado" conta do último movimento, não só da mudança de etapa (04/11/2026, áudio da vendedora: "os três
 -- já tiveram atualização ... aparece como se eu não tivesse contato com eles há um grande tempo"). Mesma regra da tela do CRM
