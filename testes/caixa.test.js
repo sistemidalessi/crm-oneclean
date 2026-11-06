@@ -244,9 +244,12 @@ test('material vendido à Agilité: previsão e título do FKN de mesmo valor co
   const g2 = C.itensGrade('2026-10-06', '2026-10-31', hoje, gravadas, titulos, { nome: t => t.cliente });
   assert.equal(g2.length, g.length);
   gravadas[0] = Object.assign({}, gravadas[0], { situacao: 'pago', pago_em: '2026-10-21', baixa: 'caixa', baixado_em: '2026-10-21T15:00:00Z' });
-  const g3 = C.itensGrade('2026-10-06', '2026-10-31', '2026-10-21', gravadas, titulos, { nome: t => t.cliente });
-  assert.equal(g3.filter(x => x.data === '2026-10-21' && x.secao === 'entrada').reduce((t, x) => t + x.valor, 0).toFixed(2), (5715.4 + 300).toFixed(2), 'recebida aparece feita, sem o título repetido');
+  const g3 = C.itensGrade('2026-10-06', '2026-10-31', '2026-10-21', gravadas, titulos, { nome: t => t.cliente, d1: true, atrasoNaGrade: true });
+  assert.equal(g3.filter(x => x.data === '2026-10-21' && x.secao === 'entrada').reduce((t, x) => t + x.valor, 0).toFixed(2), '2500.05', 'recebida aparece feita, sem o título repetido');
   assert.ok(g3.some(x => x.chave === 'lanc:m0' && x.estado === 'feito') && !g3.some(x => x.chave === 'tit:00990/01'));
+  // 06/11/2026: os que venceram em 20/10 e não foram pagos já estão em atraso em 21/10 (próximo dia útil, fora do saldo)
+  const atr = g3.filter(x => x.tipo === 'titulo');
+  assert.equal(atr.length, 6); assert.ok(atr.every(x => x.atrasado && x.semSaldo && x.data === '2026-10-22'));
 });
 
 test('reembolso da folha à Agilité: sai com o componente; com nome de pessoa, volta a somar sem o nome', () => {
@@ -272,7 +275,8 @@ test('título em atraso remarcado: vai para o dia escolhido, em vermelho, e volt
     { duplicata: '002/01', cliente: 'COLEGIO EXEMPLO', valor: 431.55, vencimento: '2026-10-05' }];
   const g = C.itensGrade('2026-10-06', '2026-10-20', '2026-10-06', [], titulos, { d1: true });
   const t1 = g.find(x => x.chave === 'tit:001/01'), t2 = g.find(x => x.chave === 'tit:002/01');
-  assert.deepEqual([t1.data, t1.atrasado, t2.data, t2.atrasado], ['2026-10-09', true, '2026-10-06', false]);
+  // o 002/01 venceu ontem e não foi pago: em atraso (06/11/2026); sem a opção da grade, sai da previsão
+  assert.deepEqual([t1.data, t1.atrasado, t2], ['2026-10-09', true, undefined]);
   assert.match(t1.obs, /em atraso/);
   // remarcado para sábado: entra no próximo dia útil (12/10 é feriado → 13/10)
   const sab = C.itensGrade('2026-10-06', '2026-10-20', '2026-10-06', [], [Object.assign({}, titulos[0], { previsao: '2026-10-10' })], { d1: true });
@@ -381,4 +385,23 @@ test('título em atraso sem data combinada vai para o próximo dia útil, vermel
   // fora do saldo previsto
   const s = { saldo: 1000, ancora: { data: '2026-10-30' } };
   assert.equal(C.saldosGrade(['2026-11-06'], hoje, s, [], it)['2026-11-06'], 1000);
+});
+
+test('venceu ontem e não foi pago: em atraso hoje, mesmo que o crédito do BB fosse hoje (06/11/2026, Laquiatto)', () => {
+  const hoje = '2026-11-06'; // sexta
+  const lq = { duplicata: '002599/01', cliente_nome: 'Laquiatto', vencimento: '2026-11-05', valor: 414.66 };
+  const hj = { duplicata: '002588/01', cliente_nome: 'Elim', vencimento: '2026-11-06', valor: 852.52 };
+  const opc = { d1: true, atrasoNaGrade: true, desde: '2026-10-01', cobranca: () => 'boleto atualizado 06/11' };
+  const it = C.itensGrade(hoje, '2026-11-20', hoje, [], [lq, hj], opc);
+  const a = it.find(x => x.ref.duplicata === '002599/01'), b = it.find(x => x.ref.duplicata === '002588/01');
+  assert.ok(a.atrasado && a.semSaldo, 'vencido ontem = em atraso');
+  assert.equal(a.data, '2026-11-09', 'vai para o próximo dia útil');
+  assert.match(a.obs, /em atraso: venceu 05\/11/);
+  assert.ok(!b.atrasado, 'o que vence hoje ainda não está em atraso');
+  assert.equal(b.data, '2026-11-09', 'pago hoje, cai na conta no próximo dia útil');
+  // remarcado para uma data que ainda vem não é "atraso sem data": fica na data combinada, no saldo
+  const rem = C.itensGrade(hoje, '2026-11-20', hoje, [], [Object.assign({}, lq, { previsao: '2026-11-10' })], opc)[0];
+  assert.equal(rem.data, '2026-11-10'); assert.ok(!rem.semSaldo);
+  // leitura da Agilité e do CEO (sem a opção): o vencido sai da previsão, não aparece como crédito de hoje
+  assert.equal(C.itensGrade(hoje, '2026-11-20', hoje, [], [lq], { d1: true }).length, 0);
 });

@@ -145,6 +145,10 @@
   // previsto nesse dia, em vermelho; previsão que já passou volta para "A receber vencido".
   const remarcado = (t, hoje) => !!t.previsao && t.previsao >= hoje;
   const diaDoTitulo = (t, hoje, d1) => remarcado(t, hoje) ? posterga(t.previsao) : creditoTitulo(t.vencimento, d1);
+  // Em atraso (06/11/2026, Anderson: "vamos falar a mesma língua"): venceu (dia útil) antes de hoje e não foi pago — a mesma
+  // regra da cobrança automática (boleto atualizado no 1º dia). Não espera o dia do crédito (D+1): o boleto pago no
+  // vencimento já foi baixado pelo BB de manhã. Remarcado para hoje ou depois segue a data combinada.
+  const emAtraso = (t, hoje, d1) => diaDoTitulo(t, hoje, d1) < hoje || (!remarcado(t, hoje) && posterga(t.vencimento) < hoje);
   // Remarcado para ANTES do dia em que cairia na conta: o cliente adiantou o pagamento (08/10/2026,
   // Anderson: "veio vermelho também"). Fica verde, com a marca de adiantado, e não conta como atraso.
   const adiantado = (t, hoje, d1) => remarcado(t, hoje) && posterga(t.previsao) < creditoTitulo(t.vencimento, d1);
@@ -220,7 +224,11 @@
     (titulos || []).forEach(t => {
       if (recebidos.has(t.duplicata)) return;
       const cr = diaDoTitulo(t, hoje, opc.d1);
-      if (cr < hoje) {
+      // 06/11/2026 (Anderson, Laquiatto NF 2599 vencida em 05/11: "vamos falar a mesma língua? ele venceu ontem, está vencido"):
+      // o título que venceu e não foi pago no vencimento já está em atraso no dia seguinte, como a cobrança automática trata
+      // (boleto atualizado no 1º dia). Antes a grade esperava passar o dia do CRÉDITO (D+1) e mostrava "cai na conta" no dia
+      // em que ele já estava vencido; o pago no vencimento já teria sido baixado pelo BB de manhã.
+      if (emAtraso(t, hoje, opc.d1)) {
         // Em atraso sem data combinada (05/11/2026, Anderson: "joga para o dia seguinte, como vermelho, como em
         // atraso, para eu também visualizar"): o título vai para o dia em que cairia na conta se o cliente pagasse
         // hoje (o próximo dia útil) e anda um dia a cada dia até ser pago, em vermelho, com o que a cobrança já
@@ -270,7 +278,7 @@
   }
   function receberVencido(titulos, lancs, hoje, d1) {
     const recebidos = recebidosDe(lancs);
-    return (titulos || []).filter(t => !recebidos.has(t.duplicata) && diaDoTitulo(t, hoje, d1) < hoje)
+    return (titulos || []).filter(t => !recebidos.has(t.duplicata) && emAtraso(t, hoje, d1))
       .sort((a, b) => a.vencimento.localeCompare(b.vencimento));
   }
 
@@ -392,7 +400,7 @@
     const tits = (d.titulos || []).filter(t => !recebidos.has(t.duplicata)).map(t => {
       const cai = diaDoTitulo(t, hoje, o.d1), nome = limpar(nomeT(t));
       const lig = ligT.get(t.duplicata);
-      return Object.assign({ cliente: nome, duplicata: t.duplicata, valor: r2(t.valor), vencimento: t.vencimento, cai_na_conta: cai, atrasado: cai < hoje || (remarcado(t, hoje) && !adiantado(t, hoje, o.d1)), adiantado: adiantado(t, hoje, o.d1),
+      return Object.assign({ cliente: nome, duplicata: t.duplicata, valor: r2(t.valor), vencimento: t.vencimento, cai_na_conta: cai, atrasado: emAtraso(t, hoje, o.d1) || (remarcado(t, hoje) && !adiantado(t, hoje, o.d1)), adiantado: adiantado(t, hoje, o.d1),
         entre_empresas: ENTRE_EMPRESAS.test(nome) || !!(lig && ehEntreEmpresas(lig)) }, lig ? { referente: limpar(lig.descricao) } : {});
     }).sort((a, b) => a.vencimento.localeCompare(b.vencimento) || a.duplicata.localeCompare(b.duplicata));
     const atrasados = tits.filter(t => t.atrasado);
