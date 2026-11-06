@@ -228,7 +228,7 @@
     CRM.abrirForm({
       titulo: 'Registrar pedido: ' + R.nomeDeItem(forn.nome), largura: 'extra', salvarTexto: 'Registrar pedido ao fornecedor',
       intro: 'Confira as quantidades (na unidade do estoque). As vendedoras passam a ver "a caminho" com a data. Quando a nota do fornecedor chegar, o pedido vira "faturado"; quando a entrada for lançada, sai sozinho.',
-      htmlAntes: '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Produto</th><th class="num">Saldo</th><th class="num">Já pedido</th><th class="num">Comprar</th><th class="num">Custo un.</th></tr></thead><tbody>' +
+      htmlAntes: '<div class="tabela-rolagem"><table class="tabela" data-sem-filtro><thead><tr><th>Produto</th><th class="num">Saldo</th><th class="num">Já pedido</th><th class="num">Comprar</th><th class="num">Custo un.</th></tr></thead><tbody>' +
         forn.itens.filter(g => g.codigo && g.comprar > 0).map((g, k) => '<tr><td>' + esc(R.nomeDeItem(g.descricao)) + ' <small>' + esc(g.codigo) + ' · ' + esc(g.unidade || '') + '</small></td>' +
           '<td class="num' + (g.saldo < 0 ? ' neg' : '') + '">' + qtd(g.saldo) + '</td><td class="num">' + (g.pedido ? qtd(g.pedido) : '—') + '</td>' +
           '<td class="num"><input type="number" min="0" step="any" class="cp-qtd" data-cp-qtd="' + k + '" value="' + esc(g.comprar) + '" aria-label="Quantidade de ' + esc(R.nomeDeItem(g.descricao)) + '"></td>' +
@@ -280,7 +280,7 @@
       htmlAntes: '<datalist id="cpFornLista">' + lf.map(x => '<option value="' + esc(x.nome) + '">').join('') + '</datalist>' +
         '<datalist id="cpProdLista">' + lp.map(e => '<option value="' + esc(String(e.codigo).replace(/\.\d+$/, '')) + '">' + esc(e.descricao) + '</option>').join('') + '</datalist>' +
         '<div class="campos"><label class="campo largo"><span>Fornecedor</span><input id="cpForn" list="cpFornLista" placeholder="nome do fornecedor" autocomplete="off"><small id="cpFornInfo"></small></label></div>' +
-        '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Produto</th><th class="num">Quantidade</th><th class="num">Custo un. (opcional)</th></tr></thead><tbody id="cpLinhas">' +
+        '<div class="tabela-rolagem"><table class="tabela" data-sem-filtro><thead><tr><th>Produto</th><th class="num">Quantidade</th><th class="num">Custo un. (opcional)</th></tr></thead><tbody id="cpLinhas">' +
         [0, 1, 2, 3, 4].map(linha).join('') + '</tbody></table></div><p><button type="button" class="btn sec" id="cpMais">+ mais linhas</button></p>',
       campos: [{ nome: 'previsao', rotulo: 'Chega em (previsão)', tipo: 'date', obrigatorio: true, ajuda: 'o prazo do fornecedor no cadastro, quando houver; mude se ele prometer outra data' },
         { nome: 'obs', rotulo: 'Observação', largo: true, dica: 'ex.: combinado por telefone com o representante' }],
@@ -357,7 +357,7 @@
       intro: 'Mude a quantidade ou o custo de cada produto, inclua produtos novos e troque a previsão. Quantidade 0 tira o produto do pedido; não dá para pôr menos do que já entrou. ' +
         'O pedido continua o mesmo (não é cancelado) e a mudança fica anotada nele.' + (p.aprovacao === 'aprovado' ? ' Se o total subir com produto novo, o pedido volta para a aprovação.' : ''),
       htmlAntes: '<datalist id="cpEdLista">' + lp.map(e => '<option value="' + esc(String(e.codigo).replace(/\.\d+$/, '')) + '">' + esc(e.descricao) + '</option>').join('') + '</datalist>' +
-        '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Produto</th><th class="num">Quantidade</th><th class="num">Já entrou</th><th class="num">Custo un.</th></tr></thead><tbody id="cpEdLinhas">' +
+        '<div class="tabela-rolagem"><table class="tabela" data-sem-filtro><thead><tr><th>Produto</th><th class="num">Quantidade</th><th class="num">Já entrou</th><th class="num">Custo un.</th></tr></thead><tbody id="cpEdLinhas">' +
         its.map(i => '<tr><td>' + esc(R.nomeDeItem(i.descricao || i.codigo)) + ' <small>' + esc(i.codigo) + ' · ' + esc(i.unidade || '') + '</small></td>' +
           '<td class="num"><input type="number" min="' + esc(num(i.recebido)) + '" step="any" class="cp-qtd" data-ce-ordem="' + i.ordem + '" value="' + esc(num(i.quantidade) - num(i.cancelado)) + '" aria-label="Quantidade de ' + esc(R.nomeDeItem(i.descricao || i.codigo)) + '"></td>' +
           '<td class="num">' + (i.recebido ? qtd(i.recebido) : '—') + '</td>' +

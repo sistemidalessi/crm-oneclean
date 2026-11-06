@@ -1879,8 +1879,12 @@
       else { it.quantidade = Number(i.quantidade); if (i.custo_unit != null) it.custo_unit = Number(i.custo_unit); }
     });
     if (!p.itens.length) throw new Error('o pedido ficaria sem itens: cancele o pedido');
-    if (x.previsao) p.previsao = x.previsao;
-    if (x.obs_nova) p.obs = [p.obs, x.obs_nova].filter(Boolean).join(' · ');
+    const log = [];
+    (x.itens || []).forEach(i => { if (i.ordem == null && Number(i.quantidade) > 0) log.push('incluído ' + i.codigo + ': ' + i.quantidade); });
+    if (x.previsao && x.previsao !== p.previsao) { log.push('previsão ' + p.previsao.slice(8, 10) + '/' + p.previsao.slice(5, 7) + ' → ' + x.previsao.slice(8, 10) + '/' + x.previsao.slice(5, 7)); p.previsao = x.previsao; }
+    if (x.obs_nova) log.push(x.obs_nova);
+    if (log.length || mudados) { const d = new Date(), h = String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0') + ' ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+      p.obs = [p.obs, h + ' ' + (mudados ? mudados + ' item(ns) mudado(s)' + (log.length ? ' · ' : '') : '') + log.join(' · ')].filter(Boolean).join(' · '); }
     lsGrava('crm_compra_pedidos', l);
     return Object.assign({}, p, { itens: undefined, novos, mudados });
   };
