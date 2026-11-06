@@ -248,7 +248,53 @@
     const d = docsDe(sg.info);
     return qual === 'completo' ? d.ficha && d.fispq : qual === 'ficha' ? d.ficha : qual === 'fispq' ? d.fispq : qual === 'so-foto' ? !d.ficha && !d.fispq : true;
   }));
-  const API = { docsDe, filtraDocs, catalogo, estado, filtra, linhas, cadastro, atalhos, pesquisa, inativosFora, fornecedoresDe, selosDe, vizinhos, embalagens, margemDe, noMinimo, paraBuscar, custoEstimado, specsTexto, specsDe, bate, confiavel, textoWhats, CUSTO_PADRAO };
+  // 06/11/2026 (Wellington, áudio): na página do produto, as compras de cada fornecedor lado a lado — a última compra, o
+  // último custo e o menor, para ver onde está mais em conta. l: crm_produto_compras (custo por unidade do estoque, com IPI,
+  // ST, frete e outras). O "mais em conta" é pelo último custo de cada um (o preço de hoje, não o de meses atrás).
+  function comprasPorFornecedor(l) {
+    const m = new Map();
+    (l || []).forEach(c => {
+      const cu = c.custo_un == null ? null : num(c.custo_un);
+      if (!(cu > 0)) return;
+      const k = String(c.fornecedor_doc || c.fornecedor_nome || '?');
+      const g = m.get(k) || { doc: c.fornecedor_doc || '', nome: c.fornecedor_nome || '', vezes: 0, qtd: 0, ultima: null, ultimoCusto: null, menorCusto: null, maiorCusto: null };
+      g.vezes++; g.qtd += num(c.qtd);
+      const em = c.emitida_em ? String(c.emitida_em) : '';
+      if (!g.ultima || em > g.ultima) { g.ultima = em; g.ultimoCusto = cu; }
+      g.menorCusto = g.menorCusto == null ? cu : Math.min(g.menorCusto, cu);
+      g.maiorCusto = g.maiorCusto == null ? cu : Math.max(g.maiorCusto, cu);
+      m.set(k, g);
+    });
+    const out = [...m.values()].sort((a, b) => a.ultimoCusto - b.ultimoCusto || String(b.ultima).localeCompare(String(a.ultima)));
+    if (out.length > 1) out[0].maisEmConta = true;
+    out.forEach(g => { g.acimaPct = out[0].ultimoCusto > 0 ? Math.round((g.ultimoCusto / out[0].ultimoCusto - 1) * 1000) / 10 : 0; });
+    return out;
+  }
+  // Os pedidos de venda que ainda vão sair com este produto (06/11/2026, Wellington: "acompanhar os pedidos pendentes"):
+  // aberto (bloqueado ou liberado), em separação e a emitir NF; a quantidade na unidade do estoque e o que falta do físico.
+  // peds: os pedidos que a pessoa vê; faltas: crm_pedidos_faltas (pedido_id, idx, base, falta na unidade do item).
+  function pedidosDoProduto(peds, base, faltas) {
+    const b = String(base || '').replace(/\.\d+$/, '');
+    const fal = new Map();
+    (faltas || []).forEach(x => { if (x.base === b) fal.set(x.pedido_id + '|' + x.idx, num(x.falta)); });
+    const out = [];
+    (peds || []).forEach(p => {
+      if (['aberto', 'separacao', 'separado'].indexOf(p.situacao) === -1) return;
+      let q = 0, falta = 0, achou = false, un = '';
+      (p.itens || []).forEach((it, i) => {
+        const bi = String(it.base || it.codigo || '').replace(/\.\d+$/, '');
+        if (bi !== b) return;
+        achou = true;
+        const f = num(it.fator) || 1;
+        q += it.qtd_est != null ? num(it.qtd_est) : num(it.quantidade) * f;
+        falta += (fal.get(p.id + '|' + i) || 0) * f;
+        un = un || it.unidade || '';
+      });
+      if (achou) out.push({ pedido: p, qtd: Math.round(q * 1000) / 1000, falta: Math.round(falta * 1000) / 1000, unidade: un });
+    });
+    return out.sort((a, b2) => String(a.pedido.criado_em || '').localeCompare(String(b2.pedido.criado_em || '')));
+  }
+  const API = { comprasPorFornecedor, pedidosDoProduto, docsDe, filtraDocs, catalogo, estado, filtra, linhas, cadastro, atalhos, pesquisa, inativosFora, fornecedoresDe, selosDe, vizinhos, embalagens, margemDe, noMinimo, paraBuscar, custoEstimado, specsTexto, specsDe, bate, confiavel, textoWhats, CUSTO_PADRAO };
   raiz.CRMProdutos = API;
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
 })(typeof window !== 'undefined' ? window : globalThis);
@@ -858,14 +904,18 @@
   const contagem = () => { const n = visiveis().length, t = lista.filter(x => quem().cuida || x.situacao !== 'INATIVO').length; return n + ' de ' + t.toLocaleString('pt-BR') + ' produtos'; };
 
   // ----------------------------------------------------------------- página do produto
+  // Compras e Pedidos (06/11/2026, Wellington): o histórico das notas de compra (só quem vê custo e compra: administrador e
+  // comprador) e os pedidos de venda que ainda vão sair com o produto (cada um vê os pedidos que já vê na tela Pedidos).
+  const vePedidos = () => !!(CRM.pedidos && CRM.pedidos.doProduto) && CRM.papel() !== 'motorista';
   const ABAS_PROD = () => [['geral', 'Geral'], ['precos', 'Preços'], ['estoque', 'Estoque'], ['vendas', 'Vendas']]
+    .concat(podeFotos() ? [['compras', 'Compras']] : []).concat(vePedidos() ? [['pedidos', 'Pedidos de venda']] : [])
     .concat(CRM.ehAdmin() ? [['fiscal', 'Fiscal']] : []).concat(podeFotos() ? [['fornecedor', 'Fornecedor']] : []).concat([['foto', 'Foto e ficha']]);
   const dl = pares => '<dl class="dados pc-dados">' + pares.filter(Boolean).map(([k, v]) => '<dt>' + esc(k) + '</dt><dd>' + (v == null || v === '' ? '—' : esc(v)) + '</dd>').join('') + '</dl>';
   function pagina(x) {
     const viz = X.vizinhos(visiveis(), x.codigo), u = x.foto ? st().fotoUrl(x.foto.caminho) : '', inf = x.info || {}, d = det.get(x.codigo) || {};
     const abas = ABAS_PROD(); if (!abas.some(a => a[0] === pc.aba)) pc.aba = 'geral';
     const vc = veCusto() && x.custo != null, mg = vc ? X.margemDe(x.preco, x.custo) : null, sg = sugs.find(z => z.codigo === x.codigo && z.situacao === 'sugerida');
-    const corpo = { geral: abaGeral, precos: abaPrecos, estoque: abaEstoque, vendas: abaVendas, fiscal: abaFiscal, fornecedor: abaFornecedor, foto: abaFoto }[pc.aba](x, d);
+    const corpo = { geral: abaGeral, precos: abaPrecos, estoque: abaEstoque, vendas: abaVendas, compras: abaCompras, pedidos: abaPedidos, fiscal: abaFiscal, fornecedor: abaFornecedor, foto: abaFoto }[pc.aba](x, d);
     return '<div class="pc-nav"><button type="button" class="link" data-acao="pc-voltar">‹ Voltar à pesquisa</button><span class="flex"></span>' +
         (viz.ant ? '<button type="button" class="link" data-acao="pf-abrir" data-id="' + esc(viz.ant.codigo) + '">‹ ' + esc(viz.ant.codigo) + ' ' + esc(nome(viz.ant)) + '</button>' : '') +
         (viz.pos ? '<small>' + viz.pos + ' de ' + viz.total + '</small>' : '') +
@@ -957,15 +1007,58 @@
   }
   function abaFornecedor(x, d) {
     const fo = x.forn, cad = fo ? (fornLista || []).find(z => String(z.codigo) === String(fo.cod)) : null;
-    const cu = i => { const q = num(i.quantidade) * (num(i.fator) || 1); return q > 0 ? (num(i.valor_total) + num(i.ipi) + num(i.st) + num(i.frete) + num(i.outras)) / q : null; };
     return '<div class="pc-colunas"><div><h3>Fornecedor</h3>' + (fo ? dl([['Fornecedor', R.nomeDeItem(fo.nome)], ['Código', fo.cod], ['De onde', fo.trocado ? 'definido no CRM' : 'do cadastro do FKN']]) : '<p class="vazio">Sem fornecedor: diga de quem se compra.</p>') +
         '<p class="acoes"><button type="button" class="btn sec" data-acao="pc-forn" data-id="' + esc(x.codigo) + '">' + (fo ? 'Trocar o fornecedor' : 'Definir o fornecedor') + '</button></p></div>' +
       '<div><h3>Cadastro do fornecedor</h3>' + (cad ? dl([['Prazo de entrega', cad.prazo_dias != null ? cad.prazo_dias + ' dia(s)' : ''], ['Pedido mínimo', cad.pedido_minimo != null ? R.moeda(cad.pedido_minimo) : ''],
           ['Frete', cad.frete === 'cif' ? 'CIF' : cad.frete === 'fob' ? 'FOB' : cad.frete === 'cif_acima' ? 'CIF acima de ' + R.moeda(cad.frete_cif_acima) : cad.frete], ['Dias de pedido', (cad.dias_pedido || []).map(n => ['', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'][n]).join(', ')],
           ['Pagamento', cad.pagamento], ['Contato', [cad.contato, cad.telefone, cad.email].filter(Boolean).join(' · ')]]) : '<p class="vazio">Sem prazo, mínimo e frete cadastrados (Compras → Fornecedores).</p>') + '</div></div>' +
-      '<h3>Últimas compras <small>pelas notas de compra</small></h3>' + (d.carregando ? '<p class="dica">Carregando…</p>' : (d.compras || []).length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Data</th><th>Nota</th><th>Fornecedor</th><th class="num">Quantidade</th><th class="num">Custo un.</th></tr></thead><tbody>' +
-        d.compras.map(i => '<tr><td>' + esc(dataBR(i.emitida_em)) + '</td><td>' + esc(i.numero || '') + '</td><td>' + esc(R.nomeDeItem(i.fornecedor_nome || '')) + '</td><td class="num">' + qtd(num(i.quantidade) * (num(i.fator) || 1)) + ' ' + esc(x.unidade || '') + '</td><td class="num">' + (cu(i) != null ? 'R$ ' + preco(cu(i)) : '—') + '</td></tr>').join('') +
-        '</tbody></table></div><p class="dica">Custo unitário com IPI, ST, frete e outras despesas da nota.</p>' : '<p class="vazio">Nenhuma nota de compra deste produto no CRM ainda.</p>');
+      '<p class="acoes"><button type="button" class="btn sec" data-acao="pc-aba" data-id="compras">Ver as compras de todos os fornecedores</button></p>';
+  }
+  // ---- aba Compras (06/11/2026, Wellington: "as entradas das últimas notas, para comparar onde comprei mais em conta")
+  const COMO = { item: 'lançada no CRM', vinculo: 'pelo código do fornecedor', ean: 'pelo código de barras' };
+  const SIT_COMPRA = { lancada: 'entrada dada', ignorada: 'entrou no FKN', pendente: 'a lançar' };
+  function abaCompras(x, d) {
+    if (d.carregando || d.historico === undefined) return '<p class="dica">Carregando…</p>';
+    const l = d.historico || [];
+    if (!l.length) return '<p class="vazio">Nenhuma nota de compra deste produto ainda (nem pelo código do fornecedor nem pelo código de barras).</p>';
+    const g = X.comprasPorFornecedor(l), un = esc(x.unidade || 'un');
+    const resumo = '<h3>Por fornecedor <small>custo por ' + un + ', com IPI, ST, frete e outras despesas da nota</small></h3><div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Fornecedor</th>' +
+      '<th>Última compra</th><th class="num">Último custo</th><th class="num">Menor</th><th class="num">Maior</th><th class="num">Compras</th><th class="num">Quantidade</th></tr></thead><tbody>' +
+      g.map(f => '<tr' + (f.maisEmConta ? ' class="pc-mais-conta"' : '') + '><td><strong>' + esc(R.nomeDeItem(f.nome || f.doc || '—')) + '</strong>' + (f.maisEmConta ? ' ' + CRM.selo('mais em conta', 'verde') : f.acimaPct > 0 ? ' <small class="neg">+' + esc(String(f.acimaPct).replace('.', ',')) + '%</small>' : '') + '</td>' +
+        '<td>' + esc(dataBR(f.ultima)) + '</td><td class="num"><strong>R$ ' + preco(f.ultimoCusto) + '</strong></td><td class="num">R$ ' + preco(f.menorCusto) + '</td><td class="num">R$ ' + preco(f.maiorCusto) + '</td>' +
+        '<td class="num">' + f.vezes + '</td><td class="num">' + qtd(f.qtd) + ' ' + un + '</td></tr>').join('') + '</tbody></table></div>';
+    const todas = '<h3>Notas de compra <small>' + l.length + (l.length >= 100 ? ' mais recentes' : '') + '</small></h3><div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Data</th><th>Nota</th><th>Fornecedor</th>' +
+      '<th>Na nota</th><th class="num">Quantidade</th><th class="num">Custo por ' + un + '</th><th class="num">Total</th><th>Situação</th></tr></thead><tbody>' +
+      l.map(c => '<tr><td>' + esc(dataBR(c.emitida_em)) + '</td><td>' + esc(String(c.numero || '')) + '</td><td>' + esc(R.nomeDeItem(c.fornecedor_nome || '')) + '</td>' +
+        '<td><small>' + esc(qtd(c.qtd_nota) + ' ' + (c.unidade || '') + (num(c.fator) !== 1 ? ' × ' + qtd(c.fator) : '')) + '<br>' + esc(c.descricao || '') + '</small></td>' +
+        '<td class="num">' + qtd(c.qtd) + ' ' + un + '</td><td class="num"><strong>' + (c.custo_un != null ? 'R$ ' + preco(c.custo_un) : '—') + '</strong></td><td class="num">' + (c.valor != null ? 'R$ ' + preco(c.valor) : '—') + '</td>' +
+        '<td><small>' + esc(SIT_COMPRA[c.situacao] || c.situacao || '') + (c.como && c.como !== 'item' ? '<br>' + esc(COMO[c.como] || c.como) : '') + '</small></td></tr>').join('') + '</tbody></table></div>' +
+      (l.some(c => c.como === 'ean') ? '<p class="dica">"Pelo código de barras": nota de antes do CRM ligada pelo código de barras do produto; a quantidade é a da nota (1 por embalagem). Se o fornecedor vende em caixa, confira o custo.</p>' : '');
+    return resumo + todas;
+  }
+  // ---- aba Pedidos de venda (06/11/2026, Wellington: "ver os pedidos de vendas que estão pendentes")
+  function abaPedidos(x) {
+    return '<p class="dica">Pedidos ainda não faturados com este produto' + (CRM.papel() === 'vendedor' ? ' (os seus)' : '') + ': bloqueados, liberados, em separação e a emitir NF. Clique no número para abrir.</p>' +
+      '<div data-pc-pedidos="' + esc(x.codigo) + '"><p class="dica">Carregando…</p></div>';
+  }
+  async function pedidosDaAba(c, cod) {
+    const el = c.querySelector('[data-pc-pedidos]');
+    if (!el) return;
+    try {
+      const l = await CRM.pedidos.doProduto(cod), x = prod(cod) || {}, un = esc(x.unidade || 'un');
+      if (!c.contains(el)) return;
+      if (!l.length) { el.innerHTML = '<p class="vazio">Nenhum pedido de venda pendente com este produto.</p>'; return; }
+      const tq = l.reduce((s, z) => s + z.qtd, 0), tf = l.reduce((s, z) => s + z.falta, 0);
+      el.innerHTML = '<div class="kpis"><div class="kpi"><span>Nos pedidos</span><strong>' + qtd(Math.round(tq * 1000) / 1000) + '</strong><small>' + un + ' em ' + l.length + ' pedido(s)</small></div>' +
+          '<div class="kpi' + (tf > 0 ? ' alerta' : ' verde') + '"><span>Falta do físico</span><strong>' + qtd(Math.round(tf * 1000) / 1000) + '</strong><small>' + (tf > 0 ? un + ' sem estoque para atender' : 'o estoque atende') + '</small></div></div>' +
+        '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Pedido</th><th>Data</th><th>Cliente</th><th>Vendedor(a)</th><th class="num">Quantidade</th><th class="num">Falta</th><th>Entrega</th><th>Situação</th></tr></thead><tbody>' +
+        l.map(z => { const p = z.pedido;
+          return '<tr><td><button type="button" class="link" data-acao="pc-pedido" data-id="' + esc(p.id) + '">' + esc(String(p.numero || '')) + '</button></td><td>' + esc(dataBR(p.criado_em)) + '</td>' +
+            '<td>' + esc(z.cliente || '—') + '</td><td>' + esc(R.primeiroNome(CRM.nomeUsuario(p.vendedor_id))) + '</td><td class="num">' + qtd(z.qtd) + ' ' + un + '</td>' +
+            '<td class="num' + (z.falta > 0 ? ' neg' : '') + '">' + (z.falta > 0 ? qtd(z.falta) : '—') + '</td><td>' + esc(p.entrega ? R.dataBR(p.entrega) : '—') + '</td>' +
+            '<td>' + CRM.selo(z.sit.rotulo, z.sit.cor) + (z.sit.bloqueios ? '<small>' + esc(z.sit.bloqueios.map(b => (P && P.ROTULO_BLOQUEIO[b]) || b).join(' · ')) + '</small>' : '') + '</td></tr>'; }).join('') +
+        '</tbody></table></div>';
+    } catch (e) { el.innerHTML = '<p class="dica">Não consegui carregar os pedidos agora.</p>'; }
   }
   function abaFoto(x) {
     const u = x.foto ? st().fotoUrl(x.foto.caminho) : '', inf = x.info || {}, sg = sugs.find(z => z.codigo === x.codigo && z.situacao === 'sugerida');
@@ -982,8 +1075,9 @@
     if (!podeFotos() || det.has(cod)) return;
     det.set(cod, { carregando: true });
     const s = st();
-    Promise.all([s.produtoDetalhe ? s.produtoDetalhe(cod).catch(() => ({})) : {}, s.estoqueMovs(cod, 12).catch(() => [])])
-      .then(([dd, movs]) => { det.set(cod, Object.assign({}, dd, { movs })); if (pc.aberto === cod) CRM.render(); });
+    Promise.all([s.produtoDetalhe ? s.produtoDetalhe(cod).catch(() => ({})) : {}, s.estoqueMovs(cod, 12).catch(() => []),
+      s.produtoCompras ? s.produtoCompras(cod).catch(() => []) : []])
+      .then(([dd, movs, historico]) => { det.set(cod, Object.assign({}, dd, { movs, historico: historico || [] })); if (pc.aberto === cod) CRM.render(); });
   }
 
   CRM.telas.produtos = {
@@ -1009,6 +1103,7 @@
       if (pc.aberto) {
         carregaDetalhe(pc.aberto);
         if (pc.aba === 'vendas') clientes(c, pc.aberto);
+        if (pc.aba === 'pedidos' && vePedidos()) pedidosDaAba(c, pc.aberto);
         return;
       }
       const conta = c.querySelector('[data-pc-conta]'); if (conta) conta.textContent = contagem();
@@ -1190,6 +1285,7 @@
     'pf-abrir': id => { pc.aberto = base(id); CRM.estado.aba = 'produtos'; CRM.render(); raiz.scrollTo && raiz.scrollTo(0, 0); },
     'pc-voltar': () => { pc.aberto = null; CRM.render(); },
     'pc-aba': id => { pc.aba = id; CRM.render(); },
+    'pc-pedido': id => { if (CRM.pedidos && CRM.pedidos.abrir) CRM.pedidos.abrir(id); },
     'pc-modo': id => { try { raiz.localStorage.setItem(chaveModo(), id); } catch (e) { /* fica só nesta sessão */ } pc.limite = 100; CRM.render(); },
     'pc-atalho': id => { pc.atalho = id; pc.limite = 100; CRM.render(); },
     'pc-mais': () => { pc.limite += 100; CRM.render(); },

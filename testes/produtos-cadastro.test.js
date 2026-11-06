@@ -98,3 +98,38 @@ test('inativos para quem cuida do cadastro: entram pelo cadastro e aparecem em "
   assert.equal(n.todos, 5); assert.equal(n.inativos, 2);
   assert.equal(Object.fromEntries(X.atalhos(l, {}).map(a => [a.id, a.n])).todos, 3);
 });
+
+test('aba Compras: por fornecedor, o mais em conta pelo último custo (06/11/2026, Wellington)', () => {
+  const l = [
+    { fornecedor_doc: '1', fornecedor_nome: 'DESTRO', emitida_em: '2026-10-20T10:00:00Z', custo_un: 6.7625, qtd: 12 },
+    { fornecedor_doc: '1', fornecedor_nome: 'DESTRO', emitida_em: '2026-09-02T10:00:00Z', custo_un: 6.62, qtd: 12 },
+    { fornecedor_doc: '2', fornecedor_nome: 'SEVERINI', emitida_em: '2026-10-31T10:00:00Z', custo_un: 8.575, qtd: 36 },
+    { fornecedor_doc: '3', fornecedor_nome: 'WMS', emitida_em: '2026-10-27T10:00:00Z', custo_un: null, qtd: 5 }
+  ];
+  const g = X.comprasPorFornecedor(l);
+  assert.equal(g.length, 2);                        // sem custo não entra
+  assert.equal(g[0].nome, 'DESTRO');
+  assert.equal(g[0].maisEmConta, true);
+  assert.equal(g[0].ultimoCusto, 6.7625);           // o último, não o menor
+  assert.equal(g[0].menorCusto, 6.62);
+  assert.equal(g[0].vezes, 2);
+  assert.equal(g[0].qtd, 24);
+  assert.equal(g[1].acimaPct, 26.8);
+  assert.equal(X.comprasPorFornecedor(l.slice(0, 1))[0].maisEmConta, undefined); // um fornecedor só: sem selo
+});
+
+test('aba Pedidos de venda: só os que ainda vão sair, com a quantidade do estoque e a falta (06/11/2026)', () => {
+  const peds = [
+    { id: 'a', numero: 98, situacao: 'aberto', criado_em: '2026-11-06T10:00:00Z', itens: [{ base: '010079', codigo: '010079', qtd_est: 4, quantidade: 4, fator: 1, unidade: 'FR' }] },
+    { id: 'b', numero: 90, situacao: 'separacao', criado_em: '2026-11-05T10:00:00Z', itens: [{ base: '010095', qtd_est: 2 }, { base: '010079', codigo: '010079.1', quantidade: 1, fator: 12, qtd_est: 12, unidade: 'CX' }] },
+    { id: 'c', numero: 80, situacao: 'faturado', criado_em: '2026-11-04T10:00:00Z', itens: [{ base: '010079', qtd_est: 9 }] },
+    { id: 'd', numero: 70, situacao: 'cancelado', criado_em: '2026-11-03T10:00:00Z', itens: [{ base: '010079', qtd_est: 9 }] }
+  ];
+  const l = X.pedidosDoProduto(peds, '010079', [{ pedido_id: 'b', idx: 1, base: '010079', falta: 0.5 }]);
+  assert.deepEqual(l.map(z => z.pedido.numero), [90, 98]);   // o mais antigo primeiro
+  assert.equal(l[0].qtd, 12);
+  assert.equal(l[0].falta, 6);                                // 0,5 caixa × 12
+  assert.equal(l[1].qtd, 4);
+  assert.equal(l[1].falta, 0);
+  assert.deepEqual(X.pedidosDoProduto(peds, '999999', []), []);
+});

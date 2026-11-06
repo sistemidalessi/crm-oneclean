@@ -1218,6 +1218,12 @@
 
   CRM.pedidos = {
     faltasResumo,
+    // os pedidos que a pessoa vê e que ainda vão sair com o produto (página do produto, aba Pedidos; 06/11/2026)
+    doProduto: async base => {
+      if (peds === null) await carrega(true);
+      return raiz.CRMProdutos && raiz.CRMProdutos.pedidosDoProduto ? raiz.CRMProdutos.pedidosDoProduto(peds, base, faltas)
+        .map(x => Object.assign(x, { cliente: nomeCliente(x.pedido), sit: P.situacao(x.pedido) })) : [];
+    },
     deProposta: async pid => {
       const pr = (E().D.propostas || []).find(p => p.id === pid); if (!pr) return;
       fechaFichas(); E().aba = 'pedidos'; aberto = null;

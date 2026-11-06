@@ -1791,6 +1791,9 @@
       .sort((a, b) => String(b.emitida_em || '').localeCompare(String(a.emitida_em || ''))).slice(0, 10);
     return { saldo, hist, compras: comp, unidades };
   };
+  // Histórico de compras do produto, inclusive as notas de antes da virada (pelo vínculo aprendido e pelo código de barras),
+  // com o custo por unidade do estoque: só administrador e comprador (06/11/2026, Wellington).
+  Supa.prototype.produtoCompras = async function (codigo) { return unwrap(await this.sb.rpc('crm_produto_compras', { p_codigo: codigo })) || []; };
   Supa.prototype.sugestaoMarcar = async function (codigo, situacao) { return unwrap(await this.sb.from('crm_produto_fotos_sugestoes').update({ situacao }).eq('codigo', codigo)); };
 
   // Modo local: as fotos ficam no navegador como data: (serve para ver as telas); sem IA (a busca devolve "sem").
@@ -1857,6 +1860,7 @@
       codigo: i.codigo, pedido_id: p.id, pedido_em: p.criado_em, previsao: p.previsao, falta: Number(i.quantidade) - Number(i.cancelado || 0), faturado: 0, faturado_em: null }))));
   };
   Local.prototype.produtoDetalhe = async function () { return { saldo: null, hist: [], compras: [], unidades: [] }; };
+  Local.prototype.produtoCompras = async function () { return []; };
   Local.prototype.produtoClientes = async function (codigo, limite) {
     const base = c => String(c || '').replace(/\.\d+$/, ''), m = new Map();
     (this.ler().notas || []).filter(n => !n.cancelada).forEach(n => (n.itens || []).filter(i => base(i.codigo) === base(codigo)).forEach(i => {

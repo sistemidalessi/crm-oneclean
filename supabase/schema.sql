@@ -9636,6 +9636,39 @@ end;
 $$;
 revoke all on function public.crm_compra_desfazer(uuid, text) from public, anon;
 grant execute on function public.crm_compra_desfazer(uuid, text) to authenticated;
+-- 06/11/2026 (Wellington, áudio): na página do produto, uma aba com as entradas das últimas notas de compra, para comparar
+-- onde comprou mais em conta. As notas de antes da virada (entraram no FKN, "ignoradas" no CRM) e as pendentes não têm o
+-- nosso código no item: o produto sai do vínculo aprendido nas entradas (CNPJ do fornecedor + código dele → nosso código e
+-- quantas vêm na embalagem) ou do código de barras do cadastro fiscal. Só o administrador e o comprador (mostra custo).
+create or replace function public.crm_produto_compras(p_codigo text)
+returns table (compra_id uuid, numero bigint, serie text, emitida_em timestamptz, fornecedor_nome text, fornecedor_doc text,
+  situacao text, como text, descricao text, unidade text, qtd_nota numeric, fator numeric, qtd numeric, valor numeric, custo_un numeric)
+language sql stable security definer set search_path = public as $$
+  with alvo as (select regexp_replace(trim(coalesce(p_codigo, '')), '\.\d+$', '') b),
+  eans as (select p.gtin from crm_fiscal_produtos p, alvo where p.codigo = alvo.b and p.gtin ~ '^\d{8,14}$'),
+  itens as (
+    select c.id, c.numero, c.serie, c.emitida_em, c.fornecedor_nome, c.fornecedor_doc, c.situacao, i.descricao, i.unidade,
+      i.quantidade, i.valor_total, i.ipi, i.st, i.frete, i.outras,
+      case when i.codigo is not null then 'item' when v.codigo is not null then 'vinculo' when i.ean in (select gtin from eans) then 'ean' end como,
+      case when i.codigo is not null then coalesce(nullif(i.fator, 0), 1) when v.codigo is not null then coalesce(nullif(v.fator, 0), 1) else 1 end f
+    from crm_compras c join crm_compra_itens i on i.compra_id = c.id
+    left join crm_compra_vinculos v on v.fornecedor_doc = c.fornecedor_doc and v.cod_fornecedor = i.cod_fornecedor and i.codigo is null
+    , alvo
+    where not coalesce(c.devolucao, false)
+      and (regexp_replace(coalesce(i.codigo, ''), '\.\d+$', '') = alvo.b
+        or (i.codigo is null and regexp_replace(coalesce(v.codigo, ''), '\.\d+$', '') = alvo.b)
+        or (i.codigo is null and v.codigo is null and i.ean in (select gtin from eans)))
+  )
+  select id, numero, serie, emitida_em, fornecedor_nome, fornecedor_doc, situacao, como, descricao, unidade, quantidade, f,
+    round(quantidade * f, 3), round(valor_total + coalesce(ipi, 0) + coalesce(st, 0) + coalesce(frete, 0) + coalesce(outras, 0), 2),
+    case when quantidade * f > 0 then round((valor_total + coalesce(ipi, 0) + coalesce(st, 0) + coalesce(frete, 0) + coalesce(outras, 0)) / (quantidade * f), 4) end
+  from itens
+  where (select public.crm_eh_admin() or public.crm_eh_comprador())
+  order by emitida_em desc nulls last
+  limit 100
+$$;
+revoke all on function public.crm_produto_compras(text) from public, anon;
+grant execute on function public.crm_produto_compras(text) to authenticated;
 
 -- ============================================================ 04/11/2026: Diretor de Vendas, parado pelo último contato
 -- Diretor de Vendas: "parado" conta do último movimento, não só da mudança de etapa (04/11/2026, áudio da vendedora: "os três
