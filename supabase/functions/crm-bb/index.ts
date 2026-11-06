@@ -77,7 +77,7 @@ const dig = (v: unknown) => String(v ?? '').replace(/\D/g, '');
 // 03/11/2026, 1º boleto da virada). Vai só com letras e números: "00286201" (nota 002862, parcela 01); a mensagem do boleto
 // continua com "NF 002862/01".
 const seuNumero = (v: unknown) => String(v ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 15);
-const txt = (v: unknown, n: number) => String(v ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9 .,\/&-]/g, ' ').replace(/\s+/g, ' ').trim().toUpperCase().slice(0, n);
+const txt = (v: unknown, n: number) => String(v ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9 .,\/&-]/g, ' ').replace(/\s+/g, ' ').trim().toUpperCase().slice(0, n);
 const msgBB = (j: any, t: string) => {
   const e = j?.erros || j?.errors || (j?.error ? [j.error] : null);
   if (Array.isArray(e) && e.length) return e.map((x: any) => [x.codigo || x.code, x.mensagem || x.message || x.textoMensagem].filter(Boolean).join(' ')).join('; ').slice(0, 300);
