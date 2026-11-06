@@ -1580,6 +1580,11 @@
   Local.prototype.prospecTratar = async function (id, situacao, motivo, empresa) {
     const l = await this.prospecMinhas();
     lsGrava('crm_prospec_local', l.map(x => (x.id === id ? Object.assign({}, x, { situacao, motivo_descarte: motivo, empresa_id: empresa, tratado_em: situacao === 'nova' ? null : new Date().toISOString() }) : x)));
+    // como o crm_prospec_tratar: ao virar lead, as anotações entram no histórico da empresa
+    const s = l.find(x => x.id === id);
+    if (situacao === 'lead' && empresa && s && s.situacao !== 'lead' && (s.anotacoes || []).length)
+      await this.inserirVarios('atividades', s.anotacoes.map(a => ({ empresa_id: empresa, tipo: a.como || 'nota', descricao: 'Antes de virar lead (leads sugeridos): ' + a.texto,
+        concluida: true, concluida_em: a.em, data_hora: a.em, responsavel_id: s.vendedor_id, automatica: false })));
   };
   Local.prototype.prospecAnotar = async function (id, texto, como) {
     const l = await this.prospecMinhas(), em = new Date().toISOString();
