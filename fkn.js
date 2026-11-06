@@ -39,7 +39,9 @@
   // (caixa fechada do mesmo código) vira "000044.1", como no CSV de estoque. O saldo do FKN já
   // desconta o que está reservado para cliente (saldo = atual − pendente de cliente).
   const ehListagemProdutos = t => /LISTAGEM CADASTRAL DE PRODUTOS|ESTOQUE:;\s*m[ií]n:/i.test(String(t).slice(0, 5000));
-  function lerListagemProdutos(texto) {
+  // opc.todos (06/11/2026, comprador: "muitos itens que estavam inativos no FKN não vieram"): devolve também o inativo sem
+  // saldo e sem pedido, que a leitura do estoque deixa de fora; é o que "Trazer os inativos do FKN" usa.
+  function lerListagemProdutos(texto, opc) {
     const n = v => R.numeroBR(v) || 0;
     const data = v => { const m = /^(\d\d)\/(\d\d)\/(\d{4})$/.exec(String(v || '').trim()); return m && m[1] !== '00' ? m[3] + '-' + m[2] + '-' + m[1] : null; };
     const out = new Map();
@@ -64,8 +66,16 @@
     const lista = [...out.values()].filter(x => x.quantidade != null);
     if (!lista.length) throw new Error('não achei produtos na listagem (é a "Listagem cadastral de produtos" do FKN salva em CSV?)');
     // Entra o que está ativo e o inativo que ainda tem saldo ou pedido em aberto.
-    return lista.filter(x => x.situacao !== 'INATIVO' || x.quantidade || x.pend_fornecedor).map(x => Object.assign(x, {
+    return lista.filter(x => (opc && opc.todos) || x.situacao !== 'INATIVO' || x.quantidade || x.pend_fornecedor).map(x => Object.assign(x, {
       custo_total: x.quantidade > 0 ? Math.round(x.quantidade * (x.custo_unit || 0) * 100) / 100 : 0 }));
+  }
+  // Os produtos da listagem que o CRM ainda não tem (pelo código, a caixa ".1" à parte). Entram sempre INATIVOS e com saldo
+  // zero: o estoque é do CRM desde a virada, e o comprador reativa o que voltar a vender. Nada do que já existe muda.
+  function faltamNoCrm(lidos, existentes) {
+    const tem = new Set([...(existentes || [])].map(c => String(c).toUpperCase()));
+    const novos = (lidos || []).filter(x => x && x.codigo && !tem.has(String(x.codigo).toUpperCase()));
+    return { novos, jaTem: (lidos || []).length - novos.length, ativosNoFkn: novos.filter(x => x.situacao !== 'INATIVO').length,
+      comSaldoNoFkn: novos.filter(x => Number(x.quantidade) !== 0).length };
   }
   // Hora em que a listagem foi gerada no FKN (cabeçalho ";DATA: 16/10/2026;" e "…;14:14;"), horário de Brasília → ISO.
   // O estoque do CRM compara os dois saldos nessa hora (16/10/2026). Sem cabeçalho: null.
@@ -307,7 +317,7 @@
   }
 
   const api = { lerContasPagar, ehContasPagar, conferirContasPagar, planoContasPagar, lancamentoDoFkn, lerEstoque, lerListagemProdutos, posicaoListagem, lerArquivoEstoque, ehListagemProdutos, codigoFKN, lerContasReceber, ehContasReceber, ligaEmpresas, dataFKN,
-    conferirListagemProdutos, conferirContasReceber };
+    conferirListagemProdutos, conferirContasReceber, faltamNoCrm };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else raiz.CRMFkn = api;
 })(typeof window !== 'undefined' ? window : globalThis);

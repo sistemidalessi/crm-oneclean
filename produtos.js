@@ -998,6 +998,7 @@
       return '<div class="cabecalho"><div><h1>Produtos</h1><p class="sub">pesquise pelo código, pela descrição ou pelo código de barras; clique para ver tudo do produto</p></div>' +
         '<div class="acoes">' + (podeCad() && dono ? '<button type="button" class="btn" data-acao="pc-novo">+ Novo produto</button>' : '') +
           (CRM.ehAdmin() && dono === false ? '<button type="button" class="btn sec" data-acao="pc-dono">Passar o cadastro para o CRM</button>' : '') +
+          (dono && (CRM.ehAdmin() || CRM.ehComprador()) ? '<label class="btn sec arquivo" title="No FKN: Listagem cadastral de produtos (SIFN108) com Situação 0 (todos), salva em CSV. Só entram os códigos que o CRM ainda não tem, todos inativos e com saldo zero; nada do que já existe muda.">Trazer os inativos do FKN<input type="file" data-pc-fkn accept=".csv,.txt,text/csv"></label>' : '') +
           (cuidaFotos() ? '<button type="button" class="btn sec" data-acao="pf-ir-fotos">Fotos e fichas' + (semFoto ? ' (' + semFoto + ' sem foto)' : '') + '</button>' : '') +
         '<button type="button" class="btn sec" data-acao="pf-recarregar"' + (carregando ? ' disabled' : '') + '>Atualizar</button></div></div>' +
         (podeCad() && dono === false ? '<p class="aviso-notas">Até a virada, o cadastro de produto (descrição, preço, mínimo) vem do FKN. Quando o FKN parar de emitir, ' +
@@ -1019,8 +1020,32 @@
       [['[data-pc-linha]', 'linha'], ['[data-pc-forn]', 'forn'], ['[data-pc-ordem]', 'ordem']].forEach(([sel, k]) => {
         const e = c.querySelector(sel); if (e) e.addEventListener('change', () => { pc[k] = e.value; pc.limite = 100; CRM.render(); });
       });
+      const fk = c.querySelector('[data-pc-fkn]');
+      if (fk) fk.addEventListener('change', () => { const f = fk.files && fk.files[0]; fk.value = ''; if (f) trazerDoFkn(f).catch(e => CRM.falhou(e)); });
     }
   };
+  // Inativos do FKN que a leitura do estoque tinha deixado de fora (06/11/2026, comprador). A listagem SIFN108 inteira é lida,
+  // só os códigos que o CRM não tem vão ao banco (crm_produtos_trazer_do_fkn), todos INATIVOS e com saldo zero.
+  async function trazerDoFkn(f) {
+    const K = raiz.CRMFkn;
+    if (!K || !K.faltamNoCrm) throw new Error('recarregue a página (Ctrl+F5) e tente de novo');
+    const buf = await f.arrayBuffer();
+    let txt = new TextDecoder('utf-8').decode(buf);
+    if (txt.indexOf('�') !== -1) txt = new TextDecoder('windows-1252').decode(buf);   // CSV do FKN é Windows-1252
+    if (!K.ehListagemProdutos(txt)) throw new Error('não é a "Listagem cadastral de produtos" do FKN (SIFN108) salva em CSV');
+    const lidos = K.lerListagemProdutos(txt, { todos: true });
+    if (!lidos.some(x => x.situacao === 'INATIVO')) throw new Error('a listagem veio sem nenhum produto inativo: no FKN, deixe "Situação" em 0 (todos) e salve de novo');
+    const r = K.faltamNoCrm(lidos, (lista || []).map(x => x.codigo).concat(lista ? [].concat(...lista.map(x => x.caixa && x.caixa.codigo ? [x.caixa.codigo] : [])) : []));
+    if (!r.novos.length) { CRM.toast('Nenhum produto a trazer: os ' + lidos.length + ' da listagem já estão no CRM.'); return; }
+    const ex = r.novos.slice(0, 8).map(x => '• ' + x.codigo + ' ' + x.descricao).join('\n');
+    if (!confirm('Trazer ' + r.novos.length + ' produto(s) do FKN que não estão no CRM?\n\n' + ex + (r.novos.length > 8 ? '\n• …' : '') +
+      '\n\nEntram INATIVOS e com saldo zero (o estoque é o do CRM), com descrição, linha, família, fornecedor, custo e preço do FKN. ' +
+      'Os ' + r.jaTem + ' que já estão no CRM não mudam.' + (r.ativosNoFkn ? '\n\nAtenção: ' + r.ativosNoFkn + ' estão ATIVOS no FKN e entram inativos aqui; reative os que forem vender.' : ''))) return;
+    const campos = ['codigo', 'descricao', 'situacao', 'linha', 'familia', 'fornecedor_cod', 'estoque_min', 'estoque_max', 'custo_compra', 'custo_unit', 'preco_venda', 'localizacao', 'ult_entrada', 'ult_saida'];
+    const out = await st().produtosTrazerDoFkn(r.novos.map(x => { const o = {}; campos.forEach(k => { if (x[k] != null) o[k] = x[k]; }); return o; }));
+    CRM.toast((out && out.novos != null ? out.novos : r.novos.length) + ' produto(s) trazido(s) do FKN, inativos. Para vender, abra o produto e clique em Reativar.');
+    lista = null; det.clear(); carrega();
+  }
   function formForn(cod) {
     const x = prod(cod); if (!x) return;
     const m = new Map();
@@ -1147,6 +1172,14 @@
     'pc-editar': id => formCadastro(id),
     // 06/11/2026: o inativo volta a aparecer para vender (pesquisa, pedido, catálogo) com um clique
     'pc-reativar': async id => {
+      // o inativo trazido da listagem do FKN pode vir sem unidade nem regra fiscal (a SIFN108 não tem unidade): sem elas a nota
+      // não sai, então o cadastro abre para completar e a situação se troca lá
+      let v = null;
+      try { v = await st().produtoLer(id); } catch (e) { /* segue com a reativação simples */ }
+      if (v && (!v.unidade || v.tem_regra === false)) {
+        CRM.toast('Antes de reativar, complete ' + [!v.unidade ? 'a unidade' : '', v.tem_regra === false ? 'a regra fiscal (mesma tributação que outro produto)' : ''].filter(Boolean).join(' e ') + ' e troque a Situação para ATIVO.', true);
+        formCadastro(id); return;
+      }
       if (!confirm('Reativar o produto ' + id + '?\n\nEle volta a aparecer para as vendedoras (catálogo, pedido e orçamento).')) return;
       try { await st().produtoGravar(id, { situacao: 'ATIVO' }); CRM.toast('Produto ' + id + ' reativado.'); lista = null; det.delete(id); pc.aberto = id; carrega(); } catch (e) { CRM.falhou(e); }
     },

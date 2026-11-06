@@ -4531,6 +4531,53 @@ end;
 $$;
 grant execute on function public.crm_produto_gravar(text, jsonb) to authenticated;
 
+-- Inativos do FKN que a leitura da listagem SIFN108 deixava de fora (06/11/2026, comprador): só código novo, INATIVO, saldo zero.
+create or replace function public.crm_produtos_trazer_do_fkn(p_lista jsonb) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare it jsonb; cod text; base text; un text; fc text; fn text; novos int := 0; ja int := 0; inval int := 0; cods text[] := '{}';
+  d date; e public.crm_estoque;
+  num text[] := array['estoque_min', 'estoque_max', 'custo_compra', 'custo_unit', 'preco_venda'];
+  nv numeric[];
+begin
+  if not (public.crm_eh_admin() or public.crm_eh_comprador()) then raise exception 'só o administrador e o comprador trazem produtos do FKN'; end if;
+  if not public.crm_produtos_do_crm() then raise exception 'o cadastro ainda é do FKN'; end if;
+  if jsonb_typeof(p_lista) <> 'array' then raise exception 'lista inválida'; end if;
+  if jsonb_array_length(p_lista) > 5000 then raise exception 'lista grande demais (até 5.000 produtos)'; end if;
+  perform set_config('crm.cadastro', '1', true);
+  for it in select * from jsonb_array_elements(p_lista) loop
+    cod := upper(btrim(coalesce(it ->> 'codigo', '')));
+    if cod = '' or cod !~ '^[A-Z0-9][A-Z0-9.\-]{0,19}$' or length(btrim(coalesce(it ->> 'descricao', ''))) < 1 then inval := inval + 1; continue; end if;
+    if exists (select 1 from public.crm_estoque where codigo = cod) or exists (select 1 from public.crm_estoque_saldo where codigo = cod) then ja := ja + 1; continue; end if;
+    base := regexp_replace(cod, '\.\d+$', '');
+    un := case when cod <> base then 'CX' else (select f.unidade from public.crm_fiscal_produtos f where f.codigo = base) end;
+    fc := nullif(btrim(coalesce(it ->> 'fornecedor_cod', '')), '');
+    fn := null;
+    if fc is not null then select nome into fn from public.crm_fornecedores where codigo = fc; if fn is null then fc := null; end if; end if;
+    nv := array[]::numeric[];
+    for i in 1 .. array_length(num, 1) loop
+      begin nv := nv || greatest(nullif(it ->> num[i], '')::numeric, 0); exception when others then nv := nv || null::numeric; end;
+    end loop;
+    insert into public.crm_estoque (codigo, descricao, unidade, situacao, linha, familia, fornecedor_cod, fornecedor, estoque_min, estoque_max,
+        custo_compra, custo_unit, preco_venda, localizacao, ult_entrada, ult_saida, quantidade, estoque_atual, custo_total, atualizado_em)
+      values (cod, left(btrim(it ->> 'descricao'), 120), nullif(upper(btrim(coalesce(un, ''))), ''), 'INATIVO',
+        nullif(btrim(coalesce(it ->> 'linha', '')), ''), nullif(btrim(coalesce(it ->> 'familia', '')), ''), fc, fn, nv[1], nv[2], nv[3], nv[4], nv[5],
+        nullif(btrim(coalesce(it ->> 'localizacao', '')), ''),
+        case when (it ->> 'ult_entrada') ~ '^\d{4}-\d{2}-\d{2}$' then (it ->> 'ult_entrada')::date end,
+        case when (it ->> 'ult_saida') ~ '^\d{4}-\d{2}-\d{2}$' then (it ->> 'ult_saida')::date end, 0, 0, 0, now());
+    insert into public.crm_estoque_saldo (codigo, descricao, unidade, saldo, custo_medio, inicio, atualizado_em)
+      values (cod, left(btrim(it ->> 'descricao'), 120), nullif(upper(btrim(coalesce(un, ''))), ''), 0, nv[4], now(), now()) on conflict (codigo) do nothing;
+    select * into e from public.crm_estoque where codigo = cod;
+    insert into public.crm_produto_hist (codigo, acao, antes, depois)
+      values (cod, 'novo', null, to_jsonb(e) || jsonb_build_object('obs', 'trazido da listagem do FKN (inativo); situação no FKN: ' || coalesce(it ->> 'situacao', '?')));
+    novos := novos + 1; cods := cods || cod;
+  end loop;
+  perform set_config('crm.cadastro', '', true);
+  return jsonb_build_object('ok', true, 'novos', novos, 'ja_tinha', ja, 'invalidos', inval, 'codigos', to_jsonb(cods));
+end;
+$$;
+revoke all on function public.crm_produtos_trazer_do_fkn(jsonb) from public, anon;
+grant execute on function public.crm_produtos_trazer_do_fkn(jsonb) to authenticated;
+
 -- O que o formulário de edição mostra (a logística não lê crm_estoque, que tem custo): os campos do cadastro, com o custo
 -- só para o administrador e o comprador.
 create or replace function public.crm_produto_ler(p_codigo text) returns jsonb language plpgsql stable security definer set search_path = public as $$

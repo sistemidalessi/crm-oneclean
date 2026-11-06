@@ -498,6 +498,8 @@
   Supa.prototype.produtoLer = async function (codigo) { return unwrap(await this.sb.rpc('crm_produto_ler', { p_codigo: codigo })); };
   Supa.prototype.produtoGravar = async function (codigo, dados) { return unwrap(await this.sb.rpc('crm_produto_gravar', { p_codigo: codigo, p_dados: dados })); };
   Supa.prototype.produtoProximoCodigo = async function () { return unwrap(await this.sb.rpc('crm_produto_proximo_codigo')); };
+  // inativos da listagem do FKN que o CRM não tem (06/11/2026): o banco só insere código novo, INATIVO e com saldo zero
+  Supa.prototype.produtosTrazerDoFkn = async function (lista) { return unwrap(await this.sb.rpc('crm_produtos_trazer_do_fkn', { p_lista: lista })); };
   Supa.prototype.produtoEmbalagem = async function (codigo, unidade, fator) { return unwrap(await this.sb.rpc('crm_produto_embalagem', { p_codigo: codigo, p_unidade: unidade, p_fator: fator })); };
   Supa.prototype.trocarFornecedor = async function (codigo, fornecedor) {
     return unwrap(await this.sb.from('crm_produto_fornecedor').upsert({ codigo, fornecedor: fornecedor || null, atualizado_em: new Date().toISOString() }, { onConflict: 'codigo' }));
@@ -546,6 +548,7 @@
   Local.prototype.produtoLer = async function () { return null; };
   Local.prototype.produtoGravar = async function () { throw new Error('o cadastro de produto só funciona ligado ao banco'); };
   Local.prototype.produtoProximoCodigo = async function () { return ''; };
+  Local.prototype.produtosTrazerDoFkn = async function () { throw new Error('o cadastro de produto só funciona ligado ao banco'); };
   Local.prototype.produtoEmbalagem = async function () { throw new Error('o cadastro de produto só funciona ligado ao banco'); };
   Local.prototype.trocarFornecedor = async function (codigo, fornecedor) {
     lsGrava('crm_produto_fornecedor', lsLe('crm_produto_fornecedor', []).filter(x => x.codigo !== codigo).concat({ codigo, fornecedor: fornecedor || null }));

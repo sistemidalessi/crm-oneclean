@@ -187,6 +187,19 @@ test('listagem de produtos do FKN: fornecedor, mínimo, pedido e a caixa fechada
   assert.ok(!c.parado.some(x => x.codigo === '010001.1'), 'a caixa não aparece como parada separada');
 });
 
+test('inativos do FKN (06/11/2026): a listagem inteira e só os códigos que o CRM não tem', () => {
+  const K = require('../fkn.js');
+  const todos = K.lerListagemProdutos(LISTAGEM, { todos: true });
+  assert.deepEqual(todos.map(x => x.codigo), ['010001', '010001.1', '010002', '010005', '010009'], 'com { todos } o inativo sem saldo vem');
+  const inat = todos.find(x => x.codigo === '010009');
+  assert.deepEqual([inat.situacao, inat.descricao, inat.custo_unit, inat.preco_venda], ['INATIVO', 'PRODUTO ANTIGO', 1, 1.3]);
+  const r = K.faltamNoCrm(todos, ['010001', '010001.1', '010002', '010005']);
+  assert.deepEqual(r.novos.map(x => x.codigo), ['010009']);
+  assert.deepEqual([r.jaTem, r.ativosNoFkn, r.comSaldoNoFkn], [4, 0, 0]);
+  const r2 = K.faltamNoCrm(todos, ['010001']);
+  assert.deepEqual([r2.novos.length, r2.ativosNoFkn], [4, 3], 'ativo no FKN que falta no CRM é contado (entra inativo e avisa)');
+});
+
 test('listagem de produtos: conferência do relatório puxado no FKN (o que faltou marcar)', () => {
   const K = require('../fkn.js');
   assert.deepEqual(K.conferirListagemProdutos(LISTAGEM).recusa, [], 'a listagem completa passa');
