@@ -466,7 +466,7 @@ Deno.serve(async (req) => {
   try { c = await req.json(); } catch { return resposta(400, { erro: 'corpo inválido' }); }
 
   const hoje = hojeSP(), limite = LIMITE_DIA[eu.papel] ?? 30;
-  const { count: usadas } = await db.from('crm_assistente_uso').select('id', { count: 'exact', head: true }).eq('user_id', eu.user_id).or('tela.is.null,tela.neq.fotos').gte('criado_em', hoje + 'T03:00:00Z');
+  const { count: usadas } = await db.from('crm_assistente_uso').select('id', { count: 'exact', head: true }).eq('user_id', eu.user_id).or('tela.is.null,tela.not.in.("fotos","oferta-ia")').gte('criado_em', hoje + 'T03:00:00Z');
   if (c.acao === 'situacao') {
     let custoMes = null;
     if (eu.papel === 'admin') {

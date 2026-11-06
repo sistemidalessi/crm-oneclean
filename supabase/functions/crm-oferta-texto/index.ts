@@ -49,6 +49,11 @@ Regras:
 - Se vier um pedido de quem está montando a oferta, siga o pedido dentro destas regras.`;
 
 const temItens = (t: string) => /\{itens\}/.test(t);
+// cota própria por dia (06/11/2026, decisão do Anderson: não tira perguntas do assistente) e o gasto no teto do mês
+const LIMITE_DIA: Record<string, number> = { admin: 100, gestor: 30 };
+// US$ por milhão de tokens do Opus 5.5 (o mesmo PRECO do crm-assistente)
+const PRECO = { entrada: 4, saida: 20, lido: 0.2, escrito: 5 };
+const hojeSP = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
@@ -78,6 +83,20 @@ Deno.serve(async (req) => {
   const lista = itens.map(x => '- ' + x.descricao + (x.unidade ? ' (' + x.unidade + ')' : '') + ': R$ ' + x.preco.toFixed(2).replace('.', ',') +
     (x.preco_tabela && x.preco_tabela > x.preco ? ' (tabela R$ ' + x.preco_tabela.toFixed(2).replace('.', ',') + ')' : '')).join('\n');
 
+  const limite = LIMITE_DIA[eu.papel] ?? 0;
+  const { data: reserva } = await db.rpc('crm_ia_reservar', { p_user: quem.user.id, p_tela: 'oferta-ia', p_limite: limite, p_desde: hojeSP() + 'T03:00:00Z' });
+  if (!reserva) {
+    const { data: t } = await db.rpc('crm_ia_teto');
+    return resposta(429, { erro: t && t.estourado ? 'o limite de gasto do mês com a IA foi atingido (CEO Grupo → Diretores).'
+      : 'limite de textos de oferta de hoje atingido (' + limite + '). Amanhã libera de novo.' });
+  }
+  // deno-lint-ignore no-explicit-any
+  const fecha = async (u: any, erro: string | null) => {
+    const ent = Number(u?.input_tokens || 0), sai = Number(u?.output_tokens || 0), lid = Number(u?.cache_read_input_tokens || 0), esc = Number(u?.cache_creation_input_tokens || 0);
+    const custo = Math.round((ent * PRECO.entrada + sai * PRECO.saida + lid * PRECO.lido + esc * PRECO.escrito) / 1e6 * 100000) / 100000;
+    await db.from('crm_assistente_uso').update({ tela: 'oferta-ia', mascote: 'oferta', ferramentas: [], tokens_entrada: ent, tokens_saida: sai,
+      cache_lido: lid, cache_escrito: esc, custo_usd: custo, erro }).eq('id', reserva);
+  };
   const ia = new Anthropic({ apiKey: chave });
   try {
     const r = await ia.beta.messages.create({
@@ -91,6 +110,7 @@ Deno.serve(async (req) => {
         '\nProdutos (só para você entender o que é; NÃO repita na mensagem, use {itens}):\n' + lista + (pedido ? '\n\nPedido de quem está montando: ' + pedido : '') }]
       // deno-lint-ignore no-explicit-any
     } as any);
+    await fecha(r.usage, r.stop_reason === 'refusal' || r.stop_reason === 'max_tokens' ? String(r.stop_reason) : null);
     if (r.stop_reason === 'refusal') return resposta(422, { erro: 'a IA não escreveu este texto; escreva à mão' });
     if (r.stop_reason === 'max_tokens') return resposta(422, { erro: 'a IA não terminou o texto; tente de novo' });
     // deno-lint-ignore no-explicit-any
@@ -100,6 +120,7 @@ Deno.serve(async (req) => {
     if (!temItens(whatsapp)) whatsapp += '\n{itens}';
     return resposta(200, { assunto: String(lido.assunto ?? '').trim().slice(0, 120), corpo, whatsapp });
   } catch (e) {
+    await fecha(null, 'falhou: ' + String((e as Error).message || e).slice(0, 200)).catch(() => {});
     if (e instanceof Anthropic.AuthenticationError) return resposta(503, { erro: 'a chave da Anthropic (ANTHROPIC_API_KEY) foi recusada: confira nos segredos do Supabase' });
     if (e instanceof Anthropic.RateLimitError) return resposta(429, { erro: 'a IA está ocupada; tente de novo em um minuto' });
     if (e instanceof Anthropic.APIError) { console.error('[crm-oferta-texto] API ' + e.status); return resposta(502, { erro: 'a IA não respondeu (' + e.status + ')' }); }
