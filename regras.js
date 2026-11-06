@@ -873,6 +873,30 @@
   }
 
   // ------------------------------------------------------------ busca global
+  // Onde fica o cliente: rua e número, bairro e cidade (06/11/2026, áudio de uma vendedora: com o nome = razão social, as
+  // creches da mesma Sociedade ficaram com o mesmo nome e "antes aparecia o endereço; agora tenho que clicar um por um").
+  function localEmpresa(e) {
+    if (!e) return '';
+    const rua = [e.logradouro, e.numero].map(x => String(x || '').trim()).filter(Boolean).join(', ');
+    return [rua, e.bairro, e.cidade].map(x => String(x || '').trim()).filter(Boolean).join(' · ');
+  }
+  // O apelido só interessa quando é diferente do nome (é onde ficou o nome antigo, de antes da razão social)
+  function apelidoDe(e) {
+    return e && e.apelido && normaliza(e.apelido) !== normaliza(e.nome) ? String(e.apelido).trim() : '';
+  }
+  // Rótulo que separa clientes de mesmo nome numa lista de escolha: base(e) (o nome, ou nome · CNPJ); quando dois têm o mesmo,
+  // entra onde fica cada um; se ainda empatar, o código do cliente (ou o CNPJ). Devolve Map(id → rótulo).
+  function rotulosEmpresas(lista, base) {
+    const b = base || (e => String(e.nome || '').trim());
+    const conta = l => { const m = new Map(); l.forEach(([, r]) => { const k = normaliza(r); m.set(k, (m.get(k) || 0) + 1); }); return m; };
+    let par = (lista || []).map(e => [e, b(e)]);
+    let c = conta(par);
+    par = par.map(([e, r]) => [e, c.get(normaliza(r)) > 1 && localEmpresa(e) ? r + ' · ' + localEmpresa(e) : r]);
+    c = conta(par);
+    par = par.map(([e, r]) => [e, c.get(normaliza(r)) > 1 ? r + ' · ' + (e.codigo ? 'cód. ' + e.codigo : e.cnpj ? formataCNPJ(e.cnpj) : 'cadastro ' + String(e.id).slice(0, 6)) : r]);
+    return new Map(par.map(([e, r]) => [e.id, r]));
+  }
+
   function buscaGlobal(D, ix, termo, limite) {
     const t = normaliza(termo);
     if (t.length < 2 && digitos(termo).length < 3) return [];
@@ -880,8 +904,8 @@
     const lim = limite || 8;
     const numProp = /^#?\d+$/.test(termo.trim()) ? Number(termo.replace('#', '')) : null;
     for (const e of D.empresas) {
-      if (casaBusca(termo, [e.nome, e.razao_social, e.cnpj, e.telefone, e.whatsapp, e.email, e.cidade])) {
-        res.push({ tipo: 'empresa', id: e.id, titulo: e.nome, sub: [e.cidade, e.uf].filter(Boolean).join('/') || e.razao_social || '' });
+      if (casaBusca(termo, [e.nome, e.razao_social, e.apelido, e.codigo, e.cnpj, e.telefone, e.whatsapp, e.email, e.cidade, e.bairro, e.logradouro])) {
+        res.push({ tipo: 'empresa', id: e.id, titulo: e.nome, sub: [apelidoDe(e), localEmpresa(e) || [e.cidade, e.uf].filter(Boolean).join('/'), e.codigo ? 'cód. ' + e.codigo : ''].filter(Boolean).join(' · ') || e.razao_social || '' });
         if (res.filter(r => r.tipo === 'empresa').length >= lim) break;
       }
     }
@@ -1191,7 +1215,7 @@
     normaliza, digitos, doc, ehCNPJ, ehCPF, chaveNome, linkWhatsApp, linkTelefone, formataCNPJ, cnpjValido, casaBusca, iniciais,
     primeiroNome, aplicaModelo, linkGoogleAgenda, totalItem, totalItens, indexa, probabilidade,
     situacaoEfetiva, situacaoTarefa, alertas, ultimoMovimento, etapaDeOrcamento, ritmoCompra, cicloRecompra, itensHabituais, nomeDeItem, textoItens, dashboard, duplicadosEmpresas, duplicadosContatos, mesclaCampos,
-    buscaGlobal, csvParse, csvGera, csvCelula, numeroBR, dataPlanilha,
+    buscaGlobal, localEmpresa, apelidoDe, rotulosEmpresas, csvParse, csvGera, csvCelula, numeroBR, dataPlanilha,
     cfopDeVenda, notaDeVenda, devolucoesComoNotas, sugereSegmento, NOMES_SEGMENTO, faturamento, chaveDoc, chaveTelefone, chaveEmail, achaDuplicados, motivoDuplicado, nomesCompativeis, mesmoCliente
   };
 

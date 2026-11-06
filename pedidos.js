@@ -771,6 +771,8 @@
       '<label class="campo"><span>📅 2ª data (opcional: 2 parcelas)</span><input type="date" data-pd-prog value="' + esc(l[1] || '') + '" title="Com a 2ª data, o valor é dividido em duas parcelas, uma em cada dia"></label>';
   };
   const PAGAMENTOS = ['28 DIAS BOLETO', '28/35/42 DIAS BOLETO', '30 DIAS BOLETO', '30/60 DIAS BOLETO', '30/60/90 DIAS BOLETO', 'A VISTA BOLETO', 'A VISTA PIX', 'A VISTA TRANSFERENCIA', 'CARTAO DE CREDITO'];
+  // rótulo de cada cliente na lista do pedido: nome · CNPJ e, quando repete, onde fica (R.rotulosEmpresas)
+  const rotuloCliente = () => R.rotulosEmpresas(E().D.empresas || [], x => x.nome + (x.cnpj ? ' · ' + x.cnpj : ''));
   function novoEd(o) {
     o = o || {};
     const e = o.empresa_id ? CRM.empresa(o.empresa_id) : null;
@@ -929,9 +931,12 @@
     let corpo;
     if (x.aba === 'dados') {
       const emps = R.ordemAlfa(E().D.empresas || [], c => c.nome);   // em ordem alfabética (pedido do Anderson)
+      // 06/11/2026 (vendedora: as creches da mesma Sociedade têm o mesmo nome): a lista mostra rua, bairro e cidade de cada um
+      const rot = rotuloCliente();
       corpo = '<div class="campos pd-campos">' +
-        '<label class="campo largo"><span>Cliente *</span><input data-ed-cliente list="pdClientes" value="' + esc(e ? e.nome + (e.cnpj ? ' · ' + e.cnpj : '') : '') + '" placeholder="Nome, CNPJ ou cidade" autocomplete="off"></label>' +
-        '<datalist id="pdClientes">' + emps.slice(0, 5000).map(c => '<option value="' + esc(c.nome + (c.cnpj ? ' · ' + c.cnpj : '')) + '">' + esc([c.cidade, CRM.nomeUsuario(c.responsavel_id)].filter(Boolean).join(' · ')) + '</option>').join('') + '</datalist>' +
+        '<label class="campo largo"><span>Cliente *</span><input data-ed-cliente list="pdClientes" value="' + esc(e ? rot.get(e.id) || e.nome : '') + '" placeholder="Nome, CNPJ, bairro ou rua" autocomplete="off">' +
+          (e && R.localEmpresa(e) ? '<small>' + esc(R.localEmpresa(e)) + '</small>' : '') + '</label>' +
+        '<datalist id="pdClientes">' + emps.slice(0, 5000).map(c => '<option value="' + esc(rot.get(c.id)) + '">' + esc([R.apelidoDe(c), R.localEmpresa(c) || c.cidade, CRM.nomeUsuario(c.responsavel_id)].filter(Boolean).join(' · ')) + '</option>').join('') + '</datalist>' +
         // cliente sem os dados da nota (23/10/2026): avisa já no pedido, em vez de só travar na emissão
         (e && R.faltasNota(e).length ? '<p class="alerta largo">Para a nota sair, falta no cadastro do cliente: <strong>' + esc(R.faltasNota(e).join(', ')) + '</strong>. ' +
           '<button type="button" class="btn sec mini" data-acao="pd-cad-cliente" data-id="' + esc(e.id) + '">Completar o cadastro</button></p>' : '') +
@@ -1301,9 +1306,10 @@
         const pg = c.querySelector('[data-ed="dados.pagamento"]'); if (pg) pg.value = novo;
       });
       on('[data-ed-cliente]', 'change', el => {
-        const v = el.value.trim(), emps = E().D.empresas || [];
-        const e = emps.find(x => (x.nome + (x.cnpj ? ' · ' + x.cnpj : '')) === v) || (emps.filter(x => R.normaliza(x.nome) === R.normaliza(v)).length === 1 ? emps.find(x => R.normaliza(x.nome) === R.normaliza(v)) : null);
-        if (!e) { CRM.toast('Escolha o cliente na lista (digite parte do nome ou o CNPJ).', true); return; }
+        const v = el.value.trim(), emps = E().D.empresas || [], rot = rotuloCliente();
+        const e = emps.find(x => rot.get(x.id) === v) || emps.find(x => (x.nome + (x.cnpj ? ' · ' + x.cnpj : '')) === v) ||
+          (emps.filter(x => R.normaliza(x.nome) === R.normaliza(v)).length === 1 ? emps.find(x => R.normaliza(x.nome) === R.normaliza(v)) : null);
+        if (!e) { CRM.toast('Escolha o cliente na lista (digite parte do nome, o CNPJ, o bairro ou a rua).', true); return; }
         ed.empresa_id = e.id; ed.dados.entrega = P.entregaDoCliente(e); if (!String(ed.dados.texto_nota || '').trim() && e.obs_nota) ed.dados.texto_nota = e.obs_nota;   // texto fixo do cliente na nota (horário de recebimento; 03/11/2026)
         if (!String(ed.dados.pagamento || '').trim()) ed.dados.pagamento = ultimoPagamento(e.id);
         if (!CRM.ehGestor() || !ed.vendedor_id) ed.vendedor_id = CRM.ehGestor() || ehLog() ? e.responsavel_id || CRM.meuId() : CRM.meuId();

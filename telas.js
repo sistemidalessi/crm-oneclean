@@ -393,7 +393,7 @@
       if (f.semTarefa && r.proxima) return false;
       if (f.busca) {
         const cs = CRM.doEmpresa('contatos', e.id);
-        if (!R.casaBusca(f.busca, [e.codigo, e.nome, e.razao_social, e.apelido, e.cnpj, e.telefone, e.whatsapp, e.email, e.cidade, e.bairro].concat(...cs.map(c => [c.nome, c.email, c.telefone, c.celular, c.whatsapp])))) return false;
+        if (!R.casaBusca(f.busca, [e.codigo, e.nome, e.razao_social, e.apelido, e.cnpj, e.telefone, e.whatsapp, e.email, e.cidade, e.bairro, e.logradouro].concat(...cs.map(c => [c.nome, c.email, c.telefone, c.celular, c.whatsapp])))) return false;
       }
       return true;
     });
@@ -450,7 +450,7 @@
               '<td>' + CRM.seloSituacao(sit) + '</td>' +
               '<td>' + (CRM.seloTipoCliente(e) || '<small>—</small>') + '</td>' +
               '<td>' + esc(CRM.nomeUsuario(e.responsavel_id)) + '</td>' +
-              '<td>' + esc([e.cidade, e.uf].filter(Boolean).join('/')) + '</td>' +
+              '<td>' + esc([e.cidade, e.uf].filter(Boolean).join('/')) + (e.bairro || e.logradouro ? '<small>' + esc([[e.logradouro, e.numero].filter(Boolean).join(', '), e.bairro].filter(Boolean).join(' · ')) + '</small>' : '') + '</td>' +
               '<td>' + (c ? esc(c.nome) + '<small>' + esc(telefoneDe(e, c)) + '</small>' : '<small>' + esc(telefoneDe(e, null)) + '</small>') + '</td>' +
               '<td>' + (r.ultimoContato ? esc(R.dataBR(r.ultimoContato)) : '<small>nunca</small>') + '</td>' +
               '<td>' + (r.proxima ? '<span class="' + (R.diaLocal(r.proxima.data_hora) < CRM.hoje() ? 'atrasado' : '') + '">' + esc(R.dataBR(r.proxima.data_hora)) + '</span><small>' + esc(r.proxima.descricao) + '</small>' : '<small>—</small>') + '</td>' +

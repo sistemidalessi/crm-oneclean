@@ -23,17 +23,24 @@
   const principal = id => { const l = CRM.doEmpresa('contatos', id); return l.find(c => c.principal) || l[0] || null; };
   const telDe = (e, c) => (c && (c.whatsapp || c.celular || c.telefone)) || (e && (e.whatsapp || e.telefone)) || '';
 
+  // Clientes de mesmo nome (unidades da mesma razão social) saem na lista com o endereço de cada um (06/11/2026, áudio de uma
+  // vendedora) e a escolha volta pelo rótulo inteiro: antes o CRM ficava sempre com o primeiro de mesmo nome.
+  const rotulos = () => R.rotulosEmpresas(E().D.empresas);
   function datalistEmpresas() {
-    return '<datalist id="dlEmpresas">' + E().D.empresas.slice().sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
-      .map(e => '<option value="' + esc(e.nome) + '">' + esc([e.cidade, CRM.nomeUsuario(e.responsavel_id)].filter(Boolean).join(' · ')) + '</option>').join('') + '</datalist>';
+    const rot = rotulos();
+    return '<datalist id="dlEmpresas">' + E().D.empresas.slice().sort((a, b) => rot.get(a.id).localeCompare(rot.get(b.id), 'pt-BR'))
+      .map(e => '<option value="' + esc(rot.get(e.id)) + '">' + esc([R.apelidoDe(e), R.localEmpresa(e) || e.cidade, CRM.nomeUsuario(e.responsavel_id)].filter(Boolean).join(' · ')) + '</option>').join('') + '</datalist>';
   }
   function resolveEmpresa(nome) {
-    const n = R.normaliza(nome);
+    const n = R.normaliza(nome), rot = rotulos();
+    const pelo = E().D.empresas.filter(e => R.normaliza(rot.get(e.id)) === n);
+    if (pelo.length === 1) return pelo[0];
     const l = E().D.empresas.filter(e => R.normaliza(e.nome) === n);
+    if (l.length > 1) throw new Error('há ' + l.length + ' clientes com o nome "' + nome + '": escolha na lista o do endereço certo.');
     if (!l.length) throw new Error('empresa "' + nome + '" não encontrada. Cadastre primeiro como lead (tecla N).');
     return l[0];
   }
-  const campoEmpresa = (pre) => ({ nome: 'empresa_nome', rotulo: 'Empresa', obrigatorio: true, largo: true, dica: 'comece a digitar…', padrao: pre && pre.empresa_id ? CRM.nomeEmpresa(pre.empresa_id) : '' });
+  const campoEmpresa = (pre) => ({ nome: 'empresa_nome', rotulo: 'Empresa', obrigatorio: true, largo: true, dica: 'comece a digitar o nome, o bairro ou a rua…', padrao: pre && pre.empresa_id && CRM.empresa(pre.empresa_id) ? rotulos().get(pre.empresa_id) : '' });
   function ligaDatalist(form) {
     const el = form.elements.empresa_nome;
     if (el) el.setAttribute('list', 'dlEmpresas');
