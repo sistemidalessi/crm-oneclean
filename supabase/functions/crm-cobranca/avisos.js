@@ -5,11 +5,38 @@
 
 const dia = iso => new Date(String(iso).slice(0, 10) + 'T12:00:00Z');
 const iso = d => d.toISOString().slice(0, 10);
-const util = d => d.getUTCDay() !== 0 && d.getUTCDay() !== 6;
+// Dia útil bancário de São Bernardo do Campo, o mesmo calendário do Caixa (caixa-calculo.js): nacionais, 9 de julho,
+// Carnaval, Sexta-feira Santa, Corpus Christi e 20/08. 06/11/2026 (Anderson): a Jardim Celeste venceu em 02/11 (Finados),
+// o prazo dela era 03/11, e o aviso do 3º dia útil saiu em 05/11 porque o feriado contava como dia de atraso.
+function pascoa(ano) { // Meeus/Butcher
+  const a = ano % 19, b = Math.floor(ano / 100), c = ano % 100, d = Math.floor(b / 4), e = b % 4;
+  const f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const mes = Math.floor((h + l - 7 * m + 114) / 31), dd = ((h + l - 7 * m + 114) % 31) + 1;
+  return ano + '-' + String(mes).padStart(2, '0') + '-' + String(dd).padStart(2, '0');
+}
+const somaDias = (s, n) => { const d = dia(s); d.setUTCDate(d.getUTCDate() + n); return iso(d); };
+const cacheFeriados = new Map();
+export function feriados(ano) {
+  if (cacheFeriados.has(ano)) return cacheFeriados.get(ano);
+  const f = new Set(['01-01', '04-21', '05-01', '07-09', '08-20', '09-07', '10-12', '11-02', '11-15', '11-20', '12-25'].map(x => ano + '-' + x));
+  const p = pascoa(ano);
+  for (const n of [-48, -47, -2, 60]) f.add(somaDias(p, n)); // Carnaval (2), Sexta-feira Santa, Corpus Christi
+  cacheFeriados.set(ano, f);
+  return f;
+}
+const util = d => d.getUTCDay() !== 0 && d.getUTCDay() !== 6 && !feriados(d.getUTCFullYear()).has(iso(d));
+// vencimento em sábado, domingo ou feriado: o cliente paga sem atraso no próximo dia útil
+export function prazoPagar(vencimento) {
+  const d = dia(vencimento);
+  while (!util(d)) d.setUTCDate(d.getUTCDate() + 1);
+  return iso(d);
+}
 
-// dias úteis (segunda a sexta) depois do vencimento até hoje: venceu sexta, hoje segunda = 1
+// dias úteis de atraso: contados depois do último dia de pagar (o vencimento ou, se ele não é dia útil, o próximo dia
+// útil), sem fins de semana nem feriados. Venceu sexta, hoje segunda = 1; venceu em 02/11 (Finados), em 06/11 = 3.
 export function diasUteisAtraso(vencimento, hoje) {
-  const d = dia(vencimento), fim = dia(hoje);
+  const d = dia(prazoPagar(vencimento)), fim = dia(hoje);
   let n = 0;
   while (d < fim) { d.setUTCDate(d.getUTCDate() + 1); if (util(d)) n++; }
   return n;

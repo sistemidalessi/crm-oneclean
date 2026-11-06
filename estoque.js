@@ -1409,6 +1409,12 @@
         const nomeDe = new Map(base.map(e => [e.codigo, e.descricao])), unDe = new Map(base.map(e => [e.codigo, e.unidade]));
         (saldo || []).forEach(x => { if (!nomeDe.has(x.codigo)) { nomeDe.set(x.codigo, x.descricao); unDe.set(x.codigo, x.unidade); } });
         const cad = new Set(nomeDe.keys());
+        // 06/11/2026 (Wellington, NF 23065 da Leal: "tenho que pegar o valor e multiplicar para dar o valor total"): o valor total
+        // de cada linha já sai do preço de compra da unidade (cadastro; sem ele, o custo médio) × a quantidade. Dá para trocar à
+        // mão: o que ele digitar no valor fica, e apagar o valor volta para a conta automática.
+        const compraDe = new Map();
+        base.forEach(e => { const p = Number(e.custo_compra) > 0 ? Number(e.custo_compra) : 0; if (p > 0) compraDe.set(e.codigo, p); });
+        (saldo || []).forEach(z => { if (!compraDe.has(z.codigo) && Number(z.custo_medio) > 0) compraDe.set(z.codigo, Number(z.custo_medio)); });
         const total = Number(c.valor_total) || 0;
         const linha = i => '<tr data-mlinha><td><input name="mc_' + i + '" list="esProdutosM" placeholder="código" class="es-cod" autocomplete="off"><small data-mnome="' + i + '"></small></td>' +
           '<td><input name="mq_' + i + '" type="number" step="any" min="0" class="es-fator" placeholder="0"><small data-mun="' + i + '"></small></td>' +
@@ -1419,6 +1425,7 @@
         CRM.abrirForm({
           titulo: 'Lançar à mão: NF ' + c.numero + ' · ' + (c.fornecedor_nome || ''), largura: 'extra',
           intro: 'Digite cada produto que veio: o código nosso, a quantidade na unidade do estoque e o valor total pago nele (com IPI, ST e frete, se tiver). ' +
+            'O valor total já vem preenchido pelo último preço de compra da unidade × a quantidade: se a nota disser outro valor, é só digitar por cima. ' +
             'O estoque soma essas quantidades e o custo de cada um sai do valor ÷ quantidade. Os itens do XML ficam guardados. ' +
             (fat ? 'Confira também o faturamento (as parcelas), embaixo, antes de dar a entrada.' : 'As parcelas continuam as do XML.'),
           campos: [{ nome: 'motivo', rotulo: 'Por que à mão', largo: true, dica: 'ex.: o XML vem com uma linha só, "sacos diversos"' }],
@@ -1440,13 +1447,25 @@
                 const certo = cod && !cad.has(cod) ? S.codigoDoCadastro(cod, cad) : null;
                 form.querySelector('[data-mnome="' + i + '"]').textContent = cad.has(cod) ? nomeDe.get(cod) || '' : certo ? 'faltou o zero da frente: é o ' + certo + ' ' + (nomeDe.get(certo) || '') : cod ? 'código que o cadastro não tem' : '';
                 form.querySelector('[data-mun="' + i + '"]').textContent = unDe.get(certo || cod) || '';
-                form.querySelector('[data-mcusto="' + i + '"]').textContent = q > 0 && v > 0 ? R.moeda(v / q) + ' cada' : '';
-                t += v;
+                const pc = compraDe.get(certo || cod);
+                const ev = form.elements['mv_' + i];
+                let val = v;
+                if (!ev.dataset.manual) {
+                  val = q > 0 && pc > 0 ? Math.round(pc * q * 100) / 100 : 0;
+                  if (val !== v) ev.value = val > 0 ? val : '';
+                }
+                form.querySelector('[data-mcusto="' + i + '"]').textContent = q > 0 && val > 0 ? R.moeda(val / q) + ' cada' +
+                  (!ev.dataset.manual && pc > 0 ? ' (último preço de compra)' : pc > 0 && Math.abs(val / q - pc) / pc > 0.005 ? ' · último preço ' + R.moeda(pc) : '') : '';
+                t += val;
               }
               const dif = Math.round((t - total) * 100) / 100;
               soma.innerHTML = 'Soma: <strong>' + R.moeda(t) + '</strong> · total da nota ' + R.moeda(total) + (t && Math.abs(dif) >= 0.01 ? ' · <span class="neg">diferença ' + R.moeda(dif) + '</span>' : t ? ' ✓' : '');
             };
-            corpo.addEventListener('input', atualiza);
+            corpo.addEventListener('input', ev => {
+              const el = ev.target;
+              if (el && el.name && /^mv_/.test(el.name)) { if (String(el.value) === '' || Number(el.value) === 0) delete el.dataset.manual; else el.dataset.manual = '1'; }
+              atualiza();
+            });
             // 06/11/2026 (Wellington, NF 23065 da Leal: "ele puxou e salvou sem eu ter dado a entrada nos outros itens"): Enter num
             // campo (ex.: ao escolher o produto da lista) enviava o formulário e dava a entrada pela metade. Agora o Enter só passa
             // para o próximo campo; a entrada sai só no botão.

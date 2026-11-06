@@ -13,6 +13,18 @@ test('dias úteis de atraso e prazo em dias úteis (sábado e domingo não conta
   assert.strictEqual(A.diaLongo('2026-10-30'), 'sexta-feira, 30/10/2026');
 });
 
+test('feriado não conta como dia de atraso e o vencimento no feriado vai para o dia útil seguinte (Jardim Celeste, 06/11)', () => {
+  assert.strictEqual(A.prazoPagar('2026-11-02'), '2026-11-03');            // Finados
+  assert.strictEqual(A.diasUteisAtraso('2026-11-02', '2026-11-05'), 2);    // antes saía 3 e o aviso ia em 05/11
+  assert.strictEqual(A.diasUteisAtraso('2026-11-02', '2026-11-06'), 3);
+  assert.strictEqual(A.diasUteisAtraso('2026-11-03', '2026-11-06'), 3);
+  assert.strictEqual(A.diasUteisAtraso('2026-11-19', '2026-11-23'), 1);    // 20/11 Consciência Negra
+  assert.strictEqual(A.diasUteisAtraso('2026-11-14', '2026-11-16'), 0);    // sábado: paga segunda sem atraso
+  assert.strictEqual(A.prazoUtil('2026-11-12', 3), '2026-11-17');          // 13, 16, 17 (14 e 15 fim de semana)
+  assert.strictEqual(A.prazoUtil('2026-11-18', 3), '2026-11-24');          // 19, (20 feriado), 23, 24
+  assert.strictEqual(A.prazoUtil('2026-12-23', 2), '2026-12-28');          // 24, (25 Natal), 28
+});
+
 test('quem recebe: 5 dias úteis de atraso, um aviso por cliente, sem repetir, sem cartório nem data combinada', () => {
   const hoje = '2026-10-23';
   const titulos = [
