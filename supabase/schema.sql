@@ -1921,6 +1921,9 @@ create table if not exists public.crm_fiscal_produtos (
 );
 drop trigger if exists crm_fiscal_produtos_atualizado_em on public.crm_fiscal_produtos;
 create trigger crm_fiscal_produtos_atualizado_em before update on public.crm_fiscal_produtos for each row execute function public.crm_toca_atualizado_em();
+-- 06/11/2026: o "a caminho" das compras (crm_compra_andamento_int) procura o produto pelo código de barras de cada item das
+-- notas de compra; sem índice, com 8 pedidos ao fornecedor abertos a conta levava 30 s e a tela Produtos ficava em "Carregando…".
+create index if not exists crm_fiscal_produtos_gtin_idx on public.crm_fiscal_produtos (gtin) where gtin is not null;
 
 -- Código de barras (GTIN) que a Sefaz recusa (rejeição 611 "cEAN inválido") vira vazio: a nota sai com SEM GTIN
 -- (05/11/2026: NF 1-2882 rejeitada por "0000000000000"; 86 produtos limpos, backup crm_backup.fiscal_gtin_invalido_20261105).
