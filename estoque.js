@@ -297,7 +297,27 @@
   // no papel 290014 — o fardo com 5 pacotes entrou como 1). Pega os dois erros: embalagem com o número errado e item ligado
   // ao produto errado (Coala 120 ml no limpador de 5 L, cabo plástico na vassoura). custoDe: Map(codigo → custo atual).
   // Mais que 1,8× ou menos que 0,55× o atual: avisa e, se a conta fechar com um número da descrição ou um inteiro, sugere.
-  function custosSuspeitos(itens, lista, custoDe) {
+  // 06/11/2026 (Wellington, NF 7569: "SACO 50 BRANCO INFECTANTE" ligado ao 240003 SACO ALVEJADO, um pano, e o aviso sugeriu "5 por
+  // embalagem"): antes do número da embalagem, procura no cadastro um produto com o MESMO custo (até 5%) e descrição parecida
+  // (2 palavras em comum ou mais, "INFECT" casa com "INFECTANTE"); achando, sugere trocar o produto (o 370044, a R$ 24,33).
+  // produtos: [{ codigo, descricao }] do cadastro (sem as caixas).
+  const palavrasProd = t => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().split(/[^A-Z0-9]+/).filter(w => w.length >= 2 && !/^(C|P|DE|DA|DO|COM|PCT|PT|UN|CX|FD|LT|LTS|L|ML|KG|G)$/.test(w));
+  const casaPalavra = (a, b) => a === b || (Math.min(a.length, b.length) >= 4 && (a.startsWith(b) || b.startsWith(a)));
+  function produtoParecido(desc, custo, produtos, custoDe, menos) {
+    const pw = palavrasProd(desc);
+    let melhor = null;
+    (produtos || []).forEach(p => {
+      if (!p || !p.codigo || p.codigo === menos || ehCaixa(p.codigo)) return;
+      const c = Number(custoDe && custoDe.get(p.codigo));
+      if (!(c > 0) || Math.abs(custo / c - 1) > 0.05) return;
+      const qw = palavrasProd(p.descricao), n = pw.filter(a => qw.some(b => casaPalavra(a, b))).length;
+      if (n < 2) return;
+      const dif = Math.abs(custo / c - 1);
+      if (!melhor || n > melhor.n || (n === melhor.n && dif < melhor.dif)) melhor = { codigo: p.codigo, descricao: p.descricao, custo: c, n, dif };
+    });
+    return melhor;
+  }
+  function custosSuspeitos(itens, lista, custoDe, produtos) {
     const porId = new Map((itens || []).map(i => [i.id, i]));
     return (lista || []).filter(x => !x.ignorar && x.codigo && Number(x.fator) > 0).map(x => {
       const it = porId.get(x.id), f = Number(x.fator), atual = Number(custoDe && custoDe.get(x.codigo));
@@ -307,6 +327,10 @@
       if (r <= 1.8 && r >= 0.55) return null;
       const moeda = v => 'R$ ' + v.toFixed(2).replace('.', ',');
       let dica = '';
+      const par = produtoParecido(it.descricao, novo, produtos, custoDe, x.codigo);
+      if (par) return { id: x.id, sugestao: null, produto: par.codigo,
+        texto: (it.descricao || x.codigo) + ' → ' + x.codigo + ': ' + moeda(novo) + ' cada, o custo atual é ' + moeda(atual) + ' → parece outro produto: ' +
+          par.codigo + ' ' + par.descricao + ' (custo ' + moeda(par.custo) + ')' };
       if (r > 1.8) {
         const alvo = r * f, cands = fatoresDaDescricao(it.descricao);
         const daDesc = cands.find(n => Math.abs(n / alvo - 1) <= 0.25), inteiro = Math.round(alvo);
@@ -1328,15 +1352,18 @@
               const custoDe = new Map();
               (saldo || []).forEach(z => { if (Number(z.custo_medio) > 0) custoDe.set(z.codigo, Number(z.custo_medio)); });
               base.forEach(z => { if (!custoDe.has(z.codigo) && Number(z.custo_unit) > 0) custoDe.set(z.codigo, Number(z.custo_unit)); });
-              const caros = S.custosSuspeitos(itens, lista, custoDe);
+              const caros = S.custosSuspeitos(itens, lista, custoDe, base.map(z => ({ codigo: z.codigo, descricao: z.descricao })));
               if (caros.length) {
-                const comSug = caros.filter(z => z.sugestao);
+                const comSug = caros.filter(z => z.sugestao || z.produto);
                 if (!confirm('O custo de ' + caros.length + ' item(ns) ficou longe do custo atual:\n\n' + caros.map(z => '· ' + z.texto).join('\n') +
                   '\n\nUm fardo ou caixa com várias unidades precisa do número certo em "vem quantas na embalagem", e cada item da nota precisa estar ligado ao mesmo produto nosso.' +
-                  (comSug.length ? '\n\nOK: usar o número sugerido (' + comSug.length + ' item(ns)) e conferir de novo. Cancelar: voltar sem dar entrada.' : '\n\nOK: dar entrada assim mesmo (o preço mudou de verdade). Cancelar: voltar e corrigir.'))) return false;
+                  (comSug.length ? '\n\nOK: usar o ' + (comSug.some(z => z.produto) ? 'produto' : 'número') + ' sugerido (' + comSug.length + ' item(ns)) e conferir de novo. Cancelar: voltar sem dar entrada.' : '\n\nOK: dar entrada assim mesmo (o preço mudou de verdade). Cancelar: voltar e corrigir.'))) return false;
                 if (comSug.length) {
-                  comSug.forEach(z => { const e = form.elements['f_' + z.id]; if (e) { e.value = z.sugestao; e.dispatchEvent(new Event('input')); } });
-                  CRM.toast('Número da embalagem trocado em ' + comSug.length + ' item(ns): confira e clique de novo em "Dar entrada".');
+                  comSug.forEach(z => {
+                    const e = form.elements[(z.produto ? 'c_' : 'f_') + z.id];
+                    if (e) { e.value = z.produto || z.sugestao; e.dispatchEvent(new Event('input')); e.dispatchEvent(new Event('change')); }
+                  });
+                  CRM.toast((comSug.some(z => z.produto) ? 'Produto' : 'Número da embalagem') + ' trocado em ' + comSug.length + ' item(ns): confira e clique de novo em "Dar entrada".');
                   return false;
                 }
               }

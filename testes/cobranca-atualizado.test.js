@@ -106,3 +106,15 @@ test('o módulo 11 da função é o mesmo do cobranca.js e o boleto.js monta o c
   const B = g.CRMBoleto;
   assert.strictEqual(B.codigoBarras('001', '2026-10-28', 678.35, B.campoLivre('38048801000001464', 17)), '00199161300000678350000003804880100000146417');
 });
+
+// 06/11/2026: boleto com abatimento (devolução) — casa com o título já abatido e os encargos correm sobre o valor abatido
+test('boleto com abatimento: casa pelo valor abatido e calcula juros e multa sobre ele', () => {
+  const b = { valor: 2400.68, abatimento: 1040.48, vencimento: '2026-12-03', doc: '11222333000181', juros: { tipo: 2, pct: 2 }, multa: { tipo: 2, pct: 5 } };
+  assert.strictEqual(A.valorCobrado(b), 1360.2);
+  const e = A.encargos(b, '2026-12-08');
+  assert.strictEqual(e.multa, 68.01);
+  assert.strictEqual(e.total, Math.round((1360.2 + e.juros + e.multa) * 100) / 100);
+  const t = { empresa_id: 'x', duplicata: '002888/01', valor: 1360.2, vencimento: '2026-12-03', nota_numero: 2888 };
+  const r = A.casa([b], [t], new Map([['x', '11222333000181']]));
+  assert.strictEqual(r.casados.length, 1);
+});

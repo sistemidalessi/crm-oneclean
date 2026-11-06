@@ -9,6 +9,9 @@ const r2 = v => Math.round((Number(v) || 0) * 100) / 100;
 const dia = iso => new Date(String(iso).slice(0, 10) + 'T12:00:00Z');
 const isoDe = d => d.toISOString().slice(0, 10);
 const digitos = v => String(v == null ? '' : v).replace(/\D/g, '');
+// 06/11/2026: o boleto com abatimento (devolução) é cobrado pelo valor do documento menos o abatimento; juros e multa também
+// correm sobre esse valor (b.abatimento vem da crm-bb, ação 'vencidos': o do banco ou o que o CRM deu)
+export const valorCobrado = b => r2(r2(b.valor) - (Number(b.abatimento) > 0 ? r2(b.abatimento) : 0));
 
 // primeiro dia útil a partir do vencimento (vencido em sábado, domingo ou feriado, paga-se sem encargo no dia útil seguinte).
 // util(iso) → boolean (o calendário de feriados vem de fora; sem ele, só sábado e domingo)
@@ -22,7 +25,7 @@ export function vencimentoEfetivo(vencimento, util) {
 // encargos até hoje. b = { valor, vencimento, juros: { tipo, pct, valor }, multa: { tipo, pct, valor, data } }
 // juros tipo 1 = valor por dia; tipo 2 = taxa mensal (÷ 30 por dia); multa tipo 1 = valor fixo; tipo 2 = percentual.
 export function encargos(b, hoje, util) {
-  const valor = r2(b.valor), venc = String(b.vencimento).slice(0, 10);
+  const valor = valorCobrado(b), venc = String(b.vencimento).slice(0, 10);
   const efetivo = vencimentoEfetivo(venc, util);
   if (!(hoje > efetivo)) return { atrasado: false, dias: 0, multa: 0, juros: 0, encargos: 0, total: valor };
   const dias = Math.round((dia(hoje) - dia(venc)) / 864e5);
@@ -57,7 +60,7 @@ export function casa(boletos, titulos, docs) {
   const out = [], sem = [];
   for (const b of boletos || []) {
     const doc = digitos(b.doc);
-    const cands = (titulos || []).filter(t => digitos(docs.get(t.empresa_id)) === doc && Math.abs(r2(t.valor) - r2(b.valor)) < 0.011 &&
+    const cands = (titulos || []).filter(t => digitos(docs.get(t.empresa_id)) === doc && Math.abs(r2(t.valor) - valorCobrado(b)) < 0.011 &&
       String(t.vencimento).slice(0, 10) === String(b.vencimento).slice(0, 10));
     let t = cands.length === 1 ? cands[0] : null;
     if (!t && cands.length > 1) {
@@ -88,13 +91,13 @@ export function quemRecebeBoleto({ casados, hoje, util, ja, pagos, semAviso }) {
     if (motivo === null) continue;   // já recebeu: nem conta
     const e = encargos(b, hoje, util);
     if (!e.atrasado) continue;
-    if (motivo) { fora.push({ empresa_id: t.empresa_id, duplicata: t.duplicata, nota_numero: t.nota_numero, valor: r2(b.valor), motivo }); continue; }
+    if (motivo) { fora.push({ empresa_id: t.empresa_id, duplicata: t.duplicata, nota_numero: t.nota_numero, valor: valorCobrado(b), motivo }); continue; }
     if (!porCliente.has(t.empresa_id)) porCliente.set(t.empresa_id, []);
     porCliente.get(t.empresa_id).push({ boleto: b, titulo: t, ...e });
   }
   const lista = [...porCliente.entries()].map(([empresa_id, l]) => {
     l.sort((a, b) => String(a.titulo.vencimento).localeCompare(String(b.titulo.vencimento)));
-    return { empresa_id, itens: l, original: r2(l.reduce((s, x) => s + r2(x.boleto.valor), 0)), total: r2(l.reduce((s, x) => s + x.total, 0)) };
+    return { empresa_id, itens: l, original: r2(l.reduce((s, x) => s + valorCobrado(x.boleto), 0)), total: r2(l.reduce((s, x) => s + x.total, 0)) };
   });
   return { lista, fora };
 }
@@ -127,7 +130,7 @@ export function parametrosBoleto({ cliente, vendedora, envio, hoje }) {
   return [cliente || 'tudo bem', vendedora || 'o financeiro', p3, p4, p5];
 }
 export function faixaPdf(x, hoje) {
-  return 'BOLETO ATUALIZADO ATÉ ' + dm(hoje) + ': pague ' + moeda(x.total) + ' (original ' + moeda(x.boleto.valor) + ' + multa ' + moeda(x.multa) +
+  return 'BOLETO ATUALIZADO ATÉ ' + dm(hoje) + ': pague ' + moeda(x.total) + ' (original ' + moeda(valorCobrado(x.boleto)) + (Number(x.boleto.abatimento) > 0 ? ', já com o abatimento de ' + moeda(x.boleto.abatimento) : '') + ' + multa ' + moeda(x.multa) +
     ' + juros ' + moeda(x.juros) + ', ' + x.dias + ' dia' + (x.dias === 1 ? '' : 's') + ' de atraso). Mesmo código de barras: pago em outro dia, o banco calcula os encargos daquele dia.';
 }
 export const textoFinal = (corpo, p) => corpo.replace(/\{\{(\d)\}\}/g, (_, n) => p[Number(n) - 1] || '');
@@ -175,7 +178,7 @@ export function dadosDoBoleto(B, cfg, emit, x, hoje) {
     agenciaCodigo: String(cfg.agencia || '').trim() + '/' + String(cfg.conta || '').trim(),
     pagador: { nome: String(pg.nome || '').toUpperCase(), doc: B.docFmt(b.doc),
       endereco: [String(pg.endereco || '').toUpperCase(), [cep ? 'CEP: ' + cep : '', [pg.cidade, pg.uf].filter(Boolean).join(' - ')].filter(Boolean).join(', ').toUpperCase()].filter(Boolean) },
-    pix: null,
+    pix: null, abatimento: Number(b.abatimento) > 0 ? r2(b.abatimento) : 0,
     instrucoes: B.instrucoes({ juros_mes_pct: Number(Number((b.juros || {}).tipo) === 2 ? b.juros.pct : 0), multa_pct: Number(Number((b.multa || {}).tipo) === 2 ? b.multa.pct : 0) }, r2(b.valor), String(b.vencimento).slice(0, 10)),
     simulacao: false
   };

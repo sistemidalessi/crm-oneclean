@@ -21,7 +21,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.116.0';
 import { quemRecebe, prazoUtil, parametros, textoFinal, textoEmail, CORPO, alertasCartorio, celularesDoCliente, emailsDoCliente, telWa, moeda, docsTexto,
   porTransferencia, valorAtualizado, contaTexto, valorTransferencia, paragrafoTransferencia, textoEmailTransferencia } from './avisos.js';
-import { casa, quemRecebeBoleto, pdfBoletos, parametrosBoleto, CORPO_BOLETO, textoEmailBoleto, resumoRodada, mod11 } from './atualizado.js';
+import { casa, quemRecebeBoleto, valorCobrado, pdfBoletos, parametrosBoleto, CORPO_BOLETO, textoEmailBoleto, resumoRodada, mod11 } from './atualizado.js';
 import { jsPDF } from 'npm:jspdf@2.5.2';
 
 const CORS = {
@@ -272,7 +272,7 @@ Deno.serve(async (req) => {
         const agora = new Date().toISOString();
         const { data: regs, error: eIns } = await db.from('crm_boletos').insert(env.itens.map((x: Linha) => {
           const t = x.titulo as Linha, b = x.boleto as Linha;
-          return { duplicata: t.duplicata, empresa_id: t.empresa_id, nota_numero: t.nota_numero, valor_original: b.valor, valor: x.total, vencimento: t.vencimento,
+          return { duplicata: t.duplicata, empresa_id: t.empresa_id, nota_numero: t.nota_numero, valor_original: valorCobrado(b), valor: x.total, vencimento: t.vencimento,
             linha_digitavel: String(b.linha || ''), arquivo, origem: 'auto', encargos: { multa: x.multa, juros: x.juros, dias: x.dias, ate: hoje, nosso_numero: b.nosso_numero },
             avisado_em: agora, cobrado_em: agora };
         })).select('id');

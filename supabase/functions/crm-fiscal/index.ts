@@ -379,7 +379,7 @@ async function boletosDaNota(db: ReturnType<typeof createClient>, n: Linha) {
   const dados = ((cfgL as Linha | null)?.dados || {}) as Linha, b = (dados.boleto || {}) as Linha;
   if (!b.ligado || b.caminho !== 'api') return { registrados: [] as Linha[], pendentes: 0, dados };
   const pre = prefixoDup(n);
-  const { data: rows } = await db.from('crm_boletos_bb').select('duplicata, nosso_numero, documento, valor, vencimento, emissao, situacao, retorno')
+  const { data: rows } = await db.from('crm_boletos_bb').select('duplicata, nosso_numero, documento, valor, vencimento, emissao, situacao, retorno, abatimento')
     .like('duplicata', pre + '%').in('situacao', ['preparado', 'registrado']).order('duplicata');
   const l = (rows || []) as Linha[];
   const { data: falta } = await db.rpc('crm_boleto_bb_a_registrar');
@@ -404,7 +404,7 @@ async function desenhaBoletos(pdf: any, regs: Linha[], xml: string, dados: Linha
   regs.forEach((b, i) => {
     if (i || !primeira) pdf.addPage('a4', 'portrait');
     const pix = B.pixDe(b);
-    const dd = B.montar(cfg, emit, { valor: b.valor, vencimento: b.vencimento, nosso_numero: b.nosso_numero, documento: b.documento, emissao: b.emissao, pix }, pg, { hoje });
+    const dd = B.montar(cfg, emit, { valor: b.valor, vencimento: b.vencimento, nosso_numero: b.nosso_numero, documento: b.documento, emissao: b.emissao, pix, abatimento: b.abatimento }, pg, { hoje });
     B.desenha(pdf, dd, { aviso, qr: pix && QR ? B.qrDesenhador(QR, pix) : null });
   });
 }

@@ -156,6 +156,9 @@
       agenciaCodigo: String(cfg.agencia).trim() + '/' + String(cfg.conta).trim(),
       pagador: { nome: String((pagador && pagador.nome) || '').toUpperCase(), doc: docFmt(pagador && pagador.doc), endereco: enderecoLinhas(pagador && pagador.endereco) },
       pix: t.pix || null,
+      // 06/11/2026: abatimento dado no banco por devolução (crm_boletos_bb.abatimento): o código de barras continua com o valor do
+      // documento; o banco cobra o valor menos o abatimento
+      abatimento: Number(t.abatimento) > 0 ? r2(t.abatimento) : 0,
       instrucoes: instrucoes(cfg, t.valor, t.vencimento),
       simulacao: !!op.simulacao
     };
@@ -269,7 +272,9 @@
     if (op.aviso && ins.length < 6) ins.push('ATENÇÃO: SÓ PAGUE SE O BENEFICIÁRIO FOR ' + limpa(d.beneficiario.nome).toUpperCase() + (d.beneficiario.doc ? ' - CNPJ ' + d.beneficiario.doc : ''));
     ins.forEach((t, i) => escreve(t, X + 3, y + 6.5 + i * 3.6, ESQ - 6, 7.4, { negrito: op.aviso && i === ins.length - 1 && /^ATENÇÃO: SÓ PAGUE/.test(t) }));
     // boleto vencido atualizado (04/11/2026, cobrança automática): juros e multa até o dia e o valor cobrado, como a 2ª via do BB
-    [['(-) Abatimento', ''], ['(+) Juros / Multa', cob ? moeda(cob.encargos).replace('R$ ', '') : ''], ['(=) Valor Cobrado', cob ? moeda(cob.total).replace('R$ ', '') : '']]
+    const abat = Number(d.abatimento) > 0 ? Number(d.abatimento) : 0;
+    [['(-) Abatimento', abat ? moeda(abat).replace('R$ ', '') : ''], ['(+) Juros / Multa', cob ? moeda(cob.encargos).replace('R$ ', '') : ''],
+      ['(=) Valor Cobrado', cob ? moeda(cob.total).replace('R$ ', '') : abat ? moeda(Math.round((Number(d.valor) - abat) * 100) / 100).replace('R$ ', '') : '']]
       .forEach((c, i) => cel(X + ESQ, yIns + i * H, DIR, H, c[0], c[1], { amarela: true, cinza: i === 2, direita: true }));
     y += 3 * H + 8;
     pdf.setDrawColor(0); pdf.setLineWidth(0.4); pdf.line(X, y, X + W, y);
@@ -560,7 +565,7 @@
     const b = ((bb && bb.lista) || []).find(x => x.id === id);
     if (!b) return;
     const e = b.empresa_id ? CRM.empresa(b.empresa_id) : null;
-    const d = montar(cfgB(), emitente(), { valor: b.valor, vencimento: b.vencimento, nosso_numero: b.nosso_numero, documento: b.documento, emissao: b.emissao, pix: pixDe(b) },
+    const d = montar(cfgB(), emitente(), { valor: b.valor, vencimento: b.vencimento, nosso_numero: b.nosso_numero, documento: b.documento, emissao: b.emissao, pix: pixDe(b), abatimento: b.abatimento },
       { nome: (e && (e.razao_social || e.nome)) || '', doc: e && e.cnpj, endereco: e ? { logradouro: e.logradouro, numero: e.numero, complemento: e.complemento, bairro: e.bairro, cidade: e.cidade, uf: e.uf, cep: e.cep } : '' },
       { hoje: CRM.hoje() });
     await carregaJsPdf();
@@ -602,7 +607,7 @@
       const pg = opc.pagador && opc.pagador.nome ? opc.pagador
         : { nome: (e && (e.razao_social || e.nome)) || '', doc: e && e.cnpj, endereco: e ? { logradouro: e.logradouro, numero: e.numero, complemento: e.complemento, bairro: e.bairro, cidade: e.cidade, uf: e.uf, cep: e.cep } : '' };
       if (!pg.nome) { const m = 'NF ' + n.numero + ', parcela ' + (b.parcela || b.duplicata) + ': boleto sem o nome do pagador'; if (opc.faltas) opc.faltas.push(m); else CRM.toast(m + ' (avise o administrador).', true); }
-      const d = montar(cfgB(), emitente(), { valor: b.valor, vencimento: b.vencimento, nosso_numero: b.nosso_numero, documento: b.documento, emissao: b.emissao, pix: pixDe(b) },
+      const d = montar(cfgB(), emitente(), { valor: b.valor, vencimento: b.vencimento, nosso_numero: b.nosso_numero, documento: b.documento, emissao: b.emissao, pix: pixDe(b), abatimento: b.abatimento },
         pg,
         { hoje: CRM.hoje() });
       pdf.addPage('a4', 'portrait');

@@ -9,6 +9,8 @@
 //                                    e, desde 03/11/2026, também os feitos no site do BB (crm_bb_site_casar: título certo pelo seu
 //                                    número ou por CNPJ + valor + vencimento; o resto fica em crm_bb_site para o administrador)
 //   POST { acao: 'baixar_canceladas' } baixa no banco o boleto de nota cancelada (02/11/2026): o cliente não consegue mais pagar
+//   POST { acao: 'ajustes' }         devolução lançada na nota (06/11/2026): título menor que o boleto → abatimento no banco
+//                                    (PATCH /boletos/{id}); título zerado → baixa (crm_boleto_bb_ajustes diz quais). Também no ciclo.
 //   POST { acao: 'vencidos' }        boletos em aberto já vencidos com linha digitável, juros e multa (cobrança automática, 04/11/2026)
 //   POST { acao: 'extrato', de?, ate?, bruto? }  extrato da conta pela VPS (com o A1, mTLS), 04/11/2026: lê e devolve os lançamentos
 //   POST { acao: 'extrato_conciliar', de?, ate? } lê o extrato, guarda em crm_fin_extrato e confere com o Caixa (05/11/2026;
@@ -303,6 +305,55 @@ Deno.serve(async (req) => {
       return { baixados, cancelados, erros, detalhes };
     }
 
+    // ------------------------------------------------------------ devolução → abatimento (ou baixa) no banco
+    // 06/11/2026 (Anderson, NF 1-2888 da MBS: 16 das 20 caixas de interfolha voltam): a devolução abate o título no CRM; sem isto
+    // o boleto registrado continuava com o valor cheio e o cliente pagaria a mais. O banco (crm_boleto_bb_ajustes) só aponta
+    // boleto registrado pela API de nota com devolução já lançada. Abatimento: PATCH com indicadorIncluirAbatimento (o 1º) ou
+    // indicadorAlterarAbatimento (o valor muda numa 2ª devolução); título zerado: baixa, como a nota cancelada.
+    async function ajustarDevolucoes() {
+      if (!b.ligado || b.caminho !== 'api') return { pulado: 'boleto pela API desligado' };
+      const { data: alvo, error } = await db.rpc('crm_boleto_bb_ajustes');
+      if (error) throw new Error('ajustes: ' + error.message);
+      if (!alvo || !alvo.length) return { abatidos: 0, baixados: 0 };
+      let tk = '', abatidos = 0, baixados = 0, erros = 0; const detalhes: string[] = [];
+      const agora = () => new Date().toISOString();
+      for (const a of alvo as any[]) {
+        if (!tk) tk = await token('cobrancas.boletos-requisicao cobrancas.boletos-info');
+        const { data: atual } = await db.from('crm_boletos_bb').select('retorno').eq('id', a.id).maybeSingle();
+        const ret = (atual?.retorno || []) as any[];
+        const doc = a.duplicata + ' (NF ' + a.nota_numero + ')';
+        if (a.acao === 'baixar') {
+          const r = await fetch(COBRANCA + '/boletos/000' + a.nosso_numero + '/baixar?gw-dev-app-key=' + APP(), { method: 'POST',
+            headers: { Authorization: 'Bearer ' + tk, 'Content-Type': 'application/json' }, body: JSON.stringify({ numeroConvenio: Number(b.convenio) }) });
+          const t = await r.text(); let j: any = null; try { j = JSON.parse(t); } catch { /* texto */ }
+          const m = msgBB(j, t);
+          if (r.ok || /baixad/i.test(m)) {
+            await db.from('crm_boletos_bb').update({ situacao: 'baixado', motivo: 'devolução: o título zerou, boleto baixado no banco', atualizado_em: agora(),
+              retorno: ret.concat([{ api: 'baixa', em: agora(), motivo: 'devolução total', resposta: r.ok ? (j?.dataBaixa || 'ok') : m }]) }).eq('id', a.id);
+            baixados++;
+          } else { erros++; detalhes.push(doc + ': ' + m); await db.from('crm_boletos_bb').update({ motivo: ('devolução total, o banco recusou a baixa: ' + m).slice(0, 300), atualizado_em: agora() }).eq('id', a.id); }
+          continue;
+        }
+        const novo = Math.round(Number(a.abatimento) * 100) / 100, ja = Number(a.abatimento_atual) > 0;
+        const corpo = ja ? { numeroConvenio: Number(b.convenio), indicadorAlterarAbatimento: 'S', alteracaoAbatimento: { novoValorAbatimento: novo } }
+          : { numeroConvenio: Number(b.convenio), indicadorIncluirAbatimento: 'S', abatimento: { valorAbatimento: novo } };
+        const r = await fetch(COBRANCA + '/boletos/000' + a.nosso_numero + '?gw-dev-app-key=' + APP(), { method: 'PATCH',
+          headers: { Authorization: 'Bearer ' + tk, 'Content-Type': 'application/json' }, body: JSON.stringify(corpo) });
+        const t = await r.text(); let j: any = null; try { j = JSON.parse(t); } catch { /* texto */ }
+        if (r.ok) {
+          await db.from('crm_boletos_bb').update({ abatimento: novo, abatimento_em: agora(), atualizado_em: agora(),
+            motivo: 'devolução: abatimento de R$ ' + novo.toFixed(2).replace('.', ',') + ' dado no banco (cobra R$ ' + (Number(a.valor) - novo).toFixed(2).replace('.', ',') + ')',
+            retorno: ret.concat([{ api: 'abatimento', em: agora(), valor: novo, resposta: j || t.slice(0, 200) }]) }).eq('id', a.id);
+          abatidos++;
+        } else {
+          const m = msgBB(j, t); erros++; detalhes.push(doc + ': ' + m);
+          await db.from('crm_boletos_bb').update({ motivo: ('devolução: o banco recusou o abatimento de R$ ' + novo.toFixed(2) + ': ' + m).slice(0, 300), atualizado_em: agora() }).eq('id', a.id);
+          console.error('[crm-bb] abatimento ' + doc + ' ' + r.status + ' ' + m);
+        }
+      }
+      return { abatidos, baixados, erros, detalhes };
+    }
+
     // as datas de cada liquidado (pagamento × crédito), sem dados do cliente: para conferir em que dia o dinheiro entra
     if (c.acao === 'datas') {
       const tk = await token('cobrancas.boletos-info');
@@ -340,13 +391,20 @@ Deno.serve(async (req) => {
         } catch (e) { d = { erro: String((e as Error).message || e).slice(0, 120) }; }
         if (c.bruto && bruto.length < 2) bruto.push({ lista: x, detalhe: d });
         out.push({ nosso_numero: dig(x.numeroBoletoBB).slice(3), vencimento: iso(x.dataVencimento) || iso(d.dataVencimentoTituloCobranca), valor: x.valorOriginal ?? d.valorOriginalTituloCobranca ?? null,
-          valor_atual: x.valorAtual ?? d.valorAtualTituloCobranca ?? null, linha: dig(d.codigoLinhaDigitavel), seu: String(d.numeroTituloCedenteCobranca ?? x.numeroTituloBeneficiario ?? '').trim(),
+          valor_atual: x.valorAtual ?? d.valorAtualTituloCobranca ?? null, abatimento: Number(d.valorAbatimentoTituloCobranca ?? x.valorAbatimento ?? 0) || 0, linha: dig(d.codigoLinhaDigitavel), seu: String(d.numeroTituloCedenteCobranca ?? x.numeroTituloBeneficiario ?? '').trim(),
           doc: dig(d.numeroInscricaoSacadoCobranca ?? ''), erro: d.erro || null,
           juros: { tipo: d.codigoTipoJuroMora ?? null, pct: d.percentualJuroMoraTitulo ?? null, valor: d.valorJuroMoraTitulo ?? null },
           multa: { tipo: d.codigoTipoMulta ?? null, pct: d.percentualMultaTitulo ?? null, valor: d.valorMultaTituloCobranca ?? null, data: iso(d.dataMultaTitulo) },
           codigo: dig(d.textoCodigoBarrasTituloCobranca), estado: d.codigoEstadoTituloCobranca ?? x.codigoEstadoTituloCobranca ?? null, limite: iso(d.dataLimiteRecebimentoTitulo), emissao: iso(d.dataEmissaoTituloCobranca),
           pagador: { nome: String(d.nomeSacadoCobranca || '').trim(), endereco: String(d.textoEnderecoSacadoCobranca || '').trim(), bairro: String(d.nomeBairroSacadoCobranca || '').trim(),
             cidade: String(d.nomeMunicipioSacadoCobranca || '').trim(), uf: String(d.siglaUnidadeFederacaoSacadoCobranca || '').trim(), cep: dig(d.numeroCepSacadoCobranca).padStart(8, '0') } });
+      }
+      // o abatimento que o CRM deu (crm_boletos_bb.abatimento) vale mesmo se o detalhe do banco não trouxer o campo
+      const nossos = out.map(o => o.nosso_numero).filter(Boolean);
+      if (nossos.length) {
+        const { data: abs } = await db.from('crm_boletos_bb').select('nosso_numero, abatimento').in('nosso_numero', nossos).gt('abatimento', 0);
+        const m = new Map((abs || []).map((z: any) => [String(z.nosso_numero), Number(z.abatimento)]));
+        out.forEach(o => { const v = m.get(String(o.nosso_numero)); if (v && v > (o.abatimento || 0)) o.abatimento = v; });
       }
       return resposta(200, { n: l.length, boletos: out, ...(c.bruto ? { bruto } : {}) });
     }
@@ -423,6 +481,7 @@ Deno.serve(async (req) => {
       return resposta(200, { ok: true, de, ate, lidas: r.n, gravadas, saldo, conciliacao: conc });
     }
     if (c.acao === 'baixar_canceladas') return resposta(200, await baixarCanceladas());
+    if (c.acao === 'ajustes') return resposta(200, await ajustarDevolucoes());
     if (c.acao === 'registrar') return resposta(200, await registrar(Array.isArray(c.ids) ? c.ids : undefined));
     if (c.acao === 'pagos') return resposta(200, await pagos(Math.min(30, Math.max(1, Number(c.dias) || 5))));
     if (c.acao === 'ciclo') {
@@ -431,9 +490,11 @@ Deno.serve(async (req) => {
       let prep: any = null;
       if (dups && dups.length) { const { data, error } = await db.rpc('crm_boleto_bb_preparar', { p_duplicatas: dups }); if (error) throw new Error('preparar: ' + error.message); prep = data; }
       const bx = await baixarCanceladas();
+      let aj: any = null;
+      try { aj = await ajustarDevolucoes(); } catch (e) { aj = { erro: (e as Error).message }; }   // não trava o resto do ciclo
       const reg = await registrar();
       const pg = await pagos(5);
-      return resposta(200, { preparados: prep?.preparados || 0, pulados: prep?.pulados || [], baixas: bx, registro: reg, pagos: pg });
+      return resposta(200, { preparados: prep?.preparados || 0, pulados: prep?.pulados || [], baixas: bx, devolucoes: aj, registro: reg, pagos: pg });
     }
     return resposta(400, { erro: 'ação desconhecida' });
   } catch (e) {
