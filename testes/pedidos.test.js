@@ -208,3 +208,15 @@ test('comissão: fardo pelo preço da caixa', () => {
     unidades: new Map([['300044', 'PT']]), usuarios: [{ user_id: 'v', nome: 'S', papel: 'vendedor' }] });
   assert.deepStrictEqual(Object.keys(r[0].porFaixa), ['C']);   // 113,75 ÷ 103,01 = +10,4% → faixa C (antes: ÷ 6,44 → F)
 });
+
+test('unidade da embalagem no impresso: a sigla fica e a embalagem fechada diz quanto vem dentro', () => {
+  assert.strictEqual(P.unidadeEmbalagem('FR', 1, 'FR'), 'FR');
+  assert.strictEqual(P.unidadeEmbalagem('FD', 1, 'FD'), 'FD');
+  assert.strictEqual(P.unidadeEmbalagem('CX', '25.0000', 'PT'), 'CX c/ 25 PT');
+  assert.strictEqual(P.unidadeEmbalagem('FD', 16, 'PT'), 'FD c/ 16 PT');
+  assert.strictEqual(P.unidadeEmbalagem('CX', 12, 'CX'), 'CX c/ 12');
+  assert.strictEqual(P.unidadeEmbalagem('CX', 12, null), 'CX c/ 12');
+  assert.strictEqual(P.unidadeEmbalagem('', 1, 'UN'), '');
+  const l = P.bolao([{ numero: 1, itens: [{ codigo: '150034.1', descricao: 'Copo', unidade: 'CX', fator: '25.0000', quantidade: 2 }] }], new Map());
+  assert.strictEqual(l[0].fator, 25);
+});

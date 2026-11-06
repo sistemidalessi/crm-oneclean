@@ -161,7 +161,7 @@
       const k = (it.codigo || '') + '|' + (it.unidade || '') + (it.codigo ? '' : '|' + sem(it.descricao));
       if (!m.has(k)) {
         const e = (info && it.codigo && (info.get(it.codigo) || info.get(String(it.codigo).replace(/\.\d+$/, '')))) || {};
-        m.set(k, { codigo: it.codigo || '', descricao: it.descricao, unidade: it.unidade || '', quantidade: 0, localizacao: e.localizacao || '', linha: e.linha || '', familia: e.familia || '', pedidos: [] });
+        m.set(k, { codigo: it.codigo || '', descricao: it.descricao, unidade: it.unidade || '', fator: num(it.fator) || 1, quantidade: 0, localizacao: e.localizacao || '', linha: e.linha || '', familia: e.familia || '', pedidos: [] });
       }
       const x = m.get(k);
       x.quantidade = Math.round((x.quantidade + num(it.quantidade)) * 1000) / 1000;
@@ -211,6 +211,16 @@
   //   o: { notas, itensPorNota (Map), mes 'AAAA-MM', dia(nota) → 'AAAA-MM-DD', precos (Map código → preço "ven"),
   //        precoCaixa (Map código → preço da caixa), pedidoDaNota (Map nota_id → pedido), cfg, usuarios [{user_id, nome, papel}] }
   const unidadeNorm = u => String(u || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
+  // 06/11/2026 (Anderson, foto do pedido impresso): a sigla fica (FR é frasco, FD é fardo), mas a embalagem fechada diz quanto vem
+  // dentro — "CX c/ 25 PT", "FD c/ 16 PT" — para a separação não confundir caixa, fardo e pacote. fator = unidades do cadastro base
+  // por embalagem (o código ".1" da caixa); unBase = a unidade do código base (sai só se for diferente da embalagem).
+  const unidadeEmbalagem = (un, fator, unBase) => {
+    const u = String(un || '').trim(), f = Number(fator) || 1;
+    if (!(f > 1)) return u;
+    const fq = Number.isInteger(f) ? String(f) : String(Math.round(f * 1000) / 1000).replace('.', ',');
+    const b = String(unBase || '').trim();
+    return (u ? u + ' ' : '') + 'c/ ' + fq + (b && unidadeNorm(b) !== unidadeNorm(u) ? ' ' + b : '');
+  };
   const ehVendaCfop = c => !c || /^[56][14]/.test(String(c));
   // Devolução (22/10/2026, decisão do Anderson: "devolveu é meio que não houve venda"): o.devolucoes (R.devolucoesComoNotas)
   // do mês tiram a comissão da venda devolvida, na proporção do valor devolvido, de quem vendeu — no mês da devolução (o mês da
@@ -290,7 +300,7 @@
 
   const FRETE_CONTA = [['0', '0-Remetente (CIF)'], ['1', '1-Destinatário (FOB)'], ['2', '2-Terceiros'], ['9', '9-Sem frete']];
 
-  const P = { precoMinimo, abaixoDoMinimo, FINANCEIRO, unidadeNorm, descontoValor, descontoPct, descontoGeral, TABELA_PADRAO, PLANOS_PADRAO, MARGEM_MINIMA, MARGEM_INTERNO, margemDoPlano, pctDaMargem, chaveMargem, rotuloMargem, margemMinima, apuraComissao, totalComAjustes, itensParaRepetir, ehVendaCfop, FAIXAS, FRETE_CONTA, ROTULO_BLOQUEIO, tabelaDe, planosDe, planoDoUsuario, precoLiq, totalItem, precoDaFaixa, faixaDoPreco, rotuloFaixa,
+  const P = { precoMinimo, abaixoDoMinimo, FINANCEIRO, unidadeNorm, unidadeEmbalagem, descontoValor, descontoPct, descontoGeral, TABELA_PADRAO, PLANOS_PADRAO, MARGEM_MINIMA, MARGEM_INTERNO, margemDoPlano, pctDaMargem, chaveMargem, rotuloMargem, margemMinima, apuraComissao, totalComAjustes, itensParaRepetir, ehVendaCfop, FAIXAS, FRETE_CONTA, ROTULO_BLOQUEIO, tabelaDe, planosDe, planoDoUsuario, precoLiq, totalItem, precoDaFaixa, faixaDoPreco, rotuloFaixa,
     margem, sobreTabela, abaixoDaTabela, linha, totais, bloqueiosAbertos, situacao, pausado, bolao, ultimasCompras, procura, itensDaProposta, entregaDoCliente, entregaTexto };
   raiz.CRMPedidos = P;
   if (typeof module !== 'undefined') module.exports = P;
@@ -306,6 +316,8 @@
   const esc = CRM.esc, E = () => CRM.estado;
   const num = v => (v == null || v === '' ? 0 : Number(v) || 0);
   const qtd = v => (v == null ? '—' : Number(v).toLocaleString('pt-BR', { maximumFractionDigits: 3 }));
+  // a unidade para imprimir/separar: "CX c/ 25 PT" na embalagem fechada (P.unidadeEmbalagem)
+  const unSep = it => { const b = it && it.codigo && porCod.get(String(it.codigo).replace(/\.\d+$/, '')); return P.unidadeEmbalagem(it && it.unidade, it && it.fator, b && b.unidade); };
   const preco = v => (v == null ? '—' : Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 }));
   const pct = v => (v == null ? '—' : Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%');
   const quando = iso => (iso ? new Date(iso).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—');
@@ -520,13 +532,13 @@
     return '<section class="cartao"><h2>Lista de separação SP ' + esc(b) + ' <small>' + ps.length + ' pedido(s) · ' + l.length + ' produto(s)</small></h2>' +
       '<p class="acoes"><button type="button" class="btn sec" data-acao="pd-bolao-voltar">← Voltar</button> <button type="button" class="btn" data-acao="pd-bolao-imprimir" data-id="' + esc(b) + '">Imprimir a lista e os pedidos</button></p>' +
       '<h3>1. Descer o material (somado)</h3><div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Local</th><th>Código</th><th>Produto</th><th class="num">Qtde</th><th>Un</th><th>Pedidos</th></tr></thead><tbody>' +
-      l.map(x => '<tr><td>' + esc(x.localizacao || '—') + '</td><td>' + esc(x.codigo) + '</td><td>' + esc(x.descricao) + '</td><td class="num"><strong>' + qtd(x.quantidade) + '</strong></td><td>' + esc(x.unidade) + '</td>' +
+      l.map(x => '<tr><td>' + esc(x.localizacao || '—') + '</td><td>' + esc(x.codigo) + '</td><td>' + esc(x.descricao) + '</td><td class="num"><strong>' + qtd(x.quantidade) + '</strong></td><td>' + esc(unSep(x)) + '</td>' +
         '<td><small>' + esc(x.pedidos.map(y => y.numero + ': ' + qtd(y.quantidade)).join(' · ')) + '</small></td></tr>').join('') + '</tbody></table></div>' +
       '<h3>2. Separar pedido a pedido</h3>' + ps.map(p => {
         const todos = (p.itens || []).every(i => i.separado);
         return '<div class="pd-sep"><h4>Pedido ' + esc(p.numero) + ' · ' + esc(nomeCliente(p)) + ' ' + CRM.selo(P.situacao(p).rotulo, P.situacao(p).cor) + '</h4>' +
           '<table class="tabela"><tbody>' + (p.itens || []).map((it, i) => '<tr><td><label class="filtro-inline"><input type="checkbox" data-pd-sep="' + esc(p.id) + ':' + i + '"' + (it.separado ? ' checked' : '') + (p.situacao !== 'separacao' ? ' disabled' : '') + '> ' +
-            esc(it.descricao) + '</label><small>' + esc(it.codigo || '') + '</small></td><td class="num"><strong>' + qtd(it.quantidade) + '</strong> ' + esc(it.unidade || '') + '</td></tr>').join('') + '</tbody></table>' +
+            esc(it.descricao) + '</label><small>' + esc(it.codigo || '') + '</small></td><td class="num"><strong>' + qtd(it.quantidade) + '</strong> ' + esc(unSep(it)) + '</td></tr>').join('') + '</tbody></table>' +
           '<p class="acoes">' + (p.situacao === 'separacao' ? '<button type="button" class="btn' + (todos ? ' verde' : ' sec') + '" data-acao="pd-separado" data-id="' + esc(p.id) + '">Separado ✓</button> ' : '') +
           '<button type="button" class="btn sec" data-acao="pd-falta" data-id="' + esc(p.id) + '">⚠ Faltou</button> ' +
           '<button type="button" class="mini" data-acao="pd-voltar-aberto" data-id="' + esc(p.id) + '">tirar da lista (volta ao aberto)</button></p>' + avisoFalta(p) + '</div>';
@@ -538,7 +550,7 @@
     const l = P.bolao(ps, new Map(disp.map(d => [d.codigo, d])));
     return '<div class="sp-doc"><h1>Lista de separação SP ' + esc(b) + '</h1><p>' + esc(new Date().toLocaleString('pt-BR')) + ' · ' + ps.length + ' pedido(s): ' + esc(ps.map(p => p.numero).join(', ')) + '</p>' +
       '<table><thead><tr><th>✓</th><th>Local</th><th>Código</th><th>Produto</th><th>Qtde</th><th>Un</th><th>Pedidos</th></tr></thead><tbody>' +
-      l.map(x => '<tr><td class="cx"></td><td>' + esc(x.localizacao) + '</td><td>' + esc(x.codigo) + '</td><td>' + esc(x.descricao) + '</td><td class="n">' + qtd(x.quantidade) + '</td><td>' + esc(x.unidade) + '</td><td>' +
+      l.map(x => '<tr><td class="cx"></td><td>' + esc(x.localizacao) + '</td><td>' + esc(x.codigo) + '</td><td>' + esc(x.descricao) + '</td><td class="n">' + qtd(x.quantidade) + '</td><td>' + esc(unSep(x)) + '</td><td>' +
         esc(x.pedidos.map(y => y.numero + ': ' + qtd(y.quantidade)).join(' · ')) + '</td></tr>').join('') + '</tbody></table>' +
       ps.map(p => htmlPedidoImpresso(p, true)).join('') + '</div>';
   }
@@ -550,7 +562,7 @@
         p.vendedor_id && CRM.nomeUsuario(p.vendedor_id) !== '—' ? 'Vendedor(a): ' + CRM.nomeUsuario(p.vendedor_id) : ''].filter(Boolean).join(' · ')) + '</p>' +
       (d.texto_nota ? '<p><strong>Texto da nota:</strong> ' + esc(d.texto_nota) + '</p>' : '') + (d.observacoes ? '<p><strong>Obs.:</strong> ' + esc(d.observacoes) + '</p>' : '') +
       '<table><thead><tr><th>✓</th><th>Item</th><th>Código</th><th>Produto</th><th>Qtde</th><th>Un</th></tr></thead><tbody>' +
-      (p.itens || []).map((it, i) => [it, i]).sort((a, b) => sem(a[0].descricao).localeCompare(sem(b[0].descricao), 'pt-BR', { numeric: true })).map(([it, i]) => '<tr><td class="cx"></td><td>' + (i + 1) + '</td><td>' + esc(it.codigo || '') + '</td><td>' + esc(it.descricao) + '</td><td class="n">' + qtd(it.quantidade) + '</td><td>' + esc(it.unidade || '') + '</td></tr>').join('') +
+      (p.itens || []).map((it, i) => [it, i]).sort((a, b) => sem(a[0].descricao).localeCompare(sem(b[0].descricao), 'pt-BR', { numeric: true })).map(([it, i]) => '<tr><td class="cx"></td><td>' + (i + 1) + '</td><td>' + esc(it.codigo || '') + '</td><td>' + esc(it.descricao) + '</td><td class="n">' + qtd(it.quantidade) + '</td><td>' + esc(unSep(it)) + '</td></tr>').join('') +
       '</tbody></table><p class="ass">Separado por: ____________________ &nbsp; Conferido por: ____________________</p></section>';
   }
 
