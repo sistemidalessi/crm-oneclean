@@ -11468,3 +11468,46 @@ begin
 end;
 $$;
 revoke all on function public.crm_gnre_ligar(boolean) from public, anon, authenticated;
+
+-- extrato do BB (06/11/2026): a linha lida de novo com outro lote (depois do fechamento do dia) não vira linha nova
+create or replace function public.crm_fin_extrato_gravar(p_linhas jsonb, p_saldo jsonb default null) returns integer
+language plpgsql security definer set search_path = public as $$
+declare n integer;
+begin
+  -- 06/11/2026: o BB devolve as linhas do dia anterior com OUTRO lote (e, na "Cobrança", outro documento) depois do fechamento,
+  -- e a chave mudava: 22 linhas de 05/11 voltaram como novas ("conferir") em 06/11 às 7h15. A linha já gravada que SUMIU desta
+  -- leitura (a chave dela não veio) e tem o mesmo dia, sinal, valor e histórico de uma linha nova passa a ter a chave nova
+  -- (é a mesma linha; mantém a situação e o lançamento ligados). Duas iguais no mesmo dia casam na ordem.
+  with x as (select y.chave, y.data, y.sinal, y.valor, y.historico, y.documento, y.lote
+               from jsonb_to_recordset(coalesce(p_linhas, '[]'::jsonb)) as y(chave text, data date, sinal text, valor numeric, historico text,
+                    documento text, lote integer)
+              where y.chave is not null and y.data is not null),
+       nova as (select x.*, row_number() over (partition by x.data, x.sinal, x.valor, x.historico order by x.chave) k
+                  from x where not exists (select 1 from public.crm_fin_extrato f where f.chave = x.chave)),
+       sumiu as (select f.id, f.data, f.sinal, f.valor, f.historico, row_number() over (partition by f.data, f.sinal, f.valor, f.historico order by f.id) k
+                   from public.crm_fin_extrato f
+                  where f.data in (select distinct data from x) and not exists (select 1 from x where x.chave = f.chave)
+                    and f.situacao <> 'saldo')
+  update public.crm_fin_extrato f set chave = nova.chave, documento = nova.documento, lote = nova.lote
+    from sumiu join nova on nova.data = sumiu.data and nova.sinal = sumiu.sinal and nova.valor = sumiu.valor
+                        and nova.historico is not distinct from sumiu.historico and nova.k = sumiu.k
+   where f.id = sumiu.id;
+  insert into public.crm_fin_extrato as f (chave, data, movimento, tipo, sinal, valor, historico, complemento, documento, codigo, lote, contrapartida, id_transacao, situacao)
+  select x.chave, x.data, x.movimento, x.tipo, x.sinal, x.valor, x.historico, x.complemento, x.documento, x.codigo, x.lote, x.contrapartida, x.id_transacao,
+         case when coalesce(x.tipo, '1') <> '1' or x.historico ~* '^(saldo anterior|saldo do dia|s a l d o)$' then 'saldo'
+              when x.historico ~* 'rende f' then 'ignorado' else 'conferir' end
+    from jsonb_to_recordset(coalesce(p_linhas, '[]'::jsonb)) as x(chave text, data date, movimento date, tipo text, sinal text, valor numeric, historico text,
+         complemento text, documento text, codigo integer, lote integer, contrapartida text, id_transacao text)
+   where x.chave is not null and x.data is not null
+  on conflict (chave) do update set valor = excluded.valor, complemento = excluded.complemento, contrapartida = excluded.contrapartida,
+        id_transacao = excluded.id_transacao, lido_em = now()
+   where f.situacao in ('conferir', 'saldo', 'ignorado') and (f.valor is distinct from excluded.valor or f.complemento is distinct from excluded.complemento);
+  get diagnostics n = row_count;
+  if p_saldo is not null and (p_saldo->>'data') is not null and (p_saldo->>'saldo') is not null then
+    insert into public.crm_fin_extrato_saldo (data, saldo, conta, investimento, lido_em)
+    values ((p_saldo->>'data')::date, (p_saldo->>'saldo')::numeric, nullif(p_saldo->>'conta', '')::numeric, nullif(p_saldo->>'investimento', '')::numeric, now())
+    on conflict (data) do update set saldo = excluded.saldo, conta = excluded.conta, investimento = excluded.investimento, lido_em = now();
+  end if;
+  return n;
+end;
+$$;
