@@ -17,6 +17,12 @@
   // endereço (o login usa o "#" na troca de senha). Depois de entrar, o CRM abre a tela Pedidos já nesse pedido.
   const LINK_PEDIDO = 'sd-crm-ir-pedido';
   function guardaLinkPedido() {
+    // o toque na notificação do fiscal dos agentes (06/11/2026) abre "#agentes": Configurações → Fiscal dos agentes
+    if (location.hash === '#agentes') {
+      try { sessionStorage.setItem(LINK_PEDIDO, 'agentes'); } catch (e) { /* abre a tela normal */ }
+      try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { /* fica o # */ }
+      return true;
+    }
     const m = /^#pedido=(\d{1,9})$/.exec(location.hash || '');
     if (!m) return false;
     try { sessionStorage.setItem(LINK_PEDIDO, m[1]); } catch (e) { /* sem guarda: abre a tela normal */ }
@@ -27,6 +33,7 @@
   function abreLinkPedido() {
     let n = null;
     try { n = sessionStorage.getItem(LINK_PEDIDO); sessionStorage.removeItem(LINK_PEDIDO); } catch (e) { return; }
+    if (n === 'agentes' && E.eu) { CRM.acoes['ajustes-secao']('agentes'); return; }
     if (!n || !E.eu || !CRM.telas.pedidos || !CRM.telas.pedidos.abrirNumero) return;
     E.aba = 'pedidos'; gravaAbaDaSessao('pedidos');
     CRM.telas.pedidos.abrirNumero(Number(n));

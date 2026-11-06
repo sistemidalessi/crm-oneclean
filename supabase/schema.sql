@@ -10647,3 +10647,461 @@ begin
       nullif(left(array_to_string(array(select jsonb_array_elements_text(public.crm_pedido_credito_motivo(r.id)->'textos')), ' '), 300), '') end);
 end;
 $$;
+
+-- ============================================================================================================================
+-- Fiscal dos agentes da OneClean (06/11/2026). Anderson: "nada pode simplesmente travar ou parar de funcionar, e ninguém aqui
+-- fica em cima disso". Mesmo desenho do fiscal da Agilité (agilite-sistema-gestao src/fiscal/agentes.js):
+--   - confere de hora em hora o RESULTADO do que roda sozinho (não só se rodou): nota presa ou rejeitada, DF-e sem leitura,
+--     boleto não registrado, extrato parado, espelho com a Agilité preso, cobrança e leads que não saíram, contador sem o mês,
+--     pedido travado no financeiro, IBPT vencendo, contas vencidas, agendador com erro ou parado;
+--   - cada problema guarda quando abriu, quando foi avisado e quando se resolveu (crm_fiscal_problemas);
+--   - conferência que quebra vira problema ("o fiscal não conseguiu conferir X"), nunca silêncio;
+--   - o aviso (Web Push só no celular do Anderson) e o pulso público ficam na Edge Function crm-fiscal-agentes, que o
+--     agendador chama de hora em hora (crm_fiscal_tick) e que passa o certificado A1 e o serviço fiscal (problemas "externo:").
+-- Funções só do agendador/da função: recusam anon e authenticated por dentro (sem precisar de revoke).
+-- ============================================================================================================================
+
+create table if not exists public.crm_fiscal_problemas (
+  chave text primary key,                       -- ex.: 'nfe:presa:<id>', 'agendador:crm-espelho'
+  area text not null,
+  nivel text not null check (nivel in ('grave', 'atencao')),
+  texto text not null,
+  fazer text,
+  link text,
+  primeiro_em timestamptz not null default now(),
+  ultimo_em timestamptz not null default now(),
+  avisado_em timestamptz,
+  resolvido_em timestamptz
+);
+alter table public.crm_fiscal_problemas enable row level security;
+do $p$ begin
+  create policy ler on public.crm_fiscal_problemas for select to authenticated using ((select public.crm_eh_admin()));
+exception when duplicate_object then null; end $p$;
+
+create schema if not exists crm_interno;
+-- estado do fiscal (hora da última conferência, visitas da rotina da nuvem, último resumo, chaves VAPID): a API não expõe
+create table if not exists crm_interno.fiscal_estado (nome text primary key, valor text, quando timestamptz not null default now());
+-- aparelhos do Anderson inscritos no Web Push (endereço do serviço de push e as chaves do navegador)
+create table if not exists crm_interno.fiscal_push (
+  id bigserial primary key,
+  user_id uuid not null,
+  endpoint text not null unique,
+  p256dh text not null,
+  auth text not null,
+  aparelho text,
+  criado_em timestamptz not null default now(),
+  ultimo_envio timestamptz,
+  ultimo_erro text
+);
+
+-- um problema em jsonb (para as conferências abaixo)
+create or replace function crm_interno.fiscal_p(p_chave text, p_area text, p_nivel text, p_texto text, p_fazer text default null, p_link text default '#agentes')
+returns jsonb language sql immutable as $$
+  select jsonb_build_object('chave', p_chave, 'area', p_area, 'nivel', p_nivel, 'texto', p_texto, 'fazer', p_fazer, 'link', p_link);
+$$;
+create or replace function crm_interno.fiscal_reais(v numeric) returns text language sql immutable as $$
+  select 'R$ ' || translate(to_char(coalesce(v, 0), 'FM999,999,990.00'), ',.', '.,');
+$$;
+
+create or replace function crm_interno.fiscal_so_servidor() returns void language plpgsql as $$
+begin
+  if coalesce(auth.role(), '') in ('anon', 'authenticated') then raise exception 'só o agendador e a função do fiscal'; end if;
+end;
+$$;
+
+-- estado: ler (p_valor null) ou gravar
+create or replace function public.crm_fiscal_estado(p_nome text, p_valor text default null, p_gravar boolean default false)
+returns text language plpgsql security definer set search_path = public as $$
+declare v text;
+begin
+  perform crm_interno.fiscal_so_servidor();
+  if p_gravar then
+    insert into crm_interno.fiscal_estado (nome, valor, quando) values (p_nome, p_valor, now())
+      on conflict (nome) do update set valor = excluded.valor, quando = now();
+    return p_valor;
+  end if;
+  select valor into v from crm_interno.fiscal_estado where nome = p_nome;
+  return v;
+end;
+$$;
+
+-- ---------------------------------------------------------------------------------------------------- as conferências
+create or replace function public.crm_fiscal_conferir(p_externos jsonb default null)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare
+  achados jsonb := '[]'::jsonb;
+  agora_sp timestamp := now() at time zone 'America/Sao_Paulo';
+  hoje date := (now() at time zone 'America/Sao_Paulo')::date;
+  hora int := extract(hour from now() at time zone 'America/Sao_Paulo')::int;
+  minuto int := extract(minute from now() at time zone 'America/Sao_Paulo')::int;
+  dow int := extract(dow from now() at time zone 'America/Sao_Paulo')::int;
+  util boolean;
+  cfg jsonb;
+  r record; n int; v numeric; t text; ts timestamptz; lst text;
+  chaves text[]; novos int := 0; resolvidos int := 0; antes record;
+  F constant text := 'Fiscal dos agentes';
+begin
+  perform crm_interno.fiscal_so_servidor();
+  if (select valor from crm_interno.fiscal_estado where nome = 'ligado_em') is null then
+    insert into crm_interno.fiscal_estado (nome, valor) values ('ligado_em', now()::text) on conflict (nome) do nothing;
+  end if;
+  select coalesce(dados, '{}'::jsonb) into cfg from public.crm_config where id = 1;
+  begin util := public.crm_prospec_dia_util(hoje); exception when others then util := dow between 1 and 5; end;
+
+  -- 1. agendadores do banco (pg_cron): sumiu, desligado, com erro nas últimas rodadas ou sem rodar quando devia
+  begin
+    for r in select * from (values
+        ('crm-espelho',          'Espelho com a Agilité',        0, 24, 15,  null::int, false, 'grave'),
+        ('crm-bb-ciclo',         'Boletos do BB',                8, 21, 30,  null, false, 'grave'),
+        ('crm-bb-extrato',       'Extrato do BB',                8, 22, 70,  null, false, 'grave'),
+        ('crm-nfe-email',        'E-mail das NF-e',              8, 22, 45,  null, false, 'grave'),
+        ('crm-bb-pagar-ciclo',   'Pagamentos pelo BB',           8, 22, 30,  null, false, 'atencao'),
+        ('crm-leads-sugeridos',  'Leads sugeridos',              null, null, null, 7, true, 'grave'),
+        ('crm-cobranca-avisos',  'Cobrança automática',          null, null, null, 10, true, 'grave'),
+        ('crm-qualificacao',     'Estrelas dos clientes',        null, null, null, 7, false, 'atencao'),
+        ('crm-contador',         'XML do mês ao contador',       null, null, null, null, false, 'grave'),
+        ('crm-fiscal-agentes',   'Fiscal dos agentes',           null, null, null, null, false, 'grave')
+      ) as e(job, rotulo, ini, fim, max_min, hora_dia, so_util, nivel)
+    loop
+      select j.active, (select max(d.start_time) from cron.job_run_details d where d.jobid = j.jobid) ult,
+             (select count(*) from (select d.status from cron.job_run_details d where d.jobid = j.jobid order by d.start_time desc limit 2) x where x.status = 'failed') falhas,
+             (select left(d.return_message, 140) from cron.job_run_details d where d.jobid = j.jobid order by d.start_time desc limit 1) msg
+        into antes from cron.job j where j.jobname = r.job;
+      if not found then
+        achados := achados || crm_interno.fiscal_p('agendador:' || r.job, F, 'grave', 'O agendador "' || r.job || '" (' || r.rotulo || ') sumiu do banco: isso para de rodar sozinho.', 'Me chamar: recriar o agendador.');
+        continue;
+      end if;
+      if not antes.active then
+        achados := achados || crm_interno.fiscal_p('agendador:' || r.job, F, r.nivel, 'O agendador de ' || r.rotulo || ' está desligado.', 'Me chamar: religar o agendador "' || r.job || '".');
+      elsif antes.falhas >= 2 then
+        achados := achados || crm_interno.fiscal_p('agendador:' || r.job, F, r.nivel, r.rotulo || ': as duas últimas rodadas deram erro (' || coalesce(antes.msg, 'sem mensagem') || ').', 'Me chamar com esse erro.');
+      elsif r.max_min is not null and hora >= r.ini and hora < r.fim and (antes.ult is null or antes.ult < now() - make_interval(mins => r.max_min)) then
+        achados := achados || crm_interno.fiscal_p('agendador:' || r.job, F, r.nivel, r.rotulo || ': o agendador não roda desde ' || coalesce(to_char(antes.ult at time zone 'America/Sao_Paulo', 'DD/MM HH24:MI'), 'nunca') || ' (devia rodar a cada poucos minutos).', 'Me chamar: o pg_cron do Supabase pode ter parado.');
+      elsif r.hora_dia is not null and hora >= r.hora_dia and (not r.so_util or dow between 1 and 5)
+            and (antes.ult is null or (antes.ult at time zone 'America/Sao_Paulo')::date < hoje) then
+        achados := achados || crm_interno.fiscal_p('agendador:' || r.job, F, r.nivel, r.rotulo || ': o agendador de hoje não rodou (última vez ' || coalesce(to_char(antes.ult at time zone 'America/Sao_Paulo', 'DD/MM HH24:MI'), 'nunca') || ').', 'Me chamar: o pg_cron do Supabase pode ter parado.');
+      end if;
+    end loop;
+  exception when others then
+    achados := achados || crm_interno.fiscal_p('conferencia:agendadores', F, 'atencao', 'O fiscal não conseguiu conferir os agendadores (' || left(sqlerrm, 120) || ').', 'Me chamar: a conferência quebrou.');
+  end;
+
+  -- 2. chamadas do banco às Edge Functions (pg_net) com erro nas últimas 2 horas
+  begin
+    select count(*) into n from net._http_response where created > now() - interval '2 hours' and (status_code >= 400 or timed_out or error_msg is not null);
+    if n >= 5 then
+      select left(coalesce(error_msg, status_code::text || ' ' || content, ''), 120) into t from net._http_response
+        where created > now() - interval '2 hours' and (status_code >= 400 or timed_out or error_msg is not null) order by created desc limit 1;
+      achados := achados || crm_interno.fiscal_p('funcoes:erros', F, case when n >= 15 then 'grave' else 'atencao' end,
+        n || ' chamadas dos agendadores às funções do CRM deram erro nas últimas 2 horas (a última: ' || coalesce(t, '?') || ').', 'Me chamar: uma função pode ter caído (boletos, extrato, cobrança, e-mail das notas).');
+    end if;
+  exception when others then
+    achados := achados || crm_interno.fiscal_p('conferencia:funcoes', F, 'atencao', 'O fiscal não conseguiu conferir as chamadas às funções (' || left(sqlerrm, 120) || ').', 'Me chamar: a conferência quebrou.');
+  end;
+
+  -- 3. NF-e de produção: presa, rejeitada sem outra autorizada do mesmo pedido, denegada, autorizada fora do CRM, sem e-mail
+  begin
+    for r in select id, numero, situacao, atualizado_em from public.crm_nfe
+              where ambiente = 'producao' and situacao in ('pendente', 'bloqueada') and atualizado_em < now() - interval '30 minutes' loop
+      achados := achados || crm_interno.fiscal_p('nfe:presa:' || r.id, 'NF-e', 'grave', 'A NF-e ' || coalesce(r.numero::text, '?') || ' está ' || r.situacao || ' desde ' || to_char(r.atualizado_em at time zone 'America/Sao_Paulo', 'DD/MM HH24:MI') || ' sem resposta da Sefaz.', 'Pedidos → NF-e → abrir a nota e "Consultar" (a Sefaz pode ter autorizado sem devolver).', '#pedido');
+    end loop;
+    for r in select nf.id, nf.numero, nf.cstat, left(nf.motivo, 90) motivo from public.crm_nfe nf
+              where nf.ambiente = 'producao' and nf.situacao = 'rejeitada' and nf.atualizado_em > now() - interval '3 days'
+                and not exists (select 1 from public.crm_nfe a where a.ambiente = 'producao' and a.situacao = 'autorizada' and nf.pedido_id is not null and a.pedido_id = nf.pedido_id and a.criado_em >= nf.criado_em) loop
+      achados := achados || crm_interno.fiscal_p('nfe:rejeitada:' || r.id, 'NF-e', 'grave', 'NF-e ' || coalesce(r.numero::text, '?') || ' rejeitada pela Sefaz (' || coalesce(r.cstat::text, '?') || ' ' || coalesce(r.motivo, '') || ') e ainda sem nota autorizada para o pedido.', 'Corrigir o motivo e "Emitir de novo" (mesmo número), ou me chamar.');
+    end loop;
+    for r in select id, numero from public.crm_nfe where ambiente = 'producao' and situacao = 'denegada' and atualizado_em > now() - interval '30 days' loop
+      achados := achados || crm_interno.fiscal_p('nfe:denegada:' || r.id, 'NF-e', 'grave', 'NF-e ' || r.numero || ' DENEGADA pela Sefaz (irregularidade cadastral do cliente ou da OneClean): o número não volta.', 'Me chamar e falar com o contador.');
+    end loop;
+    select count(*), string_agg(numero::text, ', ' order by numero) into n, lst from public.crm_nfe
+      where ambiente = 'producao' and situacao = 'autorizada' and nota_id is null and coalesce(tipo, 'venda') = 'venda' and autorizada_em < now() - interval '1 hour';
+    if n > 0 then
+      achados := achados || crm_interno.fiscal_p('nfe:fora-do-crm', 'NF-e', 'grave', n || ' NF-e autorizada(s) que não entraram nas notas do CRM (estoque, título e comissão ficam faltando): ' || lst || '.', 'Me chamar: a gravação depois da autorização falhou.');
+    end if;
+    select count(*), string_agg(numero::text, ', ' order by numero) into n, lst from public.crm_nfe
+      where ambiente = 'producao' and situacao = 'autorizada' and coalesce(email_ok, false) = false
+        and autorizada_em < now() - interval '3 hours' and autorizada_em > now() - interval '10 days';
+    if n > 0 then
+      achados := achados || crm_interno.fiscal_p('nfe:sem-email', 'NF-e', 'atencao', n || ' NF-e sem o e-mail ao cliente (cliente sem e-mail no cadastro ou envio com erro): ' || lst || '.', 'Pôr o "E-mail para a nota fiscal" no cadastro do cliente: o envio sai sozinho em até 15 min.');
+    end if;
+  exception when others then
+    achados := achados || crm_interno.fiscal_p('conferencia:nfe', 'NF-e', 'atencao', 'O fiscal não conseguiu conferir as NF-e (' || left(sqlerrm, 120) || ').', 'Me chamar: a conferência quebrou.');
+  end;
+
+  -- 4. DF-e (notas de compra pela Sefaz): sem leitura, ou a Sefaz recusando
+  begin
+    select ultima_em, ultimo_cstat, ultimo_motivo into antes from public.crm_dfe_estado order by id limit 1;
+    if antes.ultima_em is null or antes.ultima_em < now() - interval '72 hours' then
+      achados := achados || crm_interno.fiscal_p('dfe:parado', 'DF-e', 'grave', 'As notas de compra não são buscadas na Sefaz desde ' || coalesce(to_char(antes.ultima_em at time zone 'America/Sao_Paulo', 'DD/MM HH24:MI'), 'nunca') || ': nota de fornecedor pode estar passando sem ninguém ver.', 'Estoque → Notas de compra → "Buscar na Sefaz agora" (ou me chamar).');
+    elsif util and hora >= 11 and (antes.ultima_em at time zone 'America/Sao_Paulo')::date < hoje then
+      achados := achados || crm_interno.fiscal_p('dfe:parado', 'DF-e', 'atencao', 'Hoje ainda ninguém buscou as notas de compra na Sefaz (última vez ' || to_char(antes.ultima_em at time zone 'America/Sao_Paulo', 'DD/MM HH24:MI') || '; a busca roda com o CRM aberto).', 'Abrir Estoque → Notas de compra no CRM.');
+    end if;
+    if antes.ultimo_cstat is not null and antes.ultimo_cstat not in (137, 138) then
+      achados := achados || crm_interno.fiscal_p('dfe:recusa', 'DF-e', case when antes.ultimo_cstat = 656 then 'grave' else 'atencao' end,
+        'A Sefaz respondeu à busca das notas de compra com ' || antes.ultimo_cstat || ' (' || left(coalesce(antes.ultimo_motivo, ''), 90) || ').', 'Me chamar com esse código.');
+    end if;
+  exception when others then
+    achados := achados || crm_interno.fiscal_p('conferencia:dfe', 'DF-e', 'atencao', 'O fiscal não conseguiu conferir o DF-e (' || left(sqlerrm, 120) || ').', 'Me chamar: a conferência quebrou.');
+  end;
+
+  -- 5. boletos do BB: nota a prazo com boleto que não registrou; boleto com erro (sem outro registrado no lugar)
+  begin
+    if coalesce((cfg -> 'boleto' ->> 'ligado')::boolean, false) then
+      select count(*), string_agg(nf.numero::text, ', ' order by nf.numero) into n, lst
+        from public.crm_nfe nf join public.crm_pedidos p on p.id = nf.pedido_id
+       where nf.ambiente = 'producao' and nf.situacao = 'autorizada' and nf.autorizada_em < now() - interval '2 hours'
+         and nf.autorizada_em > now() - interval '30 days' and coalesce(p.dados ->> 'pagamento', '') ~* 'boleto'
+         and not exists (select 1 from public.crm_boletos_bb b where (b.nfe_id = nf.id or b.nota_numero = nf.numero) and b.situacao in ('registrado', 'pago', 'liquidado', 'baixado', 'cancelado'));
+      if n > 0 then
+        achados := achados || crm_interno.fiscal_p('boleto:nao-registrado', 'Boletos', 'grave', n || ' nota(s) a prazo no boleto sem o boleto registrado no BB: ' || lst || '. O cliente recebe a nota sem boleto.', 'Me chamar: o registro no BB falhou (veja Caixa → Cobrança).');
+      end if;
+      select count(*), string_agg(distinct b.nota_numero::text, ', ') into n, lst from public.crm_boletos_bb b
+       where b.situacao = 'erro' and b.criado_em > now() - interval '30 days'
+         and not exists (select 1 from public.crm_boletos_bb o where o.nota_numero = b.nota_numero and o.parcela = b.parcela and o.situacao <> 'erro');
+      if n > 0 then
+        achados := achados || crm_interno.fiscal_p('boleto:erro', 'Boletos', 'grave', n || ' boleto(s) com erro no BB e sem outro no lugar (NF ' || lst || ').', 'Me chamar: ver o erro do registro.');
+      end if;
+    end if;
+  exception when others then
+    achados := achados || crm_interno.fiscal_p('conferencia:boletos', 'Boletos', 'atencao', 'O fiscal não conseguiu conferir os boletos (' || left(sqlerrm, 120) || ').', 'Me chamar: a conferência quebrou.');
+  end;
+
+  -- 6. extrato do BB: leitura parada; lançamento do banco que o CRM não conhece de um dia que já passou
+  begin
+    select max(lido_em) into ts from public.crm_fin_extrato_saldo;
+    if hora >= 8 and hora < 22 and (ts is null or ts < now() - interval '90 minutes') then
+      achados := achados || crm_interno.fiscal_p('extrato:parado', 'Caixa', 'grave', 'O extrato do BB não é lido desde ' || coalesce(to_char(ts at time zone 'America/Sao_Paulo', 'DD/MM HH24:MI'), 'nunca') || ' (lê de 30 em 30 min): a conciliação do Caixa parou.', 'Me chamar: a leitura passa pela VPS com o certificado A1.');
+    end if;
+    select count(*), sum(valor) into n, v from public.crm_fin_extrato where situacao = 'conferir' and data < hoje;
+    if n > 0 then
+      achados := achados || crm_interno.fiscal_p('extrato:conferir', 'Caixa', 'atencao', n || ' lançamento(s) do extrato do BB de dias anteriores que o Caixa não conhece (' || crm_interno.fiscal_reais(v) || ').', 'Caixa → conferência com o BB: lançar ou ligar cada um.');
+    end if;
+  exception when others then
+    achados := achados || crm_interno.fiscal_p('conferencia:extrato', 'Caixa', 'atencao', 'O fiscal não conseguiu conferir o extrato (' || left(sqlerrm, 120) || ').', 'Me chamar: a conferência quebrou.');
+  end;
+
+  -- 7. espelho das transferências com a Agilité: pacote preso
+  begin
+    select count(*), min(mudou_em) into n, ts from public.crm_fin_espelho_fila where pendente and mudou_em < now() - interval '30 minutes';
+    if n > 0 then
+      achados := achados || crm_interno.fiscal_p('espelho:preso', 'Espelho com a Agilité', 'grave', n || ' lançamento(s) entre a OneClean e a Agilité sem chegar lá desde ' || to_char(ts at time zone 'America/Sao_Paulo', 'DD/MM HH24:MI') || ': os dois caixas ficam diferentes.', 'Configurações → Integrações → Espelho com a Agilité (ver o erro), ou me chamar.');
+    end if;
+  exception when others then
+    achados := achados || crm_interno.fiscal_p('conferencia:espelho', 'Espelho com a Agilité', 'atencao', 'O fiscal não conseguiu conferir o espelho (' || left(sqlerrm, 120) || ').', 'Me chamar: a conferência quebrou.');
+  end;
+
+  -- 8. cobrança automática de hoje (dia útil, depois das 10h)
+  begin
+    if util and hora >= 10 and (coalesce((cfg -> 'cobranca_boleto' ->> 'ligado')::boolean, false) or coalesce((cfg -> 'cobranca_aviso' ->> 'ligado')::boolean, false))
+       and not exists (select 1 from public.crm_cobranca_rodadas where dia = hoje) then
+      achados := achados || crm_interno.fiscal_p('cobranca:hoje', 'Cobrança', 'grave', 'A cobrança automática de hoje (boleto atualizado e aviso do cartório, 9h05) não rodou.', 'Me chamar: conferir a função crm-cobranca.');
+    end if;
+  exception when others then
+    achados := achados || crm_interno.fiscal_p('conferencia:cobranca', 'Cobrança', 'atencao', 'O fiscal não conseguiu conferir a cobrança (' || left(sqlerrm, 120) || ').', 'Me chamar: a conferência quebrou.');
+  end;
+
+  -- 9. leads sugeridos de hoje (dia útil, 6h30)
+  begin
+    if util and hora >= 8 and coalesce((cfg -> 'prospeccao' ->> 'ligado')::boolean, false)
+       and not exists (select 1 from public.crm_prospec_sugestoes where (criado_em at time zone 'America/Sao_Paulo')::date = hoje) then
+      achados := achados || crm_interno.fiscal_p('leads:hoje', 'Leads', 'grave', 'A lista de leads sugeridos de hoje não saiu (sai às 6h30): as vendedoras ficam sem prospecção.', 'Vendas → Leads sugeridos → "Gerar a lista de hoje agora", e me chamar.');
+    end if;
+  exception when others then
+    achados := achados || crm_interno.fiscal_p('conferencia:leads', 'Leads', 'atencao', 'O fiscal não conseguiu conferir os leads (' || left(sqlerrm, 120) || ').', 'Me chamar: a conferência quebrou.');
+  end;
+
+  -- 10. XML do mês anterior ao contador (dia 2, 9h05)
+  begin
+    t := to_char(date_trunc('month', hoje) - interval '1 month', 'YYYY-MM');
+    if coalesce((cfg -> 'contador' ->> 'ligado')::boolean, false) and (extract(day from hoje) > 2 or (extract(day from hoje) = 2 and hora >= 11))
+       and not exists (select 1 from public.crm_contador_envios where mes = t and ok) then
+      achados := achados || crm_interno.fiscal_p('contador:' || t, 'Contabilidade', 'grave', 'Os XML de ' || t || ' ainda não foram ao contador (vão sozinhos no dia 2): sem eles a apuração do mês atrasa.', 'Pedidos → NF-e → "Contabilidade: XML do mês" → Enviar.');
+    end if;
+  exception when others then
+    achados := achados || crm_interno.fiscal_p('conferencia:contador', 'Contabilidade', 'atencao', 'O fiscal não conseguiu conferir o envio ao contador (' || left(sqlerrm, 120) || ').', 'Me chamar: a conferência quebrou.');
+  end;
+
+  -- 11. pedidos travados: no financeiro (só o Anderson libera) e no resto (gestora, vendedora, compras)
+  begin
+    select count(*), string_agg(numero::text, ', ' order by numero), min(criado_em) into n, lst, ts from public.crm_pedidos
+     where situacao = 'aberto' and bloqueios && array['ATRASO', 'LIMITE', 'PRAZO', 'SEM ANÁLISE', 'SEM ENTRADA']
+       and not (array(select unnest(bloqueios) intersect select unnest(array['ATRASO', 'LIMITE', 'PRAZO', 'SEM ANÁLISE', 'SEM ENTRADA'])) <@ coalesce(liberado, '{}'))
+       and criado_em < now() - interval '4 hours';
+    if n > 0 then
+      achados := achados || crm_interno.fiscal_p('pedidos:financeiro', 'Pedidos', case when ts < now() - interval '48 hours' then 'grave' else 'atencao' end,
+        n || ' pedido(s) travado(s) no financeiro esperando você (crédito, prazo, atraso ou entrada): ' || lst || '.', 'Abrir cada pedido (o motivo está no aviso vermelho) e liberar ou recusar.', '#pedido');
+    end if;
+    select count(*), string_agg(numero::text, ', ' order by numero) into n, lst from public.crm_pedidos
+     where situacao = 'aberto' and coalesce(array_length(bloqueios, 1), 0) > 0 and not (bloqueios <@ coalesce(liberado, '{}'))
+       and not (bloqueios && array['ATRASO', 'LIMITE', 'PRAZO', 'SEM ANÁLISE', 'SEM ENTRADA']) and criado_em < now() - interval '3 days';
+    if n > 0 then
+      achados := achados || crm_interno.fiscal_p('pedidos:parados', 'Pedidos', 'atencao', n || ' pedido(s) travado(s) há mais de 3 dias (estoque, preço ou item sem cadastro): ' || lst || '.', 'Cobrar a gestora, a vendedora ou o comprador (o motivo está em cada pedido).', '#pedido');
+    end if;
+  exception when others then
+    achados := achados || crm_interno.fiscal_p('conferencia:pedidos', 'Pedidos', 'atencao', 'O fiscal não conseguiu conferir os pedidos (' || left(sqlerrm, 120) || ').', 'Me chamar: a conferência quebrou.');
+  end;
+
+  -- 12. IBPT (tributos aproximados na nota): tabela vencendo ou vencida
+  begin
+    select max(vig_fim) into ts from public.crm_ibpt;
+    if ts is null or ts::date < hoje then
+      achados := achados || crm_interno.fiscal_p('ibpt:vencido', 'Fiscal', 'atencao', 'A tabela do IBPT (tributos aproximados que vão na nota) venceu em ' || coalesce(to_char(ts, 'DD/MM'), '?') || ' e não foi renovada sozinha.', 'Fiscal → 4. Emissão → "Atualizar pelo IBPT agora".');
+    end if;
+  exception when others then
+    achados := achados || crm_interno.fiscal_p('conferencia:ibpt', 'Fiscal', 'atencao', 'O fiscal não conseguiu conferir o IBPT (' || left(sqlerrm, 120) || ').', 'Me chamar: a conferência quebrou.');
+  end;
+
+  -- 13. contas a pagar vencidas sem baixa
+  begin
+    select count(*), sum(valor) into n, v from public.crm_fin_lancamentos where tipo = 'saida' and situacao = 'aberto' and vencimento < hoje;
+    if n > 0 then
+      achados := achados || crm_interno.fiscal_p('caixa:vencidas', 'Caixa', 'atencao', n || ' conta(s) a pagar vencida(s) sem baixa (' || crm_interno.fiscal_reais(v) || '): ou foi paga e falta o ✓, ou está atrasada (juros e multa).', 'Caixa → Contas a pagar → vencidas.');
+    end if;
+  exception when others then
+    achados := achados || crm_interno.fiscal_p('conferencia:caixa', 'Caixa', 'atencao', 'O fiscal não conseguiu conferir as contas vencidas (' || left(sqlerrm, 120) || ').', 'Me chamar: a conferência quebrou.');
+  end;
+
+  -- 14. vigia de notas do servidor do escritório (depois da virada só serve ao Plano B do FKN)
+  begin
+    select max(ultimo_sinal) into ts from public.crm_integracoes where ativo and coalesce(uso, 'notas') = 'notas';
+    if ts is not null and ts < now() - interval '6 hours' and util and hora >= 9 then
+      achados := achados || crm_interno.fiscal_p('vigia-notas:sem-sinal', 'Vigia de notas', 'atencao', 'O vigia de notas do servidor do escritório está sem sinal desde ' || to_char(ts at time zone 'America/Sao_Paulo', 'DD/MM HH24:MI') || '. Com a virada as notas do CRM não dependem dele, mas nota emitida pelo FKN (Plano B) não entra.', 'Conferir no servidor a tarefa "CRM - vigia de notas" (ou desligar a chave em Integrações se o FKN não emite mais).');
+    end if;
+  exception when others then
+    achados := achados || crm_interno.fiscal_p('conferencia:vigia', 'Vigia de notas', 'atencao', 'O fiscal não conseguiu conferir o vigia de notas (' || left(sqlerrm, 120) || ').', 'Me chamar: a conferência quebrou.');
+  end;
+
+  -- 15. WhatsApp oficial: mensagens que falharam
+  begin
+    select count(*) into n from public.crm_whatsapp_eventos where tipo = 'status' and status = 'failed' and criado_em > now() - interval '3 days';
+    if n >= 3 then
+      achados := achados || crm_interno.fiscal_p('whatsapp:falhas', 'WhatsApp', 'atencao', n || ' mensagens do WhatsApp oficial falharam nos últimos 3 dias.', 'Conferir no painel da Meta a conta, o pagamento e os modelos; me chamar com o erro.');
+    end if;
+  exception when others then
+    achados := achados || crm_interno.fiscal_p('conferencia:whatsapp', 'WhatsApp', 'atencao', 'O fiscal não conseguiu conferir o WhatsApp (' || left(sqlerrm, 120) || ').', 'Me chamar: a conferência quebrou.');
+  end;
+
+  -- 16. quem bate o ponto aqui: a rotina "Fiscal dos agentes" da nuvem (seg, qua, sex) — um vigia o outro
+  begin
+    select coalesce((select valor from crm_interno.fiscal_estado where nome = 'visita:nuvem'), (select valor from crm_interno.fiscal_estado where nome = 'ligado_em'))::timestamptz into ts;
+    if ts < now() - interval '4 days' then
+      achados := achados || crm_interno.fiscal_p('vigia:nuvem', F, 'grave',
+        case when (select valor from crm_interno.fiscal_estado where nome = 'visita:nuvem') is null then 'A rotina "Fiscal dos agentes" da nuvem ainda não passou por aqui desde que o fiscal foi ligado: as tarefas agendadas do Claude ficaram sem fiscal.'
+             else 'A rotina "Fiscal dos agentes" da nuvem não passa aqui há ' || extract(day from now() - ts)::int || ' dias: as tarefas agendadas do Claude (vigia da legislação…) ficaram sem fiscal.' end,
+        'Me chamar: conferir a rotina nas tarefas agendadas do Claude.');
+    end if;
+  exception when others then
+    achados := achados || crm_interno.fiscal_p('conferencia:nuvem', F, 'atencao', 'O fiscal não conseguiu conferir a rotina da nuvem (' || left(sqlerrm, 120) || ').', 'Me chamar: a conferência quebrou.');
+  end;
+
+  -- 17. externos (certificado A1, serviço fiscal, fiscal da Agilité): vêm da Edge Function
+  if p_externos is not null and jsonb_typeof(p_externos) = 'array' then achados := achados || p_externos; end if;
+
+  -- grava: novo, continua (sobe de atenção para grave = avisa de novo), resolvido
+  select array_agg(x ->> 'chave') into chaves from jsonb_array_elements(achados) x;
+  for r in select * from jsonb_to_recordset(achados) as x(chave text, area text, nivel text, texto text, fazer text, link text) loop
+    if not exists (select 1 from public.crm_fiscal_problemas where chave = r.chave and resolvido_em is null) then novos := novos + 1; end if;
+    insert into public.crm_fiscal_problemas (chave, area, nivel, texto, fazer, link) values (r.chave, r.area, r.nivel, r.texto, r.fazer, r.link)
+    on conflict (chave) do update set area = excluded.area, texto = excluded.texto, fazer = excluded.fazer, link = excluded.link, ultimo_em = now(),
+      primeiro_em = case when crm_fiscal_problemas.resolvido_em is not null then now() else crm_fiscal_problemas.primeiro_em end,
+      avisado_em = case when crm_fiscal_problemas.resolvido_em is not null then null
+                        when excluded.nivel = 'grave' and crm_fiscal_problemas.nivel <> 'grave' then null
+                        else crm_fiscal_problemas.avisado_em end,
+      nivel = excluded.nivel, resolvido_em = null;
+  end loop;
+  with f as (update public.crm_fiscal_problemas set resolvido_em = now()
+              where resolvido_em is null and not (chave = any(coalesce(chaves, '{}')))
+                and (p_externos is not null or chave not like 'externo:%') returning 1)
+  select count(*) into resolvidos from f;
+  insert into crm_interno.fiscal_estado (nome, valor, quando) values ('verificado_em', now()::text, now())
+    on conflict (nome) do update set valor = excluded.valor, quando = now();
+  return jsonb_build_object('novos', novos, 'resolvidos', resolvidos,
+    'graves', (select count(*) from public.crm_fiscal_problemas where resolvido_em is null and nivel = 'grave'),
+    'atencao', (select count(*) from public.crm_fiscal_problemas where resolvido_em is null and nivel <> 'grave'));
+end;
+$$;
+
+-- abertos (para o aviso e o pulso) e marcar como avisados
+create or replace function public.crm_fiscal_abertos() returns jsonb language plpgsql security definer set search_path = public as $$
+begin
+  perform crm_interno.fiscal_so_servidor();
+  return coalesce((select jsonb_agg(to_jsonb(p) order by case p.nivel when 'grave' then 0 else 1 end, p.primeiro_em)
+                     from public.crm_fiscal_problemas p where p.resolvido_em is null), '[]'::jsonb);
+end;
+$$;
+create or replace function public.crm_fiscal_marcar(p_chaves text[]) returns void language plpgsql security definer set search_path = public as $$
+begin
+  perform crm_interno.fiscal_so_servidor();
+  update public.crm_fiscal_problemas set avisado_em = now() where chave = any(p_chaves) and resolvido_em is null;
+end;
+$$;
+
+-- inscrições do Web Push (a função confere o login do administrador antes de chamar)
+create or replace function public.crm_fiscal_push(p_acao text, p_dados jsonb default '{}'::jsonb) returns jsonb language plpgsql security definer set search_path = public as $$
+declare n int;
+begin
+  perform crm_interno.fiscal_so_servidor();
+  if p_acao = 'listar' then
+    return coalesce((select jsonb_agg(to_jsonb(i)) from crm_interno.fiscal_push i), '[]'::jsonb);
+  elsif p_acao = 'gravar' then
+    insert into crm_interno.fiscal_push (user_id, endpoint, p256dh, auth, aparelho)
+    values ((p_dados ->> 'user_id')::uuid, p_dados ->> 'endpoint', p_dados ->> 'p256dh', p_dados ->> 'auth', left(p_dados ->> 'aparelho', 120))
+    on conflict (endpoint) do update set user_id = excluded.user_id, p256dh = excluded.p256dh, auth = excluded.auth, aparelho = excluded.aparelho, ultimo_erro = null;
+    return jsonb_build_object('ok', true);
+  elsif p_acao = 'apagar' then
+    with alvo as (select id from crm_interno.fiscal_push where endpoint = p_dados ->> 'endpoint' or id = (p_dados ->> 'id')::bigint),
+         d as (delete from crm_interno.fiscal_push i using alvo where i.id = alvo.id returning 1)
+    select count(*) into n from d;
+    return jsonb_build_object('ok', true, 'apagados', n);
+  elsif p_acao = 'resultado' then
+    update crm_interno.fiscal_push set ultimo_envio = case when (p_dados ->> 'ok')::boolean then now() else ultimo_envio end,
+      ultimo_erro = case when (p_dados ->> 'ok')::boolean then null else left(p_dados ->> 'erro', 200) end
+     where endpoint = p_dados ->> 'endpoint';
+    return jsonb_build_object('ok', true);
+  end if;
+  raise exception 'ação desconhecida: %', p_acao;
+end;
+$$;
+
+-- a tela do administrador (Configurações → Fiscal dos agentes)
+create or replace function public.crm_fiscal_painel() returns jsonb language plpgsql stable security definer set search_path = public as $$
+begin
+  if not public.crm_eh_admin() then raise exception 'só o administrador'; end if;
+  return jsonb_build_object(
+    'abertos', coalesce((select jsonb_agg(to_jsonb(p) order by case p.nivel when 'grave' then 0 else 1 end, p.primeiro_em) from public.crm_fiscal_problemas p where p.resolvido_em is null), '[]'::jsonb),
+    'resolvidos', coalesce((select jsonb_agg(to_jsonb(p) order by p.resolvido_em desc) from (select * from public.crm_fiscal_problemas where resolvido_em > now() - interval '14 days' order by resolvido_em desc limit 40) p), '[]'::jsonb),
+    'verificado_em', (select valor from crm_interno.fiscal_estado where nome = 'verificado_em'),
+    'visita_nuvem', (select valor from crm_interno.fiscal_estado where nome = 'visita:nuvem'),
+    'ultimo_aviso', (select valor from crm_interno.fiscal_estado where nome = 'ultimo_aviso'),
+    'aparelhos', coalesce((select jsonb_agg(jsonb_build_object('id', id, 'aparelho', aparelho, 'criado_em', criado_em, 'ultimo_envio', ultimo_envio, 'ultimo_erro', ultimo_erro, 'meu', user_id = auth.uid()))
+                            from crm_interno.fiscal_push), '[]'::jsonb));
+end;
+$$;
+
+-- o agendador: chama a Edge Function (mesma senha do agendador da cobrança, crm_interno.cobranca_cfg)
+create or replace function public.crm_fiscal_tick() returns void language plpgsql security definer set search_path = public as $$
+declare c record;
+begin
+  perform crm_interno.fiscal_so_servidor();
+  select * into c from crm_interno.cobranca_cfg where id = 1;
+  if c.url is null then perform public.crm_fiscal_conferir(null); return; end if;   -- sem a função: ao menos confere
+  perform net.http_post(url := replace(c.url, '/crm-cobranca', '/crm-fiscal-agentes'), body := jsonb_build_object('acao', 'rodar', 'origem', 'agendador'),
+    headers := jsonb_build_object('Content-Type', 'application/json', 'Authorization', 'Bearer ' || c.senha), timeout_milliseconds := 120000);
+end;
+$$;
+-- só o agendador e a função chamam (por dentro elas já recusam anon/authenticated); a tela do administrador lê pelo painel
+revoke all on function public.crm_fiscal_conferir(jsonb) from public, anon, authenticated;
+revoke all on function public.crm_fiscal_estado(text, text, boolean) from public, anon, authenticated;
+revoke all on function public.crm_fiscal_abertos() from public, anon, authenticated;
+revoke all on function public.crm_fiscal_marcar(text[]) from public, anon, authenticated;
+revoke all on function public.crm_fiscal_push(text, jsonb) from public, anon, authenticated;
+revoke all on function public.crm_fiscal_tick() from public, anon, authenticated;
+revoke all on function public.crm_fiscal_painel() from public, anon;
+grant execute on function public.crm_fiscal_painel() to authenticated;
+revoke all on public.crm_fiscal_problemas from anon;
+do $$ begin
+  if exists (select 1 from pg_extension where extname = 'pg_cron') then
+    perform cron.unschedule(jobid) from cron.job where jobname = 'crm-fiscal-agentes';
+    perform cron.schedule('crm-fiscal-agentes', '7 * * * *', 'select public.crm_fiscal_tick()');
+  end if;
+end $$;

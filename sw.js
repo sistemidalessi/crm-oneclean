@@ -29,3 +29,20 @@ self.addEventListener('fetch', e => {
     return r;
   }).catch(() => caches.match('rota-offline.html').then(r => r || new Response(SEM_REDE, { headers: { 'Content-Type': 'text/html; charset=utf-8' } }))));
 });
+
+// Avisos do fiscal dos agentes (06/11/2026): a notificação chega mesmo com o CRM fechado e o toque abre a tela do fiscal.
+self.addEventListener('push', e => {
+  let d = {};
+  try { d = e.data ? e.data.json() : {}; } catch (_) { d = { titulo: 'CRM', corpo: e.data ? e.data.text() : '' }; }
+  e.waitUntil(self.registration.showNotification(d.titulo || 'CRM', { body: d.corpo || '', tag: d.tag || undefined, renotify: !!d.tag,
+    icon: 'assets/app-192.png', badge: 'assets/app-192.png', data: { url: d.url || './#agentes' } }));
+});
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  const alvo = (e.notification.data && e.notification.data.url) || './#agentes';
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(cs => {
+    const aberto = cs.find(c => c.url.startsWith(self.registration.scope));
+    if (aberto) return aberto.navigate(alvo).then(c => (c || aberto).focus()).catch(() => aberto.focus());
+    return self.clients.openWindow(alvo);
+  }));
+});

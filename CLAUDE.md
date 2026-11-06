@@ -287,6 +287,12 @@ motorista, pela logística e como app instalado (PWA).
 - E-mail pelo Brevo (`crm-email`), em nome da vendedora da carteira, com fila de aprovação; descadastro (LGPD) só a
   função grava (`email_sair_em`).
 - Login 1 vez por dia no navegador; app instalado pede o login a cada abertura.
+- **Envio sozinho só nas exceções decididas pelo Anderson** (o resto é clique de alguém): NF-e com o boleto ao cliente por
+  e-mail, cobrança automática (boleto atualizado e aviso do cartório), XML do mês ao contador e, como **exceção nº 11 (mesma
+  numeração da Agilité, 06/11/2026), o fiscal dos agentes**: Web Push só nos aparelhos que o Anderson inscreveu, das 7h às
+  21h (grave novo uma vez, resumo seg/qua/sex 8h, "tudo certo" às segundas, prazos de hoje e amanhã ter/qui 8h). O fiscal
+  (`crm-fiscal-agentes`, `crm_fiscal_conferir`, agendador de hora em hora) só confere e avisa: **não conserta sozinho**.
+  Conferência nova entra em `crm_fiscal_conferir` (resultado, não "se rodou"); a que quebra vira problema, nunca silêncio.
 
 ## Segurança (lições da auditoria de 11/09/2026 aplicadas)
 
@@ -301,6 +307,7 @@ motorista, pela logística e como app instalado (PWA).
   ou arquivo:** `ANTHROPIC_API_KEY`, `BREVO_API_KEY`, `WHATSAPP_*`, `FISCAL_URL`/`FISCAL_TOKEN`, `IBPT_TOKEN`,
   chaves do BB. Senhas de integração (vigia, leitura do Caixa, espelho) são geradas na tela e o banco guarda
   só o SHA-256; o Anderson cola direto no destino. Na Meta, "Redefinir" troca a chave do app: o certo é "Mostrar".
+  A chave do Web Push do fiscal (VAPID) a própria função gera e guarda em `crm_interno.fiscal_estado` (a API não expõe).
 - **Certificado A1 (.pfx e senha) só existe na VPS** — nunca no repositório, no CRM, no chat. O serviço fiscal só
   escuta em 127.0.0.1.
 - Buckets com dado de cliente são privados (`crm-notas-xml`, `crm-boletos`, `crm-canhotos`, `crm-caixa-anexos`,

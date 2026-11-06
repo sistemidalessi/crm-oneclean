@@ -1046,6 +1046,13 @@
     if (r.error) throw await erroDaFuncao(r);
     return r.data;
   };
+  // Fiscal dos agentes (06/11/2026): Edge Function crm-fiscal-agentes (só o administrador)
+  Supa.prototype.fiscalAgentes = async function (corpo) {
+    const r = await this.sb.functions.invoke('crm-fiscal-agentes', { body: corpo });
+    if (r.error) throw await erroDaFuncao(r);
+    return r.data;
+  };
+  Local.prototype.fiscalAgentes = async function () { return Promise.reject(new Error('o fiscal dos agentes só funciona com o Supabase ligado')); };
   Local.prototype.cobranca = async function (corpo) { return corpo && corpo.acao === 'situacao' ? { local: true, avisos: [] } : Promise.reject(new Error('o aviso de atraso só funciona com o Supabase ligado')); };
   Supa.prototype.email = async function (corpo) {
     const r = await this.sb.functions.invoke('crm-email', { body: corpo });
