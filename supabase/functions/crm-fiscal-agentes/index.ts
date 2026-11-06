@@ -154,7 +154,8 @@ Deno.serve(async (req) => {
       const { data, error } = await comoUsuario.rpc('crm_fiscal_painel');
       if (error) throw new Error(error.message);
       const { dia } = agoraBr();
-      const prazos = await prazosEntre(dia, new Date(Date.parse(dia + 'T12:00:00Z') + 14 * 864e5).toISOString().slice(0, 10));
+      const dd = (n: number) => new Date(Date.parse(dia + 'T12:00:00Z') + n * 864e5).toISOString().slice(0, 10);
+      const prazos = await prazosEntre(dd(-10), dd(30));   // os 10 dias que passaram (vencido sem prova) e os 30 que vêm
       return resposta(200, Object.assign({}, data, { chave_publica: (await vapid()).publica, prazos, pulso: url + '/functions/v1/crm-fiscal-agentes' }));
     }
     if (c.acao === 'inscrever') {

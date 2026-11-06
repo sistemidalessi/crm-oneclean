@@ -78,10 +78,31 @@
         ab.map(p => '<tr><td>' + nivel(p) + '</td><td>' + esc(p.area) + '</td><td>' + esc(p.texto) + '</td><td><small>' + esc(p.fazer || '') + '</small></td><td>' + quando(p.primeiro_em) + '</td></tr>').join('') + '</tbody></table>'
         : '<p class="vazio">Nada travado agora.</p>') + '</section>' +
 
-      '<section class="cartao"><h2>Prazos dos próximos 14 dias</h2>' +
-      (pz.length ? '<table class="tabela"><thead><tr><th>Dia</th><th>Prazo</th><th>Situação</th></tr></thead><tbody>' +
-        pz.map(x => '<tr><td>' + esc(dataBR(x.data)) + '</td><td>' + esc(x.titulo) + '</td><td><small>' + esc(x.situacao || '') + '</small></td></tr>').join('') + '</tbody></table>'
-        : '<p class="vazio">Nenhum prazo nos próximos 14 dias.</p>') + '</section>' +
+      '<section class="cartao"><h2>Prazos (10 dias para trás e 30 para frente)</h2>' +
+      '<p class="dica">Cada prazo diz a situação pelo dado real: guia lançada no Caixa, XML enviado ao contador, contas e títulos do dia. Declaração que só o contador entrega fica "a confirmar" até você marcar. Sem a prova, o prazo vira aviso no dia anterior e grave no dia.</p>' +
+      (pz.length ? '<table class="tabela"><thead><tr><th>Dia</th><th>Prazo</th><th>Situação</th><th></th></tr></thead><tbody>' +
+        pz.map(x => '<tr><td>' + esc(dataBR(x.data)) + '</td><td>' + esc(x.titulo) + (x.nota ? '<br><small>' + esc(x.nota) + '</small>' : '') + '</td><td>' +
+          (x.tipo === 'caixa' ? '<small>' + esc(x.situacao || '') + '</small>' : CRM.selo(x.situacao || '', x.ok ? 'verde' : (x.data <= hoje() ? 'vermelho' : 'ambar'))) + '</td><td>' + botoesPrazo(x) + '</td></tr>').join('') + '</tbody></table>'
+        : '<p class="vazio">Nenhum prazo no período.</p>') + '</section>' +
+
+      '<section class="cartao"><h2>Certidões</h2>' +
+      '<p class="dica">O fiscal avisa 15 dias antes de vencer e grave quando vencer. Ponha a validade que está no PDF de cada certidão.</p>' +
+      ((sit.certidoes || []).length ? '<table class="tabela"><thead><tr><th>Certidão</th><th>Válida até</th><th></th></tr></thead><tbody>' +
+        sit.certidoes.map(c => '<tr><td>' + esc(c.nome) + '</td><td>' + esc(dataBR(c.validade)) + '</td><td><button type="button" class="mini" data-acao="agentes-certidao-apagar" data-id="' + esc(c.nome) + '">tirar</button></td></tr>').join('') + '</tbody></table>'
+        : '<p class="vazio">Nenhuma certidão cadastrada.</p>') +
+      '<form id="formCertidao" class="form-plano"><div class="campos">' +
+      '<label class="campo largo"><span>Certidão</span><input type="text" id="certNome" list="certNomes" placeholder="ex.: CND federal (Receita/PGFN)"></label>' +
+      '<datalist id="certNomes">' + ['CND federal (Receita/PGFN)', 'Certidão de débitos estaduais (Sefaz-SP)', 'Certidão de tributos municipais (São Bernardo)', 'CRF do FGTS (Caixa)', 'CNDT (Justiça do Trabalho)'].map(n => '<option value="' + esc(n) + '">').join('') + '</datalist>' +
+      '<label class="campo"><span>Válida até</span><input type="date" id="certValidade"></label></div>' +
+      '<p><button type="submit" class="btn">Salvar certidão</button></p></form></section>' +
+
+      '<section class="cartao"><h2>Calendário dos impostos</h2>' +
+      '<p class="dica">Os marcados "confirmar" dependem do enquadramento da OneClean (o dia do ICMS em SP sai do código de prazo do CNAE): confirme com o contador e acerte o dia aqui.</p>' +
+      '<form id="formCalendario"><table class="tabela"><thead><tr><th>Usar</th><th>Prazo</th><th>Regra</th><th>Dia</th></tr></thead><tbody>' +
+      (sit.calendario || []).map((c, i) => '<tr><td><input type="checkbox" data-cal-ativo="' + i + '"' + (c.ativo === false ? '' : ' checked') + '></td><td>' + esc(c.titulo) +
+        (c.conferir ? ' ' + CRM.selo('confirmar', 'ambar') : '') + '<br><small>' + esc(c.nota || '') + '</small></td><td><small>' + esc(regraTexto(c)) + '</small></td><td>' +
+        (c.regra === 'dia' ? '<input type="number" min="1" max="31" step="1" data-cal-dia="' + i + '" value="' + esc(c.dia || '') + '">' : '—') + '</td></tr>').join('') +
+      '</tbody></table><p><button type="submit" class="btn">Salvar calendário</button></p></form></section>' +
 
       '<section class="cartao"><h2>Resolvidos (14 dias)</h2>' +
       (res.length ? '<table class="tabela"><thead><tr><th>Área</th><th>O que foi</th><th>Abriu</th><th>Resolveu</th></tr></thead><tbody>' +
@@ -90,9 +111,53 @@
       '<p class="dica">Pulso público (só a hora e os números, para a rotina "Fiscal dos agentes" da nuvem): <code>' + esc(sit.pulso || '') + '</code></p></section>';
   }
 
-  CRM.ajustes.secao('agentes', 'Fiscal dos agentes', tela, null, 'historico');
+  const hoje = () => new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
+  const regraTexto = c => c.regra === 'dia' ? 'dia ' + c.dia + ' do ' + (c.meses > 1 ? c.meses + 'º ' : '') + 'mês seguinte (dia útil antes)'
+    : c.regra === 'ultimo_util' ? 'último dia útil do mês seguinte' : c.regra === 'util' ? c.util + 'º dia útil do ' + (c.meses || 1) + 'º mês seguinte'
+    : c.regra === 'anual_ultimo_util' ? 'último dia útil do mês ' + c.mes + ' do ano seguinte' : c.regra;
+  function botoesPrazo(x) {
+    if (!x.marcavel) return '';
+    const id = esc(x.chave + '|' + x.competencia);
+    if (/\(marcado\)/.test(x.situacao || '')) return '<button type="button" class="mini" data-acao="agentes-prazo" data-id="' + id + '|">desmarcar</button>';
+    if (x.ok) return '';
+    return x.tipo === 'guia'
+      ? '<button type="button" class="mini" data-acao="agentes-prazo" data-id="' + id + '|sem_guia">sem guia este mês</button> <button type="button" class="mini" data-acao="agentes-prazo" data-id="' + id + '|feito">paguei</button>'
+      : '<button type="button" class="mini" data-acao="agentes-prazo" data-id="' + id + '|feito">✓ entregue</button>';
+  }
+  const rpc = async (nome, args) => { const r = await CRM.store().sb.rpc(nome, args); if (r.error) throw new Error(r.error.message); return r.data; };
+  function depois() {
+    const fc = document.getElementById('formCertidao');
+    if (fc) fc.addEventListener('submit', async ev => {
+      ev.preventDefault();
+      const nome = document.getElementById('certNome').value.trim(), val = document.getElementById('certValidade').value;
+      if (!nome || !val) { CRM.toast('Diga a certidão e a validade.'); return; }
+      try { await rpc('crm_fiscal_certidao', { p_nome: nome, p_validade: val, p_obs: null }); CRM.toast('Certidão salva.'); await carrega(); } catch (e) { CRM.falhou(e); }
+    });
+    const fk = document.getElementById('formCalendario');
+    if (fk) fk.addEventListener('submit', async ev => {
+      ev.preventDefault();
+      const cal = (sit.calendario || []).map((c, i) => {
+        const n = Object.assign({}, c);
+        const a = fk.querySelector('[data-cal-ativo="' + i + '"]'), d = fk.querySelector('[data-cal-dia="' + i + '"]');
+        n.ativo = !!(a && a.checked);
+        if (d && d.value) { const v = Math.max(1, Math.min(31, Number(d.value) || 0)); if (v !== Number(c.dia)) { n.dia = v; n.conferir = false; n.nota = 'dia acertado pelo administrador em ' + new Date().toLocaleDateString('pt-BR'); } }
+        return n;
+      });
+      try { await CRM.salvarConfig({ prazos_fiscais: cal }); CRM.toast('Calendário salvo.'); await carrega(); } catch (e) { CRM.falhou(e); }
+    });
+  }
+
+  CRM.ajustes.secao('agentes', 'Fiscal dos agentes', tela, depois, 'historico');
   Object.assign(CRM.acoes, {
     'agentes-atualizar': () => { sit = null; erro = null; CRM.render(); },
+    'agentes-prazo': async id => {
+      const [chave, comp, situ] = String(id).split('|');
+      try { await rpc('crm_fiscal_marcar_prazo', { p_chave: chave, p_competencia: comp, p_situacao: situ || null }); await carrega(); } catch (e) { CRM.falhou(e); }
+    },
+    'agentes-certidao-apagar': async nome => {
+      if (!confirm('Tirar a certidão "' + nome + '" da lista?')) return;
+      try { await rpc('crm_fiscal_certidao', { p_nome: nome, p_validade: null, p_obs: null }); await carrega(); } catch (e) { CRM.falhou(e); }
+    },
     'agentes-inscrever': () => inscrever().catch(CRM.falhou),
     'agentes-sair': () => sair().catch(CRM.falhou),
     'agentes-testar': async () => {

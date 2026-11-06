@@ -10994,6 +10994,37 @@ begin
     achados := achados || crm_interno.fiscal_p('conferencia:nuvem', F, 'atencao', 'O fiscal não conseguiu conferir a rotina da nuvem (' || left(sqlerrm, 120) || ').', 'Me chamar: a conferência quebrou.');
   end;
 
+  -- 18. prazos do calendário (impostos e declarações) de hoje e do próximo dia útil sem o dado que prova (06/11/2026)
+  begin
+    for r in select * from jsonb_to_recordset(public.crm_fiscal_prazos(hoje - 5, crm_interno.fiscal_util(hoje + 1, false)))
+               as x(data date, chave text, competencia text, tipo text, titulo text, situacao text, ok boolean)
+              where not x.ok and x.tipo in ('guia', 'declaracao') loop
+      achados := achados || crm_interno.fiscal_p('prazo:' || r.chave || ':' || coalesce(r.competencia, ''), 'Prazos',
+        case when r.data <= hoje then 'grave' else 'atencao' end,
+        case when r.data < hoje then 'VENCIDO em ' || to_char(r.data, 'DD/MM') when r.data = hoje then 'Vence HOJE' else 'Vence ' || to_char(r.data, 'DD/MM') end
+          || ': ' || r.titulo || ' (' || r.situacao || ').',
+        case r.tipo when 'guia' then 'Lançar a guia no Caixa; se não há imposto este mês, marcar "sem guia" em Configurações → Fiscal dos agentes.'
+                    else 'Confirmar com o contador que foi entregue e marcar "entregue" em Configurações → Fiscal dos agentes.' end);
+    end loop;
+  exception when others then
+    achados := achados || crm_interno.fiscal_p('conferencia:prazos', 'Prazos', 'atencao', 'O fiscal não conseguiu conferir os prazos (' || left(sqlerrm, 120) || ').', 'Me chamar: a conferência quebrou.');
+  end;
+
+  -- 19. certidões: vencida, vencendo em 15 dias, ou nenhuma cadastrada
+  begin
+    if not exists (select 1 from public.crm_fiscal_certidoes) then
+      achados := achados || crm_interno.fiscal_p('certidoes:cadastro', 'Certidões', 'atencao', 'Nenhuma certidão cadastrada (CND federal, estadual, municipal, CRF do FGTS, CNDT): o fiscal não sabe quando vencem.', 'Configurações → Fiscal dos agentes → Certidões: pôr o nome e a validade de cada uma.');
+    end if;
+    for r in select nome, validade from public.crm_fiscal_certidoes where validade <= hoje + 15 loop
+      achados := achados || crm_interno.fiscal_p('certidao:' || r.nome, 'Certidões', case when r.validade < hoje then 'grave' else 'atencao' end,
+        case when r.validade < hoje then 'Certidão vencida desde ' || to_char(r.validade, 'DD/MM') || ': ' || r.nome || ' (licitação, cliente público e banco pedem).'
+             else 'Certidão vence em ' || to_char(r.validade, 'DD/MM') || ': ' || r.nome || '.' end,
+        'Tirar a nova e atualizar a validade em Configurações → Fiscal dos agentes.');
+    end loop;
+  exception when others then
+    achados := achados || crm_interno.fiscal_p('conferencia:certidoes', 'Certidões', 'atencao', 'O fiscal não conseguiu conferir as certidões (' || left(sqlerrm, 120) || ').', 'Me chamar: a conferência quebrou.');
+  end;
+
   -- 17. externos (certificado A1, serviço fiscal, fiscal da Agilité): vêm da Edge Function
   if p_externos is not null and jsonb_typeof(p_externos) = 'array' then achados := achados || p_externos; end if;
 
@@ -11073,6 +11104,8 @@ begin
     'verificado_em', (select valor from crm_interno.fiscal_estado where nome = 'verificado_em'),
     'visita_nuvem', (select valor from crm_interno.fiscal_estado where nome = 'visita:nuvem'),
     'ultimo_aviso', (select valor from crm_interno.fiscal_estado where nome = 'ultimo_aviso'),
+    'certidoes', coalesce((select jsonb_agg(to_jsonb(c) order by c.validade) from public.crm_fiscal_certidoes c), '[]'::jsonb),
+    'calendario', coalesce((select dados -> 'prazos_fiscais' from public.crm_config where id = 1), crm_interno.fiscal_calendario_padrao()),
     'aparelhos', coalesce((select jsonb_agg(jsonb_build_object('id', id, 'aparelho', aparelho, 'criado_em', criado_em, 'ultimo_envio', ultimo_envio, 'ultimo_erro', ultimo_erro, 'meu', user_id = auth.uid()))
                             from crm_interno.fiscal_push), '[]'::jsonb));
 end;
@@ -11105,3 +11138,196 @@ do $$ begin
     perform cron.schedule('crm-fiscal-agentes', '7 * * * *', 'select public.crm_fiscal_tick()');
   end if;
 end $$;
+
+-- ============================================================================================================================
+-- Prazos do mês da OneClean ligados ao fiscal (06/11/2026). Anderson: "nada pode escapar, absolutamente NADA… liste todos os
+-- prazos do mês e ligue cada um ao fiscal com o dado real, não só com lembrete. Prazo de hoje e amanhã vai no aviso."
+-- Cada prazo diz a situação pelo dado real: guia lançada no Caixa (paga ou aberta), envio ao contador, contas e títulos do dia,
+-- certidão com validade; declaração que só o contador entrega (EFD, DCTFWeb) fica "a confirmar" até o Anderson marcar
+-- "entregue" (ou o robô que lê o e-mail do contador, quando existir). Imposto sem guia no mês: marcar "sem guia este mês".
+-- O calendário fica em crm_config.dados.prazos_fiscais (editável); sem ele, vale o padrão abaixo.
+-- Dia útil: o calendário bancário de São Bernardo do Campo (crm_prospec_dia_util), que tem os feriados nacionais.
+-- ============================================================================================================================
+
+create table if not exists public.crm_fiscal_marcas (
+  chave text not null,          -- 'pis_cofins', 'dctfweb'…
+  competencia text not null,    -- 'AAAA-MM'
+  situacao text not null check (situacao in ('feito', 'sem_guia')),
+  obs text,
+  quem uuid default auth.uid(),
+  quando timestamptz not null default now(),
+  primary key (chave, competencia)
+);
+alter table public.crm_fiscal_marcas enable row level security;
+do $p$ begin
+  create policy ler on public.crm_fiscal_marcas for select to authenticated using ((select public.crm_eh_admin()));
+exception when duplicate_object then null; end $p$;
+
+create table if not exists public.crm_fiscal_certidoes (
+  nome text primary key,        -- 'CND federal (Receita/PGFN)', 'CRF do FGTS'…
+  validade date,
+  obs text,
+  atualizado_em timestamptz not null default now()
+);
+alter table public.crm_fiscal_certidoes enable row level security;
+do $p$ begin
+  create policy ler on public.crm_fiscal_certidoes for select to authenticated using ((select public.crm_eh_admin()));
+exception when duplicate_object then null; end $p$;
+
+-- dia útil: anda para trás (antecipa) ou para frente (prorroga) até um dia útil
+create or replace function crm_interno.fiscal_util(d date, antecipa boolean default true) returns date language plpgsql stable as $$
+declare x date := d; n int := 0;
+begin
+  while not public.crm_prospec_dia_util(x) and n < 15 loop x := x + case when antecipa then -1 else 1 end; n := n + 1; end loop;
+  return x;
+end;
+$$;
+-- o N-ésimo dia útil do mês de `d`
+create or replace function crm_interno.fiscal_enesimo_util(d date, n int) returns date language plpgsql stable as $$
+declare x date := date_trunc('month', d)::date; c int := 0;
+begin
+  loop
+    if public.crm_prospec_dia_util(x) then c := c + 1; if c >= n then return x; end if; end if;
+    x := x + 1;
+    if x > (date_trunc('month', d) + interval '1 month')::date then return null; end if;
+  end loop;
+end;
+$$;
+
+-- o calendário padrão (Lucro Real, comércio em SP). "conferir": o dia depende do enquadramento e o contador confirma.
+create or replace function crm_interno.fiscal_calendario_padrao() returns jsonb language sql immutable as $$
+  select '[
+    {"chave":"icms","titulo":"ICMS próprio (guia GARE, Sefaz-SP)","tipo":"guia","regra":"dia","dia":20,"meses":1,"guia":"\\m(icms|gare)\\M","conferir":true,
+     "nota":"o dia em SP sai do código de prazo (CPR) do CNAE principal na Agenda Tributária Paulista: confirmar com o contador e acertar aqui"},
+    {"chave":"pis_cofins","titulo":"PIS e COFINS (DARF)","tipo":"guia","regra":"dia","dia":25,"meses":1,"guia":"\\m(pis|cofins)\\M","nota":"Lei 11.933/2009: dia 25 do mês seguinte; antecipa se não for dia útil"},
+    {"chave":"irpj_csll","titulo":"IRPJ e CSLL por estimativa (DARF)","tipo":"guia","regra":"ultimo_util","meses":1,"guia":"\\m(irpj|csll)\\M","nota":"Lei 9.430/1996 art. 6º: último dia útil do mês seguinte"},
+    {"chave":"dctfweb","titulo":"DCTFWeb (declaração)","tipo":"declaracao","regra":"ultimo_util","meses":1,"nota":"IN RFB 2.237/2024 alterada pela 2.248/2025: último dia útil do mês seguinte"},
+    {"chave":"reinf","titulo":"EFD-Reinf (declaração)","tipo":"declaracao","regra":"dia","dia":15,"meses":1,"nota":"IN RFB 2.043/2021: dia 15 do mês seguinte; antecipa se não for dia útil"},
+    {"chave":"efd_contrib","titulo":"EFD-Contribuições (SPED PIS/COFINS)","tipo":"declaracao","regra":"util","util":10,"meses":2,"nota":"IN RFB 1.252/2012: 10º dia útil do 2º mês seguinte"},
+    {"chave":"efd_icms","titulo":"EFD ICMS/IPI (SPED Fiscal, Sefaz-SP)","tipo":"declaracao","regra":"dia","dia":20,"meses":1,"conferir":true,"nota":"dia a confirmar com o contador"},
+    {"chave":"ecd","titulo":"ECD (escrituração contábil do ano)","tipo":"declaracao","regra":"anual_ultimo_util","mes":6,"nota":"último dia útil de junho do ano seguinte"},
+    {"chave":"ecf","titulo":"ECF (escrituração fiscal do ano)","tipo":"declaracao","regra":"anual_ultimo_util","mes":7,"nota":"último dia útil de julho do ano seguinte"}
+  ]'::jsonb;
+$$;
+
+-- o vencimento de um prazo do calendário para a competência (1º dia do mês do fato gerador)
+create or replace function crm_interno.fiscal_vencimento(p jsonb, comp date) returns date language plpgsql stable as $$
+declare base date := (date_trunc('month', comp) + make_interval(months => coalesce((p ->> 'meses')::int, 1)))::date; fim date;
+begin
+  if p ->> 'regra' = 'dia' then
+    return crm_interno.fiscal_util(least(base + (coalesce((p ->> 'dia')::int, 20) - 1), (base + interval '1 month' - interval '1 day')::date), coalesce((p ->> 'prorroga')::boolean, false) = false);
+  elsif p ->> 'regra' = 'ultimo_util' then
+    return crm_interno.fiscal_util((base + interval '1 month' - interval '1 day')::date, true);
+  elsif p ->> 'regra' = 'util' then
+    return crm_interno.fiscal_enesimo_util(base, coalesce((p ->> 'util')::int, 10));
+  elsif p ->> 'regra' = 'anual_ultimo_util' then
+    if extract(month from comp) <> 12 then return null; end if;   -- uma vez por ano (competência de dezembro)
+    fim := (make_date(extract(year from comp)::int + 1, coalesce((p ->> 'mes')::int, 6), 1) + interval '1 month' - interval '1 day')::date;
+    return crm_interno.fiscal_util(fim, true);
+  end if;
+  return null;
+end;
+$$;
+
+-- os prazos de p_de a p_ate, cada um com a situação pelo dado real
+create or replace function public.crm_fiscal_prazos(p_de date, p_ate date) returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare
+  cal jsonb; out jsonb := '[]'::jsonb; p jsonb; comp date; venc date; compt text; sit text; ok boolean; m record; g record;
+  d date; n int; v numeric;
+begin
+  if coalesce(auth.role(), '') = 'anon' or (auth.role() = 'authenticated' and not public.crm_eh_admin()) then raise exception 'só o administrador'; end if;
+  if p_ate < p_de or p_ate - p_de > 400 then raise exception 'período inválido'; end if;
+  select coalesce(dados -> 'prazos_fiscais', crm_interno.fiscal_calendario_padrao()) into cal from public.crm_config where id = 1;
+  cal := coalesce(cal, crm_interno.fiscal_calendario_padrao());
+
+  -- obrigações fiscais: competências que podem vencer no período (até 14 meses antes, por causa da ECD/ECF)
+  for p in select * from jsonb_array_elements(cal) loop
+    if coalesce((p ->> 'ativo')::boolean, true) = false then continue; end if;
+    for comp in select generate_series(date_trunc('month', p_de) - interval '19 months', date_trunc('month', p_ate), interval '1 month')::date loop
+      venc := crm_interno.fiscal_vencimento(p, comp);
+      if venc is null or venc < p_de or venc > p_ate then continue; end if;
+      compt := to_char(comp, 'YYYY-MM');
+      select * into m from public.crm_fiscal_marcas where chave = p ->> 'chave' and competencia = compt;
+      ok := false; sit := null;
+      if p ->> 'tipo' = 'guia' then
+        select l.situacao, l.pago_em, l.valor into g from public.crm_fin_lancamentos l
+         where l.tipo = 'saida' and (coalesce(l.descricao, '') || ' ' || coalesce(l.categoria, '')) ~* (p ->> 'guia')
+           and l.vencimento between (venc - 25) and (venc + 5) order by abs(l.vencimento - venc) limit 1;
+        if found then
+          ok := true;
+          sit := case when g.situacao = 'pago' then 'guia paga no Caixa (' || crm_interno.fiscal_reais(g.valor) || ')' else 'guia no Caixa, aberta (' || crm_interno.fiscal_reais(g.valor) || ')' end;
+          if g.situacao <> 'pago' and venc < (now() at time zone 'America/Sao_Paulo')::date then ok := false; sit := 'guia no Caixa SEM BAIXA (venceu)'; end if;
+        elsif m.situacao = 'sem_guia' then ok := true; sit := 'sem guia este mês (marcado)';
+        elsif m.situacao = 'feito' then ok := true; sit := 'pago (marcado)';
+        else sit := 'sem guia no Caixa';
+        end if;
+      else
+        if m.situacao = 'feito' then ok := true; sit := 'entregue (marcado)'; else sit := 'a confirmar com o contador'; end if;
+      end if;
+      out := out || jsonb_build_object('data', venc, 'chave', p ->> 'chave', 'competencia', compt, 'tipo', p ->> 'tipo',
+        'titulo', (p ->> 'titulo') || ' de ' || to_char(comp, 'MM/YYYY') || case when coalesce((p ->> 'conferir')::boolean, false) then ' (dia a confirmar)' else '' end,
+        'situacao', sit, 'ok', ok, 'nota', p ->> 'nota', 'marcavel', true);
+    end loop;
+  end loop;
+
+  -- XML do mês ao contador (dia 2; o CRM manda sozinho)
+  for comp in select generate_series(date_trunc('month', p_de) - interval '1 month', date_trunc('month', p_ate), interval '1 month')::date loop
+    venc := (comp + interval '1 month' + interval '1 day')::date;
+    if venc < p_de or venc > p_ate then continue; end if;
+    compt := to_char(comp, 'YYYY-MM');
+    ok := exists (select 1 from public.crm_contador_envios ce where ce.mes = compt and ce.ok);
+    out := out || jsonb_build_object('data', venc, 'chave', 'xml_contador', 'competencia', compt, 'tipo', 'automatico',
+      'titulo', 'XML de ' || to_char(comp, 'MM/YYYY') || ' ao contador', 'situacao', case when ok then 'enviado' else 'o CRM manda sozinho às 9h05' end, 'ok', ok, 'marcavel', false);
+  end loop;
+
+  -- contas a pagar e títulos a receber de cada dia (o Caixa)
+  for d in select generate_series(p_de, p_ate, interval '1 day')::date loop
+    select count(*), sum(valor) into n, v from public.crm_fin_lancamentos where tipo = 'saida' and situacao = 'aberto' and vencimento = d;
+    if n > 0 then out := out || jsonb_build_object('data', d, 'chave', 'pagar:' || d, 'tipo', 'caixa', 'titulo', n || ' conta(s) a pagar (' || crm_interno.fiscal_reais(v) || ')', 'situacao', 'em aberto no Caixa', 'ok', true, 'marcavel', false); end if;
+    select count(*), sum(valor) into n, v from public.crm_titulos t where t.vencimento = d and not coalesce(t.abono, false) and t.cartorio_em is null;
+    if n > 0 then out := out || jsonb_build_object('data', d, 'chave', 'receber:' || d, 'tipo', 'caixa', 'titulo', n || ' título(s) a receber (' || crm_interno.fiscal_reais(v) || ')', 'situacao', 'boletos no BB; a baixa entra sozinha', 'ok', true, 'marcavel', false); end if;
+  end loop;
+
+  -- certidões vencendo
+  for g in select nome, validade from public.crm_fiscal_certidoes where validade between p_de and p_ate loop
+    out := out || jsonb_build_object('data', g.validade, 'chave', 'certidao:' || g.nome, 'tipo', 'certidao', 'titulo', 'Certidão vence: ' || g.nome, 'situacao', 'tirar a nova antes', 'ok', false, 'marcavel', false);
+  end loop;
+
+  return coalesce((select jsonb_agg(x order by x ->> 'data', x ->> 'titulo') from jsonb_array_elements(out) x), '[]'::jsonb);
+end;
+$$;
+
+-- marcar um prazo (entregue / sem guia este mês) ou desmarcar; só o administrador
+create or replace function public.crm_fiscal_marcar_prazo(p_chave text, p_competencia text, p_situacao text) returns void language plpgsql security definer set search_path = public as $$
+declare n int;
+begin
+  if not public.crm_eh_admin() then raise exception 'só o administrador'; end if;
+  if p_competencia !~ '^\d{4}-\d{2}$' then raise exception 'competência inválida'; end if;
+  if p_situacao is null then   -- desmarcar
+    with d as (delete from public.crm_fiscal_marcas m where m.chave = p_chave and m.competencia = p_competencia returning 1) select count(*) into n from d;
+    return;
+  end if;
+  insert into public.crm_fiscal_marcas (chave, competencia, situacao) values (p_chave, p_competencia, p_situacao)
+    on conflict (chave, competencia) do update set situacao = excluded.situacao, quem = auth.uid(), quando = now();
+end;
+$$;
+
+-- certidão: gravar (nome, validade) ou apagar (validade null e apagar); só o administrador
+create or replace function public.crm_fiscal_certidao(p_nome text, p_validade date, p_obs text default null) returns void language plpgsql security definer set search_path = public as $$
+declare n int;
+begin
+  if not public.crm_eh_admin() then raise exception 'só o administrador'; end if;
+  if coalesce(trim(p_nome), '') = '' then raise exception 'diga o nome da certidão'; end if;
+  if p_validade is null then
+    with d as (delete from public.crm_fiscal_certidoes c where c.nome = trim(p_nome) returning 1) select count(*) into n from d;
+    return;
+  end if;
+  insert into public.crm_fiscal_certidoes (nome, validade, obs) values (trim(p_nome), p_validade, p_obs)
+    on conflict (nome) do update set validade = excluded.validade, obs = excluded.obs, atualizado_em = now();
+end;
+$$;
+
+revoke all on function public.crm_fiscal_prazos(date, date) from public, anon;
+revoke all on function public.crm_fiscal_marcar_prazo(text, text, text) from public, anon;
+revoke all on function public.crm_fiscal_certidao(text, date, text) from public, anon;
+revoke all on public.crm_fiscal_marcas, public.crm_fiscal_certidoes from anon;
