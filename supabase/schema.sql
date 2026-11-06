@@ -11257,6 +11257,7 @@ begin
           ok := true;
           sit := case when g.situacao = 'pago' then 'guia paga no Caixa (' || crm_interno.fiscal_reais(g.valor) || ')' else 'guia no Caixa, aberta (' || crm_interno.fiscal_reais(g.valor) || ')' end;
           if g.situacao <> 'pago' and venc < (now() at time zone 'America/Sao_Paulo')::date then ok := false; sit := 'guia no Caixa SEM BAIXA (venceu)'; end if;
+        elsif coalesce((p ->> 'sem_imposto')::boolean, false) then ok := true; sit := 'sem imposto a pagar (créditos)';   -- 06/11/2026: a OneClean está se creditando
         elsif m.situacao = 'sem_guia' then ok := true; sit := 'sem guia este mês (marcado)';
         elsif m.situacao = 'feito' then ok := true; sit := 'pago (marcado)';
         else sit := 'sem guia no Caixa';

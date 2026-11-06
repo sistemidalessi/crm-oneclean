@@ -97,11 +97,13 @@
       '<p><button type="submit" class="btn">Salvar certidão</button></p></form></section>' +
 
       '<section class="cartao"><h2>Calendário dos impostos</h2>' +
-      '<p class="dica">Os marcados "confirmar" dependem do enquadramento da OneClean (o dia do ICMS em SP sai do código de prazo do CNAE): confirme com o contador e acerte o dia aqui.</p>' +
-      '<form id="formCalendario"><table class="tabela"><thead><tr><th>Usar</th><th>Prazo</th><th>Regra</th><th>Dia</th></tr></thead><tbody>' +
+      '<p class="dica">Os marcados "confirmar" dependem do enquadramento da OneClean (o dia do ICMS em SP sai do código de prazo do CNAE): confirme com o contador e acerte o dia aqui. ' +
+      '"Sem imposto (créditos)": a OneClean está se creditando e não paga a guia; a declaração continua sendo conferida. Quando os créditos acabarem, desmarque e o fiscal volta a cobrar a guia no dia.</p>' +
+      '<form id="formCalendario"><table class="tabela"><thead><tr><th>Usar</th><th>Prazo</th><th>Regra</th><th>Dia</th><th>Sem imposto (créditos)</th></tr></thead><tbody>' +
       (sit.calendario || []).map((c, i) => '<tr><td><input type="checkbox" data-cal-ativo="' + i + '"' + (c.ativo === false ? '' : ' checked') + '></td><td>' + esc(c.titulo) +
         (c.conferir ? ' ' + CRM.selo('confirmar', 'ambar') : '') + '<br><small>' + esc(c.nota || '') + '</small></td><td><small>' + esc(regraTexto(c)) + '</small></td><td>' +
-        (c.regra === 'dia' ? '<input type="number" min="1" max="31" step="1" data-cal-dia="' + i + '" value="' + esc(c.dia || '') + '">' : '—') + '</td></tr>').join('') +
+        (c.regra === 'dia' ? '<input type="number" min="1" max="31" step="1" data-cal-dia="' + i + '" value="' + esc(c.dia || '') + '">' : '—') + '</td><td>' +
+        (c.tipo === 'guia' ? '<label class="campo check"><input type="checkbox" data-cal-sem="' + i + '"' + (c.sem_imposto ? ' checked' : '') + '> sem guia</label>' : '') + '</td></tr>').join('') +
       '</tbody></table><p><button type="submit" class="btn">Salvar calendário</button></p></form></section>' +
 
       '<section class="cartao"><h2>Resolvidos (14 dias)</h2>' +
@@ -140,6 +142,8 @@
         const n = Object.assign({}, c);
         const a = fk.querySelector('[data-cal-ativo="' + i + '"]'), d = fk.querySelector('[data-cal-dia="' + i + '"]');
         n.ativo = !!(a && a.checked);
+        const si = fk.querySelector('[data-cal-sem="' + i + '"]');
+        if (si && !!si.checked !== !!c.sem_imposto) { n.sem_imposto = si.checked; if (si.checked) n.sem_imposto_desde = new Date().toISOString().slice(0, 10); }
         if (d && d.value) { const v = Math.max(1, Math.min(31, Number(d.value) || 0)); if (v !== Number(c.dia)) { n.dia = v; n.conferir = false; n.nota = 'dia acertado pelo administrador em ' + new Date().toLocaleDateString('pt-BR'); } }
         return n;
       });

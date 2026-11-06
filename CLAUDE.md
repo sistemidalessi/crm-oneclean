@@ -293,6 +293,8 @@ motorista, pela logística e como app instalado (PWA).
   21h (grave novo uma vez, resumo seg/qua/sex 8h, "tudo certo" às segundas, prazos de hoje e amanhã ter/qui 8h). O fiscal
   (`crm-fiscal-agentes`, `crm_fiscal_conferir`, agendador de hora em hora) só confere e avisa: **não conserta sozinho**.
   Conferência nova entra em `crm_fiscal_conferir` (resultado, não "se rodou"); a que quebra vira problema, nunca silêncio.
+  A OneClean está se creditando (06/11/2026): guias de ICMS, PIS/COFINS e IRPJ/CSLL com `sem_imposto` no calendário até o
+  Anderson dizer que os créditos acabaram (como o "impostos = 0%" das metas).
 
 ## Segurança (lições da auditoria de 11/09/2026 aplicadas)
 
