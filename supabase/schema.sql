@@ -2875,14 +2875,17 @@ grant execute on function public.crm_pedido_situacao(uuid, text, text) to authen
 
 -- Liberar (gestora/administrador e, desde 21/10/2026, a logística): os bloqueios de agora ficam liberados; um bloqueio
 -- novo volta a segurar. p_liberar = false desfaz. Entrada recebida (SEM ENTRADA): os mesmos.
-create or replace function public.crm_pedido_liberar(p_id uuid, p_liberar boolean, p_entrada boolean) returns jsonb language plpgsql security definer set search_path = public as $$
+create or replace function public.crm_pedido_liberar(p_id uuid, p_liberar boolean, p_entrada boolean)
+returns jsonb language plpgsql security definer set search_path = public as $$
 declare r public.crm_pedidos;
   fin constant text[] := array['SEM ANÁLISE', 'PRAZO', 'LIMITE', 'ATRASO', 'SEM ENTRADA'];
+  nunca constant text[] := array['SEM CADASTRO', 'TROCA'];
 begin
   if not (public.crm_eh_gestor() or public.crm_eh_logistica()) then raise exception 'só a gestora, a logística ou o administrador libera pedido'; end if;
   select * into r from public.crm_pedidos where id = p_id for update;
   if r.id is null then raise exception 'pedido não encontrado'; end if;
-  if r.situacao <> 'aberto' then raise exception 'só se libera pedido em aberto'; end if;
+  -- 06/11/2026: também na separação (PREÇO/ESTOQUE refeitos por uma troca de item)
+  if r.situacao not in ('aberto', 'separacao', 'separado') then raise exception 'só se libera pedido em aberto ou na separação'; end if;
   -- 04/11/2026: confirmar a entrada (pagamento antecipado) é do financeiro: só o administrador
   if p_entrada is not null then
     if not public.crm_eh_admin() then raise exception 'a entrada do pagamento só o administrador confirma'; end if;
@@ -2891,17 +2894,17 @@ begin
   perform public.crm_pedidos_atualizar();
   select * into r from public.crm_pedidos where id = p_id;
   -- Financeiro (crédito desde 27/10/2026; atraso e entrada desde 04/11/2026): só o administrador libera; a gestora e a
-  -- logística liberam o resto. SEM CADASTRO ninguém libera: troca-se o item pelo produto cadastrado.
+  -- logística liberam o resto. SEM CADASTRO ninguém libera: troca-se o item pelo produto cadastrado. TROCA (06/11/2026)
+  -- ninguém libera: sai com o ✓ do separador (crm_pedido_troca_ok).
   if p_liberar is not null then
     update public.crm_pedidos set liberado = case when not p_liberar then '{}'
-        when public.crm_eh_admin() then array(select b from unnest(r.bloqueios) b where b <> 'SEM CADASTRO')
-        else array(select b from unnest(r.bloqueios) b where (b <> all(fin) and b <> 'SEM CADASTRO') or b = any(r.liberado)) end,
+        when public.crm_eh_admin() then array(select b from unnest(r.bloqueios) b where b <> all(nunca))
+        else array(select b from unnest(r.bloqueios) b where (b <> all(fin) and b <> all(nunca)) or b = any(r.liberado)) end,
       liberado_por = case when p_liberar then auth.uid() end, liberado_em = case when p_liberar then now() end, atualizado_em = now() where id = p_id;
   end if;
   select * into r from public.crm_pedidos where id = p_id;
   return public.crm_pedido_saida(r);
-end;
-$$;
+end $$;
 revoke all on function public.crm_pedido_liberar(uuid, boolean, boolean) from public, anon;
 grant execute on function public.crm_pedido_liberar(uuid, boolean, boolean) to authenticated;
 
@@ -9876,12 +9879,136 @@ begin
     insert into public.crm_atividades (empresa_id, responsavel_id, tipo, descricao, data_hora, automatica, criado_por)
     values (p.empresa_id, p.vendedor_id, 'tarefa', left('Pedido ' || p.numero || coalesce(' (' || emp || ')', '') || ': na separação faltou ' ||
       coalesce(nullif(txt, ''), 'item') || coalesce('. Obs.: ' || nullif(btrim(coalesce(p_obs, '')), ''), '') ||
-      '. Avise o cliente e combine (entrega parcial, troca ou o resto depois).', 1000), now(), true, auth.uid());
+      '. Avise o cliente e combine (entrega parcial ou o resto depois). Se for trocar o item, abra o pedido e use "🔁 Trocar item": o separador confere e a nota sai com a troca.', 1000), now(), true, auth.uid());
   end if;
   return jsonb_build_object('itens', jsonb_array_length(l));
 end $$;
 revoke all on function public.crm_pedido_falta(uuid, jsonb, text) from public, anon;
 grant execute on function public.crm_pedido_falta(uuid, jsonb, text) to authenticated;
+-- ============================================================ 06/11/2026: troca de item no pedido em separação
+-- Áudio do Anderson: "quando o pedido já estava no estoque, separando, às vezes tinha que trocar alguma fragrância ... o
+-- separador ligava para a vendedora e a vendedora ia trocando. Não quero que acabe com essa trava de segurança ... a partir do
+-- momento que a vendedora mexe no pedido estando em separação, cria-se mais uma linha identificando que a vendedora trocou o
+-- item ou a quantidade ... e quando emitir a nota fiscal, sai o certo". Decisões dele: o separador confirma a troca antes da
+-- nota sair; o preço do item novo vem da tabela e a vendedora pode ajustar.
+--   crm_pedido_trocar: só a vendedora do pedido (ou a gestora/administrador), com o pedido em separação ou separado. Troca o
+--     produto/quantidade/preço de uma linha, tira a linha ou inclui um produto; motivo obrigatório. Cada troca fica em
+--     dados.trocas (antes, depois, quem, quando, motivo) e o item novo leva o id da troca. O pedido ganha a trava TROCA, que
+--     ninguém libera: só o ✓ do separador tira. As travas PREÇO, ESTOQUE e SEM CADASTRO são refeitas com os itens novos
+--     (a liberação anterior delas deixa de valer); a gestora/logística libera PREÇO e ESTOQUE como no pedido em aberto.
+--   crm_pedido_troca_ok: o separador (logística) ou o administrador confirma que separou a troca; sem troca pendente a
+--     trava TROCA sai. A nota (crm-fiscal) recusa pedido com trava aberta, então não sai com o item velho.
+--   crm_pedido_liberar: passa a liberar também o pedido em separação/separado (PREÇO e ESTOQUE de uma troca); TROCA e
+--     SEM CADASTRO ninguém libera.
+create or replace function public.crm_pedido_trocar(p_id uuid, p jsonb) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare r public.crm_pedidos; k int := nullif(p->>'idx', '')::int; antes jsonb; novo jsonb; its jsonb; vp numeric; quem text;
+  motivo text := left(btrim(coalesce(p->>'motivo', '')), 300); tid text := replace(gen_random_uuid()::text, '-', '');
+  neg numeric; mmin numeric; trava boolean; mg record; bl text[]; lib text[]; acao text;
+  so text[] := array['TROCA', 'PREÇO', 'ESTOQUE', 'SEM CADASTRO'];
+  enxuto constant text[] := array['codigo', 'descricao', 'unidade', 'quantidade', 'preco', 'desconto', 'total'];
+begin
+  select * into r from public.crm_pedidos where id = p_id for update;
+  if r.id is null then raise exception 'pedido não encontrado'; end if;
+  if not (public.crm_eh_gestor() or (public.crm_eh_membro() and r.vendedor_id = (select auth.uid()))) then
+    raise exception 'só a vendedora do pedido (ou a gestora) troca item na separação'; end if;
+  if r.situacao not in ('separacao', 'separado') then raise exception 'a troca é para pedido em separação ou separado (em aberto, use Editar)'; end if;
+  if length(motivo) < 3 then raise exception 'diga o motivo da troca (ex.: faltou a fragrância, o cliente aceitou outra)'; end if;
+  its := r.itens;
+  if k is not null then
+    if k < 0 or k >= jsonb_array_length(its) then raise exception 'item não é deste pedido'; end if;
+    antes := its -> k;
+  end if;
+  if jsonb_typeof(p->'item') = 'object' and coalesce(nullif(p->'item'->>'quantidade', '')::numeric, 0) > 0 then
+    novo := public.crm_pedido_itens_norm(jsonb_build_array(p->'item')) -> 0;
+    novo := novo || jsonb_build_object('troca', tid);
+  end if;
+  if antes is null and novo is null then raise exception 'diga o produto e a quantidade'; end if;
+  if antes is not null and novo is not null and (antes->>'codigo') is not distinct from (novo->>'codigo')
+     and (antes->>'unidade') is not distinct from (novo->>'unidade') and (antes->>'quantidade')::numeric = (novo->>'quantidade')::numeric
+     and (antes->>'preco')::numeric = (novo->>'preco')::numeric and coalesce((antes->>'desconto')::numeric, 0) = coalesce((novo->>'desconto')::numeric, 0) then
+    raise exception 'nada mudou no item'; end if;
+  if k is null then its := its || jsonb_build_array(novo); acao := 'incluir';
+  elsif novo is null then
+    if jsonb_array_length(its) <= 1 then raise exception 'é o único item do pedido: para tirar tudo, a logística cancela o pedido'; end if;
+    its := its - k; acao := 'tirar';
+  else its := jsonb_set(its, array[k::text], novo); acao := 'trocar'; end if;
+  select coalesce(sum((i->>'total')::numeric), 0) into vp from jsonb_array_elements(its) i;
+  select nome into quem from public.crm_usuarios where user_id = (select auth.uid());
+
+  -- travas refeitas com os itens novos (a mesma regra de margem do crm_pedidos_atualizar)
+  select coalesce(nullif(dados->'tabela_precos'->>'NEG', '')::numeric, -10), coalesce(nullif(dados->>'margem_minima', '')::numeric, 23),
+         coalesce((dados->>'pedido_trava_preco')::boolean, true)
+    into neg, mmin, trava from public.crm_config where id = 1;
+  select bool_or(v.pl <= 0) sem_preco,
+         sum(v.pl * v.q) filter (where v.c > 0) rec_c, sum(v.c * v.q) filter (where v.c > 0) cus_c,
+         sum((v.c / (1 - mmin / 100) - 0.01) * v.q) filter (where v.c > 0) min_c,
+         sum(v.pl * v.q) filter (where v.c <= 0 and v.tb > 0) rec_t, sum(v.tb * v.q) filter (where v.c <= 0 and v.tb > 0) tab_t
+    into mg
+    from jsonb_array_elements(its) i
+    cross join lateral (select (i->>'preco')::numeric * (1 - coalesce((i->>'desconto')::numeric, 0) / 100) pl, coalesce((i->>'custo')::numeric, 0) c,
+                               coalesce((i->>'preco_tab')::numeric, 0) tb, coalesce((i->>'quantidade')::numeric, 0) q) v;
+  bl := array(select b from unnest(r.bloqueios) b where b <> all(so)) || array['TROCA'];
+  lib := array(select b from unnest(r.liberado) b where b <> all(so));
+  if trava and not (r.dados ? 'remessa_futura') and (coalesce(mg.sem_preco, false)
+       or (coalesce(mg.rec_c, 0) > 0 and (mg.rec_c - mg.cus_c) / mg.rec_c * 100 < mmin - 0.005 and mg.rec_c < mg.min_c - 0.000001)
+       or (coalesce(mg.tab_t, 0) > 0 and mg.rec_t < round(mg.tab_t * (1 + neg / 100), 2) - 0.005)) then bl := bl || array['PREÇO']; end if;
+  if exists (select 1 from jsonb_array_elements(its) i where public.crm_produto_generico(i->>'codigo')) then bl := bl || array['SEM CADASTRO']; end if;
+
+  update public.crm_pedidos set itens = its, valor_produtos = vp, valor_total = vp + frete, bloqueios = bl, liberado = lib,
+    dados = jsonb_set(coalesce(dados, '{}'::jsonb), '{trocas}', coalesce(dados->'trocas', '[]'::jsonb) || jsonb_build_array(jsonb_build_object(
+      'id', tid, 'em', now(), 'por', quem, 'por_id', (select auth.uid()), 'acao', acao, 'motivo', motivo,
+      'antes', (select jsonb_object_agg(e.key, e.value) from jsonb_each(antes) e where e.key = any(enxuto)),
+      'depois', (select jsonb_object_agg(e.key, e.value) from jsonb_each(novo) e where e.key = any(enxuto)),
+      'ok_em', null, 'ok_por', null))),
+    comentarios = coalesce(comentarios, '[]'::jsonb) || jsonb_build_array(jsonb_build_object('quando', now(), 'por', (select auth.uid()), 'nome', quem,
+      'texto', '🔁 Troca na separação: ' || case acao
+        when 'incluir' then 'incluído ' || coalesce(novo->>'descricao', novo->>'codigo') || ' × ' || trim(to_char((novo->>'quantidade')::numeric, 'FM999999990.###'))
+        when 'tirar' then 'tirado ' || coalesce(antes->>'descricao', antes->>'codigo') || ' × ' || trim(to_char((antes->>'quantidade')::numeric, 'FM999999990.###'))
+        else coalesce(antes->>'descricao', antes->>'codigo') || ' × ' || trim(to_char((antes->>'quantidade')::numeric, 'FM999999990.###')) || ' → ' ||
+             coalesce(novo->>'descricao', novo->>'codigo') || ' × ' || trim(to_char((novo->>'quantidade')::numeric, 'FM999999990.###')) end ||
+      '. Motivo: ' || motivo || '. Falta o separador confirmar.')),
+    atualizado_por = (select auth.uid()), atualizado_em = now()
+   where id = p_id;
+  -- estoque: o item novo cabe no que há no galpão (a falta é medida com o pedido já gravado)
+  if exists (select 1 from public.crm_pedidos_faltas_todas() f where f.pedido_id = p_id) then
+    update public.crm_pedidos set bloqueios = bloqueios || array['ESTOQUE'] where id = p_id;
+  end if;
+  select * into r from public.crm_pedidos where id = p_id;
+  return public.crm_pedido_saida(r);
+end $$;
+revoke all on function public.crm_pedido_trocar(uuid, jsonb) from public, anon;
+grant execute on function public.crm_pedido_trocar(uuid, jsonb) to authenticated;
+
+create or replace function public.crm_pedido_troca_ok(p_id uuid, p_troca text) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare r public.crm_pedidos; tr jsonb; novas jsonb := '[]'::jsonb; achou boolean := false; quem text; pend int;
+begin
+  if not (public.crm_eh_logistica() or public.crm_eh_admin()) then raise exception 'quem confirma a troca é o separador (logística)'; end if;
+  select * into r from public.crm_pedidos where id = p_id for update;
+  if r.id is null then raise exception 'pedido não encontrado'; end if;
+  if r.situacao not in ('separacao', 'separado') then raise exception 'o pedido não está mais na separação'; end if;
+  select nome into quem from public.crm_usuarios where user_id = (select auth.uid());
+  for tr in select value from jsonb_array_elements(coalesce(r.dados->'trocas', '[]'::jsonb)) loop
+    if tr->>'id' = p_troca then
+      if tr->>'ok_em' is not null then raise exception 'esta troca já foi confirmada'; end if;
+      tr := tr || jsonb_build_object('ok_em', now(), 'ok_por', quem); achou := true;
+    end if;
+    novas := novas || jsonb_build_array(tr);
+  end loop;
+  if not achou then raise exception 'troca não encontrada'; end if;
+  select count(*) into pend from jsonb_array_elements(novas) t where t->>'ok_em' is null;
+  update public.crm_pedidos set
+    itens = (select coalesce(jsonb_agg(case when o.i->>'troca' = p_troca then o.i || '{"separado": true}'::jsonb else o.i end order by o.n), '[]'::jsonb)
+               from jsonb_array_elements(itens) with ordinality o(i, n)),
+    dados = jsonb_set(dados, '{trocas}', novas),
+    bloqueios = case when pend = 0 then array_remove(bloqueios, 'TROCA') else bloqueios end,
+    atualizado_por = (select auth.uid()), atualizado_em = now()
+   where id = p_id returning * into r;
+  return public.crm_pedido_saida(r);
+end $$;
+revoke all on function public.crm_pedido_troca_ok(uuid, text) from public, anon;
+grant execute on function public.crm_pedido_troca_ok(uuid, text) to authenticated;
 
 -- E-mail da nota fiscal ao cliente (04/11/2026, Anderson: "quando emite, precisa ir o XML junto com a DANFE para o e-mail de
 -- cadastro", com um campo próprio no cadastro). A crm-fiscal manda sozinha, logo depois da autorização, a nota de PRODUÇÃO ao

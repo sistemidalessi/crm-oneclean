@@ -567,8 +567,10 @@
   }
 
   // Botão e notas do pedido (tela do pedido em pedidos.js).
-  const podeEmitir = p => ehOp() && !!fiscalCfg().emitente && !((globalThis.CRMPedidos || {}).pausado || (() => false))(p) && (p.situacao === 'separado' || p.situacao === 'separacao' ||
-    (p.situacao === 'aberto' && !(p.bloqueios || []).some(b => (p.liberado || []).indexOf(b) === -1)));
+  // 06/11/2026: na separação também vale a trava aberta (a TROCA de item esperando o ✓ do separador, ou o preço/estoque de uma
+  // troca): o banco e o crm-fiscal já recusam; aqui o botão nem aparece
+  const podeEmitir = p => ehOp() && !!fiscalCfg().emitente && !((globalThis.CRMPedidos || {}).pausado || (() => false))(p) &&
+    (p.situacao === 'separado' || p.situacao === 'separacao' || p.situacao === 'aberto') && !(p.bloqueios || []).some(b => (p.liberado || []).indexOf(b) === -1);
   function doPedido(p) {
     if (!ehOp()) return '';
     if (nfes === null) { setTimeout(carrega, 0); return ''; }

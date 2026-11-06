@@ -134,7 +134,8 @@
   const bloqueiosAbertos = p => (p.bloqueios || []).filter(b => (p.liberado || []).indexOf(b) === -1);
   const ROTULO_BLOQUEIO = { ESTOQUE: 'estoque', ATRASO: 'duplicata em atraso', 'SEM ENTRADA': 'sem entrada (pagamento antecipado)', 'PREÇO': 'margem geral abaixo do mínimo',
     'SEM ANÁLISE': 'sem análise de crédito', PRAZO: 'prazo além do crédito', LIMITE: 'acima do limite de crédito',
-    'SEM CADASTRO': 'item sem cadastro (CONSULTOR): troque pelo produto cadastrado' };
+    'SEM CADASTRO': 'item sem cadastro (CONSULTOR): troque pelo produto cadastrado',
+    TROCA: 'troca de item esperando o separador confirmar' };
   // Financeiro (04/11/2026, Anderson: "quando o caso for financeiro, somente eu que desbloqueio"): crédito, duplicata em atraso e
   // pagamento antecipado sem entrada só o administrador libera (crm_pedido_liberar). SEM CADASTRO ninguém libera.
   const FINANCEIRO = ['SEM ANÁLISE', 'PRAZO', 'LIMITE', 'ATRASO', 'SEM ENTRADA'];
@@ -147,8 +148,10 @@
     if (pausado(p)) { const ate = p.dados.pausado.ate; return { rotulo: 'PAUSADO' + (ate ? ' ATÉ ' + String(ate).slice(8, 10) + '/' + String(ate).slice(5, 7) : ''), cor: 'cinza', chave: 'pausado' }; }
     if (p.situacao === 'cancelado') return { rotulo: 'CANCELADO', cor: 'cinza', chave: 'cancelado' };
     if (p.situacao === 'faturado') return { rotulo: 'FATURADO' + (notaNumero ? ' NF ' + notaNumero : ''), cor: 'azul', chave: 'faturado' };
-    if (p.situacao === 'separado') return { rotulo: 'A EMITIR NF', cor: 'verde', chave: 'separado' };
-    if (p.situacao === 'separacao') return { rotulo: 'EM SEPARAÇÃO' + (p.bolao_id ? ' · SP ' + p.bolao_id : ''), cor: 'ambar', chave: 'separacao' };
+    // 06/11/2026: troca de item na separação esperando o ✓ do separador (a nota não sai)
+    const troca = (p.situacao === 'separado' || p.situacao === 'separacao') && bloqueiosAbertos(p).indexOf('TROCA') !== -1;
+    if (p.situacao === 'separado') return troca ? { rotulo: 'TROCA A CONFERIR', cor: 'ambar', chave: 'separado' } : { rotulo: 'A EMITIR NF', cor: 'verde', chave: 'separado' };
+    if (p.situacao === 'separacao') return { rotulo: 'EM SEPARAÇÃO' + (p.bolao_id ? ' · SP ' + p.bolao_id : '') + (troca ? ' · TROCA' : ''), cor: 'ambar', chave: 'separacao' };
     const b = bloqueiosAbertos(p);
     return b.length ? { rotulo: 'BLOQUEADO', cor: 'vermelho', chave: 'bloqueado', bloqueios: b } : { rotulo: 'LIBERADO', cor: 'verde', chave: 'liberado' };
   }
@@ -538,10 +541,10 @@
         const todos = (p.itens || []).every(i => i.separado);
         return '<div class="pd-sep"><h4>Pedido ' + esc(p.numero) + ' · ' + esc(nomeCliente(p)) + ' ' + CRM.selo(P.situacao(p).rotulo, P.situacao(p).cor) + '</h4>' +
           '<table class="tabela"><tbody>' + (p.itens || []).map((it, i) => '<tr><td><label class="filtro-inline"><input type="checkbox" data-pd-sep="' + esc(p.id) + ':' + i + '"' + (it.separado ? ' checked' : '') + (p.situacao !== 'separacao' ? ' disabled' : '') + '> ' +
-            esc(it.descricao) + '</label><small>' + esc(it.codigo || '') + '</small></td><td class="num"><strong>' + qtd(it.quantidade) + '</strong> ' + esc(unSep(it)) + '</td></tr>').join('') + '</tbody></table>' +
+            esc(it.descricao) + (it.troca ? ' 🔁' : '') + '</label><small>' + esc(it.codigo || '') + '</small></td><td class="num"><strong>' + qtd(it.quantidade) + '</strong> ' + esc(unSep(it)) + '</td></tr>').join('') + '</tbody></table>' +
           '<p class="acoes">' + (p.situacao === 'separacao' ? '<button type="button" class="btn' + (todos ? ' verde' : ' sec') + '" data-acao="pd-separado" data-id="' + esc(p.id) + '">Separado ✓</button> ' : '') +
           '<button type="button" class="btn sec" data-acao="pd-falta" data-id="' + esc(p.id) + '">⚠ Faltou</button> ' +
-          '<button type="button" class="mini" data-acao="pd-voltar-aberto" data-id="' + esc(p.id) + '">tirar da lista (volta ao aberto)</button></p>' + avisoFalta(p) + '</div>';
+          '<button type="button" class="mini" data-acao="pd-voltar-aberto" data-id="' + esc(p.id) + '">tirar da lista (volta ao aberto)</button></p>' + avisoFalta(p) + htmlTrocas(p) + '</div>';
       }).join('') + '</section>';
   }
 
@@ -563,21 +566,104 @@
       (d.texto_nota ? '<p><strong>Texto da nota:</strong> ' + esc(d.texto_nota) + '</p>' : '') + (d.observacoes ? '<p><strong>Obs.:</strong> ' + esc(d.observacoes) + '</p>' : '') +
       // 06/11/2026 (Anderson): o preço de cada item e o total no impresso, para conferir se o valor é do fardo/caixa ou da unidade
       '<table><thead><tr><th>✓</th><th>Item</th><th>Código</th><th>Produto</th><th>Qtde</th><th>Un</th><th>Vl. unit.</th><th>Total</th></tr></thead><tbody>' +
-      (p.itens || []).map((it, i) => [it, i]).sort((a, b) => sem(a[0].descricao).localeCompare(sem(b[0].descricao), 'pt-BR', { numeric: true })).map(([it, i]) => '<tr><td class="cx"></td><td>' + (i + 1) + '</td><td>' + esc(it.codigo || '') + '</td><td>' + esc(it.descricao) + '</td><td class="n">' + qtd(it.quantidade) + '</td><td>' + esc(unSep(it)) + '</td>' +
+      (p.itens || []).map((it, i) => [it, i]).sort((a, b) => sem(a[0].descricao).localeCompare(sem(b[0].descricao), 'pt-BR', { numeric: true })).map(([it, i]) => '<tr><td class="cx"></td><td>' + (i + 1) + '</td><td>' + esc(it.codigo || '') + '</td><td>' + esc(it.descricao) + (it.troca ? ' (trocado)' : '') + '</td><td class="n">' + qtd(it.quantidade) + '</td><td>' + esc(unSep(it)) + '</td>' +
         '<td class="v">' + R.moeda(P.precoLiq(it)) + '</td><td class="v">' + R.moeda(P.totalItem(it)) + '</td></tr>').join('') +
       '</tbody>' + (() => { const t = P.totais(p.itens, p.frete, {});
         return '<tfoot>' + (t.frete ? '<tr><td colspan="7" class="v">Produtos</td><td class="v">' + R.moeda(t.produtos) + '</td></tr><tr><td colspan="7" class="v">Frete</td><td class="v">' + R.moeda(t.frete) + '</td></tr>' : '') +
-          '<tr><td colspan="7" class="v"><strong>Total do pedido</strong></td><td class="v"><strong>' + R.moeda(t.geral) + '</strong></td></tr></tfoot>'; })() + '</table><p class="ass">Separado por: ____________________ &nbsp; Conferido por: ____________________</p></section>';
+          '<tr><td colspan="7" class="v"><strong>Total do pedido</strong></td><td class="v"><strong>' + R.moeda(t.geral) + '</strong></td></tr></tfoot>'; })() + '</table>' +
+      (trocasDe(p).length ? '<p><strong>Trocas na separação:</strong> ' + esc(trocasDe(p).map(tr => textoTroca(tr) + ' (' + (tr.por || '') + '; ' + (tr.ok_em ? 'conferida' : 'a conferir') + ')').join(' · ')) + '</p>' : '') + '<p class="ass">Separado por: ____________________ &nbsp; Conferido por: ____________________</p></section>';
   }
 
   // ------------------------------------------------ pedido aberto (Dados / Produtos / Comentários)
+  // ------------------------------------------------ troca de item na separação (06/11/2026)
+  // Áudio do Anderson: "o separador ligava para a vendedora e a vendedora ia trocando ... não quero que acabe com essa trava de
+  // segurança ... cria-se mais uma linha identificando que a vendedora trocou o item ou a quantidade ... e quando emitir a nota
+  // fiscal, sai o certo". Só a vendedora do pedido (ou a gestora) troca (crm_pedido_trocar), com o motivo; a troca fica no
+  // pedido e o separador confirma (crm_pedido_troca_ok). Até o ✓, a trava TROCA segura a nota (ninguém a libera).
+  const trocasDe = p => ((p.dados || {}).trocas || []);
+  const naSeparacao = p => p.situacao === 'separacao' || p.situacao === 'separado';
+  const podeTrocar = p => naSeparacao(p) && ehVenda() && (CRM.ehGestor() || p.vendedor_id === CRM.meuId());
+  const podeConfirmarTroca = () => ehLog() || CRM.ehAdmin();
+  const descItem = i => (i ? (i.descricao || i.codigo || '') + ' × ' + qtd(i.quantidade) + (i.unidade ? ' ' + i.unidade : '') : '');
+  function textoTroca(t) {
+    const a = t.antes, d = t.depois;
+    if (t.acao === 'incluir') return 'incluiu ' + descItem(d) + ' a R$ ' + preco(num(d.preco));
+    if (t.acao === 'tirar') return 'tirou ' + descItem(a);
+    const precoMudou = a && d && num(a.preco) !== num(d.preco);
+    return descItem(a) + ' → ' + descItem(d) + (precoMudou ? ' (preço R$ ' + preco(num(a.preco)) + ' → R$ ' + preco(num(d.preco)) + ')' : '');
+  }
+  function htmlTrocas(p) {
+    const l = trocasDe(p);
+    if (!l.length) return '';
+    const pend = naSeparacao(p) ? l.filter(t => !t.ok_em) : [];
+    return '<div class="pd-trocas' + (pend.length ? ' pendente' : '') + '"><p><strong>🔁 Trocas na separação</strong>' + (pend.length ? ' — ' + pend.length + ' esperando o separador conferir. A nota só sai depois do ✓.' : '') + '</p><ul>' +
+      l.map(t => '<li><small>' + esc(quando(t.em)) + ' · ' + esc(t.por || '') + '</small> ' + esc(textoTroca(t)) + '<small>Motivo: ' + esc(t.motivo || '') + '</small>' +
+        (t.ok_em ? '<span class="pd-troca-ok">✓ separado' + (t.ok_por ? ' por ' + esc(t.ok_por) : '') + ' em ' + esc(quando(t.ok_em)) + '</span>'
+          : naSeparacao(p) ? '<span class="pd-troca-pend">⏳ esperando o separador</span>' + (podeConfirmarTroca() ? ' <button type="button" class="btn verde" data-acao="pd-troca-ok" data-id="' + esc(p.id + '|' + t.id) + '">✓ Separei a troca</button>' : '')
+          : '<span class="pd-troca-pend">não conferida (o pedido saiu da separação)</span>') + '</li>').join('') + '</ul></div>';
+  }
+  function formTroca(p, idx0) {
+    const its = p.itens || [];
+    const cod = v => String(v || '').split(' — ')[0].trim();
+    CRM.abrirForm({ titulo: '🔁 Trocar item: pedido ' + p.numero, largura: 'largo', salvarTexto: 'Registrar a troca',
+      intro: 'O pedido está na separação: a troca fica anotada no pedido e o separador confere. A nota só sai depois que ele marcar "✓ Separei a troca". ' +
+        'Mudou o produto? O preço vem da tabela; ajuste se combinou outro com o cliente.',
+      htmlAntes: listaProdutosHTML,
+      campos: [
+        { nome: 'linha', rotulo: 'Qual item', tipo: 'select', largo: true, opcoes: its.map((it, i) => [String(i), (i + 1) + '. ' + descItem(it)]).concat([['novo', '+ Incluir um produto que não estava no pedido']]) },
+        { nome: 'acao', rotulo: 'O que fazer', tipo: 'select', largo: true, opcoes: [['trocar', 'Trocar o produto ou mudar a quantidade / o preço'], ['tirar', 'Tirar este item do pedido']] },
+        { nome: 'produto', rotulo: 'Produto (código ou nome)', largo: true, lista: 'pdProdutos', dica: 'digite o código ou parte do nome' },
+        { nome: 'quantidade', rotulo: 'Quantidade', tipo: 'numero', passo: '0.001', moeda: false, vazioNulo: true },
+        { nome: 'preco', rotulo: 'Preço unitário (R$)', tipo: 'numero', passo: '0.0001', moeda: false, vazioNulo: true },
+        { nome: 'desconto', rotulo: 'Desconto (%)', tipo: 'numero', passo: '0.01', moeda: false, vazioNulo: true },
+        { nome: 'motivo', rotulo: 'Motivo da troca *', tipo: 'textarea', largo: true, linhas: 2, dica: 'ex.: faltou Lavanda, o cliente aceitou Floral' }],
+      valores: (() => { const i = idx0 != null && its[idx0] ? idx0 : 0, it = its[i] || {};
+        return { linha: String(i), acao: 'trocar', produto: it.codigo ? it.codigo + ' — ' + it.descricao : '', quantidade: num(it.quantidade) || null, preco: num(it.preco) || null, desconto: num(it.desconto) || 0, motivo: '' }; })(),
+      extras: form => {
+        const el = n => form.elements[n];
+        if (el('produto')) el('produto').setAttribute('list', 'pdProdutos');
+        const mostra = () => { const tirar = el('acao').value === 'tirar', novo = el('linha').value === 'novo';
+          if (novo && tirar) el('acao').value = 'trocar';
+          ['produto', 'quantidade', 'preco', 'desconto'].forEach(n => { const c = el(n) && el(n).closest('.campo'); if (c) c.hidden = el('acao').value === 'tirar'; }); };
+        el('linha').addEventListener('change', () => {
+          const it = its[Number(el('linha').value)];
+          if (it) { el('produto').value = it.codigo ? it.codigo + ' — ' + it.descricao : ''; el('quantidade').value = num(it.quantidade); el('preco').value = num(it.preco); el('desconto').value = num(it.desconto) || 0; }
+          else { el('produto').value = ''; el('quantidade').value = ''; el('preco').value = ''; el('desconto').value = 0; }
+          mostra();
+        });
+        el('acao').addEventListener('change', mostra);
+        // produto novo: o preço vem da tabela (decisão do Anderson); a vendedora ajusta se combinou outro
+        el('produto').addEventListener('change', () => {
+          const c = cod(el('produto').value), d = porCod.get(c), it = its[Number(el('linha').value)];
+          if (d && (!it || it.codigo !== c) && num(d.preco_venda) > 0) el('preco').value = num(d.preco_venda);
+        });
+        mostra();
+      },
+      aoSalvar: async v => {
+        const linha = v.linha === 'novo' ? null : Number(v.linha), it = linha == null ? null : its[linha];
+        let item = null;
+        if (v.acao !== 'tirar') {
+          const c = cod(v.produto), d = porCod.get(c);
+          if (!c || (!d && !(it && it.codigo === c))) throw new Error('escolha o produto na lista (código ou nome)');
+          if (!(num(v.quantidade) > 0)) throw new Error('diga a quantidade (para tirar o item, escolha "Tirar este item do pedido")');
+          if (!(num(v.preco) > 0)) throw new Error('diga o preço');
+          item = { codigo: c, descricao: d ? d.descricao : it.descricao, unidade: it && it.codigo === c ? it.unidade : (d && d.unidade) || null, quantidade: num(v.quantidade), preco: num(v.preco), desconto: num(v.desconto) || 0, obs: it && it.codigo === c ? it.obs || null : null };
+        } else if (linha == null) throw new Error('escolha qual item tirar');
+        if (String(v.motivo || '').trim().length < 3) throw new Error('diga o motivo da troca');
+        await CRM.store().pedidoTrocar(p.id, { idx: linha, item, motivo: String(v.motivo).trim() });
+        await recarrega();
+        CRM.toast('Troca registrada no pedido ' + p.numero + ': o separador confere e a nota só sai depois do ✓.');
+      } });
+  }
+
   // Faltou na separação (04/11/2026, pedido da logística): o que a separação não achou, para a vendedora avisar o cliente
   function avisoFalta(p) {
     const f = p.dados && p.dados.separacao_falta;
     if (!f) return '';
     const l = (f.itens || []).map(x => qtd(x.falta) + ' ' + (x.unidade || '') + ' de ' + (x.descricao || x.codigo));
     return '<p class="alerta">⚠ <strong>Faltou na separação</strong>' + (f.em ? ' (' + esc(R.dataBR(R.diaLocal(f.em))) + (f.por ? ', ' + esc(f.por) : '') + ')' : '') + ': ' +
-      esc(l.join('; ') || 'veja a observação') + (f.obs ? '. Obs.: ' + esc(f.obs) : '') + '.' + (ehOp() ? '' : ' Avise o cliente e combine com a logística (entrega parcial, troca ou o resto depois).') + '</p>';
+      esc(l.join('; ') || 'veja a observação') + (f.obs ? '. Obs.: ' + esc(f.obs) : '') + '.' + (ehOp() && !podeTrocar(p) ? '' : ' Avise o cliente e combine com a logística (entrega parcial, troca ou o resto depois).') +
+      (podeTrocar(p) ? ' <button type="button" class="btn mini" data-acao="pd-trocar" data-id="' + esc(p.id + '|' + ((f.itens || [])[0] ? f.itens[0].idx : '')) + '">🔁 Trocar item</button>' : '') + '</p>';
   }
   function formFalta(p) {
     const f = (p.dados && p.dados.separacao_falta) || {}, ant = new Map((f.itens || []).map(x => [x.idx, x.falta]));
@@ -603,6 +689,9 @@
     if (podeEditar(p)) botoes.push('<button type="button" class="btn sec" data-acao="pd-editar" data-id="' + esc(p.id) + '">Editar</button>');
     if (gest && p.situacao === 'aberto' && (p.bloqueios || []).length) botoes.push(bAbertos.length ? '<button type="button" class="btn verde" data-acao="pd-liberar" data-id="' + esc(p.id) + '">Liberar</button>'
       : '<button type="button" class="btn sec" data-acao="pd-desliberar" data-id="' + esc(p.id) + '">Desfazer liberação</button>');
+    // 06/11/2026: depois de uma troca na separação, a gestora/logística libera preço e estoque (a TROCA, só o ✓ do separador)
+    if (gest && naSeparacao(p) && bAbertos.some(b => b !== 'TROCA' && b !== 'SEM CADASTRO' && P.FINANCEIRO.indexOf(b) === -1)) botoes.push('<button type="button" class="btn verde" data-acao="pd-liberar" data-id="' + esc(p.id) + '">Liberar</button>');
+    if (podeTrocar(p)) botoes.push('<button type="button" class="btn" data-acao="pd-trocar" data-id="' + esc(p.id) + '" title="O pedido está na separação: a troca fica anotada e o separador confere">🔁 Trocar item</button>');
     if (CRM.ehAdmin() && p.situacao === 'aberto' && ((p.bloqueios || []).indexOf('SEM ENTRADA') !== -1 || p.entrada_ok)) botoes.push('<button type="button" class="btn sec" data-acao="pd-entrada" data-id="' + esc(p.id) + '">' + (p.entrada_ok ? 'Desfazer "entrada recebida"' : 'Entrada recebida') + '</button>');
     const pz = P.pausado(p);
     if (ehOp() && ['aberto', 'separacao', 'separado'].indexOf(p.situacao) !== -1) botoes.push(pz
@@ -650,10 +739,11 @@
       corpo = gradeProdutos(p.itens || [], { ctx, faltas: fs, ler: true }) + rodapeTotais(t, p.itens || []);
     }
     return '<section class="cartao pd-janela"><header class="pd-topo"><button type="button" class="btn sec" data-acao="pd-fechar">← Voltar</button><h2>Pedido ' + esc(p.numero) + ' · ' + esc(nomeCliente(p)) + '</h2>' + CRM.selo(s.rotulo, s.cor) + '</header>' +
-      avisoFalta(p) +
+      avisoFalta(p) + htmlTrocas(p) +
       (pz ? '<p class="aviso-notas">⏸ <strong>Pausado</strong>' + (p.dados.pausado.ate ? ' até ' + esc(R.dataBR(String(p.dados.pausado.ate).slice(0, 10))) + ' (volta sozinho nesse dia)' : ' até alguém clicar em "Retomar"') +
         (p.dados.pausado.motivo ? ' · ' + esc(p.dados.pausado.motivo) : '') + (p.dados.pausado.por ? ' · por ' + esc(p.dados.pausado.por) : '') + '. Não vai à separação nem à nota.</p>' : '') +
-      (bAbertos.length ? '<p class="alerta">Bloqueado por: <strong>' + esc(bAbertos.map(b => P.ROTULO_BLOQUEIO[b] || b).join(', ')) + '</strong>.' + (bAbertos.some(b => b !== 'SEM CADASTRO' && P.FINANCEIRO.indexOf(b) === -1) ? (gest ? ' Confira e clique em "Liberar".' : ' Estoque e preço, quem libera é a gestora ou a logística.') : '') +
+      (bAbertos.length ? '<p class="alerta">Bloqueado por: <strong>' + esc(bAbertos.map(b => P.ROTULO_BLOQUEIO[b] || b).join(', ')) + '</strong>.' + (bAbertos.some(b => b !== 'SEM CADASTRO' && b !== 'TROCA' && P.FINANCEIRO.indexOf(b) === -1) ? (gest ? ' Confira e clique em "Liberar".' : ' Estoque e preço, quem libera é a gestora ou a logística.') : '') +
+        (bAbertos.indexOf('TROCA') !== -1 ? ' <strong>A troca de item sai com o ✓ do separador em "✓ Separei a troca"</strong> (ninguém libera esta trava); só depois a nota pode ser emitida.' : '') +
         (bAbertos.indexOf('SEM CADASTRO') !== -1 ? ' <strong>O item genérico (CONSULTOR) não vai à separação nem à nota:</strong> peça o cadastro do produto ao comprador e troque o item no pedido (ninguém libera esta trava).' : '') +
         (bAbertos.some(b => ['SEM ANÁLISE', 'PRAZO', 'LIMITE'].indexOf(b) !== -1) && textoMotivo(motivoCredito(p)) ? ' <strong>' + esc(textoMotivo(motivoCredito(p))) + '</strong>' : '') +
         (bAbertos.some(b => P.FINANCEIRO.indexOf(b) !== -1) ? ' O financeiro (' + esc(bAbertos.filter(b => P.FINANCEIRO.indexOf(b) !== -1).map(b => P.ROTULO_BLOQUEIO[b]).join(', ')) + ') só o administrador libera.' + (CRM.ehAdmin() && CRM.credito && CRM.credito.analisar && bAbertos.some(b => ['SEM ANÁLISE', 'PRAZO', 'LIMITE'].indexOf(b) !== -1) ?
@@ -697,7 +787,7 @@
       (gest ? '<th class="num">Margem</th>' : sg ? '<th title="verde: margem dentro do mínimo; vermelho: abaixo">Margem</th>' : '') + '<th class="num">Preço total</th><th>Faixa</th><th class="num">Comis%</th><th class="num">Desc s/tab</th>' + (o.ler ? '' : '<th class="num">Disp.</th><th></th>') + '</tr></thead><tbody>' +
       (itens.length ? itens.map((it, i) => {
         const l = P.linha(it, o.ctx), fa = falta(i), d = porCod.get(it.codigo);
-        return '<tr' + (o.sel === i ? ' class="sel"' : '') + '><td>' + String(i + 1).padStart(3, '0') + '</td><td>' + esc(it.codigo || '') + '</td><td>' + (it.codigo && CRM.produtos ? CRM.produtos.miniatura(it.codigo, 'pequena') : '') + esc(it.descricao) + (it.obs ? '<small>' + esc(it.obs) + '</small>' : '') + '</td><td>' + esc(it.unidade || '') + '</td>' +
+        return '<tr' + (o.sel === i ? ' class="sel"' : '') + '><td>' + String(i + 1).padStart(3, '0') + '</td><td>' + esc(it.codigo || '') + '</td><td>' + (it.codigo && CRM.produtos ? CRM.produtos.miniatura(it.codigo, 'pequena') : '') + esc(it.descricao) + (it.obs ? '<small>' + esc(it.obs) + '</small>' : '') + (it.troca ? '<small class="pd-trocado">🔁 trocado na separação</small>' : '') + '</td><td>' + esc(it.unidade || '') + '</td>' +
           '<td class="num">' + qtd(it.quantidade) + '</td><td class="num">' + (fa > 0 ? '<strong class="neg">' + qtd(fa) + '</strong>' : '0') + '</td><td class="num">' + preco(it.preco) + '</td><td class="num">' + (num(it.desconto) > 0 ? preco(Math.round(num(it.desconto) * 100) / 100) + '%<small>R$ ' + preco(P.descontoValor(it)) + '</small>' : '0,00') + '</td>' +
           (gest ? '<td class="num">' + (l.margem == null ? '—' : l.abaixoMinimo ? '<strong class="neg" title="este item está abaixo da margem mínima; o que trava é a margem geral do pedido">' + pct(l.margem) + '</strong>' : pct(l.margem)) + '</td>' : sg ? '<td>' + slotSinal(sg, i) + '</td>' : '') + '<td class="num">' + preco(l.total) + '</td><td>' + esc(P.rotuloFaixa(l.faixa)) + '</td><td class="num">' + (l.comissao == null ? '—' : preco(l.comissao)) + '</td>' +
           '<td class="num">' + (l.sobreTab == null ? '—' : preco(l.sobreTab)) + '</td>' +
@@ -1441,6 +1531,12 @@
     'pd-entrada': vivo(async id => { const p = ped(id); troca(await CRM.store().pedidoLiberar(id, null, !p.entrada_ok)); CRM.render(); }),
     'pd-cancelar': vivo(async id => { const p = ped(id); const m = prompt('Cancelar o pedido ' + p.numero + '? A reserva do estoque sai. Diga o motivo:'); if (!m) return; troca(await CRM.store().pedidoSituacao(id, 'cancelado', m)); await recarrega(); }),
     'pd-falta': id => { const p = ped(id); if (p) formFalta(p); },
+    'pd-trocar': chave => { const [id, ix] = String(chave).split('|'); const p = ped(id); if (p) formTroca(p, ix === undefined || ix === '' ? null : Number(ix)); },
+    'pd-troca-ok': async chave => {
+      const [id, t] = String(chave).split('|'), p = ped(id), tr = p && trocasDe(p).find(x => x.id === t);
+      if (!tr || !confirm('Confirmar que você separou a troca do pedido ' + p.numero + '?\n\n' + textoTroca(tr))) return;
+      try { await CRM.store().pedidoTrocaOk(id, t); await recarrega(); CRM.toast('Troca conferida no pedido ' + p.numero + '.'); } catch (e) { CRM.falhou(e); }
+    },
     'pd-separado': vivo(async id => { const p = ped(id); if ((p.itens || []).some(i => !i.separado) && !confirm('Há itens sem a caixinha de conferido. Marcar o pedido ' + p.numero + ' como separado assim mesmo?')) return; troca(await CRM.store().pedidoSituacao(id, 'separado')); CRM.render(); }),
     'pd-voltar-aberto': vivo(async id => { if (!confirm('Tirar o pedido da separação (volta ao aberto)?')) return; troca(await CRM.store().pedidoSituacao(id, 'aberto')); await recarrega(); }),
     'pd-desfaturar': vivo(async id => { if (!confirm('Desfazer o faturado? O pedido volta a "a emitir NF" e reserva o estoque de novo.')) return; troca(await CRM.store().pedidoSituacao(id, 'desfaturar')); await recarrega(); }),

@@ -1440,3 +1440,14 @@ button.ordena.ativo { color: var(--marinho); }
 /* Janela de crédito aberta pelo pedido (05/11/2026): o que o pedido pede e por que travou, em destaque no alto */
 .cred-pedido { background: #fff4e5; border: 1px solid #f0c27a; border-left: 4px solid #d98a00; border-radius: 8px; padding: 10px 14px; margin: 0 0 12px; color: #4a3200; }
 .cred-pedido p { margin: 4px 0; }
+/* troca de item na separação (06/11/2026) */
+.pd-trocas { border: 1px solid var(--linha, #d9e2e6); border-left: 4px solid #2e8b57; border-radius: 8px; padding: 8px 12px; margin: 8px 0; background: #f6fbf7; }
+.pd-trocas.pendente { border-left-color: #d98e04; background: #fff8e6; }
+.pd-trocas p { margin: 0 0 4px; }
+.pd-trocas ul { margin: 0; padding-left: 18px; }
+.pd-trocas li { margin: 4px 0; }
+.pd-trocas li small { display: block; color: var(--suave, #5b6b73); }
+.pd-trocas li > small:first-child { display: inline; }
+.pd-troca-ok { color: #1f7a45; font-weight: 600; margin-left: 4px; }
+.pd-troca-pend { color: #a86a00; font-weight: 600; margin-left: 4px; }
+.pd-trocado { display: block; color: #a86a00; }

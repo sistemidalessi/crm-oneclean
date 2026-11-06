@@ -1262,6 +1262,8 @@
   Supa.prototype.pedidoCreditoMotivo = async function (id) { return unwrap(await this.sb.rpc('crm_pedido_credito_motivo', { p_id: id })); };
   Supa.prototype.pedidoPausar = async function (id, pausar, ate, motivo) { return unwrap(await this.sb.rpc('crm_pedido_pausar', { p_id: id, p_pausar: !!pausar, p_ate: ate || null, p_motivo: motivo || null })); };
   Supa.prototype.pedidoDados = async function (id, p) { return unwrap(await this.sb.rpc('crm_pedido_dados', { p_id: id, p })); };
+  Supa.prototype.pedidoTrocar = async function (id, p) { return unwrap(await this.sb.rpc('crm_pedido_trocar', { p_id: id, p })); };
+  Supa.prototype.pedidoTrocaOk = async function (id, troca) { return unwrap(await this.sb.rpc('crm_pedido_troca_ok', { p_id: id, p_troca: troca })); };
   Supa.prototype.pedidoFalta = async function (id, itens, obs) { return unwrap(await this.sb.rpc('crm_pedido_falta', { p_id: id, p_itens: itens, p_obs: obs || null })); };
   // sinal verde/vermelho da margem para quem não vê custo (só sim/não; 03/11/2026)
   Supa.prototype.pedidoSinal = async function (itens) { return unwrap(await this.sb.rpc('crm_pedido_sinal', { p_itens: itens })); };
@@ -1369,6 +1371,34 @@
     if (pausar) r.dados.pausado = { ate: ate || null, motivo: motivo || null, por: 'Administrador (modo local)', em: new Date().toISOString() }; else delete r.dados.pausado;
     r.comentarios = (r.comentarios || []).concat([{ quando: new Date().toISOString(), por: LOCAL_ADMIN, nome: 'Administrador (modo local)', texto: pausar ? 'Pedido pausado' : 'Pedido retomado' }]);
     this._pedsGrava(); return Object.assign({}, r);
+  };
+  // troca de item na separação (06/11/2026): como o crm_pedido_trocar / crm_pedido_troca_ok do banco, sem as travas de margem
+  Local.prototype.pedidoTrocar = async function (id, x) {
+    const p = this._ped(id), enx = i => (i ? (({ codigo, descricao, unidade, quantidade, preco, desconto, total }) => ({ codigo, descricao, unidade, quantidade, preco, desconto, total }))(i) : null);
+    if (['separacao', 'separado'].indexOf(p.situacao) === -1) throw new Error('a troca é para pedido em separação ou separado');
+    if (String(x.motivo || '').trim().length < 3) throw new Error('diga o motivo da troca');
+    const tid = 't' + Date.now(), antes = x.idx == null ? null : p.itens[x.idx];
+    let novo = null;
+    if (x.item && Number(x.item.quantidade) > 0) {
+      const e = (lsLe('crm_estoque', []) || []).find(y => y.codigo === x.item.codigo) || {};
+      const q = Number(x.item.quantidade), pr = Number(x.item.preco) || 0, d = Number(x.item.desconto) || 0;
+      novo = { codigo: x.item.codigo, descricao: x.item.descricao || e.descricao || x.item.codigo, unidade: x.item.unidade || e.unidade || null, quantidade: q, preco: pr, desconto: d,
+        total: Math.round(q * pr * (1 - d / 100) * 100) / 100, separado: false, troca: tid };
+    }
+    if (!antes && !novo) throw new Error('diga o produto e a quantidade');
+    const acao = x.idx == null ? 'incluir' : novo ? 'trocar' : 'tirar';
+    if (acao === 'incluir') p.itens.push(novo); else if (acao === 'tirar') p.itens.splice(x.idx, 1); else p.itens[x.idx] = novo;
+    p.valor_produtos = p.itens.reduce((s, i) => s + Number(i.total || 0), 0); p.valor_total = p.valor_produtos + Number(p.frete || 0);
+    p.bloqueios = (p.bloqueios || []).filter(b => b !== 'TROCA').concat(['TROCA']);
+    p.dados = Object.assign({}, p.dados, { trocas: ((p.dados || {}).trocas || []).concat([{ id: tid, em: new Date().toISOString(), por: 'Você (modo local)', acao, motivo: x.motivo, antes: enx(antes), depois: enx(novo), ok_em: null, ok_por: null }]) });
+    this._pedsGrava(); return Object.assign({}, p);
+  };
+  Local.prototype.pedidoTrocaOk = async function (id, troca) {
+    const p = this._ped(id), l = ((p.dados || {}).trocas || []).map(t => (t.id === troca ? Object.assign({}, t, { ok_em: new Date().toISOString(), ok_por: 'Separador (modo local)' }) : t));
+    p.dados = Object.assign({}, p.dados, { trocas: l });
+    p.itens = p.itens.map(i => (i.troca === troca ? Object.assign({}, i, { separado: true }) : i));
+    if (!l.some(t => !t.ok_em)) p.bloqueios = (p.bloqueios || []).filter(b => b !== 'TROCA');
+    this._pedsGrava(); return Object.assign({}, p);
   };
   Local.prototype.pedidoFalta = async function (id, itens, obs) {
     const p = this._peds().find(x => x.id === id); if (!p) throw new Error('pedido não encontrado');
