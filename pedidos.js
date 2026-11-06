@@ -561,9 +561,13 @@
         // 04/11/2026 (logística): o nome do(a) vendedor(a) no pedido impresso e na lista de separação
         p.vendedor_id && CRM.nomeUsuario(p.vendedor_id) !== '—' ? 'Vendedor(a): ' + CRM.nomeUsuario(p.vendedor_id) : ''].filter(Boolean).join(' · ')) + '</p>' +
       (d.texto_nota ? '<p><strong>Texto da nota:</strong> ' + esc(d.texto_nota) + '</p>' : '') + (d.observacoes ? '<p><strong>Obs.:</strong> ' + esc(d.observacoes) + '</p>' : '') +
-      '<table><thead><tr><th>✓</th><th>Item</th><th>Código</th><th>Produto</th><th>Qtde</th><th>Un</th></tr></thead><tbody>' +
-      (p.itens || []).map((it, i) => [it, i]).sort((a, b) => sem(a[0].descricao).localeCompare(sem(b[0].descricao), 'pt-BR', { numeric: true })).map(([it, i]) => '<tr><td class="cx"></td><td>' + (i + 1) + '</td><td>' + esc(it.codigo || '') + '</td><td>' + esc(it.descricao) + '</td><td class="n">' + qtd(it.quantidade) + '</td><td>' + esc(unSep(it)) + '</td></tr>').join('') +
-      '</tbody></table><p class="ass">Separado por: ____________________ &nbsp; Conferido por: ____________________</p></section>';
+      // 06/11/2026 (Anderson): o preço de cada item e o total no impresso, para conferir se o valor é do fardo/caixa ou da unidade
+      '<table><thead><tr><th>✓</th><th>Item</th><th>Código</th><th>Produto</th><th>Qtde</th><th>Un</th><th>Vl. unit.</th><th>Total</th></tr></thead><tbody>' +
+      (p.itens || []).map((it, i) => [it, i]).sort((a, b) => sem(a[0].descricao).localeCompare(sem(b[0].descricao), 'pt-BR', { numeric: true })).map(([it, i]) => '<tr><td class="cx"></td><td>' + (i + 1) + '</td><td>' + esc(it.codigo || '') + '</td><td>' + esc(it.descricao) + '</td><td class="n">' + qtd(it.quantidade) + '</td><td>' + esc(unSep(it)) + '</td>' +
+        '<td class="v">' + R.moeda(P.precoLiq(it)) + '</td><td class="v">' + R.moeda(P.totalItem(it)) + '</td></tr>').join('') +
+      '</tbody>' + (() => { const t = P.totais(p.itens, p.frete, {});
+        return '<tfoot>' + (t.frete ? '<tr><td colspan="7" class="v">Produtos</td><td class="v">' + R.moeda(t.produtos) + '</td></tr><tr><td colspan="7" class="v">Frete</td><td class="v">' + R.moeda(t.frete) + '</td></tr>' : '') +
+          '<tr><td colspan="7" class="v"><strong>Total do pedido</strong></td><td class="v"><strong>' + R.moeda(t.geral) + '</strong></td></tr></tfoot>'; })() + '</table><p class="ass">Separado por: ____________________ &nbsp; Conferido por: ____________________</p></section>';
   }
 
   // ------------------------------------------------ pedido aberto (Dados / Produtos / Comentários)

@@ -20,7 +20,7 @@
       ultMov: s.ult_mov || null, fkn: null, minimo: null, fornecedor: null }));
     (fkn || []).filter(e => !ehCaixa(e.codigo)).forEach(e => {
       const l = porCod.get(e.codigo) || { codigo: e.codigo, descricao: e.descricao, unidade: e.unidade, saldo: null, custo: null, ultMov: null };
-      Object.assign(l, { fkn: atualFkn(e), minimo: e.estoque_min == null ? null : num(e.estoque_min), fornecedor: e.fornecedor || null, descricao: l.descricao || e.descricao, linha: e.linha || null });
+      Object.assign(l, { fkn: atualFkn(e), minimo: e.estoque_min == null ? null : num(e.estoque_min), fornecedor: e.fornecedor || null, descricao: l.descricao || e.descricao, linha: e.linha || null, inativo: e.situacao === 'INATIVO' });
       porCod.set(e.codigo, l);
     });
     return [...porCod.values()].map(l => Object.assign(l, { dif: l.saldo == null || l.fkn == null ? null : Math.round((l.fkn - l.saldo) * 1000) / 1000 }));
@@ -585,7 +585,7 @@
       '<p class="acoes"><input type="search" placeholder="Procurar produto, código ou fornecedor" value="' + esc(filtro.busca) + '" data-es-busca class="of-busca"> ' +
       (d ? '' : '<label class="filtro-inline"><input type="checkbox" data-es-sodif' + (filtro.soDif ? ' checked' : '') + '> só com diferença</label>') + '</p>' +
       (l.length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Produto</th><th class="num">' + (d ? 'No galpão</th>' + colsDisp().replace(/<\/th>$/, '') : 'Saldo CRM</th><th class="num">FKN agora</th><th class="num">Diferença') + '</th><th class="num">Custo médio</th><th>Último movimento</th><th></th></tr></thead><tbody>' +
-        l.slice(0, 300).map(x => '<tr><td>' + (CRM.produtos ? '<button type="button" class="pd-info-foto" data-acao="pf-ficha" data-id="' + esc(x.codigo) + '" title="Ficha e foto">' + CRM.produtos.miniatura(x.codigo) + '</button>' : '') + '<strong>' + esc(R.nomeDeItem(x.descricao || x.codigo)) + '</strong><small>' + esc(x.codigo) + (x.unidade ? ' · ' + esc(x.unidade) : '') + (x.fornecedor ? ' · ' + esc(x.fornecedor) : '') + '</small></td>' +
+        l.slice(0, 300).map(x => '<tr><td>' + (CRM.produtos ? '<button type="button" class="pd-info-foto" data-acao="pf-ficha" data-id="' + esc(x.codigo) + '" title="Ficha e foto">' + CRM.produtos.miniatura(x.codigo) + '</button>' : '') + '<strong>' + esc(R.nomeDeItem(x.descricao || x.codigo)) + '</strong>' + (x.inativo ? ' ' + CRM.selo('inativo', '') : '') + '<small>' + esc(x.codigo) + (x.unidade ? ' · ' + esc(x.unidade) : '') + (x.fornecedor ? ' · ' + esc(x.fornecedor) : '') + '</small></td>' +
           '<td class="num' + (d && +x.saldo < 0 ? ' neg' : '') + '">' + qtd(x.saldo) + '</td>' + (d ? celsDisp(x) : '<td class="num">' + qtd(x.fkn) + '</td>' +
           '<td class="num">' + (x.dif == null ? '—' : Math.abs(x.dif) < 0.0005 ? '✓' : '<strong>' + qtd(x.dif) + '</strong>') + '</td>') +
           '<td class="num">' + (x.custo == null ? '—' : R.moeda(x.custo)) + '</td><td>' + esc(quando(x.ultMov)) + '</td>' +

@@ -168,15 +168,30 @@
   ];
   function atalhos(l, quem) {
     quem = quem || {};
-    return ATALHOS.filter(a => !a[3] || quem[a[3]]).map(a => ({ id: a[0], nome: a[1], n: (l || []).filter(x => (a[0] === 'inativos' || x.situacao !== 'INATIVO') && a[2](x)).length }));
+    return ATALHOS.filter(a => !a[3] || quem[a[3]]).map(a => ({ id: a[0], nome: a[1], n: (l || []).filter(x => (a[0] === 'inativos' || (a[0] === 'todos' && quem.cuida) || x.situacao !== 'INATIVO') && a[2](x)).length }));
+  }
+  // 06/11/2026 (Wellington: "no estoque, para o comprador, tem que aparecer, porque às vezes ficou inativo por um tempo e a
+  // gente vai reativar"): o disponível do banco (crm_estoque_disponivel) só traz o inativo que ainda tem estoque, que é o que
+  // a vendedora pode vender. Para quem cuida do cadastro, os outros inativos entram pelo cadastro (crm_estoque), com o saldo
+  // do cadastro e nada reservado, no mesmo formato do disponível (a caixa fechada fica de fora: não tem o fator aqui).
+  function inativosFora(disp, estoque) {
+    const tem = new Set((disp || []).map(d => d.codigo));
+    return (estoque || []).filter(e => e.situacao === 'INATIVO' && !ehCaixa(e.codigo) && !tem.has(e.codigo)).map(e => {
+      const fi = num(e.estoque_atual != null ? e.estoque_atual : e.quantidade);
+      return { codigo: e.codigo, base: e.codigo, descricao: e.descricao, unidade: e.unidade, linha: e.linha, familia: e.familia, situacao: 'INATIVO',
+        fisico: fi, reservado: 0, disponivel: fi, a_caminho: 0, preco_venda: e.preco_venda, custo: e.custo_unit, localizacao: e.localizacao };
+    });
   }
   // Pesquisa da tela: todas as palavras em qualquer ordem (código, descrição, linha, família, marca, fabricante, código de
   // barras); um número de 8 a 14 dígitos também acha pelo código de barras inteiro. Inativo só no atalho "Inativos".
+  // 06/11/2026 (Wellington): para quem cuida do cadastro (`comInativos`), o inativo também entra em "Todos" e na pesquisa,
+  // com o selo "inativo", para achar e reativar; os outros atalhos (em falta, no mínimo…) continuam só com os ativos.
   function pesquisa(l, f) {
     f = f || {};
     const termos = sem(f.busca).split(/\s+/).filter(Boolean), at = ATALHOS.find(a => a[0] === (f.atalho || 'todos')) || ATALHOS[0];
+    const comInat = at[0] === 'inativos' || (f.comInativos && at[0] === 'todos');
     const out = (l || []).filter(x => {
-      if (at[0] !== 'inativos' && x.situacao === 'INATIVO') return false;
+      if (!comInat && x.situacao === 'INATIVO') return false;
       if (!at[2](x)) return false;
       if (f.linha && x.linha !== f.linha) return false;
       if (f.forn === '__sem' ? x.forn : f.forn && (!x.forn || x.forn.cod !== f.forn)) return false;
@@ -233,7 +248,7 @@
     const d = docsDe(sg.info);
     return qual === 'completo' ? d.ficha && d.fispq : qual === 'ficha' ? d.ficha : qual === 'fispq' ? d.fispq : qual === 'so-foto' ? !d.ficha && !d.fispq : true;
   }));
-  const API = { docsDe, filtraDocs, catalogo, estado, filtra, linhas, cadastro, atalhos, pesquisa, fornecedoresDe, selosDe, vizinhos, embalagens, margemDe, noMinimo, paraBuscar, custoEstimado, specsTexto, specsDe, bate, confiavel, textoWhats, CUSTO_PADRAO };
+  const API = { docsDe, filtraDocs, catalogo, estado, filtra, linhas, cadastro, atalhos, pesquisa, inativosFora, fornecedoresDe, selosDe, vizinhos, embalagens, margemDe, noMinimo, paraBuscar, custoEstimado, specsTexto, specsDe, bate, confiavel, textoWhats, CUSTO_PADRAO };
   raiz.CRMProdutos = API;
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
 })(typeof window !== 'undefined' ? window : globalThis);
@@ -278,7 +293,7 @@
       const cm = CRM.aCaminho ? await CRM.aCaminho.garante() : null;
       fotos = new Map(fs.map(x => [x.codigo, x]));
       fornLista = fornecedores;
-      lista = X.cadastro(X.catalogo({ disp, fotos: fs, infos, vendidos }), { eans, estoque, forn, fornecedores, fiscal });
+      lista = X.cadastro(X.catalogo({ disp: cuidaJa ? disp.concat(X.inativosFora(disp, estoque)) : disp, fotos: fs, infos, vendidos }), { eans, estoque, forn, fornecedores, fiscal });
       lista.forEach(x => { x.caminho = (cm && cm.get(x.codigo)) || null; });
       if (cuidaFotos()) {
         [sugs, ia] = await Promise.all([s.produtoSugestoes().catch(() => []), s.produtoBuscar({ acao: 'situacao' }).catch(() => null)]);
@@ -797,7 +812,7 @@
     try { m = raiz.localStorage.getItem(chaveModo()); } catch (e) { /* sem armazenamento: o padrão */ }
     return m === 'lista' || m === 'grade' ? m : (CRM.papel() === 'vendedor' ? 'grade' : 'lista');
   }
-  const visiveis = () => X.pesquisa(lista, pc);
+  const visiveis = () => X.pesquisa(lista, Object.assign({}, pc, { comInativos: quem().cuida }));
   const dataBR = iso => (iso ? R.dataBR(String(iso).slice(0, 10)) : '—');
   const pct = v => (v == null ? '—' : Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + '%');
   const emb = x => (x.unidade || 'UN') + (x.caixa && x.caixa.fator ? ' · CX c/ ' + qtd(x.caixa.fator) : '');
@@ -805,8 +820,7 @@
 
   function atalhosHTML() {
     const base0 = lista.filter(x => (!pc.linha || x.linha === pc.linha) && (!pc.forn || (pc.forn === '__sem' ? !x.forn : x.forn && x.forn.cod === pc.forn)));
-    const nb = X.pesquisa(base0, { busca: pc.busca, atalho: 'inativos' }).length;
-    return X.atalhos(X.pesquisa(base0, { busca: pc.busca, atalho: 'todos' }).concat(nb ? X.pesquisa(base0, { busca: pc.busca, atalho: 'inativos' }) : []), quem())
+    return X.atalhos(X.pesquisa(base0, { busca: pc.busca, atalho: 'todos', comInativos: true }), quem())
       .map(a => '<button type="button" class="chip-filtro' + (pc.atalho === a.id ? ' ativo' : '') + '" data-acao="pc-atalho" data-id="' + a.id + '" aria-pressed="' + (pc.atalho === a.id) + '">' + esc(a.nome) + ' <small>' + a.n + '</small></button>').join('');
   }
   function barra() {
@@ -841,7 +855,7 @@
     return (modo() === 'grade' ? '<div class="pf-grade">' + l.slice(0, lim).map(x => cartao(x, 'tela')).join('') + '</div>' : tabelaLista(l.slice(0, lim))) +
       (l.length > lim ? '<p class="acoes"><button type="button" class="btn sec" data-acao="pc-mais">Mostrar mais (' + (l.length - lim) + ')</button></p>' : '');
   }
-  const contagem = () => { const n = visiveis().length, t = lista.filter(x => x.situacao !== 'INATIVO').length; return n + ' de ' + t.toLocaleString('pt-BR') + ' produtos'; };
+  const contagem = () => { const n = visiveis().length, t = lista.filter(x => quem().cuida || x.situacao !== 'INATIVO').length; return n + ' de ' + t.toLocaleString('pt-BR') + ' produtos'; };
 
   // ----------------------------------------------------------------- página do produto
   const ABAS_PROD = () => [['geral', 'Geral'], ['precos', 'Preços'], ['estoque', 'Estoque'], ['vendas', 'Vendas']]
@@ -863,6 +877,7 @@
           ' · ' + esc(emb(x)) + (x.linha ? ' · ' + esc(R.nomeDeItem(x.linha)) : '') + (inf.marca ? ' · marca ' + esc(inf.marca) : '') + '</p>' +
           '<p class="acoes">' + (!CRM.foraDeVendas() && CRM.pedidos && CRM.pedidos.incluirItem ? '<button type="button" class="btn" data-acao="pf-pedido" data-id="' + esc(x.codigo) + '">+ Pedido</button> ' : '') +
             (!CRM.foraDeVendas() ? '<a class="btn sec" href="' + esc('https://wa.me/?text=' + encodeURIComponent(X.textoWhats(Object.assign({ nome: nome(x) }, x), u, inf.ficha_caminho ? st().fotoUrl(inf.ficha_caminho) : inf.ficha_url || ''))) + '" target="_blank" rel="noopener noreferrer">📲 Mandar foto e preço pelo WhatsApp</a> ' : '') +
+            (podeCad() && dono && x.situacao === 'INATIVO' ? '<button type="button" class="btn" data-acao="pc-reativar" data-id="' + esc(x.codigo) + '">Reativar</button> ' : '') +
             (podeCad() && dono ? '<button type="button" class="btn sec" data-acao="pc-editar" data-id="' + esc(x.codigo) + '">Editar o cadastro</button> ' : '') +
             (cuidaFotos() ? '<button type="button" class="btn sec" data-acao="pf-info-editar" data-id="' + esc(x.codigo) + '">Editar a ficha</button>' : '') + '</p></div>' +
         '<div class="kpis pc-kpis"><div class="kpi' + (x.disponivel > 0 ? '' : ' alerta') + '"><span>Disponível</span><strong>' + qtd(Math.floor(x.disponivel * 1000) / 1000) + '</strong><small>' + esc(x.unidade || '') + '</small></div>' +
@@ -1130,6 +1145,11 @@
   Object.assign(CRM.acoes, {
     'pc-novo': () => formCadastro(null),
     'pc-editar': id => formCadastro(id),
+    // 06/11/2026: o inativo volta a aparecer para vender (pesquisa, pedido, catálogo) com um clique
+    'pc-reativar': async id => {
+      if (!confirm('Reativar o produto ' + id + '?\n\nEle volta a aparecer para as vendedoras (catálogo, pedido e orçamento).')) return;
+      try { await st().produtoGravar(id, { situacao: 'ATIVO' }); CRM.toast('Produto ' + id + ' reativado.'); lista = null; det.delete(id); pc.aberto = id; carrega(); } catch (e) { CRM.falhou(e); }
+    },
     'pc-dono': async () => {
       if (!confirm('Passar o cadastro de produtos para o CRM?\n\nDaí em diante a listagem de produtos do FKN não muda mais nada no CRM (nem preço, nem produto novo, nem a conferência do estoque) e o cadastro passa a ser feito só aqui, pelo comprador, pela logística e pelo administrador.\n\nFaça isso quando o FKN parar de emitir nota. Não tem volta pela tela.')) return;
       try { await st().produtosPassarAoCrm(); dono = true; CRM.toast('O cadastro de produtos agora é do CRM.'); CRM.render(); } catch (e) { CRM.falhou(e); }

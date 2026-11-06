@@ -81,3 +81,20 @@ test('abaixoDaTabela: o sinal para a vendedora (que não vê a margem)', () => {
   assert.equal(P.abaixoDaTabela(P.linha({ quantidade: 1, preco: 8.0, preco_tab: 9.24 }, tab)), true);
   assert.equal(P.abaixoDaTabela(P.linha({ quantidade: 1, preco: 8.0 }, tab)), false); // sem preço de tabela: não diz
 });
+
+// 06/11/2026 (Wellington): o comprador acha o inativo (com ou sem estoque) para reativar; a vendedora continua sem ver
+test('inativos para quem cuida do cadastro: entram pelo cadastro e aparecem em "Todos" e na pesquisa', () => {
+  const est = [{ codigo: '130021', descricao: 'CABO 1,80MT MADEIRA C/ ROSCA', unidade: 'UN', situacao: 'INATIVO', estoque_atual: 0, preco_venda: 9.5, custo_unit: 4 },
+    { codigo: '150094.1', descricao: 'COPO CX', situacao: 'INATIVO' }, { codigo: '030045', situacao: 'INATIVO' }, { codigo: '370045', situacao: 'ATIVO' }];
+  const fora = X.inativosFora(disp, est);
+  assert.deepEqual(fora.map(x => x.codigo), ['130021']); // a caixa e o que já veio no disponível ficam de fora
+  assert.equal(fora[0].disponivel, 0);
+  const l = X.cadastro(X.catalogo({ disp: disp.concat(fora) }), ex);
+  assert.deepEqual(X.pesquisa(l, {}).map(x => x.codigo), ['150034', '280025', '370045']); // vendedora: só ativos
+  assert.deepEqual(X.pesquisa(l, { comInativos: true }).map(x => x.codigo), ['030045', '130021', '150034', '280025', '370045']);
+  assert.deepEqual(X.pesquisa(l, { busca: 'cabo', comInativos: true }).map(x => x.codigo), ['130021']);
+  assert.deepEqual(X.pesquisa(l, { atalho: 'falta', comInativos: true }).map(x => x.codigo), []); // atalhos de trabalho seguem só com ativos
+  const n = Object.fromEntries(X.atalhos(l, { cuida: true }).map(a => [a.id, a.n]));
+  assert.equal(n.todos, 5); assert.equal(n.inativos, 2);
+  assert.equal(Object.fromEntries(X.atalhos(l, {}).map(a => [a.id, a.n])).todos, 3);
+});
