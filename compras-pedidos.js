@@ -159,7 +159,8 @@
       '</tbody></table></div>' +
       '<p class="dica">Registrado em ' + esc(br(R.diaLocal(p.criado_em))) + (p.criado_por ? ' por ' + esc(CRM.nomeUsuario(p.criado_por)) : '') + ' · previsão do pedido ' + esc(br(p.previsao)) +
         (p.ultNota ? ' · última nota do fornecedor em ' + esc(br(R.diaLocal(p.ultNota))) + ' (chega ~' + X.DIAS_DEPOIS_DA_NOTA + ' dias depois)' : '') + (p.obs ? ' · ' + esc(p.obs) : '') + '</p>' +
-      (p.aberto ? '<p class="acoes"><button type="button" class="btn sec" data-acao="cp-previsao" data-id="' + p.id + '">Mudar a previsão</button> ' +
+      (p.aberto ? '<p class="acoes"><button type="button" class="btn" data-acao="cp-editar" data-id="' + p.id + '">✎ Editar o pedido</button> ' +
+        '<button type="button" class="btn sec" data-acao="cp-previsao" data-id="' + p.id + '">Mudar a previsão</button> ' +
         (tel ? '<a class="btn sec" href="' + esc(tel) + '" target="_blank" rel="noopener noreferrer">📲 Cobrar o fornecedor pelo WhatsApp</a> ' : '') +
         '<button type="button" class="btn sec" data-acao="cp-chegou" data-id="' + p.id + '">Chegou tudo</button> ' +
         '<button type="button" class="btn sec" data-acao="cp-cancelar-resto" data-id="' + p.id + '">Cancelar o que falta</button> ' +
@@ -328,7 +329,90 @@
       }
     });
   }
-  CRM.comprasPedidos = { registrar, novoPedido, recarregar: () => { dados = null; } };
+  // ----------------------------------------------------------------- editar o pedido lançado (06/11/2026, áudio do Wellington:
+  // "quando eu lançar um pedido e precisar alterar, tenho que conseguir abrir ele e editar, sem que ele seja cancelado").
+  // Tudo de uma vez: quantidade e custo de cada item (0 tira), produtos novos e a previsão; grava tudo ou nada
+  // (crm_compra_pedido_editar) e a mudança fica anotada na observação do pedido.
+  async function editarPedido(id) {
+    const p = dados && dados.lista.find(x => x.id === Number(id)); if (!p) return;
+    let est = [];
+    try { est = st().estoque ? await st().estoque() : []; } catch (e) { CRM.falhou(e); return; }
+    const prods = new Map();
+    (est || []).forEach(e => { const c = String(e.codigo || '').replace(/\.\d+$/, ''); if (c && !prods.has(c) && e.situacao !== 'INATIVO') prods.set(c, e); });
+    const lp = [...prods.values()].sort((a, b) => String(a.descricao).localeCompare(String(b.descricao), 'pt-BR'));
+    const acha = v => {
+      const t = String(v || '').trim(); if (!t) return null;
+      const c = t.split(' ')[0].replace(/\.\d+$/, '');
+      if (prods.has(c)) return prods.get(c);
+      if (/^\d{1,5}$/.test(c) && prods.has(c.padStart(6, '0'))) return prods.get(c.padStart(6, '0'));
+      const u = t.toUpperCase(); return lp.find(e => String(e.descricao).toUpperCase() === u) || null;
+    };
+    const its = p.itens.filter(i => Math.max(num(i.quantidade) - num(i.cancelado), 0) > 0 || num(i.recebido) > 0);
+    const linhaNova = k => '<tr><td><input list="cpEdLista" style="width:100%;min-width:240px" data-ce-cod="' + k + '" placeholder="código ou descrição" aria-label="Produto novo ' + (k + 1) + '"><small data-ce-desc="' + k + '"></small></td>' +
+      '<td class="num"><input type="number" min="0" step="any" class="cp-qtd" data-ce-q="' + k + '" aria-label="Quantidade do produto novo ' + (k + 1) + '"></td><td class="num">—</td>' +
+      '<td class="num"><input type="number" min="0" step="any" class="cp-qtd" data-ce-c="' + k + '" aria-label="Custo do produto novo ' + (k + 1) + '"></td></tr>';
+    let n = 3;
+    CRM.abrirForm({
+      titulo: 'Editar o pedido nº ' + p.id + ': ' + R.nomeDeItem(p.fornecedor_nome), largura: 'extra', salvarTexto: 'Salvar as mudanças', semFoco: true,
+      intro: 'Mude a quantidade ou o custo de cada produto, inclua produtos novos e troque a previsão. Quantidade 0 tira o produto do pedido; não dá para pôr menos do que já entrou. ' +
+        'O pedido continua o mesmo (não é cancelado) e a mudança fica anotada nele.' + (p.aprovacao === 'aprovado' ? ' Se o total subir com produto novo, o pedido volta para a aprovação.' : ''),
+      htmlAntes: '<datalist id="cpEdLista">' + lp.map(e => '<option value="' + esc(String(e.codigo).replace(/\.\d+$/, '')) + '">' + esc(e.descricao) + '</option>').join('') + '</datalist>' +
+        '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Produto</th><th class="num">Quantidade</th><th class="num">Já entrou</th><th class="num">Custo un.</th></tr></thead><tbody id="cpEdLinhas">' +
+        its.map(i => '<tr><td>' + esc(R.nomeDeItem(i.descricao || i.codigo)) + ' <small>' + esc(i.codigo) + ' · ' + esc(i.unidade || '') + '</small></td>' +
+          '<td class="num"><input type="number" min="' + esc(num(i.recebido)) + '" step="any" class="cp-qtd" data-ce-ordem="' + i.ordem + '" value="' + esc(num(i.quantidade) - num(i.cancelado)) + '" aria-label="Quantidade de ' + esc(R.nomeDeItem(i.descricao || i.codigo)) + '"></td>' +
+          '<td class="num">' + (i.recebido ? qtd(i.recebido) : '—') + '</td>' +
+          '<td class="num"><input type="number" min="0" step="any" class="cp-qtd" data-ce-custo="' + i.ordem + '" value="' + (i.custo_unit != null ? esc(num(i.custo_unit)) : '') + '" aria-label="Custo de ' + esc(R.nomeDeItem(i.descricao || i.codigo)) + '"></td></tr>').join('') +
+        [0, 1, 2].map(linhaNova).join('') + '</tbody></table></div><p><button type="button" class="btn sec" id="cpEdMais">+ incluir mais produtos</button></p>',
+      campos: [{ nome: 'previsao', rotulo: 'Chega em (previsão)', tipo: 'date', obrigatorio: true },
+        { nome: 'obs', rotulo: 'Motivo da mudança (opcional)', largo: true, dica: 'ex.: o fornecedor só tinha 6; incluí o detergente que faltou' }],
+      valores: { previsao: p.previsao || p.previsaoEf, obs: '' },
+      extras: form => {
+        form.addEventListener('change', ev => {
+          const k = ev.target.dataset && ev.target.dataset.ceCod; if (k == null) return;
+          const e = acha(ev.target.value), d = form.querySelector('[data-ce-desc="' + k + '"]'), c = form.querySelector('[data-ce-c="' + k + '"]');
+          if (e) { ev.target.value = String(e.codigo).replace(/\.\d+$/, ''); d.textContent = R.nomeDeItem(e.descricao) + ' · ' + (e.unidade || '') + (e.estoque_atual != null ? ' · saldo ' + qtd(e.estoque_atual) : '');
+            const cu = Number(e.custo_compra) > 0 ? Number(e.custo_compra) : Number(e.custo_unit) > 0 ? Number(e.custo_unit) : 0;
+            if (c && !c.value && cu > 0) c.value = Math.round(cu * 10000) / 10000; }
+          else d.textContent = ev.target.value.trim() ? 'produto não encontrado no cadastro' : '';
+        });
+        // Enter num campo não grava o pedido pela metade (a lição da NF 23065): só pula para o próximo campo
+        form.addEventListener('keydown', ev => {
+          if (ev.key !== 'Enter' || ev.target.tagName !== 'INPUT') return;
+          ev.preventDefault();
+          const cs = [...form.querySelectorAll('input:not([type=hidden])')], k = cs.indexOf(ev.target);
+          if (cs[k + 1]) cs[k + 1].focus();
+        });
+        form.querySelector('#cpEdMais').addEventListener('click', () => { const tb = form.querySelector('#cpEdLinhas'); for (let i = 0; i < 3; i++) tb.insertAdjacentHTML('beforeend', linhaNova(n++)); });
+      },
+      aoSalvar: async (v, form) => {
+        const itens = [], ruins = [], tirados = [];
+        its.forEach(i => {
+          const q = form.querySelector('[data-ce-ordem="' + i.ordem + '"]').value, cu = form.querySelector('[data-ce-custo="' + i.ordem + '"]').value;
+          const qn = q === '' ? 0 : Number(q);
+          if (!(qn >= 0)) { ruins.push(i.codigo + ' com quantidade inválida'); return; }
+          if (qn < num(i.recebido)) { ruins.push(i.codigo + ': já entraram ' + qtd(i.recebido)); return; }
+          if (qn === 0) tirados.push(R.nomeDeItem(i.descricao || i.codigo));
+          itens.push({ ordem: i.ordem, quantidade: qn + num(i.cancelado), custo_unit: cu === '' ? null : Number(cu) });
+        });
+        [...form.querySelectorAll('[data-ce-cod]')].forEach(el => {
+          const k = el.dataset.ceCod, q = Number(form.querySelector('[data-ce-q="' + k + '"]').value) || 0, cu = form.querySelector('[data-ce-c="' + k + '"]').value;
+          if (!el.value.trim() && !q) return;
+          const e = acha(el.value);
+          if (!e) { ruins.push(el.value.trim() || 'linha nova ' + (Number(k) + 1)); return; }
+          if (q <= 0) { ruins.push(String(e.codigo) + ' sem quantidade'); return; }
+          itens.push({ codigo: String(e.codigo).replace(/\.\d+$/, ''), descricao: e.descricao, unidade: e.unidade || null, quantidade: q, custo_unit: cu === '' ? null : Number(cu) });
+        });
+        if (ruins.length) throw new Error('confira: ' + ruins.join(', '));
+        if (tirados.length && !confirm('Tirar do pedido: ' + tirados.join(', ') + '?')) return false;
+        const r = await st().compraPedidoEditar(p.id, { previsao: v.previsao || null, obs_nova: v.obs || null, itens });
+        dados = null; CRM.aCaminho.limpa(); if (CRM.comprasRecarregar) CRM.comprasRecarregar(); carrega();
+        const nada = r && !r.novos && !r.mudados && (v.previsao || null) === (p.previsao || null) && !v.obs;
+        CRM.toast(nada ? 'Nada mudou no pedido.' : r && r.aprovacao === 'aguardando' && p.aprovacao === 'aprovado' ? 'Pedido nº ' + p.id + ' atualizado e de volta à APROVAÇÃO (o total subiu): espere antes de mandar ao fornecedor.'
+          : 'Pedido nº ' + p.id + ' atualizado: as vendedoras já veem as quantidades novas a caminho.');
+      }
+    });
+  }
+  CRM.comprasPedidos = { registrar, novoPedido, editarPedido, recarregar: () => { dados = null; } };
 
   async function aprovar(id, decisao, motivo) {
     const r = await st().compraPedidoAprovar(Number(id), decisao, motivo || null);
@@ -342,6 +426,7 @@
   }
   Object.assign(CRM.acoes, {
     'cp-novo': () => novoPedido(),
+    'cp-editar': id => editarPedido(id),
     // mudar a quantidade ou o custo de um item (04/11/2026, pedido do Wellington: sem cancelar o pedido)
     'cp-item': chave => {
       const [id, ordem] = String(chave).split(':').map(Number);

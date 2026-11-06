@@ -575,6 +575,7 @@
   // desfazer a entrada inteira (06/11/2026): estorno do estoque, contas a pagar abertas apagadas e a nota volta a pendente
   Supa.prototype.compraDesfazer = async function (id, motivo) { return unwrap(await this.sb.rpc('crm_compra_desfazer', { p_compra: id, p_motivo: motivo })); };
   Supa.prototype.estoqueSaidaAvulsa = async function (codigo, quantidade, motivo) { return unwrap(await this.sb.rpc('crm_estoque_saida_avulsa', { p_codigo: codigo, p_quantidade: quantidade, p_motivo: motivo })); };
+  Supa.prototype.compraPedidoEditar = async function (id, p) { return unwrap(await this.sb.rpc('crm_compra_pedido_editar', { p_id: Number(id), p })); };
   Supa.prototype.compraPedidoItem = async function (id, ordem, quantidade, custo) { return unwrap(await this.sb.rpc('crm_compra_pedido_item', { p_id: id, p_ordem: ordem, p_quantidade: quantidade, p_custo: custo == null ? null : custo })); };
   Supa.prototype.estoqueAvulsaEstornar = async function (id, motivo) { return unwrap(await this.sb.rpc('crm_estoque_avulsa_estornar', { p_id: id, p_motivo: motivo })); };
   Supa.prototype.comprovanteEnviar = async function (arquivo, hoje) {
@@ -1864,6 +1865,24 @@
     else if (acao === 'cancelar') p.situacao = 'cancelado';
     lsGrava('crm_compra_pedidos', l);
     return p;
+  };
+  Local.prototype.compraPedidoEditar = async function (id, x) {
+    const l = lsLe('crm_compra_pedidos', []), p = l.find(y => y.id === Number(id));
+    if (!p || p.situacao !== 'aberto') throw new Error('o pedido já foi fechado ou cancelado');
+    let novos = 0, mudados = 0;
+    (x.itens || []).forEach(i => {
+      if (i.ordem == null) { if (Number(i.quantidade) > 0) { p.itens.push(Object.assign({ ordem: p.itens.reduce((m, y) => Math.max(m, y.ordem), 0) + 1, cancelado: 0 }, i)); novos++; } return; }
+      const it = p.itens.find(y => y.ordem === i.ordem); if (!it) return;
+      if (Number(i.quantidade) === Number(it.quantidade) && (i.custo_unit == null || Number(i.custo_unit) === Number(it.custo_unit))) return;
+      mudados++;
+      if (Number(i.quantidade) === 0) p.itens = p.itens.filter(y => y !== it);
+      else { it.quantidade = Number(i.quantidade); if (i.custo_unit != null) it.custo_unit = Number(i.custo_unit); }
+    });
+    if (!p.itens.length) throw new Error('o pedido ficaria sem itens: cancele o pedido');
+    if (x.previsao) p.previsao = x.previsao;
+    if (x.obs_nova) p.obs = [p.obs, x.obs_nova].filter(Boolean).join(' · ');
+    lsGrava('crm_compra_pedidos', l);
+    return Object.assign({}, p, { itens: undefined, novos, mudados });
   };
   Local.prototype.aCaminho = async function () {
     return [].concat(...lsLe('crm_compra_pedidos', []).filter(p => p.situacao === 'aberto').map(p => (p.itens || []).map(i => ({

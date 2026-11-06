@@ -7952,6 +7952,8 @@ begin
   update public.crm_prospec_sugestoes s set situacao = 'expirada'
    where s.situacao in ('nova', 'amanha') and s.respondeu_em is null
      and (s.mandou_em is null or s.mandou_em < now() - interval '7 days')   -- 02/11/2026: a mandada espera 7 dias pela resposta
+     -- 06/11/2026: com anotação nos últimos 7 dias também não expira (a vendedora está tentando)
+     and not exists (select 1 from jsonb_array_elements(coalesce(s.anotacoes, '[]'::jsonb)) an where (an->>'em')::timestamptz > now() - interval '7 days')
      and (select count(distinct x.dia) from public.crm_prospec_sugestoes x where x.dia > s.dia and x.dia < v_dia) >= 2;
   get diagnostics expiradas = row_count;
 
@@ -9581,6 +9583,79 @@ begin
 end $$;
 revoke all on function public.crm_compra_pedido_item(bigint, integer, numeric, numeric) from public, anon;
 grant execute on function public.crm_compra_pedido_item(bigint, integer, numeric, numeric) to authenticated;
+
+-- 06/11/2026 (Wellington, áudio): "quando eu lançar um pedido e precisar alterar, tenho que conseguir abrir e editar, sem
+-- que ele seja cancelado". Editar o pedido ao fornecedor inteiro de uma vez: previsão, quantidade e custo de cada item,
+-- tirar item (quantidade 0) e incluir produto novo. Usa as mesmas regras do crm_compra_pedido_item (não dá para pôr menos
+-- do que já entrou, a mudança fica anotada na observação, a aprovação volta a "aguardando" se o total subir) e grava tudo
+-- ou nada. Só administrador e comprador; só pedido em aberto.
+-- p = { previsao: 'aaaa-mm-dd' | null, obs_nova: texto | null,
+--       itens: [ { ordem: n, quantidade, custo_unit } (item que já existe) | { codigo, descricao, unidade, quantidade, custo_unit } (novo) ] }
+create or replace function public.crm_compra_pedido_editar(p_id bigint, p jsonb)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare r public.crm_compra_pedidos; x jsonb; it public.crm_compra_pedido_itens; cod text; q numeric; cu numeric; k int; novos int := 0; mudou int := 0;
+  tot numeric; log text := '';
+begin
+  if not (public.crm_eh_admin() or public.crm_eh_comprador()) then raise exception 'só o administrador e o comprador mexem no pedido ao fornecedor'; end if;
+  select * into r from public.crm_compra_pedidos where id = p_id for update;
+  if r.id is null then raise exception 'pedido não encontrado'; end if;
+  if r.situacao <> 'aberto' then raise exception 'o pedido já foi fechado ou cancelado'; end if;
+
+  -- 1) produtos novos primeiro (assim dá para trocar o único item por outro)
+  for x in select value from jsonb_array_elements(coalesce(p->'itens', '[]'::jsonb)) loop
+    if nullif(x->>'ordem', '') is not null then continue; end if;
+    q := round(coalesce(nullif(x->>'quantidade', '')::numeric, 0), 3);
+    if q <= 0 then continue; end if;
+    cod := regexp_replace(btrim(coalesce(x->>'codigo', '')), '\.\d+$', '');
+    if cod = '' then raise exception 'item novo sem código'; end if;
+    if exists (select 1 from public.crm_compra_pedido_itens where pedido_id = p_id and codigo = cod) then
+      raise exception 'o produto % já está no pedido: mude a quantidade dele', cod; end if;
+    cu := nullif(x->>'custo_unit', '')::numeric;
+    if cu is not null and cu < 0 then raise exception 'custo inválido'; end if;
+    select coalesce(max(ordem), 0) + 1 into k from public.crm_compra_pedido_itens where pedido_id = p_id;
+    insert into public.crm_compra_pedido_itens (pedido_id, ordem, codigo, descricao, unidade, quantidade, custo_unit)
+      values (p_id, k, cod, nullif(btrim(coalesce(x->>'descricao', '')), ''), nullif(btrim(coalesce(x->>'unidade', '')), ''), q, cu);
+    novos := novos + 1;
+    log := concat_ws(' · ', nullif(log, ''), 'incluído ' || cod || ': ' || trim(to_char(q, 'FM999999990.###')));
+  end loop;
+
+  -- 2) itens que já existiam: só o que mudou passa pelo crm_compra_pedido_item (regras e anotação de cada um)
+  for x in select value from jsonb_array_elements(coalesce(p->'itens', '[]'::jsonb)) loop
+    if nullif(x->>'ordem', '') is null then continue; end if;
+    select * into it from public.crm_compra_pedido_itens where pedido_id = p_id and ordem = (x->>'ordem')::int;
+    if it.pedido_id is null then raise exception 'item % não é deste pedido', x->>'ordem'; end if;
+    q := round(coalesce(nullif(x->>'quantidade', '')::numeric, -1), 3);
+    cu := nullif(x->>'custo_unit', '')::numeric;
+    if q = it.quantidade and (cu is null or cu = it.custo_unit) then continue; end if;
+    perform public.crm_compra_pedido_item(p_id, it.ordem, q, cu);
+    mudou := mudou + 1;
+  end loop;
+
+  if nullif(p->>'previsao', '') is not null and (p->>'previsao')::date is distinct from r.previsao then
+    update public.crm_compra_pedidos set previsao = (p->>'previsao')::date where id = p_id;
+    log := concat_ws(' · ', nullif(log, ''), 'previsão ' || to_char(r.previsao, 'DD/MM') || ' → ' || to_char((p->>'previsao')::date, 'DD/MM'));
+  end if;
+  if nullif(btrim(coalesce(p->>'obs_nova', '')), '') is not null then
+    log := concat_ws(' · ', nullif(log, ''), btrim(p->>'obs_nova'));
+  end if;
+  if not exists (select 1 from public.crm_compra_pedido_itens where pedido_id = p_id) then raise exception 'o pedido ficaria sem itens: cancele o pedido'; end if;
+
+  select * into r from public.crm_compra_pedidos where id = p_id;
+  if novos > 0 and r.aprovacao is not null then
+    select coalesce(sum(greatest(quantidade - cancelado, 0) * coalesce(custo_unit, 0)), 0) into tot from public.crm_compra_pedido_itens where pedido_id = p_id;
+    if tot > coalesce(r.aprovacao_total, 0) + 0.009 and r.aprovacao = 'aprovado' then
+      update public.crm_compra_pedidos set aprovacao = 'aguardando', aprovacao_total = round(tot, 2), aprovado_em = null, aprovado_por = null where id = p_id;
+    elsif r.aprovacao = 'aguardando' then
+      update public.crm_compra_pedidos set aprovacao_total = round(tot, 2) where id = p_id;
+    end if;
+  end if;
+  update public.crm_compra_pedidos set atualizado_em = now(),
+    obs = case when log = '' then obs else left(concat_ws(' · ', nullif(obs, ''), to_char(now() at time zone 'America/Sao_Paulo', 'DD/MM HH24:MI') || ' ' || log), 1000) end
+   where id = p_id returning * into r;
+  return to_jsonb(r) || jsonb_build_object('novos', novos, 'mudados', mudou);
+end $$;
+revoke all on function public.crm_compra_pedido_editar(bigint, jsonb) from public, anon;
+grant execute on function public.crm_compra_pedido_editar(bigint, jsonb) to authenticated;
 
 -- ============================================================ 04/11/2026: corrigir a entrada de nota de compra já lançada
 -- Corrigir a entrada de uma nota de compra já lançada (04/11/2026, pedido do Wellington: "preciso que deixe eu entrar e editar
