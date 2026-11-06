@@ -38,13 +38,21 @@ test('o lote leva só o CNPJ do emitente (sem a IE de SP), município com 5 díg
   assert.match(x, /<contribuinteEmitente><identificacao><CNPJ>11222333000181<\/CNPJ><\/identificacao><razaoSocial>EMPRESA EXEMPLO DE LIMPEZA LTDA<\/razaoSocial><endereco>Rua Exemplo, 100<\/endereco><municipio>48708<\/municipio><uf>SP<\/uf><cep>09700000<\/cep><telefone>1140000000<\/telefone><\/contribuinteEmitente>/);
   assert.ok(!/<IE>/.test(x));
   assert.match(x, /<documentoOrigem tipo="22">35261111222333000181550010000028621000000010<\/documentoOrigem>/);
-  assert.match(x, /<valor tipo="11">52\.30<\/valor><valor tipo="21">52\.30<\/valor>/);
+  assert.match(x, /<dataVencimento>2026-11-06<\/dataVencimento><valor tipo="11">52\.30<\/valor><contribuinteDestinatario>/);   // só o principal (RS: valorExigido "P")
+  assert.match(G.montaLote(EMIT, Object.assign({}, GUIA, { total: true })), /<valor tipo="11">52\.30<\/valor><valor tipo="21">52\.30<\/valor>/);
   assert.match(x, /<contribuinteDestinatario><identificacao><CPF>12345678909<\/CPF><\/identificacao><razaoSocial>Fulano de Tal<\/razaoSocial><municipio>14902<\/municipio><\/contribuinteDestinatario>/);
   assert.match(x, /<campoExtra><codigo>74<\/codigo><valor>35261111222333000181550010000028621000000010<\/valor><\/campoExtra>/);
   assert.match(x, /<valorGNRE>52\.30<\/valorGNRE><dataPagamento>2026-11-06<\/dataPagamento><identificadorGuia>2862<\/identificadorGuia><\/TDadosGNRE><\/guias><\/TLote_GNRE>$/);
   assert.ok(!/>\s+</.test(x), 'sem espaço entre as tags');
   const f = G.montaLote(EMIT, Object.assign({}, GUIA, { fcpJunto: true, valorFcp: 5 }));
-  assert.match(f, /<valor tipo="11">52\.30<\/valor><valor tipo="12">5\.00<\/valor><valor tipo="21">57\.30<\/valor><valor tipo="22">5\.00<\/valor>/);
+  assert.match(f, /<valor tipo="11">52\.30<\/valor><valor tipo="12">5\.00<\/valor><contribuinteDestinatario>/);
+  // FCP do RS como 2º item da mesma guia (receita 100129), um valorGNRE com a soma
+  const dois = G.montaLote(EMIT, Object.assign({}, GUIA, { itens: [{ receita: '100102', valor: 10.5 }, { receita: '100129', valor: 1.5 }] }));
+  assert.strictEqual((dois.match(/<item>/g) || []).length, 2);
+  assert.match(dois, /<item><receita>100102<\/receita>[\s\S]*<valor tipo="11">10\.50<\/valor>[\s\S]*<\/item><item><receita>100129<\/receita>[\s\S]*<valor tipo="11">1\.50<\/valor>/);
+  assert.match(dois, /<valorGNRE>12\.00<\/valorGNRE>/);
+  if (temXmllint) valida(dois, 'lote_gnre_v2.00.xsd');
+  assert.match(G.montaLote(EMIT, Object.assign({}, GUIA, { convenio: 'EC 87/2015' })), /<valor tipo="11">52\.30<\/valor><convenio>EC 87\/2015<\/convenio><contribuinteDestinatario>/);
   assert.match(f, /<valorGNRE>57\.30<\/valorGNRE>/);
   assert.throws(() => G.montaLote(EMIT, Object.assign({}, GUIA, { valor: 0 })), /valor/);
   assert.throws(() => G.montaLote({ cnpj: '' }, GUIA), /CNPJ/);
@@ -86,7 +94,7 @@ test('a rota recusa ação desconhecida e recibo inválido', async () => {
   await assert.rejects(G.resultado({ ambiente: 'producao' }, '123'), /recibo/);
 });
 
-test('o robô monta as guias do RS pela nota (DIFAL e, com FCP, a guia própria 100129) e lê o resultado do lote', async () => {
+test('o robô monta a guia do RS pela nota (DIFAL e, com FCP, o 2º item 100129) e lê o resultado do lote', async () => {
   const R = await import('../supabase/functions/crm-gnre/guia.js');
   const nfe = { id: 'x', ambiente: 'producao', serie: 1, numero: 2862, chave: CHAVE, totais: { vICMSUFDest: 3.94, vFCPUFDest: 0 },
     nota: { dest: { doc: '24912562000170', nome: 'Cliente de Porto Alegre', endereco: { uf: 'RS', cMun: '4314902' } } } };
@@ -98,12 +106,19 @@ test('o robô monta as guias do RS pela nota (DIFAL e, com FCP, a guia própria 
   assert.deepStrictEqual([m.uf, m.guias[0].valor, m.ambiente, g.receita, g.docTipo, g.identificador, g.destinatario.cnpj, g.referencia], ['RS', 3.94, 'producao', '100102', '22', '2862', '24912562000170', null]);
   assert.deepStrictEqual(g.camposExtras, [{ codigo: '74', valor: CHAVE }]);
   if (temXmllint) valida(G.montaLote(m.emitente, [g]), 'lote_gnre_v2.00.xsd');
-  // aromatizante para o RS: 25% + FCP 2% (AMPARA) → duas guias, cada uma com o seu valor
+  // aromatizante para o RS: 25% + FCP 2% (AMPARA) → UMA guia com o FCP como 2º item (receita 100129)
   const f = R.montaGuias(Object.assign({}, nfe, { totais: { vICMSUFDest: 10.5, vFCPUFDest: 1.5 } }), cfg, '2026-11-06');
-  assert.deepStrictEqual(f.guias.map(x => [x.receita, x.valor, x.guia.valor, x.guia.fcpJunto]), [['100102', 10.5, 10.5, false], ['100129', 1.5, 1.5, false]]);
-  if (temXmllint) valida(G.montaLote(f.emitente, [f.guias[1].guia]), 'lote_gnre_v2.00.xsd');
+  assert.strictEqual(f.guias.length, 1);
+  assert.deepStrictEqual([f.guias[0].receita, f.guias[0].valor, f.guias[0].valorFcp], ['100102', 10.5, 1.5]);
+  assert.deepStrictEqual(f.guias[0].guia.itens, [{ receita: '100102', valor: 10.5 }, { receita: '100129', valor: 1.5 }]);
+  const lf = G.montaLote(f.emitente, [f.guias[0].guia]);
+  assert.match(lf, /<valorGNRE>12\.00<\/valorGNRE>/);
+  if (temXmllint) valida(lf, 'lote_gnre_v2.00.xsd');
+  const sep = R.montaGuias(Object.assign({}, nfe, { totais: { vICMSUFDest: 10.5, vFCPUFDest: 1.5 } }), { gnre: { uf: { RS: { fcp: 'separada' } } }, fiscal: cfg.fiscal }, '2026-11-06');
+  assert.deepStrictEqual(sep.guias.map(x => [x.receita, x.valor]), [['100102', 10.5], ['100129', 1.5]]);
   const j = R.montaGuias(Object.assign({}, nfe, { totais: { vICMSUFDest: 10.5, vFCPUFDest: 1.5 } }), { gnre: { uf: { RS: { fcp: 'junto' } } }, fiscal: cfg.fiscal }, '2026-11-06');
-  assert.deepStrictEqual(j.guias.map(x => [x.receita, x.valor, x.guia.fcpJunto]), [['100102', 12, true]]);
+  assert.deepStrictEqual(j.guias.map(x => [x.receita, x.valor, x.valorFcp, x.guia.fcpJunto]), [['100102', 10.5, 1.5, true]]);
+  assert.match(G.montaLote(j.emitente, [j.guias[0].guia]), /<valor tipo="11">10\.50<\/valor><valor tipo="12">1\.50<\/valor>[\s\S]*<valorGNRE>12\.00<\/valorGNRE>/);
   assert.match(R.montaGuias(Object.assign({}, nfe, { nota: { dest: { endereco: { uf: 'SP' } } } }), cfg, '2026-11-06').erro, /não é para outra UF/);
   assert.match(R.montaGuias(Object.assign({}, nfe, { nota: { dest: { endereco: { uf: 'MG' } } } }), cfg, '2026-11-06').erro, /ainda não foi conferida/);
   assert.match(R.montaGuias(Object.assign({}, nfe, { totais: { vICMSUFDest: 3, vFCPUFDest: 1 } }), { gnre: { uf: { RS: { fcp: null } } }, fiscal: cfg.fiscal }, '2026-11-06').erro, /FCP/);

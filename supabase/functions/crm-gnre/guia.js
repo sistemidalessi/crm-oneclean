@@ -4,12 +4,15 @@
 // e Unimake). Hoje só o RS tem venda a consumidor com DIFAL (4 notas em 2026). Outra UF só sai depois de conferida
 // (crm_config.dados.gnre.uf.<UF>), para não mandar guia errada — vira "erro" com o aviso, e o fiscal dos agentes avisa.
 
-// RS: receita 100102 (ICMS DIFAL consumidor final não contribuinte, EC 87/2015), documento de origem 22 (chave da NF-e),
-// campo extra 74 (chave da NF-e), sem período de referência. O FCP do RS (AMPARA: 2% na perfumaria/aromatizante, NCM 3303–3307)
-// sai numa GUIA PRÓPRIA, receita 100129, com o mesmo campo extra 74 (gnre-automacao uf_additional_fields.json; sped-gnre).
-// fcp: 'separada' = uma guia a mais, receita_fcp; 'junto' = o FCP no mesmo item (valores tipo 12/22), se a UF pedir assim.
+// RS (conferido no GnreConfigUF de produção em 06/11/2026, receitas 100102 e 100129): documento de origem 22 (chave da NF-e),
+// campo extra 74 obrigatório (chave, 44), sem período de referência, só o valor PRINCIPAL (valorExigido "P"), emitente com
+// CNPJ e endereço; o FCP do RS (AMPARA: 2% na perfumaria/aromatizante, NCM 3303–3307) é a receita 100129, que vai como
+// 2º ITEM da mesma guia (como faz o gnre-automacao em produção): um código de barras só, uma conta no Caixa.
+// fcp: 'item' = 2º item da mesma guia; 'separada' = uma guia a mais; 'junto' = o FCP no mesmo item (valores 12).
+// O portal marca "exigeConvenio" para o RS, mas não há convênio a informar no DIFAL por operação (guias de MS passam sem):
+// se recusar por isso, pôr o texto em crm_config.dados.gnre.uf.RS.convenio.
 export const REGRAS_UF = {
-  RS: { receita: '100102', receita_fcp: '100129', doc_tipo: '22', campo_extra: '74', referencia: false, fcp: 'separada' }
+  RS: { receita: '100102', receita_fcp: '100129', doc_tipo: '22', campo_extra: '74', referencia: false, fcp: 'item' }
 };
 
 const dig = v => String(v == null ? '' : v).replace(/\D/g, '');
@@ -17,7 +20,7 @@ const r2 = v => Math.round(Number(v || 0) * 100) / 100;
 
 // nfe: { id, ambiente, serie, numero, chave, totais: { vICMSUFDest, vFCPUFDest }, nota: { dest: { doc, nome, endereco: { uf, cMun } } } }
 // cfg: { gnre: { ambiente?, uf?: { RS: {...} } }, fiscal: { emitente } }.
-// Devolve { uf, ambiente, emitente, guias: [{ receita, valor, guia }] } (uma por receita) ou { uf, erro }.
+// Devolve { uf, ambiente, emitente, guias: [{ receita, valor, valorFcp, guia }] } ou { uf, erro }. No RS é UMA guia (DIFAL + FCP como 2º item).
 export function montaGuias(nfe, cfg, hoje) {
   const t = (nfe && nfe.totais) || {}, dest = ((nfe && nfe.nota) || {}).dest || {}, end = dest.endereco || {};
   const uf = String(end.uf || '').toUpperCase(), difal = r2(t.vICMSUFDest), fcp = r2(t.vFCPUFDest);
@@ -29,20 +32,27 @@ export function montaGuias(nfe, cfg, hoje) {
   if (dig(nfe.chave).length !== 44) return erro('a nota não tem a chave de acesso');
   const regra = Object.assign({}, REGRAS_UF[uf] || {}, ((cfg.gnre || {}).uf || {})[uf] || {});
   if (!regra.receita) return erro('a GNRE para ' + uf + ' ainda não foi conferida (receita, documento de origem e campos extras da UF): me chamar para rodar a consulta da UF no Portal GNRE');
-  const separada = fcp > 0 && regra.fcp === 'separada' && regra.receita_fcp, junto = fcp > 0 && regra.fcp === 'junto';
-  if (fcp > 0 && !separada && !junto) return erro('a nota tem FCP para ' + uf + ' (R$ ' + fcp.toFixed(2) + ') e a regra do FCP dessa UF ainda não foi conferida: me chamar');
+  const item = fcp > 0 && regra.fcp === 'item' && regra.receita_fcp, separada = fcp > 0 && regra.fcp === 'separada' && regra.receita_fcp, junto = fcp > 0 && regra.fcp === 'junto';
+  if (fcp > 0 && !item && !separada && !junto) return erro('a nota tem FCP para ' + uf + ' (R$ ' + fcp.toFixed(2) + ') e a regra do FCP dessa UF ainda não foi conferida: me chamar');
   const e = (cfg.fiscal || {}).emitente || {};
   if (dig(e.cnpj).length !== 14) return erro('falta o CNPJ do emitente (Fiscal → Emissão)');
   const doc = dig(dest.doc);
   const [ano, mes] = String(hoje).split('-');
-  const umaGuia = (receita, valor, valorFcp) => ({ uf, receita, docTipo: regra.doc_tipo || '22', chave: dig(nfe.chave), valor, valorFcp, fcpJunto: valorFcp > 0,
+  // itens: a lista que o serviço fiscal 2026-11-06b usa; receita/valor/valorFcp/fcpJunto no topo valem para o 2026-11-06a (um item)
+  const umaGuia = (itens, valorFcpJunto) => ({ uf, receita: itens[0].receita, valor: itens[0].valor, valorFcp: valorFcpJunto, fcpJunto: valorFcpJunto > 0, itens,
+    docTipo: regra.doc_tipo || '22', chave: dig(nfe.chave), convenio: regra.convenio || null, total: regra.total === true,
     vencimento: hoje, pagamento: hoje, referencia: regra.referencia ? { mes: Number(mes), ano: Number(ano) } : null,
     destinatario: { cpf: doc.length === 11 ? doc : null, cnpj: doc.length === 14 ? doc : null, nome: dest.nome, cMun: end.cMun },
     camposExtras: regra.campo_extra ? [{ codigo: regra.campo_extra, valor: dig(nfe.chave) }] : [],
     identificador: String(nfe.numero || '').replace(/\D/g, '').slice(-10) || null });
   const guias = [];
-  if (difal > 0 || junto) guias.push({ receita: regra.receita, valor: r2(difal + (junto ? fcp : 0)), guia: umaGuia(regra.receita, difal, junto ? fcp : 0) });
-  if (separada) guias.push({ receita: regra.receita_fcp, valor: fcp, guia: umaGuia(regra.receita_fcp, fcp, 0) });
+  if (item) {
+    const itens = (difal > 0 ? [{ receita: regra.receita, valor: difal }] : []).concat([{ receita: regra.receita_fcp, valor: fcp }]);
+    guias.push({ receita: itens[0].receita, valor: difal > 0 ? difal : fcp, valorFcp: difal > 0 ? fcp : 0, guia: umaGuia(itens, 0) });
+  } else {
+    if (difal > 0 || junto) guias.push({ receita: regra.receita, valor: difal, valorFcp: junto ? fcp : 0, guia: umaGuia([{ receita: regra.receita, valor: difal, valorFcp: junto ? fcp : 0 }], junto ? fcp : 0) });
+    if (separada) guias.push({ receita: regra.receita_fcp, valor: fcp, valorFcp: 0, guia: umaGuia([{ receita: regra.receita_fcp, valor: fcp }], 0) });
+  }
   return Object.assign(base, { emitente: { cnpj: dig(e.cnpj), razao: e.razao, endereco: Object.assign({}, e.endereco || {}) }, guias });
 }
 

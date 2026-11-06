@@ -30,23 +30,30 @@ function envelope(servico, xml, versaoDados) {
     '</gnr:gnreDadosMsg></soap:Body></soap:Envelope>';
 }
 const amb = cfg => (cfg.ambiente === 'producao' ? 'producao' : 'homologacao');
-const chama = (cfg, servico, xml, versao) => S.posta(BASE[amb(cfg)] + servico, WS + servico, envelope(servico, xml, versao), cfg, RESPOSTA);
+// o Portal GNRE às vezes passa de 30 s (06/11/2026: duas consultas caíram no limite do serviço fiscal); espera até 55 s
+const chama = (cfg, servico, xml, versao) => S.posta(BASE[amb(cfg)] + servico, WS + servico, envelope(servico, xml, versao), Object.assign({}, cfg, { tempo: 55000 }), RESPOSTA);
 
 // ---------------------------------------------------------------- o lote
 // emitente: { cnpj, razao, endereco: { logradouro, numero, cMun, uf, cep, fone } }
-// guia: { uf, receita, docTipo, chave, valor, valorFcp, fcpJunto, vencimento (AAAA-MM-DD), pagamento, referencia: { mes, ano } | null,
-//         destinatario: { cpf | cnpj, nome, cMun }, camposExtras: [{ codigo, valor }], identificador }
-function item(g) {
+// guia: { uf, docTipo, chave, vencimento (AAAA-MM-DD), pagamento, referencia: { mes, ano } | null, destinatario: { cpf | cnpj, nome, cMun },
+//         camposExtras: [{ codigo, valor }], identificador, convenio?, total? (manda também os valores "total" 21/22),
+//         itens: [{ receita, valor, valorFcp? }] }   (sem "itens": um item só com receita, valor, valorFcp e fcpJunto da guia)
+// 06/11/2026, depois do GnreConfigUF do RS: valorExigido "P" = só o valor PRINCIPAL (tipo 11; 12 para o FCP junto); os totais
+// (21/22) só com "total"; o FCP do RS vai como 2º ITEM da mesma guia (receita 100129), um código de barras só.
+const itensDa = g => (Array.isArray(g.itens) && g.itens.length ? g.itens
+  : [{ receita: g.receita, valor: g.valor, valorFcp: g.fcpJunto ? g.valorFcp : 0 }]);
+function item(g, it) {
   const d = g.destinatario || {};
   const docDest = dig(d.cnpj).length === 14 ? tag('CNPJ', dig(d.cnpj)) : dig(d.cpf).length === 11 ? tag('CPF', dig(d.cpf)) : '';
-  const valores = '<valor tipo="11">' + valor2(g.valor) + '</valor>' + (g.fcpJunto && Number(g.valorFcp) > 0 ? '<valor tipo="12">' + valor2(g.valorFcp) + '</valor>' : '') +
-    '<valor tipo="21">' + valor2(Number(g.valor) + (g.fcpJunto ? Number(g.valorFcp || 0) : 0)) + '</valor>' + (g.fcpJunto && Number(g.valorFcp) > 0 ? '<valor tipo="22">' + valor2(g.valorFcp) + '</valor>' : '');
-  return '<item>' + tag('receita', g.receita) +
-    (g.detalhamento ? tag('detalhamentoReceita', g.detalhamento) : '') +
+  const fcp = Number(it.valorFcp || 0);
+  const valores = '<valor tipo="11">' + valor2(it.valor) + '</valor>' + (fcp > 0 ? '<valor tipo="12">' + valor2(fcp) + '</valor>' : '') +
+    (g.total ? '<valor tipo="21">' + valor2(it.valor) + '</valor>' + (fcp > 0 ? '<valor tipo="22">' + valor2(fcp) + '</valor>' : '') : '');
+  return '<item>' + tag('receita', it.receita) +
+    (it.detalhamento ? tag('detalhamentoReceita', it.detalhamento) : '') +
     (g.docTipo ? '<documentoOrigem tipo="' + esc(g.docTipo) + '">' + esc(g.docTipo === '22' || g.docTipo === '24' ? dig(g.chave) : g.documento || dig(g.chave)) + '</documentoOrigem>' : '') +
-    (g.produto ? tag('produto', g.produto) : '') +
+    (it.produto ? tag('produto', it.produto) : '') +
     (g.referencia ? '<referencia><periodo>0</periodo>' + tag('mes', String(g.referencia.mes).padStart(2, '0')) + tag('ano', g.referencia.ano) + '</referencia>' : '') +
-    tag('dataVencimento', g.vencimento) + valores +
+    tag('dataVencimento', g.vencimento) + valores + (g.convenio ? tag('convenio', limpa(g.convenio, 30)) : '') +
     (docDest || d.nome ? '<contribuinteDestinatario>' + (docDest ? '<identificacao>' + docDest + '</identificacao>' : '') + tag('razaoSocial', limpa(d.nome, 60)) +
       (dig(d.cMun).length === 7 ? tag('municipio', dig(d.cMun).slice(2)) : '') + '</contribuinteDestinatario>' : '') +
     ((g.camposExtras || []).length ? '<camposExtras>' + g.camposExtras.slice(0, 3).map(c => '<campoExtra>' + tag('codigo', c.codigo) + tag('valor', limpa(c.valor, 100)) + '</campoExtra>').join('') + '</camposExtras>' : '') +
@@ -56,15 +63,16 @@ function dadosGnre(emitente, g) {
   const e = emitente || {}, en = e.endereco || {};
   if (dig(e.cnpj).length !== 14) throw Object.assign(new Error('falta o CNPJ do emitente'), { status: 400 });
   if (!g || !/^[A-Z]{2}$/.test(String(g.uf || ''))) throw Object.assign(new Error('falta a UF favorecida'), { status: 400 });
-  if (!(Number(g.valor) > 0)) throw Object.assign(new Error('valor da guia inválido'), { status: 400 });
+  const itens = itensDa(g);
+  if (!itens.length || itens.length > 100 || itens.some(it => !/^\d{6}$/.test(String(it.receita || '')) || !(Number(it.valor) > 0))) throw Object.assign(new Error('valor da guia inválido'), { status: 400 });
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(g.vencimento || '')) || !/^\d{4}-\d{2}-\d{2}$/.test(String(g.pagamento || ''))) throw Object.assign(new Error('datas da guia inválidas'), { status: 400 });
-  const total = Number(g.valor) + (g.fcpJunto ? Number(g.valorFcp || 0) : 0);
+  const total = itens.reduce((s, it) => s + Number(it.valor) + Number(it.valorFcp || 0), 0);
   // a IE do emitente é a da UF favorecida: a OneClean não tem inscrição lá, então vai o CNPJ com o endereço completo
   const emit = '<contribuinteEmitente><identificacao>' + (g.ieNaUf ? tag('IE', dig(g.ieNaUf)) : tag('CNPJ', dig(e.cnpj))) + '</identificacao>' +
     (g.ieNaUf ? '' : tag('razaoSocial', limpa(e.razao, 60)) + tag('endereco', limpa([en.logradouro, en.numero].filter(Boolean).join(', '), 60)) +
       (dig(en.cMun).length === 7 ? tag('municipio', dig(en.cMun).slice(2)) : '') + tag('uf', en.uf) + tag('cep', dig(en.cep)) + tag('telefone', dig(en.fone).slice(0, 11))) +
     '</contribuinteEmitente>';
-  return '<TDadosGNRE versao="2.00">' + tag('ufFavorecida', g.uf) + '<tipoGnre>0</tipoGnre>' + emit + '<itensGNRE>' + item(g) + '</itensGNRE>' +
+  return '<TDadosGNRE versao="2.00">' + tag('ufFavorecida', g.uf) + '<tipoGnre>0</tipoGnre>' + emit + '<itensGNRE>' + itens.map(it => item(g, it)).join('') + '</itensGNRE>' +
     tag('valorGNRE', valor2(total)) + tag('dataPagamento', g.pagamento) + (g.identificador ? tag('identificadorGuia', g.identificador) : '') + '</TDadosGNRE>';
 }
 // o lote: uma ou mais guias (o robô manda uma por lote, para um erro não recusar as outras)

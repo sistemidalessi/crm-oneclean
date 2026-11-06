@@ -11038,8 +11038,8 @@ begin
       select count(*), string_agg(nf.serie || '-' || nf.numero, ', ') into n, lst from public.crm_nfe nf
        where nf.ambiente = 'producao' and nf.situacao = 'autorizada' and nf.autorizada_em between now() - interval '20 days' and now() - interval '1 hour'
          and coalesce((nf.totais ->> 'vICMSUFDest')::numeric, 0) + coalesce((nf.totais ->> 'vFCPUFDest')::numeric, 0) > 0
-         and (select count(*) from public.crm_gnre g where g.nfe_id = nf.id and g.situacao in ('gerada', 'paga', 'cancelada', 'rejeitada', 'erro'))
-             < (case when coalesce((nf.totais ->> 'vICMSUFDest')::numeric, 0) > 0 then 1 else 0 end) + (case when coalesce((nf.totais ->> 'vFCPUFDest')::numeric, 0) > 0 then 1 else 0 end);
+         and coalesce((select sum(g.valor + g.valor_fcp) from public.crm_gnre g where g.nfe_id = nf.id and g.situacao in ('gerada', 'paga', 'cancelada', 'rejeitada', 'erro')), 0)
+             < coalesce((nf.totais ->> 'vICMSUFDest')::numeric, 0) + coalesce((nf.totais ->> 'vFCPUFDest')::numeric, 0) - 0.01;
       if n > 0 then
         achados := achados || crm_interno.fiscal_p('gnre:sem-guia', 'GNRE do DIFAL', 'grave',
           'Nota com DIFAL autorizada há mais de 1 hora sem GNRE: NF ' || lst || '. O robô devia ter gerado a guia.', 'Me chamar: conferir o agendador crm-gnre e o serviço fiscal.');
@@ -11422,10 +11422,11 @@ begin
        select 1 from public.crm_nfe n
         where n.ambiente = 'producao' and n.situacao = 'autorizada' and n.autorizada_em > now() - interval '20 days'
           and coalesce((n.totais ->> 'vICMSUFDest')::numeric, 0) + coalesce((n.totais ->> 'vFCPUFDest')::numeric, 0) > 0
-          and (select count(*) from public.crm_gnre g where g.nfe_id = n.id
-                 and (g.situacao in ('gerada', 'paga', 'cancelada', 'rejeitada')
-                      or (g.situacao = 'erro' and (g.tentativas >= 6 or g.atualizado_em > now() - interval '30 minutes'))))
-              < (case when coalesce((n.totais ->> 'vICMSUFDest')::numeric, 0) > 0 then 1 else 0 end) + (case when coalesce((n.totais ->> 'vFCPUFDest')::numeric, 0) > 0 then 1 else 0 end))
+          and coalesce((select sum(g.valor + g.valor_fcp) from public.crm_gnre g where g.nfe_id = n.id
+                 and (g.situacao in ('gerada', 'paga', 'cancelada', 'rejeitada', 'enviada')
+                      or (g.situacao = 'erro' and (g.tentativas >= 6 or g.atualizado_em > now() - interval '30 minutes')))), 0)
+              < coalesce((n.totais ->> 'vICMSUFDest')::numeric, 0) + coalesce((n.totais ->> 'vFCPUFDest')::numeric, 0) - 0.01
+          or exists (select 1 from public.crm_gnre g where g.nfe_id = n.id and g.situacao = 'enviada'))
      then return; end if;
   select * into c from crm_interno.bb_cfg where id = 1;
   if c.url is null or c.anon is null then return; end if;
@@ -11456,3 +11457,14 @@ do $c$ begin
     perform cron.schedule('crm-gnre', '*/10 10-23,0 * * *', 'select public.crm_gnre_tick()');
   end if;
 end $c$;
+
+-- liga/desliga o robô da GNRE sem regravar o resto de crm_config.dados.gnre (06/11/2026: o "Ligar" da tela apagava a consulta da UF)
+create or replace function public.crm_gnre_ligar(p_ligado boolean) returns void language plpgsql security definer set search_path = public as $$
+begin
+  if coalesce(auth.role(), '') in ('anon', 'authenticated') then raise exception 'só o servidor'; end if;
+  update public.crm_config set dados = jsonb_set(coalesce(dados, '{}'::jsonb), '{gnre}',
+      coalesce(dados -> 'gnre', '{}'::jsonb) || jsonb_build_object('ligado', coalesce(p_ligado, false), 'ligado_em', now()))
+   where id = 1;
+end;
+$$;
+revoke all on function public.crm_gnre_ligar(boolean) from public, anon, authenticated;

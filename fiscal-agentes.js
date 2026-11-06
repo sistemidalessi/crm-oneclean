@@ -212,20 +212,20 @@
     },
     'gnre-ligar': async v => {
       try {
-        const atual = (gn && gn.cfg) || {};
         if (v === 'sim' && !confirm('Ligar o robô da GNRE? A partir de agora, cada NF-e com DIFAL gera a guia sozinha no Portal GNRE (pagar continua sendo com você).')) return;
-        await CRM.salvarConfig({ gnre: Object.assign({}, atual, { ligado: v === 'sim' }) });
+        await CRM.store().gnre({ acao: 'ligar', ligado: v === 'sim' });   // a função grava só o "ligado" (não apaga a consulta da UF)
         CRM.toast(v === 'sim' ? 'Robô da GNRE ligado.' : 'Robô da GNRE desligado.');
       } catch (e) { CRM.falhou(e); }
       await carrega();
     },
     'gnre-config': async () => {
-      CRM.toast('Consultando as regras do RS no Portal GNRE…');
-      try {
-        const a = await CRM.store().gnre({ acao: 'configuf', uf: 'RS', receita: '100102' });
-        const b = await CRM.store().gnre({ acao: 'configuf', uf: 'RS', receita: '100129' });
-        CRM.toast('Portal respondeu: DIFAL ' + (a.codigo || '?') + ' ' + (a.descricao || '') + ' · FCP ' + (b.codigo || '?') + ' ' + (b.descricao || '') + '. Me chame para eu conferir as regras com a resposta.');
-      } catch (e) { CRM.falhou(e); }
+      CRM.toast('Consultando as regras do RS no Portal GNRE… (o portal pode levar até 30 s em cada uma)');
+      const res = [];
+      for (const receita of ['100102', '100129']) {
+        try { const r = await CRM.store().gnre({ acao: 'configuf', uf: 'RS', receita }); res.push((receita === '100102' ? 'DIFAL' : 'FCP') + ': ' + (r.codigo || '?') + ' ' + (r.descricao || '')); }
+        catch (e) { res.push((receita === '100102' ? 'DIFAL' : 'FCP') + ': ' + e.message); }
+      }
+      CRM.toast('Portal respondeu — ' + res.join(' · ') + '. Me chame para eu conferir as regras com a resposta.');
       await carrega();
     },
     'agentes-prazo': async id => {

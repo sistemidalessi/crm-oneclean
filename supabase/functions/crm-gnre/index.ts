@@ -36,6 +36,14 @@ async function servico(corpo: Linha) {
   if (!r.ok) throw new Error(j.erro || 'serviço fiscal: HTTP ' + r.status);
   return j as Linha;
 }
+async function versaoServico() {
+  try {
+    const url = Deno.env.get('FISCAL_URL'), tok = Deno.env.get('FISCAL_TOKEN');
+    const r = await fetch(String(url).replace(/\/$/, '') + '/saude', { headers: { Authorization: 'Bearer ' + tok }, signal: AbortSignal.timeout(15000) });
+    const j = await r.json().catch(() => ({}));
+    return String((j as Linha).versao || '');
+  } catch { return ''; }
+}
 async function config(db: Db) {
   const { data } = await db.from('crm_config').select('dados').eq('id', 1).maybeSingle();
   const d = ((data && (data as Linha).dados) || {}) as Linha;
@@ -75,8 +83,10 @@ async function enviaNota(db: Db, nfe: Linha, cfg: { gnre: Linha; fiscal: Linha }
     const g0 = ja.get(String(x.receita));
     if (g0 && ['gerada', 'paga', 'cancelada'].includes(String(g0.situacao))) { out.push({ id: g0.id, receita: x.receita, situacao: g0.situacao, ja: true }); continue; }
     if (g0 && !forcar && (g0.situacao === 'rejeitada' || (g0.situacao === 'enviada' && g0.recibo))) { out.push({ id: g0.id, receita: x.receita, situacao: g0.situacao, ja: true, motivo: g0.motivo }); continue; }
-    const linha = Object.assign({}, comum, { receita: x.receita, valor: x.valor, valor_fcp: Number((x.guia as Linha).fcpJunto ? (x.guia as Linha).valorFcp : 0), tentativas: Number((g0 && g0.tentativas) || 0) + 1 });
+    const linha = Object.assign({}, comum, { receita: x.receita, valor: x.valor, valor_fcp: Number(x.valorFcp || 0), tentativas: Number((g0 && g0.tentativas) || 0) + 1 });
     try {
+      // guia com 2 itens (DIFAL + FCP do RS) só no serviço fiscal 2026-11-06b ou mais novo (o 06a mandaria só o 1º item)
+      if (((x.guia as Linha).itens as Linha[] || []).length > 1 && (await versaoServico()) < '2026-11-06b') throw new Error('a nota tem FCP e o serviço fiscal da VPS ainda é o antigo: falta o git pull + reiniciar (versão 2026-11-06b)');
       const r = await servico({ acao: 'enviar', ambiente: m.ambiente, emitente: m.emitente, guias: [x.guia] });
       const ok = Number(r.codigo) === 100 && !!r.recibo;
       const { data } = await db.from('crm_gnre').upsert(Object.assign(linha, {
@@ -147,7 +157,7 @@ async function ciclo(db: Db, opts: { nfeId?: string; forcar?: boolean } = {}) {
     const t = (n.totais || {}) as Linha;
     return Number(t.vICMSUFDest || 0) + Number(t.vFCPUFDest || 0) > 0;
   });
-  const { data: guias } = await db.from('crm_gnre').select('nfe_id, receita, situacao, tentativas, atualizado_em').in('nfe_id', comDifal.map(n => n.id).concat(['00000000-0000-0000-0000-000000000000']));
+  const { data: guias } = await db.from('crm_gnre').select('nfe_id, receita, situacao, tentativas, atualizado_em, valor, valor_fcp').in('nfe_id', comDifal.map(n => n.id).concat(['00000000-0000-0000-0000-000000000000']));
   const porNota = new Map<string, Linha[]>();
   for (const g of (guias || []) as Linha[]) porNota.set(String(g.nfe_id), (porNota.get(String(g.nfe_id)) || []).concat([g]));
   // a guia "parada" não chama o portal de novo: gerada/paga/cancelada; rejeitada (espera alguém); enviada (espera o resultado);
@@ -156,9 +166,10 @@ async function ciclo(db: Db, opts: { nfeId?: string; forcar?: boolean } = {}) {
     (g.situacao === 'erro' && (Number(g.tentativas) >= 6 || Date.now() - Date.parse(String(g.atualizado_em)) < 30 * 6e4));
   let enviadas = 0;
   for (const n of comDifal) {
-    const t = (n.totais || {}) as Linha, precisa = (Number(t.vICMSUFDest || 0) > 0 ? 1 : 0) + (Number(t.vFCPUFDest || 0) > 0 ? 1 : 0);
+    // coberto pelo VALOR (no RS o FCP é 2º item da mesma guia; em outra UF pode ser guia própria)
+    const t = (n.totais || {}) as Linha, devido = Number(t.vICMSUFDest || 0) + Number(t.vFCPUFDest || 0);
     const gs = porNota.get(String(n.id)) || [];
-    if (!opts.nfeId && gs.filter(parada).length >= precisa) continue;
+    if (!opts.nfeId && gs.filter(parada).reduce((x, g) => x + Number(g.valor || 0) + Number(g.valor_fcp || 0), 0) >= devido - 0.01) continue;
     if (enviadas >= 5) break;
     for (const r of await enviaNota(db, n, cfg, !!opts.forcar)) out.push(Object.assign({ nota: n.serie + '-' + n.numero }, r));
     enviadas++;
@@ -176,6 +187,17 @@ async function ciclo(db: Db, opts: { nfeId?: string; forcar?: boolean } = {}) {
   return { enviadas: out, resultados: res };
 }
 
+// a consulta da UF no Portal GNRE (GnreConfigUF, só leitura); guarda a resposta em crm_config.dados.gnre.consulta
+async function consultaUF(db: Db, b: Linha) {
+  const uf = String(b.uf || '').toUpperCase(), receita = String(b.receita || '100102').replace(/\D/g, '');
+  if (!/^[A-Z]{2}$/.test(uf)) throw new Error('UF inválida');
+  const { gnre } = await config(db);
+  const r = await servico({ acao: 'configuf', ambiente: gnre.ambiente === 'homologacao' ? 'homologacao' : 'producao', uf, receita });
+  const { error } = await db.rpc('crm_gnre_config_uf', { p_uf: uf, p_receita: receita, p_retorno: r });
+  if (error) console.error('[crm-gnre] guardar a consulta: ' + error.message);
+  return r;
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
   if (req.method !== 'POST') return resposta(405, { erro: 'use POST' });
@@ -187,7 +209,11 @@ Deno.serve(async (req) => {
   if (senhaAg) {
     const { data: ok } = await db.rpc('crm_bb_senha_ok', { p: senhaAg });
     if (ok !== true) return resposta(401, { erro: 'senha do agendador inválida' });
-    if (b.acao !== 'ciclo') return resposta(400, { erro: 'o agendador só roda o ciclo' });
+    // 06/11/2026: a consulta da UF (só leitura) também pelo agendador, para conferir as regras daqui sem depender da tela
+    if (b.acao === 'configuf') {
+      try { return resposta(200, await consultaUF(db, b)); } catch (e) { return resposta(500, { erro: (e as Error).message }); }
+    }
+    if (b.acao !== 'ciclo') return resposta(400, { erro: 'o agendador só roda o ciclo e a consulta da UF' });
     const { gnre } = await config(db);
     if (gnre.ligado !== true) return resposta(200, { desligado: true });
     try { return resposta(200, await ciclo(db)); } catch (e) { return resposta(500, { erro: (e as Error).message }); }
@@ -214,12 +240,15 @@ Deno.serve(async (req) => {
     }
     if (b.acao === 'configuf') {
       if (eu.papel !== 'admin') return resposta(403, { erro: 'só o administrador' });
-      const uf = String(b.uf || '').toUpperCase();
-      if (!/^[A-Z]{2}$/.test(uf)) return resposta(400, { erro: 'UF inválida' });
-      const { gnre } = await config(db);
-      const r = await servico({ acao: 'configuf', ambiente: gnre.ambiente === 'homologacao' ? 'homologacao' : 'producao', uf, receita: String(b.receita || '100102') });
-      await db.rpc('crm_gnre_config_uf', { p_uf: uf, p_receita: String(b.receita || '100102'), p_retorno: r });
-      return resposta(200, r);
+      return resposta(200, await consultaUF(db, b));
+    }
+    // ligar/desligar pela função (06/11/2026): grava só a chave "ligado" sobre a versão do banco (a tela gravava a configuração
+    // que tinha carregado e apagava a consulta da UF que chegou depois)
+    if (b.acao === 'ligar') {
+      if (eu.papel !== 'admin') return resposta(403, { erro: 'só o administrador' });
+      const { error } = await db.rpc('crm_gnre_ligar', { p_ligado: b.ligado === true });
+      if (error) return resposta(500, { erro: error.message });
+      return resposta(200, { ligado: b.ligado === true });
     }
     return resposta(400, { erro: 'ação desconhecida' });
   } catch (e) {
