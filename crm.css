@@ -1368,6 +1368,11 @@ button.ordena.ativo { color: var(--marinho); }
 .lead-msg { background: var(--realce); border-radius: 8px; padding: 10px 12px; font-size: .86rem; white-space: pre-wrap; margin: 0; }
 .lead-acoes { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; border-top: 1px solid var(--borda); padding-top: 10px; }
 .lead-marcas { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 0 2px; }
+.lead-anot { border-top: 1px solid var(--borda); margin-top: 10px; padding-top: 8px; }
+.lead-anot-lista { list-style: none; margin: 4px 0 8px; padding: 0; display: grid; gap: 4px; font-size: .88rem; }
+.lead-anot-lista small { color: var(--texto-suave, #667); margin-right: 4px; }
+.lead-anot-form { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.lead-anot-form input { flex: 1 1 260px; min-width: 0; }
 .lead-acoes .btn.sec.ativo { background: var(--verde-fundo, #e7f5ea); border-color: var(--verde, #2e7d32); color: var(--verde, #2e7d32); font-weight: 700; }
 .lead-h2 { font-size: 1rem; margin: 18px 0 8px; color: var(--suave); }
 @media (max-width: 800px) { .lead-corpo { grid-template-columns: minmax(0, 1fr); } }

@@ -8370,6 +8370,70 @@ language sql stable security definer set search_path = public as $$
 $$;
 revoke all on function public.crm_prospec_minhas2(uuid, date) from public, anon;
 grant execute on function public.crm_prospec_minhas2(uuid, date) to authenticated;
+-- 06/11/2026 (Isabela/Anderson, áudio): nos Leads sugeridos, um campo de observação para o histórico das tentativas
+-- ("liguei, mandei WhatsApp, ainda não falei com o comprador") enquanto a empresa ainda não virou lead. Ao virar lead, as
+-- anotações entram no histórico (atividades concluídas) da empresa criada, para a cadência começar com a história toda.
+alter table public.crm_prospec_sugestoes add column if not exists anotacoes jsonb not null default '[]'::jsonb;
+
+-- anotar (quem tem a sugestão ou a gestão que a vê); como: ligacao, whatsapp, email, visita ou nota
+create or replace function public.crm_prospec_anotar(p_id bigint, p_texto text, p_como text default 'nota')
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare s record; t text := left(btrim(coalesce(p_texto, '')), 500); c text := coalesce(nullif(p_como, ''), 'nota'); r jsonb;
+begin
+  select * into s from public.crm_prospec_sugestoes where id = p_id;
+  if s.id is null or not (s.vendedor_id = (select auth.uid()) or public.crm_prospec_ve(s.vendedor_id)) then raise exception 'sugestão não encontrada'; end if;
+  if length(t) < 3 then raise exception 'escreva a anotação'; end if;
+  if c not in ('ligacao', 'whatsapp', 'email', 'visita', 'nota') then raise exception 'tipo inválido'; end if;
+  update public.crm_prospec_sugestoes
+     set anotacoes = coalesce(anotacoes, '[]'::jsonb) || jsonb_build_array(jsonb_build_object('em', now(), 'por', (select auth.uid()), 'como', c, 'texto', t))
+   where id = p_id returning anotacoes into r;
+  return r;
+end $$;
+revoke all on function public.crm_prospec_anotar(bigint, text, text) from public, anon;
+grant execute on function public.crm_prospec_anotar(bigint, text, text) to authenticated;
+
+-- a lista do dia com as anotações (a minhas2 continua para quem ainda estiver na versão antiga da tela)
+create or replace function public.crm_prospec_minhas3(p_vendedor uuid default null, p_dia date default null)
+returns table (id bigint, dia date, vendedor_id uuid, situacao text, motivo_descarte text, tratado_em timestamptz, empresa_id uuid, segmento text,
+  motivos text[], contato jsonb, ordem integer, cnpj text, razao text, fantasia text, cnae text, atividade text, abertura date, endereco text,
+  bairro text, cep text, cidade text, tel1 text, tel2 text, email text, porte text, capital numeric, mandou_em timestamptz, respondeu_em timestamptz,
+  anotacoes jsonb)
+language sql stable security definer set search_path = public as $$
+  select s.id, s.dia, s.vendedor_id, s.situacao, s.motivo_descarte, s.tratado_em, s.empresa_id, s.segmento, s.motivos, s.contato, s.ordem,
+         b.cnpj, b.razao, b.fantasia, b.cnae, d.descricao, b.abertura, b.endereco, b.bairro, b.cep, b.cidade, b.tel1, b.tel2, b.email, b.porte, b.capital,
+         s.mandou_em, s.respondeu_em, s.anotacoes
+    from public.crm_prospec_sugestoes s
+    join public.crm_prospec_base b on b.cnpj = s.cnpj
+    left join public.crm_prospec_cnae d on d.codigo = b.cnae
+   where s.vendedor_id = coalesce(p_vendedor, (select auth.uid())) and public.crm_prospec_ve(s.vendedor_id)
+     and (s.situacao in ('nova', 'amanha') or (s.tratado_em at time zone 'America/Sao_Paulo')::date = coalesce(p_dia, (now() at time zone 'America/Sao_Paulo')::date))
+   order by (s.situacao in ('nova', 'amanha')) desc, (s.mandou_em is not null), s.dia, s.ordem;
+$$;
+revoke all on function public.crm_prospec_minhas3(uuid, date) from public, anon;
+grant execute on function public.crm_prospec_minhas3(uuid, date) to authenticated;
+
+-- virar lead leva as anotações para o histórico da empresa (uma atividade concluída por anotação, com a data dela)
+create or replace function public.crm_prospec_tratar(p_id bigint, p_situacao text, p_motivo text default null, p_empresa uuid default null)
+returns void language plpgsql security definer set search_path = public as $$
+declare s record; a jsonb;
+begin
+  select * into s from public.crm_prospec_sugestoes where id = p_id;
+  if s.id is null or not (s.vendedor_id = (select auth.uid()) or public.crm_prospec_ve(s.vendedor_id)) then raise exception 'sugestão não encontrada'; end if;
+  if p_situacao not in ('nova', 'amanha', 'lead', 'descartada') then raise exception 'situação inválida'; end if;
+  if p_situacao = 'descartada' and nullif(btrim(coalesce(p_motivo, '')), '') is null then raise exception 'diga o motivo do descarte'; end if;
+  update public.crm_prospec_sugestoes set situacao = p_situacao,
+         motivo_descarte = case when p_situacao = 'descartada' then left(btrim(p_motivo), 200) end,
+         empresa_id = case when p_situacao = 'lead' then p_empresa end,
+         tratado_em = case when p_situacao = 'nova' then null else now() end
+   where id = p_id;
+  if p_situacao = 'lead' and p_empresa is not null and s.situacao <> 'lead' then
+    for a in select * from jsonb_array_elements(coalesce(s.anotacoes, '[]'::jsonb)) loop
+      insert into public.crm_atividades (empresa_id, tipo, descricao, concluida, concluida_em, data_hora, responsavel_id, automatica)
+      values (p_empresa, coalesce(nullif(a->>'como', ''), 'nota'), left('Antes de virar lead (leads sugeridos): ' || coalesce(a->>'texto', ''), 2000), true,
+              coalesce((a->>'em')::timestamptz, now()), coalesce((a->>'em')::timestamptz, now()), coalesce((a->>'por')::uuid, s.vendedor_id), false);
+    end loop;
+  end if;
+end $$;
 
 -- Resultado com mandadas e responderam (função nova, mesmo motivo).
 create or replace function public.crm_prospec_resultado2(p_desde date)
@@ -8403,6 +8467,7 @@ begin
      and (select count(distinct x.dia) from public.crm_prospec_sugestoes x where x.dia > s.dia and x.dia < v_dia) >= 2;$a$,
       $b$   where s.situacao in ('nova', 'amanha') and s.respondeu_em is null
      and (s.mandou_em is null or s.mandou_em < now() - interval '7 days')
+     and not exists (select 1 from jsonb_array_elements(coalesce(s.anotacoes, '[]'::jsonb)) an where (an->>'em')::timestamptz > now() - interval '7 days')  -- 06/11/2026: anotação recente segura 7 dias
      and (select count(distinct x.dia) from public.crm_prospec_sugestoes x where x.dia > s.dia and x.dia < v_dia) >= 2;$b$);
     if position('s.respondeu_em is null' in def) = 0 then raise exception 'trecho da expiração não encontrado em crm_prospec_gerar'; end if;
     execute def;

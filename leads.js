@@ -147,6 +147,7 @@
         '<div><p class="lead-rot">Mensagem pronta (para o seu WhatsApp ou para a ligação)</p><p class="lead-msg">' + esc(msg) + '</p></div>' +
       '</div></div>' +
       (marcas ? '<div class="lead-marcas">' + marcas + '</div>' : '') +
+      anotacoesHTML(l, aberta) +
       '<div class="lead-acoes">' + (aberta
         ? '<button type="button" class="btn" data-acao="lead-virar" data-id="' + l.id + '">Virar lead</button>' +
           (zap ? '<button type="button" class="btn sec" data-acao="lead-zap" data-id="' + l.id + '" data-url="' + esc('https://wa.me/55' + zap + '?text=' + encodeURIComponent(msg)) + '">Abrir no meu WhatsApp</button>' : '') +
@@ -157,6 +158,35 @@
           (l.situacao !== 'amanha' ? '<button type="button" class="btn sec" data-acao="lead-amanha" data-id="' + l.id + '">Deixar para amanhã</button>' : '') +
           (!l.contato || c.erro || !c.achou ? '<button type="button" class="btn sec" data-acao="lead-contato" data-id="' + l.id + '">Procurar o contato de novo</button>' : '')
         : estado + ' <button type="button" class="mini" data-acao="lead-desfazer" data-id="' + l.id + '">desfazer</button>') + '</div></article>';
+  }
+
+  // Anotações das tentativas (06/11/2026, pedido da equipe: "liguei, mandei mensagem e ainda não falei com o comprador; só
+  // viro lead quando falar com ele"): o histórico fica no cartão enquanto não vira lead e vai para o histórico da empresa
+  // quando vira (crm_prospec_tratar). Anotação nos últimos 7 dias segura a sugestão na lista (não expira).
+  const COMO = [['ligacao', '☎ Liguei'], ['whatsapp', '🟢 WhatsApp'], ['email', '✉ E-mail'], ['visita', '🚗 Visita'], ['nota', '📝 Outra']];
+  const comoRot = c => (COMO.find(x => x[0] === c) || COMO[4])[1];
+  const quandoAnot = iso => { try { return new Date(iso).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); } catch (e) { return ''; } };
+  function anotacoesHTML(l, aberta) {
+    const an = Array.isArray(l.anotacoes) ? l.anotacoes : [];
+    if (!aberta && !an.length) return '';
+    return '<div class="lead-anot"><p class="lead-rot">Anotações das tentativas' + (an.length ? ' (' + an.length + ')' : '') + '</p>' +
+      (an.length ? '<ul class="lead-anot-lista">' + an.map(a => '<li><small>' + esc(quandoAnot(a.em)) + ' · ' + esc(comoRot(a.como)) +
+          (a.por && a.por !== l.vendedor_id ? ' · ' + esc(R().primeiroNome(CRM.nomeUsuario(a.por))) : '') + '</small> ' + esc(a.texto || '') + '</li>').join('') + '</ul>'
+        : '<p class="dica">Ligou, mandou WhatsApp ou e-mail e ainda não falou com o comprador? Anote aqui cada tentativa. Quando virar lead, as anotações vão para o histórico da empresa.</p>') +
+      (aberta ? '<div class="lead-anot-form"><select data-lead-como="' + l.id + '" aria-label="Como foi">' + CRM.opcoesHTML(COMO, 'ligacao') + '</select>' +
+        '<input type="text" data-lead-anot="' + l.id + '" maxlength="500" placeholder="ex.: liguei, a recepção pediu e-mail; o comprador é o Sr. Paulo, volta na segunda" aria-label="Anotação">' +
+        '<button type="button" class="btn sec" data-acao="lead-anotar" data-id="' + l.id + '">Anotar</button></div>' : '') + '</div>';
+  }
+  async function anotar(id) {
+    const i = document.querySelector('[data-lead-anot="' + id + '"]'), c = document.querySelector('[data-lead-como="' + id + '"]');
+    const t = i ? i.value.trim() : '';
+    if (t.length < 3) { CRM.toast('Escreva a anotação.', true); if (i) i.focus(); return; }
+    try {
+      await CRM.store().prospecAnotar(Number(id), t, c ? c.value : 'nota');
+      const l = achar(id);
+      if (l) l.anotacoes = (l.anotacoes || []).concat([{ em: new Date().toISOString(), como: c ? c.value : 'nota', texto: t }]);
+      CRM.toast('Anotado.'); CRM.render();
+    } catch (e) { CRM.falhou(e); }
   }
 
   const R = () => raiz.CRMRegras;
@@ -175,6 +205,7 @@
       (feitas.length ? '<h2 class="lead-h2">Tratadas hoje</h2>' + feitas.map(cartao).join('') : '') +
       '<p class="dica">Mandou a mensagem? Marque <strong>Mandei</strong> (abrir pelo botão do WhatsApp já marca). A empresa respondeu, mesmo que seja um não? Marque <strong>Respondeu</strong>. ' +
         'A mandada fica aqui 7 dias esperando a resposta; a que respondeu fica até você virar lead ou descartar. ' +
+        'Ainda não falou com o comprador? Anote cada tentativa no cartão (a anotação segura a empresa aqui por 7 dias) e vire lead quando falar com ele: as anotações vão junto para o histórico. ' +
         'O que não for tratado continua aqui amanhã. Depois de 3 listas sem ser tratado, volta para a base e pode ir para outra pessoa. A primeira conversa é pela sua linha (ligação ou o seu WhatsApp); o WhatsApp da empresa não fala com quem ainda não é cliente.</p>';
   }
 
@@ -226,6 +257,7 @@
     depois() {
       const s = document.getElementById('leadVend');
       if (s) s.addEventListener('change', () => { vendSel = s.value; dados = null; CRM.render(); });
+      document.querySelectorAll('[data-lead-anot]').forEach(i => i.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); anotar(i.dataset.leadAnot); } }));
     }
   };
 
@@ -284,6 +316,7 @@
     },
     'lead-mandei': id => { const l = achar(id); if (l) marcar(id, 'mandei', !l.mandou_em); },
     'lead-respondeu': id => { const l = achar(id); if (l) marcar(id, 'respondeu', !l.respondeu_em); },
+    'lead-anotar': id => anotar(id),
     'lead-amanha': id => tratar(id, 'amanha'),
     'lead-desfazer': id => tratar(id, 'nova'),
     'lead-descartar': id => {

@@ -1543,7 +1543,13 @@
   Supa.prototype.gvFechado = async function (de, ate) { return unwrap(await this.sb.rpc('crm_gv_fechado', { p_de: de, p_ate: ate })); };
   // Leads sugeridos (01/11/2026, leads.js): a lista de cada vendedor(a), tratar, o que os parecidos compram, resultado e a
   // Edge Function crm-prospeccao (procurar o contato, gerar a lista, senha da carga mensal)
-  Supa.prototype.prospecMinhas = async function (vend) { return unwrap(await this.sb.rpc('crm_prospec_minhas2', { p_vendedor: vend || null })); };
+  // minhas3 (06/11/2026) traz também as anotações das tentativas; se o banco ainda não tiver, a minhas2
+  Supa.prototype.prospecMinhas = async function (vend) {
+    const r = await this.sb.rpc('crm_prospec_minhas3', { p_vendedor: vend || null });
+    if (r.error && /crm_prospec_minhas3/.test(r.error.message || '')) return unwrap(await this.sb.rpc('crm_prospec_minhas2', { p_vendedor: vend || null }));
+    return unwrap(r);
+  };
+  Supa.prototype.prospecAnotar = async function (id, texto, como) { return unwrap(await this.sb.rpc('crm_prospec_anotar', { p_id: id, p_texto: texto, p_como: como || 'nota' })); };
   Supa.prototype.prospecMarcar = async function (id, marca, liga) { return unwrap(await this.sb.rpc('crm_prospec_marcar', { p_id: id, p_marca: marca, p_liga: liga !== false })); };
   Supa.prototype.prospecTratar = async function (id, situacao, motivo, empresa) { return unwrap(await this.sb.rpc('crm_prospec_tratar', { p_id: id, p_situacao: situacao, p_motivo: motivo || null, p_empresa: empresa || null })); };
   Supa.prototype.prospecParecidos = async function () { return unwrap(await this.sb.rpc('crm_prospec_parecidos')); };
@@ -1573,6 +1579,10 @@
   Local.prototype.prospecTratar = async function (id, situacao, motivo, empresa) {
     const l = await this.prospecMinhas();
     lsGrava('crm_prospec_local', l.map(x => (x.id === id ? Object.assign({}, x, { situacao, motivo_descarte: motivo, empresa_id: empresa, tratado_em: situacao === 'nova' ? null : new Date().toISOString() }) : x)));
+  };
+  Local.prototype.prospecAnotar = async function (id, texto, como) {
+    const l = await this.prospecMinhas(), em = new Date().toISOString();
+    lsGrava('crm_prospec_local', l.map(x => (x.id === id ? Object.assign({}, x, { anotacoes: (x.anotacoes || []).concat([{ em, como: como || 'nota', texto }]) }) : x)));
   };
   Local.prototype.prospecMarcar = async function (id, marca, liga) {
     const l = await this.prospecMinhas(), agora = new Date().toISOString();
