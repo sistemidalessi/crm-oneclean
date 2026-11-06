@@ -9926,6 +9926,26 @@ end $$;
 drop trigger if exists crm_empresa_codigo_limpa on public.crm_empresas;
 create trigger crm_empresa_codigo_limpa before update of codigo on public.crm_empresas for each row execute function public.crm_empresa_codigo_limpa();
 
+-- Código ao virar cliente. 06/11/2026 (Anderson): "todo cliente é para ter o seu código; os que já eram clientes já têm o deles e a gente segue na
+-- sequência". Feito no mesmo dia, com backup: 19 cadastros de 03–04/11 sem código (2020–2038; backup
+-- crm_backup.empresas_codigo_novos_*) e os 194 clientes antigos sem o código do FKN (2039–2232; backup
+-- crm_backup.empresas_codigo_clientes_*; decisão dele: número novo já, sem esperar a lista do FKN).
+-- Lead e prospect antigos (do Agendor) ficam sem código até virar cliente (decisão dele): este gatilho dá o próximo número
+-- quando a situação passa a "cliente". O cadastro novo continua ganhando código na hora (crm_empresa_codigo_novo).
+create or replace function public.crm_empresa_codigo_cliente() returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if new.situacao = 'cliente' and (new.codigo is null or btrim(new.codigo) = '') then
+    loop
+      new.codigo := nextval('public.crm_empresa_codigo_seq')::text;
+      exit when not exists (select 1 from public.crm_empresas where codigo = new.codigo and id <> new.id);
+    end loop;
+  end if;
+  return new;
+end $$;
+revoke all on function public.crm_empresa_codigo_cliente() from public, anon, authenticated;
+drop trigger if exists crm_empresa_codigo_cliente on public.crm_empresas;
+create trigger crm_empresa_codigo_cliente before update of situacao on public.crm_empresas for each row execute function public.crm_empresa_codigo_cliente();
+
 -- Funil do Diretor de Vendas (04/11/2026, 2ª mudança; Renata: "esses clientes não estão parados, eu só não mudei de etapa porque
 -- não houve alteração: são orçamentos que ainda estão aguardando retorno dos clientes"):
 -- - negócio na etapa de orçamento/proposta não é "parado": é "aguardando retorno do cliente". Só entra na lista (separada)
