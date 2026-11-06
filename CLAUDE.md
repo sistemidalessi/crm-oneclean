@@ -295,6 +295,10 @@ motorista, pela logística e como app instalado (PWA).
   Conferência nova entra em `crm_fiscal_conferir` (resultado, não "se rodou"); a que quebra vira problema, nunca silêncio.
   A OneClean está se creditando (06/11/2026): guias de ICMS, PIS/COFINS e IRPJ/CSLL com `sem_imposto` no calendário até o
   Anderson dizer que os créditos acabaram (como o "impostos = 0%" das metas).
+- **GNRE do DIFAL (06/11/2026, pedido do Anderson):** o robô `crm-gnre` **gera** a guia no Portal GNRE sozinho depois da NF-e
+  com DIFAL (`servico-fiscal/gnre.js`, rota `/gnre`; tabela `crm_gnre`; chave `crm_config.dados.gnre.ligado`). Gerar não
+  paga: o código de barras vai para a conta do Caixa e **pagar é sempre clique do Anderson**. RS: receita 100102, doc. 22,
+  campo extra 74; FCP do RS em guia própria (100129). UF nova só depois do `GnreConfigUF` conferido (`dados.gnre.uf.<UF>`).
 
 ## Segurança (lições da auditoria de 11/09/2026 aplicadas)
 
