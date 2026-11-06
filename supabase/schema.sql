@@ -7189,11 +7189,15 @@ grant execute on function public.crm_ia_teto() to service_role;
 -- (as funções perguntam crm_ia_teto() para dizer o motivo certo).
 create or replace function public.crm_ia_reservar(p_user uuid, p_tela text, p_limite integer, p_desde timestamptz) returns bigint
 language plpgsql security definer set search_path = public as $$
-declare n integer; id bigint; fotos boolean := coalesce(p_tela, '') = 'fotos';
+-- cota por grupo (06/11/2026): 'fotos' (busca de fotos), 'oferta-ia' (texto da oferta, cota própria por decisão do
+-- Anderson, sem tirar perguntas do assistente) e o resto, que é o assistente (a tela gravada é o nome da tela aberta)
+declare n integer; id bigint;
+  grupo text := case when coalesce(p_tela, '') in ('fotos', 'oferta-ia') then p_tela else 'assistente' end;
 begin
   if coalesce(auth.role(), '') <> 'service_role' then raise exception 'só a função da IA'; end if;
-  perform pg_advisory_xact_lock(hashtext('crm_ia:' || p_user::text || ':' || fotos::text));
-  select count(*) into n from public.crm_assistente_uso u where u.user_id = p_user and u.criado_em >= p_desde and (coalesce(u.tela, '') = 'fotos') = fotos;
+  perform pg_advisory_xact_lock(hashtext('crm_ia:' || p_user::text || ':' || grupo));
+  select count(*) into n from public.crm_assistente_uso u where u.user_id = p_user and u.criado_em >= p_desde
+     and (case when coalesce(u.tela, '') in ('fotos', 'oferta-ia') then u.tela else 'assistente' end) = grupo;
   if n >= p_limite then return null; end if;
   if (public.crm_ia_teto() ->> 'estourado')::boolean then return null; end if;
   insert into public.crm_assistente_uso (user_id, tela, ferramentas, tokens_entrada, tokens_saida, cache_lido, cache_escrito, custo_usd, erro)
