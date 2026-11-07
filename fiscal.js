@@ -19,6 +19,12 @@
   const NCM_PAPEL_HIGIENICO = '48181000';
   const PIS_LUCRO_REAL = 1.65, COFINS_LUCRO_REAL = 7.6;
   const CST_ST = ['60', '500'];
+  // Monofásicos de PIS/COFINS da Lei 10.147/2000, art. 1º, I, "b" (perfumaria, toucador e higiene pessoal): posições 33.03 a
+  // 33.07 (exceto 33.06), 3401.11.90 (exceto o Ex 01), 3401.20.10 e 9603.21.00. O fabricante paga tudo; a revenda sai com CST 04
+  // (alíquota zero) — 07/11/2026, pedido do Anderson: a OneClean vendia aromatizantes e sabonete líquido com CST 01 (pago a maior).
+  // Mesma lista em cbs-estoque.js (estoque de abertura da CBS).
+  const MONOFASICO_NCM = [/^330[3457]/, /^34011190$/, /^34012010$/, /^96032100$/];
+  const ehMonofasico = ncm => !!ncm && MONOFASICO_NCM.some(re => re.test(String(ncm)));
   // Antigo Anexo XIII da Portaria CAT 68/2019 (produtos de limpeza), revogado pela Portaria SRE 20/2026 a partir de
   // 01/08/2026. Reconhecido pelo CEST do segmento 11 (produtos de limpeza no Convênio ICMS 142/2018, o mesmo do anexo)
   // ou pelo NCM. A lista de NCM abaixo é a que deu para confirmar em 15/10/2026 sem o texto oficial (a rede da sessão
@@ -165,7 +171,19 @@
 
     // 3) PIS/COFINS
     if (venda) {
-      if (ncm === NCM_PAPEL_HIGIENICO && (venda.cst_pis !== '06' || venda.cst_cofins !== '06')) {
+      if (ehMonofasico(ncm) && (venda.cst_pis !== '04' || venda.cst_cofins !== '04')) {
+        alerta('erro', 'NCM ' + fmtNcm(ncm) + ' é monofásico de PIS/COFINS (Lei 10.147/2000, art. 1º, I): o fabricante paga tudo e a revenda sai com CST 04 (alíquota zero). As notas saíram com CST ' +
+          (venda.cst_pis || '—') + (n2(venda.aliq_pis) ? ' e ' + String(venda.aliq_pis).replace('.', ',') + '% de PIS' : '') +
+          '. Proposta corrigida para CST 04. Se foi pago PIS/COFINS sobre estas vendas, dá para recuperar (até 5 anos): falar com o contador.', true);
+        Object.assign(venda, { cst_pis: '04', aliq_pis: 0, cst_cofins: '04', aliq_cofins: 0 });
+      } else if (ehMonofasico(ncm)) {
+        const cobradas = vendas.filter(c => c.cst_pis === '01' || c.cst_cofins === '01');
+        if (cobradas.length) {
+          const de = cobradas.map(c => c.primeira).sort()[0], ate = cobradas.map(c => c.ultima).sort().pop();
+          alerta('info', 'Monofásico (NCM ' + fmtNcm(ncm) + ') com PIS/COFINS cobrado (CST 01) em ' + cobradas.reduce((s, c) => s + (c.n || 0), 0) + ' venda(s), de ' +
+            dataBR(de) + ' a ' + dataBR(ate) + '. A regra atual (CST 04, alíquota zero) está certa; se foi pago, dá para recuperar (até 5 anos): falar com o contador.');
+        }
+      } else if (ncm === NCM_PAPEL_HIGIENICO && (venda.cst_pis !== '06' || venda.cst_cofins !== '06')) {
         alerta('erro', 'Papel higiênico tem PIS/COFINS com alíquota zero (Lei 10.925/2004, art. 1º, XXVIII). As notas saíram com CST ' +
           (venda.cst_pis || '—') + (n2(venda.aliq_pis) ? ' e ' + String(venda.aliq_pis).replace('.', ',') + '% de PIS' : '') +
           '. Proposta corrigida para CST 06 (alíquota zero). Se foi pago PIS/COFINS sobre estas vendas, dá para recuperar (até 5 anos): falar com o contador.', true);
@@ -271,7 +289,7 @@
     return null;
   }
 
-  const api = { NCM_PAPEL_HIGIENICO, LIMPEZA_FORA_ST_SP, FORA_ST_SP, ehLimpezaForaST, grupoForaST, stDasCompras, alertaEntrada, analisa, clientes, fmtNcm, ehVenda, ehST };
+  const api = { NCM_PAPEL_HIGIENICO, MONOFASICO_NCM, ehMonofasico, LIMPEZA_FORA_ST_SP, FORA_ST_SP, ehLimpezaForaST, grupoForaST, stDasCompras, alertaEntrada, analisa, clientes, fmtNcm, ehVenda, ehST };
   raiz.CRMFiscal = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);

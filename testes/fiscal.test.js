@@ -213,3 +213,24 @@ test('proposta: só venda comum dentro de SP; entrega futura e venda para fora v
     combos: [combo({ cfop: '5117', ultima: '2026-10-10', cst_pis: '49' }), combo({ ultima: '2026-09-01' })] });
   assert.equal(r.regra.venda.cfop, '5102'); assert.equal(r.regra.venda.cst_pis, '01');
 });
+
+test('verificações: monofásico da Lei 10.147 (aromatizante 3307, sabonete líquido 3401.20.10) vendido com CST 01 vira CST 04', () => {
+  let r = F.analisa({ codigo: 'M1', descricao: 'AROMATIZANTE EXEMPLO 360ML', ncms: { 33074900: { n: 40, primeira: '2026-01-08', ultima: '2026-11-05' } }, cests: [], gtins: [], origens: ['0'],
+    combos: [combo({ n: 40, primeira: '2026-01-08', ultima: '2026-11-05' })] });
+  assert.deepEqual([r.regra.venda.cst_pis, r.regra.venda.aliq_pis, r.regra.venda.cst_cofins, r.regra.venda.aliq_cofins], ['04', 0, '04', 0]);
+  assert.match(r.alertas.map(a => a.nivel + ': ' + a.texto).join('\n'), /erro: NCM 3307\.49\.00 é monofásico .* CST 04/);
+  assert.equal(r.alertas.filter(a => a.corrigido).length, 1);
+  // regra já certa, mas vendas antigas cobradas: só informação
+  r = F.analisa({ codigo: 'M2', descricao: 'SABONETE LIQUIDO EXEMPLO 5L', ncms: { 34012010: { n: 10, ultima: '2026-11-05' } }, cests: [], gtins: [], origens: ['0'],
+    combos: [combo({ cst_pis: '04', aliq_pis: 0, cst_cofins: '04', aliq_cofins: 0, n: 3, primeira: '2026-10-20', ultima: '2026-11-05' }), combo({ n: 7, primeira: '2026-01-30', ultima: '2026-10-10' })] });
+  assert.equal(r.regra.venda.cst_pis, '04');
+  assert.match(r.alertas.map(a => a.nivel + ': ' + a.texto).join('\n'), /info: Monofásico \(NCM 3401\.20\.10\) com PIS\/COFINS cobrado \(CST 01\) em 7 venda\(s\), de 30\/01\/2026 a 10\/10\/2026/);
+  assert.ok(!r.alertas.some(a => a.nivel === 'erro'));
+  // fora da lista: sabão em pó (3401.20.90), dentifrício (33.06) e detergente seguem com CST 01
+  ['34012090', '33061000', '34022000'].forEach(ncm => {
+    const x = F.analisa({ codigo: 'N' + ncm, descricao: 'PRODUTO', ncms: { [ncm]: { n: 5, ultima: '2026-11-05' } }, cests: [], gtins: [], origens: ['0'], combos: [combo({ n: 5 })] });
+    assert.equal(x.regra.venda.cst_pis, '01', ncm);
+    assert.ok(!x.alertas.some(a => /monofásico/i.test(a.texto)), ncm);
+  });
+  assert.ok(F.ehMonofasico('33051000') && F.ehMonofasico('34011190') && F.ehMonofasico('96032100') && !F.ehMonofasico('96039000'));
+});

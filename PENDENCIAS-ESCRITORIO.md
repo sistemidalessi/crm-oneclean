@@ -76,6 +76,12 @@ A mesma lista resumida está no `PENDENCIAS-ESCRITORIO.md` do `agilite-sistema-g
       monofásicos; **álcool 2207 e lubrificantes 2710 comprados com CST 04** (monofásico de combustíveis, Lei 9.718 art. 5º, que
       não está na lista do art. 381, II) → entram ou não?; sacos de lixo Leal com CST 07 (isento?) e fornecedores com CST 50/73/99
       (código de entrada numa nota de saída) → o CRM manda esses para "a conferir".
+      (2b) **Feito em 07/11 (decisão do Anderson):** a revenda dos monofásicos da Lei 10.147 (aromatizantes 3307, sabonete líquido
+      3401.20.10, sabonete 3401.11.90) passou a **CST 04** no CRM (65 produtos; backup `crm_backup.fiscal_monofasico_20261107`).
+      Mandar ao contador como decisão: (a) **retificar 2026** para recuperar os **R$ 1.389** de PIS/COFINS pagos a maior nessas
+      revendas (notas de janeiro a novembro no CRM), se ele achar que compensa; (b) o **álcool 70 e o álcool perfumado estão com NCM
+      3307.41.00** nas notas (preparação odorífera que atua por combustão) — parece classificação errada; se o NCM certo for outro
+      (2207 ou 3808.94), eles saem do monofásico e a regra deles volta a CST 01.
       (3) **Contador — validar a classificação item a item** (CSV por item: coluna "Classificação" com "pelo quê" e "motivo"). Em 07/11,
       com a data de hoje: 812 produtos com saldo (R$ 305 mil a custo médio); só 275 têm nota de compra no CRM (o estoque começou em 16/10
       pelo saldo do FKN), e **18 produtos, R$ 4,9 mil, têm NCM monofásico** (Lei 10.147: aromatizantes 3307, sabonete 3401.11.90…) — o grupo
