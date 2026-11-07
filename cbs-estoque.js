@@ -127,7 +127,7 @@
   if (!CRM || !CRM.telas) return;
   const esc = CRM.esc;
   const DATA_INVENTARIO = '2026-12-31';
-  const st = { data: null, linhas: null, carregando: false, rodando: '', busca: '', mostrar: 'todos', semPis: null };
+  const st = { data: null, linhas: null, carregando: false, rodando: '', busca: '', mostrar: 'todos', semPis: null, buscandoPis: false };
   const dataPadrao = () => (R.hojeISO() >= DATA_INVENTARIO ? DATA_INVENTARIO : R.hojeISO());
   const dataBR = v => (v ? String(v).slice(8, 10) + '/' + String(v).slice(5, 7) + '/' + String(v).slice(0, 4) : '');
   const qtd = v => String(+Number(v).toFixed(3)).replace('.', ',');
@@ -177,8 +177,19 @@
       '<td>' + CRM.selo(C.nomeGrupo(l.grupo), cor) + '<small>' + esc((l.como ? 'pelo ' + l.como + ': ' : '') + l.motivo) + '</small></td></tr>';
   }
 
+  // Quantas notas ainda estão sem o PIS/COFINS lido: busca ao abrir a tela, para o botão "Ler o PIS/COFINS" aparecer antes
+  // do levantamento (07/11/2026: o Anderson abriu a seção e não achou o botão, que só vinha depois de "Levantar o estoque").
+  function buscaSemPis() {
+    if (st.semPis !== null || st.buscandoPis) return;
+    st.buscandoPis = true;
+    setTimeout(async () => {
+      try { st.semPis = await CRM.store().comprasSemPis(); } catch (e) { st.semPis = []; }
+      st.buscandoPis = false; CRM.render();
+    }, 0);
+  }
   function secaoFiscal() {
     if (st.data === null) st.data = dataPadrao();
+    buscaSemPis();
     const r = st.linhas ? C.resume(st.linhas) : null, l = st.linhas ? filtradas() : [];
     const kpi = (g, nome, sub) => { const t = r.grupos[g] || { n: 0, valor: 0 }; return '<button type="button" class="kpi clicavel' + (st.mostrar === g ? ' ativo' : '') + (g === 'presumido' ? ' verde' : '') + '" data-acao="cbs-mostrar" data-id="' + g + '"><span>' + esc(nome) + '</span><strong>' + t.n + '</strong><small>' + esc(R.moeda(t.valor) + ' · ' + sub) + '</small></button>'; };
     return '<section class="cartao"><h2>5. Estoque de abertura para o crédito de CBS <small>LC 214/2025, art. 381 · Decreto 12.955/2026, arts. 605 a 611 · inventário de 31/12/2026</small></h2>' +
