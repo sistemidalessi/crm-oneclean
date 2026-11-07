@@ -1,7 +1,7 @@
 // Fiscal dos agentes da OneClean (06/11/2026): quando e o que avisar no celular do Anderson. Partes puras (sem Deno): a Edge
 // Function crm-fiscal-agentes importa e os testes do Node (testes/fiscal-agentes.test.js) também. Mesma regra do fiscal da
 // Agilité (agilite-sistema-gestao src/fiscal/agentes.js, planoDeAviso/montarAviso), pedida pelo Anderson para as duas:
-//   - das 7h às 21h (Brasília); fora disso nada sai (o grave novo espera as 7h);
+//   - só em dia útil (07/11/2026) e das 7h às 21h (Brasília); fora disso nada sai (o grave novo espera);
 //   - problema GRAVE novo: na hora, uma vez por problema (e de novo se um "atenção" virar grave);
 //   - segunda, quarta e sexta a partir das 8h: o resumo do que está aberto + os prazos até 2 dias (na sexta, até segunda);
 //   - toda segunda, mesmo sem nada aberto: "tudo certo" (prova de que o fiscal está vivo);
@@ -23,8 +23,12 @@ export const somaDia = (iso, n) => new Date(Date.parse(iso + 'T12:00:00Z') + n *
 
 // o que avisar agora (sem enviar). `abertos`: problemas em aberto ({ chave, area, nivel, texto, fazer, avisado_em });
 // `prazosDe(de, ate)`: os prazos do calendário ({ data, titulo }).
-export function planoDeAviso(abertos, { agora = Date.now(), ultimoResumo = null, ultimoPrazos = null, prazosDe = () => [] } = {}) {
+// `diaUtil`: false em sábado, domingo e feriado (crm_prospec_dia_util, calendário de São Bernardo). 07/11/2026, Anderson: os
+// avisos da OneClean só em dia útil ("a OneClean não abre de feriado, nem sábado, nem domingo"); o grave do fim de semana
+// fica guardado e sai no próximo dia útil (ainda sem avisado_em), junto do resumo.
+export function planoDeAviso(abertos, { agora = Date.now(), ultimoResumo = null, ultimoPrazos = null, prazosDe = () => [], diaUtil = null } = {}) {
   const { hora, dow, dia } = agoraBr(agora);
+  if (diaUtil === false || (diaUtil == null && (dow === 0 || dow === 6))) return { avisar: false, motivo: 'não é dia útil na OneClean' };
   if (hora < 7 || hora >= 21) return { avisar: false, motivo: 'fora da janela (7h às 21h)' };
   const graves = abertos.filter(p => p.nivel === 'grave' && !p.avisado_em);
   const diaDeResumo = [1, 3, 5].includes(dow) && hora >= 8 && ultimoResumo !== dia;

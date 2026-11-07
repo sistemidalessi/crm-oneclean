@@ -12191,3 +12191,26 @@ begin
     end if;
   end loop;
 end $anon$;
+
+-- 07/11/2026, Anderson: "os avisos, as tarefas, eu quero só de segunda a sexta… a OneClean não abre de feriado, nem sábado,
+-- nem domingo". Tarefa que o SISTEMA marca (automática ou a próxima de uma recorrência) e cairia em sábado, domingo ou
+-- feriado (calendário de São Bernardo, crm_prospec_dia_util) vai para o próximo dia útil, às 9h. A tarefa que a pessoa marca
+-- à mão fica na data que ela escolheu. Migração crm_atividade_tarefa_dia_util.
+create or replace function public.crm_atividade_dia_util() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare d date; n int := 0;
+begin
+  if coalesce(new.concluida, false) or new.data_hora is null
+     or not (coalesce(new.automatica, false) or new.recorrencia is not null)
+     or new.tipo in ('sistema', 'nota') then
+    return new;
+  end if;
+  d := (new.data_hora at time zone 'America/Sao_Paulo')::date;
+  if public.crm_prospec_dia_util(d) then return new; end if;
+  while not public.crm_prospec_dia_util(d) and n < 15 loop d := d + 1; n := n + 1; end loop;
+  new.data_hora := (d + time '09:00') at time zone 'America/Sao_Paulo';
+  return new;
+end;
+$$;
+create or replace trigger crm_atividade_dia_util before insert on public.crm_atividades
+  for each row execute function public.crm_atividade_dia_util();

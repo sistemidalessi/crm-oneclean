@@ -136,7 +136,10 @@ Deno.serve(async (req) => {
       // os prazos já buscados (síncronos para o plano)
       const pz2 = await prazosEntre(dia, new Date(Date.parse(dia + 'T12:00:00Z') + 3 * 864e5).toISOString().slice(0, 10));
       const prazosDe = (de: string, ate: string) => pz2.filter(x => String(x.data) >= de && String(x.data) <= ate);
-      const plano = planoDeAviso(abertos, { ultimoResumo: await estado('resumo_dia'), ultimoPrazos: await estado('prazos_dia'), prazosDe });
+      // dia útil da OneClean (07/11/2026): sábado, domingo e feriado não avisam (o calendário é o do banco)
+      let diaUtil: boolean | null = null;
+      try { const { data: du, error: eDu } = await db.rpc('crm_prospec_dia_util', { d: dia }); if (!eDu && typeof du === 'boolean') diaUtil = du; } catch (_) { /* sem resposta: decide pelo dia da semana */ }
+      const plano = planoDeAviso(abertos, { ultimoResumo: await estado('resumo_dia'), ultimoPrazos: await estado('prazos_dia'), prazosDe, diaUtil });
       let envio: Linha | null = null;
       if (plano.avisar) {
         envio = await avisar(montarAviso(plano));

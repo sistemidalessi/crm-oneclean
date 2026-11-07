@@ -31,6 +31,10 @@
   // 20/10/2026 (Anderson: "o Clean fala 3 coisas e quando eu abro, cadê as 3? … tem que funcionar como uma agenda"):
   // tarefas e leads são os DE QUEM ESTÁ LOGADO (alMeu); o da equipe vai para a gestora só como acompanhamento.
   function guia(c) {
+    // 07/11/2026 (Anderson): "os avisos, as tarefas, eu quero só de segunda a sexta… a OneClean não abre de feriado, nem
+    // sábado, nem domingo". Fora do dia útil (calendário de São Bernardo, CRMCaixa.util) o Clean não cobra nada: só diz
+    // que a empresa está fechada (informativo, não entra no selo). O que estiver pendente volta no próximo dia útil.
+    if (c.naoUtil) return [{ id: 'nao-util', nivel: 'info', texto: 'Hoje a OneClean não abre (' + c.naoUtil + '): os avisos voltam no próximo dia útil.', aba: null, sub: null, mascote: null }];
     const it = [], poe = (id, nivel, texto, aba, sub, mascote) => it.push({ id, nivel, texto, aba, sub: sub || null, mascote: mascote || null });
     const al = c.al || {}, meu = c.alMeu || al, r = c.resumo || {}, n = a => (a || []).length;
     if (c.vendas) {
@@ -139,6 +143,9 @@
   // dia faz a IA preparar (uma vez por dia, guardada no banco); o Clean avisa e o painel do comprador mostra.
   let analise = null, analiseDia = '', gerandoAnalise = false;
   const fazAnalise = () => (CRM.ehAdmin() || CRM.ehComprador()) && CRM.store().analiseCompras;
+  // dia útil da OneClean (07/11/2026): fora dele a análise de compras não é preparada sozinha e o Clean fica quieto.
+  // Devolve '' em dia útil ou o porquê ("sábado", "feriado (Proclamação da República)").
+  const naoUtilHoje = () => { const C = raiz.CRMCaixa, h = CRM.hoje(); try { return C && C.util && !C.util(h) ? C.porqueNaoUtil(h) : ''; } catch (e) { return ''; } };
   async function gerarAnalise(refazer) {
     if (gerandoAnalise || !fazAnalise()) return analise;
     gerandoAnalise = true; CRM.render();
@@ -171,7 +178,7 @@
       try { analise = await st.analiseHoje(CRM.hoje()); analiseDia = CRM.hoje(); } catch (e) { analise = null; }
       // ninguém fez ainda hoje: prepara em segundo plano (uma vez por dia neste navegador)
       let ja = ''; try { ja = localStorage.getItem('crm_analise_tentada') || ''; } catch (e) { /* ok */ }
-      if (!analise && st.modo === 'supabase' && ja !== CRM.hoje()) { try { localStorage.setItem('crm_analise_tentada', CRM.hoje()); } catch (e) { /* ok */ } gerarAnalise(false); }
+      if (!analise && st.modo === 'supabase' && ja !== CRM.hoje() && !naoUtilHoje()) { try { localStorage.setItem('crm_analise_tentada', CRM.hoje()); } catch (e) { /* ok */ } gerarAnalise(false); }
     }
     CRM.render();
   }
@@ -201,7 +208,7 @@
       gestor: CRM.ehGestor(), admin: CRM.ehAdmin(), comprador: CRM.ehComprador(), op: CRM.ehLogistica() || CRM.ehGestor(),
       fkn: CRM.lembreteFkn ? CRM.lembreteFkn() : [], recusas: CRM.recusasFkn ? CRM.recusasFkn() : [],
       vigiasParados: CRM.ehAdmin() && !(CRM.fknDesligado && CRM.fknDesligado()) ? (E().vigias || []).filter(c => raiz.CRMDados.situacaoVigia(c).estado === 'parado').map(c => c.nome) : [],
-      papel: eu.papel, hoje: CRM.hoje(),
+      papel: eu.papel, hoje: CRM.hoje(), naoUtil: naoUtilHoje(),
       analise: fazAnalise() ? { pronta: !!(analise && analise.texto), gerando: gerandoAnalise } : null
     });
   }

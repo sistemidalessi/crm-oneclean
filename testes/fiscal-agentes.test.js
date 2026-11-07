@@ -81,6 +81,13 @@ test('fora das 7h às 21h nada sai, nem grave', () => {
   assert.equal(A.planoDeAviso([grave('a')], { agora: em('2026-11-06T21:00') }).avisar, false);
 });
 
+test('só em dia útil: sábado, domingo e feriado não avisam, nem grave (07/11/2026)', () => {
+  assert.equal(A.planoDeAviso([grave('a')], { agora: em('2026-11-07T10:00') }).avisar, false); // sábado
+  assert.equal(A.planoDeAviso([grave('a')], { agora: em('2026-11-08T10:00') }).avisar, false); // domingo
+  assert.equal(A.planoDeAviso([grave('a')], { agora: em('2026-11-20T10:00'), diaUtil: false }).avisar, false); // feriado (sexta)
+  assert.equal(A.planoDeAviso([grave('a')], { agora: em('2026-11-10T10:00'), diaUtil: true, ultimoPrazos: '2026-11-10' }).tipo, 'grave'); // terça útil: sai
+});
+
 test('grave novo sai na hora, uma vez; já avisado não repete', () => {
   const p = A.planoDeAviso([grave('a'), atencao('b')], { agora: em('2026-11-10T15:00'), ultimoPrazos: '2026-11-10' }); // terça
   assert.equal(p.tipo, 'grave');

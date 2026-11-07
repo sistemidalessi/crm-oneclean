@@ -124,3 +124,12 @@ test('números da NF-e sem uso: aviso com o prazo, urgente a 5 dias do dia 10', 
   assert.strictEqual(T.guia({ op: true, resumo: { nfe_sem_uso: { n: 1, prazo: '2026-11-10' } }, hoje: '2026-11-06' }).find(i => i.id === 'nfe-sem-uso').nivel, 'urgente');
   assert.ok(!T.guia({ op: true, resumo: { nfe_sem_uso: { n: 0 } }, hoje: '2026-11-06' }).some(i => i.id === 'nfe-sem-uso'));
 });
+
+test('fora do dia útil o Clean fica quieto: só o aviso de que a OneClean não abre (07/11/2026)', () => {
+  const it = T.guia({ naoUtil: 'sábado', vendas: true, alMeu: { atrasadas: [1, 2], deHoje: [1] }, gestor: true, admin: true, comprador: true, analise: { pronta: true } });
+  assert.strictEqual(it.length, 1);
+  assert.strictEqual(it[0].nivel, 'info');
+  assert.match(it[0].texto, /não abre \(sábado\)/);
+  assert.strictEqual(T.contagem(it), 0, 'não entra no selo');
+  assert.ok(T.guia({ vendas: true, alMeu: { atrasadas: [1] } }).some(x => x.id === 'atrasadas'), 'em dia útil continua igual');
+});
