@@ -63,6 +63,28 @@ A mesma lista resumida está no `PENDENCIAS-ESCRITORIO.md` do `agilite-sistema-g
 - [ ] **Contador:** (1) concorda que o CRM dê ciência em todas as notas recebidas? (2) para a OneClean, alguma nota de compra
       exige resposta definitiva (confirmação ou desconhecimento)? Em que prazo (o CRM usa 90 dias da emissão)? Se todas
       precisarem, ligar `dfe_lembrete_todas` (o Claude liga).
+- [ ] **Crédito presumido de CBS sobre o estoque de 01/01/2027 (07/11/2026; LC 214/2025, art. 381; Decreto 12.955/2026, arts.
+      605 a 611).** O CRM já monta o inventário em Fiscal → "5. Estoque de abertura para o crédito de CBS" (detalhes em
+      `docs/legislacao/registro.md`, entrada de 07/11). O que depende de você e do contador (Fiscontasp):
+      (1) **Você, SQL Editor** (o conector não roda `revoke`):
+      `revoke all on function public.crm_compra_itens_pis(jsonb) from public, anon;` e
+      `revoke all on function public.crm_cbs_inventario(date) from public, anon;` (as duas já recusam quem não é admin/gestora/comprador;
+      é só a higiene de sempre).
+      (2) **Você, 1 clique:** Fiscal → seção 5 → "Ler o PIS/COFINS de N notas guardadas" (relê os XML das notas de compra gravadas antes de
+      07/11 e completa o CST de PIS/COFINS de cada item; as notas novas já chegam com ele). Depois "Levantar o estoque" (hoje, para teste) e
+      "Exportar para o contador" — saem dois CSV: por item e por NCM.
+      (3) **Contador — validar a classificação item a item** (CSV por item: coluna "Classificação" com "pelo quê" e "motivo"). Em 07/11,
+      com a data de hoje: 812 produtos com saldo (R$ 305 mil a custo médio); só 275 têm nota de compra no CRM (o estoque começou em 16/10
+      pelo saldo do FKN), e **18 produtos, R$ 4,9 mil, têm NCM monofásico** (Lei 10.147: aromatizantes 3307, sabonete 3401.11.90…) — o grupo
+      "Crédito presumido" de hoje. Perguntas a ele: (a) a OneClean vende os 3307 (aromatizantes/odorizadores) e 3401.11.90 com **CST 01**
+      (PIS/COFINS cobrado): se são monofásicos, a revenda era CST 04 (alíquota zero) — conferir e, se for o caso, recuperar o pago a maior
+      (5 anos); (b) o álcool (2207/2208) e outros itens de regime especial entram em alguma hipótese do art. 381? (c) a base é o custo de
+      aquisição pelo IRPJ: o custo médio do CRM é o valor pago (com ICMS, IPI, ST e frete, sem tirar crédito) — serve, ou ele quer sem o
+      ICMS recuperável? (d) como ele vai escriturar (Livro de Inventário/ECD e EFD-Contribuições) e **apropriar em 2027** (até 30/06/2027,
+      12 parcelas só contra a CBS) — e se a RFB já publicou a IN com a forma de apropriação.
+      (4) **Até 31/12/2026 (logística e comprador):** zerar os **83 produtos com saldo negativo** (vendido sem entrada) e dar entrada em toda
+      compra que chegou — o inventário de 31/12 é feito **uma vez só** (Decreto, art. 608) e o que não estiver no CRM fica fora do crédito.
+      (5) **Em 02/01/2027:** Levantar o estoque com a data **31/12/2026**, exportar os dois CSV e mandar ao contador com os XML das compras.
 - [ ] **Contador — Reforma em 2027** (antes de 01/01/2027): (1) o IBS e a CBS entram na base do ICMS? A Sefaz-SP diz que
       sim (Resposta à Consulta 32931/2026); há decisão de primeira instância contra. Entram os dois ou só a CBS?
       (2) Qual a alíquota da CBS de 2027? (3) O cliente paga o total com o IBS e a CBS? (4) Como ficam o PIS/COFINS e o

@@ -636,6 +636,14 @@
   Supa.prototype.compraItensDe = async function (ids) { return unwrap(await this.sb.from('crm_compra_itens').select('compra_id, ordem, ncm, cfop, descricao').in('compra_id', ids)); };
   Supa.prototype.comprasItensProduto = async function () { return unwrap(await this.sb.rpc('crm_compras_itens_produto')); };
   Supa.prototype.compraItensSt = async function (lista) { return unwrap(await this.sb.rpc('crm_compra_itens_st', { p: lista })); };
+  // Estoque de abertura para o crédito de CBS (07/11/2026): posição numa data com a última compra e o CST de PIS/COFINS
+  // (só administrador e gestora, pela função); notas de compra com item sem o PIS/COFINS lido e o preenchimento pelo XML guardado.
+  Supa.prototype.cbsInventario = async function (data) { return paginado((de, ate) => this.sb.rpc('crm_cbs_inventario', { p_data: data }).range(de, ate)); };
+  Supa.prototype.comprasSemPis = async function () {
+    const l = await paginado((de, ate) => this.sb.from('crm_compra_itens').select('id, crm_compras(chave, devolucao)').is('pis_cst', null).order('id').range(de, ate));
+    return [...new Set(l.filter(i => i.crm_compras && !i.crm_compras.devolucao).map(i => i.crm_compras.chave).filter(Boolean))];
+  };
+  Supa.prototype.compraItensPis = async function (lista) { return unwrap(await this.sb.rpc('crm_compra_itens_pis', { p: lista })); };
   Supa.prototype.compraGravar = async function (compra, itens) {
     const r = unwrap(await this.sb.from('crm_compras').upsert(compra, { onConflict: 'chave', ignoreDuplicates: true }).select());
     if (!r || !r.length) return null; // já estava no CRM
@@ -692,6 +700,9 @@
   };
   Local.prototype.comprasSemSt = async function () { return []; };
   Local.prototype.compraItensSt = async function () { return 0; };
+  Local.prototype.cbsInventario = async function () { return []; };
+  Local.prototype.comprasSemPis = async function () { return []; };
+  Local.prototype.compraItensPis = async function () { return 0; };
   Local.prototype.compraItensDe = async function (ids) { return (this._compraItens || []).filter(i => ids.indexOf(i.compra_id) !== -1); };
   Local.prototype.comprasItensProduto = async function () {
     const pend = new Set((this._compras || []).filter(c => c.situacao === 'pendente').map(c => c.id));

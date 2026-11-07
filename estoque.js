@@ -141,7 +141,10 @@
         return { ordem: it.ordem, cod_fornecedor: it.codigo, descricao: it.descricao, ean: f.gtin || null, ncm: it.ncm, cfop: it.cfop, unidade: it.unidade,
           quantidade: num(it.quantidade), valor_total: r2(it.valor_total), ipi: r2(f.v_ipi), st: r2(f.v_icms_st), frete: num(e.frete), outras: num(e.outras),
           st_cst: e.st_cst || null, st_base: e.st_base == null ? null : e.st_base, st_aliq: e.st_aliq == null ? null : e.st_aliq,
-          st_proprio: e.st_proprio == null ? null : e.st_proprio, st_valor: e.st_valor == null ? null : e.st_valor };
+          st_proprio: e.st_proprio == null ? null : e.st_proprio, st_valor: e.st_valor == null ? null : e.st_valor,
+          // PIS/COFINS que o fornecedor usou (07/11/2026): diz se a compra gerou crédito — estoque de abertura da CBS (cbs-estoque.js)
+          pis_cst: f.cst_pis || null, pis_aliq: f.aliq_pis == null ? null : f.aliq_pis, pis_valor: f.v_pis == null ? null : f.v_pis,
+          cofins_cst: f.cst_cofins || null, cofins_aliq: f.aliq_cofins == null ? null : f.aliq_cofins, cofins_valor: f.v_cofins == null ? null : f.v_cofins };
       })
     };
   }

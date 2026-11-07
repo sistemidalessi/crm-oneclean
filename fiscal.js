@@ -456,10 +456,11 @@
         '<p class="dica">IE, indicador da IE e código do município vêm das notas já emitidas (só completam campo vazio). O que faltar: completar na ficha do cliente.</p>' +
         (cli.faltando.length ? '<details data-chave="fi-clientes"><summary>' + cli.faltando.length + ' cliente(s) com dado faltando</summary><ul class="lista">' +
           cli.faltando.slice(0, 150).map(x => '<li><button type="button" class="linha" data-acao="abrir-empresa" data-id="' + esc(x.empresa.id) + '"><strong>' + esc(x.empresa.nome) + '</strong><small>' + esc(x.falta.join(' · ')) + '</small></button></li>').join('') +
-          '</ul></details>' : '<p class="vazio">Todos completos. 👍</p>') + '</section>' + (CRM.nfe ? CRM.nfe.secaoFiscal() : '');
+          '</ul></details>' : '<p class="vazio">Todos completos. 👍</p>') + '</section>' + (CRM.nfe ? CRM.nfe.secaoFiscal() : '') + (CRM.cbs ? CRM.cbs.secaoFiscal() : '');
     },
     depois(c) {
       if (CRM.nfe) CRM.nfe.depois(c);
+      if (CRM.cbs) CRM.cbs.depois(c);
       const b = c.querySelector('[data-fi-busca]');
       if (b) b.addEventListener('input', () => { filtro.busca = b.value; CRM.render(); });
     }

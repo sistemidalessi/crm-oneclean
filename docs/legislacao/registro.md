@@ -6,6 +6,62 @@ urgência. O vigia só escreve aqui; quem muda o sistema é a sessão de desenvo
 
 <!-- novas entradas abaixo desta linha -->
 
+## 07/11/2026 — Crédito presumido de CBS sobre o estoque existente em 01/01/2027 (LC 214/2025, art. 381; Decreto 12.955/2026, arts. 605 a 611)
+- **O que mudou:** em 01/01/2027 o PIS/Pasep e a COFINS são extintos e a CBS passa a ser cobrada. A LC 214/2025 (Capítulo
+  da utilização do saldo credor, **arts. 378 a 383**) e o regulamento da CBS (Decreto 12.955/2026, **arts. 602 a 613**) dizem o
+  que acontece com os créditos e com o estoque na virada. Regra lida (entrada da sessão de desenvolvimento, pedido do Anderson):
+  - **art. 378 / Dec. 602:** o saldo credor de PIS/COFINS (inclusive presumido) não usado até a extinção continua válido, sem
+    interromper o prazo; deve estar na escrituração; compensa com a CBS (pedido formal) ou, nas condições da RFB, ressarcimento
+    e compensação com outros tributos federais;
+  - **art. 379 / Dec. 603:** bem devolvido a partir de 01/01/2027 de venda anterior dá crédito de CBS igual ao PIS/COFINS que
+    incidiu na venda; só compensa com a CBS, sem ressarcimento;
+  - **art. 380 / Dec. 604:** crédito que vinha sendo apropriado por depreciação/quota mensal continua, como crédito presumido de CBS;
+  - **art. 381 / Dec. 605 a 611 (o que vale para a OneClean):** contribuinte do regime regular da CBS apropria **crédito presumido
+    sobre o estoque de bens materiais existente em 01/01/2027** nas hipóteses: (I) quem estava no **cumulativo** em 31/12/2026
+    (não é o caso: a OneClean é **Lucro Real**, não cumulativo); (II) bens sujeitos a **substituição tributária ou monofasia** de
+    PIS/COFINS — Lei 10.147/2000, art. 1º, I (perfumaria, toucador e higiene pessoal: posições 33.03 a 33.07 exceto 33.06,
+    3401.11.90 exceto Ex 01, 3401.20.10 e 9603.21.00), Lei 10.485/2002 (autopeças), MP 2.158-35 art. 43 e Lei 9.532 art. 53
+    (cigarros), Lei 12.402/2011 art. 6º, II; (III) a parcela com vedação parcial de crédito (§§ 7º a 9º do art. 3º das Leis
+    10.637 e 10.833). **Só bens novos** comprados de PJ no País ou importados, para revenda ou produção (§ 1º, I). **Fora:**
+    bem com alíquota zero, isenção, suspensão ou não incidência de PIS/COFINS na compra (§ 1º, II; na OneClean: papel higiênico
+    4818.10.00, Lei 10.925/2004); uso e consumo pessoal (III); ativo imobilizado e imóveis (IV). **Percentual e base (§ 3º):
+    9,25% sobre o valor do estoque** para o bem nacional; para o importado, o PIS/COFINS-Importação efetivamente pago (sem o
+    adicional). **Inventário (§ 2º; Dec. 606, 608 a 610):** feito em **31/12/2026, uma vez só**, abrangendo mercadorias, produtos
+    acabados e em elaboração, matérias-primas e embalagens com documento fiscal idôneo guardado 5 anos; **valorado pelo custo de
+    aquisição pelas regras do IRPJ** (nacional e importado separados; produto acabado/em processo só pelo custo de matéria-prima
+    e embalagem); registrado no **Livro de Inventário** com quantidade, valor unitário, classificação fiscal (NCM) e descrição de
+    cada item. **Apropriação (§ 4º):** apurar e apropriar **até 30/06/2027**; usar em **12 parcelas mensais iguais e sucessivas**
+    a partir do período seguinte; **só compensa com a CBS** (nem outros tributos, nem ressarcimento). **Devolução (Dec. 611):**
+    bem do estoque de abertura devolvido a partir de 01/01/2027 **estorna** o crédito presumido;
+  - **art. 382 / Dec. 612:** a compensação com crédito de PIS/COFINS tem preferência sobre os créditos de CBS do art. 53;
+  - **art. 383 / Dec. 613:** o direito de usar os créditos dos arts. 379 a 381 **extingue em 5 anos** do último dia do período de
+    apuração em que houve a apropriação.
+  No **Lucro Real** a compra normal (CST 01 do fornecedor) já deu crédito de 9,25% de PIS/COFINS (1,65% + 7,6%) e **fica fora**;
+  o que entra é o que **não gerou crédito na compra**: monofásicos (o fornecedor vende com CST 02/03/04) e ST (CST 05). O saldo
+  credor acumulado de PIS/COFINS continua valendo contra a CBS (art. 378).
+- **Norma e link:** LC 214/2025, arts. 378 a 383 — https://www.planalto.gov.br/ccivil_03/leis/lcp/lcp214.htm ; Decreto 12.955/2026
+  (regulamento da CBS), arts. 602 a 613 — https://www.planalto.gov.br/ccivil_03/_ato2023-2026/2026/decreto/d12955.htm (publicação
+  original: https://www2.camara.leg.br/legin/fed/decret/2026/decreto-12955-29-abril-2026-799019-publicacaooriginal-179077-pe.html).
+  **A CONFIRMAR no texto oficial:** o Planalto não abre inteiro pela rede da sessão (a página da LC 214 passa de 360 mil
+  caracteres e a do decreto de 500 mil; os artigos 378 a 383 e 602 a 613 ficaram fora do trecho que deu para ler). O texto acima
+  foi lido em cópia artigo por artigo (https://modeloinicial.com.br/lei/LCP-214-2025/utilizacao-saldo-credor-pis-da-cofins-@__I_VIII_V
+  e https://modeloinicial.com.br/lei/DEC-12955-2026/utilizacao-saldo-credor-contribuicao-o-pis-pasep-da-cofins-dos-creditos-iniciais-cbs-@__II_XIII_II)
+  e bate com os resumos de PwC (Tax Intelligence ed. 06/2026), Econet, Simtax e FCR Law. **O contador confere no original.**
+  A avaliação de origem está em `sistemi-dalessi/docs/avaliacoes/2026-11-07-videos-cbs-estoque-e-ferramentas-abertas.md`.
+- **Desde quando:** estoque de **01/01/2027** (inventário de 31/12/2026); apropriação até 30/06/2027; uso em 12 parcelas; 5 anos.
+- **O que muda no sistema (feito em 07/11/2026, sessão de desenvolvimento):** (1) o CST e a alíquota de PIS/COFINS que o
+  fornecedor usou passam a ser gravados em cada item da nota de compra (`crm_compra_itens.pis_cst`…; `estoque.js compraDoXml`),
+  e as notas gravadas antes se completam pelo XML guardado (`crm_compra_itens_pis`, botão na tela); (2) **Fiscal → "5. Estoque de
+  abertura para o crédito de CBS"** (`cbs-estoque.js`, função `crm_cbs_inventario(data)`, só administrador e gestora): posição do
+  estoque numa data (31/12/2026; hoje, para teste) por produto e NCM, com saldo, custo médio, valor, a última nota de compra e o
+  CST de PIS/COFINS dela, o CST da nossa venda e a **classificação sugerida** (crédito presumido / já deu crédito / alíquota zero /
+  a conferir / saldo negativo), o crédito estimado de 9,25% e **CSV para o contador** (por item e por NCM). A classificação é
+  sugestão pelas notas; **quem valida item a item e decide a apropriação é o contador** (`PENDENCIAS-ESCRITORIO.md`).
+  O que o sistema **não** faz: não apropria nem escritura o crédito (é da EFD-Contribuições/ECD do contador); o custo é o médio
+  do CRM (valor pago na nota, com ICMS, IPI, ST e frete, sem tirar créditos) — o contador ajusta à base do IRPJ se precisar.
+- **Urgência:** **média-alta** — o inventário é o de 31/12/2026 (menos de 2 meses): os saldos negativos e as compras que ainda
+  não entraram no CRM precisam estar acertados até lá, e a classificação precisa passar pelo contador antes.
+
 ## 21/10/2026 — SP: IBS e CBS entram na base de cálculo do ICMS a partir de 2027 (entendimento da Sefaz-SP)
 - **O que mudou:** a Sefaz-SP respondeu (Resposta à Consulta nº 32931, de 22/01/2026) que, quando o IBS e a CBS forem
   efetivamente cobrados, o valor deles **compõe a base de cálculo do ICMS** (art. 13 da LC 87/1996: a base é o valor da

@@ -12073,6 +12073,102 @@ end;
 $$;
 
 -- =====================================================================
+-- Estoque de abertura para o crédito presumido de CBS (07/11/2026)
+-- LC 214/2025, arts. 378 a 383 (art. 381: crédito presumido sobre o estoque existente em 01/01/2027; art. 383: extingue em
+-- 5 anos) e Decreto 12.955/2026, arts. 602 a 613 (art. 605: hipóteses; 607: 9,25% do valor, bem nacional; 608/609: inventário
+-- de 31/12/2026 pelo custo de aquisição do IRPJ; 610: Livro de Inventário; 611: devolução estorna). A OneClean é Lucro Real:
+-- a compra normal (CST 01) já deu crédito de PIS/COFINS e fica FORA; entra o que NÃO gerou crédito na compra (monofásicos da
+-- Lei 10.147/2000, ST de PIS/COFINS); alíquota zero, isenção, suspensão, uso e consumo e imobilizado ficam fora. Para
+-- classificar cada produto, o CST de PIS/COFINS que o fornecedor usou na NOTA DE COMPRA passa a ser gravado no item (como
+-- o ICMS-ST desde 19/10/2026); a classificação em si é no navegador (cbs-estoque.js) e quem decide é o contador.
+-- =====================================================================
+alter table public.crm_compra_itens add column if not exists pis_cst text;
+alter table public.crm_compra_itens add column if not exists pis_aliq numeric(7,4);
+alter table public.crm_compra_itens add column if not exists pis_valor numeric(16,2);
+alter table public.crm_compra_itens add column if not exists cofins_cst text;
+alter table public.crm_compra_itens add column if not exists cofins_aliq numeric(7,4);
+alter table public.crm_compra_itens add column if not exists cofins_valor numeric(16,2);
+create index if not exists crm_compra_itens_codigo_idx on public.crm_compra_itens (codigo) where codigo is not null;
+create index if not exists crm_compra_itens_ean_idx on public.crm_compra_itens (ean) where ean is not null;
+
+-- Completa o PIS/COFINS dos itens gravados antes de 07/11/2026: o navegador relê o XML guardado (crm-compras-xml) e manda
+-- [{chave, ordem, pis_cst, pis_aliq, pis_valor, cofins_cst, cofins_aliq, cofins_valor}]; só preenche o que está vazio.
+create or replace function public.crm_compra_itens_pis(p jsonb) returns integer language plpgsql security definer set search_path = public as $$
+declare n integer;
+begin
+  if not (public.crm_eh_admin() or public.crm_eh_comprador()) then raise exception 'só o administrador ou o comprador'; end if;
+  update public.crm_compra_itens i set pis_cst = x.pis_cst, pis_aliq = x.pis_aliq, pis_valor = x.pis_valor,
+         cofins_cst = x.cofins_cst, cofins_aliq = x.cofins_aliq, cofins_valor = x.cofins_valor
+    from jsonb_to_recordset(coalesce(p, '[]'::jsonb)) as x(chave text, ordem integer, pis_cst text, pis_aliq numeric, pis_valor numeric, cofins_cst text, cofins_aliq numeric, cofins_valor numeric),
+         public.crm_compras c
+   where c.chave = x.chave and i.compra_id = c.id and i.ordem = x.ordem and i.pis_cst is null and x.pis_cst is not null;
+  get diagnostics n = row_count;
+  return n;
+end $$;
+revoke all on function public.crm_compra_itens_pis(jsonb) from public, anon;
+grant execute on function public.crm_compra_itens_pis(jsonb) to authenticated;
+
+-- Posição do estoque numa data (fim do dia em São Paulo) para o inventário do crédito de CBS. Parte do saldo e do custo médio
+-- de HOJE (a verdade do sistema, inclusive os acertos diretos de custo) e DESFAZ os movimentos posteriores à data, na ordem
+-- inversa em que entraram no livro: a conta do gatilho crm_estoque_mov_saldo ao contrário (entrada: tira a quantidade e
+-- volta o custo médio de antes; os outros tipos só mexem na quantidade). Com a data de hoje devolve exatamente o saldo atual.
+-- Junto vai a última nota de compra do produto até a data (item ligado, ligação lembrada do fornecedor ou código de barras,
+-- sem as devoluções de cliente) com o CST de PIS/COFINS que o fornecedor usou, e o CST da nossa venda (regra fiscal).
+-- Só administrador e gestora (tem custo). Devolve as linhas com saldo diferente de zero.
+create or replace function public.crm_cbs_inventario(p_data date)
+returns table (codigo text, descricao text, unidade text, linha text, ncm text, cest text, origem text, saldo numeric, custo_medio numeric, valor numeric,
+  compra_numero bigint, compra_em timestamptz, fornecedor text, compra_ncm text, compra_cfop text, compra_custo numeric, compra_como text,
+  pis_cst text, pis_aliq numeric, cofins_cst text, cofins_aliq numeric, venda_cst_pis text, venda_cst_cofins text, movs_depois integer)
+language plpgsql stable security definer set search_path = public as $$
+declare corte timestamptz; s record; m record; sal numeric; cm numeric; nd integer;
+begin
+  if not public.crm_eh_gestor() then raise exception 'só o administrador ou a gestora'; end if;
+  if p_data is null then raise exception 'informe a data da posição'; end if;
+  corte := ((p_data + 1)::timestamp at time zone 'America/Sao_Paulo');
+  for s in select e.codigo as cod, e.saldo::numeric as sal, e.custo_medio::numeric as cm, coalesce(ce.descricao, e.descricao) as descr,
+                  coalesce(ce.unidade, e.unidade) as un, ce.linha as lin, f.ncm as ncm8, f.cest as cest7, f.origem as orig, f.gtin as gtin,
+                  (f.regra->'venda'->>'cst_pis') as vpis, (f.regra->'venda'->>'cst_cofins') as vcofins
+             from public.crm_estoque_saldo e
+             left join public.crm_estoque ce on ce.codigo = e.codigo
+             left join public.crm_fiscal_produtos f on f.codigo = e.codigo
+            order by e.codigo
+  loop
+    sal := s.sal; cm := s.cm; nd := 0;
+    for m in select mv.tipo as tp, mv.quantidade::numeric as q, mv.custo_unit::numeric as cu
+               from public.crm_estoque_mov mv where mv.codigo = s.cod and mv.quando >= corte
+              order by mv.criado_em desc, mv.id desc
+    loop
+      nd := nd + 1;
+      if m.tp = 'inicial' then
+        cm := null;
+      elsif m.tp = 'entrada' and m.q > 0 and coalesce(m.cu, 0) > 0 and cm is not null and (sal - m.q) > 0 then
+        cm := round((sal * cm - m.q * m.cu) / (sal - m.q), 4);
+        if cm <= 0 then cm := s.cm; end if;
+      end if;
+      sal := sal - m.q;
+    end loop;
+    if sal = 0 then continue; end if;
+    codigo := s.cod; descricao := s.descr; unidade := s.un; linha := s.lin; ncm := s.ncm8; cest := s.cest7; origem := s.orig;
+    saldo := sal; custo_medio := cm; valor := case when sal > 0 then round(sal * coalesce(cm, 0), 2) else 0 end;
+    venda_cst_pis := s.vpis; venda_cst_cofins := s.vcofins; movs_depois := nd;
+    select c.numero, c.emitida_em, c.fornecedor_nome, i.ncm, i.cfop,
+           case when i.quantidade > 0 and coalesce(i.fator, v.fator) > 0 then round((i.valor_total + i.ipi + i.st + i.frete + i.outras) / (i.quantidade * coalesce(i.fator, v.fator)), 4) end,
+           case when i.codigo is not null then 'item ligado' when v.codigo is not null then 'ligação do fornecedor' else 'código de barras' end,
+           i.pis_cst, i.pis_aliq, i.cofins_cst, i.cofins_aliq
+      into compra_numero, compra_em, fornecedor, compra_ncm, compra_cfop, compra_custo, compra_como, pis_cst, pis_aliq, cofins_cst, cofins_aliq
+      from public.crm_compra_itens i
+      join public.crm_compras c on c.id = i.compra_id
+      left join public.crm_compra_vinculos v on v.fornecedor_doc = c.fornecedor_doc and v.cod_fornecedor = i.cod_fornecedor
+     where not c.devolucao and c.emitida_em < corte
+       and (i.codigo = s.cod or (i.codigo is null and (v.codigo = s.cod or (v.codigo is null and s.gtin is not null and i.ean = s.gtin))))
+     order by c.emitida_em desc, i.ordem limit 1;
+    return next;
+  end loop;
+end $$;
+revoke all on function public.crm_cbs_inventario(date) from public, anon;
+grant execute on function public.crm_cbs_inventario(date) to authenticated;
+
+-- =====================================================================
 -- Visitante (anon) sem privilégio em tabela, view ou sequência nenhuma (06/11/2026)
 -- Regra deste CLAUDE.md ("anon sem privilégio em tabela nenhuma"). Até aqui o revoke ia tabela por tabela
 -- nas listas acima, e o padrão do Supabase dá tudo ao anon em toda tabela nova: 37 tabelas e 30 sequências
