@@ -293,6 +293,9 @@ motorista, pela logística e como app instalado (PWA).
   21h (grave novo uma vez, resumo seg/qua/sex 8h, "tudo certo" às segundas, prazos de hoje e amanhã ter/qui 8h). O fiscal
   (`crm-fiscal-agentes`, `crm_fiscal_conferir`, agendador de hora em hora) só confere e avisa: **não conserta sozinho**.
   Conferência nova entra em `crm_fiscal_conferir` (resultado, não "se rodou"); a que quebra vira problema, nunca silêncio.
+  Desde 07/11/2026 ele vigia também as **regras fiscais dos produtos** (`crm_interno.fiscal_regras_produtos`: sem regra, ou
+  PIS/COFINS contra a lei). **A lista de monofásicos (Lei 10.147) e a do papel higiênico vivem em três lugares — `fiscal.js`,
+  `cbs-estoque.js` e `crm_interno.fiscal_regras_produtos` — mudou uma, mudar as três.**
   A OneClean está se creditando (06/11/2026): guias de ICMS, PIS/COFINS e IRPJ/CSLL com `sem_imposto` no calendário até o
   Anderson dizer que os créditos acabaram (como o "impostos = 0%" das metas).
 - **GNRE do DIFAL (06/11/2026, pedido do Anderson):** o robô `crm-gnre` **gera** a guia no Portal GNRE sozinho depois da NF-e

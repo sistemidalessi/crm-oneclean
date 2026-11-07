@@ -11286,6 +11286,50 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------------------------------- as conferências
+-- 20. Regras fiscais dos produtos (07/11/2026, Anderson: "sempre deixar o fiscal monitorando os produtos que já estão cadastrados
+-- e os novos, junto às leis, para andarmos certinho praticamente online"). Roda de hora em hora dentro de crm_fiscal_conferir.
+-- O fiscal só avisa; a correção é na aba Fiscal (a proposta já vem certa: fiscal.js analisa). Listas iguais às do fiscal.js e do
+-- cbs-estoque.js: monofásicos da Lei 10.147/2000, art. 1º, I (33.03 a 33.07 exceto 33.06, 3401.11.90, 3401.20.10, 9603.21.00) e
+-- papel higiênico 4818.10.00 (alíquota zero, Lei 10.925/2004). MUDOU UMA LISTA, MUDAR AS TRÊS.
+create or replace function crm_interno.fiscal_regras_produtos() returns jsonb language plpgsql security definer set search_path = public as $$
+declare achados jsonb := '[]'::jsonb; n int; lst text;
+begin
+  -- a) produto ativo com estoque, vendido nos últimos 60 dias ou cadastrado há menos de 30 dias, sem regra fiscal: a NF-e dele não sai
+  with q as (
+    select e.codigo, e.descricao from public.crm_estoque e
+     where e.codigo !~ '\.\d+$' and coalesce(e.situacao, '') <> 'INATIVO'
+       and (exists (select 1 from public.crm_estoque_saldo s where s.codigo = e.codigo and s.saldo > 0)
+            or exists (select 1 from public.crm_nota_itens i join public.crm_notas nt on nt.id = i.nota_id
+                        where i.codigo = e.codigo and not nt.cancelada and nt.emitida_em > now() - interval '60 days')
+            or exists (select 1 from public.crm_produtos p where p.codigo = e.codigo and p.criado_em > now() - interval '30 days'))
+       and not exists (select 1 from public.crm_fiscal_produtos f where f.codigo = e.codigo and (f.regra -> 'venda' ->> 'cfop') is not null))
+  select count(*), (select string_agg(codigo || ' ' || left(coalesce(descricao, ''), 30), ', ') from (select * from q order by codigo limit 10) x) into n, lst from q;
+  if n > 0 then
+    achados := achados || crm_interno.fiscal_p('fiscal:sem-regra', 'Fiscal', 'atencao',
+      n || ' produto(s) com estoque, venda recente ou cadastro novo sem regra fiscal (a NF-e deles não sai): ' || lst || case when n > 10 then '…' else '' end || '.',
+      'Fiscal → 2. Regra fiscal dos produtos → "Atualizar as propostas"; produto sem venda no histórico: ✎ e copiar a regra de um parecido.', '#fiscal');
+  end if;
+  -- b) regra de PIS/COFINS contra a lei: monofásico sem CST 04, papel higiênico sem CST 06, CST 01 fora de 1,65% + 7,6%
+  with q as (
+    select f.codigo, f.descricao, case
+      when (f.ncm ~ '^330[3457]' or f.ncm in ('34011190', '34012010', '96032100')) and coalesce(f.regra -> 'venda' ->> 'cst_pis', '') <> '04' then 'monofásico da Lei 10.147 sem CST 04'
+      when f.ncm = '48181000' and coalesce(f.regra -> 'venda' ->> 'cst_pis', '') <> '06' then 'papel higiênico sem CST 06 (alíquota zero)'
+      when f.regra -> 'venda' ->> 'cst_pis' = '01' and (coalesce((f.regra -> 'venda' ->> 'aliq_pis')::numeric, 0) <> 1.65 or coalesce((f.regra -> 'venda' ->> 'aliq_cofins')::numeric, 0) <> 7.6) then 'CST 01 fora de 1,65% + 7,6%'
+      end as motivo
+      from public.crm_fiscal_produtos f where (f.regra -> 'venda') is not null)
+  select count(*), (select string_agg(codigo || ' ' || left(coalesce(descricao, ''), 30) || ' (' || motivo || ')', ', ') from (select * from q where motivo is not null order by codigo limit 8) x)
+    into n, lst from q where motivo is not null;
+  if n > 0 then
+    achados := achados || crm_interno.fiscal_p('fiscal:regra-contra-a-lei', 'Fiscal', 'grave',
+      n || ' produto(s) com a regra de PIS/COFINS contra a lei: ' || lst || case when n > 8 then '…' else '' end || '.',
+      'Fiscal → 2. Regra fiscal dos produtos → "Atualizar as propostas" (a proposta já vem corrigida) e conferir; ou ✎ no produto.', '#fiscal');
+  end if;
+  return achados;
+exception when others then
+  return jsonb_build_array(crm_interno.fiscal_p('conferencia:regras', 'Fiscal', 'atencao', 'O fiscal não conseguiu conferir as regras fiscais dos produtos (' || left(sqlerrm, 120) || ').', 'Me chamar: a conferência quebrou.'));
+end;
+$$;
+
 create or replace function public.crm_fiscal_conferir(p_externos jsonb default null)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare
@@ -11615,6 +11659,9 @@ begin
   exception when others then
     achados := achados || crm_interno.fiscal_p('conferir:gnre', F, 'atencao', 'Não consegui conferir a GNRE: ' || left(sqlerrm, 120), 'Me chamar.');
   end;
+
+  -- 20. regras fiscais dos produtos (07/11/2026): sem regra e contra a lei (crm_interno.fiscal_regras_produtos)
+  achados := achados || crm_interno.fiscal_regras_produtos();
 
   -- 17. externos (certificado A1, serviço fiscal, fiscal da Agilité): vêm da Edge Function
   if p_externos is not null and jsonb_typeof(p_externos) = 'array' then achados := achados || p_externos; end if;
