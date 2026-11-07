@@ -66,10 +66,7 @@ A mesma lista resumida está no `PENDENCIAS-ESCRITORIO.md` do `agilite-sistema-g
 - [ ] **Crédito presumido de CBS sobre o estoque de 01/01/2027 (07/11/2026; LC 214/2025, art. 381; Decreto 12.955/2026, arts.
       605 a 611).** O CRM já monta o inventário em Fiscal → "5. Estoque de abertura para o crédito de CBS" (detalhes em
       `docs/legislacao/registro.md`, entrada de 07/11). O que depende de você e do contador (Fiscontasp):
-      (1) **Você, SQL Editor** (o conector não roda `revoke`):
-      `revoke all on function public.crm_compra_itens_pis(jsonb) from public, anon;` e
-      `revoke all on function public.crm_cbs_inventario(date) from public, anon;` (as duas já recusam quem não é admin/gestora/comprador;
-      é só a higiene de sempre).
+      (1) ~~`revoke` das duas funções no SQL Editor~~ — rodado pelo Anderson em 07/11 e conferido no banco.
       (2) **Você, 1 clique:** Fiscal → seção 5 → "Ler o PIS/COFINS de N notas guardadas" (relê os XML das notas de compra gravadas antes de
       07/11 e completa o CST de PIS/COFINS de cada item; as notas novas já chegam com ele). Depois "Levantar o estoque" (hoje, para teste) e
       "Exportar para o contador" — saem dois CSV: por item e por NCM.
