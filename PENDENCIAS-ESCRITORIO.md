@@ -67,9 +67,15 @@ A mesma lista resumida está no `PENDENCIAS-ESCRITORIO.md` do `agilite-sistema-g
       605 a 611).** O CRM já monta o inventário em Fiscal → "5. Estoque de abertura para o crédito de CBS" (detalhes em
       `docs/legislacao/registro.md`, entrada de 07/11). O que depende de você e do contador (Fiscontasp):
       (1) ~~`revoke` das duas funções no SQL Editor~~ — rodado pelo Anderson em 07/11 e conferido no banco.
-      (2) **Você, 1 clique:** Fiscal → seção 5 → "Ler o PIS/COFINS de N notas guardadas" (relê os XML das notas de compra gravadas antes de
-      07/11 e completa o CST de PIS/COFINS de cada item; as notas novas já chegam com ele). Depois "Levantar o estoque" (hoje, para teste) e
-      "Exportar para o contador" — saem dois CSV: por item e por NCM.
+      (2) ~~"Ler o PIS/COFINS das notas guardadas"~~ — feito pelo Anderson em 07/11: 1.476 de 1.483 itens de compra com o CST lido
+      (2 notas sem XML). Falta só "Levantar o estoque" e "Exportar para o contador" (dois CSV: por item e por NCM).
+      **O que a leitura mostrou (07/11, posição de hoje):** crédito presumido sugerido em **16 produtos, R$ 4,4 mil** (≈ R$ 407 de
+      crédito); 746 já deram crédito (R$ 272 mil); 37 com alíquota zero/isento (R$ 19 mil: papel higiênico, café, açúcar); 13 a
+      conferir (R$ 9,4 mil). Achados para o contador: **Bom Ar (3307) comprado com CST 04 e vendido com CST 01** → PIS/COFINS pago a
+      maior na revenda; aromatizantes Coala e álcool perfumado Vigut (3307) **comprados com CST 01** → ou o fornecedor erra ou não são
+      monofásicos; **álcool 2207 e lubrificantes 2710 comprados com CST 04** (monofásico de combustíveis, Lei 9.718 art. 5º, que
+      não está na lista do art. 381, II) → entram ou não?; sacos de lixo Leal com CST 07 (isento?) e fornecedores com CST 50/73/99
+      (código de entrada numa nota de saída) → o CRM manda esses para "a conferir".
       (3) **Contador — validar a classificação item a item** (CSV por item: coluna "Classificação" com "pelo quê" e "motivo"). Em 07/11,
       com a data de hoje: 812 produtos com saldo (R$ 305 mil a custo médio); só 275 têm nota de compra no CRM (o estoque começou em 16/10
       pelo saldo do FKN), e **18 produtos, R$ 4,9 mil, têm NCM monofásico** (Lei 10.147: aromatizantes 3307, sabonete 3401.11.90…) — o grupo
