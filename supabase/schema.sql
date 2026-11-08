@@ -11294,10 +11294,12 @@ $$;
 create or replace function crm_interno.fiscal_regras_produtos() returns jsonb language plpgsql security definer set search_path = public as $$
 declare achados jsonb := '[]'::jsonb; n int; lst text;
 begin
-  -- a) produto ativo com estoque, vendido nos últimos 60 dias ou cadastrado há menos de 30 dias, sem regra fiscal: a NF-e dele não sai
+  -- a) produto ativo com estoque, vendido nos últimos 60 dias ou cadastrado há menos de 30 dias, sem regra fiscal: a NF-e dele não sai.
+  --    Fora o item genérico de orçamento "CONSULTOR …" (620000 a 620005), de propósito sem regra: o pedido com ele trava em
+  --    SEM CADASTRO e nunca chega à nota (Anderson, 08/11/2026).
   with q as (
     select e.codigo, e.descricao from public.crm_estoque e
-     where e.codigo !~ '\.\d+$' and coalesce(e.situacao, '') <> 'INATIVO'
+     where e.codigo !~ '\.\d+$' and coalesce(e.situacao, '') <> 'INATIVO' and e.descricao !~* '^\s*CONSULTOR\M'
        and (exists (select 1 from public.crm_estoque_saldo s where s.codigo = e.codigo and s.saldo > 0)
             or exists (select 1 from public.crm_nota_itens i join public.crm_notas nt on nt.id = i.nota_id
                         where i.codigo = e.codigo and not nt.cancelada and nt.emitida_em > now() - interval '60 days')
