@@ -20,6 +20,27 @@
     if (d.getHours() >= 18) { d.setDate(d.getDate() + 1); d.setHours(9); }
     return d.toISOString();
   }
+  // Estoque de um produto para o "Adicionar item" do negócio (09/11/2026, pedido da equipe): disponível e o que já foi
+  // pedido ao fornecedor, com a data (compras-pedidos.js). Busca uma vez por 5 minutos; sem custo (o banco não manda à vendedora).
+  let dispCache = null, dispEm = 0;
+  async function estoqueItem(cod) {
+    const st = CRM.store();
+    if (!st || !st.estoqueDisponivel || !cod) return null;
+    try {
+      if (!dispCache || Date.now() - dispEm > 300000) {
+        const l = await st.estoqueDisponivel();
+        dispCache = new Map(l.map(d => [String(d.codigo), d])); dispEm = Date.now();
+        if (CRM.aCaminho) CRM.aCaminho.limpa();
+      }
+      if (CRM.aCaminho) await CRM.aCaminho.garante();
+    } catch (e) { return null; }
+    const c = String(cod).replace(/\.0+$/, ''), d = dispCache.get(c) || dispCache.get(c.replace(/\.\d+$/, ''));
+    if (!d) return null;
+    const un = d.unidade || '';
+    const caminho = CRM.aCaminho ? CRM.aCaminho.texto(d.codigo, un) : '';
+    return { disponivel: Number(d.disponivel) || 0, unidade: un,
+      caminho: caminho || (Number(d.a_caminho) > 0 ? Number(d.a_caminho).toLocaleString('pt-BR') + ' pedidos no FKN (sem data)' : '') };
+  }
   const principal = id => { const l = CRM.doEmpresa('contatos', id); return l.find(c => c.principal) || l[0] || null; };
   const telDe = (e, c) => (c && (c.whatsapp || c.celular || c.telefone)) || (e && (e.whatsapp || e.telefone)) || '';
 
@@ -905,11 +926,17 @@
           const p = CRM.produto(form.elements.produto_id.value);
           if (!p || !p.codigo) { box.hidden = true; box.innerHTML = ''; return; }
           const pedido = p.id;
-          CRM.produtos.fotoDe(p.codigo).then(u => {
+          // 09/11/2026 (pedido da equipe): junto da foto, o disponível e se já há compra a caminho com a data, para decidir
+          // na hora se põe esse produto ou oferece outro.
+          Promise.all([CRM.produtos.fotoDe(p.codigo), estoqueItem(p.codigo)]).then(([u, est]) => {
             if (form.elements.produto_id.value !== pedido) return; // trocou de produto enquanto carregava
             box.hidden = false;
+            const q = n => Number(n).toLocaleString('pt-BR', { maximumFractionDigits: 3 });
             box.innerHTML = (u ? '<img src="' + esc(u) + '" alt="">' : '<span class="item-foto-vazia">sem foto cadastrada</span>') +
-              '<span><strong>' + esc(p.nome) + '</strong><small>' + esc(p.codigo) + (p.unidade ? ' · ' + esc(p.unidade) : '') + '</small></span>';
+              '<span><strong>' + esc(p.nome) + '</strong><small>' + esc(p.codigo) + (p.unidade ? ' · ' + esc(p.unidade) : '') + '</small>' +
+              (est ? '<small class="item-estoque' + (est.disponivel <= 0 ? ' neg' : '') + '">Disponível: <strong>' + esc(q(est.disponivel) + ' ' + est.unidade) + '</strong> · ' +
+                (est.caminho ? 'A caminho: ' + esc(est.caminho) : est.disponivel <= 0 ? '<strong>nada pedido ao fornecedor</strong>' : 'nada a caminho') + '</small>' : '') +
+              '</span>';
           });
         };
         form.elements.produto_id.addEventListener('change', () => {

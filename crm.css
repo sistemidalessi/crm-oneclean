@@ -1384,6 +1384,8 @@ button.ordena.ativo { color: var(--marinho); }
 .item-foto img { width: 120px; height: 120px; object-fit: contain; border-radius: 8px; background: #fff; flex: none; }
 .item-foto .item-foto-vazia { width: 120px; height: 120px; display: flex; align-items: center; justify-content: center; text-align: center; font-size: .8rem; color: var(--texto-2, #666); background: var(--cinza-fundo); border-radius: 8px; flex: none; }
 .item-foto small { display: block; color: var(--texto-2, #666); }
+.item-foto small.item-estoque { margin-top: 6px; color: var(--texto, #1d2b30); }
+.item-foto small.item-estoque.neg { color: #b42318; }
 /* Entrada da nota de compra: o faturamento (parcelas) editável na mesma janela dos itens (03/11/2026, Wellington) */
 .es-parcelas { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--borda); }
 .es-parcelas h3 { margin: 0 0 6px; font-size: 1rem; }
