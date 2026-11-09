@@ -10581,6 +10581,12 @@ declare r public.crm_pedidos; emp uuid := nullif(p->>'empresa_id', '')::uuid; it
 begin
   if not (public.crm_eh_membro() or logi) then raise exception 'só a equipe de vendas faz pedido'; end if;
   if emp is null or not public.crm_ve_empresa(emp) then raise exception '%', case when logi then 'a logística lança pedido só dos clientes de venda direta' else 'cliente fora da sua carteira' end; end if;
+  -- cadastro para virar pedido (09/11/2026): o orçamento pode ter só o nome; o pedido, não
+  if not exists (select 1 from public.crm_empresas e where e.id = emp
+                  and length(regexp_replace(coalesce(e.cnpj, ''), '[^0-9A-Za-z]', '', 'g')) in (11, 14)
+                  and coalesce(e.ind_ie, '') <> '') then
+    raise exception 'para virar pedido, complete o cadastro do cliente (CNPJ ou CPF, se é contribuinte do ICMS e o endereço). O orçamento pode ser salvo sem isso.';
+  end if;
   if pid is not null then
     select * into r from public.crm_pedidos where id = pid for update;
     if r.id is null then raise exception 'pedido não encontrado'; end if;

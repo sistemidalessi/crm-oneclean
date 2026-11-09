@@ -1054,10 +1054,12 @@
       const rot = rotuloCliente();
       corpo = '<div class="campos pd-campos">' +
         '<label class="campo largo"><span>Cliente *</span><input data-ed-cliente list="pdClientes" value="' + esc(e ? rot.get(e.id) || e.nome : '') + '" placeholder="Nome, CNPJ, bairro ou rua" autocomplete="off">' +
-          (e && R.localEmpresa(e) ? '<small>' + esc(R.localEmpresa(e)) + '</small>' : '') + '</label>' +
+          (e && R.localEmpresa(e) ? '<small>' + esc(R.localEmpresa(e)) + '</small>' : '') +
+          // 09/11/2026 (Anderson): orçamento rápido, com o cliente só pelo nome; o cadastro completo é exigido ao virar pedido
+          (!x.id && !ehLog() ? '<small><button type="button" class="link" data-acao="pd-cliente-rapido">+ Cliente novo (só o nome, para o orçamento)</button></small>' : '') + '</label>' +
         '<datalist id="pdClientes">' + emps.slice(0, 5000).map(c => '<option value="' + esc(rot.get(c.id)) + '">' + esc([R.apelidoDe(c), R.localEmpresa(c) || c.cidade, CRM.nomeUsuario(c.responsavel_id)].filter(Boolean).join(' · ')) + '</option>').join('') + '</datalist>' +
         // cliente sem os dados da nota (23/10/2026): avisa já no pedido, em vez de só travar na emissão
-        (e && R.faltasNota(e).length ? '<p class="alerta largo">Para a nota sair, falta no cadastro do cliente: <strong>' + esc(R.faltasNota(e).join(', ')) + '</strong>. ' +
+        (e && R.faltasNota(e).length ? '<p class="alerta largo">' + (x.id ? 'Para a nota sair' : 'O orçamento já pode ser salvo. Para virar pedido') + ', falta no cadastro do cliente: <strong>' + esc(R.faltasNota(e).join(', ')) + '</strong>. ' +
           '<button type="button" class="btn sec mini" data-acao="pd-cad-cliente" data-id="' + esc(e.id) + '">Completar o cadastro</button></p>' : '') +
         (CRM.ehGestor() ? '<label class="campo"><span>Vendedor(a)</span><select data-ed="vendedor_id">' + CRM.opcoesHTML(CRM.opcoesUsuarios(), x.vendedor_id) + '</select></label>'
           : '<label class="campo"><span>Vendedor(a)</span><input value="' + esc(CRM.nomeUsuario(x.vendedor_id)) + '" disabled></label>') +
@@ -1157,6 +1159,48 @@
     linhaNova();
   }
 
+  // Cliente escolhido no editor (pela lista ou criado agora pelo "+ Cliente novo")
+  function escolheCliente(e) {
+    ed.empresa_id = e.id; ed.dados.entrega = P.entregaDoCliente(e); if (!String(ed.dados.texto_nota || '').trim() && e.obs_nota) ed.dados.texto_nota = e.obs_nota;   // texto fixo do cliente na nota (horário de recebimento; 03/11/2026)
+    if (!String(ed.dados.pagamento || '').trim()) ed.dados.pagamento = ultimoPagamento(e.id);
+    if (!CRM.ehGestor() || !ed.vendedor_id) ed.vendedor_id = CRM.ehGestor() || ehLog() ? e.responsavel_id || CRM.meuId() : CRM.meuId();
+    const abertoNeg = CRM.doEmpresa('negocios', e.id).filter(n => n.status === 'aberto' && ((CRM.etapa(n.etapa_id) || {}).funil || 'Vendas') === funilVendas());
+    if (!ed.negocio_id && abertoNeg.length === 1) ed.negocio_id = abertoNeg[0].id;
+    CRM.render();
+  }
+
+  // Orçamento rápido (09/11/2026, Anderson: "às vezes só tem o nome do cliente… para virar pedido, aí sim fica obrigatório o
+  // cadastro"): o cliente nasce como lead só com o nome (telefone, contato e cidade se souber), na carteira de quem faz o
+  // orçamento. O CNPJ, o contribuinte e o endereço ficam para o "Gravar pedido", que não passa sem eles (aqui e no banco).
+  function clienteRapido() {
+    const nomeDigitado = (document.querySelector('[data-ed-cliente]') || {}).value || '';
+    CRM.abrirForm({
+      titulo: 'Cliente novo para o orçamento',
+      intro: 'Basta o nome para salvar o orçamento. Para virar pedido, o CRM pede o cadastro completo (CNPJ ou CPF, contribuinte e endereço).',
+      campos: [
+        { nome: 'nome', rotulo: 'Nome do cliente', obrigatorio: true, largo: true },
+        { nome: 'telefone', rotulo: 'Telefone / WhatsApp (se souber)', tipo: 'tel' },
+        { nome: 'contato_nome', rotulo: 'Pessoa de contato (se souber)' },
+        { nome: 'cidade', rotulo: 'Cidade (se souber)' }
+      ],
+      valores: { nome: R.normaliza(nomeDigitado) && !CRM.empresa(ed.empresa_id) ? nomeDigitado.trim() : '' },
+      salvarTexto: 'Usar no orçamento',
+      aoSalvar: async v => {
+        const nome = String(v.nome || '').trim();
+        if (!nome) throw new Error('diga o nome do cliente');
+        const iguais = (E().D.empresas || []).filter(x => R.normaliza(x.nome) === R.normaliza(nome));
+        if (iguais.length && !confirm('Já existe cliente com esse nome (' + iguais.slice(0, 3).map(x => x.nome + (R.localEmpresa(x) ? ' · ' + R.localEmpresa(x) : '')).join('; ') +
+          '). Se for o mesmo, cancele e escolha na lista. Criar outro assim mesmo?')) throw new Error('escolha o cliente na lista');
+        if (v.telefone) await CRM.barraDuplicado({ telefone: v.telefone });
+        const emp = await CRM.inserir('empresas', { nome, telefone: v.telefone || null, cidade: v.cidade || null, situacao: 'lead',
+          responsavel_id: ed.vendedor_id || CRM.meuId(), origem: 'Orçamento rápido' });
+        if (v.contato_nome) await CRM.inserir('contatos', { empresa_id: emp.id, nome: v.contato_nome, whatsapp: v.telefone || null, principal: true });
+        escolheCliente(emp);
+        CRM.toast('Cliente "' + nome + '" criado como lead. O orçamento já pode ser salvo; para virar pedido, complete o cadastro.');
+      }
+    });
+  }
+
   function paraGravar() {
     const x = ed, e = CRM.empresa(x.empresa_id);
     if (!e) throw new Error('escolha o cliente (aba Dados cadastrais)');
@@ -1168,6 +1212,11 @@
   }
 
   async function gravarPedido() {
+    const ec = CRM.empresa(ed.empresa_id), faltas = ec ? R.faltasNota(ec) : [];
+    if (faltas.length) {
+      if (CRM.fichas && CRM.fichas.formEmpresa) CRM.fichas.formEmpresa(ec);
+      throw new Error('para virar pedido, complete o cadastro do cliente: ' + faltas.join(', ') + '. Depois clique em "Gravar pedido" de novo (o orçamento pode ser salvo sem isso).');
+    }
     const st = CRM.store(), dados = paraGravar(), eraNovo = !ed.id;
     const r = await st.pedidoGravar(dados);
     const pr = ed.proposta_id && (E().D.propostas || []).find(p => p.id === ed.proposta_id);
@@ -1428,13 +1477,8 @@
         const v = el.value.trim(), emps = E().D.empresas || [], rot = rotuloCliente();
         const e = emps.find(x => rot.get(x.id) === v) || emps.find(x => (x.nome + (x.cnpj ? ' · ' + x.cnpj : '')) === v) ||
           (emps.filter(x => R.normaliza(x.nome) === R.normaliza(v)).length === 1 ? emps.find(x => R.normaliza(x.nome) === R.normaliza(v)) : null);
-        if (!e) { CRM.toast('Escolha o cliente na lista (digite parte do nome, o CNPJ, o bairro ou a rua).', true); return; }
-        ed.empresa_id = e.id; ed.dados.entrega = P.entregaDoCliente(e); if (!String(ed.dados.texto_nota || '').trim() && e.obs_nota) ed.dados.texto_nota = e.obs_nota;   // texto fixo do cliente na nota (horário de recebimento; 03/11/2026)
-        if (!String(ed.dados.pagamento || '').trim()) ed.dados.pagamento = ultimoPagamento(e.id);
-        if (!CRM.ehGestor() || !ed.vendedor_id) ed.vendedor_id = CRM.ehGestor() || ehLog() ? e.responsavel_id || CRM.meuId() : CRM.meuId();
-        const abertoNeg = CRM.doEmpresa('negocios', e.id).filter(n => n.status === 'aberto' && ((CRM.etapa(n.etapa_id) || {}).funil || 'Vendas') === funilVendas());
-        if (!ed.negocio_id && abertoNeg.length === 1) ed.negocio_id = abertoNeg[0].id;
-        CRM.render();
+        if (!e) { CRM.toast('Escolha o cliente na lista (digite parte do nome, o CNPJ, o bairro ou a rua) ou use "+ Cliente novo".', true); return; }
+        escolheCliente(e);
       });
       const prod = c.querySelector('#pdProd');
       if (prod) {
@@ -1475,6 +1519,7 @@
   }
   const troca = r => { peds = (peds || []).map(p => (p.id === r.id ? r : p)); };
   Object.assign(CRM.acoes, {
+    'pd-cliente-rapido': () => { if (ed) clienteRapido(); },
     'pd-cad-cliente': id => { const e = CRM.empresa(id); if (e && CRM.fichas) CRM.fichas.formEmpresa(e); },
     'pd-ver': id => { f.ver = id; f.bolao = null; aberto = null; CRM.render(); },
     'pd-sit': id => { f.sit = id; CRM.render(); },
