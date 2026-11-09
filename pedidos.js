@@ -820,7 +820,10 @@
           '<td class="num">' + qtd(it.quantidade) + '</td><td class="num">' + (fa > 0 ? '<strong class="neg">' + qtd(fa) + '</strong>' : '0') + '</td><td class="num">' + preco(it.preco) + '</td><td class="num">' + (num(it.desconto) > 0 ? preco(Math.round(num(it.desconto) * 100) / 100) + '%<small>R$ ' + preco(P.descontoValor(it)) + '</small>' : '0,00') + '</td>' +
           (gest ? '<td class="num">' + (l.margem == null ? '—' : l.abaixoMinimo ? '<strong class="neg" title="este item está abaixo da margem mínima; o que trava é a margem geral do pedido">' + pct(l.margem) + '</strong>' : pct(l.margem)) + '</td>' : sg ? '<td>' + slotSinal(sg, i) + '</td>' : '') + '<td class="num">' + preco(l.total) + '</td><td>' + esc(P.rotuloFaixa(l.faixa)) + '</td><td class="num">' + (l.comissao == null ? '—' : preco(l.comissao)) + '</td>' +
           '<td class="num">' + (l.sobreTab == null ? '—' : preco(l.sobreTab)) + '</td>' +
-          (o.ler ? '' : '<td class="num">' + (d ? qtd(Math.floor(num(d.disponivel) * 1000) / 1000) : '—') + '</td><td class="num"><button type="button" class="mini" data-acao="pd-item-editar" data-id="' + i + '" title="Alterar o item">✎</button>' +
+          (o.ler ? '' : '<td class="num">' + (d ? qtd(Math.floor(num(d.disponivel) * 1000) / 1000) : '—') + '</td><td class="num pd-item-acoes">' +
+            (i > 0 ? '<button type="button" class="mini" data-acao="pd-item-subir" data-id="' + i + '" title="Subir uma posição">↑</button>' : '') +
+            (i < itens.length - 1 ? '<button type="button" class="mini" data-acao="pd-item-descer" data-id="' + i + '" title="Descer uma posição">↓</button>' : '') +
+            '<button type="button" class="mini" data-acao="pd-item-editar" data-id="' + i + '" title="Alterar o item">✎</button>' +
             '<button type="button" class="mini" data-acao="pd-item-excluir" data-id="' + i + '" title="Excluir o item">×</button></td>') + '</tr>';
       }).join('') : '<tr><td colspan="15" class="vazio">Nenhum item.</td></tr>') + '</tbody></table></div>';
   }
@@ -1086,6 +1089,8 @@
         '<label class="campo largo"><span>Produto (código ou nome) — item ' + (x.sel != null ? x.sel + 1 : x.itens.length + 1) + '</span><input id="pdProd" list="pdProdutos" value="' + esc(l.codigo ? l.codigo + ' — ' + l.descricao : l.descricao) + '" placeholder="digite o código ou parte do nome" autocomplete="off"></label>' +
         (ehLivre(dd) ? '<p class="alerta largo">⚠ Item genérico: o pedido fica <strong>travado (sem cadastro)</strong> até trocar este item pelo produto cadastrado. Peça o cadastro ao comprador.</p>' +
           '<label class="campo largo"><span>Descrição deste item (para a separação saber o que é)</span><input id="pdDescLivre" data-seq="' + x.seq + '" maxlength="120" value="' + esc(l.descricao) + '" placeholder="escreva o produto como deve sair na nota" autocomplete="off"></label>' : '') +
+        // 09/11/2026 (Anderson: "incluir um produto no item 5 em vez do 10, para ficar na ordem do cliente"): a posição do item
+        '<label class="campo pd-pos"><span>Nº do item</span><input id="pdPos" data-seq="' + x.seq + '" type="number" step="1" min="1" max="' + (x.sel != null ? x.itens.length : x.itens.length + 1) + '" value="' + esc(l.pos || (x.sel != null ? x.sel + 1 : x.itens.length + 1)) + '" inputmode="numeric" title="Digite outro número para pôr o item nessa posição; os de baixo descem uma posição"></label>' +
         '<label class="campo"><span>Qtde' + (l.unidade ? ' (' + esc(l.unidade) + ')' : '') + '</span><input id="pdQtd" data-seq="' + x.seq + '" type="number" step="any" min="0" value="' + esc(l.quantidade) + '" inputmode="decimal"></label>' +
         '<label class="campo"><span>Preço un</span><input id="pdPreco" data-seq="' + x.seq + '" type="number" step="any" min="0" value="' + esc(l.preco) + '" inputmode="decimal"></label>' +
         '<label class="campo"><span>Desc %</span><input id="pdDesc" data-seq="' + x.seq + '" type="number" step="any" min="0" max="100" value="' + esc(l.desconto) + '" inputmode="decimal"></label>' +
@@ -1146,6 +1151,7 @@
   function leLinha(c) {
     const l = ed.linha, g = id => c.querySelector('#' + id);
     if (g('pdQtd') && Number(g('pdQtd').dataset.seq) === ed.seq) { l.quantidade = g('pdQtd').value; l.preco = g('pdPreco').value; l.desconto = g('pdDesc').value; }
+    if (g('pdPos') && Number(g('pdPos').dataset.seq) === ed.seq) l.pos = g('pdPos').value;
     const dl = g('pdDescLivre');
     if (dl && Number(dl.dataset.seq) === ed.seq && dl.value.trim()) l.descricao = dl.value.replace(/\s+/g, ' ').trim().slice(0, 120);
   }
@@ -1155,7 +1161,11 @@
     if (!l.codigo && !l.descricao) throw new Error('escolha o produto');
     if (!(num(l.quantidade) > 0)) throw new Error('diga a quantidade');
     const it = completa({ codigo: l.codigo || null, descricao: l.descricao, unidade: l.unidade || null, quantidade: num(l.quantidade), preco: num(l.preco), desconto: num(l.desconto) });
-    if (ed.sel != null) ed.itens[ed.sel] = it; else ed.itens.push(it);
+    // posição escolhida (1 = primeiro); vazia ou fora da lista: no fim (item novo) ou onde estava (item alterado)
+    const n = ed.sel != null ? ed.itens.length : ed.itens.length + 1;
+    let pos = Math.round(num(l.pos)); if (!(pos >= 1 && pos <= n)) pos = ed.sel != null ? ed.sel + 1 : n;
+    if (ed.sel != null) ed.itens.splice(ed.sel, 1);
+    ed.itens.splice(pos - 1, 0, it);
     linhaNova();
   }
 
@@ -1499,7 +1509,7 @@
           dV.addEventListener('change', () => { leLinha(c); CRM.render(); });
           dV.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); leLinha(c); try { salvaItem(); CRM.render(); } catch (e) { CRM.toast(e.message, true); } } });
         }
-        ['#pdDescLivre', '#pdQtd', '#pdPreco', '#pdDesc'].forEach(s => { const el = c.querySelector(s); if (!el) return;
+        ['#pdDescLivre', '#pdQtd', '#pdPreco', '#pdDesc', '#pdPos'].forEach(s => { const el = c.querySelector(s); if (!el) return;
           el.addEventListener('change', () => { leLinha(c); CRM.render(); });
           el.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); leLinha(c); try { salvaItem(); CRM.render(); setTimeout(() => { const p = document.querySelector('#pdProd'); if (p) p.focus(); }, 30); } catch (e) { CRM.toast(e.message, true); } } }); });
       }
@@ -1589,6 +1599,8 @@
       CRM.produtos.escolher(cod => { if (!ed) return; if (ed.sel == null) linhaNova(); escolheProduto(cod); CRM.render(); setTimeout(() => { const q = document.querySelector('#pdQtd'); if (q) q.focus(); }, 80); }, digitado);
     },
     'pd-item-editar': i => { const it = ed.itens[Number(i)]; linhaNova(); ed.sel = Number(i); ed.linha = { codigo: it.codigo || '', descricao: it.descricao, unidade: it.unidade || '', quantidade: it.quantidade, preco: it.preco, desconto: it.desconto }; CRM.render(); },
+    'pd-item-subir': i => { const k = Number(i); if (k > 0) { const t = ed.itens[k - 1]; ed.itens[k - 1] = ed.itens[k]; ed.itens[k] = t; ed.sel = null; linhaNova(); CRM.render(); } },
+    'pd-item-descer': i => { const k = Number(i); if (k < ed.itens.length - 1) { const t = ed.itens[k + 1]; ed.itens[k + 1] = ed.itens[k]; ed.itens[k] = t; ed.sel = null; linhaNova(); CRM.render(); } },
     'pd-item-excluir': i => { ed.itens.splice(Number(i), 1); ed.sel = null; CRM.render(); },
     'pd-organizar': () => { ed.itens.sort((a, b) => String(a.descricao).localeCompare(String(b.descricao), 'pt-BR')); CRM.render(); },
     // 09/11/2026 (Anderson: "a gente restaura muito o pedido desses clientes, a quantidade é muito grande"): as notas do cliente vêm do banco

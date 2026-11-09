@@ -1470,3 +1470,7 @@ button.ordena.ativo { color: var(--marinho); }
 .pd-troca-ok { color: #1f7a45; font-weight: 600; margin-left: 4px; }
 .pd-troca-pend { color: #a86a00; font-weight: 600; margin-left: 4px; }
 .pd-trocado { display: block; color: #a86a00; }
+
+/* posição do item e setas (09/11/2026) */
+.pd-entrada .pd-pos input { max-width: 90px; }
+.pd-grade td.pd-item-acoes { white-space: nowrap; }
