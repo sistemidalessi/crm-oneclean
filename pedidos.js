@@ -682,6 +682,33 @@
       } });
   }
   CRM.pedidoFalta = formFalta;
+  // Recibo dos itens que faltaram (09/11/2026, áudio da logística ao Anderson: "antigamente a gente fazia uma folhinha, tipo um
+  // recibo, que o cliente estava aceitando o parcial… o sistema consegue criar um recibo sobre esses itens faltantes?"). Sai do
+  // registro do "Faltou na separação": duas vias (cliente e OneClean) numa folha, com a declaração da entrega parcial, a
+  // assinatura de quem recebeu e o espaço para assinar quando o que faltou for entregue. Não muda nada no pedido.
+  function htmlReciboFalta(p) {
+    const f = (p.dados && p.dados.separacao_falta) || {}, d = p.dados || {};
+    const cfg = E().cfg || {}, em = (cfg.fiscal && cfg.fiscal.emitente) || {}, en = em.endereco || {};
+    const emp = CRM.empresa(p.empresa_id) || {}, doc = emp.cnpj || p.cliente_doc || d.cliente_doc || '';
+    const nf = notaNumero(p), itens = f.itens || [];
+    const endEm = [[en.logradouro, en.numero].filter(Boolean).join(', '), en.bairro, [en.municipio, en.uf].filter(Boolean).join(' - '), en.fone ? 'Tel.: ' + R.mascaraTel(en.fone) : ''].filter(Boolean).join(' · ');
+    const nomeEm = em.razao || CRM.nomeInstalacao();
+    const via = rot => '<section class="rf-via"><header><img src="' + esc(CRM.logo()) + '" alt=""><div><strong>' + esc(nomeEm) + '</strong><span>' + esc(endEm) + '</span>' +
+        (em.cnpj ? '<span>CNPJ: ' + esc(R.formataCNPJ(em.cnpj)) + '</span>' : '') + '</div><em>' + esc(rot) + '</em></header>' +
+      '<h1>Recibo de entrega parcial — itens pendentes</h1>' +
+      '<p class="rf-dados"><strong>Cliente:</strong> ' + esc(nomeCliente(p)) + (doc ? ' · ' + esc(R.formataCNPJ ? R.formataCNPJ(doc) : doc) : '') +
+        '<br><strong>Pedido:</strong> ' + esc(p.numero) + (nf ? ' · <strong>NF:</strong> ' + esc(nf) : '') + (d.seu_pedido ? ' · <strong>Seu pedido:</strong> ' + esc(d.seu_pedido) : '') +
+        (P.entregaTexto(d.entrega) ? '<br><strong>Entrega:</strong> ' + esc(P.entregaTexto(d.entrega)) : '') + '</p>' +
+      '<table><thead><tr><th>Código</th><th>Produto</th><th>Un</th><th class="n">Qtde pendente</th></tr></thead><tbody>' +
+        itens.map(x => { const it = (p.itens || [])[x.idx] || {};
+          return '<tr><td>' + esc(x.codigo || it.codigo || '') + '</td><td>' + esc(x.descricao || it.descricao || '') + '</td><td>' + esc(x.unidade || it.unidade || '') + '</td><td class="n">' + qtd(x.falta) + '</td></tr>'; }).join('') +
+      '</tbody></table>' + (f.obs ? '<p><strong>Obs.:</strong> ' + esc(f.obs) + '</p>' : '') +
+      '<p class="rf-decl">Declaro que recebi os demais itens deste pedido' + (nf ? ' (NF ' + esc(nf) + ')' : '') + ' e estou ciente de que os itens acima, que faltaram na separação, ' +
+        'serão entregues depois pela ' + esc(nomeEm) + '.</p>' +
+      '<div class="rf-ass"><div>Recebido em ____/____/______</div><div>Nome legível: ______________________________</div><div>Assinatura: ______________________________</div></div>' +
+      '<div class="rf-depois"><strong>Entrega dos itens pendentes:</strong> recebi os itens acima em ____/____/______ &nbsp; Assinatura: ______________________________</div></section>';
+    return '<div class="rf-doc">' + via('Via do cliente') + '<div class="rf-corte">✂ - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -</div>' + via('Via da ' + CRM.nomeInstalacao() + ' (volta assinada)') + '</div>';
+  }
   function telaPedido(p) {
     const s = P.situacao(p, notaNumero(p)), d = p.dados || {}, ctx = ctxDe(p.vendedor_id), t = P.totais(p.itens, p.frete, ctx);
     const fs = faltasDe(p.id), gest = ehOp();   // 21/10/2026: a logística também libera (pedido do Anderson)
@@ -716,6 +743,7 @@
       botoes.push('<button type="button" class="btn sec" data-acao="nota-xml" data-id="' + esc(notaP.chave) + '">XML da nota</button>');
       botoes.push('<button type="button" class="btn sec" data-acao="nota-reenviar" data-id="' + esc(notaP.chave) + '" title="Manda de novo ao cliente o e-mail com o XML, a DANFE e o boleto">✉ Reenviar a nota ao cliente</button>');
     }
+    if (d.separacao_falta && (d.separacao_falta.itens || []).length && ['cancelado'].indexOf(p.situacao) === -1) botoes.push('<button type="button" class="btn sec" data-acao="pd-recibo-falta" data-id="' + esc(p.id) + '" title="Duas vias numa folha: o cliente assina que recebeu sem os itens que faltaram e que eles vão depois">🧾 Recibo dos itens que faltaram</button>');
     botoes.push('<button type="button" class="btn sec" data-acao="pd-imprimir" data-id="' + esc(p.id) + '">Imprimir</button>');
     if (CRM.fichas && CRM.fichas.baixarPdfPedido) botoes.push('<button type="button" class="btn sec" data-acao="pd-pdf" data-id="' + esc(p.id) + '" title="salva o pedido em PDF, para mandar ao cliente ou guardar">📄 Baixar PDF</button>');
     // 05/11/2026: com fotos para toda a equipe (a vendedora escolhe qual dos dois PDFs manda ao cliente)
@@ -1566,6 +1594,7 @@
       const p = ped(id); if (!p) return;
       CRM.fichas.baixarPdfPedido(p).catch(CRM.falhou);
     },
+    'pd-recibo-falta': id => { const p = ped(id); if (p) imprimir(htmlReciboFalta(p), 'Recibo itens pendentes - pedido ' + p.numero); },
     'pd-imprimir': id => { const p = ped(id); if (p) imprimir('<div class="sp-doc">' + htmlPedidoImpresso(p, false) + '</div>', 'Pedido ' + p.numero); },
     'pd-marcar-todos': () => { (peds || []).filter(p => P.situacao(p).chave === 'liberado').filter(p => !(CRM.Lista && CRM.Lista.escondido('[data-pd-marca="' + p.id + '"]'))).forEach(p => f.marcados.add(p.id)); CRM.render(); },
     'pd-bolao-montar': vivo(async () => {
