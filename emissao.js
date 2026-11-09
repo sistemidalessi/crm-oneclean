@@ -1008,6 +1008,8 @@
         ['remessa_futura', 'Entrega futura — remessa (5117): na entrega, com ICMS, baixa o estoque' + (temFat ? '' : ' (emita antes o faturamento)')]] }]
         .concat(temFat ? [] : [{ nome: 'ref_chave', rotulo: 'Faturamento feito no FKN? Chave da nota de simples faturamento (44 números)', tipo: 'texto',
           ajuda: 'Só para a remessa, quando o faturamento (5922) saiu pelo FKN antes da virada. Está no DANFE da nota de faturamento.' }]),
+      // 09/11/2026: pedido de entrega futura já guarda a chave do faturamento (dados.remessa_futura.ref_chave): vem preenchida
+      valores: (() => { const rf = (p.dados || {}).remessa_futura; return rf ? { tipo: 'remessa_futura', ref_chave: rf.ref_chave || '' } : {}; })(),
       salvarTexto: 'Ver a prévia', aoSalvar: async v => {
         const ch = String(v.ref_chave || '').replace(/\D/g, '');
         if (v.tipo === 'remessa_futura' && !temFat && ch.length !== 44) throw new Error('falta a chave da nota de simples faturamento (44 números), ou emita antes o faturamento pelo CRM');

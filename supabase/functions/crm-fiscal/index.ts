@@ -103,7 +103,7 @@ async function dadosDoPedido(db: ReturnType<typeof createClient>, pedidoId: stri
   const p = pedido as Linha;
   if (['faturado', 'cancelado'].includes(String(p.situacao))) throw new Error('o pedido já está ' + p.situacao);
   const abertos = ((p.bloqueios as string[]) || []).filter(b => !((p.liberado as string[]) || []).includes(b));
-  if (abertos.length) throw new Error('o pedido está bloqueado (' + abertos.join(', ') + '): a gestora precisa liberar');
+  if (abertos.length) throw new Error('o pedido está bloqueado (' + abertos.join(', ') + '): a logística ou o administrador precisa liberar');
   const { data: empresa } = await db.from('crm_empresas').select('*').eq('id', p.empresa_id).maybeSingle();
   const bases = [...new Set(((p.itens as Linha[]) || []).map(i => String(i.codigo || '').replace(/\.\d+$/, '')).filter(Boolean))];
   const { data: regs } = bases.length ? await db.from('crm_fiscal_produtos').select('*').in('codigo', bases) : { data: [] };
@@ -181,7 +181,10 @@ async function dadosDaOutra(db: ReturnType<typeof createClient>, o: Linha, fisca
     const ch = String(o.ref_chave || '');
     if (!ref && /^\d{44}$/.test(ch)) {
       const cnpjEmit = String((fiscal.emitente as Linha)?.cnpj || '').replace(/\D/g, '');
-      if (ch.slice(6, 20) !== cnpjEmit) throw new Error('a chave informada não é de uma nota da empresa (CNPJ ' + ch.slice(6, 20) + ')');
+      // 09/11/2026 (Anderson): entrega futura faturada pela empresa anterior do grupo (parou de movimentar em dezembro/2025)
+      // sai agora pela atual, referenciando a nota antiga, como o FKN fazia. Só os CNPJs de fiscal.cnpjs_anteriores.
+      const anteriores = (Array.isArray(fiscal.cnpjs_anteriores) ? fiscal.cnpjs_anteriores as unknown[] : []).map(x => String(x).replace(/\D/g, ''));
+      if (ch.slice(6, 20) !== cnpjEmit && !anteriores.includes(ch.slice(6, 20))) throw new Error('a chave informada não é de uma nota da empresa (CNPJ ' + ch.slice(6, 20) + ')');
       const { data: nf } = await db.from('crm_notas').select('numero, emitida_em, empresa_id, cancelada').eq('chave', ch).maybeSingle();
       const n = nf as Linha | null;
       if (n && n.cancelada) throw new Error('a nota de simples faturamento informada está cancelada');
