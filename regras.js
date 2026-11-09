@@ -897,6 +897,37 @@
     return new Map(par.map(([e, r]) => [e.id, r]));
   }
 
+  // Fornecedor (09/11/2026, áudios do Wellington: "como no FKN", achar pelo código, pelo nome, pelo nome fantasia e pelo CNPJ).
+  // Rótulo da lista de escolha: "00061 — NOME (FANTASIA)"; o texto que a pesquisa olha; e quem é o fornecedor digitado.
+  const semZeros = c => String(c || '').trim().replace(/^0+(?=\d)/, '');
+  function fornecedorRotulo(f) {
+    if (!f) return '';
+    const nome = String(f.nome || '').trim(), fan = String(f.fantasia || '').trim();
+    return (f.codigo ? String(f.codigo).trim() + ' — ' : '') + nome + (fan && normaliza(fan) !== normaliza(nome) ? ' (' + fan + ')' : '');
+  }
+  function fornecedorTexto(f) {
+    if (!f) return '';
+    const d = digitos(f.cnpj);
+    return [f.codigo, semZeros(f.codigo), f.nome, f.fantasia, d, d.length === 14 ? formataCNPJ(d) : ''].filter(Boolean).join(' ');
+  }
+  // Acha um fornecedor da lista pelo que foi digitado: o rótulo da lista, o código (com ou sem os zeros da frente), o CNPJ,
+  // o nome ou o nome fantasia; por fim, um pedaço que só um deles tem. Nenhum ou mais de um: null.
+  function fornecedorAcha(texto, lista) {
+    const t = String(texto || '').trim(), l = (lista || []).filter(Boolean);
+    if (!t || !l.length) return null;
+    const n = normaliza(t), d = digitos(t);
+    const um = arr => arr.length === 1 ? arr[0] : null;
+    const rot = l.find(f => normaliza(fornecedorRotulo(f)) === n);
+    if (rot) return rot;
+    const cab = t.split(/\s+[—-]\s+/)[0];   // "00061 — …" colado de outro lugar
+    if (/^\d{1,6}$/.test(cab)) { const c = um(l.filter(f => f.codigo && semZeros(f.codigo) === semZeros(cab))); if (c) return c; }
+    if (d.length === 14 || (d.length >= 11 && /^[\d./-]+$/.test(t))) { const c = um(l.filter(f => digitos(f.cnpj) === d)); if (c) return c; }
+    const ex = um(l.filter(f => normaliza(f.nome) === n || (f.fantasia && normaliza(f.fantasia) === n)));
+    if (ex) return ex;
+    if (n.length >= 3) return um(l.filter(f => normaliza(f.nome).includes(n) || (f.fantasia && normaliza(f.fantasia).includes(n))));
+    return null;
+  }
+
   function buscaGlobal(D, ix, termo, limite) {
     const t = normaliza(termo);
     if (t.length < 2 && digitos(termo).length < 3) return [];
@@ -1215,7 +1246,7 @@
     normaliza, digitos, doc, ehCNPJ, ehCPF, chaveNome, linkWhatsApp, linkTelefone, formataCNPJ, cnpjValido, casaBusca, iniciais,
     primeiroNome, aplicaModelo, linkGoogleAgenda, totalItem, totalItens, indexa, probabilidade,
     situacaoEfetiva, situacaoTarefa, alertas, ultimoMovimento, etapaDeOrcamento, ritmoCompra, cicloRecompra, itensHabituais, nomeDeItem, textoItens, dashboard, duplicadosEmpresas, duplicadosContatos, mesclaCampos,
-    buscaGlobal, localEmpresa, apelidoDe, rotulosEmpresas, csvParse, csvGera, csvCelula, numeroBR, dataPlanilha,
+    buscaGlobal, localEmpresa, apelidoDe, rotulosEmpresas, fornecedorRotulo, fornecedorTexto, fornecedorAcha, csvParse, csvGera, csvCelula, numeroBR, dataPlanilha,
     cfopDeVenda, notaDeVenda, devolucoesComoNotas, sugereSegmento, NOMES_SEGMENTO, faturamento, chaveDoc, chaveTelefone, chaveEmail, achaDuplicados, motivoDuplicado, nomesCompativeis, mesmoCliente
   };
 

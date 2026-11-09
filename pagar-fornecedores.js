@@ -47,17 +47,19 @@
       const soma = arr => arr.reduce((s, c) => s + num(c.valor), 0);
       const kpi = (t, arr, cls, ver) => '<button type="button" class="kpi clicavel ' + (cls || '') + (f.ver === ver ? ' ativo' : '') + '" data-acao="pf-ver" data-id="' + ver + '"><span>' + esc(t) + '</span><strong>' + R.moeda(soma(arr)) + '</strong><small>' + arr.length + ' conta(s)</small></button>';
       const base = filtra(dados, hoje);
-      const l = CRM.Lista.filtra('pf-lista', base, { texto: c => [c.fornecedor, c.descricao, c.titulo_duplicata, c.observacoes, origemDe(c)], data: c => c.vencimento });
-      CRM.Lista.planilha('pf-lista', 'contas-a-pagar-fornecedores', ['Vencimento', 'Fornecedor', 'Descrição', 'Parcela', 'Valor', 'Situação', 'Origem', 'Observações'],
-        () => l.map(c => [br(c.vencimento), c.fornecedor || '', c.descricao || '', c.parcela ? c.parcela + '/' + (c.parcelas || '?') : '', num(c.valor), situacaoDe(c, hoje)[0], origemDe(c), c.observacoes || '']));
+      const l = CRM.Lista.filtra('pf-lista', base, { texto: c => [c.fornecedor, R.fornecedorTexto({ codigo: c.forn_codigo, nome: c.fornecedor, fantasia: c.forn_fantasia, cnpj: c.forn_cnpj }), c.descricao, c.titulo_duplicata, c.observacoes, origemDe(c)], data: c => c.vencimento });
+      CRM.Lista.planilha('pf-lista', 'contas-a-pagar-fornecedores', ['Vencimento', 'Cód. fornecedor', 'Fornecedor', 'Nome fantasia', 'CNPJ', 'Descrição', 'Parcela', 'Valor', 'Situação', 'Origem', 'Observações'],
+        () => l.map(c => [br(c.vencimento), c.forn_codigo || '', c.fornecedor || '', c.forn_fantasia || '', c.forn_cnpj ? R.formataCNPJ(c.forn_cnpj) : '', c.descricao || '', c.parcela ? c.parcela + '/' + (c.parcelas || '?') : '', num(c.valor), situacaoDe(c, hoje)[0], origemDe(c), c.observacoes || '']));
       return cab +
         '<div class="kpis">' + kpi('Vencidas', venc, venc.length ? 'vermelho' : '', 'vencidas') + kpi('Vencem em 7 dias', sem, 'ambar', 'semana') + kpi('A pagar (todas)', ab, '', 'abertas') + '</div>' +
         '<section class="cartao"><div class="filtro-linha">' + VER.map(v => '<button type="button" class="chip-filtro' + (f.ver === v[0] ? ' ativo' : '') + '" data-acao="pf-ver" data-id="' + v[0] + '">' + v[1] + '</button>').join('') + '</div>' +
-        CRM.Lista.barra('pf-lista', { periodo: true, rotuloPeriodo: 'Vencimento de', placeholder: 'Fornecedor, nota, parcela ou observação', total: base.length, achados: l.length }) +
+        CRM.Lista.barra('pf-lista', { periodo: true, rotuloPeriodo: 'Vencimento de', placeholder: 'Fornecedor (código, nome, fantasia ou CNPJ), nota, parcela ou observação', total: base.length, achados: l.length }) +
         (l.length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Vencimento</th><th>Fornecedor</th><th>Descrição</th><th>Parcela</th><th class="num">Valor</th><th>Situação</th><th>Origem</th><th></th></tr></thead><tbody>' +
           CRM.Lista.corta('pf-lista', l, 150).map(c => {
             const s = situacaoDe(c, hoje), ed = (c.edicoes || []).length, abre = c.situacao === 'aberto' || c.situacao === 'pausado';
-            return '<tr><td>' + esc(br(c.vencimento)) + '</td><td>' + esc(c.fornecedor || '—') + '</td><td>' + esc(c.descricao || '') +
+            return '<tr><td>' + esc(br(c.vencimento)) + '</td><td>' + esc(c.fornecedor || '—') +
+              // 09/11/2026 (Wellington): código e nome fantasia do cadastro embaixo do nome, para achar como no FKN
+              ((c.forn_codigo || c.forn_fantasia) ? '<small>' + esc([c.forn_codigo ? 'cód. ' + c.forn_codigo : '', c.forn_fantasia || ''].filter(Boolean).join(' · ')) + '</small>' : '') + '</td><td>' + esc(c.descricao || '') +
               (ed ? ' <small title="' + esc((c.edicoes || []).map(x => br(x.em) + ' ' + (x.por || '') + ': ' + x.motivo).join('\n')) + '">✎ corrigida ' + ed + 'x</small>' : '') + '</td>' +
               '<td>' + esc(c.parcela ? c.parcela + '/' + (c.parcelas || '?') : '') + '</td><td class="num">' + R.moeda(c.valor) + '</td><td>' + CRM.selo(s[0], s[1]) + '</td><td><small>' + esc(origemDe(c)) + '</small></td>' +
               '<td class="num">' + (abre ? '<button type="button" class="mini" data-acao="pf-editar" data-id="' + esc(c.id) + '" title="Corrigir (pede o motivo)">✎ Corrigir</button>' : '') + '</td></tr>';

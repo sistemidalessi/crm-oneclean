@@ -9002,14 +9002,24 @@ drop policy if exists ler_admin on public.crm_fin_fornecedor_edicoes;
 create policy ler_admin on public.crm_fin_fornecedor_edicoes for select to authenticated using (public.crm_eh_admin());
 revoke all on public.crm_fin_fornecedor_edicoes from anon;
 
+-- 09/11/2026: nome fantasia do fornecedor (pesquisa por código, nome, fantasia e CNPJ)
+alter table public.crm_fornecedores add column if not exists fantasia text;
+
 create or replace function public.crm_fin_fornecedores_ler(p_pagos_desde date default null)
 returns setof jsonb language sql stable security definer set search_path = public as $$
+  -- 09/11/2026 (Wellington): o código, o nome fantasia e o CNPJ do fornecedor vão junto, para a pesquisa achar por eles.
+  -- O fornecedor da conta vem do cadastro pelo nome (o do FKN) ou, na conta criada pela nota de compra, pelo CNPJ da nota.
   select jsonb_build_object('id', l.id, 'fornecedor', l.fornecedor, 'descricao', l.descricao, 'valor', l.valor, 'vencimento', l.vencimento,
       'situacao', l.situacao, 'pago_em', l.pago_em, 'parcela', l.parcela, 'parcelas', l.parcelas, 'titulo_duplicata', l.titulo_duplicata,
       'observacoes', l.observacoes, 'origem', l.origem, 'compra_id', l.compra_id, 'chave_fkn', l.chave_fkn, 'criado_em', l.criado_em, 'atualizado_em', l.atualizado_em,
+      'forn_codigo', f.codigo, 'forn_fantasia', f.fantasia, 'forn_cnpj', coalesce(nullif(f.cnpj, ''), c.doc),
       'edicoes', coalesce((select jsonb_agg(jsonb_build_object('em', x.em, 'por', x.por_nome, 'motivo', x.motivo, 'antes', x.antes, 'depois', x.depois) order by x.em desc)
          from public.crm_fin_fornecedor_edicoes x where x.lancamento_id = l.id), '[]'::jsonb))
     from public.crm_fin_lancamentos l
+    left join lateral (select regexp_replace(coalesce(cp.fornecedor_doc, ''), '\D', '', 'g') doc from public.crm_compras cp where cp.id = l.compra_id) c on true
+    left join lateral (select fo.codigo, fo.fantasia, fo.cnpj from public.crm_fornecedores fo
+       where upper(btrim(fo.nome)) = upper(btrim(l.fornecedor)) or (c.doc <> '' and regexp_replace(coalesce(fo.cnpj, ''), '\D', '', 'g') = c.doc)
+       order by (upper(btrim(fo.nome)) = upper(btrim(l.fornecedor))) desc limit 1) f on true
    where (public.crm_eh_comprador() or public.crm_eh_admin())
      and l.tipo = 'saida' and l.categoria = 'Fornecedores'
      and (l.situacao in ('aberto', 'pausado') or (l.situacao = 'pago' and coalesce(l.pago_em, l.vencimento) >= coalesce(p_pagos_desde, (now() at time zone 'America/Sao_Paulo')::date - 30)))

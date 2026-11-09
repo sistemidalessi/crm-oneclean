@@ -257,10 +257,12 @@
     catch (e) { CRM.falhou(e); return; }
     const prods = new Map();
     (est || []).forEach(e => { const c = String(e.codigo || '').replace(/\.\d+$/, ''); if (c && !prods.has(c) && e.situacao !== 'INATIVO') prods.set(c, e); });
-    const fmap = new Map();   // nome → { cod, nome, prazo }
-    (forns || []).filter(x => x.ativo !== false).forEach(x => fmap.set(String(x.nome).trim().toUpperCase(), { cod: x.codigo || null, nome: x.nome, prazo: x.prazo_dias }));
-    (est || []).forEach(e => { const n = String(e.fornecedor || '').trim(); if (n && !fmap.has(n.toUpperCase())) fmap.set(n.toUpperCase(), { cod: e.fornecedor_cod || null, nome: n, prazo: null }); });
+    // 09/11/2026 (Wellington, "como no FKN"): acha o fornecedor pelo código, nome, nome fantasia ou CNPJ (R.fornecedorAcha)
+    const fmap = new Map();   // nome → { codigo, nome, fantasia, cnpj, prazo }
+    (forns || []).filter(x => x.ativo !== false).forEach(x => fmap.set(String(x.nome).trim().toUpperCase(), { codigo: x.codigo || null, nome: x.nome, fantasia: x.fantasia || null, cnpj: x.cnpj || null, prazo: x.prazo_dias }));
+    (est || []).forEach(e => { const n = String(e.fornecedor || '').trim(); if (n && !fmap.has(n.toUpperCase())) fmap.set(n.toUpperCase(), { codigo: e.fornecedor_cod || null, nome: n, prazo: null }); });
     const lf = [...fmap.values()].sort((a, b) => String(a.nome).localeCompare(String(b.nome), 'pt-BR'));
+    const fornDe = t => R.fornecedorAcha(t, lf);
     const lp = [...prods.values()].sort((a, b) => String(a.descricao).localeCompare(String(b.descricao), 'pt-BR'));
     const linha = k => '<tr data-cp-linha="' + k + '"><td><input list="cpProdLista" class="cp-cod" style="width:100%;min-width:260px" data-cp-cod="' + k + '" placeholder="código ou descrição" aria-label="Produto ' + (k + 1) + '"><small data-cp-desc="' + k + '"></small></td>' +
       '<td class="num"><input type="number" min="0" step="any" class="cp-qtd" data-cp-q="' + k + '" aria-label="Quantidade ' + (k + 1) + '"></td>' +
@@ -277,9 +279,9 @@
     CRM.abrirForm({
       titulo: 'Novo pedido ao fornecedor', largura: 'extra', salvarTexto: 'Registrar pedido ao fornecedor', semFoco: true,
       intro: 'Pedido começado do zero (sem a sugestão). Escolha o fornecedor e digite o código ou parte da descrição de cada produto; a quantidade é na unidade do estoque. As vendedoras passam a ver "a caminho" com a data.',
-      htmlAntes: '<datalist id="cpFornLista">' + lf.map(x => '<option value="' + esc(x.nome) + '">').join('') + '</datalist>' +
+      htmlAntes: '<datalist id="cpFornLista">' + lf.map(x => '<option value="' + esc(R.fornecedorRotulo(x)) + '">' + esc(x.cnpj ? R.formataCNPJ(x.cnpj) : '') + '</option>').join('') + '</datalist>' +
         '<datalist id="cpProdLista">' + lp.map(e => '<option value="' + esc(String(e.codigo).replace(/\.\d+$/, '')) + '">' + esc(e.descricao) + '</option>').join('') + '</datalist>' +
-        '<div class="campos"><label class="campo largo"><span>Fornecedor</span><input id="cpForn" list="cpFornLista" placeholder="nome do fornecedor" autocomplete="off"><small id="cpFornInfo"></small></label></div>' +
+        '<div class="campos"><label class="campo largo"><span>Fornecedor</span><input id="cpForn" list="cpFornLista" placeholder="código, nome, nome fantasia ou CNPJ do fornecedor" autocomplete="off"><small id="cpFornInfo"></small></label></div>' +
         '<div class="tabela-rolagem"><table class="tabela" data-sem-filtro><thead><tr><th>Produto</th><th class="num">Quantidade</th><th class="num">Custo un. (opcional)</th></tr></thead><tbody id="cpLinhas">' +
         [0, 1, 2, 3, 4].map(linha).join('') + '</tbody></table></div><p><button type="button" class="btn sec" id="cpMais">+ mais linhas</button></p>',
       campos: [{ nome: 'previsao', rotulo: 'Chega em (previsão)', tipo: 'date', obrigatorio: true, ajuda: 'o prazo do fornecedor no cadastro, quando houver; mude se ele prometer outra data' },
@@ -288,9 +290,11 @@
       extras: form => {
         const fi = form.querySelector('#cpForn'), info = form.querySelector('#cpFornInfo');
         fi.addEventListener('change', () => {
-          const x = fmap.get(fi.value.trim().toUpperCase());
+          const x = fornDe(fi.value);
+          if (x) fi.value = R.fornecedorRotulo(x);
           if (x && x.prazo != null && form.elements.previsao) form.elements.previsao.value = R.somaDias(CRM.hoje(), Number(x.prazo));
-          info.textContent = x ? (x.prazo != null ? 'prazo de ' + x.prazo + ' dias no cadastro' : 'sem prazo no cadastro (7 dias)') : (fi.value.trim() ? 'fornecedor novo: fica só com o nome' : '');
+          info.textContent = x ? [x.cnpj ? 'CNPJ ' + R.formataCNPJ(x.cnpj) : '', x.prazo != null ? 'prazo de ' + x.prazo + ' dias no cadastro' : 'sem prazo no cadastro (7 dias)'].filter(Boolean).join(' · ')
+            : (fi.value.trim() ? 'não achei no cadastro por código, nome, fantasia ou CNPJ: o pedido fica só com o nome digitado' : '');
         });
         form.addEventListener('change', ev => {
           const k = ev.target.dataset && ev.target.dataset.cpCod; if (k == null) return;
@@ -308,7 +312,7 @@
       aoSalvar: async (v, form) => {
         const nome = form.querySelector('#cpForn').value.trim();
         if (!nome) throw new Error('diga o fornecedor');
-        const x = fmap.get(nome.toUpperCase());
+        const x = fornDe(nome);
         const its = [], ruins = [];
         [...form.querySelectorAll('[data-cp-cod]')].forEach(el => {
           const k = el.dataset.cpCod, q = Number(form.querySelector('[data-cp-q="' + k + '"]').value) || 0, cu = form.querySelector('[data-cp-c="' + k + '"]').value;
@@ -320,7 +324,7 @@
         });
         if (ruins.length) throw new Error('confira: ' + ruins.join(', '));
         if (!its.length) throw new Error('ponha pelo menos um produto com quantidade');
-        const r = await st().compraPedidoGravar({ fornecedor_cod: x ? x.cod : null, fornecedor_nome: x ? x.nome : nome, previsao: v.previsao, obs: v.obs || null, itens: its });
+        const r = await st().compraPedidoGravar({ fornecedor_cod: x ? x.codigo : null, fornecedor_nome: x ? x.nome : nome, previsao: v.previsao, obs: v.obs || null, itens: its });
         if (r.aprovacao === 'aguardando') CRM.toast('Pedido nº ' + r.id + ' registrado e AGUARDANDO APROVAÇÃO (' + R.moeda(r.aprovacao_total) + '): ainda não mande ao fornecedor.');
         else CRM.toast('Pedido nº ' + r.id + ' registrado (' + its.length + ' itens · chega ~' + R.dataBR(v.previsao) + '). As vendedoras já veem "a caminho".');
         dados = null; CRM.aCaminho.limpa();

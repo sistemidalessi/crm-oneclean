@@ -895,6 +895,8 @@
     const campos = [
       { nome: 'codigo', rotulo: 'Código', obrigatorio: true, desabilitado: !novo, dica: novo ? 'o código do fornecedor no FKN, se tiver' : '' },
       { nome: 'nome', rotulo: 'Nome', obrigatorio: true, largo: true },
+      // 09/11/2026 (Wellington, "como no FKN"): o pedido ao fornecedor e o contas a pagar acham pelo código, nome, fantasia e CNPJ
+      { nome: 'fantasia', rotulo: 'Nome fantasia', dica: 'como a equipe chama o fornecedor; com o CNPJ preenchido, vem da Receita' },
       { nome: 'prazo_dias', rotulo: 'Prazo de entrega (dias corridos)', tipo: 'numero', obrigatorio: true, min: 0, max: 180 },
       { nome: 'pedido_minimo', rotulo: 'Pedido mínimo (R$)', tipo: 'numero', min: 0 },
       { nome: 'frete', rotulo: 'Frete', tipo: 'select', opcoes: [['', '—'], ['cif', 'CIF (o fornecedor paga)'], ['fob', 'FOB (nós pagamos)'], ['cif_acima', 'CIF acima de um valor']] },
@@ -903,17 +905,28 @@
     ].concat([1, 2, 3, 4, 5, 6].map(d => ({ nome: 'dia_' + d, rotulo: DIAS[d], tipo: 'checkbox' })), [
       { nome: 'pagamento', rotulo: 'Condição de pagamento', dica: 'ex.: 28 dias boleto' },
       { nome: 'contato', rotulo: 'Contato (vendedor do fornecedor)' }, { nome: 'telefone', rotulo: 'Telefone / WhatsApp' }, { nome: 'email', rotulo: 'E-mail' },
-      { nome: 'cnpj', rotulo: 'CNPJ' }, { nome: 'ativo', rotulo: 'Ainda compramos deste fornecedor', tipo: 'checkbox', dica: 'desmarcado, os produtos dele no FKN ficam em "Vende e não tem fornecedor" até dizer de quem compra' },
+      { nome: 'cnpj', rotulo: 'CNPJ', dica: 'ao digitar, o CRM busca o nome fantasia na Receita' }, { nome: 'ativo', rotulo: 'Ainda compramos deste fornecedor', tipo: 'checkbox', dica: 'desmarcado, os produtos dele no FKN ficam em "Vende e não tem fornecedor" até dizer de quem compra' },
       { nome: 'obs', rotulo: 'Observações', tipo: 'textarea', largo: true }]);
     const valores = Object.assign({ codigo: cod || '', nome: (t && t.nome) || '' }, k, { prazo_dias: k.prazo_dias != null ? k.prazo_dias : 7, ativo: k.ativo !== false });
     [1, 2, 3, 4, 5, 6].forEach(d => { valores['dia_' + d] = dias.includes(d); });
     CRM.abrirForm({ titulo: novo ? 'Novo fornecedor' : 'Fornecedor: ' + ((t && t.nome) || cod), largura: 'largo', campos, valores,
       intro: 'O prazo entra na sugestão de compra (o que sai até a mercadoria chegar); o pedido mínimo e o frete aparecem no pedido por fornecedor.',
+      extras: form => {
+        const cn = form.elements.cnpj, fa = form.elements.fantasia, st = CRM.store();
+        if (!cn || !fa || !st.consultaReceita) return;
+        cn.addEventListener('change', async () => {
+          const d = R.digitos(cn.value);
+          if (d.length !== 14 || fa.value.trim()) return;
+          try { const r = await st.consultaReceita(d), x = r && r.dados;
+            if (x && !fa.value.trim()) { fa.value = String(x.nome_fantasia || '').trim(); CRM.toast(fa.value ? 'Nome fantasia trazido da Receita.' : 'A Receita não tem nome fantasia para este CNPJ: escreva como a equipe chama.'); }
+          } catch (e) { CRM.toast('A Receita não respondeu: escreva o nome fantasia à mão.', true); }
+        });
+      },
       aoSalvar: async v => {
         const f = { codigo: novo ? String(v.codigo).trim() : cod, nome: String(v.nome).trim(), prazo_dias: Math.round(v.prazo_dias), pedido_minimo: v.pedido_minimo || null,
           frete: v.frete || null, frete_cif_acima: v.frete === 'cif_acima' ? v.frete_cif_acima || null : null,
           dias_pedido: [1, 2, 3, 4, 5, 6].filter(d => v['dia_' + d]), pagamento: v.pagamento || null, contato: v.contato || null, telefone: v.telefone || null,
-          email: v.email || null, cnpj: v.cnpj || null, obs: v.obs || null, ativo: !!v.ativo };
+          email: v.email || null, cnpj: v.cnpj || null, fantasia: String(v.fantasia || '').trim() || null, obs: v.obs || null, ativo: !!v.ativo };
         await CRM.store().salvarFornecedor(f);
         CRM.toast('Fornecedor salvo.'); estoque = null; CRM.render();
       } });
