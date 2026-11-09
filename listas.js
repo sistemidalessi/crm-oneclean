@@ -3,7 +3,7 @@
    Cada lista ganha, com uma chamada só: caixa de pesquisa (sem acento, sem maiúscula, várias palavras = todas têm de estar),
    período de/até, um seletor opcional, "mostrar mais" (nada some sem aviso) e "Baixar planilha" com TUDO o que o filtro achou.
 
-     const st = CRM.Lista.estado('nfe');                             // { busca, de, ate, sel, limite }
+     const st = CRM.Lista.estado('nfe');                             // { busca, de, ate, sel, sel2, limite }
      const l = CRM.Lista.filtra('nfe', todas, { texto: n => [n.numero, n.cliente], data: n => n.emitida_em });
      html = CRM.Lista.barra('nfe', { periodo: true, total: todas.length, achados: l.length, sel: [['', 'Todas'], ['x', 'X']] }) +
             tabela(CRM.Lista.corta('nfe', l, 100)) + CRM.Lista.mais('nfe', l, 100);
@@ -64,7 +64,7 @@
   // ================================================================== tela (só no navegador)
   const CRM = raiz.CRM, esc = s => CRM.esc(s);
   const estados = {}, planilhas = {};
-  const estado = (id, padrao) => estados[id] || (estados[id] = Object.assign({ busca: '', de: '', ate: '', sel: '', limite: 0 }, padrao || {}));
+  const estado = (id, padrao) => estados[id] || (estados[id] = Object.assign({ busca: '', de: '', ate: '', sel: '', sel2: '', limite: 0 }, padrao || {}));
   const filtra = (id, linhas, o) => aplica(estado(id), linhas, o);
   const corta = (id, l, n) => l.slice(0, Math.max(n, estado(id).limite || 0));
   // "Mostrar mais": diz quantos faltam, e a planilha leva todos
@@ -75,14 +75,16 @@
       Math.min(n, l.length - vis) + '</button> <button type="button" class="mini" data-acao="ls-mais" data-id="' + esc(id + '|' + l.length) + '">Mostrar todos</button>' +
       (planilhas[id] ? ' · a planilha leva todos' : '') + '</p>';
   }
-  // o: { periodo, rotuloPeriodo, sel: [[valor, rótulo]…], rotuloSel, placeholder, total, achados, csv (false = sem botão), extra (html) }
+  // o: { periodo, rotuloPeriodo, sel: [[valor, rótulo]…], rotuloSel, sel2 / rotuloSel2 (um 2º seletor; 09/11/2026, o vendedor(a)
+  //      na consulta de notas: quem usa filtra por st.sel2), placeholder, total, achados, csv (false = sem botão), extra (html) }
   function barra(id, o) {
     o = o || {};
     const st = estado(id), sid = 'ls_' + id.replace(/[^a-z0-9]/gi, '_');
-    const filtrado = st.busca || st.de || st.ate || st.sel;
+    const filtrado = st.busca || st.de || st.ate || st.sel || st.sel2;
     return '<div class="lista-barra" data-ls="' + esc(id) + '">' +
       '<label class="lista-busca"><span class="sr">Pesquisar</span><input type="search" id="' + sid + '_b" data-ls-busca="' + esc(id) + '" value="' + esc(st.busca) + '" placeholder="' + esc(o.placeholder || 'Pesquisar…') + '"></label>' +
       (o.sel ? '<label class="filtro-inline">' + esc(o.rotuloSel || '') + ' <select id="' + sid + '_s" data-ls-sel="' + esc(id) + '">' + CRM.opcoesHTML(o.sel, st.sel) + '</select></label>' : '') +
+      (o.sel2 ? '<label class="filtro-inline">' + esc(o.rotuloSel2 || '') + ' <select id="' + sid + '_s2" data-ls-sel2="' + esc(id) + '">' + CRM.opcoesHTML(o.sel2, st.sel2) + '</select></label>' : '') +
       (o.periodo ? '<label class="filtro-inline">' + esc(o.rotuloPeriodo || 'De') + ' <input type="date" id="' + sid + '_de" data-ls-de="' + esc(id) + '" value="' + esc(st.de) + '"></label>' +
         '<label class="filtro-inline">até <input type="date" id="' + sid + '_ate" data-ls-ate="' + esc(id) + '" value="' + esc(st.ate) + '"></label>' : '') +
       (filtrado ? '<button type="button" class="mini" data-acao="ls-limpa" data-id="' + esc(id) + '">limpar</button>' : '') +
@@ -107,10 +109,11 @@
     if (t.dataset.lsDe) muda(t.dataset.lsDe, 'de', t.value);
     else if (t.dataset.lsAte) muda(t.dataset.lsAte, 'ate', t.value);
     else if (t.dataset.lsSel) muda(t.dataset.lsSel, 'sel', t.value);
+    else if (t.dataset.lsSel2) muda(t.dataset.lsSel2, 'sel2', t.value);
   });
   Object.assign(CRM.acoes, {
     'ls-mais': v => { const i = String(v).lastIndexOf('|'); estado(v.slice(0, i)).limite = Number(v.slice(i + 1)) || 0; CRM.render(); },
-    'ls-limpa': id => { Object.assign(estado(id), { busca: '', de: '', ate: '', sel: '', limite: 0 }); CRM.render(); },
+    'ls-limpa': id => { Object.assign(estado(id), { busca: '', de: '', ate: '', sel: '', sel2: '', limite: 0 }); CRM.render(); },
     'ls-csv': id => {
       const p = planilhas[id];
       if (!p) { CRM.toast('Nada para baixar aqui.', true); return; }

@@ -435,16 +435,20 @@
   // nota, pelo cliente… e a sequência da nota tem que continuar"). Todas as notas que o CRM conhece (as do FKN, série 1, e as do
   // CRM, série 2), pesquisadas no banco (crm_notas_buscar): número ("2791" ou "2-15"), chave, CNPJ/CPF, cliente, cidade.
   const LS = 'nf-consulta';
-  let busca = null, buscando = false, seq = null, seqLendo = false;
-  const chaveBusca = st => [st.busca, st.de, st.ate, st.sel].join('|');
+  let busca = null, buscando = false, seq = null, seqLendo = false, vendedoresNf = [];
+  const chaveBusca = st => [st.busca, st.de, st.ate, st.sel, st.sel2].join('|');
+  // 09/11/2026 (Anderson: "trocar a natureza pelo vendedor… e no filtro procurar as notas pelo vendedor"): o nome que a nota traz
+  // (SILMARA, DIRETO…) escrito como nome
+  const nomeVend = v => String(v || '').toLowerCase().replace(/(^|\s)\S/g, c => c.toUpperCase());
   const filtrosRpc = st => ({ texto: st.busca || '', de: st.de || null, ate: st.ate || null, serie: /^\d+$/.test(st.sel) ? st.sel : '',
-    situacao: st.sel === 'cancelada' ? 'cancelada' : st.sel === 'valida' ? 'valida' : '' });
+    situacao: st.sel === 'cancelada' ? 'cancelada' : st.sel === 'valida' ? 'valida' : '', vendedor: st.sel2 || '' });
   async function buscaNotas(maisUm) {
     const st = CRM.Lista.estado(LS), k = chaveBusca(st), junta = maisUm && busca && busca.k === k;
     buscando = true;
     try {
       const r = await CRM.store().notasBuscar(Object.assign(filtrosRpc(st), { limite: 100, offset: junta ? busca.notas.length : 0 }));
       busca = junta ? Object.assign({}, busca, { notas: busca.notas.concat(r.notas || []) }) : { k, total: Number(r.total) || 0, soma: Number(r.soma) || 0, notas: r.notas || [] };
+      if (Array.isArray(r.vendedores) && r.vendedores.length) vendedoresNf = r.vendedores;
     } catch (e) { CRM.falhou(e); busca = { k, total: 0, soma: 0, notas: [], erro: true }; }
     buscando = false;
     CRM.render();
@@ -461,7 +465,7 @@
     return '<tr' + (m ? ' class="cx-marcada"' : '') + '><td class="cx-marca"><input type="checkbox" data-acao="nf-marca" data-id="' + esc(n.chave) + '"' + (m ? ' checked' : '') + ' aria-label="marcar a NF ' + esc(n.numero) + '"></td>' +
       '<td><strong>' + esc((n.serie || '') + '-' + n.numero) + '</strong><small>' + (n.nfe_id ? 'CRM' : 'FKN') + '</small></td>' +
       '<td>' + esc(diaHora(n.emitida_em)) + '</td><td>' + cli + '<small>' + esc([n.cliente_doc, [n.cidade, n.uf].filter(Boolean).join('/')].filter(Boolean).join(' · ')) + '</small></td>' +
-      '<td><small>' + esc(n.natureza || '') + '</small></td><td class="num">' + moeda(n.valor_total) + '</td>' +
+      '<td>' + esc(nomeVend(n.vendedor_nome)) + '</td><td class="num">' + moeda(n.valor_total) + '</td>' +
       '<td>' + (n.cancelada ? CRM.selo('cancelada', 'vermelho') : CRM.selo('autorizada', 'verde')) + '</td><td class="num">' + b.join(' ') + '</td></tr>';
   }
   function telaSequencia() {
@@ -486,7 +490,8 @@
     const l = busca && busca.k === chaveBusca(st) ? busca.notas : null;
     return '<section class="cartao"><h2>Consultar notas fiscais <small>todas: as do FKN e as do CRM</small><span class="flex"></span>' +
       '<button type="button" class="btn sec" data-acao="nf-consulta-recolher">Recolher</button></h2>' + telaSequencia() +
-      CRM.Lista.barra(LS, { periodo: true, rotuloPeriodo: 'Emitida de', placeholder: 'Número (2791 ou 2-15), cliente, CNPJ, cidade ou chave', csv: false,
+      CRM.Lista.barra(LS, { periodo: true, rotuloPeriodo: 'Emitida de', placeholder: 'Número, cliente, CNPJ, cidade, vendedor(a) ou chave', csv: false,
+        sel2: [['', 'Todos os vendedores']].concat(vendedoresNf.concat(st.sel2 && vendedoresNf.indexOf(st.sel2) === -1 ? [st.sel2] : []).map(v => [v, nomeVend(v)])),
         sel: [['', 'Todas']].concat(serie() === 1 ? [['1', 'Série 1']] : [['1', 'Série 1 (FKN)'], [String(serie()), 'Série ' + serie() + ' (CRM)']]).concat([['valida', 'Só as válidas'], ['cancelada', 'Só as canceladas']]),
         extra: '<button type="button" class="btn sec" data-acao="nf-consulta-csv">Baixar planilha</button>' }) +
       (!l ? '<p class="vazio">Procurando…</p>' : !l.length ? '<p class="vazio">Nenhuma nota com essa pesquisa.</p>' :
@@ -496,7 +501,7 @@
           '<button type="button" class="btn sec" data-acao="nf-marcadas-xml">XML de todas (ZIP)</button> ' +
           '<button type="button" class="mini" data-acao="nf-marcadas-limpa">desmarcar</button></p>' : '') +
         '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th class="cx-marca"><input type="checkbox" data-acao="nf-marca-todas" title="marcar todas as que estão na lista"' +
-          (l.length && l.every(n => marcadasNf.has(n.chave)) ? ' checked' : '') + '></th><th>NF</th><th>Emitida</th><th>Cliente</th><th>Natureza</th><th class="num">Valor</th><th>Situação</th><th></th></tr></thead><tbody>' +
+          (l.length && l.every(n => marcadasNf.has(n.chave)) ? ' checked' : '') + '></th><th>NF</th><th>Emitida</th><th>Cliente</th><th>Vendedor(a)</th><th class="num">Valor</th><th>Situação</th><th></th></tr></thead><tbody>' +
         l.map(linhaConsulta).join('') + '</tbody></table></div>' +
         (busca.total > l.length ? '<p class="dica lista-mais">Mostrando ' + l.length + ' de ' + busca.total.toLocaleString('pt-BR') + '. <button type="button" class="mini" data-acao="nf-consulta-mais"' + (buscando ? ' disabled' : '') + '>Mostrar mais 100</button> · a planilha leva todas</p>' : '')) +
       '</section>';
@@ -1172,8 +1177,8 @@
           if (l.length < 2000) break;
         }
         if (!out.length) { CRM.toast('A pesquisa não achou nada para baixar.', true); return; }
-        CRM.baixarCSV('notas-fiscais', ['Série', 'Número', 'Emitida em', 'Cliente', 'CNPJ/CPF', 'Cidade', 'UF', 'Natureza', 'Valor', 'Situação', 'Chave'],
-          out.map(n => [n.serie, n.numero, diaHora(n.emitida_em), n.empresa_nome || n.cliente_nome || '', n.cliente_doc || '', n.cidade || '', n.uf || '', n.natureza || '', n.valor_total, n.cancelada ? 'cancelada' : 'autorizada', n.chave]));
+        CRM.baixarCSV('notas-fiscais', ['Série', 'Número', 'Emitida em', 'Cliente', 'CNPJ/CPF', 'Cidade', 'UF', 'Vendedor(a)', 'Natureza', 'Valor', 'Situação', 'Chave'],
+          out.map(n => [n.serie, n.numero, diaHora(n.emitida_em), n.empresa_nome || n.cliente_nome || '', n.cliente_doc || '', n.cidade || '', n.uf || '', nomeVend(n.vendedor_nome), n.natureza || '', n.valor_total, n.cancelada ? 'cancelada' : 'autorizada', n.chave]));
       } catch (e) { CRM.falhou(e); }
     },
     'nf-xml': async id => {

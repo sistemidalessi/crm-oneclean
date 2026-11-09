@@ -7561,14 +7561,19 @@ create policy ler on public.crm_credito_rekta for select to authenticated using 
 -- em crm_notas (as do FKN e as do CRM): número ("2791" ou "2-15"), chave (44), CNPJ/CPF, palavras do cliente/cidade/natureza;
 -- período, série e situação. A logística não lê crm_notas direto (RLS); aqui lê, como a gestão, para reimprimir e conferir.
 -- Vendedor(a): só as notas que já vê (carteira ou vendidas por ela).
+-- 09/11/2026 (Anderson: "trocar a natureza pelo vendedor… e no filtro procurar as notas pelo vendedor"): p_vendedor filtra pelo
+-- vendedor(a) da nota (vendedor_nome, o que a nota traz: SILMARA, ISABELA, DIRETO…); a pesquisa por palavras também acha pelo
+-- vendedor(a); a 1ª página traz "vendedores" (os nomes das notas que a pessoa vê) para o seletor da tela.
+drop function if exists public.crm_notas_buscar(text, date, date, text, text, integer, integer);
 create or replace function public.crm_notas_buscar(p_texto text default '', p_de date default null, p_ate date default null,
-  p_serie text default '', p_situacao text default '', p_limite integer default 200, p_offset integer default 0)
+  p_serie text default '', p_situacao text default '', p_limite integer default 200, p_offset integer default 0, p_vendedor text default '')
 returns jsonb language plpgsql stable security definer set search_path = public as $$
 declare
   t text := coalesce(trim(p_texto), '');
   d text := regexp_replace(t, '\D', '', 'g');
   doc text := upper(regexp_replace(t, '[^0-9A-Za-z]', '', 'g'));
   tudo boolean := public.crm_eh_gestor() or public.crm_eh_logistica() or public.crm_eh_comprador();
+  vend text := upper(trim(coalesce(p_vendedor, '')));
   ser text := null; num bigint := null; ws text[]; r jsonb;
 begin
   if not (tudo or public.crm_eh_membro()) then raise exception 'sem acesso às notas'; end if;
@@ -7577,7 +7582,7 @@ begin
   ws := array_remove(string_to_array(translate(lower(t), 'áàâãäéèêëíìîïóòôõöúùûüç', 'aaaaaeeeeiiiiooooouuuuc'), ' '), '');
   with base as (
     select n.id, n.chave, n.serie, n.numero, n.emitida_em, n.empresa_id, e.nome empresa_nome, n.cliente_doc, n.cliente_nome, n.cidade, n.uf,
-           n.natureza, n.valor_total, n.cancelada, f.id nfe_id, f.situacao nfe_situacao
+           n.natureza, n.vendedor_nome, n.valor_total, n.cancelada, f.id nfe_id, f.situacao nfe_situacao
       from public.crm_notas n
       left join public.crm_empresas e on e.id = n.empresa_id
       left join lateral (select x.id, x.situacao from public.crm_nfe x where x.chave = n.chave order by x.criado_em desc limit 1) f on true
@@ -7586,22 +7591,27 @@ begin
        and (p_ate is null or n.emitida_em < ((p_ate + 1)::timestamp at time zone 'America/Sao_Paulo'))
        and (coalesce(p_serie, '') = '' or n.serie = p_serie)
        and (coalesce(p_situacao, '') = '' or (p_situacao = 'cancelada') = n.cancelada)
+       and (vend = '' or upper(trim(coalesce(n.vendedor_nome, ''))) = vend)
        and (t = ''
          or (num is not null and n.numero = num and (ser is null or n.serie = ser))
          or (length(d) = 44 and n.chave = d)
          or (length(doc) in (11, 14) and t ~ '^[0-9A-Za-z./ -]+$' and upper(regexp_replace(coalesce(n.cliente_doc, ''), '[^0-9A-Za-z]', '', 'g')) = doc)
          or (num is null and length(d) <> 44 and not (length(doc) in (11, 14) and t ~ '^[0-9./ -]+$')
-             and not exists (select 1 from unnest(ws) w where position(w in translate(lower(concat_ws(' ', n.cliente_nome, e.nome, n.cidade, n.natureza, n.cliente_doc)),
+             and not exists (select 1 from unnest(ws) w where position(w in translate(lower(concat_ws(' ', n.cliente_nome, e.nome, n.cidade, n.natureza, n.vendedor_nome, n.cliente_doc)),
                'áàâãäéèêëíìîïóòôõöúùûüç', 'aaaaaeeeeiiiiooooouuuuc')) = 0)))
   )
   select jsonb_build_object('total', (select count(*) from base), 'soma', coalesce((select sum(valor_total) filter (where not cancelada) from base), 0),
     'notas', coalesce((select jsonb_agg(to_jsonb(b) order by b.emitida_em desc, b.numero desc)
                          from (select * from base order by emitida_em desc, numero desc limit least(greatest(coalesce(p_limite, 200), 1), 5000) offset greatest(coalesce(p_offset, 0), 0)) b), '[]'))
+    || case when coalesce(p_offset, 0) = 0 then jsonb_build_object('vendedores', coalesce((select jsonb_agg(v order by v) from (select distinct upper(trim(n.vendedor_nome)) v
+         from public.crm_notas n where coalesce(trim(n.vendedor_nome), '') <> ''
+          and (tudo or n.empresa_id in (select public.crm_empresas_minhas()) or n.vendedor_id = auth.uid())) x), '[]')) else '{}'::jsonb end
     into r;
   return r;
 end;
 $$;
-grant execute on function public.crm_notas_buscar(text, date, date, text, text, integer, integer) to authenticated;
+revoke all on function public.crm_notas_buscar(text, date, date, text, text, integer, integer, text) from public, anon;
+grant execute on function public.crm_notas_buscar(text, date, date, text, text, integer, integer, text) to authenticated;
 
 -- A sequência de cada série: a próxima do CRM (crm_nfe_numeracao), a última autorizada e a última nota de cada série (FKN incluso).
 create or replace function public.crm_nfe_sequencia()

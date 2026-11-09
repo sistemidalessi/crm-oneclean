@@ -1511,7 +1511,7 @@
   Supa.prototype.notasBuscar = async function (o) {
     o = o || {};
     return unwrap(await comTentativas(() => this.sb.rpc('crm_notas_buscar', { p_texto: o.texto || '', p_de: o.de || null, p_ate: o.ate || null, p_serie: o.serie || '',
-      p_situacao: o.situacao || '', p_limite: o.limite || 100, p_offset: o.offset || 0 }))) || { total: 0, soma: 0, notas: [] };
+      p_situacao: o.situacao || '', p_limite: o.limite || 100, p_offset: o.offset || 0, p_vendedor: o.vendedor || '' }))) || { total: 0, soma: 0, notas: [] };
   };
   Supa.prototype.nfeSequencia = async function () { return unwrap(await this.sb.rpc('crm_nfe_sequencia')) || {}; };
   Supa.prototype.nfeNumeracaoIniciar = async function (serie, ultima) { return unwrap(await this.sb.rpc('crm_nfe_numeracao_iniciar', { p_serie: serie, p_ultima: ultima })); };
@@ -1752,12 +1752,15 @@
   Local.prototype.notasBuscar = async function (o) {
     o = o || {};
     const L = raiz.CRMListas, est = (raiz.CRM && raiz.CRM.estado && raiz.CRM.estado.D) || {}, emp = id => ((est.empresas || []).find(e => e.id === id) || {}).nome;
-    let l = (est.notas || []).filter(n => (!o.serie || String(n.serie) === String(o.serie)) && (!o.situacao || (o.situacao === 'cancelada') === !!n.cancelada));
-    l = L ? L.aplica({ busca: o.texto || '', de: o.de || '', ate: o.ate || '' }, l, { texto: n => [n.serie + '-' + n.numero, n.cliente_nome, emp(n.empresa_id), n.cliente_doc, n.cidade, n.chave], data: n => n.emitida_em }) : l;
+    const vend = v => String(v || '').trim().toUpperCase(), todas = est.notas || [];
+    let l = todas.filter(n => (!o.serie || String(n.serie) === String(o.serie)) && (!o.situacao || (o.situacao === 'cancelada') === !!n.cancelada) &&
+      (!o.vendedor || vend(n.vendedor_nome) === vend(o.vendedor)));
+    l = L ? L.aplica({ busca: o.texto || '', de: o.de || '', ate: o.ate || '' }, l, { texto: n => [n.serie + '-' + n.numero, n.cliente_nome, emp(n.empresa_id), n.cliente_doc, n.cidade, n.vendedor_nome, n.chave], data: n => n.emitida_em }) : l;
     l = l.slice().sort((a, b) => String(b.emitida_em).localeCompare(String(a.emitida_em)));
     const de = o.offset || 0;
     return { total: l.length, soma: l.filter(n => !n.cancelada).reduce((s2, n) => s2 + (Number(n.valor_total) || 0), 0),
-      notas: l.slice(de, de + (o.limite || 100)).map(n => Object.assign({}, n, { empresa_nome: emp(n.empresa_id) || null })) };
+      notas: l.slice(de, de + (o.limite || 100)).map(n => Object.assign({}, n, { empresa_nome: emp(n.empresa_id) || null })),
+      vendedores: de ? undefined : Array.from(new Set(todas.map(n => vend(n.vendedor_nome)).filter(Boolean))).sort() };
   };
   Local.prototype.nfeSequencia = async function () { return { crm: [], notas: [] }; };
   Local.prototype.nfeNumeracaoIniciar = async function (serie, ultima) { return { serie, ultima, proximo: ultima + 1 }; };
