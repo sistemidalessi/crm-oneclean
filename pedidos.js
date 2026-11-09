@@ -1434,6 +1434,16 @@
   };
 
   const vivo = fn => async id => { try { await fn(id); } catch (e) { CRM.falhou(e); } };
+  // notas do cliente com os itens, do banco (09/11/2026); guardadas 5 min por cliente
+  let notasCache = null;
+  async function notasDoCliente(empresa) {
+    if (notasCache && notasCache.empresa === empresa && Date.now() - notasCache.em < 300000) return notasCache;
+    CRM.toast('Buscando as notas do cliente…');
+    const l = await CRM.store().clienteNotasRepetir(empresa);
+    notasCache = { empresa, em: Date.now(), notas: l.map(n => ({ id: n.id, numero: n.numero, serie: n.serie, emitida_em: n.emitida_em, valor_total: n.valor_total, cancelada: !!n.cancelada })),
+      porNota: new Map(l.map(n => [n.id, n.itens || []])) };
+    return notasCache;
+  }
   const troca = r => { peds = (peds || []).map(p => (p.id === r.id ? r : p)); };
   Object.assign(CRM.acoes, {
     'pd-cad-cliente': id => { const e = CRM.empresa(id); if (e && CRM.fichas) CRM.fichas.formEmpresa(e); },
@@ -1507,22 +1517,24 @@
     'pd-item-editar': i => { const it = ed.itens[Number(i)]; linhaNova(); ed.sel = Number(i); ed.linha = { codigo: it.codigo || '', descricao: it.descricao, unidade: it.unidade || '', quantidade: it.quantidade, preco: it.preco, desconto: it.desconto }; CRM.render(); },
     'pd-item-excluir': i => { ed.itens.splice(Number(i), 1); ed.sel = null; CRM.render(); },
     'pd-organizar': () => { ed.itens.sort((a, b) => String(a.descricao).localeCompare(String(b.descricao), 'pt-BR')); CRM.render(); },
-    'pd-ultimas': () => {
-      const u = P.ultimasCompras(CRM.doEmpresa('notas', ed.empresa_id), E().ix.porNota);
+    // 09/11/2026 (Anderson: "a gente restaura muito o pedido desses clientes, a quantidade é muito grande"): as notas do cliente vêm do banco
+    // (crm_cliente_notas_repetir, sem custo, as 300 mais recentes), porque a logística não carrega as notas da venda direta.
+    'pd-ultimas': vivo(async () => {
+      const nc = await notasDoCliente(ed.empresa_id), u = P.ultimasCompras(nc.notas, nc.porNota);
       CRM.abrirForm({ titulo: 'Últimas compras · ' + CRM.nomeEmpresa(ed.empresa_id), largura: 'largo', campos: [], salvarTexto: 'Fechar', aoSalvar: async () => {},
         intro: u.produtos.length ? 'O que o cliente comprou (pelas notas), da compra mais recente. Clique em "+" para pôr no pedido com a última quantidade e o último preço.' : 'Nenhuma nota deste cliente no CRM.',
         htmlDepois: u.produtos.length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Produto</th><th class="num">Última qtde</th><th class="num">Último preço</th><th>Última compra</th><th class="num">Vezes</th><th class="num">Disp.</th><th></th></tr></thead><tbody>' +
           u.produtos.slice(0, 150).map((x, i) => { const d = porCod.get(x.codigo); return '<tr><td><strong>' + esc(x.descricao) + '</strong><small>' + esc(x.codigo) + '</small></td><td class="num">' + qtd(x.quantidade) + ' ' + esc(x.unidade) + '</td><td class="num">' + preco(x.preco) + '</td>' +
             '<td>' + esc(R.dataBR(R.diaLocal(x.ultima))) + ' · NF ' + esc(x.nota) + '</td><td class="num">' + x.vezes + '</td><td class="num">' + (d ? qtd(Math.floor(num(d.disponivel))) : '—') + '</td><td><button type="button" class="mini" data-acao="pd-ultima-add" data-id="' + i + '">+</button></td></tr>'; }).join('') + '</tbody></table></div>' : '' });
       CRM.pedidos._ultimas = u.produtos;
-    },
+    }),
     'pd-ultima-add': i => { const x = (CRM.pedidos._ultimas || [])[Number(i)]; if (!x) return; ed.itens.push(completa({ codigo: x.codigo || null, descricao: x.descricao, unidade: x.unidade, quantidade: x.quantidade, preco: x.preco, desconto: 0 })); CRM.toast(x.descricao + ' no pedido.'); CRM.render(); },
-    'pd-importar-ultimas': () => {
-      const u = P.ultimasCompras(CRM.doEmpresa('notas', ed.empresa_id), E().ix.porNota);
+    'pd-importar-ultimas': vivo(async () => {
+      const nc = await notasDoCliente(ed.empresa_id), u = P.ultimasCompras(nc.notas, nc.porNota);
       if (!u.ultimaNota.length) { CRM.toast('Nenhuma nota deste cliente no CRM.', true); return; }
       u.ultimaNota.forEach(x => ed.itens.push(completa({ codigo: x.codigo || null, descricao: x.descricao, unidade: x.unidade, quantidade: x.quantidade, preco: x.preco, desconto: 0 })));
       CRM.toast(u.ultimaNota.length + ' item(ns) da última compra (preços dela; confira com a tabela).'); CRM.render();
-    },
+    }),
     'pd-gravar': vivo(gravarPedido),
     'pd-salvar-orcamento': vivo(salvarOrcamento),
     'pd-liberar': vivo(async id => { const p = ped(id); if (!confirm('Liberar o pedido ' + p.numero + ' (' + P.bloqueiosAbertos(p).map(b => P.ROTULO_BLOQUEIO[b] || b).join(', ') + ')?')) return; troca(await CRM.store().pedidoLiberar(id, true, null)); const r = P.bloqueiosAbertos(ped(id));
@@ -1583,20 +1595,34 @@
       if (!confirm('Reabrir as comissões de ' + nomeMes(com.mes) + '? Fica registrado quem reabriu e quando.')) return;
       await CRM.store().comissaoReabrir(com.mes + '-01'); com.mesCarregado = null; CRM.render();
     }),
-    'pd-repetir': () => {
+    'pd-repetir': vivo(async () => {
       const ps = (peds || []).filter(p => p.empresa_id === ed.empresa_id && p.id !== ed.id && p.situacao !== 'cancelado').slice(0, 10);
-      const ns = CRM.doEmpresa('notas', ed.empresa_id).filter(n => !n.cancelada).slice().sort((a, b) => String(b.emitida_em).localeCompare(String(a.emitida_em))).slice(0, 10);
-      const linha = (id, rot, data, valor, n) => '<tr><td><strong>' + esc(rot) + '</strong></td><td>' + esc(data) + '</td><td class="num">' + n + '</td><td class="num">' + R.moeda(valor) + '</td><td><button type="button" class="mini" data-acao="pd-repetir-usar" data-id="' + esc(id) + '">usar</button></td></tr>';
+      const nc = await notasDoCliente(ed.empresa_id), ns = nc.notas.filter(n => !n.cancelada);
+      // o que a pessoa reconhece no pedido de cada posto: os primeiros produtos da nota
+      const resumo = its => (its || []).slice(0, 4).map(i => i.descricao).join(' · ') + ((its || []).length > 4 ? ' …' : '');
+      const linha = (id, rot, data, valor, its, busca) => '<tr data-rep-busca="' + esc(R.normaliza(busca)) + '"><td><strong>' + esc(rot) + '</strong></td><td>' + esc(data) + '</td>' +
+        '<td><small>' + esc(resumo(its)) + '</small></td><td class="num">' + (its || []).length + '</td><td class="num">' + R.moeda(valor) + '</td>' +
+        '<td><button type="button" class="mini" data-acao="pd-repetir-usar" data-id="' + esc(id) + '">usar</button></td></tr>';
+      const tem = ps.length || ns.length;
       CRM.abrirForm({ titulo: 'Repetir pedido · ' + CRM.nomeEmpresa(ed.empresa_id), largura: 'largo', campos: [], salvarTexto: 'Fechar', aoSalvar: async () => {},
-        intro: 'Escolha um pedido do CRM ou uma nota do cliente: os itens entram com as quantidades e os preços dela (confira com a tabela de hoje).',
-        htmlDepois: (ps.length || ns.length) ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Pedido / nota</th><th>Data</th><th class="num">Itens</th><th class="num">Valor</th><th></th></tr></thead><tbody>' +
-          ps.map(p => linha('p:' + p.id, 'Pedido ' + p.numero, R.dataBR(R.diaLocal(p.criado_em)), p.valor_total, (p.itens || []).length)).join('') +
-          ns.map(n => linha('n:' + n.id, 'NF ' + n.numero, R.dataBR(R.diaLocal(n.emitida_em)), n.valor_total, (E().ix.porNota.get(n.id) || []).length)).join('') + '</tbody></table></div>'
-          : '<p class="vazio">Nenhum pedido nem nota deste cliente no CRM.</p>' });
-    },
+        intro: 'Escolha um pedido do CRM ou uma nota do cliente (as ' + ns.length + ' mais recentes): os itens entram com as quantidades e os preços dela (confira com a tabela de hoje).',
+        htmlDepois: tem ? '<input type="search" id="pdRepBusca" placeholder="Procurar: número da NF, data (dd/mm) ou produto" style="width:100%;margin:0 0 8px">' +
+          '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Pedido / nota</th><th>Data</th><th>Produtos</th><th class="num">Itens</th><th class="num">Valor</th><th></th></tr></thead><tbody>' +
+          ps.map(p => { const d = R.dataBR(R.diaLocal(p.criado_em)); return linha('p:' + p.id, 'Pedido ' + p.numero, d, p.valor_total, p.itens, ['pedido', p.numero, d, (p.itens || []).map(i => i.descricao + ' ' + (i.codigo || '')).join(' ')].join(' ')); }).join('') +
+          ns.map(n => { const d = R.dataBR(R.diaLocal(n.emitida_em)), its = nc.porNota.get(n.id) || []; return linha('n:' + n.id, 'NF ' + n.numero, d, n.valor_total, its, ['nf', n.numero, d, its.map(i => i.descricao + ' ' + (i.codigo || '')).join(' ')].join(' ')); }).join('') +
+          '</tbody></table></div>'
+          : '<p class="vazio">Nenhum pedido nem nota deste cliente no CRM.</p>',
+        extras: form => {
+          const b = form.querySelector('#pdRepBusca'); if (!b) return;
+          b.addEventListener('input', () => {
+            const pal = R.normaliza(b.value).split(/\s+/).filter(Boolean);
+            form.querySelectorAll('tr[data-rep-busca]').forEach(tr => { const t = tr.getAttribute('data-rep-busca'); tr.style.display = pal.every(w => t.indexOf(w) !== -1) ? '' : 'none'; });
+          });
+        } });
+    }),
     'pd-repetir-usar': id => {
       const [t, x] = id.split(':');
-      const its = t === 'p' ? P.itensParaRepetir(ped(x)) : P.itensParaRepetir(null, E().ix.porNota.get(x) || []);
+      const its = t === 'p' ? P.itensParaRepetir(ped(x)) : P.itensParaRepetir(null, (notasCache && notasCache.porNota.get(x)) || E().ix.porNota.get(x) || []);
       if (!its.length) { CRM.toast('Nada para repetir.', true); return; }
       if (ed.itens.length && confirm('O pedido já tem ' + ed.itens.length + ' item(ns). OK = trocar pelos do escolhido; Cancelar = juntar.')) ed.itens = [];
       its.forEach(i => ed.itens.push(completa(i)));

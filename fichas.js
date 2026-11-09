@@ -133,7 +133,7 @@
       // ---- coluna 1: dados + contatos
       '<div class="ficha-col">' +
         '<section><dl class="dados">' +
-          (e.codigo ? dado('Código', '<strong>' + esc(e.codigo) + '</strong>') : '') + dado('Grupo', grupo) + dado('Razão social', esc(e.razao_social)) + (e.razao_receita && e.razao_receita !== e.razao_social ? dado('Razão social completa (Receita)', esc(e.razao_receita)) : '') + (e.apelido ? dado('Apelido', esc(e.apelido)) : '') + (e.obs_nota ? dado('Texto na nota', esc(e.obs_nota)) : '') + (e.email_nfe ? dado('E-mail da nota fiscal', esc(e.email_nfe)) : '') + dado('CNPJ/CPF', esc(e.cnpj) + (e.cnpj && R.ehCNPJ(R.chaveDoc(e.cnpj)) && !R.cnpjValido(e.cnpj) ? ' ' + CRM.selo('inválido?', 'ambar') : '')) +
+          (e.codigo ? dado('Código', '<strong>' + esc(e.codigo) + '</strong>') : '') + dado('Grupo', grupo) + dado('Razão social', esc(e.razao_social)) + (e.razao_receita && e.razao_receita !== e.razao_social ? dado('Razão social completa (Receita)', esc(e.razao_receita)) : '') + (e.apelido ? dado('Apelido', esc(e.apelido)) : '') + (e.obs_nota ? dado('Texto na nota', esc(e.obs_nota)) : '') + (e.email_nfe ? dado('E-mail da nota fiscal', esc(e.email_nfe)) : '') + (e.avista_livre ? dado('Pagamento', CRM.selo('à vista sem travar o pedido', 'azul')) : '') + dado('CNPJ/CPF', esc(e.cnpj) + (e.cnpj && R.ehCNPJ(R.chaveDoc(e.cnpj)) && !R.cnpjValido(e.cnpj) ? ' ' + CRM.selo('inválido?', 'ambar') : '')) +
           dado('Telefone', esc(e.telefone)) + dado('WhatsApp', esc(e.whatsapp)) +
           dado('E-mail', e.email ? (separaEmails(e.email).length ? separaEmails(e.email).map(m => '<a href="mailto:' + esc(m) + '">' + esc(m) + '</a>').join('<br>') : esc(e.email)) : '') +
           dado('Site', e.site ? '<a href="' + esc(/^https?:/i.test(e.site) ? e.site : 'https://' + e.site) + '" target="_blank" rel="noopener noreferrer">' + esc(e.site) + '</a>' : '') +
@@ -431,7 +431,13 @@
       { nome: 'codigo_municipio', rotulo: 'Código do município (IBGE)', terco: true, ajuda: 'Vem sozinho pelo CEP.' },
       // 04/11/2026 (Anderson): a nota emitida vai sozinha por e-mail, com o XML e a DANFE (crm-fiscal)
       { nome: 'email_nfe', rotulo: 'E-mail para a nota fiscal (XML e DANFE)', largo: true,
-        ajuda: 'A nota vai sozinha para este e-mail quando é emitida. Vazio: vai para o e-mail da empresa. Mais de um: separe com ponto e vírgula.' },
+        ajuda: 'A nota vai sozinha para este e-mail quando é emitida. Vazio: vai para o e-mail da empresa. Mais de um: separe com ponto e vírgula.' }
+    );
+    // 09/11/2026 (Anderson): cliente de confiança que paga à vista sem dia certo — o pedido à vista
+    // não trava em SEM ENTRADA; a nota sai e o administrador confirma o pagamento depois. Só o administrador muda (o banco confere).
+    if (completo && CRM.ehAdmin()) c.push({ nome: 'avista_livre', rotulo: 'Paga à vista sem dia certo: não travar o pedido à vista ("sem entrada")', tipo: 'checkbox', largo: true,
+      ajuda: 'Cliente de confiança: a nota sai e a entrega é feita; você confirma o pagamento depois.' });
+    if (completo) c.push(
       { tipo: 'secao', rotulo: 'Pós-venda' },
       { nome: 'ciclo_recompra_dias', rotulo: 'Compra a cada (dias)', tipo: 'numero', passo: '1', min: 1, vazioNulo: true, ajuda: 'vazio = padrão de ' + E().cfg.ciclo_recompra_padrao + ' dias' },
       { nome: 'observacoes', rotulo: 'Observações importantes', tipo: 'textarea', largo: true }
@@ -604,6 +610,7 @@
       },
       aoSalvar: async v => {
         if (!g) delete v.responsavel_id;
+        if (!CRM.ehAdmin()) delete v.avista_livre;
         const errRaz = erroRazao(v);
         if (errRaz) throw new Error(errRaz);
         // quem tem CNPJ ou CPF diz se é contribuinte (com a inscrição certa), isento ou não contribuinte (30/10/2026)

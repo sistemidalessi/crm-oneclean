@@ -1282,6 +1282,9 @@
   Supa.prototype.bolaoMontar = async function (ids, obs) { return unwrap(await this.sb.rpc('crm_bolao_montar', { p_pedidos: ids, p_obs: obs || null })); };
   Supa.prototype.pedidoSepararItem = async function (id, idx, ok) { return unwrap(await this.sb.rpc('crm_pedido_separar_item', { p_id: id, p_idx: idx, p_ok: !!ok })); };
   Supa.prototype.pedidoNotasCandidatas = async function (id) { return unwrap(await this.sb.rpc('crm_pedido_notas_candidatas', { p_id: id })); };
+  // 09/11/2026: notas do cliente com os itens (sem custo), para "Repetir pedido" e "Últimas compras" — também para a logística
+  // nos clientes de venda direta, que não carregam crm_notas
+  Supa.prototype.clienteNotasRepetir = async function (empresa) { return unwrap(await this.sb.rpc('crm_cliente_notas_repetir', { p_empresa: empresa, p_limite: 300 })) || []; };
   Supa.prototype.pedidoFaturar = async function (id, nota) { return unwrap(await this.sb.rpc('crm_pedido_faturar', { p_id: id, p_nota: nota })); };
   Supa.prototype.pedidosTrocaEmpresa = async function (de, para) { return de.length ? unwrap(await this.sb.rpc('crm_pedidos_troca_empresa', { p_de: de, p_para: para })) : 0; };
 
@@ -1323,8 +1326,9 @@
   };
   Local.prototype.pedidosAtualizar = async function () {
     const falt = new Set((await this._faltas()).map(f => f.pedido_id));
+    const livre = new Set((this.ler().empresas || []).filter(e => e.avista_livre).map(e => e.id));   // 09/11/2026: paga à vista sem dia certo
     this._peds().filter(p => p.situacao === 'aberto').forEach(p => {
-      p.bloqueios = [falt.has(p.id) && 'ESTOQUE', !p.entrada_ok && /(vista|antecipad|pix|transfer|dep[oó]sito)/i.test((p.dados || {}).pagamento || '') && !/\d+ *(dias|ddl)/i.test((p.dados || {}).pagamento || '') && 'SEM ENTRADA',
+      p.bloqueios = [falt.has(p.id) && 'ESTOQUE', !p.entrada_ok && !livre.has(p.empresa_id) && /(vista|antecipad|pix|transfer|dep[oó]sito)/i.test((p.dados || {}).pagamento || '') && !/\d+ *(dias|ddl)/i.test((p.dados || {}).pagamento || '') && 'SEM ENTRADA',
         (p.itens || []).some(i => { const pl = Number(i.preco) * (1 - Number(i.desconto || 0) / 100), c = Number(i.custo) || 0;
           return c > 0 ? pl <= 0 || (pl - c) / pl * 100 < 23 - 0.005 : Number(i.preco_tab) > 0 && pl < Number(i.preco_tab) * 0.9 - 0.00005; }) && 'PREÇO'].filter(Boolean);
     });
@@ -1451,6 +1455,11 @@
   Local.prototype.pedidoNotasCandidatas = async function (id) {
     const r = this._ped(id), usadas = new Set(this._peds().map(p => p.nota_id).filter(Boolean));
     return (this.ler().notas || []).filter(n => n.empresa_id === r.empresa_id && !n.cancelada && !usadas.has(n.id)).slice(0, 20);
+  };
+  Local.prototype.clienteNotasRepetir = async function (empresa) {
+    const d = this.ler();
+    return (d.notas || []).filter(n => n.empresa_id === empresa && !n.cancelada).sort((a, b) => String(b.emitida_em).localeCompare(String(a.emitida_em))).slice(0, 300)
+      .map(n => Object.assign({}, n, { itens: (d.nota_itens || []).filter(i => i.nota_id === n.id).sort((a, b) => (a.ordem || 0) - (b.ordem || 0)) }));
   };
   Local.prototype.pedidoFaturar = async function (id, nota) {
     const r = this._ped(id), n = (this.ler().notas || []).find(x => x.id === nota);

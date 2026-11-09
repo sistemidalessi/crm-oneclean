@@ -2716,7 +2716,7 @@ begin
     select p.id, array_remove(array[
       case when p.id in (select pedido_id from f) then 'ESTOQUE' end,
       case when exists (select 1 from public.crm_titulos t where t.empresa_id = p.empresa_id and coalesce(t.previsao, t.vencimento) < hoje and not t.abono) then 'ATRASO' end,
-      case when not p.entrada_ok and coalesce(p.dados->>'pagamento', '') ~* '(vista|antecipad|pix|transfer|dep[oó]sito)' and coalesce(p.dados->>'pagamento', '') !~* '[0-9]+ *(dias|ddl)' then 'SEM ENTRADA' end,
+      case when not p.entrada_ok and coalesce(p.dados->>'pagamento', '') ~* '(vista|antecipad|pix|transfer|dep[oó]sito)' and coalesce(p.dados->>'pagamento', '') !~* '[0-9]+ *(dias|ddl)' and not exists (select 1 from public.crm_empresas ae where ae.id = p.empresa_id and ae.avista_livre) then 'SEM ENTRADA' end,
       -- 04/11/2026; sumiu em 04/11 à noite (a função foi regravada deste arquivo sem ela) e voltou em 05/11: NÃO TIRAR
       case when exists (select 1 from jsonb_array_elements(p.itens) i where public.crm_produto_generico(i->>'codigo')) then 'SEM CADASTRO' end,
       case when trava and (coalesce(mg.sem_preco, false)
@@ -12273,3 +12273,45 @@ end;
 $$;
 create or replace trigger crm_atividade_dia_util before insert on public.crm_atividades
   for each row execute function public.crm_atividade_dia_util();
+
+-- 09/11/2026 (Anderson): clientes antigos de confiança que pagam à vista sem dia certo — crm_empresas.avista_livre: o pedido
+-- à vista deles não leva a trava SEM ENTRADA (a nota sai, a entrega é feita e o administrador confirma o pagamento depois).
+-- Só o administrador liga/desliga. E crm_cliente_notas_repetir: as notas do cliente com os itens (sem custo) para "Repetir
+-- pedido" e "Últimas compras" — a logística não lê crm_notas dos clientes de venda direta.
+alter table public.crm_empresas add column if not exists avista_livre boolean not null default false;
+comment on column public.crm_empresas.avista_livre is 'Paga à vista sem dia certo (cliente de confiança): pedido à vista não trava em SEM ENTRADA. Só o administrador muda.';
+
+create or replace function public.crm_empresa_avista_livre_guarda() returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if auth.uid() is null or public.crm_eh_admin() then return new; end if;
+  if tg_op = 'INSERT' then new.avista_livre := false;
+  elsif new.avista_livre is distinct from old.avista_livre then raise exception 'só o administrador muda o "paga à vista sem travar"';
+  end if;
+  return new;
+end;
+$$;
+revoke all on function public.crm_empresa_avista_livre_guarda() from public, anon, authenticated;
+drop trigger if exists crm_empresa_avista_livre_guarda on public.crm_empresas;
+create trigger crm_empresa_avista_livre_guarda before insert or update of avista_livre on public.crm_empresas
+  for each row execute function public.crm_empresa_avista_livre_guarda();
+
+-- notas do cliente com os itens, para "Repetir pedido" e "Últimas compras" (sem custo; só venda, sem canceladas)
+create or replace function public.crm_cliente_notas_repetir(p_empresa uuid, p_limite int default 300)
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+begin
+  if not (public.crm_ve_empresa(p_empresa) or public.crm_eh_comprador()) then raise exception 'cliente fora da sua carteira'; end if;
+  return coalesce((
+    select jsonb_agg(x order by x->>'emitida_em' desc) from (
+      select jsonb_build_object('id', n.id, 'numero', n.numero, 'serie', n.serie, 'emitida_em', n.emitida_em, 'valor_total', n.valor_total,
+               'natureza', n.natureza,
+               'itens', coalesce((select jsonb_agg(jsonb_build_object('codigo', i.codigo, 'descricao', i.descricao, 'unidade', i.unidade, 'cfop', i.cfop,
+                                     'quantidade', i.quantidade, 'valor_unitario', i.valor_unitario, 'valor_total', i.valor_total) order by i.ordem)
+                                   from public.crm_nota_itens i where i.nota_id = n.id), '[]'::jsonb)) x
+        from public.crm_notas n
+       where n.empresa_id = p_empresa and not n.cancelada
+       order by n.emitida_em desc
+       limit least(greatest(coalesce(p_limite, 300), 1), 1000)) s), '[]'::jsonb);
+end;
+$$;
+revoke all on function public.crm_cliente_notas_repetir(uuid, int) from public, anon;
+grant execute on function public.crm_cliente_notas_repetir(uuid, int) to authenticated;
