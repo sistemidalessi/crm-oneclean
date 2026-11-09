@@ -962,7 +962,7 @@
       fx.map(f => { const pr = P.precoDaFaixa(x.preco, f, tab), m = vc ? X.margemDe(pr, x.custo) : null;
         return '<tr><td><strong>' + esc(P.rotuloFaixa(f)) + '</strong></td><td class="num">' + (tab[f] ? (tab[f] > 0 ? '+' : '') + tab[f] + '%' : 'base') + '</td><td class="num"><strong>R$ ' + preco(pr) + '</strong></td>' +
           (cx ? '<td class="num">R$ ' + preco(P.precoDaFaixa(cx.preco, f, tab)) + '</td>' : '') + (vc ? '<td class="num' + (m != null && P.abaixoDoMinimo(pr, x.custo, mmin) ? ' neg' : '') + '">' + pct(m) + '</td>' : '') + '</tr>'; }).join('') +
-      '</tbody></table></div><p class="dica">' + (vc ? 'Abaixo de ' + pct(mmin) + ' de margem o pedido fica bloqueado até a gestora ou a logística liberar.' : 'A comissão sai pela faixa do preço praticado. Abaixo da tabela A o pedido pode ficar bloqueado até a gestora ou a logística liberar.') + '</p></div>';
+      '</tbody></table></div><p class="dica">' + (vc ? 'Abaixo de ' + pct(mmin) + ' de margem o pedido fica bloqueado até a logística ou o administrador liberar.' : 'A comissão sai pela faixa do preço praticado. Abaixo da tabela A o pedido pode ficar bloqueado até a logística ou o administrador liberar.') + '</p></div>';
     if (vc) {
       const s0 = d.saldo, c = x.cad;
       h += '<div><h3>Custo</h3>' + dl([['Custo do cadastro', 'R$ ' + preco(x.custo)], s0 && s0.custo_medio != null ? ['Custo médio (livro do estoque)', 'R$ ' + preco(s0.custo_medio)] : null,
@@ -1217,7 +1217,7 @@
           if (!aviso) return;
           if (!(c > 0 && p > 0)) { aviso.hidden = true; return; }
           const m = (p - c) / p * 100;
-          aviso.textContent = 'Margem sobre o preço: ' + m.toFixed(1).replace('.', ',') + '% (mínima ' + margemMin + '%)' + (m < margemMin ? ' — abaixo da mínima: o pedido fica bloqueado até a gestora liberar' : '');
+          aviso.textContent = 'Margem sobre o preço: ' + m.toFixed(1).replace('.', ',') + '% (mínima ' + margemMin + '%)' + (m < margemMin ? ' — abaixo da mínima: o pedido fica bloqueado até a logística ou o administrador liberar' : '');
           aviso.className = 'aviso-campo' + (m < margemMin ? ' neg' : ''); aviso.hidden = false;
         };
         const peloIndice = () => { const c = num('custo_compra'); if (c > 0) el('custo_unit').value = (Math.round(c * (1 + num('indice_custo') / 100) * 10000) / 10000).toFixed(4).replace(/0{1,2}$/, ''); pelaPorcentagem(); };

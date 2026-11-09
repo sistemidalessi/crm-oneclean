@@ -18,7 +18,7 @@ Como ler os números ("logistica_painel"):
 - Nota sem rota: nota emitida que não entrou em nenhuma rota. Pode ser retirada no balcão ou transportadora; sugira
   conferir as mais antigas, não acuse.
 - Pedidos (a partir de 03/11/2026): separado há mais de 1 dia esperando a NF-e, entrega vencida e bloqueio ainda não
-  liberado. Bloqueio é decisão da gestora ou do administrador, não da logística.
+  liberado. Estoque e preço a logística libera (confira antes); financeiro (crédito, atraso, pagamento antecipado) só o administrador.
 - Agradecimento que falhou: o cliente não recebeu o WhatsApp com o canhoto (telefone errado ou sem WhatsApp).
 
 Como responder:

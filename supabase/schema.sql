@@ -2881,7 +2881,7 @@ declare r public.crm_pedidos;
   fin constant text[] := array['SEM ANÁLISE', 'PRAZO', 'LIMITE', 'ATRASO', 'SEM ENTRADA'];
   nunca constant text[] := array['SEM CADASTRO', 'TROCA'];
 begin
-  if not (public.crm_eh_gestor() or public.crm_eh_logistica()) then raise exception 'só a gestora, a logística ou o administrador libera pedido'; end if;
+  if not (public.crm_eh_admin() or public.crm_eh_logistica()) then raise exception 'só a logística ou o administrador libera pedido'; end if;   -- 09/11/2026: a gestora não libera mais (Anderson)
   select * into r from public.crm_pedidos where id = p_id for update;
   if r.id is null then raise exception 'pedido não encontrado'; end if;
   -- 06/11/2026: também na separação (PREÇO/ESTOQUE refeitos por uma troca de item)

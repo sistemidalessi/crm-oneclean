@@ -3,7 +3,7 @@
    pendência/liberação): cabeçalho (cliente, tabela, pagamento, transportadora, frete, entrega), grade de produtos
    (item, código, nome, un, qtde, não atendido, preço, desconto, margem, total, comissão, desconto sobre a tabela) e,
    a mais do que o FKN, o DISPONÍVEL de cada produto (físico − reservado pelos pedidos do CRM). O pedido reserva o
-   estoque; os bloqueios (ESTOQUE, ATRASO, SEM ENTRADA, PREÇO) seguram até a gestora ou a logística liberar; a logística junta os
+   estoque; os bloqueios (ESTOQUE, ATRASO, SEM ENTRADA, PREÇO) seguram até a logística ou o administrador liberar; a logística junta os
    liberados numa lista de separação (o "bolão"), separa e marca separado; a nota que chega fatura o pedido sozinha.
    Aqui: as regras puras (testes/pedidos.test.js). A tela fica no fim do arquivo. */
 (function (raiz) {
@@ -34,7 +34,7 @@
   const rotuloMargem = (k, faixas) => { const fs = (faixas || MARGEM_INTERNO).slice().sort((a, b) => b.min - a.min), i = Number(String(k).slice(1));
     const f = fs[i]; if (!f) return k; return f.min <= -1e8 ? 'margem abaixo de ' + fs[i - 1].min + '%' : i === 0 ? 'margem ' + f.min + '% ou mais' : 'margem ' + f.min + '–' + fs[i - 1].min + '%'; };
   // Margem mínima (a da tabela A: 23%). A vendedora vê a margem para saber se tem espaço quando o cliente negocia;
-  // a MARGEM GERAL do pedido abaixo dela bloqueia (PREÇO) até a gestora ou a logística liberar (03/11/2026: antes era item a item).
+  // a MARGEM GERAL do pedido abaixo dela bloqueia (PREÇO) até a logística ou o administrador liberar (03/11/2026: antes era item a item).
   const MARGEM_MINIMA = 23;
   const margemMinima = cfg => (cfg && cfg.margem_minima != null && cfg.margem_minima !== '' ? Number(cfg.margem_minima) : MARGEM_MINIMA);
   const planosDe = cfg => ((cfg && Array.isArray(cfg.comissao_planos) && cfg.comissao_planos.length) ? cfg.comissao_planos : PLANOS_PADRAO);
@@ -326,6 +326,7 @@
   const quando = iso => (iso ? new Date(iso).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—');
   const ehLog = () => CRM.papel() === 'logistica';
   const ehOp = () => ehLog() || CRM.ehGestor();                       // logística ou gestora/administrador
+  const podeLiberar = () => ehLog() || CRM.ehAdmin();                // 09/11/2026 (Anderson): a gestora não libera pedido
   const ehVenda = () => ['admin', 'gestor', 'vendedor'].indexOf(CRM.papel()) !== -1;
   // custo e margem: administrador, gestora e comprador (20/10/2026, Anderson: "preços de custo as vendedoras não
   // enxergam"; antes a equipe de vendas via, como no FKN). O banco já não manda o custo para a vendedora nem para a logística.
@@ -511,7 +512,7 @@
       (lib.length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th></th><th>Pedido</th><th>Cliente</th><th>Cidade</th><th>Entrega</th><th class="num">Itens</th><th class="num">Valor</th></tr></thead><tbody>' +
         lib.map(p => linhaP(p, true) + '</tr>').join('') + '</tbody></table></div>' +
         '<p class="acoes"><button type="button" class="btn" data-acao="pd-bolao-montar">Montar lista de separação com os marcados (' + f.marcados.size + ')</button> <button type="button" class="mini" data-acao="pd-marcar-todos">marcar todos</button></p>'
-        : '<p class="vazio">Nenhum pedido liberado esperando. Os bloqueados aparecem na aba Pedidos; quem libera é a gestora.</p>') + '</section>' +
+        : '<p class="vazio">Nenhum pedido liberado esperando. Os bloqueados aparecem na aba Pedidos; quem libera é a logística (estoque, preço) ou o administrador.</p>') + '</section>' +
       '<section class="cartao"><h2>Listas de separação abertas <small>' + listas.length + '</small></h2>' +
       (listas.length ? '<ul class="lista">' + listas.map(b => { const ps = emSep.filter(p => p.bolao_id === b), bo = boloes.find(x => x.id === b) || {};
         return '<li><div><strong>SP ' + esc(b) + '</strong> ' + ps.length + ' pedido(s): ' + esc(ps.map(p => p.numero).join(', ')) + '<small>' + esc(bo.criado_em ? quando(bo.criado_em) : '') + (bo.observacao ? ' · ' + bo.observacao : '') + '</small></div>' +
@@ -687,10 +688,10 @@
     const bAbertos = P.bloqueiosAbertos(p);
     const botoes = [];
     if (podeEditar(p)) botoes.push('<button type="button" class="btn sec" data-acao="pd-editar" data-id="' + esc(p.id) + '">Editar</button>');
-    if (gest && p.situacao === 'aberto' && (p.bloqueios || []).length) botoes.push(bAbertos.length ? '<button type="button" class="btn verde" data-acao="pd-liberar" data-id="' + esc(p.id) + '">Liberar</button>'
+    if (podeLiberar() && p.situacao === 'aberto' && (p.bloqueios || []).length) botoes.push(bAbertos.length ? '<button type="button" class="btn verde" data-acao="pd-liberar" data-id="' + esc(p.id) + '">Liberar</button>'
       : '<button type="button" class="btn sec" data-acao="pd-desliberar" data-id="' + esc(p.id) + '">Desfazer liberação</button>');
-    // 06/11/2026: depois de uma troca na separação, a gestora/logística libera preço e estoque (a TROCA, só o ✓ do separador)
-    if (gest && naSeparacao(p) && bAbertos.some(b => b !== 'TROCA' && b !== 'SEM CADASTRO' && P.FINANCEIRO.indexOf(b) === -1)) botoes.push('<button type="button" class="btn verde" data-acao="pd-liberar" data-id="' + esc(p.id) + '">Liberar</button>');
+    // 06/11/2026: depois de uma troca na separação, a logística ou o administrador libera preço e estoque (a TROCA, só o ✓ do separador)
+    if (podeLiberar() && naSeparacao(p) && bAbertos.some(b => b !== 'TROCA' && b !== 'SEM CADASTRO' && P.FINANCEIRO.indexOf(b) === -1)) botoes.push('<button type="button" class="btn verde" data-acao="pd-liberar" data-id="' + esc(p.id) + '">Liberar</button>');
     if (podeTrocar(p)) botoes.push('<button type="button" class="btn" data-acao="pd-trocar" data-id="' + esc(p.id) + '" title="O pedido está na separação: a troca fica anotada e o separador confere">🔁 Trocar item</button>');
     if (CRM.ehAdmin() && p.situacao === 'aberto' && ((p.bloqueios || []).indexOf('SEM ENTRADA') !== -1 || p.entrada_ok)) botoes.push('<button type="button" class="btn sec" data-acao="pd-entrada" data-id="' + esc(p.id) + '">' + (p.entrada_ok ? 'Desfazer "entrada recebida"' : 'Entrada recebida') + '</button>');
     const pz = P.pausado(p);
@@ -742,7 +743,7 @@
       avisoFalta(p) + htmlTrocas(p) +
       (pz ? '<p class="aviso-notas">⏸ <strong>Pausado</strong>' + (p.dados.pausado.ate ? ' até ' + esc(R.dataBR(String(p.dados.pausado.ate).slice(0, 10))) + ' (volta sozinho nesse dia)' : ' até alguém clicar em "Retomar"') +
         (p.dados.pausado.motivo ? ' · ' + esc(p.dados.pausado.motivo) : '') + (p.dados.pausado.por ? ' · por ' + esc(p.dados.pausado.por) : '') + '. Não vai à separação nem à nota.</p>' : '') +
-      (bAbertos.length ? '<p class="alerta">Bloqueado por: <strong>' + esc(bAbertos.map(b => P.ROTULO_BLOQUEIO[b] || b).join(', ')) + '</strong>.' + (bAbertos.some(b => b !== 'SEM CADASTRO' && b !== 'TROCA' && P.FINANCEIRO.indexOf(b) === -1) ? (gest ? ' Confira e clique em "Liberar".' : ' Estoque e preço, quem libera é a gestora ou a logística.') : '') +
+      (bAbertos.length ? '<p class="alerta">Bloqueado por: <strong>' + esc(bAbertos.map(b => P.ROTULO_BLOQUEIO[b] || b).join(', ')) + '</strong>.' + (bAbertos.some(b => b !== 'SEM CADASTRO' && b !== 'TROCA' && P.FINANCEIRO.indexOf(b) === -1) ? (podeLiberar() ? ' Confira e clique em "Liberar".' : ' Estoque e preço, quem libera é a logística ou o administrador.') : '') +
         (bAbertos.indexOf('TROCA') !== -1 ? ' <strong>A troca de item sai com o ✓ do separador em "✓ Separei a troca"</strong> (ninguém libera esta trava); só depois a nota pode ser emitida.' : '') +
         (bAbertos.indexOf('SEM CADASTRO') !== -1 ? ' <strong>O item genérico (CONSULTOR) não vai à separação nem à nota:</strong> peça o cadastro do produto ao comprador e troque o item no pedido (ninguém libera esta trava).' : '') +
         (bAbertos.some(b => ['SEM ANÁLISE', 'PRAZO', 'LIMITE'].indexOf(b) !== -1) && textoMotivo(motivoCredito(p)) ? ' <strong>' + esc(textoMotivo(motivoCredito(p))) + '</strong>' : '') +
@@ -758,7 +759,7 @@
   const sinais = new Map(), sinalIds = new Map();
   const chaveSinal = its => JSON.stringify(its.map(i => [i.codigo || '', i.unidade || '', num(i.quantidade), num(i.preco), num(i.desconto)]));
   const bola = v => (v === true ? '<span class="sinal" title="margem dentro do mínimo">🟢</span>' : v === false ? '<span class="sinal" title="abaixo da margem mínima">🔴</span>' : '<span class="sinal" title="sem custo cadastrado: não dá para medir">⚪</span>');
-  const textoGeral = v => (v === true ? '🟢 dentro da margem mínima' : v === false ? '<strong class="neg">🔴 abaixo da margem mínima: o pedido fica bloqueado até a gestora ou a logística liberar</strong>' : '—');
+  const textoGeral = v => (v === true ? '🟢 dentro da margem mínima' : v === false ? '<strong class="neg">🔴 abaixo da margem mínima: o pedido fica bloqueado até a logística ou o administrador liberar</strong>' : '—');
   function sinalDe(its) {
     if (veMargem() || !its.length || !CRM.store().pedidoSinal) return null;
     const k = chaveSinal(its);
@@ -798,7 +799,7 @@
   function rodapeTotais(t, itens) {
     const sg = veMargem() ? null : sinalDe(itens || []);
     return '<div class="pd-totais"><span>Total dos produtos <strong>' + R.moeda(t.produtos) + '</strong></span><span>Frete <strong>' + R.moeda(t.frete) + '</strong></span>' +
-      (veMargem() ? '<span>Margem geral <strong' + (t.abaixoMinimo ? ' class="neg" title="abaixo da margem mínima: o pedido fica bloqueado até a gestora ou a logística liberar"' : '') + '>' + pct(t.margem) + '</strong></span>' : sg ? '<span>Margem geral ' + slotSinal(sg, 'geral') + '</span>' : '') + '<span>Comissão <strong>' + (t.comissao == null ? '<span title="no plano interno, a comissão é um % do pedido pela margem dele (sai na nota)">pela margem do pedido</span>' : R.moeda(t.comissao) + (t.comissaoPct != null ? ' (' + pct(t.comissaoPct) + ')' : '')) + '</strong></span>' +
+      (veMargem() ? '<span>Margem geral <strong' + (t.abaixoMinimo ? ' class="neg" title="abaixo da margem mínima: o pedido fica bloqueado até a logística ou o administrador liberar"' : '') + '>' + pct(t.margem) + '</strong></span>' : sg ? '<span>Margem geral ' + slotSinal(sg, 'geral') + '</span>' : '') + '<span>Comissão <strong>' + (t.comissao == null ? '<span title="no plano interno, a comissão é um % do pedido pela margem dele (sai na nota)">pela margem do pedido</span>' : R.moeda(t.comissao) + (t.comissaoPct != null ? ' (' + pct(t.comissaoPct) + ')' : '')) + '</strong></span>' +
       '<span class="geral">Total geral <strong>' + R.moeda(t.geral) + '</strong></span></div>';
   }
 
@@ -1077,7 +1078,7 @@
       '<div class="chips">' + abas.map(a => '<button type="button" class="chip-filtro' + (x.aba === a[0] ? ' ativo' : '') + '" data-acao="pd-aba-ed" data-id="' + a[0] + '">' + esc(a[1]) + '</button>').join('') + '</div>' +
       corpo + '<p class="acoes pd-gravar">' + (!x.id && !ehLog() ? '<button type="button" class="btn sec" data-acao="pd-salvar-orcamento">Salvar orçamento e gerar o PDF</button> ' : '') +
       '<button type="button" class="btn verde" data-acao="pd-gravar">' + (x.id ? 'Gravar as alterações do pedido' : 'Gravar pedido (reserva o estoque)') + '</button></p>' +
-      '<p class="dica">Orçamento: vai para o negócio do cliente e sai no PDF da empresa (WhatsApp/e-mail na ficha). Pedido: reserva o estoque e pode ficar <strong>bloqueado</strong>: falta de produto ou preço abaixo da tabela, a gestora ou a logística liberam; crédito, duplicata em atraso ou pagamento antecipado (financeiro), só o administrador; item genérico (CONSULTOR), ninguém libera: troque pelo produto cadastrado.</p></section>';
+      '<p class="dica">Orçamento: vai para o negócio do cliente e sai no PDF da empresa (WhatsApp/e-mail na ficha). Pedido: reserva o estoque e pode ficar <strong>bloqueado</strong>: falta de produto ou preço abaixo da tabela, a logística ou o administrador liberam; crédito, duplicata em atraso ou pagamento antecipado (financeiro), só o administrador; item genérico (CONSULTOR), ninguém libera: troque pelo produto cadastrado.</p></section>';
   }
 
   // valor do campo "data-ed" (ex.: dados.entrega.cidade) para o editor
@@ -1149,7 +1150,7 @@
     await recarrega();
     versaoAgora();
     const b = P.bloqueiosAbertos(r);
-    CRM.toast('Pedido ' + r.numero + ' gravado' + (b.length ? ' — BLOQUEADO por ' + b.map(x => P.ROTULO_BLOQUEIO[x] || x).join(', ') + ' (a gestora ou a logística libera)' : ' e liberado para a separação') + '.', !!b.length);
+    CRM.toast('Pedido ' + r.numero + ' gravado' + (b.length ? ' — BLOQUEADO por ' + b.map(x => P.ROTULO_BLOQUEIO[x] || x).join(', ') + ' (a logística ou o administrador libera)' : ' e liberado para a separação') + '.', !!b.length);
     const neg = n && CRM.negocio(n.id);
     if (eraNovo && neg && neg.status === 'aberto' && CRM.podeEditarNegocio(neg) && confirm('Pedido gravado. Marcar o negócio "' + neg.titulo + '" como GANHO agora?')) CRM.fichas.formGanho(Object.assign({}, neg, { valor: r.valor_total }));
   }
@@ -1264,7 +1265,7 @@
     const inp = (nome, v) => '<input name="' + nome + '" type="number" step="any" value="' + esc(v == null ? '' : v) + '" class="pd-num">';
     CRM.abrirForm({
       titulo: 'Tabela de preços e planos de comissão', largura: 'extra', campos: [], valores: {},
-      intro: 'A tabela PADRAO soma um percentual sobre o preço de venda do produto (o "ven" da listagem do FKN). A margem mínima trava o pedido (a gestora ou a logística libera). Cada plano diz a comissão (%) de cada faixa; quem está "sem comissão" não entra na apuração.',
+      intro: 'A tabela PADRAO soma um percentual sobre o preço de venda do produto (o "ven" da listagem do FKN). A margem mínima trava o pedido (a logística ou o administrador libera). Cada plano diz a comissão (%) de cada faixa; quem está "sem comissão" não entra na apuração.',
       htmlDepois: '<h3>Tabela de preços (%)</h3><div class="tabela-rolagem"><table class="tabela"><thead><tr>' + TB.map(k => '<th>' + P.rotuloFaixa(k) + '</th>').join('') + '</tr></thead><tbody><tr>' +
         TB.map(k => '<td>' + inp('tab_' + k, tab[k]) + '</td>').join('') + '</tr></tbody></table></div>' +
         '<p class="acoes"><label class="filtro-inline">Margem mínima (%) ' + inp('margem_minima', P.margemMinima(cfg)) + '</label> <label class="filtro-inline"><input type="checkbox" name="trava"' + (cfg.pedido_trava_preco === false ? '' : ' checked') + '> bloquear o pedido abaixo dela</label></p>' +

@@ -1442,7 +1442,7 @@
     ids.forEach(id => {
       const r = this._ped(id);
       if (r.situacao !== 'aberto') throw new Error('o pedido ' + r.numero + ' não está em aberto');
-      if (r.bloqueios.some(b => r.liberado.indexOf(b) === -1)) throw new Error('o pedido ' + r.numero + ' está bloqueado: a gestora precisa liberar');
+      if (r.bloqueios.some(b => r.liberado.indexOf(b) === -1)) throw new Error('o pedido ' + r.numero + ' está bloqueado: a logística ou o administrador precisa liberar');
     });
     this._boloes = this._boloes || [];
     const b = { id: this._boloes.length + 1, dia: new Date().toISOString().slice(0, 10), criado_em: new Date().toISOString() };
