@@ -8761,7 +8761,24 @@ begin
   end if;
   razao := upper(btrim(new.razao_social));
   alvo := razao;
-  if length(d) = 14 and substr(d, 9, 4) <> '0001' and btrim(coalesce(new.cidade, '')) <> '' then alvo := razao || ' (' || upper(btrim(new.cidade)) || ')'; end if;
+  if length(d) = 14 and substr(d, 9, 4) <> '0001' and btrim(coalesce(new.cidade, '')) <> '' then
+    alvo := razao || ' (' || upper(btrim(new.cidade)) || ')';
+    -- 09/11/2026 (um pedido foi para a unidade errada: duas unidades na mesma cidade com o mesmo nome): outra
+    -- unidade da mesma empresa na mesma cidade → o nome leva também o bairro
+    if btrim(coalesce(new.bairro, '')) <> '' and exists (select 1 from public.crm_empresas o
+         where o.id is distinct from new.id and left(regexp_replace(coalesce(o.cnpj, ''), '\D', '', 'g'), 8) = left(d, 8)
+           and length(regexp_replace(coalesce(o.cnpj, ''), '\D', '', 'g')) = 14 and upper(btrim(coalesce(o.cidade, ''))) = upper(btrim(new.cidade))) then
+      alvo := razao || ' (' || upper(btrim(new.cidade)) || ' - ' || upper(btrim(new.bairro));
+      -- no mesmo bairro também (unidades na mesma rua): o número do endereço
+      if btrim(coalesce(new.numero, '')) <> '' and exists (select 1 from public.crm_empresas o
+           where o.id is distinct from new.id and left(regexp_replace(coalesce(o.cnpj, ''), '\D', '', 'g'), 8) = left(d, 8)
+             and length(regexp_replace(coalesce(o.cnpj, ''), '\D', '', 'g')) = 14 and upper(btrim(coalesce(o.cidade, ''))) = upper(btrim(new.cidade))
+             and upper(btrim(coalesce(o.bairro, ''))) = upper(btrim(new.bairro))) then
+        alvo := alvo || ' - Nº ' || upper(btrim(new.numero));
+      end if;
+      alvo := alvo || ')';
+    end if;
+  end if;
   if new.nome is distinct from alvo then
     velho := btrim(coalesce(new.nome, ''));
     -- guarda o nome antigo como apelido (sem repetir, e sem guardar o que já é a própria razão social, completa ou abreviada)
@@ -8778,6 +8795,25 @@ $$;
 drop trigger if exists crm_empresa_nome_pelo_cnpj on public.crm_empresas;
 create trigger crm_empresa_nome_pelo_cnpj before insert or update on public.crm_empresas
   for each row execute function public.crm_empresa_nome_pelo_cnpj();
+
+-- 09/11/2026: quando entra (ou muda de cidade/bairro) uma unidade, as outras da mesma empresa na mesma cidade refazem o nome
+-- (ganham o bairro, ou o número no mesmo bairro)
+create or replace function public.crm_empresa_nome_irmas() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare d text := regexp_replace(coalesce(new.cnpj, ''), '\D', '', 'g');
+begin
+  if pg_trigger_depth() > 1 or length(d) <> 14 or btrim(coalesce(new.cidade, '')) = '' then return null; end if;
+  update public.crm_empresas o set nome = o.nome
+   where o.id <> new.id and left(regexp_replace(coalesce(o.cnpj, ''), '\D', '', 'g'), 8) = left(d, 8)
+     and length(regexp_replace(coalesce(o.cnpj, ''), '\D', '', 'g')) = 14 and upper(btrim(coalesce(o.cidade, ''))) = upper(btrim(new.cidade))
+     and substr(regexp_replace(o.cnpj, '\D', '', 'g'), 9, 4) <> '0001';
+  return null;
+end;
+$$;
+revoke all on function public.crm_empresa_nome_irmas() from public, anon, authenticated;
+drop trigger if exists crm_empresa_nome_irmas on public.crm_empresas;
+create trigger crm_empresa_nome_irmas after insert or update of cnpj, cidade, bairro on public.crm_empresas
+  for each row execute function public.crm_empresa_nome_irmas();
 
 -- Texto fixo do cliente na nota fiscal (03/11/2026, Edson/logística: o FKN punha na observação da nota o horário de recebimento e
 -- de almoço). Vai sozinho para o "Texto da nota" de cada pedido novo. Preenchido com o texto das notas do FKN de 121 clientes
