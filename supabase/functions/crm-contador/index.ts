@@ -12,6 +12,10 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.116.0';
 import { zipSync, strToU8 } from 'npm:fflate@0.8.2';
 import { doMes, montar, mesAnterior, mesExtenso, textoEmail } from './contador.js';
+// 10/11/2026: o e-mail sai pela caixa do próprio domínio (função crm-enviar-email), não mais pelo Brevo, que bloqueou a conta
+// por causa dos avisos de cobrança. O corpo é o mesmo; muda o endereço e quem autoriza (a chave de serviço do projeto).
+const EMAIL_URL = () => Deno.env.get('SUPABASE_URL')! + '/functions/v1/crm-enviar-email';
+const EMAIL_AUTH = () => 'Bearer ' + Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
 // deno-lint-ignore no-explicit-any
 type Linha = Record<string, any>;
@@ -103,8 +107,8 @@ Deno.serve(async (req) => {
     entradas: r.entradas, valor: r.valor, sem_xml: r.sem_xml, canceladas_lista: r.canceladas_lista, denegadas_lista: r.denegadas_lista });
 
   async function enviar(mes: string, para: string[], origem: string) {
-    const brevo = Deno.env.get('BREVO_API_KEY') ?? '';
-    if (!brevo) throw new Error('o e-mail (Brevo) não está ligado');
+    const brevo = (Deno.env.get('EMAIL_SENHA') ? 'ligado' : '');
+    if (!brevo) throw new Error('o e-mail não está ligado (falta a senha da caixa nos Secrets, EMAIL_SENHA)');
     if (!para.length) throw new Error('falta o e-mail da contabilidade');
     const { r, zip, nome } = await fechamento(mes);
     if (!r.notas && !r.inutilizadas) throw new Error('nenhuma nota emitida em ' + mesExtenso(mes));
@@ -121,8 +125,8 @@ Deno.serve(async (req) => {
     const corpo: Linha = { sender: { name: String(rem.nome) + ' · ' + EMPRESA, email: rem.email }, replyTo: { name: String(rem.nome), email: rem.email },
       to: para.map(x => ({ email: x })), subject: EMPRESA + ' · XML das notas fiscais de ' + mesExtenso(mes), htmlContent: html, textContent: texto, tags: ['contador'] };
     if (zip.length <= MAX_ANEXO) corpo.attachment = [{ name: nome, content: base64(zip) }];
-    const rb = await fetch('https://api.brevo.com/v3/smtp/email', { method: 'POST', headers: { 'api-key': brevo, 'content-type': 'application/json', accept: 'application/json' }, body: JSON.stringify(corpo) });
-    const ok = rb.ok, erro = ok ? null : 'o Brevo recusou (' + rb.status + '): ' + (await rb.text().catch(() => '')).slice(0, 200);
+    const rb = await fetch(EMAIL_URL(), { method: 'POST', headers: { Authorization: EMAIL_AUTH(), 'content-type': 'application/json', accept: 'application/json' }, body: JSON.stringify(corpo) });
+    const ok = rb.ok, erro = ok ? null : 'o e-mail não saiu (' + rb.status + '): ' + (await rb.text().catch(() => '')).slice(0, 200);
     await db.from('crm_contador_envios').insert({ mes, para, ok, erro, notas: r.notas, valor: r.valor, canceladas: r.canceladas, arquivo: up.error ? null : caminho,
       tamanho: zip.length, origem, enviado_por: eu ? eu.user_id : null, resumo: resumoDe(r) });
     if (!ok) throw new Error(String(erro));

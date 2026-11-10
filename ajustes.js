@@ -78,7 +78,7 @@
     { nome: 'email_assunto_reposicao', rotulo: 'Assunto do e-mail de reposição', largo: true, padrao: PADRAO_EMAIL.email_assunto_reposicao },
     { nome: 'email_modelo_reposicao', rotulo: 'Texto do e-mail de reposição', tipo: 'textarea', linhas: 8, largo: true, padrao: PADRAO_EMAIL.email_modelo_reposicao,
       ajuda: 'sai na aba E-mails quando chega o ritmo de compra do cliente; {itens} = o que ele costuma levar. O e-mail de relacionamento é a campanha (aba E-mails). Vazio = o texto padrão' },
-    { nome: 'email_limite_dia', rotulo: 'E-mails da cadência por dia (somando a equipe)', tipo: 'numero', passo: '1', min: 1, max: 300, padrao: 200, ajuda: 'o plano grátis do Brevo dá 300 por dia' },
+    { nome: 'email_limite_dia', rotulo: 'E-mails da cadência por dia (somando a equipe)', tipo: 'numero', passo: '1', min: 1, max: 300, padrao: 200, ajuda: 'sai pela caixa de e-mail da empresa, que tem limite por hora: a cadência usa no máximo metade dele' },
     { tipo: 'secao', rotulo: 'Propostas' },
     { nome: 'proposta_validade_dias', rotulo: 'Validade padrão (dias)', tipo: 'numero', passo: '1', min: 1 },
     { nome: 'proposta_condicoes', rotulo: 'Condições padrão (pagamento, entrega, frete)', tipo: 'textarea', largo: true }

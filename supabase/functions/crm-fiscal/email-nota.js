@@ -60,6 +60,70 @@ export function html(nfe, o) {
   return '<div style="font-family:Arial,sans-serif;font-size:15px;line-height:1.5;color:#222;max-width:600px">' +
     texto(nfe, o).split('\n\n').map(p => '<p>' + esc(p).replace(/\n/g, '<br>') + '</p>').join('') + '</div>';
 }
+// ---- várias notas do mesmo cliente num e-mail só (10/11/2026, Anderson: "quando emite a Uniserv, é de uma vez só quase 70
+// notas"). O e-mail sai pela caixa da empresa, que tem limite por hora: as notas pendentes do mesmo cliente vão juntas, com o
+// XML de cada uma; até `maxPdf` notas, vai também um PDF com as DANFEs e os boletos; acima disso só os XML (as DANFEs seguem
+// com a mercadoria e o cliente pede o PDF respondendo o e-mail).
+const faixa = notas => {
+  const ns = notas.map(n => Number(n.numero)).sort((a, b) => a - b);
+  const seguidas = ns.every((n, i) => i === 0 || n === ns[i - 1] + 1);
+  return seguidas || ns.length > 6 ? milhar(ns[0]) + ' a ' + milhar(ns[ns.length - 1]) : ns.map(milhar).join(', ');
+};
+export function assuntoGrupo(notas, empresa) {
+  return empresa + ' · ' + notas.length + ' notas fiscais (nº ' + faixa(notas) + ')';
+}
+export function textoGrupo(notas, o) {
+  o = o || {};
+  const total = notas.reduce((s, n) => s + Number(n.valor || 0), 0);
+  const lista = notas.slice().sort((a, b) => Number(a.numero) - Number(b.numero))
+    .map(n => '• NF ' + milhar(n.numero) + (n.autorizada_em ? ', de ' + dataBR(n.autorizada_em) : '') + (n.valor != null ? ': ' + moeda(n.valor) : '')).join('\n');
+  const temBoleto = (o.boletos || []).length > 0;
+  const linhas = [
+    'Olá' + (o.cliente ? ', ' + o.cliente : '') + '!',
+    'Seguem as ' + notas.length + ' notas fiscais eletrônicas emitidas pela ' + o.empresa + ', no total de ' + moeda(total) + ':\n' + lista,
+    o.comPdf ? 'Em anexo vão o XML de cada nota (o arquivo que vale para a sua contabilidade) e um PDF com as DANFEs' + (temBoleto ? ' e os boletos' : '') + '.'
+      : 'Em anexo vai o XML de cada nota (o arquivo que vale para a sua contabilidade). As DANFEs seguem com a mercadoria; se precisar delas em PDF, é só responder este e-mail.',
+    ...textoBoletos(o.boletos),
+    'Qualquer dúvida, é só responder este e-mail' + (o.vendedor ? ' (vai para ' + o.vendedor + ')' : '') + '.',
+    'Obrigado pela preferência!\n' + o.empresa
+  ];
+  return linhas.join('\n\n');
+}
+export function htmlGrupo(notas, o) {
+  return '<div style="font-family:Arial,sans-serif;font-size:15px;line-height:1.5;color:#222;max-width:600px">' +
+    textoGrupo(notas, o).split('\n\n').map(p => '<p>' + esc(p).replace(/\n/g, '<br>') + '</p>').join('') + '</div>';
+}
+export function arquivoGrupo(notas, empresa, comBoleto) {
+  const ns = notas.map(n => Number(n.numero)).sort((a, b) => a - b);
+  return ((comBoleto ? 'DANFE e boleto ' : 'DANFE ') + empresa + ' NF ' + ns[0] + ' a ' + ns[ns.length - 1]).replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim() + '.pdf';
+}
+// Quais e-mails saem nesta rodada do agendador. pend = notas de produção autorizadas ainda sem e-mail
+// ({ id, numero, empresa_id, autorizada_em }); agora em ms. Regras:
+// - as notas do mesmo cliente vão juntas; nota sem cliente vai sozinha;
+// - o cliente só entra quando a nota mais nova dele tem pelo menos `quietoMin` minutos (o lote acabou de sair);
+// - cada rodada desenha no máximo `orcamento` DANFEs (o limite de processamento da função): grupo de até `maxPdf` notas
+//   leva o PDF e gasta uma por nota; grupo maior vai só com os XML e gasta uma;
+// - primeiro o cliente que espera há mais tempo.
+export function gruposDeEnvio(pend, agora, op) {
+  const o = Object.assign({ quietoMin: 3, maxPdf: 6, orcamento: 6 }, op || {});
+  const por = new Map();
+  (pend || []).forEach(n => { const k = n.empresa_id ? String(n.empresa_id) : 'nota:' + n.id; if (!por.has(k)) por.set(k, []); por.get(k).push(n); });
+  const t = n => Date.parse(String(n.autorizada_em || '')) || 0;
+  const grupos = [...por.values()].map(notas => ({ notas: notas.slice().sort((a, b) => Number(a.numero) - Number(b.numero)),
+    antiga: Math.min(...notas.map(t)), nova: Math.max(...notas.map(t)) }))
+    .filter(g => agora - g.nova >= o.quietoMin * 60000)
+    .sort((a, b) => a.antiga - b.antiga);
+  const sai = [];
+  let resta = o.orcamento;
+  for (const g of grupos) {
+    const comPdf = g.notas.length <= o.maxPdf, custo = comPdf ? g.notas.length : 1;
+    if (custo > resta) { if (!sai.length && comPdf) { sai.push({ notas: g.notas, comPdf }); } break; }
+    sai.push({ notas: g.notas, comPdf });
+    resta -= custo;
+    if (resta <= 0) break;
+  }
+  return sai;
+}
 export function arquivos(nfe, empresa) {
   const base = (empresa + ' NF ' + nfe.numero).replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim();
   return { xml: String(nfe.chave) + '-procNFe.xml', pdf: 'DANFE ' + base + '.pdf', boleto: 'Boleto ' + base + '.pdf' };

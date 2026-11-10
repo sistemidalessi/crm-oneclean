@@ -65,3 +65,54 @@ test('a consulta de crédito da equipe usa a mesma política do site, carregada 
   assert.match(s, /'credito\.js'/);
   assert.match(s, /só para clientes da sua carteira/);
 });
+
+// 10/11/2026: o e-mail sai pela caixa da própria empresa (limite por hora), e as notas do mesmo cliente vão num e-mail só
+test('notas do mesmo cliente vão juntas; lote grande vai só com os XML', () => {
+  const agora = Date.parse('2026-11-10T15:00:00Z');
+  const nota = (numero, empresa_id, min) => ({ id: 'n' + numero, numero, empresa_id, autorizada_em: new Date(agora - min * 60000).toISOString() });
+  const pend = [nota(3001, 'a', 30), nota(3002, 'a', 29), nota(3003, 'b', 20)];
+  for (let i = 0; i < 62; i++) pend.push(nota(3100 + i, 'grande', 40 - i * 0.5));
+  const g = N.gruposDeEnvio(pend, agora);
+  assert.equal(g[0].notas.length, 62);      // o cliente que espera há mais tempo sai primeiro
+  assert.equal(g[0].comPdf, false);         // 62 DANFEs não cabem numa chamada: só os XML, e gasta 1 do orçamento
+  assert.deepEqual(g[1].notas.map(n => n.numero), [3001, 3002]);
+  assert.equal(g[1].comPdf, true);
+  assert.deepEqual(g[2].notas.map(n => n.numero), [3003]);
+  assert.equal(g.length, 3);
+});
+test('o cliente só entra quando o lote dele terminou (3 minutos sem nota nova) e a rodada desenha no máximo 6 DANFEs', () => {
+  const agora = Date.parse('2026-11-10T15:00:00Z');
+  const nota = (numero, empresa_id, min) => ({ id: 'n' + numero, numero, empresa_id, autorizada_em: new Date(agora - min * 60000).toISOString() });
+  assert.equal(N.gruposDeEnvio([nota(1, 'a', 10), nota(2, 'a', 1)], agora).length, 0);
+  assert.equal(N.gruposDeEnvio([nota(1, 'a', 10), nota(2, 'a', 4)], agora).length, 1);
+  // 4 + 4: o segundo cliente fica para a rodada seguinte
+  const g = N.gruposDeEnvio([nota(1, 'a', 50), nota(2, 'a', 50), nota(3, 'a', 50), nota(4, 'a', 50), nota(5, 'b', 40), nota(6, 'b', 40), nota(7, 'b', 40), nota(8, 'b', 40)], agora);
+  assert.equal(g.length, 1);
+  assert.equal(g[0].notas.length, 4);
+  // nota sem cliente não se junta com outra
+  assert.equal(N.gruposDeEnvio([nota(1, null, 10), nota(2, null, 10)], agora).length, 2);
+});
+test('assunto, texto e nome do PDF do e-mail com várias notas', () => {
+  const notas = [{ numero: 3002, valor: 100, autorizada_em: '2026-11-10T15:00:00Z' }, { numero: 3001, valor: 50.5, autorizada_em: '2026-11-10T14:00:00Z' }];
+  assert.equal(N.assuntoGrupo(notas, 'Distribuidora Exemplo'), 'Distribuidora Exemplo · 2 notas fiscais (nº 3.001 a 3.002)');
+  const t = N.textoGrupo(notas, { empresa: 'Distribuidora Exemplo', cliente: 'Cliente Exemplo Ltda', comPdf: true, boletos: [{ vencimento: '2026-12-08', valor: 150.5 }] });
+  assert.match(t, /Seguem as 2 notas fiscais/);
+  assert.match(t, /150,50/);
+  assert.ok(t.indexOf('NF 3.001') < t.indexOf('NF 3.002'));
+  assert.match(t, /um PDF com as DANFEs e os boletos/);
+  const s = N.textoGrupo(notas, { empresa: 'Distribuidora Exemplo', comPdf: false });
+  assert.match(s, /As DANFEs seguem com a mercadoria/);
+  assert.equal(N.arquivoGrupo(notas, 'Distribuidora Exemplo', true), 'DANFE e boleto Distribuidora Exemplo NF 3001 a 3002.pdf');
+  assert.match(N.htmlGrupo(notas, { empresa: 'Distribuidora Exemplo' }), /<p>Olá!<\/p>/);
+});
+test('nenhuma função manda mais pelo Brevo: todas passam pela crm-enviar-email (caixa da empresa)', () => {
+  const fs = require('fs'), path = require('path'), R = path.join(__dirname, '..', 'supabase', 'functions');
+  for (const f of ['crm-fiscal', 'crm-cobranca', 'crm-contador', 'crm-email']) {
+    const s = fs.readFileSync(path.join(R, f, 'index.ts'), 'utf8');
+    assert.doesNotMatch(s, /api\.brevo\.com|BREVO_API_KEY/, f);
+    assert.match(s, /crm-enviar-email/, f);
+  }
+  const e = fs.readFileSync(path.join(R, 'crm-enviar-email', 'index.ts'), 'utf8');
+  assert.match(e, /EMAIL_SENHA/);
+  assert.doesNotMatch(e, /@oneclean/);   // repositório público: o endereço da caixa fica no banco
+});

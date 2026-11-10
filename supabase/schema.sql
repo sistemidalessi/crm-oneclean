@@ -1183,6 +1183,31 @@ create policy pula on public.crm_email_envios for insert to authenticated
   with check (situacao = 'pulado' and enviado_por = (select auth.uid()) and public.crm_ve_empresa(empresa_id));
 create policy apaga on public.crm_email_envios for delete to authenticated using ((select public.crm_eh_gestor()));
 
+-- E-MAIL PELA CAIXA DA EMPRESA (10/11/2026). O envio era pelo Brevo, que desligou a conta em 06/11/2026 (aviso de atraso
+-- não é permitido lá). Agora a Edge Function crm-enviar-email manda pela caixa de e-mail do próprio domínio (SMTP com
+-- SSL), e as outras funções (crm-fiscal, crm-cobranca, crm-contador, crm-email) passam por ela. Configuração em
+-- crm_config.dados.email = { host, porta, usuario, por_hora }; a SENHA fica só nos Secrets (EMAIL_SENHA). Cada tentativa
+-- fica aqui (o teto por hora é contado por esta tabela). Só o administrador lê; só a função (chave de serviço) grava.
+create table if not exists public.crm_email_saida (
+  id bigint generated always as identity primary key,
+  criado_em timestamptz not null default now(),
+  para text not null,
+  assunto text,
+  etiqueta text,          -- nfe, cobranca, contador, cadencia, oferta, teste
+  de_nome text,
+  responder text,         -- para quem vai a resposta do cliente (vendedor(a) ou financeiro)
+  ok boolean not null,
+  erro text,
+  message_id text,
+  bytes integer
+);
+create index if not exists crm_email_saida_criado_idx on public.crm_email_saida (criado_em desc);
+alter table public.crm_email_saida enable row level security;
+revoke all on public.crm_email_saida from anon, public, authenticated;
+grant select on public.crm_email_saida to authenticated;
+drop policy if exists crm_email_saida_admin on public.crm_email_saida;
+create policy crm_email_saida_admin on public.crm_email_saida for select to authenticated using ((select public.crm_eh_admin()));
+
 -- =================================================================== espelho Agilité ↔ OneClean (08/10/2026)
 -- Pedido do Anderson: "quando eu fizer algo entre Agilité e OneClean, já se lançasse nas duas". Vale só a
 -- categoria "Transferência entre empresas" (empréstimo de uma empresa para a outra e a volta). Formato

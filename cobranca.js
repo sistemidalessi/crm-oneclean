@@ -854,7 +854,7 @@
       '<p>WhatsApp: ' + (!st.whatsapp ? CRM.selo('WhatsApp da Meta não ligado', 'cinza') : ms ? CRM.selo('modelo ' + ms[0], ms[1]) + (m.rejected_reason && m.status === 'REJECTED' ? ' <small>' + esc(m.rejected_reason) + '</small>' : '')
           : CRM.selo('modelo ainda não criado', 'ambar') + ' <button type="button" class="mini" data-acao="cob-av-modelo">Criar o modelo na Meta</button>') +
         (ms && m.status !== 'APPROVED' ? ' <small>enquanto isso, vai só por e-mail</small>' : '') +
-        ' · E-mail: ' + (st.email ? CRM.selo('ligado', 'verde') : CRM.selo('Brevo não ligado', 'cinza')) + '</p>' +
+        ' · E-mail: ' + (st.email ? CRM.selo('ligado', 'verde') : CRM.selo('e-mail não ligado', 'cinza')) + '</p>' +
       '<p class="acoes"><button type="button" class="btn ' + (ligado ? 'sec' : 'ouro') + '" data-acao="cob-av-ligar" title="' + (ligado ? 'hoje está ligado; clicar desliga' : 'hoje está desligado; clicar liga') + '">' +
           (ligado ? 'Parar o envio automático' : 'Ligar o envio automático') + '</button>' +
         '<button type="button" class="btn sec" data-acao="cob-av-previa">Ver quem recebe hoje' + (st.hoje ? ' (' + st.hoje + ')' : '') + '</button>' +

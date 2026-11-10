@@ -10,7 +10,7 @@
     email_assunto_reposicao: 'Hora de repor os produtos de {empresa}',
     email_modelo_reposicao: '{saudacao}\n\nAqui é {vendedor_primeiro_nome}, da {minha_empresa}. Pelo ritmo das suas compras, já está chegando a hora de repor:\n{itens}\n\n' +
       'Quer que eu separe o de sempre? É só responder este e-mail que eu preparo o pedido para você.\n\nUm abraço,\n{vendedor}\n{minha_empresa}',
-    email_limite_dia: 200 // e-mails da cadência por dia, somando todo mundo (o Brevo grátis dá 300); a função confere
+    email_limite_dia: 200 // e-mails da cadência por dia, somando todo mundo (a caixa da empresa tem limite por hora); a função confere
   };
   // Clientes que só tratam por e-mail: o(a) vendedor(a) (ou a líder) marca a cadência na ficha (quinzenal ou
   // mensal). Todo dia o CRM monta a FILA: reposição quando chega o ritmo de compra do cliente (com o que

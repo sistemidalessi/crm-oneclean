@@ -1049,7 +1049,7 @@
   Local.prototype.creditoLink = SO_SUPABASE;
   Local.prototype.boletoLink = SO_SUPABASE;
 
-  // E-mails da cadência: a Edge Function crm-email envia pelo Brevo (a chave fica só no Supabase).
+  // E-mails da cadência: a Edge Function crm-email envia pela caixa de e-mail da empresa (a senha fica só no Supabase).
   // WhatsApp oficial da Meta (15/10/2026): Edge Function crm-whatsapp (só admin; a chave da Meta fica no Supabase)
   Supa.prototype.whatsapp = async function (corpo) {
     const r = await this.sb.functions.invoke('crm-whatsapp', { body: corpo });

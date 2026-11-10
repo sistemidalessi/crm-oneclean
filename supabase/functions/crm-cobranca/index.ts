@@ -1,7 +1,7 @@
 // Edge Function crm-cobranca — aviso de atraso ao cliente (23/10/2026, pedido do Anderson: "chegou em 5 dias úteis de
 // atraso, já enviar; ou eles entram em contato e negociam com a vendedora, ou eu envio o cartório").
 // Um aviso por cliente, uma vez por título: pelo WhatsApp da empresa (modelo "cobranca_atraso", em nome do(a) vendedor(a)
-// da carteira, botões "Falar com quem me atende" e "Já paguei") e por e-mail (Brevo, do e-mail do(a) vendedor(a)), já
+// da carteira, botões "Falar com quem me atende" e "Já paguei") e por e-mail (pela caixa da empresa, com a resposta indo ao(à) vendedor(a)), já
 // dizendo que, sem o pagamento até o prazo, o título segue para o cartório. O CRM NUNCA manda sozinho ao cartório: quando o
 // prazo vence sem "Já paguei", cria a tarefa "decidir o cartório" para cada administrador.
 //   POST { acao: 'situacao' }     → configuração, modelo na Meta, avisos recentes (admin)
@@ -23,6 +23,10 @@ import { quemRecebe, prazoUtil, parametros, textoFinal, textoEmail, CORPO, alert
   porTransferencia, valorAtualizado, contaTexto, valorTransferencia, paragrafoTransferencia, textoEmailTransferencia } from './avisos.js';
 import { casa, quemRecebeBoleto, valorCobrado, pdfBoletos, parametrosBoleto, CORPO_BOLETO, textoEmailBoleto, resumoRodada, mod11 } from './atualizado.js';
 import { jsPDF } from 'npm:jspdf@2.5.2';
+// 10/11/2026: o e-mail sai pela caixa do próprio domínio (função crm-enviar-email), não mais pelo Brevo, que bloqueou a conta
+// por causa dos avisos de cobrança. O corpo é o mesmo; muda o endereço e quem autoriza (a chave de serviço do projeto).
+const EMAIL_URL = () => Deno.env.get('SUPABASE_URL')! + '/functions/v1/crm-enviar-email';
+const EMAIL_AUTH = () => 'Bearer ' + Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -134,7 +138,7 @@ Deno.serve(async (req) => {
   if (agendador && c.acao !== 'rodar' && c.acao !== 'previa_boletos' && c.acao !== 'correcao_transferencia') return resposta(403, { erro: 'o agendador só roda' });
 
   const token = Deno.env.get('WHATSAPP_TOKEN') ?? '', phoneId = Deno.env.get('WHATSAPP_PHONE_ID') ?? '', wabaId = Deno.env.get('WHATSAPP_WABA_ID') ?? '';
-  const brevo = Deno.env.get('BREVO_API_KEY') ?? '';
+  const brevo = (Deno.env.get('EMAIL_SENHA') ? 'ligado' : '');
   const { data: cfgRow } = await db.from('crm_config').select('dados').eq('id', 1).maybeSingle();
   const dados = ((cfgRow as Linha | null)?.dados || {}) as Linha;
   const cfg = (dados.cobranca_aviso || {}) as Linha;
@@ -304,13 +308,13 @@ Deno.serve(async (req) => {
             (golpe ? '<p style="background:#fff176;border:2px solid #c81e1e;border-radius:8px;padding:10px 14px;color:#7a0000;font-weight:bold">⚠️ ' + golpe.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</p>' : '') +
             '<p style="color:#777;font-size:12px">' + EMPRESA + ' · financeiro</p></div>';
           try {
-            const r = await fetch('https://api.brevo.com/v3/smtp/email', { method: 'POST', headers: { 'api-key': brevo, 'content-type': 'application/json', accept: 'application/json' },
+            const r = await fetch(EMAIL_URL(), { method: 'POST', headers: { Authorization: EMAIL_AUTH(), 'content-type': 'application/json', accept: 'application/json' },
               body: JSON.stringify({ sender: { name: String(rem.nome) + ' · ' + EMPRESA, email: rem.email }, replyTo: { name: String(rem.nome), email: rem.email },
                 to: emails.map((x: string) => ({ email: x })), subject: EMPRESA + ' · boleto atualizado (' + docs + ')',
                 htmlContent: html, textContent: corpoTxt + (golpe ? '\n\n' + golpe : '') + '\n\n' + EMPRESA + ' · financeiro',
                 attachment: [{ name: nomeArq(titulo), content: base64(buf) }], tags: ['cobranca', 'boleto-atualizado'] }) });
             emailOk = r.ok;
-            if (!r.ok) up.cli_erro = [up.cli_erro, 'o Brevo recusou o e-mail (' + r.status + ')'].filter(Boolean).join(' · ');
+            if (!r.ok) up.cli_erro = [up.cli_erro, 'o e-mail não saiu (' + r.status + ')'].filter(Boolean).join(' · ');
           } catch (err) { up.cli_erro = [up.cli_erro, 'e-mail: ' + String((err as Error).message).slice(0, 200)].filter(Boolean).join(' · '); }
         }
         if (emailOk && !up.cli_status) Object.assign(up, { cli_status: 'email', cli_em: agora });
@@ -353,7 +357,7 @@ Deno.serve(async (req) => {
       let vend = ((vends || []) as Linha[]).find(y => y.user_id === emp.responsavel_id && y.ativo) as Linha | undefined;
       if (!vend && emp.responsavel_id) { const { data } = await db.from('crm_usuarios').select('user_id, nome, telefone, email, ativo').eq('user_id', emp.responsavel_id).maybeSingle(); if (data && data.ativo) vend = data as Linha; }
       const rem = vend && /@/.test(String(vend.email || '')) ? vend : admin0;
-      if (!brevo || !rem || !/@/.test(String(rem.email || ''))) return resposta(503, { erro: 'o e-mail (Brevo) ou o remetente não estão prontos' });
+      if (!brevo || !rem || !/@/.test(String(rem.email || ''))) return resposta(503, { erro: 'o e-mail ou o remetente não estão prontos' });
       const a = valorAtualizado([t], hoje, (dados.boleto || {}) as Linha);
       const bolCfg2 = (dados.boleto || {}) as Linha, emit2 = (((dados.fiscal || {}) as Linha).emitente || {}) as Linha;
       const conta2 = contaTexto({ agencia: bolCfg2.agencia, conta: bolCfg2.conta, razao: emit2.razao, cnpj: emit2.cnpj });
@@ -367,11 +371,11 @@ Deno.serve(async (req) => {
         'Desculpe o transtorno. Qualquer dúvida, é só responder este e-mail' + (telV ? ' ou me chamar no WhatsApp ' + telBR(telV) : '') + '. Agradecemos a parceria!'].join('\n\n');
       const html = '<div style="font-family:Arial,sans-serif;font-size:15px;line-height:1.5;color:#222;max-width:600px">' +
         texto.split('\n\n').map(x => '<p>' + x.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</p>').join('') + '<p style="color:#777;font-size:12px">' + EMPRESA + ' · financeiro</p></div>';
-      const r = await fetch('https://api.brevo.com/v3/smtp/email', { method: 'POST', headers: { 'api-key': brevo, 'content-type': 'application/json', accept: 'application/json' },
+      const r = await fetch(EMAIL_URL(), { method: 'POST', headers: { Authorization: EMAIL_AUTH(), 'content-type': 'application/json', accept: 'application/json' },
         body: JSON.stringify({ sender: { name: String(rem.nome) + ' · ' + EMPRESA, email: rem.email }, replyTo: { name: String(rem.nome), email: rem.email },
           to: emails.map((x: string) => ({ email: x })), subject: EMPRESA + ' · ' + doc + ': pagamento por transferência (desconsiderar o boleto)',
           htmlContent: html, textContent: texto + '\n\n' + EMPRESA + ' · financeiro', tags: ['cobranca', 'correcao'] }) });
-      if (!r.ok) return resposta(502, { erro: 'o Brevo recusou (' + r.status + ')' });
+      if (!r.ok) return resposta(502, { erro: 'o e-mail não saiu (' + r.status + ')' });
       const agora = new Date().toISOString();
       for (const b of bols as Linha[]) await db.from('crm_boletos').update({ encargos: Object.assign({}, b.encargos || {}, { correcao_em: agora, correcao_valor: a.total }) }).eq('id', b.id);
       await db.from('crm_atividades').insert({ empresa_id: t.empresa_id, tipo: 'email', concluida: true, concluida_em: agora, automatica: true, responsavel_id: (vend || {}).user_id || null,
@@ -439,12 +443,12 @@ Deno.serve(async (req) => {
             m.email.split('\n\n').map((s: string) => '<p>' + s.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</p>').join('') +
             (golpe ? '<p style="background:#fff176;border:2px solid #c81e1e;border-radius:8px;padding:10px 14px;color:#7a0000;font-weight:bold">⚠️ ' + golpe.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</p>' : '') +
             '<p style="color:#777;font-size:12px">' + EMPRESA + ' · financeiro</p></div>';
-          const r = await fetch('https://api.brevo.com/v3/smtp/email', { method: 'POST', headers: { 'api-key': brevo, 'content-type': 'application/json', accept: 'application/json' },
+          const r = await fetch(EMAIL_URL(), { method: 'POST', headers: { Authorization: EMAIL_AUTH(), 'content-type': 'application/json', accept: 'application/json' },
             body: JSON.stringify({ sender: { name: String(rem.nome) + ' · ' + EMPRESA, email: rem.email }, replyTo: { name: String(rem.nome), email: rem.email },
               to: m.emails.map((x: string) => ({ email: x })), subject: EMPRESA + ' · título em aberto (' + docsTexto(m.titulos).replace(/^(a|as) /, '') + ')',
               htmlContent: html, textContent: m.email + (golpe ? '\n\n' + golpe : '') + '\n\n' + EMPRESA + ' · financeiro', tags: ['cobranca'] }) });
           up.email_para = m.emails; up.email_ok = r.ok;
-          if (!r.ok) up.email_erro = 'o Brevo recusou (' + r.status + ')';
+          if (!r.ok) up.email_erro = 'o e-mail não saiu (' + r.status + ')';
         } catch (e) { up.email_para = m.emails; up.email_ok = false; up.email_erro = String((e as Error).message).slice(0, 300); }
       } else if (!m.emails.length) up.email_erro = 'sem e-mail no cadastro';
       const canais = [up.wa_status === 'enviado' ? 'WhatsApp' : '', up.email_ok ? 'e-mail' : ''].filter(Boolean);

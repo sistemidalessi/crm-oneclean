@@ -1,15 +1,19 @@
-// Edge Function: envia os e-mails da CADÊNCIA (07/10/2026) pelo Brevo, em nome do(a) vendedor(a) da carteira
+// Edge Function: envia os e-mails da CADÊNCIA (07/10/2026) pela caixa da empresa (crm-enviar-email; até 06/11/2026 era o Brevo), em nome do(a) vendedor(a) da carteira
 // do cliente (a resposta do cliente vai para ela). Chamada pelo CRM com o login de quem aprova a fila.
-//   POST { acao: 'situacao' }                     → { ligado } (a chave do Brevo está configurada?)
+//   POST { acao: 'situacao' }                     → { ligado } (a senha da caixa de e-mail está nos segredos?)
 //   POST { acao: 'enviar', empresa_id, tipo, campanha_id?, assunto, corpo, para?, sair_url, marca }
 //   POST { acao: 'enviar', tipo: 'oferta', oferta_id, destaques?: [códigos], ... } → queima de estoque (15/10/2026):
 //        a tabela de preços sai do BANCO (crm_ofertas) no lugar de {itens}; cada cliente recebe cada oferta uma vez
-//   POST { acao: 'aberturas' }                    → lê no Brevo quem abriu/clicou nos últimos 30 dias
+//   POST { acao: 'aberturas' }                    → era a leitura de aberturas e cliques do Brevo; pela caixa da empresa não há (devolve zeros)
 // Segurança: o cliente só é achado se quem chama enxerga a empresa (RLS, com o login dele); os
 // destinatários vêm do BANCO (o app pode só tirar algum, nunca pôr outro); limite por dia; quem pediu
-// para sair não recebe. A chave do Brevo fica SÓ nos segredos do Supabase (BREVO_API_KEY) — nunca no
+// para sair não recebe. A senha da caixa fica SÓ nos segredos do Supabase (EMAIL_SENHA) — nunca no
 // app, no repositório ou no chat. Deploy: verify_jwt ligado (o padrão).
 import { createClient } from 'npm:@supabase/supabase-js@2.116.0';
+// 10/11/2026: o e-mail sai pela caixa do próprio domínio (função crm-enviar-email), não mais pelo Brevo, que bloqueou a conta
+// por causa dos avisos de cobrança. O corpo é o mesmo; muda o endereço e quem autoriza (a chave de serviço do projeto).
+const EMAIL_URL = () => Deno.env.get('SUPABASE_URL')! + '/functions/v1/crm-enviar-email';
+const EMAIL_AUTH = () => 'Bearer ' + Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -72,32 +76,16 @@ Deno.serve(async (req) => {
   const db = createClient(url, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } });
   const { data: eu } = await db.from('crm_usuarios').select('user_id, nome, email, papel, ativo').eq('user_id', quem.user.id).maybeSingle();
   if (!eu || !eu.ativo || !['admin', 'gestor', 'vendedor'].includes(eu.papel)) return resposta(403, { erro: 'sem permissão para e-mails' });
-  const chave = Deno.env.get('BREVO_API_KEY') ?? '';
+  const chave = (Deno.env.get('EMAIL_SENHA') ? 'ligado' : '');
   let c: Record<string, unknown>;
   try { c = await req.json(); } catch { return resposta(400, { erro: 'corpo inválido' }); }
 
   if (c.acao === 'situacao') return resposta(200, { ligado: !!chave });
-  if (!chave) return resposta(503, { erro: 'o envio de e-mail ainda não está ligado: falta a chave do Brevo nos segredos do Supabase (BREVO_API_KEY)' });
+  if (!chave) return resposta(503, { erro: 'o envio de e-mail ainda não está ligado: falta a senha da caixa nos segredos do Supabase (EMAIL_SENHA)' });
 
   if (c.acao === 'aberturas') {
-    const desde = new Date(Date.now() - 31 * 864e5).toISOString();
-    const { data: envs } = await db.from('crm_email_envios').select('id, provedor_id, aberto_em, clicado_em').eq('situacao', 'enviado').gte('criado_em', desde).not('provedor_id', 'is', null);
-    const porId = new Map((envs ?? []).map(e => [String(e.provedor_id), e]));
-    let abertos = 0, clicados = 0, devolvidos = 0;
-    for (const ev of ['opened', 'clicks', 'hardBounces']) {
-      const r = await fetch('https://api.brevo.com/v3/smtp/statistics/events?limit=2500&days=30&event=' + ev, { headers: { 'api-key': chave, accept: 'application/json' } });
-      if (!r.ok) return resposta(502, { erro: 'o Brevo não respondeu (' + r.status + ')' });
-      const j = await r.json();
-      for (const x of (j.events ?? [])) {
-        const e = porId.get(String(x.messageId)); if (!e) continue;
-        const patch: Record<string, unknown> = {};
-        if (ev === 'opened' && !e.aberto_em) { patch.aberto_em = x.date; e.aberto_em = x.date; abertos++; }
-        if (ev === 'clicks' && !e.clicado_em) { patch.clicado_em = x.date; e.clicado_em = x.date; clicados++; if (!e.aberto_em) { patch.aberto_em = x.date; e.aberto_em = x.date; } }
-        if (ev === 'hardBounces') { patch.erro = 'devolvido: ' + String(x.email ?? '') + ' não existe ou não aceita e-mail'; devolvidos++; }
-        if (Object.keys(patch).length) await db.from('crm_email_envios').update(patch).eq('id', e.id);
-      }
-    }
-    return resposta(200, { ok: true, abertos, clicados, devolvidos });
+    // pela caixa da empresa não há leitura de quem abriu ou clicou (isso era do Brevo): a tela segue sem esses números
+    return resposta(200, { ok: true, abertos: 0, clicados: 0, devolvidos: 0, aviso: 'pela caixa da empresa não há leitura de aberturas e cliques' });
   }
 
   if (c.acao !== 'enviar') return resposta(400, { erro: 'ação desconhecida' });
@@ -180,8 +168,8 @@ Deno.serve(async (req) => {
   const validadeBR = oferta ? String(oferta.validade).split('-').reverse().join('/') : '';
   const tabela = oferta ? tabelaOferta(itensOferta, marca.cor, validadeBR) : '';
   const corpoTexto = oferta ? corpo.replace(/\{itens\}/g, textoOferta(itensOferta)) : corpo;
-  const r = await fetch('https://api.brevo.com/v3/smtp/email', {
-    method: 'POST', headers: { 'api-key': chave, 'content-type': 'application/json', accept: 'application/json' },
+  const r = await fetch(EMAIL_URL(), {
+    method: 'POST', headers: { Authorization: EMAIL_AUTH(), 'content-type': 'application/json', accept: 'application/json' },
     body: JSON.stringify({ sender: { name: rem.nome + ' · ' + marca.nome, email: rem.email }, replyTo: { name: rem.nome, email: rem.email },
       to: para.map(email => ({ email })), subject: assunto, htmlContent: html(corpo, marca, rodape, sair.href, tabela),
       textContent: corpoTexto + '\n\n--\n' + rodape + '\nNão quer mais receber estes e-mails? ' + sair.href,
@@ -190,7 +178,7 @@ Deno.serve(async (req) => {
   const j = await r.json().catch(() => ({}));
   const base = { empresa_id: emp.id, responsavel_id: rem.user_id, tipo, campanha_id: campanha, oferta_id: oferta ? oferta.id : null, para, assunto, corpo: corpoTexto, enviado_por: eu.user_id };
   if (!r.ok) {
-    const erro = 'o Brevo recusou (' + r.status + '): ' + String((j as Record<string, unknown>).message ?? '').slice(0, 300);
+    const erro = 'o e-mail não saiu (' + r.status + '): ' + String((j as Record<string, unknown>).message ?? '').slice(0, 300);
     await db.from('crm_email_envios').insert({ ...base, situacao: 'erro', erro });
     return resposta(502, { erro });
   }

@@ -11,8 +11,12 @@
 // Deploy: verify_jwt LIGADO.
 import { createClient } from 'npm:@supabase/supabase-js@2.116.0';
 import { ibptUrl, ibptLinha, ibptPrecisa } from './ibpt.js';
-import { destinatarios, separaEmails, assunto, texto, html, arquivos, proporcaoPng } from './email-nota.js';
+import { destinatarios, separaEmails, assunto, texto, html, arquivos, proporcaoPng, assuntoGrupo, textoGrupo, htmlGrupo, arquivoGrupo, gruposDeEnvio } from './email-nota.js';
 import { jsPDF } from 'npm:jspdf@2.5.2';
+// 10/11/2026: o e-mail sai pela caixa do próprio domínio (função crm-enviar-email), não mais pelo Brevo, que bloqueou a conta
+// por causa dos avisos de cobrança. O corpo é o mesmo; muda o endereço e quem autoriza (a chave de serviço do projeto).
+const EMAIL_URL = () => Deno.env.get('SUPABASE_URL')! + '/functions/v1/crm-enviar-email';
+const EMAIL_AUTH = () => 'Bearer ' + Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -462,8 +466,12 @@ async function enviaEmailNota(db: ReturnType<typeof createClient>, nfeId: string
     const e = (emp || {}) as Linha;
     const lista = op.para ? separaEmails(op.para).slice(0, 5) : destinatarios(e).emails;
     if (!lista.length) return await fim({ ok: false, erro: 'cliente sem e-mail no cadastro (preencha "E-mail para a nota fiscal" ou o e-mail da empresa)' });
-    const brevo = Deno.env.get('BREVO_API_KEY') ?? '';
-    if (!brevo) return await fim({ ok: false, erro: 'falta a chave do Brevo (BREVO_API_KEY)' });
+    if (!Deno.env.get('EMAIL_SENHA')) {
+      const erro = 'o e-mail não está ligado: falta a senha da caixa nos Secrets (EMAIL_SENHA)';
+      // a automática continua pendente: sai sozinha quando a senha for guardada
+      if (!op.manual && !op.base) { await db.from('crm_nfe').update({ email_em: null, email_ok: false, email_erro: erro }).eq('id', nfeId); return { ok: false, adiado: true, erro }; }
+      return await fim({ ok: false, erro });
+    }
     let vendId = e.responsavel_id as string | null;
     if (nfe.pedido_id) { const { data: p } = await db.from('crm_pedidos').select('vendedor_id').eq('id', nfe.pedido_id).maybeSingle(); if (p && (p as Linha).vendedor_id) vendId = String((p as Linha).vendedor_id); }
     const { data: v } = vendId ? await db.from('crm_usuarios').select('nome, email, ativo').eq('user_id', vendId).maybeSingle() : { data: null };
@@ -478,16 +486,111 @@ async function enviaEmailNota(db: ReturnType<typeof createClient>, nfeId: string
     if (bol.registrados.length) { try { pdfBol = await pdfBoletosNota(bol.registrados, String(nfe.proc_xml), bol.dados); } catch (err) { erroBol = String((err as Error).message || err); console.error('[crm-fiscal] boleto do e-mail: ' + erroBol); } }
     const o = { empresa: EMPRESA, cliente: String(e.razao_social || e.nome || ''), vendedor: vend ? String(vend.nome) : '',
       boletos: pdfBol ? bol.registrados.map(b => ({ vencimento: b.vencimento, valor: b.valor })) : [] };
-    const r = await fetch('https://api.brevo.com/v3/smtp/email', { method: 'POST', headers: { 'api-key': brevo, 'content-type': 'application/json', accept: 'application/json' },
+    const r = await fetch(EMAIL_URL(), { method: 'POST', headers: { Authorization: EMAIL_AUTH(), 'content-type': 'application/json', accept: 'application/json' },
       body: JSON.stringify({ sender: { name: EMPRESA + ' · Nota fiscal', email: rem.email }, replyTo: { name: String(rem.nome), email: rem.email },
         to: lista.map(x => ({ email: x })), subject: assunto(nfe, EMPRESA), htmlContent: html(nfe, o), textContent: texto(nfe, o),
         attachment: [{ name: arq.xml, content: base64(new TextEncoder().encode(String(nfe.proc_xml))) }, { name: arq.pdf, content: base64(pdf) }]
           .concat(pdfBol ? [{ name: arq.boleto, content: base64(pdfBol) }] : []),
         tags: ['nfe'] }) });
-    if (!r.ok) return await fim({ ok: false, para: lista.join(', '), erro: 'o Brevo recusou o e-mail (' + r.status + '): ' + (await r.text().catch(() => '')).slice(0, 200) });
+    if (!r.ok) {
+      const erro = 'o e-mail não saiu (' + r.status + '): ' + (await r.text().catch(() => '')).slice(0, 200);
+      // a automática que não saiu (caixa fora do ar, teto por hora) continua pendente: o agendador tenta de novo a cada 15
+      // minutos, por 2 dias. Destinatário recusado (400) não adianta repetir.
+      if (!op.manual && !op.base && r.status !== 400) {
+        await db.from('crm_nfe').update({ email_em: null, email_ok: false, email_para: lista.join(', '), email_erro: erro.slice(0, 300) }).eq('id', nfeId);
+        return { ok: false, adiado: true, erro };
+      }
+      return await fim({ ok: false, para: lista.join(', '), erro });
+    }
     const obsBol = pdfBol ? ' · com ' + bol.registrados.length + ' boleto(s)' : erroBol ? ' · sem o boleto (erro: ' + erroBol.slice(0, 120) + ')' : bol.pendentes ? ' · sem o boleto (não registrado no BB a tempo)' : '';
     return await fim({ ok: true, para: lista.join(', ') + obsBol, boletos: pdfBol ? bol.registrados.length : 0 });
   } catch (err) { return await fim({ ok: false, erro: 'e-mail: ' + String((err as Error).message || err) }); }
+}
+// Várias notas do MESMO cliente num e-mail só (10/11/2026; só a automática do agendador). O e-mail sai pela caixa da empresa,
+// que tem limite por hora, e a Uniserv recebe mais de 60 notas num dia: vão juntas, com o XML de cada uma. Com comPdf, vai
+// também um PDF com as DANFEs e os boletos registrados; sem (lote grande), só os XML (as DANFEs seguem com a mercadoria).
+async function enviaEmailGrupo(db: ReturnType<typeof createClient>, ids: string[], comPdf: boolean) {
+  const agora = new Date().toISOString();
+  const { data: rows } = await db.from('crm_nfe').select('id, ambiente, situacao, serie, numero, chave, valor, autorizada_em, proc_xml, pedido_id, empresa_id, email_em').in('id', ids);
+  const notas = ((rows || []) as Linha[]).filter(n => n.ambiente === 'producao' && n.situacao === 'autorizada' && n.proc_xml && !n.email_em).sort((a, b) => Number(a.numero) - Number(b.numero));
+  if (notas.length < 2) return { ok: false, erro: 'grupo desfeito', notas: notas.map(n => n.numero) };
+  type Bol = { registrados: Linha[]; pendentes: number; dados: Linha };
+  const bols = new Map<string, Bol>();
+  let pend = 0;
+  for (const n of notas) {
+    let b: Bol = { registrados: [], pendentes: 0, dados: {} };
+    try { b = await boletosDaNota(db, n); } catch (e) { console.error('[crm-fiscal] boletos da nota: ' + (e as Error).message); }
+    bols.set(String(n.id), b); pend += b.pendentes;
+  }
+  const maisNova = Math.max(...notas.map(n => Date.parse(String(n.autorizada_em || agora))));
+  if (pend > 0 && (Date.now() - maisNova) / 60000 < ESPERA_BOLETO) return { ok: false, adiado: true, erro: 'esperando o registro do boleto no BB (' + pend + ')', notas: notas.map(n => n.numero) };
+  // marca antes de mandar: só segue com as que esta chamada marcou (outra chamada pode ter levado alguma)
+  const { data: marcou } = await db.from('crm_nfe').update({ email_em: agora }).in('id', notas.map(n => String(n.id))).is('email_em', null).select('id');
+  const meus = new Set(((marcou || []) as Linha[]).map(x => String(x.id)));
+  const grupo = notas.filter(n => meus.has(String(n.id)));
+  const nums = grupo.map(n => n.numero), idsG = grupo.map(n => String(n.id));
+  if (!grupo.length) return { ok: false, erro: 'já tentado', notas: nums };
+  const fim = async (r: Linha) => { await db.from('crm_nfe').update({ email_em: agora, email_ok: r.ok === true, email_para: r.para || null, email_erro: r.ok ? null : String(r.erro || '').slice(0, 300) }).in('id', idsG); return Object.assign({ notas: nums }, r); };
+  try {
+    const empId = grupo[0].empresa_id;
+    const { data: emp } = empId ? await db.from('crm_empresas').select('nome, razao_social, email, email_nfe, responsavel_id').eq('id', empId).maybeSingle() : { data: null };
+    const e = (emp || {}) as Linha;
+    const lista = destinatarios(e).emails;
+    if (!lista.length) return await fim({ ok: false, erro: 'cliente sem e-mail no cadastro (preencha "E-mail para a nota fiscal" ou o e-mail da empresa)' });
+    if (!Deno.env.get('EMAIL_SENHA')) {   // continua pendente: sai sozinha quando a senha for guardada
+      const erro = 'o e-mail não está ligado: falta a senha da caixa nos Secrets (EMAIL_SENHA)';
+      await db.from('crm_nfe').update({ email_em: null, email_ok: false, email_erro: erro }).in('id', idsG);
+      return { ok: false, adiado: true, erro, notas: nums };
+    }
+    let vendId = e.responsavel_id as string | null;
+    const comPedido = grupo.find(n => n.pedido_id);
+    if (comPedido) { const { data: p } = await db.from('crm_pedidos').select('vendedor_id').eq('id', comPedido.pedido_id).maybeSingle(); if (p && (p as Linha).vendedor_id) vendId = String((p as Linha).vendedor_id); }
+    const { data: v } = vendId ? await db.from('crm_usuarios').select('nome, email, ativo').eq('user_id', vendId).maybeSingle() : { data: null };
+    const { data: adms } = await db.from('crm_usuarios').select('nome, email').eq('papel', 'admin').eq('ativo', true);
+    const vend = v && (v as Linha).ativo && /@/.test(String((v as Linha).email || '')) ? v as Linha : null;
+    const rem = vend || ((adms || []) as Linha[]).find(a => /@/.test(String(a.email || ''))) || null;
+    if (!rem) return await fim({ ok: false, erro: 'nenhum remetente com e-mail (vendedor(a) ou administrador)' });
+    const anexos: { name: string; content: string }[] = grupo.map(n => ({ name: String(n.chave) + '-procNFe.xml', content: base64(new TextEncoder().encode(String(n.proc_xml))) }));
+    const boletos: Linha[] = [];
+    let erroBol = '', faltaBol = 0;
+    if (comPdf) {
+      const Dn = await carregaDanfe(), logo = await logoDanfe();
+      const pdf = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
+      let primeira = true;
+      for (const n of grupo) {
+        const d = Dn.ler(String(n.proc_xml));
+        if (!d) throw new Error('não li o XML da NF ' + n.numero);
+        if (!primeira) pdf.addPage('a4', 'portrait');
+        primeira = false;
+        Dn.desenha(pdf, d, { logo, cores: CORES });
+        const b = bols.get(String(n.id))!;
+        faltaBol += b.pendentes;
+        if (b.registrados.length) {
+          try { await desenhaBoletos(pdf, b.registrados, String(n.proc_xml), b.dados, false); b.registrados.forEach(x => boletos.push({ vencimento: x.vencimento, valor: x.valor })); }
+          catch (err) { erroBol = String((err as Error).message || err); console.error('[crm-fiscal] boleto do e-mail em grupo: ' + erroBol); }
+        }
+      }
+      anexos.push({ name: arquivoGrupo(grupo, EMPRESA, boletos.length > 0), content: base64(new Uint8Array(pdf.output('arraybuffer'))) });
+    }
+    const o = { empresa: EMPRESA, cliente: String(e.razao_social || e.nome || ''), vendedor: vend ? String(vend.nome) : '', comPdf, boletos };
+    const r = await fetch(EMAIL_URL(), { method: 'POST', headers: { Authorization: EMAIL_AUTH(), 'content-type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify({ sender: { name: EMPRESA + ' · Nota fiscal', email: rem.email }, replyTo: { name: String(rem.nome), email: rem.email },
+        to: lista.map(x => ({ email: x })), subject: assuntoGrupo(grupo, EMPRESA), htmlContent: htmlGrupo(grupo, o), textContent: textoGrupo(grupo, o), attachment: anexos, tags: ['nfe'] }) });
+    if (!r.ok) {
+      const erro = 'o e-mail não saiu (' + r.status + '): ' + (await r.text().catch(() => '')).slice(0, 200);
+      if (r.status !== 400) {   // continua pendente: o agendador tenta de novo
+        await db.from('crm_nfe').update({ email_em: null, email_ok: false, email_para: lista.join(', '), email_erro: erro.slice(0, 300) }).in('id', idsG);
+        return { ok: false, adiado: true, erro, notas: nums };
+      }
+      return await fim({ ok: false, para: lista.join(', '), erro });
+    }
+    const obs = ' · junto com ' + (grupo.length - 1) + ' nota(s) do mesmo cliente' + (!comPdf ? ' · só os XML (lote grande)' : boletos.length ? ' · com ' + boletos.length + ' boleto(s)' : erroBol ? ' · sem o boleto (erro: ' + erroBol.slice(0, 100) + ')' : faltaBol ? ' · sem o boleto (não registrado no BB a tempo)' : '');
+    return await fim({ ok: true, para: lista.join(', ') + obs, boletos: boletos.length });
+  } catch (err) {
+    // falhou antes de mandar (desenho da DANFE, leitura do XML): tentar de novo daria no mesmo; o erro fica anotado em cada
+    // nota (o fiscal dos agentes avisa) e o "✉ E-mail" da lista de NF-e manda uma a uma
+    return await fim({ ok: false, erro: 'e-mail em grupo: ' + String((err as Error).message || err) });
+  }
 }
 // A nota pela chave (05/11/2026, a vendedora baixa e reenvia as notas dos clientes dela): a do CRM (crm_nfe de produção) ou
 // a do FKN (crm_notas + o XML guardado no bucket crm-notas-xml). Devolve o mesmo formato da crm_nfe.
@@ -540,7 +643,9 @@ async function depoisDaNota(db: ReturnType<typeof createClient>, nfeId: string) 
     const u = Deno.env.get('SUPABASE_URL')!, k = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     await fetch(u + '/functions/v1/crm-bb', { method: 'POST', headers: { Authorization: 'Bearer ' + k, 'Content-Type': 'application/json' }, body: JSON.stringify({ acao: 'ciclo' }), signal: AbortSignal.timeout(60000) });
   } catch (e) { console.error('[crm-fiscal] ciclo do BB antes do e-mail: ' + (e as Error).message); }
-  return enviaEmailNota(db, nfeId);
+  // 10/11/2026: o e-mail não sai mais na hora. O agendador (crm-nfe-email, a cada 15 minutos) junta as notas do mesmo cliente
+  // num e-mail só, depois que o lote termina (a caixa da empresa tem limite por hora; a Uniserv recebe mais de 60 notas num dia)
+  return { ok: false, adiado: true, erro: 'o e-mail sai na próxima rodada do agendador (' + nfeId + ')' };
 }
 // DIFAL (23/10/2026): nota de produção autorizada para consumidor de outra UF vira a conta da guia GNRE no Caixa (paga
 // antes de a mercadoria sair; a guia acompanha a nota). Uma por nota: a chave fica na descrição.
@@ -583,12 +688,16 @@ Deno.serve(async (req) => {
     try { c = await req.json(); } catch { /* corpo vazio */ }
     if (c.acao !== 'email_pendentes') return resposta(400, { erro: 'o agendador só manda os e-mails pendentes' });
     const desde = /^\d{4}-\d{2}-\d{2}$/.test(String(c.desde || '')) ? String(c.desde) + 'T00:00:00-03:00' : new Date(Date.now() - 2 * 864e5).toISOString();
-    const { data: pend } = await db.from('crm_nfe').select('id, numero').eq('ambiente', 'producao').eq('situacao', 'autorizada').is('email_em', null)
-      .gte('autorizada_em', desde).order('autorizada_em').limit(6);
-    // no máximo 6 por chamada (05/11/2026: 14 notas com DANFE e boleto numa chamada passaram do limite da função, que foi
-    // encerrada no meio); o resto vai na chamada seguinte do agendador, 15 minutos depois
+    const { data: pend } = await db.from('crm_nfe').select('id, numero, empresa_id, autorizada_em').eq('ambiente', 'producao').eq('situacao', 'autorizada').is('email_em', null)
+      .gte('autorizada_em', desde).order('autorizada_em').limit(400);
+    // 10/11/2026: as notas do mesmo cliente vão num e-mail só (gruposDeEnvio, email-nota.js): o cliente entra quando a nota
+    // mais nova dele tem 3 minutos (o lote acabou); cada chamada desenha no máximo 6 DANFEs (05/11/2026: 14 notas com DANFE e
+    // boleto numa chamada passaram do limite da função); lote com mais de 6 notas vai só com os XML
     const res: Linha[] = [];
-    for (const n of (pend || []) as Linha[]) res.push(Object.assign({ numero: n.numero }, await enviaEmailNota(db, String(n.id))));
+    for (const g of gruposDeEnvio((pend || []) as Linha[], Date.now())) {
+      if (g.notas.length === 1) res.push(Object.assign({ numero: g.notas[0].numero }, await enviaEmailNota(db, String(g.notas[0].id))));
+      else res.push(await enviaEmailGrupo(db, g.notas.map((n: Linha) => String(n.id)), g.comPdf));
+    }
     return resposta(200, { mandadas: res.filter(r => r.ok).length, total: res.length, notas: res });
   }
   const comoUsuario = createClient(url, Deno.env.get('SUPABASE_ANON_KEY')!, { global: { headers: { Authorization: req.headers.get('Authorization') ?? '' } }, auth: { persistSession: false } });

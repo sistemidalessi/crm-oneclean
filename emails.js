@@ -2,7 +2,7 @@
    vendas). Clientes que só tratam por e-mail entram na cadência (quinzenal ou mensal, na ficha). Todo
    dia o CRM monta a FILA (cadencia.js, filaCadencia): o lembrete de reposição no ritmo de compra do
    cliente e, no intervalo da cadência, a campanha que a líder escreveu. O(a) vendedor(a) (ou a líder)
-   confere, mexe no texto se quiser e aprova; quem envia é a Edge Function crm-email (Brevo), em nome
+   confere, mexe no texto se quiser e aprova; quem envia é a Edge Function crm-email (caixa de e-mail da empresa), em nome
    do(a) vendedor(a) da carteira. Por enquanto nada sai sem aprovação. */
 (function (raiz) {
   'use strict';
@@ -140,7 +140,7 @@
       const f = fila();
       const vends = (E().D.usuarios || []).filter(u => u.ativo && u.papel !== 'comprador');
       const aviso = !situacao ? '' : situacao.ligado ? '' :
-        '<div class="cartao aviso"><p><strong>O envio ainda não está ligado.</strong> A fila já aparece, mas o botão Enviar só funciona depois que o administrador ligar o serviço de e-mail (Brevo) ' +
+        '<div class="cartao aviso"><p><strong>O envio ainda não está ligado.</strong> A fila já aparece, mas o botão Enviar só funciona depois que o administrador ligar a caixa de e-mail da empresa ' +
         (CRM.ehAdmin() ? '— veja o passo a passo no CLAUDE.md, seção "Cadência de e-mails".' : '. Avise o administrador.') + '</p></div>';
       const segPorMotivo = new Map();
       f.segurados.forEach(s => { const k = s.motivo.split(':')[0].replace(/ em \d\d\/\d\d\/\d{4}$/, '').replace(/há \d+ dia\(s\)/, 'há poucos dias'); segPorMotivo.set(k, (segPorMotivo.get(k) || []).concat([s])); });
