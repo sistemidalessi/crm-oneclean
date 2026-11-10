@@ -1150,7 +1150,9 @@
   // Duplicatas EM ATRASO, com detalhe e o cartório (gestora e vendedores(as) não leem o contas a receber — ver
   // schema.sql; crm_atrasos substituiu crm_duplicatas_atraso em 14/10/2026).
   Supa.prototype.duplicatasAtraso = async function () {
-    return unwrap(await comTentativas(() => this.sb.rpc('crm_atrasos'))) || [];
+    // crm_atrasos_v2 (10/11/2026) traz também a data combinada do título remarcado, que continua vencido.
+    try { return unwrap(await comTentativas(() => this.sb.rpc('crm_atrasos_v2'))) || []; }
+    catch (e) { return unwrap(await comTentativas(() => this.sb.rpc('crm_atrasos'))) || []; }
   };
   // Boletos atualizados dos últimos 90 dias (o(a) vendedor(a) recebe só os da carteira — RLS).
   Supa.prototype.boletos = async function () {

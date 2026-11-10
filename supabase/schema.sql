@@ -1731,12 +1731,27 @@ returns table (empresa_id uuid, duplicata text, nota_numero integer, parcela int
 language sql stable security definer set search_path = public as $$
   select t.empresa_id, t.duplicata, t.nota_numero, t.parcela, t.vencimento, t.valor, t.abono, t.portador, t.cartorio_em
     from public.crm_titulos t
-   -- título remarcado pelo administrador no Caixa (previsao) só atrasa depois da data nova (28/10/2026, Anderson)
-   where t.empresa_id is not null and coalesce(t.previsao, t.vencimento) < (now() at time zone 'America/Sao_Paulo')::date
+   -- 10/11/2026 (Anderson): o título remarcado no Caixa (previsao) CONTINUA VENCIDO para a gestora e os(as) vendedores(as)
+   -- ("ou pediu prorrogação, ou disse que paga dia 15: continua vencido"). A trava ATRASO do pedido e o crédito seguem
+   -- pela data combinada (regra de 28/10).
+   where t.empresa_id is not null and t.vencimento < (now() at time zone 'America/Sao_Paulo')::date
      and (public.crm_eh_gestor() or (public.crm_eh_membro() and t.empresa_id in (select public.crm_empresas_minhas())));
 $$;
 revoke all on function public.crm_atrasos() from public, anon;
 grant execute on function public.crm_atrasos() to authenticated;
+
+-- A mesma lista com a data combinada (previsao), para a tela dizer "venceu em…, combinado para…".
+create or replace function public.crm_atrasos_v2()
+returns table (empresa_id uuid, duplicata text, nota_numero integer, parcela integer, vencimento date, valor numeric, abono boolean, portador text, cartorio_em date, previsao date)
+language sql stable security definer set search_path = public as $$
+  select t.empresa_id, t.duplicata, t.nota_numero, t.parcela, t.vencimento, t.valor, t.abono, t.portador, t.cartorio_em,
+         case when t.previsao >= (now() at time zone 'America/Sao_Paulo')::date then t.previsao end
+    from public.crm_titulos t
+   where t.empresa_id is not null and t.vencimento < (now() at time zone 'America/Sao_Paulo')::date
+     and (public.crm_eh_gestor() or (public.crm_eh_membro() and t.empresa_id in (select public.crm_empresas_minhas())));
+$$;
+revoke all on function public.crm_atrasos_v2() from public, anon;
+grant execute on function public.crm_atrasos_v2() to authenticated;
 
 create table if not exists public.crm_boletos (
   id              uuid primary key default gen_random_uuid(),

@@ -90,10 +90,14 @@
     if (!f) return '';
     const cart = f.cartorio > 0 ? 'Tem ' + f.qtdCartorio + ' título(s) EM CARTÓRIO desde ' + R.dataBR(f.cartorioDesde) + ' (' + R.moeda(f.cartorio) + '): não cobre — o assunto está com o financeiro.' : '';
     if (f.vencido <= 0) return cart;
-    return 'Tem ' + f.qtdVencidos + ' título(s) vencido(s) no FKN: ' + R.moeda(f.vencido) + ', o mais antigo há ' + atraso(f.maiorAtraso) + '. Combine o pagamento antes de oferecer pedido novo.' + (cart ? ' ' + cart : '');
+    const comb = f.titulos.filter(t => t.previsao && t.previsao >= CRM.hoje() && t.vencimento < CRM.hoje() && !t.cartorio_em);
+    const combTxt = comb.length ? ' ' + (comb.length === f.qtdVencidos ? 'O financeiro já combinou o pagamento para ' : comb.length + ' deles com pagamento combinado pelo financeiro para ') + [...new Set(comb.map(t => R.dataBR(t.previsao).slice(0, 5)))].join(', ') + '.' : '';
+    return 'Tem ' + f.qtdVencidos + ' título(s) vencido(s): ' + R.moeda(f.vencido) + ', o mais antigo há ' + atraso(f.maiorAtraso) + '.' + combTxt + (comb.length === f.qtdVencidos && comb.length ? '' : ' Combine o pagamento antes de oferecer pedido novo.') + (cart ? ' ' + cart : '');
   };
   // Na lista de títulos: selo de cartório e o boleto atualizado (cobranca.js).
-  const extraTitulo = t => (t.cartorio_em ? ' ' + CRM.selo('em cartório desde ' + R.dataBR(t.cartorio_em).slice(0, 5) + ' — não cobrar', 'roxo') : '') +
+  // Título remarcado no Caixa continua vencido para a equipe; a tela diz a data combinada (10/11/2026, Anderson).
+  const combinado = t => (t.previsao && t.previsao >= CRM.hoje() && t.vencimento < CRM.hoje() && !t.cartorio_em ? ' ' + CRM.selo('combinado para ' + R.dataBR(t.previsao).slice(0, 5), 'ambar', 'O financeiro combinou esta data com o cliente; o título continua vencido até ser pago') : '');
+  const extraTitulo = t => combinado(t) + (t.cartorio_em ? ' ' + CRM.selo('em cartório desde ' + R.dataBR(t.cartorio_em).slice(0, 5) + ' — não cobrar', 'roxo') : '') +
     (CRM.cobranca && !t.cartorio_em ? CRM.cobranca.seloTitulo(t) : '');
   const posicaoTxt = () => {
     const l = (E().D && E().D.titulos) || [];
