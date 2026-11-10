@@ -11468,11 +11468,13 @@ begin
   -- 2. chamadas do banco às Edge Functions (pg_net) com erro nas últimas 2 horas
   begin
     select count(*) into n from net._http_response where created > now() - interval '2 hours' and (status_code >= 400 or timed_out or error_msg is not null);
-    if n >= 5 then
+    select count(*) into n2 from net._http_response where created > now() - interval '6 hours' and (status_code >= 400 or timed_out or error_msg is not null);
+    -- 10/11/2026: a conciliação do extrato quebrou 2 vezes por hora durante um dia e ficou abaixo do limite antigo (5 em 2 horas)
+    if n >= 3 or n2 >= 8 then
       select left(coalesce(error_msg, status_code::text || ' ' || content, ''), 120) into t from net._http_response
         where created > now() - interval '2 hours' and (status_code >= 400 or timed_out or error_msg is not null) order by created desc limit 1;
-      achados := achados || crm_interno.fiscal_p('funcoes:erros', F, case when n >= 15 then 'grave' else 'atencao' end,
-        n || ' chamadas dos agendadores às funções do CRM deram erro nas últimas 2 horas (a última: ' || coalesce(t, '?') || ').', 'Me chamar: uma função pode ter caído (boletos, extrato, cobrança, e-mail das notas).');
+      achados := achados || crm_interno.fiscal_p('funcoes:erros', F, case when n >= 15 or n2 >= 8 then 'grave' else 'atencao' end,
+        n || ' chamadas dos agendadores às funções do CRM deram erro nas últimas 2 horas (' || n2 || ' nas últimas 6; a última: ' || coalesce(t, '?') || ').', 'Me chamar: uma função pode ter caído (boletos, extrato, cobrança, e-mail das notas).');
     end if;
   exception when others then
     achados := achados || crm_interno.fiscal_p('conferencia:funcoes', F, 'atencao', 'O fiscal não conseguiu conferir as chamadas às funções (' || left(sqlerrm, 120) || ').', 'Me chamar: a conferência quebrou.');
@@ -11678,11 +11680,34 @@ begin
   -- 15. WhatsApp oficial: mensagens que falharam
   begin
     select count(*) into n from public.crm_whatsapp_eventos where tipo = 'status' and status = 'failed' and criado_em > now() - interval '3 days';
-    if n >= 3 then
+    select count(*) into n2 from public.crm_whatsapp_eventos wf where wf.tipo = 'status' and wf.status = 'failed' and wf.criado_em > now() - interval '24 hours'
+      and not exists (select 1 from public.crm_whatsapp_eventos wo where wo.tipo = 'status' and wo.status in ('sent', 'delivered', 'read') and wo.criado_em > wf.criado_em);
+    if n2 >= 3 then
+      achados := achados || crm_interno.fiscal_p('whatsapp:fora', 'WhatsApp', 'grave', 'O WhatsApp da empresa (Meta) recusou as ' || n2 || ' últimas mensagens e nenhuma saiu depois: boleto, cobrança e aviso de entrega não chegam ao cliente.', 'Abrir o painel da Meta (conta, pagamento, modelos, número); me chamar com o erro.');
+    elsif n >= 3 then
       achados := achados || crm_interno.fiscal_p('whatsapp:falhas', 'WhatsApp', 'atencao', n || ' mensagens do WhatsApp oficial falharam nos últimos 3 dias.', 'Conferir no painel da Meta a conta, o pagamento e os modelos; me chamar com o erro.');
     end if;
   exception when others then
     achados := achados || crm_interno.fiscal_p('conferencia:whatsapp', 'WhatsApp', 'atencao', 'O fiscal não conseguiu conferir o WhatsApp (' || left(sqlerrm, 120) || ').', 'Me chamar: a conferência quebrou.');
+  end;
+
+  -- 21. serviços de fora que o CRM usa (10/11/2026): recusou várias vezes seguidas e nenhuma passou depois = grave
+  begin
+    select count(*), min(em), max(left(erro, 120)) into n, ts, t from public.crm_credito_rekta rk
+      where rk.erro is not null and rk.erro not ilike '%(400)%' and rk.em > now() - interval '48 hours'
+        and not exists (select 1 from public.crm_credito_rekta ro where ro.erro is null and ro.em > rk.em);
+    if n >= 2 then
+      achados := achados || crm_interno.fiscal_p('rekta:fora', 'Crédito', 'grave', 'A consulta de crédito (Rekta) recusou ' || n || ' consulta(s) seguidas desde ' || to_char(ts at time zone 'America/Sao_Paulo', 'DD/MM HH24:MI') || ' e nenhuma passou depois (' || coalesce(t, '?') || '): pedido a prazo de cliente sem análise fica travado.', 'Falar com a Rekta (conta e hash de integração). Enquanto isso, analisar pelo site da Rekta em Caixa → Crédito.');
+    end if;
+    select count(*), min(criado_em), max(left(erro, 120)) into n, ts, t from public.crm_assistente_uso iu
+      where iu.erro is not null and iu.erro not ilike '%formato%' and (iu.erro <> 'em andamento' or iu.criado_em < now() - interval '15 minutes')
+        and iu.criado_em > now() - interval '24 hours'
+        and not exists (select 1 from public.crm_assistente_uso io where io.erro is null and io.criado_em > iu.criado_em);
+    if n >= 3 then
+      achados := achados || crm_interno.fiscal_p('ia:fora', 'IA', 'grave', 'A IA (Claude) falhou em ' || n || ' chamadas seguidas desde ' || to_char(ts at time zone 'America/Sao_Paulo', 'DD/MM HH24:MI') || ' e nenhuma passou depois (' || coalesce(t, '?') || '): análise do dia, leads sugeridos, leitura de comprovante e a conversa ficam sem resposta.', 'Conferir o saldo e o limite da chave em console.anthropic.com (ANTHROPIC_API_KEY nos segredos); me chamar com o erro.');
+    end if;
+  exception when others then
+    achados := achados || crm_interno.fiscal_p('conferencia:servicos', F, 'atencao', 'O fiscal não conseguiu conferir a Rekta e a IA (' || left(sqlerrm, 120) || ').', 'Me chamar: a conferência quebrou.');
   end;
 
   -- 16. quem bate o ponto aqui: a rotina "Fiscal dos agentes" da nuvem (seg, qua, sex) — um vigia o outro
