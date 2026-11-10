@@ -1475,3 +1475,45 @@ button.ordena.ativo { color: var(--marinho); }
 /* posição do item e setas (09/11/2026) */
 .pd-entrada .pd-pos input { max-width: 90px; }
 .pd-grade td.pd-item-acoes { white-space: nowrap; }
+
+/* Crédito: parecer e relatório da consulta guardada (10/11/2026) */
+.cred-origem { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0; }
+.cred-parecer { border: 1px solid var(--borda, #ddd); border-left: 4px solid #888; border-radius: 8px; padding: 10px 14px; margin: 8px 0 12px; background: #fff; }
+.cred-parecer.cred-alto { border-left-color: #c62828; background: #fff7f6; }
+.cred-parecer.cred-medio { border-left-color: #d98a00; background: #fffaf0; }
+.cred-parecer.cred-baixo { border-left-color: #2e7d32; background: #f6fbf6; }
+.cred-risco { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0 0 6px; }
+.cred-lados { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 18px; }
+.cred-lados h4 { margin: 4px 0 2px; font-size: .82rem; text-transform: uppercase; letter-spacing: .04em; color: var(--suave, #666); }
+.cred-lados ul { margin: 0 0 6px 18px; padding: 0; }
+.cred-lados li { margin: 2px 0; }
+.cred-caminhos { margin: 6px 0 0; font-size: .92rem; }
+.cred-rel-fold { margin: 8px 0 14px; }
+.cred-rel-fold > summary { cursor: pointer; padding: 6px 0; }
+.cred-sec { border-top: 1px solid var(--borda, #ddd); padding: 6px 0; }
+.cred-sec > summary { cursor: pointer; padding: 2px 0; }
+.cred-sec > summary small { color: var(--suave, #666); font-weight: 400; }
+.cred-kv { border-collapse: collapse; width: 100%; margin: 6px 0; font-size: .92rem; }
+.cred-kv th { text-align: left; font-weight: 600; width: 210px; vertical-align: top; padding: 3px 10px 3px 0; color: var(--suave, #555); }
+.cred-kv td { padding: 3px 0; }
+.cred-tab { font-size: .9rem; margin: 6px 0; }
+.cred-nada { margin: 8px 0; padding: 6px 10px; background: #f3f7f3; border-radius: 6px; font-size: .92rem; }
+.cred-decide { margin: 14px 0 4px; }
+.cred-prontas { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0 10px; }
+@media (max-width: 640px) { .cred-lados { grid-template-columns: 1fr; } .cred-kv th { width: 120px; } }
+/* o mesmo relatório em PDF (794 px = A4) */
+.cred-rel-doc { width: 794px; box-sizing: border-box; padding: 34px 38px 28px; font: 12px/1.4 Arial, Helvetica, sans-serif; color: #111; background: #fff; }
+.cred-rel-doc > header { display: flex; justify-content: space-between; gap: 20px; border-bottom: 2px solid #175b6d; padding-bottom: 10px; margin-bottom: 10px; }
+.cred-rel-doc h1 { margin: 0; font-size: 20px; color: #175b6d; }
+.cred-rel-doc header p { margin: 2px 0 0; color: #555; }
+.cred-doc-dir { text-align: right; }
+.cred-doc-linha { margin: 6px 0; }
+.cred-rel-doc .cred-sec > summary { list-style: none; font-size: 13px; padding: 4px 0; }
+.cred-rel-doc .cred-sec > summary::-webkit-details-marker { display: none; }
+.cred-rel-doc .cred-kv, .cred-rel-doc .cred-tab { font-size: 11.5px; }
+.cred-rel-doc .cred-tab th, .cred-rel-doc .cred-tab td { padding: 3px 6px; border-bottom: 1px solid #ddd; text-align: left; }
+/* o gerador de PDF (html2canvas) não entende color-mix: no documento o cabeçalho da tabela tem cor fixa */
+.cred-rel-doc .cred-tab thead tr th { background: #e4e7e9; border-bottom: 1px solid #999; color: #111; }
+.cred-rel-doc .cred-tab .num { text-align: right; }
+.cred-rel-doc > footer { margin-top: 14px; padding-top: 8px; border-top: 1px solid #ccc; color: #666; font-size: 10.5px; }
+.cred-rel-doc .cred-caminhos, .cred-rel-doc .cred-nada, .cred-rel-doc .dica, .cred-rel-doc li, .cred-rel-doc .cred-risco { font-size: 12px; }

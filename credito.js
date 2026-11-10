@@ -250,7 +250,150 @@
     };
   }
 
-  const C = { POLITICA, SITUACOES, BLOQUEIOS, propor, resumoFatos, textoEquipe, daRekta };
+  // ---- RELATÓRIO da consulta guardada (10/11/2026, Anderson: "não veio a ficha da restrição em PDF para eu analisar? tem que
+  // consultar de novo, gastar de novo?"). A resposta da Rekta fica inteira em crm_credito_rekta.bruto: aqui ela vira um
+  // relatório para ler, guardar em PDF e decidir, sem nova consulta. Só a resposta de pessoa jurídica traz estas seções;
+  // consulta antiga (PDF lido pela IA) fica só com os fatos (resumoFatos).
+  const txt = v => (v == null || typeof v === 'object' ? '' : String(v).trim());
+  const simNao = v => /^s/i.test(txt(v));
+  // as "últimas ocorrências" de uma seção: lista de objetos, qualquer que seja o nome da lista
+  const itensDe = sec => {
+    const u = sec && typeof sec === 'object' ? (sec.ultimas_ocorrencias || sec.ultimas_consultas) : null;
+    if (!u || typeof u !== 'object') return [];
+    if (Array.isArray(u)) return u.filter(x => x && typeof x === 'object');
+    const k = Object.keys(u).find(x => u[x] && typeof u[x] === 'object');
+    return k ? lista(u[k]).filter(x => x && typeof x === 'object') : [];
+  };
+  // CPF de sócio sai mascarado (o relatório pode virar PDF); CNPJ sai inteiro. A Rekta manda o CPF com 14 dígitos (zeros na frente)
+  const docRel = (d, cpf) => {
+    const s = String(d || '').replace(/\D/g, '');
+    const c = cpf || (s.length === 14 && /^000/.test(s)) ? s.slice(-11) : s;
+    if (c.length === 11) return '***.' + c.slice(3, 6) + '.' + c.slice(6, 9) + '-**';
+    return c.length === 14 ? c.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5') : c;
+  };
+  // restrições de um sócio, administrador ou de outra empresa deles (só as que têm quantidade)
+  const restricoesDe = r => {
+    r = r && typeof r === 'object' ? r : {};
+    const um = (o, rotulo) => { o = o || {}; const q = Number(txt(o.quantidade)) || 0; return q ? { rotulo, qtd: q, valor: numBR(o.valor), ultima: diaBR(o.ultima) } : null; };
+    return [um(r.protestos, 'protesto(s)'), um(r.acoes_judiciais, 'ação(ões) judicial(is)'), um(r.pendencias_restricoes, 'pendência(s) financeira(s)'),
+      um(r.cheques_sem_fundo, 'cheque(s) sem fundo'), um(r.falencias_recuperacao_judicial, 'falência ou recuperação judicial')].filter(Boolean);
+  };
+  // ocorrência de formato que a gente ainda não viu (pendência, cheque, falência): data, valor e o resto em texto
+  const generico = x => ({ data: diaBR(acha(x, /^data/i) || ''), valor: numBR(x.valor),
+    texto: Object.keys(x).filter(k => !/^(data|valor|documento)/i.test(k) && txt(x[k])).map(k => k.replace(/_/g, ' ') + ': ' + txt(x[k])).join(' · ').slice(0, 200) });
+  function relatorio(b) {
+    for (let i = 0; i < 2 && typeof b === 'string'; i++) { try { b = JSON.parse(b); } catch (e) { b = null; } }
+    if (!b || typeof b !== 'object' || !(b.identificacao_completo || (b.score && b.score.score_pj))) return null;
+    const id = b.identificacao_completo || {}, spj = (b.score && (b.score.score_pj || b.score.score)) || {};
+    const mz = (b.localizacao_completo || {}).matriz || {}, at = id.ramo_atividade_primario || {};
+    const secao = (s, mapa) => { const o = ocorrencias(s); s = s && typeof s === 'object' ? s : {};
+      return { qtd: o.qtd, valor: o.valor, maior: numBR(s.valor_maior), maior_em: diaBR(s.data_maior), primeiro_em: diaBR(s.data_primeiro), ultimas: itensDe(s).map(mapa) }; };
+    const dec = chave(b, /(^|:)decisao$/i) || {};
+    const pp = chave(b, /pagamento_pontual$/i) || {}, atr = b.pagamento_atrasado || {};
+    const faixas = [['periodo_6_a_15_dias', '6 a 15 dias'], ['periodo_16_a_30_dias', '16 a 30 dias'], ['periodo_31_a_60_dias', '31 a 60 dias'], ['mais_de_60_dias', 'mais de 60 dias']]
+      .map(f => ({ rotulo: f[1], meses: meses12(atr[f[0]]).filter(x => numBR(x.pontuacao_mensal) > 0).map(x => txt(x.mes_ano)) })).filter(f => f.meses.length);
+    const cons = b.consultas || {};
+    const pessoa = x => ({ nome: txt(x.nome_empresa || x.nome || x.nome_socio), doc: docRel(x.cpf_cnpj || x.cpf || x.cnpj, !!x.cpf || txt(x.tipo_documento) === '1'),
+      participacao: numBR(x.participacao), cargo: txt(x.cargo), entrada: diaBR(x.data_entrada || x.entrada), debito: simNao(x.indicador_debito), fraude: simNao(x.indicador_fraude),
+      restricoes: restricoesDe(x.restricoes_documento) });
+    const outras = [], vistas = {};
+    lista((b.participacoes_socios_adm_outras_empresas || {}).socio).forEach(s => lista(s.socios_participantes).forEach(x => {
+      const cnpj = String(x.cnpj || '').replace(/\D/g, '');
+      if (!cnpj || cnpj === String(id.cnpj || '').replace(/\D/g, '')) return;
+      const ja = vistas[cnpj];
+      if (ja) { if (ja.socios.indexOf(txt(s.nome_socio)) === -1) ja.socios.push(txt(s.nome_socio)); return; }
+      outras.push(vistas[cnpj] = { razao: txt(x.razao_social), cnpj: docRel(cnpj), socios: [txt(s.nome_socio)], participacao: numBR(x.participacao), entrada: diaBR(x.entrada),
+        situacao: txt(x.situacao_cnpj), debito: simNao(x.indicador_debito), fraude: simNao(x.indicador_fraude), restricoes: restricoesDe(x.restricoes_documento) });
+    }));
+    const cheques = ['cheques_sem_fundo', 'cheques_sustados', 'cheques_devolvidos_informados_usuario'].reduce((a, k) => { const o = ocorrencias(b[k]); a.qtd += o.qtd; a.valor += o.valor; a.ultimas = a.ultimas.concat(itensDe(b[k]).map(generico)); return a; }, { qtd: 0, valor: 0, ultimas: [] });
+    return {
+      empresa: { razao: txt(id.razao_social), cnpj: docRel(id.cnpj), fundacao: diaBR(id.data_fundacao || id.data_registro), situacao: txt(id.situacao_cnpj), natureza: txt(id.natureza_juridica),
+        capital: numBR(id.capital_atual), atividade: txt(at.atividade), cnae: txt(at.cnae), segmento: txt(id.segmento), filiais: Number(txt(id.quantidade_filiais)) || 0,
+        razao_anterior: txt(id.razao_social_anterior), mudou_em: diaBR(id.data_alteracao_razao_social), capital_em: diaBR(id.data_alteracao_capital), sintegra: txt(id.situacao_sintegra),
+        endereco: [txt(mz.endereco_matriz), txt(mz.bairro_matriz), [txt(mz.cidade_matriz), txt(mz.uf_matriz)].filter(Boolean).join('/')].filter(Boolean).join(' · '),
+        telefones: lista((mz.telefone_matriz || {}).telefone).map(txt).filter(Boolean) },
+      score: { valor: /^\d+$/.test(txt(spj.score)) ? Number(spj.score) : 0, classe: txt(spj.classificacao_alfabetica), texto: txt(spj.texto) },
+      decisao: txt(chave(dec, /descricao|texto/i)),
+      limite_sugerido: numBR((b.limite_credito || {}).score || (b.limite_credito || {}).valor),
+      faturamento: txt((b.faturamento_presumido || {}).faturamento_anual),
+      protestos: secao(b.protestos, x => ({ data: diaBR(x.data), valor: numBR(x.valor), vencimento: diaBR(x.vencimento), cartorio: txt(x.cartorio), cidade: txt(x.cidade), uf: txt(x.estado || x.uf) })),
+      acoes: secao(b.acoes_civeis, x => ({ data: diaBR(x.distribuicao || x.data), valor: numBR(x.valor), tipo: txt(x.acao), autor: txt(x.autor), foro: txt(x.foro), uf: txt(x.uf), processo: txt(x.processo) })),
+      pendencias: secao(b.pendencias_restricoes, generico),
+      falencia: secao(b.falencias_recuperacao_judicial, generico),
+      fraude: secao(b.alerta_fraudes, generico),
+      cheques,
+      pontualidade: { pct: /^\d+([.,]\d+)?$/.test(txt(chave(pp, /pontuacao$/i))) ? Number(txt(chave(pp, /pontuacao$/i)).replace(',', '.')) : -1,
+        meses: meses12(pp).map(x => ({ mes: txt(x.mes_ano), v: txt(x.pontuacao_mensal) })) },
+      atrasos: faixas,
+      consultas: { total: Number(txt(cons.quantidade_total)) || 0,
+        meses: lista(cons.consultas_mes).map(x => ({ mes: txt(x.mes_ano).replace(/^(\d{2})(\d{4})$/, '$1/$2'), qtd: Number(txt(x.quantidade)) || 0 })),
+        ultimas: itensDe(cons).map(x => ({ data: diaBR(x.data), quem: txt(x.razao_social) })) },
+      socios: lista(b.socios).map(pessoa),
+      administradores: lista((b.administradores || {}).administrador).map(pessoa),
+      outras
+    };
+  }
+
+  // O PARECER: o que a consulta mostra a favor e contra, em frases curtas, e o tamanho do risco. Não decide: quem decide é o
+  // administrador. k = fatos (daRekta), rel = relatorio() ou null, ctx = { hoje, pedido_valor, pedido_prazo, compras, total_comprado, vencido }.
+  const milhoes = v => (v >= 1e6 ? 'R$ ' + String(Math.round(v / 1e5) / 10).replace('.', ',') + ' milhões' : R.moeda(v));
+  function parecer(k, rel, ctx) {
+    k = k || {}; ctx = ctx || {};
+    const hoje = ctx.hoje || new Date().toISOString().slice(0, 10), favor = [], contra = [];
+    const dias = d => (d ? Math.round((new Date(hoje + 'T12:00:00Z') - new Date(d + 'T12:00:00Z')) / 864e5) : null);
+    let grave = false;
+    const idade = k.fundacao ? meses(k.fundacao, hoje) : null;
+    if (idade != null && idade >= 60) favor.push('empresa com ' + Math.floor(idade / 12) + ' anos');
+    if (idade != null && idade < 24) contra.push(idade < 12 ? 'empresa com menos de 1 ano' : 'empresa com menos de 2 anos');
+    if (k.score >= 600) favor.push('score ' + k.score + (k.prob_inadimplencia >= 0 ? ' (' + String(k.prob_inadimplencia).replace('.', ',') + ' em cada 100 empresas assim atrasam em 12 meses)' : ''));
+    else if (k.score > 0 && k.score < POLITICA.scoreMinimo) contra.push('score baixo: ' + k.score);
+    if (k.pontualidade >= 90) favor.push('paga ' + k.pontualidade + '% em dia no cadastro positivo (contas que os fornecedores informam)');
+    else if (k.pontualidade >= 0 && k.pontualidade < POLITICA.pontualMinima) contra.push('só ' + k.pontualidade + '% pago em dia no cadastro positivo');
+    if (k.atraso_mais_60) contra.push('teve atraso acima de 60 dias no último ano');
+    if (k.faturamento_presumido) favor.push('faturamento presumido: ' + k.faturamento_presumido);
+    if (!(k.pendencias_qtd > 0) && (k.protestos_qtd > 0 || k.acoes_qtd > 0)) favor.push('sem pendência financeira negativada (dívida com banco ou fornecedor no Serasa)');
+    if (ctx.compras > 0 && !(ctx.vencido > 0)) favor.push('já comprou ' + ctx.compras + ' vez(es) da OneClean (' + R.moeda(ctx.total_comprado || 0) + ') e não tem título vencido');
+    if (ctx.vencido > 0) { contra.push('tem ' + R.moeda(ctx.vencido) + ' vencido com a OneClean'); grave = true; }
+    if (k.situacao_cadastral && !/ativ/i.test(k.situacao_cadastral)) { contra.push('CNPJ ' + k.situacao_cadastral + ' na Receita'); grave = true; }
+    if (k.protestos_qtd > 0) {
+      const ult = rel ? rel.protestos.ultimas.map(x => x.data).filter(Boolean).sort().pop() : '', d = dias(ult);
+      const rec = rel ? rel.protestos.ultimas.filter(x => x.data && dias(x.data) <= 90) : [];
+      contra.push(k.protestos_qtd + ' protesto(s)' + (k.protestos_valor ? ' somando ' + milhoes(k.protestos_valor) : '') + (ult ? '; o mais recente em ' + R.dataBR(ult) + (d != null && d >= 0 ? ' (há ' + d + ' dia(s))' : '') : ''));
+      if (rec.length) { contra.push(rec.length + ' dos ' + rel.protestos.ultimas.length + ' últimos protestos são dos últimos 90 dias (' + R.moeda(rec.reduce((a, x) => a + x.valor, 0)) + '): há fornecedor sem receber agora'); grave = true; }
+      else if (!rel || d == null || d <= 365) grave = true;
+    }
+    if (k.acoes_qtd > 0) {
+      const fisco = rel ? rel.acoes.ultimas.filter(x => /fazenda|uni[aã]o|munic|estado|prefeitura|inss|fiscal/i.test(x.autor + ' ' + x.tipo + ' ' + x.foro)).length : 0;
+      contra.push(k.acoes_qtd + ' ação(ões) judicial(is)' + (rel && rel.acoes.valor ? ' somando ' + milhoes(rel.acoes.valor) : '') +
+        (fisco ? '; ' + fisco + ' das ' + rel.acoes.ultimas.length + ' últimas são cobrança de imposto (Fazenda)' : ''));
+    }
+    if (k.pendencias_qtd > 0) { contra.push(k.pendencias_qtd + ' pendência(s) financeira(s)' + (k.pendencias_valor ? ' (' + R.moeda(k.pendencias_valor) + ')' : '')); grave = true; }
+    if (k.cheques_qtd > 0) { contra.push(k.cheques_qtd + ' cheque(s) sem fundo ou sustado(s)'); grave = true; }
+    if (k.falencia) { contra.push('falência ou recuperação judicial'); grave = true; }
+    if (k.fraude) { contra.push('alerta de fraude na consulta'); grave = true; }
+    if (/cautel|n[aã]o recomend|reprov|negad/i.test(k.recomendacao || '')) contra.push('a Rekta diz: "' + k.recomendacao + '"');
+    const mudou = k.mudanca_em ? meses(k.mudanca_em, hoje) : null;
+    if (mudou != null && mudou < 12) contra.push('mudou de sócio ou de razão social há menos de 1 ano');
+    if (rel) {
+      rel.socios.concat(rel.administradores).filter(s => s.restricoes.length || s.fraude).forEach(s =>
+        contra.push((s.cargo ? 'administrador(a) ' : 'sócio(a) ') + s.nome + ': ' + (s.fraude ? 'alerta de fraude; ' : '') + s.restricoes.map(r => r.qtd + ' ' + r.rotulo + (r.valor ? ' (' + milhoes(r.valor) + ')' : '')).join(', ')));
+      rel.outras.filter(o => o.restricoes.length).forEach(o =>
+        contra.push('outra empresa dos sócios (' + o.razao + '): ' + o.restricoes.map(r => r.qtd + ' ' + r.rotulo + (r.valor ? ' (' + milhoes(r.valor) + ')' : '')).join(', ')));
+    }
+    if (k.consultas_12m >= 12) contra.push(k.consultas_12m + ' consultas ao CNPJ em 12 meses (está procurando crédito no mercado)');
+    (k.alertas || []).forEach(a => { if (a && contra.indexOf(a) === -1 && !/n[aã]o recomenda/.test(a)) contra.push(a); });
+    const risco = grave ? 'alto' : contra.length ? 'medio' : 'baixo';
+    const jogo = ctx.pedido_valor > 0 ? R.moeda(ctx.pedido_valor) + (ctx.pedido_prazo ? ' em ' + ctx.pedido_prazo + ' dias' : '') : '';
+    const pct = ctx.pedido_valor > 0 && k.limite_sugerido > 0 ? ctx.pedido_valor / k.limite_sugerido * 100 : null;
+    if (pct != null && pct <= 10) favor.push('o valor pedido é ' + (pct < 1 ? 'menos de 1%' : Math.round(pct) + '%') + ' do limite que a consulta sugere (' + R.moeda(k.limite_sugerido) + ')');
+    const caminhos = risco === 'alto' ? ['só à vista: Pix ou transferência antes da entrega', 'metade de entrada e o resto na entrega',
+        'se for liberar a prazo: só o valor deste pedido, prazo curto, e a próxima compra depende de este ser pago em dia']
+      : risco === 'medio' ? ['a prazo com limite pequeno e prazo curto (21 dias), revendo depois da 1ª compra paga', 'primeira compra à vista e a prazo a partir da segunda']
+      : ['a prazo, no limite e no prazo que a política propõe'];
+    return { risco, rotulo: risco === 'alto' ? 'Risco alto' : risco === 'medio' ? 'Risco médio' : 'Risco baixo', favor, contra, jogo, caminhos };
+  }
+
+  const C = { POLITICA, SITUACOES, BLOQUEIOS, propor, resumoFatos, textoEquipe, daRekta, relatorio, parecer };
   raiz.CRMCredito = C;
   if (typeof module !== 'undefined' && module.exports) module.exports = C;
   if (typeof document === 'undefined' || !raiz.CRM) return;
@@ -280,6 +423,105 @@
 
   function seloSit(s) { return CRM.selo(SITUACOES[s] || s, s === 'prazo' ? 'verde' : s === 'vista' ? 'ambar' : 'cinza'); }
   const docTxt = e => (e && e.cnpj) || '';
+
+  // ---------------------------------------------------------------- relatório da consulta guardada (tela e PDF)
+  // 10/11/2026 (Anderson, pedido de crédito da equipe com restrição: "como que eu analiso? não veio a ficha… tem que consultar
+  // de novo, gastar de novo?"): a consulta já paga fica em crm_credito_rekta; aqui ela aparece inteira (parecer + seções) na
+  // resposta ao pedido, na análise e em PDF, sem nova consulta. Só o administrador lê (RLS de crm_credito_rekta).
+  const dBR = d => (d ? R.dataBR(d) : '—');
+  const restrTxt = l => l.map(r => esc(r.qtd + ' ' + r.rotulo + (r.valor ? ' · ' + R.moeda(r.valor) : '') + (r.ultima ? ' · última em ' + R.dataBR(r.ultima) : ''))).join('<br>');
+  const tabela = (cab, linhas) => '<table class="tabela cred-tab"><thead><tr>' + cab.map(c => '<th' + (c[1] ? ' class="num"' : '') + '>' + esc(c[0]) + '</th>').join('') + '</tr></thead><tbody>' +
+    linhas.map(l => '<tr>' + l.map((v, i) => '<td' + (cab[i][1] ? ' class="num"' : '') + '>' + v + '</td>').join('') + '</tr>').join('') + '</tbody></table>';
+  function htmlParecer(p) {
+    const lado = (t, l, vazio) => '<div><h4>' + t + '</h4>' + (l.length ? '<ul>' + l.map(x => '<li>' + esc(x) + '</li>').join('') + '</ul>' : '<p class="dica">' + vazio + '</p>') + '</div>';
+    return '<div class="cred-parecer cred-' + p.risco + '"><p class="cred-risco">' + CRM.selo(p.rotulo + ' pelo que a consulta mostra', p.risco === 'alto' ? 'vermelho' : p.risco === 'medio' ? 'ambar' : 'verde') +
+      (p.jogo ? ' <span>Em jogo: <strong>' + esc(p.jogo) + '</strong></span>' : '') + '</p>' +
+      '<div class="cred-lados">' + lado('Contra', p.contra, 'Nada contra na consulta.') + lado('A favor', p.favor, 'Nada a destacar.') + '</div>' +
+      '<p class="cred-caminhos"><strong>Caminhos:</strong> ' + p.caminhos.map(esc).join(' · ') + '. <em>A decisão é sua.</em></p></div>';
+  }
+  // rel = relatorio(bruto); k = fatos. aberto = todas as seções abertas (PDF)
+  function htmlRelatorio(rel, k, aberto) {
+    if (!rel) return k ? '<div class="cred-fatos"><ul>' + resumoFatos(k).map(x => '<li>' + esc(x) + '</li>').join('') + '</ul><p class="dica">Esta consulta veio por PDF: o detalhe está no PDF guardado na ficha.</p></div>' : '';
+    const sec = (titulo, resumo, corpo, abre) => '<details class="cred-sec"' + (aberto || abre ? ' open' : '') + '><summary><strong>' + esc(titulo) + '</strong>' + (resumo ? ' <small>' + esc(resumo) + '</small>' : '') + '</summary>' + corpo + '</details>';
+    const kv = l => '<table class="cred-kv"><tbody>' + l.filter(x => x[1] !== '' && x[1] != null).map(x => '<tr><th>' + esc(x[0]) + '</th><td>' + esc(x[1]) + '</td></tr>').join('') + '</tbody></table>';
+    const e = rel.empresa, so5 = n => (n > 5 ? '<p class="dica">A consulta traz o total e só as 5 ocorrências mais recentes.</p>' : '');
+    const res = s => s.qtd + ' · ' + R.moeda(s.valor);
+    const nada = [['Pendências financeiras', rel.pendencias], ['Cheques sem fundo ou sustados', rel.cheques], ['Falência ou recuperação judicial', rel.falencia], ['Alerta de fraude', rel.fraude]].filter(x => !x[1].qtd).map(x => x[0]);
+    const gen = (titulo, s) => (s.qtd ? sec(titulo, res(s), (s.ultimas.length ? tabela([['Data'], ['Valor', 1], ['Detalhe']], s.ultimas.map(x => [esc(dBR(x.data)), esc(x.valor ? R.moeda(x.valor) : '—'), esc(x.texto || '')])) : '') + so5(s.qtd), true) : '');
+    const pessoas = rel.socios.concat(rel.administradores);
+    return '<div class="cred-rel">' +
+      sec('Empresa', [e.fundacao ? 'desde ' + R.dataBR(e.fundacao) : '', e.situacao].filter(Boolean).join(' · '), kv([['Razão social', e.razao], ['CNPJ', e.cnpj], ['Fundação', e.fundacao ? R.dataBR(e.fundacao) : ''],
+        ['Situação do CNPJ', e.situacao], ['Inscrição estadual', e.sintegra], ['Atividade', [e.atividade, e.cnae].filter(Boolean).join(' · ')], ['Natureza', e.natureza],
+        ['Capital social', e.capital ? R.moeda(e.capital) + (e.capital_em ? ' (mudou em ' + R.dataBR(e.capital_em) + ')' : '') : ''],
+        ['Nome anterior', e.razao_anterior ? e.razao_anterior + (e.mudou_em ? ' (até ' + R.dataBR(e.mudou_em) + ')' : '') : ''], ['Filiais', e.filiais ? String(e.filiais) : ''],
+        ['Endereço', e.endereco], ['Telefones', e.telefones.join(' · ')]]), true) +
+      sec('Score e recomendação', rel.score.valor ? 'score ' + rel.score.valor + (rel.score.classe ? ' · classe ' + rel.score.classe : '') : 'sem score', kv([['Score', rel.score.valor ? rel.score.valor + ' de 1000' + (rel.score.classe ? ' · classe ' + rel.score.classe : '') : 'não veio'],
+        ['O que significa', rel.score.texto], ['Recomendação da Rekta', rel.decisao], ['Limite sugerido pela consulta', rel.limite_sugerido ? R.moeda(rel.limite_sugerido) : ''], ['Faturamento presumido', rel.faturamento]]), true) +
+      (rel.protestos.qtd ? sec('Protestos', res(rel.protestos), kv([['Total', rel.protestos.qtd + ' protesto(s), ' + R.moeda(rel.protestos.valor)],
+        ['Maior', rel.protestos.maior ? R.moeda(rel.protestos.maior) + (rel.protestos.maior_em ? ' em ' + R.dataBR(rel.protestos.maior_em) : '') : ''], ['Primeiro', rel.protestos.primeiro_em ? R.dataBR(rel.protestos.primeiro_em) : '']]) +
+        (rel.protestos.ultimas.length ? tabela([['Protestado em'], ['Valor', 1], ['Vencia em'], ['Cartório'], ['Cidade']], rel.protestos.ultimas.map(x => [esc(dBR(x.data)), esc(R.moeda(x.valor)), esc(dBR(x.vencimento)), esc(x.cartorio ? x.cartorio + 'º' : ''), esc([x.cidade, x.uf].filter(Boolean).join('/'))])) : '') + so5(rel.protestos.qtd), true) : '') +
+      (rel.acoes.qtd ? sec('Ações judiciais', res(rel.acoes), kv([['Total', rel.acoes.qtd + ' ação(ões), ' + R.moeda(rel.acoes.valor)], ['Maior', rel.acoes.maior ? R.moeda(rel.acoes.maior) : ''], ['Primeira', rel.acoes.primeiro_em ? R.dataBR(rel.acoes.primeiro_em) : '']]) +
+        (rel.acoes.ultimas.length ? tabela([['Distribuída em'], ['Ação'], ['Quem move'], ['Valor', 1], ['Foro']], rel.acoes.ultimas.map(x => [esc(dBR(x.data)), esc(x.tipo), esc(x.autor), esc(x.valor ? R.moeda(x.valor) : '—'), esc([x.foro, x.uf].filter(Boolean).join('/'))])) : '') + so5(rel.acoes.qtd), true) : '') +
+      gen('Pendências financeiras', rel.pendencias) + gen('Cheques sem fundo ou sustados', rel.cheques) + gen('Falência ou recuperação judicial', rel.falencia) + gen('Alerta de fraude', rel.fraude) +
+      (nada.length ? '<p class="cred-nada"><strong>Nada consta:</strong> ' + esc(nada.join(' · ')) + (rel.protestos.qtd ? '' : ' · Protestos') + (rel.acoes.qtd ? '' : ' · Ações judiciais') + '.</p>' : '') +
+      sec('Como paga (cadastro positivo)', rel.pontualidade.pct >= 0 ? rel.pontualidade.pct + '% em dia' : 'sem informação', kv([['Pago em dia', rel.pontualidade.pct >= 0 ? rel.pontualidade.pct + '% (contas que os fornecedores informam ao cadastro positivo)' : 'sem informação'],
+        ['Mês a mês', rel.pontualidade.meses.filter(m => /\d/.test(m.v)).map(m => m.mes + ': ' + m.v + '%').join(' · ')],
+        ['Atrasos no último ano', rel.atrasos.length ? rel.atrasos.map(f => f.rotulo + ' (' + f.meses.join(', ') + ')').join(' · ') : 'nenhum atraso informado']]), false) +
+      (pessoas.length ? sec('Sócios e administradores', pessoas.length + (pessoas.some(p => p.restricoes.length) ? ' · com restrição' : ''), tabela([['Nome'], ['Documento'], ['Papel'], ['Desde'], ['Restrições']],
+        pessoas.map(p => [esc(p.nome), esc(p.doc), esc(p.cargo ? p.cargo.toLowerCase() : 'sócio(a)' + (p.participacao ? ' · ' + String(p.participacao).replace('.', ',') + '%' : '')), esc(dBR(p.entrada)),
+          (p.fraude ? '<strong>alerta de fraude</strong><br>' : '') + (p.restricoes.length ? restrTxt(p.restricoes) : p.debito ? 'tem débito (sem detalhe)' : 'nada consta')])), pessoas.some(p => p.restricoes.length)) : '') +
+      (rel.outras.length ? sec('Outras empresas dos sócios', rel.outras.length + (rel.outras.some(o => o.restricoes.length) ? ' · com restrição' : ''), tabela([['Empresa'], ['CNPJ'], ['Sócio'], ['Situação'], ['Restrições']],
+        rel.outras.map(o => [esc(o.razao), esc(o.cnpj), esc(o.socios.join(', ')), esc(o.situacao), o.restricoes.length ? restrTxt(o.restricoes) : o.debito ? 'tem débito (sem detalhe)' : 'nada consta'])), rel.outras.some(o => o.restricoes.length)) : '') +
+      (rel.consultas.total || rel.consultas.ultimas.length ? sec('Quem consultou este CNPJ', rel.consultas.total + ' em 12 meses',
+        (rel.consultas.ultimas.length ? tabela([['Data'], ['Quem consultou']], rel.consultas.ultimas.map(x => [esc(dBR(x.data)), esc(x.quem)])) : '') +
+        (rel.consultas.meses.length ? '<p class="dica">Por mês: ' + esc(rel.consultas.meses.filter(m => m.qtd).map(m => m.mes + ': ' + m.qtd).join(' · ')) + '</p>' : ''), false) : '') +
+      '</div>';
+  }
+  // tudo o que a análise precisa de um cliente: a última consulta guardada (qualquer data), os fatos, o relatório e o histórico
+  async function dadosCredito(id) {
+    const e = CRM.empresa(id) || { id, nome: 'cliente' };
+    let ult = null, ficha = null;
+    try { ult = CRM.store().creditoRektaUltima ? await CRM.store().creditoRektaUltima(id) : null; } catch (err) { ult = null; }
+    try { ficha = await CRM.store().creditoVer(id); } catch (err) { ficha = null; }
+    if (ficha && ficha.situacao === 'sem_ficha') ficha = null;
+    const doc = R.chaveDoc ? R.chaveDoc(e.cnpj || '') : String(e.cnpj || '').replace(/\D/g, '');
+    const dia = ult ? (R.diaLocal ? R.diaLocal(ult.em) : String(ult.em).slice(0, 10)) : '';
+    const k = ult ? daRekta(ult.bruto, doc, dia) : (ficha && ficha.resumo && ficha.resumo.consulta) || null;
+    const r = CRM.resumo(id) || {};
+    const s = (painel && (painel.sugestoes || []).find(x => x.empresa_id === id)) || null, f = (painel && (painel.fichas || []).find(x => x.empresa_id === id)) || null;
+    const ctx = { hoje: CRM.hoje(), compras: r.compras || 0, total_comprado: r.totalComprado || 0, vencido: Number((s || f || {}).vencido) || 0, maior_mes: s ? s.maior_mes : 0 };
+    return { e, ult, ficha, k, rel: ult ? relatorio(ult.bruto) : null, dia: dia || (k && k.emitido_em) || '', ctx };
+  }
+  let relAberto = null;   // o que está na tela, para o PDF sair igual
+  // p = o pedido de crédito da equipe (ou null)
+  function corpoRelatorio(d, p) {
+    relAberto = { d, p };
+    if (!d.k) return '<p class="alerta">Este cliente ainda não tem consulta guardada no CRM. ' + (CRM.store().creditoRekta ? 'A consulta custa ' + esc(R.moeda(precoApi())) + ': use "Analisar".' : '') + '</p>';
+    const par = parecer(d.k, d.rel, Object.assign({}, d.ctx, p ? { pedido_valor: Number(p.limite) || 0, pedido_prazo: p.prazo_max || 0 } : {}));
+    return '<p class="cred-origem">' + CRM.selo(d.ult ? 'consulta da Rekta de ' + R.dataBR(d.dia) : 'consulta de ' + dBR(d.dia), 'azul') +
+      ' <small>guardada no CRM: abrir, ler e baixar não custa nada.</small> <button type="button" class="btn sec" data-acao="cred-relatorio-pdf">📄 Baixar o relatório em PDF</button></p>' +
+      htmlParecer(par) + '<details class="cred-rel-fold"' + (p ? '' : ' open') + '><summary><strong>Relatório completo da consulta</strong> <small>empresa, score, protestos, ações, sócios, quem consultou</small></summary>' + htmlRelatorio(d.rel, d.k, false) + '</details>';
+  }
+  async function verRelatorio(id) {
+    const d = await dadosCredito(id);
+    CRM.abrirForm({ titulo: 'Relatório de crédito: ' + d.e.nome, largura: 'largo', campos: [], salvarTexto: 'Fechar', semFoco: true,
+      htmlAntes: '<div class="cred-form">' + corpoRelatorio(d, null) + '</div>', aoSalvar: async () => {} });
+  }
+  async function baixarRelatorio() {
+    const a = relAberto;
+    if (!a || !a.d.k) { CRM.toast('Abra o relatório de um cliente primeiro.', true); return; }
+    if (!CRM.fichas || !CRM.fichas.baixarPdfHtml) { CRM.toast('O gerador de PDF não carregou. Recarregue a página.', true); return; }
+    const d = a.d, p = a.p, quem = p && CRM.usuario(p.pedido_por);
+    const par = parecer(d.k, d.rel, Object.assign({}, d.ctx, p ? { pedido_valor: Number(p.limite) || 0, pedido_prazo: p.prazo_max || 0 } : {}));
+    const ficha = d.ficha ? (SITUACOES[d.ficha.situacao] || d.ficha.situacao) + (d.ficha.situacao === 'prazo' ? ' · ' + R.moeda(d.ficha.limite) + (d.ficha.prazo_max ? ' · até ' + d.ficha.prazo_max + ' dias' : '') : '') : 'sem ficha';
+    const html = '<div class="cred-rel-doc"><header><div><h1>Relatório de crédito</h1><p>' + esc(CRM.nomeInstalacao()) + ' · uso interno</p></div>' +
+      '<div class="cred-doc-dir"><strong>' + esc(d.e.nome) + '</strong><br>' + esc(d.e.cnpj || '') + '<br>Consulta ' + (d.ult ? 'à Rekta ' : '') + 'em ' + esc(dBR(d.dia)) + '</div></header>' +
+      '<p class="cred-doc-linha"><strong>Ficha hoje:</strong> ' + esc(ficha) + (d.k.score ? ' · score ' + d.k.score : '') +
+      (p ? ' &nbsp;·&nbsp; <strong>Pedido da equipe:</strong> ' + esc((quem ? quem.nome + ' pede ' : '') + (p.limite ? R.moeda(p.limite) : 'análise') + (p.prazo_max ? ' em ' + p.prazo_max + ' dias' : '') + (p.motivo ? ' (' + p.motivo + ')' : '')) : '') + '</p>' +
+      htmlParecer(par) + htmlRelatorio(d.rel, d.k, true) +
+      '<footer>Gerado pelo CRM em ' + esc(R.dataBR(CRM.hoje())) + ', da consulta guardada (sem nova consulta). Informação de crédito: uso interno, não repassar ao cliente nem a terceiros.</footer></div>';
+    try { await CRM.fichas.baixarPdfHtml(html, 'Credito - ' + d.e.nome + ' - ' + (d.dia || CRM.hoje()), { folhas: true, cortes: 'tbody tr, .cred-sec, .cred-parecer, .cred-nada, .cred-doc-linha' }); } catch (err) { CRM.falhou(err); }
+  }
 
   function aba() {
     if (!painel) { setTimeout(() => carrega(), 0); return '<section class="cartao"><p class="vazio">Carregando o crédito…</p></section>'; }
@@ -410,8 +652,10 @@
   async function analisar(id, siteAberto, consultaJa, depois, pedidoId) {
     const e = CRM.empresa(id);
     if (!e) { CRM.toast('Cliente não encontrado (fora da sua lista?).', true); return; }
-    let atual = null, mot = null;
+    let atual = null, mot = null, rel = null;
     try { atual = await CRM.store().creditoVer(id); } catch (err) { /* sem ficha */ }
+    // a última consulta guardada (só o administrador lê): o relatório completo fica dobrado embaixo dos fatos, sem nova consulta
+    try { const u0 = CRM.ehAdmin() && CRM.store().creditoRektaUltima ? await CRM.store().creditoRektaUltima(id) : null; rel = u0 ? relatorio(u0.bruto) : null; } catch (err) { rel = null; }
     if (pedidoId && CRM.store().pedidoCreditoMotivo) { try { mot = await CRM.store().pedidoCreditoMotivo(pedidoId); } catch (err) { /* segue sem */ } }
     const precisa = m => {
       if (!m) return [];
@@ -429,7 +673,10 @@
     const s = (painel && (painel.sugestoes || []).find(x => x.empresa_id === id)) || null;
     const ctx = { maior_mes: s ? s.maior_mes : 0, vencido: s ? s.vencido : (ficha ? 0 : 0), hoje: CRM.hoje() };
     let lida = ficha && ficha.resumo && ficha.resumo.consulta ? ficha.resumo.consulta : null, pdf = null;
-    const fatos = () => '<div id="credFatos" class="cred-fatos">' + (lida ? '<ul>' + resumoFatos(lida).map(x => '<li>' + esc(x) + '</li>').join('') + '</ul>' : '<p class="dica">Ainda sem consulta: solte o PDF acima ou preencha à mão.</p>') + '</div>';
+    const fatos = () => '<div id="credFatos" class="cred-fatos">' + (lida ? '<ul>' + resumoFatos(lida).map(x => '<li>' + esc(x) + '</li>').join('') + '</ul>' +
+        htmlParecer(parecer(lida, rel, Object.assign({ compras: (CRM.resumo(id) || {}).compras || 0, total_comprado: (CRM.resumo(id) || {}).totalComprado || 0 }, ctx, mot ? { pedido_valor: Number(mot.valor) || 0, pedido_prazo: mot.prazo_pedido || 0 } : {}))) +
+        (rel ? '<details class="cred-rel-fold"><summary><strong>Relatório completo da consulta</strong> <small>guardada no CRM: abrir não custa nada</small></summary>' + htmlRelatorio(rel, lida, false) + '</details>' : '')
+      : '<p class="dica">Ainda sem consulta: solte o PDF acima ou preencha à mão.</p>') + '</div>';
     const prop = p => '<div id="credProposta" class="cred-proposta">' + (p ? '<p><strong>Proposta pela política:</strong> ' + seloSit(p.situacao) + (p.situacao === 'prazo' ? ' ' + esc(R.moeda(p.limite)) + ' · ' + p.prazo_max + ' dias' : '') + '</p>' +
       '<ul>' + p.motivos.map(m => '<li>' + esc(m) + '</li>').join('') + '</ul>' + (p.atencao.length ? '<p class="alerta"><strong>Atenção:</strong> ' + esc(p.atencao.join(' · ')) + '</p>' : '') : '') + '</div>';
     const v0 = ficha ? { situacao: ficha.situacao, limite: ficha.limite, prazo_max: ficha.prazo_max, revisar_em: ficha.revisar_em, obs: ficha.obs || '' }
@@ -479,7 +726,7 @@
           try {
             pdf = await CRM.store().creditoEnviar(f, id);
             const r = await CRM.store().creditoLer(pdf);
-            lida = r.consulta;
+            lida = r.consulta; rel = null;
             form.querySelector('#credFatos').outerHTML = fatos();
             st.textContent = r.aviso ? '⚠ ' + r.aviso : (lida.razao_social ? 'Lido: ' + lida.razao_social : 'Lido.');
             const docLido = lida.documento, docCad = R.chaveDoc ? R.chaveDoc(e.cnpj || '') : String(e.cnpj || '').replace(/\D/g, '');
@@ -497,7 +744,7 @@
           api.disabled = true; st.textContent = 'Consultando a Rekta (pode levar até 1 minuto)…';
           try {
             const r = await CRM.store().creditoRekta(doc, id);
-            lida = daRekta(r.bruto, doc, CRM.hoje());
+            lida = daRekta(r.bruto, doc, CRM.hoje()); rel = relatorio(r.bruto);
             if (r.caminho) pdf = r.caminho;
             form.querySelector('#credFatos').outerHTML = fatos();
             st.textContent = 'Consulta da Rekta pela API' + (lida.razao_social ? ': ' + lida.razao_social : '') + (Object.keys(r.bruto || {}).length ? '' : ' (nada consta)') + '.';
@@ -512,7 +759,7 @@
           try { ult = CRM.store().creditoRektaUltima ? await CRM.store().creditoRektaUltima(id) : null; } catch (err) { ult = null; }
           if (ult && ult.bruto && (Date.now() - new Date(ult.em).getTime()) < 30 * 864e5) {
             const doc = R.chaveDoc ? R.chaveDoc(e.cnpj || '') : String(e.cnpj || '').replace(/\D/g, '');
-            lida = daRekta(ult.bruto, doc, R.diaLocal ? R.diaLocal(ult.em) : String(ult.em).slice(0, 10));
+            lida = daRekta(ult.bruto, doc, R.diaLocal ? R.diaLocal(ult.em) : String(ult.em).slice(0, 10)); rel = relatorio(ult.bruto);
             if (ult.caminho) pdf = ult.caminho;
             form.querySelector('#credFatos').outerHTML = fatos();
             st.textContent = 'Consulta da Rekta de ' + R.dataBR(R.diaLocal ? R.diaLocal(ult.em) : String(ult.em).slice(0, 10)) + ' (já feita, sem nova cobrança)' + (lida.razao_social ? ': ' + lida.razao_social : '') + '.';
@@ -655,7 +902,8 @@
       return;
     }
     const editar = !CRM.ehAdmin() ? '' : d.situacao === 'sem_ficha' ? ' ' + linkConsultar(id, 'Analisar', 'mini', 'cred-analisar-site')
-      : ' <button type="button" class="mini" data-acao="cred-analisar" data-id="' + esc(id) + '">Editar</button>';
+      : ' <button type="button" class="mini" data-acao="cred-analisar" data-id="' + esc(id) + '">Editar</button>' +
+        (d.score || (d.resumo && d.resumo.consulta) ? ' <button type="button" class="mini" data-acao="cred-relatorio" data-id="' + esc(id) + '" title="A consulta guardada: abrir não custa nada">Relatório da consulta</button>' : '');
     el.innerHTML = '<h3>Crédito' + editar + (CRM.ehAdmin() ? '' : btConsultar + btPedir) + '</h3><p class="resumo-compras">' + (d.situacao === 'sem_ficha' ? 'Sem análise de crédito' + (d.ligado ? ': pedido a prazo fica bloqueado.' : '.')
       : seloSit(d.situacao) + (d.situacao === 'prazo' ? ' limite <strong>' + esc(R.moeda(d.limite)) + '</strong> · usado ' + esc(R.moeda(d.usado)) + ' · disponível <strong>' + esc(R.moeda(d.disponivel)) + '</strong>' + (d.prazo_max ? ' · até ' + d.prazo_max + ' dias' : '') : '') +
         (d.score ? '<br>score ' + d.score : '') + (d.analisado_em ? ' · analisado em ' + esc(R.dataBR(d.analisado_em)) : '') + (d.revisao_vencida ? ' ' + CRM.selo('revisão vencida', 'ambar') : '') +
@@ -663,9 +911,15 @@
   }
   const tetoAuto = () => (Number(cfg().auto_teto) > 0 ? Number(cfg().auto_teto) : 5000);
   // a consulta da equipe: confirma o custo, consulta, mostra o resultado e recarrega a ficha e os pedidos travados
+  const emConsulta = new Set();   // 10/11/2026: clique duplo consultou (e pagou) duas vezes o mesmo CNPJ
   async function consultaAuto(id) {
     const e = CRM.empresa(id);
     if (!e) return;
+    if (emConsulta.has(id)) { CRM.toast('A consulta deste cliente já está em andamento: aguarde o resultado.'); return; }
+    emConsulta.add(id);
+    try { await consultaAutoDe(id, e); } finally { emConsulta.delete(id); }
+  }
+  async function consultaAutoDe(id, e) {
     if (!confirm('Consultar o crédito de ' + e.nome + (e.cnpj ? ' (' + e.cnpj + ')' : '') + ' na Rekta?\n\nA consulta custa ' + R.moeda(precoApi()) +
       ' e a política da empresa decide na hora: libera a prazo até ' + R.moeda(tetoAuto()) + ' sozinha; acima disso, ou se a consulta mostrar risco, vai para o Anderson.')) return;
     CRM.toast('Consultando a Rekta (pode levar até 1 minuto)…');
@@ -697,29 +951,66 @@
         CRM.render();
       } });
   }
-  // a resposta do administrador
+  // a resposta do administrador (10/11/2026: a janela traz o que foi pedido, o parecer e o relatório da consulta guardada,
+  // e a decisão ali mesmo, sem nova consulta; a decisão começa vazia para ninguém aprovar sem querer)
   async function responder(pid) {
     let p = null;
     try { p = ((await CRM.store().creditoPedidos(null, true)) || []).find(x => String(x.id) === String(pid)); } catch (e) { p = null; }
     if (!p) { CRM.toast('Pedido de crédito não encontrado (já respondido?).', true); return; }
-    const e = CRM.empresa(p.empresa_id) || { nome: 'cliente' }, quem = CRM.usuario(p.pedido_por);
-    CRM.abrirForm({ titulo: 'Pedido de crédito: ' + e.nome,
-      intro: (quem ? quem.nome + ' pede ' : 'Pedido: ') + (p.limite ? R.moeda(p.limite) : 'análise') + (p.prazo_max ? ' em ' + p.prazo_max + ' dias' : '') + '. Motivo: ' + (p.motivo || '—'),
-      htmlDepois: '<p class="acoes"><button type="button" class="btn sec" data-acao="cred-analisar" data-id="' + esc(p.empresa_id) + '">Ver a consulta e a ficha</button></p>',
-      campos: [{ nome: 'decisao', rotulo: 'Decisão', tipo: 'select', obrigatorio: true, opcoes: [['aprova', 'Aprovar a prazo'], ['recusa', 'Não aprovar']] },
+    const d = await dadosCredito(p.empresa_id), e = d.e, quem = CRM.usuario(p.pedido_por), quemNome = quem ? R.primeiroNome(quem.nome) : 'quem pediu';
+    const negs = CRM.doEmpresa('negocios', p.empresa_id).filter(n => n.status === 'aberto');
+    const pedidos = ((painel && painel.pendentes) || []).filter(x => x.empresa_id === p.empresa_id).reduce((a, x) => a.concat(x.pedidos || []), []);
+    const ficha = d.ficha, valor = Number(p.limite) || 0, prazo = p.prazo_max || 0;
+    const cab = '<div class="alerta cred-pedido"><p><strong>' + esc((quem ? quem.nome : 'A equipe') + ' pede ' + (valor ? R.moeda(valor) : 'a análise') + (prazo ? ' em ' + prazo + ' dias' : '')) + '</strong> · ' + esc(R.dataBR(R.diaLocal(p.criado_em))) +
+        (p.origem === 'consulta' ? ' · veio da consulta automática' : '') + '</p>' +
+      '<p><strong>Motivo:</strong> ' + esc(p.motivo || '—') + '</p>' +
+      (pedidos.length ? '<p><strong>Pedido travado:</strong> ' + pedidos.map(x => esc('nº ' + x.numero + ' · ' + R.moeda(x.valor) + ' · ' + (x.bloqueios || []).join(', '))).join(' &nbsp;|&nbsp; ') + '</p>' : '') +
+      (negs.length ? '<p><strong>Negócio em aberto:</strong> ' + negs.slice(0, 3).map(n => esc(n.titulo + ' · ' + R.moeda(n.valor || 0))).join(' &nbsp;|&nbsp; ') + '</p>' : '') +
+      '<p><strong>Ficha hoje:</strong> ' + (ficha ? seloSit(ficha.situacao) + (ficha.situacao === 'prazo' ? ' ' + esc(R.moeda(ficha.limite) + (ficha.prazo_max ? ' · até ' + ficha.prazo_max + ' dias' : '')) : '') + (ficha.obs ? ' <small>' + esc(ficha.obs) + '</small>' : '') : 'sem ficha') +
+      ' · ' + esc(d.ctx.compras ? 'já comprou ' + d.ctx.compras + ' vez(es), ' + R.moeda(d.ctx.total_comprado) : 'ainda não comprou da OneClean') + '</p></div>';
+    const prontas = '<p class="cred-prontas"><strong>Respostas prontas:</strong> <button type="button" class="mini" data-resp="vista">Só à vista</button> ' +
+      '<button type="button" class="mini" data-resp="entrada">Metade de entrada</button> ' +
+      (valor ? '<button type="button" class="mini" data-resp="valor">A prazo, só este valor</button> ' : '') + '<small>preenchem a decisão e o texto; dá para mudar antes de responder</small></p>';
+    CRM.abrirForm({ titulo: 'Pedido de crédito: ' + e.nome, largura: 'largo', semFoco: true,
+      htmlAntes: '<div class="cred-form">' + cab + corpoRelatorio(d, p) + '<h3 class="cred-decide">Sua decisão</h3>' + prontas + '</div>',
+      htmlDepois: '<p class="acoes"><button type="button" class="mini" data-acao="cred-analisar" data-id="' + esc(p.empresa_id) + '">Abrir a ficha inteira (situação, revisão, observação)</button></p>',
+      campos: [{ nome: 'decisao', rotulo: 'Decisão', tipo: 'select', obrigatorio: true, opcoes: [['', 'Escolha…'], ['aprova', 'Aprovar a prazo (limite e prazo abaixo)'], ['recusa', 'Não aprovar a prazo (a ficha fica como está)']] },
         { nome: 'limite', rotulo: 'Limite (R$)', tipo: 'numero', terco: true }, { nome: 'prazo', rotulo: 'Prazo (dias)', tipo: 'numero', passo: '1', max: 365, terco: true, vazioNulo: true },
-        { nome: 'resposta', rotulo: 'Resposta para a vendedora (opcional)', tipo: 'textarea', largo: true, linhas: 2 }],
-      valores: { decisao: 'aprova', limite: p.limite || '', prazo: p.prazo_max || 35 }, salvarTexto: 'Responder',
+        { nome: 'resposta', rotulo: 'Resposta para ' + quemNome + ' (chega como tarefa)', tipo: 'textarea', largo: true, linhas: 2 }],
+      valores: { decisao: '', limite: p.limite || '', prazo: p.prazo_max || 35 }, salvarTexto: 'Responder',
+      extras: form => {
+        const poe = (n, v) => { const el = form.elements[n]; if (!el) return; el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); };
+        const prazoCurto = Math.min(prazo || 21, 28);
+        const R_ = { vista: ['recusa', 'Por enquanto só à vista (Pix ou transferência antes da entrega): a consulta mostrou restrição. Se o cliente comprar e pagar certinho, eu revejo.'],
+          entrada: ['recusa', 'Pode fechar com metade de entrada no Pix e o restante na entrega (à vista). A prazo ainda não: a consulta mostrou restrição.'],
+          valor: ['aprova', 'Liberado só este valor, em até ' + prazoCurto + ' dias. A próxima compra a prazo depende de este pedido ser pago em dia.'] };
+        form.querySelectorAll('[data-resp]').forEach(b => b.addEventListener('click', () => {
+          const r = R_[b.dataset.resp];
+          poe('decisao', r[0]); poe('resposta', r[1]);
+          if (b.dataset.resp === 'valor') { poe('limite', String(valor).replace('.', ',')); poe('prazo', String(prazoCurto)); }
+        }));
+      },
       aoSalvar: async v => {
+        if (v.decisao === 'aprova' && !(Number(v.limite) > 0)) throw new Error('para aprovar a prazo, diga o limite');
         await CRM.store().creditoResponder(p.id, v.decisao === 'aprova', Number(v.limite) || null, v.prazo || null, v.resposta);
         cacheVer.delete(p.empresa_id);
-        CRM.toast('Respondido: ' + (v.decisao === 'aprova' ? 'aprovado' : 'não aprovado') + '. A vendedora recebe a tarefa.');
+        CRM.toast('Respondido: ' + (v.decisao === 'aprova' ? 'aprovado a prazo, ' + R.moeda(v.limite) : 'não aprovado a prazo') + '. ' + (quem ? quem.nome : 'A equipe') + ' recebe a tarefa.');
         carrega(true);
         if (CRM.pedidos && CRM.pedidos.recarregar) CRM.pedidos.recarregar();
+        if (CRM.recarregar) Promise.resolve(CRM.recarregar()).catch(() => {});
       } });
   }
+  // da tarefa "Crédito: … pede …" (ou de um link): o pedido em aberto do cliente; sem pedido, só o relatório
+  async function responderCliente(id) {
+    let peds = [];
+    try { peds = (await CRM.store().creditoPedidos(id)) || []; } catch (e) { peds = []; }
+    const aberto = peds.find(x => x.situacao === 'aberto');
+    if (aberto) return responder(aberto.id);
+    CRM.toast('O pedido de crédito deste cliente já foi respondido. Abrindo o relatório da consulta.');
+    return verRelatorio(id);
+  }
 
-  CRM.credito = { aba, depoisAba, blocoFicha, preencheFicha, contagem: () => (painel ? (painel.pendentes || []).length : 0) + pedEquipe.length, consultar, analisar };
+  CRM.credito = { aba, depoisAba, blocoFicha, preencheFicha, contagem: () => (painel ? (painel.pendentes || []).length : 0) + pedEquipe.length, consultar, analisar, responder, responderCliente, verRelatorio };
 
   Object.assign(CRM.acoes, {
     'cred-atualiza': () => carrega(true),
@@ -735,6 +1026,9 @@
     'cred-auto': id => { consultaAuto(id).catch(CRM.falhou); },
     'cred-pedir': id => pedirOutro(id),
     'cred-responder': id => { responder(id).catch(CRM.falhou); },
+    'cred-responder-cliente': id => { responderCliente(id).catch(CRM.falhou); },
+    'cred-relatorio': id => { verRelatorio(id).catch(CRM.falhou); },
+    'cred-relatorio-pdf': () => { baixarRelatorio().catch(CRM.falhou); },
     // id = "empresa" ou "empresa:pedido" (a lista Para analisar manda o 1º pedido travado do cliente)
     'cred-analisar': id => { const [e, ped] = String(id).split(':'); analisar(e, false, false, null, ped).catch(CRM.falhou); },
     'cred-analisar-site': id => { const [e, ped] = String(id).split(':'); consultar(e); analisar(e, true, false, null, ped).catch(CRM.falhou); },

@@ -159,3 +159,90 @@ test('daRekta: resposta de pessoa jurídica (texto com JSON dentro)', () => {
   const semTotal = C2.daRekta(Object.assign({}, pj, { protestos: { valor_maior: '300.00', ultimas_ocorrencias: { protesto: [{ valor: '300.00' }, { valor: '212.40' }] } } }), '11222333000181');
   assert.deepEqual([semTotal.protestos_qtd, semTotal.protestos_valor], [2, 512.4]);
 });
+
+// 10/11/2026 (Anderson: "não veio a ficha da restrição… tem que consultar de novo, gastar de novo?"): a consulta guardada vira
+// relatório e parecer, sem nova consulta. Resposta FICTÍCIA no formato real de pessoa jurídica com restrição.
+const PJ_RESTRICAO = {
+  score: { score_pj: { score: '689', probabilidade: '8', classificacao_alfabetica: 'B', texto: 'De cada 100 empresas classificadas nesta classe de score, é provável que 8 apresentem débitos no mercado nos próximos 12 meses.' } },
+  identificacao_completo: { cnpj: '11222333000181', razao_social: 'INDUSTRIA FICTICIA DE PLASTICOS LTDA', situacao_cnpj: 'Ativo', data_fundacao: '18/02/1977', capital_atual: '20000.0',
+    natureza_juridica: 'SOCIEDADE EMPRESARIA LIMITADA', situacao_sintegra: 'HABILITADO', quantidade_filiais: '1', razao_social_anterior: 'FICTICIA PLASTICOS LTDA', data_alteracao_razao_social: '16/12/2022',
+    ramo_atividade_primario: { cnae: '2229-3/03', atividade: 'FAB ARTEF MATL PLAST' } },
+  localizacao_completo: { matriz: { endereco_matriz: 'RUA DE EXEMPLO, 100', bairro_matriz: 'CENTRO', cidade_matriz: 'CIDADE EXEMPLO', uf_matriz: 'SP', telefone_matriz: { telefone: ['(11) 4000-0000', '(11) 4000-0001'] } } },
+  'decisao:decisao': { 'decisao:flag': '0004', 'decisao:descricao': 'Recomendação de análise cautelosa' },
+  limite_credito: { score: '397500', texto: 'Valor de Limite de Crédito Disponível' },
+  faturamento_presumido: { faturamento_anual: 'Acima de R$ 9.100.000' },
+  protestos: { valor: null, quantidade: null, data_maior: '20/01/2025', valor_maior: '1461274.81', valor_total: '22788370.51', data_primeiro: '21/12/2021', total_protestos: '240',
+    ultimas_ocorrencias: { protesto: [{ data: '13/10/2026', valor: '32212.0', cidade: 'CIDADE EXEMPLO', estado: 'SP', cartorio: '1', vencimento: '30/09/2026' },
+      { data: '25/09/2026', valor: '33874.39', cidade: 'CIDADE EXEMPLO', estado: 'SP', cartorio: '2', vencimento: '31/07/2026' }, { data: '02/03/2026', valor: '1000.00', cidade: 'CIDADE EXEMPLO', estado: 'SP', cartorio: '2', vencimento: '31/01/2026' }] } },
+  acoes_civeis: { total_acoes: '30', valor_maior: '2226676.85', valor_total: '5237393.42', data_primeiro: '24/03/2022',
+    ultimas_ocorrencias: { acao_civel: [{ uf: 'SP', acao: 'ACAO EXECUTIVA FEDERAL', foro: 'CIDADE EXEMPLO', autor: 'UNIAO FEDERAL FAZENDA NACIONAL', valor: '53229.85', distribuicao: '14/09/2026' },
+      { uf: 'SP', acao: 'ACAO DE COBRANCA', foro: 'CIDADE EXEMPLO', autor: 'FORNECEDOR FICTICIO SA', valor: '63889.9', distribuicao: '28/04/2026' }] } },
+  pendencias_restricoes: null, alerta_fraudes: null, cheques_sem_fundo: null, cheques_sustados: null, falencias_recuperacao_judicial: null, cheques_devolvidos_informados_usuario: null,
+  'pgtpont:pagamento_pontual': { 'pgtpont:pontuacao': '100', lista_indicador_comportamento: { item_indicador: [{ mes_ano: 'set/2026', pontuacao_mensal: '100' }, { mes_ano: 'out/2026', pontuacao_mensal: '-' }] } },
+  pagamento_atrasado: { mais_de_60_dias: { lista_indicador_comportamento: { item_indicador: [{ mes_ano: 'Pontuação', pontuacao_mensal: '-' }, { mes_ano: 'out/2026', pontuacao_mensal: '-' }] } } },
+  consultas: { quantidade_total: '17', consultas_mes: [{ mes_ano: '112026', quantidade: '2' }, { mes_ano: '102026', quantidade: '0' }], ultimas_consultas: { consulta: [{ data: '10/11/2026', razao_social: 'CONSULTORA FICTICIA LTDA' }] } },
+  socios: [{ cpf_cnpj: '00012345678901', tipo_documento: '1', nome_empresa: 'MARIA EXEMPLO DA SILVA', participacao: '100,00', data_entrada: '04/09/2008', indicador_debito: 'Sim', indicador_fraude: 'Não',
+    restricoes_documento: { protestos: { valor: '46264.87', ultima: '18/08/2025', quantidade: '22' }, acoes_judiciais: { valor: '99159.7', ultima: '14/09/2026', quantidade: '2' }, cheques_sem_fundo: { valor: '0.0', quantidade: '0' } } }],
+  administradores: { administrador: [{ cpf: '00098765432100', nome: 'JOAO EXEMPLO', cargo: 'ADMINISTRADOR', entrada: '19/06/2026', indicador_debito: 'Não', indicador_fraude: 'Não', restricoes_documento: null }] },
+  participacoes_socios_adm_outras_empresas: { socio: [
+    { cpf: '00012345678901', nome_socio: 'MARIA EXEMPLO DA SILVA', socios_participantes: [{ cnpj: '44555666000199', razao_social: 'COMERCIAL FICTICIA LTDA', participacao: '100,00', situacao_cnpj: 'Ativo', indicador_debito: 'Sim',
+      restricoes_documento: { protestos: { valor: '9035533.04', ultima: '12/06/2026', quantidade: '147' } } }] },
+    { cpf: '00098765432100', nome_socio: 'JOAO EXEMPLO', socios_participantes: [{ cnpj: '44555666000199', razao_social: 'COMERCIAL FICTICIA LTDA', participacao: '000,00', situacao_cnpj: 'Ativo', indicador_debito: 'Sim', restricoes_documento: null },
+      { cnpj: '77888999000155', razao_social: 'OUTRA FICTICIA LTDA', participacao: '050,00', situacao_cnpj: 'Ativo', indicador_debito: 'Não', restricoes_documento: null }] }] }
+};
+
+test('relatorio: a consulta guardada vira as seções do relatório', () => {
+  const r = C.relatorio(JSON.stringify(PJ_RESTRICAO));
+  assert.equal(r.empresa.razao, 'INDUSTRIA FICTICIA DE PLASTICOS LTDA');
+  assert.equal(r.empresa.cnpj, '11.222.333/0001-81');
+  assert.equal(r.empresa.fundacao, '1977-02-18');
+  assert.deepEqual(r.empresa.telefones, ['(11) 4000-0000', '(11) 4000-0001']);
+  assert.deepEqual([r.score.valor, r.score.classe, r.decisao, r.limite_sugerido, r.faturamento], [689, 'B', 'Recomendação de análise cautelosa', 397500, 'Acima de R$ 9.100.000']);
+  assert.deepEqual([r.protestos.qtd, r.protestos.valor, r.protestos.maior, r.protestos.maior_em, r.protestos.ultimas.length], [240, 22788370.51, 1461274.81, '2025-01-20', 3]);
+  assert.deepEqual(r.protestos.ultimas[0], { data: '2026-10-13', valor: 32212, vencimento: '2026-09-30', cartorio: '1', cidade: 'CIDADE EXEMPLO', uf: 'SP' });
+  assert.deepEqual([r.acoes.qtd, r.acoes.valor, r.acoes.ultimas[0].autor, r.acoes.ultimas[0].data], [30, 5237393.42, 'UNIAO FEDERAL FAZENDA NACIONAL', '2026-09-14']);
+  assert.deepEqual([r.pendencias.qtd, r.cheques.qtd, r.falencia.qtd, r.fraude.qtd], [0, 0, 0, 0]);
+  assert.equal(r.pontualidade.pct, 100);
+  assert.deepEqual(r.atrasos, []);
+  assert.deepEqual([r.consultas.total, r.consultas.ultimas[0].quem, r.consultas.meses[0].mes], [17, 'CONSULTORA FICTICIA LTDA', '11/2026']);
+  // CPF de sócio nunca sai inteiro (o relatório vira PDF)
+  assert.equal(r.socios[0].doc, '***.456.789-**');
+  assert.deepEqual(r.socios[0].restricoes.map(x => [x.rotulo, x.qtd, x.valor, x.ultima]), [['protesto(s)', 22, 46264.87, '2025-08-18'], ['ação(ões) judicial(is)', 2, 99159.7, '2026-09-14']]);
+  assert.equal(r.administradores[0].cargo, 'ADMINISTRADOR');
+  // a mesma empresa aparece uma vez só, com os dois sócios
+  assert.deepEqual(r.outras.map(o => [o.razao, o.cnpj, o.socios.length, o.restricoes.length]), [['COMERCIAL FICTICIA LTDA', '44.555.666/0001-99', 2, 1], ['OUTRA FICTICIA LTDA', '77.888.999/0001-55', 1, 0]]);
+  // consulta que não é de pessoa jurídica (ou vazia) não tem relatório: a tela mostra só os fatos
+  assert.equal(C.relatorio({}), null);
+  assert.equal(C.relatorio(null), null);
+  assert.equal(C.relatorio('texto solto'), null);
+});
+
+test('parecer: o que pesa contra e a favor, o risco e os caminhos (não decide)', () => {
+  const k = C.daRekta(PJ_RESTRICAO, '11222333000181', '2026-11-10'), rel = C.relatorio(PJ_RESTRICAO);
+  const p = C.parecer(k, rel, { hoje: '2026-11-10', pedido_valor: 1184.84, pedido_prazo: 28 });
+  assert.equal(p.risco, 'alto');
+  assert.match(p.jogo, /1\.184,84 em 28 dias/);
+  assert.ok(p.contra.some(x => /^240 protesto\(s\) somando R\$ 22,8 milhões; o mais recente em 13\/10\/2026 \(há 28 dia\(s\)\)/.test(x)), p.contra.join(' | '));
+  assert.ok(p.contra.some(x => /2 dos 3 últimos protestos são dos últimos 90 dias/.test(x)));
+  assert.ok(p.contra.some(x => /30 ação\(ões\) judicial\(is\) somando R\$ 5,2 milhões; 1 das 2 últimas são cobrança de imposto/.test(x)));
+  assert.ok(p.contra.some(x => /sócio\(a\) MARIA EXEMPLO DA SILVA: 22 protesto\(s\)/.test(x)));
+  assert.ok(p.contra.some(x => /outra empresa dos sócios \(COMERCIAL FICTICIA LTDA\): 147 protesto\(s\) \(R\$ 9 milhões\)/.test(x)));
+  assert.ok(p.contra.some(x => /17 consultas ao CNPJ/.test(x)));
+  assert.ok(p.contra.some(x => /a Rekta diz: "Recomendação de análise cautelosa"/.test(x)));
+  assert.ok(p.favor.some(x => /empresa com 49 anos/.test(x)));
+  assert.ok(p.favor.some(x => /score 689/.test(x)));
+  assert.ok(p.favor.some(x => /paga 100% em dia/.test(x)));
+  assert.ok(p.favor.some(x => /menos de 1% do limite que a consulta sugere/.test(x)));
+  assert.ok(p.favor.some(x => /sem pendência financeira/.test(x)));
+  assert.match(p.caminhos[0], /só à vista/);
+  // empresa boa, sem nada contra: risco baixo
+  // o alerta que a consulta trouxe (factoring) entra no "contra": risco médio
+  const bom = C.parecer(MBS, null, { hoje });
+  assert.deepEqual([bom.risco, bom.contra], ['medio', ['consulta de factoring no último ano']]);
+  assert.equal(C.parecer(Object.assign({}, MBS, { alertas: [] }), null, { hoje }).risco, 'baixo');
+  // título vencido com a empresa pesa mais que tudo; protesto antigo (mais de 1 ano) é risco médio
+  assert.equal(C.parecer(MBS, null, { hoje, vencido: 500 }).risco, 'alto');
+  const antigo = Object.assign({}, PJ_RESTRICAO, { acoes_civeis: null, socios: [], participacoes_socios_adm_outras_empresas: null,
+    protestos: { valor_total: '900.00', total_protestos: '1', ultimas_ocorrencias: { protesto: [{ data: '10/03/2024', valor: '900.00' }] } } });
+  assert.equal(C.parecer(C.daRekta(antigo, '11222333000181', '2026-11-10'), C.relatorio(antigo), { hoje: '2026-11-10' }).risco, 'medio');
+});

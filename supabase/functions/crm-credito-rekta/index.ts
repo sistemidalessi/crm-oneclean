@@ -93,6 +93,28 @@ async function consultaRekta(db: ReturnType<typeof createClient>, hash: string, 
   return { bruto, caminho, status, ms, erro };
 }
 
+// Um documento, uma consulta de cada vez (10/11/2026: um clique duplo consultou e pagou duas vezes a mesma empresa). Quem chega
+// enquanto outra consulta do mesmo documento está em andamento espera o resultado dela e usa o mesmo, sem chamar a Rekta de novo.
+async function consultaUnica(db: ReturnType<typeof createClient>, hash: string, doc: string, empresa: string | null, por: string) {
+  const desde = new Date(Date.now() - 2000).toISOString();
+  await db.from('crm_credito_consultando').delete().lt('desde', new Date(Date.now() - 150000).toISOString());
+  const { error: ocupado } = await db.from('crm_credito_consultando').insert({ documento: doc });
+  if (ocupado && (ocupado as { code?: string }).code === '23505') {
+    for (let i = 0; i < 50; i++) {   // até ~100 s (a Rekta pode levar 90)
+      await new Promise((ok) => setTimeout(ok, 2000));
+      const { data: r } = await db.from('crm_credito_rekta').select('bruto, caminho, status, ms, erro').eq('documento', doc).gte('em', desde)
+        .order('em', { ascending: false }).limit(1).maybeSingle();
+      if (r) { const l = r as Linha; return { bruto: l.bruto as unknown, caminho: l.caminho as string | null, status: Number(l.status) || 0, ms: Number(l.ms) || 0, erro: l.erro as string | null }; }
+      const { data: ainda } = await db.from('crm_credito_consultando').select('documento').eq('documento', doc).maybeSingle();
+      if (!ainda) break;
+    }
+    return { bruto: null as unknown, caminho: null as string | null, status: 0, ms: 0, erro: 'já havia uma consulta deste documento em andamento e ela não terminou; tente de novo em um minuto' as string | null };
+  }
+  if (ocupado) console.error('[crm-credito-rekta] reserva da consulta: ' + ocupado.message);
+  try { return await consultaRekta(db, hash, doc, empresa, por); }
+  finally { await db.from('crm_credito_consultando').delete().eq('documento', doc); }
+}
+
 // A consulta da equipe: política + ficha até o teto; o resto vira pedido de crédito ao Anderson
 async function auto(db: ReturnType<typeof createClient>, hash: string, eu: Linha, uid: string, empresaId: string) {
   const { data: e } = await db.from('crm_empresas').select('id, nome, cnpj, responsavel_id').eq('id', empresaId).maybeSingle();
@@ -112,7 +134,7 @@ async function auto(db: ReturnType<typeof createClient>, hash: string, eu: Linha
   if (ult) { bruto = (ult as Linha).bruto; caminho = (ult as Linha).caminho as string | null; }
   else {
     if (!hash) return resposta(503, { erro: 'a consulta pela API ainda não está ligada (falta o REKTA_HASH nos segredos)' });
-    const r = await consultaRekta(db, hash, doc, empresaId, uid);
+    const r = await consultaUnica(db, hash, doc, empresaId, uid);
     if (r.erro) return resposta(502, { erro: r.erro });
     bruto = r.bruto; caminho = r.caminho; nova = true;
   }
@@ -175,7 +197,7 @@ Deno.serve(async (req) => {
   if (doc.length !== 11 && doc.length !== 14) return resposta(400, { erro: 'documento inválido: CPF com 11 ou CNPJ com 14' });
   const empresa = /^[0-9a-f-]{36}$/.test(String(c.empresa_id ?? '')) ? String(c.empresa_id) : null;
 
-  const { bruto, caminho, status, ms, erro } = await consultaRekta(db, hash, doc, empresa, quem.user.id);
+  const { bruto, caminho, status, ms, erro } = await consultaUnica(db, hash, doc, empresa, quem.user.id);
   if (erro) return resposta(502, { erro, status });
   return resposta(200, { bruto, caminho, status, ms });
 });

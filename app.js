@@ -23,9 +23,10 @@
       try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { /* fica o # */ }
       return true;
     }
-    const m = /^#pedido=(\d{1,9})$/.exec(location.hash || '');
+    // "#credito=N" (10/11/2026): abre direto a resposta ao pedido de crédito N da equipe (para o aviso no celular)
+    const m = /^#(pedido|credito)=(\d{1,9})$/.exec(location.hash || '');
     if (!m) return false;
-    try { sessionStorage.setItem(LINK_PEDIDO, m[1]); } catch (e) { /* sem guarda: abre a tela normal */ }
+    try { sessionStorage.setItem(LINK_PEDIDO, (m[1] === 'credito' ? 'credito:' : '') + m[2]); } catch (e) { /* sem guarda: abre a tela normal */ }
     try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { /* fica o # */ }
     return true;
   }
@@ -34,6 +35,7 @@
     let n = null;
     try { n = sessionStorage.getItem(LINK_PEDIDO); sessionStorage.removeItem(LINK_PEDIDO); } catch (e) { return; }
     if (n === 'agentes' && E.eu) { CRM.acoes['ajustes-secao']('agentes'); return; }
+    if (/^credito:/.test(n || '')) { if (E.eu && CRM.ehAdmin() && CRM.credito) CRM.credito.responder(n.slice(8)).catch(CRM.falhou); return; }
     if (!n || !E.eu || !CRM.telas.pedidos || !CRM.telas.pedidos.abrirNumero) return;
     E.aba = 'pedidos'; gravaAbaDaSessao('pedidos');
     CRM.telas.pedidos.abrirNumero(Number(n));

@@ -1240,22 +1240,25 @@
       const cta = doc.querySelector('.cta');
       const r = cta && cta.getBoundingClientRect();
       const mmPx = 210 / LARGURA;
-      let s = Math.min(1, ALTURA / H);
+      // m.folhas (relatório de crédito, 10/11/2026): nunca reduz a letra; passou de uma folha, corta em folhas no tamanho real,
+      // nos pontos de m.cortes, com margem no alto das folhas seguintes
+      let s = m.folhas ? (H <= ALTURA ? 1 : 0) : Math.min(1, ALTURA / H);
       if (s >= 0.6) { // uma folha
         const w = 210 * s, x = (210 - w) / 2;
         pdf.addImage(canvas.toDataURL('image/jpeg', 0.92), 'JPEG', x, 0, w, H * mmPx * s);
         if (r) pdf.link(x + (r.left - base.left) * mmPx * s, (r.top - base.top) * mmPx * s, r.width * mmPx * s, r.height * mmPx * s, { url: cta.href });
       } else { // orçamento enorme: folhas cortadas entre linhas, na largura toda
-        const fundos = [...doc.querySelectorAll('tbody tr')].map(tr => tr.getBoundingClientRect().bottom - base.top);
+        const fundos = [...doc.querySelectorAll(m.cortes || 'tbody tr')].map(tr => tr.getBoundingClientRect().bottom - base.top).sort((x, y) => x - y);
+        const margem = m.folhas ? 38 : 0;   // 38 px = 10 mm
         let ini = 0, pag = 0;
         while (ini < H - 1) {
-          let fim = Math.min(H, ini + ALTURA);
+          let fim = Math.min(H, ini + ALTURA - (pag ? margem : 0) - margem);
           if (fim < H) { const corte = fundos.filter(b => b > ini + 50 && b <= fim).pop(); if (corte) fim = corte; }
           const fatia = document.createElement('canvas');
           fatia.width = canvas.width; fatia.height = Math.round((fim - ini) * 2);
           fatia.getContext('2d').drawImage(canvas, 0, Math.round(ini * 2), canvas.width, fatia.height, 0, 0, canvas.width, fatia.height);
           if (pag) pdf.addPage();
-          pdf.addImage(fatia.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, 210, (fim - ini) * mmPx);
+          pdf.addImage(fatia.toDataURL('image/jpeg', 0.92), 'JPEG', 0, pag ? margem * mmPx : 0, 210, (fim - ini) * mmPx);
           if (r && r.top - base.top >= ini && r.bottom - base.top <= fim) pdf.link((r.left - base.left) * mmPx, (r.top - base.top - ini) * mmPx, r.width * mmPx, r.height * mmPx, { url: cta.href });
           ini = fim; pag++;
         }
@@ -1303,12 +1306,12 @@
   };
   fichas.pedeArquivoPdf = nome => pedeArquivo(String(nome).replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim());
   // qualquer documento do CRM em PDF pelo mesmo caminho (04/11/2026: o pedido ao fornecedor): html = um elemento de 794 px
-  fichas.baixarPdfHtml = async (html, nome) => {
+  fichas.baixarPdfHtml = async (html, nome, op) => {
     const n = String(nome).replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim();
     const alvo = await pedeArquivo(n);
     if (alvo === false) return null;
     CRM.toast('Gerando o PDF…');
-    const arq = await salva(await geraPdf({ html }), n, alvo);
+    const arq = await salva(await geraPdf(Object.assign({ html }, op || {})), n, alvo);
     CRM.toast('PDF salvo: ' + arq + (alvo ? '' : ' (pasta Downloads)') + '.');
     return arq;
   };
@@ -1395,6 +1398,11 @@
     CRM.abrirForm({
       titulo: a ? 'Tarefa · ' + CRM.nomeEmpresa(a.empresa_id) : 'Nova tarefa' + (e ? ' · ' + e.nome : ''),
       intro, campos, valores, largura: 'largo',
+      // tarefa do pedido de crédito da equipe (10/11/2026, Anderson: "abri, mas como que eu analiso?"): o botão leva direto à
+      // consulta guardada, ao parecer e à resposta
+      htmlAntes: a && !a.concluida && a.automatica && CRM.ehAdmin() && CRM.credito && /^Crédito: .+ pede /.test(a.descricao || '')
+        ? '<p class="alerta cred-pedido"><strong>Pedido de crédito da equipe.</strong> A consulta deste cliente está guardada no CRM (abrir não custa nada). ' +
+          '<button type="button" class="btn" data-acao="cred-responder-cliente" data-id="' + esc(a.empresa_id) + '">💳 Ver a consulta e responder</button></p>' : '',
       htmlDepois: e ? historicoNaTarefa(e, a) : eid ? '' : datalistEmpresas(),
       rodape: a ? '<a class="btn sec" target="_blank" rel="noopener noreferrer" href="' + esc(R.linkGoogleAgenda(a.descricao + ' — ' + CRM.nomeEmpresa(a.empresa_id), a.data_hora, 30, 'CRM: ' + CRM.nomeEmpresa(a.empresa_id))) + '">+ Google Agenda</a>' : '',
       extras: ligaDatalist,

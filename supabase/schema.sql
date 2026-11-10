@@ -7601,6 +7601,16 @@ grant select on public.crm_credito_rekta to authenticated;
 drop policy if exists ler on public.crm_credito_rekta;
 create policy ler on public.crm_credito_rekta for select to authenticated using ((select public.crm_eh_admin()));
 
+-- Crédito: um CNPJ, uma consulta de cada vez (10/11/2026: um clique duplo consultou e pagou duas vezes a mesma empresa).
+-- A Edge Function crm-credito-rekta reserva o documento aqui antes de chamar a Rekta; quem chega no meio espera o resultado.
+create table if not exists public.crm_credito_consultando (
+  documento text primary key,
+  desde timestamptz not null default now()
+);
+alter table public.crm_credito_consultando enable row level security;
+revoke all on public.crm_credito_consultando from anon, public, authenticated;
+grant select, insert, delete on public.crm_credito_consultando to service_role;
+
 -- ============================================================ Consultar notas (28/10/2026)
 -- Pedido do Anderson: "consultar pelo número da nota, pelo cliente… e a sequência da nota tem que continuar". Uma pesquisa só
 -- em crm_notas (as do FKN e as do CRM): número ("2791" ou "2-15"), chave (44), CNPJ/CPF, palavras do cliente/cidade/natureza;
