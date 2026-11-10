@@ -12604,3 +12604,193 @@ revoke all on function public.crm_fin_lanc_guarda_vencimento() from public, anon
 drop trigger if exists crm_fin_lanc_guarda_vencimento on public.crm_fin_lancamentos;
 create trigger crm_fin_lanc_guarda_vencimento before update on public.crm_fin_lancamentos
   for each row execute function public.crm_fin_lanc_guarda_vencimento();
+
+-- ============================================================================================================================
+-- Trava de custo na entrada de compra (10/11/2026, pedido do Anderson: "precisa resolver isso de uma vez por todas"). Um
+-- galão de 5 L entrou no código do frasco de 1 L e a margem do produto ficou negativa; o aviso de custo da tela deixava passar
+-- no OK. Agora:
+--  1) entrada de nota de compra com custo por unidade muito longe do custo atual (mais que 1,8× ou menos que 0,55×) só passa
+--     com o produto certo ou com o motivo escrito pelo administrador ou pelo comprador (crm_compra_custo_confirmar, guardado
+--     em crm_compra_custo_ok). A trava é do banco (gatilho antes de gravar o movimento): entrada normal, à mão e correção;
+--  2) "Corrigir a entrada" devolve ao produto errado o custo de antes (médio, de compra e com índice); antes ficava o custo
+--     do item errado no cadastro;
+--  3) crm_precos_abaixo_minimo(): preço de tabela abaixo da margem mínima pelo custo de hoje, para o painel do comprador.
+create table if not exists public.crm_compra_custo_ok (
+  compra_id uuid not null references public.crm_compras(id) on delete cascade,
+  codigo text not null,
+  custo numeric(14,4),
+  custo_atual numeric(14,4),
+  motivo text not null,
+  por uuid default auth.uid(),
+  em timestamptz not null default now(),
+  primary key (compra_id, codigo)
+);
+alter table public.crm_compra_custo_ok enable row level security;
+revoke all on public.crm_compra_custo_ok from anon;
+grant select on public.crm_compra_custo_ok to authenticated;
+do $$ begin
+  if not exists (select 1 from pg_policies where tablename = 'crm_compra_custo_ok' and policyname = 'le') then
+    create policy le on public.crm_compra_custo_ok for select to authenticated using ((select public.crm_eh_admin()) or (select public.crm_eh_comprador()));
+  end if;
+end $$;
+
+-- p_itens: [{ codigo, custo, custo_atual, motivo }] — o que a tela mostrou ao comprador e o porquê dele
+create or replace function public.crm_compra_custo_confirmar(p_compra uuid, p_itens jsonb) returns jsonb language plpgsql security definer set search_path = public as $$
+declare x jsonb; n integer := 0; mot text;
+begin
+  if not (public.crm_eh_admin() or public.crm_eh_comprador()) then raise exception 'só o administrador e o comprador confirmam um custo fora do normal'; end if;
+  if not exists (select 1 from public.crm_compras where id = p_compra) then raise exception 'nota de compra não encontrada'; end if;
+  for x in select * from jsonb_array_elements(coalesce(p_itens, '[]'::jsonb)) loop
+    mot := btrim(coalesce(x->>'motivo', ''));
+    if length(mot) < 10 then raise exception 'escreva o motivo (pelo menos 10 letras) para o produto %', x->>'codigo'; end if;
+    if not exists (select 1 from public.crm_estoque where codigo = x->>'codigo') then raise exception 'produto % não está no cadastro', x->>'codigo'; end if;
+    insert into public.crm_compra_custo_ok (compra_id, codigo, custo, custo_atual, motivo)
+    values (p_compra, x->>'codigo', nullif(x->>'custo', '')::numeric, nullif(x->>'custo_atual', '')::numeric, left(mot, 500))
+    on conflict (compra_id, codigo) do update set custo = excluded.custo, custo_atual = excluded.custo_atual, motivo = excluded.motivo, por = auth.uid(), em = now();
+    n := n + 1;
+  end loop;
+  return jsonb_build_object('confirmados', n);
+end $$;
+revoke all on function public.crm_compra_custo_confirmar(uuid, jsonb) from public, anon;
+grant execute on function public.crm_compra_custo_confirmar(uuid, jsonb) to authenticated;
+
+-- custo de comparação: o custo médio do estoque; sem ele, o custo de compra do cadastro
+create or replace function public.crm_custo_referencia(p_codigo text) returns numeric language sql stable security definer set search_path = public as $$
+  select coalesce(nullif((select s.custo_medio from public.crm_estoque_saldo s where s.codigo = p_codigo), 0),
+                  nullif((select e.custo_compra from public.crm_estoque e where e.codigo = p_codigo), 0));
+$$;
+revoke all on function public.crm_custo_referencia(text) from public, anon, authenticated;
+
+create or replace function public.crm_estoque_mov_custo_trava() returns trigger language plpgsql security definer set search_path = public as $$
+declare ci uuid := coalesce(new.compra_item_id, new.compra_item_corr); c record; ref numeric; r numeric; it record;
+begin
+  if new.tipo <> 'entrada' or ci is null or coalesce(new.custo_unit, 0) <= 0 then return new; end if;
+  select i.compra_id, i.ordem, i.descricao into it from public.crm_compra_itens i where i.id = ci;
+  select id, devolucao, numero into c from public.crm_compras where id = it.compra_id;
+  if c.id is null or c.devolucao then return new; end if;
+  ref := public.crm_custo_referencia(new.codigo);
+  if ref is null then return new; end if;
+  r := new.custo_unit / ref;
+  if r between 0.55 and 1.8 then return new; end if;
+  if exists (select 1 from public.crm_compra_custo_ok k where k.compra_id = c.id and k.codigo = new.codigo) then return new; end if;
+  if public.crm_eh_logistica() and not (public.crm_eh_admin() or public.crm_eh_comprador()) then
+    raise exception 'item % (%): o custo ficou muito longe do custo do produto % — parece produto errado ou "vem quantas na embalagem" errado. Confira o produto; se estiver certo, o comprador ou o administrador confirma a entrada.',
+      it.ordem, it.descricao, new.codigo;
+  end if;
+  raise exception 'item % (%): R$ % cada no produto %, e o custo atual é R$ % (% vezes). Parece produto errado ou "vem quantas na embalagem" errado. Corrija; se o preço mudou de verdade, escreva o motivo na tela da entrada.',
+    it.ordem, it.descricao, replace(to_char(new.custo_unit, 'FM999990.00'), '.', ','), new.codigo, replace(to_char(ref, 'FM999990.00'), '.', ','), replace(to_char(r, 'FM9990.0'), '.', ',');
+end $$;
+-- antes de gravar: nada entra no saldo nem no cadastro
+drop trigger if exists crm_estoque_mov_custo_trava on public.crm_estoque_mov;
+create trigger crm_estoque_mov_custo_trava before insert on public.crm_estoque_mov for each row execute function public.crm_estoque_mov_custo_trava();
+
+-- Corrigir a entrada: o produto errado volta ao custo de antes. Quando o saldo depois do estorno fica zero ou negativo, a
+-- conta do custo médio não fecha: vale o custo da entrada válida anterior (ou do saldo inicial). O custo de compra do
+-- cadastro volta para o da entrada válida anterior; o custo com índice é refeito.
+create or replace function public.crm_compra_corrigir(p_compra uuid, p_itens jsonb)
+ returns jsonb
+ language plpgsql
+ security definer
+ set search_path to 'public'
+as $function$
+declare c record; it record; x jsonb; cod text; f numeric; q numeric; custo numeric; m record; s record; cm numeric; n integer := 0; agora timestamptz := now();
+  ant_c numeric; ant_cad text;
+begin
+  if not (public.crm_eh_admin() or public.crm_eh_comprador()) then raise exception 'só o administrador e o comprador corrigem a entrada'; end if;
+  select * into c from public.crm_compras where id = p_compra for update;
+  if c.id is null then raise exception 'nota de compra não encontrada'; end if;
+  if c.situacao <> 'lancada' then raise exception 'a nota ainda não teve entrada: use \"Dar entrada no estoque\"'; end if;
+  if c.devolucao then raise exception 'devolução de cliente não se corrige por aqui: fale com o administrador'; end if;
+  for x in select * from jsonb_array_elements(coalesce(p_itens, '[]'::jsonb)) loop
+    select * into it from public.crm_compra_itens where id = (x->>'id')::uuid and compra_id = c.id for update;
+    if it.id is null then raise exception 'item não é desta nota'; end if;
+    cod := nullif(btrim(x->>'codigo'), ''); f := nullif(x->>'fator', '')::numeric;
+    if cod is null or f is null or f <= 0 then raise exception 'item % (%): diga o produto e quantas vêm na embalagem', it.ordem, it.descricao; end if;
+    if cod ~ '\.\d+$' or not exists (select 1 from public.crm_estoque e where e.codigo = cod) then
+      raise exception 'item % (%): o código % não está no cadastro de produtos (confira o zero da frente)', it.ordem, it.descricao, cod; end if;
+    if cod = it.codigo and f = it.fator then continue; end if;
+    select * into m from public.crm_estoque_mov mv
+     where mv.tipo = 'entrada' and (mv.compra_item_id = it.id or mv.compra_item_corr = it.id)
+       and not exists (select 1 from public.crm_estoque_mov e where e.estorno_de = mv.id)
+     order by mv.criado_em desc limit 1;
+    if m.id is not null then
+      select * into s from public.crm_estoque_saldo where codigo = m.codigo for update;
+      -- custo da entrada válida anterior a esta, no mesmo produto (ou do saldo inicial)
+      select mv.custo_unit into ant_c from public.crm_estoque_mov mv
+       where mv.codigo = m.codigo and mv.id <> m.id and mv.tipo in ('entrada', 'inicial') and coalesce(mv.custo_unit, 0) > 0
+         and mv.criado_em <= m.criado_em and not exists (select 1 from public.crm_estoque_mov e where e.estorno_de = mv.id)
+       order by mv.criado_em desc limit 1;
+      cm := null;
+      if s.saldo - m.quantidade > 0 and s.custo_medio is not null and coalesce(m.custo_unit, 0) > 0 then
+        cm := round((s.saldo * s.custo_medio - m.quantidade * m.custo_unit) / (s.saldo - m.quantidade), 4);
+      end if;
+      if cm is null or cm <= 0 then cm := ant_c; end if;
+      if cm > 0 then update public.crm_estoque_saldo set custo_medio = cm where codigo = m.codigo; end if;
+      insert into public.crm_estoque_mov (codigo, quando, tipo, quantidade, custo_unit, estorno_de, motivo)
+      values (m.codigo, agora, 'estorno', -m.quantidade, m.custo_unit, m.id,
+        left('Correção da entrada NF ' || coalesce(c.numero::text, '?') || ': item ' || it.ordem || ' ia para ' || cod, 200));
+      if m.codigo <> cod then
+        ant_cad := current_setting('crm.cadastro', true);
+        perform set_config('crm.cadastro', '1', true);
+        update public.crm_estoque e set
+          custo_compra = case when coalesce(ant_c, 0) > 0 and abs(coalesce(e.custo_compra, 0) - m.custo_unit) < 0.0001 then ant_c else e.custo_compra end,
+          custo_unit = case when coalesce(cm, 0) > 0 then round(cm * (1 + coalesce(e.indice_custo, 0) / 100), 4) else e.custo_unit end,
+          atualizado_em = now()
+         where e.codigo = m.codigo;
+        perform set_config('crm.cadastro', coalesce(ant_cad, ''), true);
+      end if;
+    end if;
+    q := round(it.quantidade * f, 3);
+    if q <= 0 then raise exception 'item % (%): quantidade zerada', it.ordem, it.descricao; end if;
+    custo := round((it.valor_total + it.ipi + it.st + it.frete + it.outras) / q, 4);
+    insert into public.crm_estoque_saldo (codigo, descricao, unidade, inicio)
+      select cod, coalesce(e.descricao, it.descricao), public.crm_un(coalesce(e.unidade, it.unidade)), agora - interval '1 second'
+      from (select 1) u left join public.crm_estoque e on e.codigo = cod
+      on conflict (codigo) do nothing;
+    insert into public.crm_estoque_mov (codigo, quando, tipo, quantidade, custo_unit, qtd_doc, unidade_doc, fator, compra_item_corr, motivo)
+      values (cod, agora, 'entrada', q, custo, it.quantidade, public.crm_un(it.unidade), f, it.id,
+        left('NF ' || coalesce(c.numero::text, '?') || ' ' || coalesce(c.fornecedor_nome, '') || ' (correção)', 200));
+    update public.crm_compra_itens set codigo = cod, fator = f where id = it.id;
+    if c.fornecedor_doc is not null and it.cod_fornecedor is not null then
+      insert into public.crm_compra_vinculos (fornecedor_doc, cod_fornecedor, codigo, fator) values (c.fornecedor_doc, it.cod_fornecedor, cod, f)
+        on conflict (fornecedor_doc, cod_fornecedor) do update set codigo = excluded.codigo, fator = excluded.fator, atualizado_em = now();
+    end if;
+    n := n + 1;
+  end loop;
+  update public.crm_compras set atualizado_em = agora where id = c.id;
+  return jsonb_build_object('corrigidos', n);
+end $function$;
+
+-- Preço de tabela abaixo da margem mínima pelo custo de hoje (custo com índice). Tolerância de 1 centavo, como a trava PREÇO.
+create or replace function public.crm_precos_abaixo_minimo() returns table (
+  codigo text, descricao text, unidade text, custo_compra numeric, indice_custo numeric, custo numeric, preco_venda numeric,
+  margem numeric, sugerido numeric, saldo numeric, ult_entrada_em timestamptz, ult_entrada_nf bigint, ult_entrada_forn text,
+  ult_entrada_custo numeric, vendido_90 numeric)
+language sql stable security definer set search_path = public as $$
+  with prod as (
+    select e.codigo, e.descricao, e.unidade, e.custo_compra, e.indice_custo, e.custo_unit, e.preco_venda
+      from public.crm_estoque e
+     where e.codigo !~ '\.\d+$' and coalesce(e.situacao, 'ATIVO') <> 'INATIVO'
+       and coalesce(e.preco_venda, 0) > 0 and coalesce(e.custo_unit, 0) > 0
+       and e.preco_venda + 0.01 < e.custo_unit / (1 - 0.23)
+       and ((select public.crm_eh_admin()) or (select public.crm_eh_comprador()))
+  )
+  select p.codigo::text, p.descricao::text, p.unidade::text, p.custo_compra::numeric, p.indice_custo::numeric, p.custo_unit::numeric, p.preco_venda::numeric,
+         round((1 - p.custo_unit / p.preco_venda) * 100, 1),
+         ceil(p.custo_unit * 1.30 * 100) / 100,
+         s.saldo::numeric, u.quando, u.numero::bigint, u.fornecedor_nome::text, u.custo_unit::numeric,
+         (select coalesce(sum(abs(m.quantidade)), 0)::numeric from public.crm_estoque_mov m where m.codigo = p.codigo and m.tipo = 'saida' and m.quando >= now() - interval '90 days')
+    from prod p
+    left join public.crm_estoque_saldo s on s.codigo = p.codigo
+    left join lateral (
+      select mv.quando, c.numero, c.fornecedor_nome, mv.custo_unit
+        from public.crm_estoque_mov mv
+        left join public.crm_compra_itens ci on ci.id = coalesce(mv.compra_item_id, mv.compra_item_corr)
+        left join public.crm_compras c on c.id = ci.compra_id
+       where mv.codigo = p.codigo and mv.tipo = 'entrada' and coalesce(mv.custo_unit, 0) > 0
+         and not exists (select 1 from public.crm_estoque_mov z where z.estorno_de = mv.id)
+       order by mv.quando desc limit 1) u on true
+   order by (1 - p.custo_unit / p.preco_venda), p.descricao;
+$$;
+revoke all on function public.crm_precos_abaixo_minimo() from public, anon;
+grant execute on function public.crm_precos_abaixo_minimo() to authenticated;

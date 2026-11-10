@@ -575,6 +575,10 @@
   };
   Supa.prototype.estoqueAvulsa = async function (p) { return unwrap(await this.sb.rpc('crm_estoque_entrada_avulsa', { p })); };
   Supa.prototype.compraCorrigir = async function (id, itens) { return unwrap(await this.sb.rpc('crm_compra_corrigir', { p_compra: id, p_itens: itens })); };
+  // custo fora do normal na entrada (10/11/2026): o banco só aceita com o motivo escrito pelo comprador ou administrador
+  Supa.prototype.compraCustoConfirmar = async function (id, itens) { return unwrap(await this.sb.rpc('crm_compra_custo_confirmar', { p_compra: id, p_itens: itens })); };
+  // produtos com o preço de tabela abaixo da margem mínima pelo custo de hoje (painel do comprador)
+  Supa.prototype.precosAbaixoMinimo = async function () { return unwrap(await this.sb.rpc('crm_precos_abaixo_minimo')); };
   // desfazer a entrada inteira (06/11/2026): estorno do estoque, contas a pagar abertas apagadas e a nota volta a pendente
   Supa.prototype.compraDesfazer = async function (id, motivo) { return unwrap(await this.sb.rpc('crm_compra_desfazer', { p_compra: id, p_motivo: motivo })); };
   Supa.prototype.estoqueSaidaAvulsa = async function (codigo, quantidade, motivo) { return unwrap(await this.sb.rpc('crm_estoque_saida_avulsa', { p_codigo: codigo, p_quantidade: quantidade, p_motivo: motivo })); };

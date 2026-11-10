@@ -662,7 +662,7 @@
           kpi('Em falta', String(c.ruptura.length), 'vendeu em 90 dias e está zerado', c.ruptura.length ? 'vermelho' : '', 'compras-kpi', 'falta') +
           kpi('Estoque parado', R.moeda(e.valorParado), c.parado.length + ' produtos sem venda em 90 dias', '', 'compras-kpi', 'parado') +
           kpi('Curva A', String(c.abc.A.length), 'produtos que fazem 80% do faturamento', '', 'compras-kpi', 'A') +
-        '</section>' : '') + quadroFaltas() + (e ? painelComprador(c) : '') + (CRM.ofertas ? CRM.ofertas.botaoCompras(c) : '') +
+        '</section>' : '') + quadroFaltas() + quadroPrecos() + (e ? painelComprador(c) : '') + (CRM.ofertas ? CRM.ofertas.botaoCompras(c) : '') +
         '<section class="cartao"><div class="filtros-compras">' +
           '<input type="search" id="cBusca" placeholder="Pesquisar produto ou código" value="' + esc(fc.busca) + '" aria-label="Pesquisar produto ou código">' +
           '<select id="cMostrar" aria-label="O que mostrar">' + CRM.opcoesHTML(MOSTRAR, fc.mostrar) + '</select>' +
@@ -834,6 +834,35 @@
         : '<p class="vazio">Nenhum pedido em andamento esperando produto. 👍</p>') +
       (futura.length ? '<details class="compras-futuras"><summary><strong>Para entregas futuras (pedidos pausados): ' + futura.length + ' produto(s)</strong> <small>a sugestão também conta: compre quando a entrega estiver perto</small></summary>' + tab(futura, true) + '</details>' : '') +
       '</section>';
+  }
+  // Preço de venda abaixo da margem mínima pelo custo de hoje (10/11/2026, Anderson, água sanitária 1 L com margem negativa:
+  // "precisa resolver isso de uma vez por todas"). O custo sobe na entrada da nota e o preço de tabela fica para trás: a
+  // vendedora vê 🔴 no pedido. Aqui o comprador e o administrador veem a lista com a última entrada e o preço sugerido
+  // (custo × 1,30, a regra do FKN) e decidem: "Usar" grava o preço sugerido no cadastro; se o custo estiver errado (produto
+  // ou embalagem errados na entrada), o certo é corrigir a entrada da nota, não o preço.
+  let precosBaixos = null, lendoPrecos = false;
+  function quadroPrecos() {
+    if (!(CRM.ehAdmin() || CRM.ehComprador()) || !CRM.store().precosAbaixoMinimo) return '';
+    if (precosBaixos === null && !lendoPrecos) {
+      lendoPrecos = true;
+      CRM.store().precosAbaixoMinimo().then(l => { precosBaixos = l || []; lendoPrecos = false; CRM.render(); }).catch(() => { precosBaixos = []; lendoPrecos = false; });
+    }
+    if (!precosBaixos || !precosBaixos.length) return '';
+    const q = v => String(Math.round(num(v) * 1000) / 1000).replace('.', ',');
+    const centavos = precosBaixos.filter(x => num(x.sugerido) - num(x.preco_venda) < 0.10);
+    const linha = x => '<tr><td><strong>' + esc(R.nomeDeItem(x.descricao)) + '</strong><small>' + esc(x.codigo) + (x.saldo != null ? ' · estoque ' + q(x.saldo) : '') +
+        (num(x.vendido_90) ? ' · vendeu ' + q(x.vendido_90) + ' em 90 dias' : '') + '</small></td>' +
+      '<td class="num">' + esc(R.moeda(num(x.custo))) + (num(x.indice_custo) ? '<small>compra ' + esc(R.moeda(num(x.custo_compra))) + ' + ' + esc(q(x.indice_custo)) + '%</small>' : '') + '</td>' +
+      '<td class="num">' + esc(R.moeda(num(x.preco_venda))) + '</td><td class="num"><strong class="neg">' + esc(q(x.margem)) + '%</strong></td>' +
+      '<td>' + (x.ult_entrada_em ? '<small>' + esc(R.dataBR(R.diaLocal(x.ult_entrada_em))) + (x.ult_entrada_nf ? ' · NF ' + esc(String(x.ult_entrada_nf)) : '') + (x.ult_entrada_forn ? ' · ' + esc(R.nomeDeItem(x.ult_entrada_forn)) : '') +
+        (x.ult_entrada_custo ? ' · ' + esc(R.moeda(num(x.ult_entrada_custo))) + ' cada' : '') + '</small>' : '<small>sem entrada no CRM</small>') + '</td>' +
+      '<td class="num"><button type="button" class="mini" data-acao="compras-preco-usar" data-id="' + esc(x.codigo) + '" title="Gravar o preço de tabela ' + esc(R.moeda(num(x.sugerido))) + ' (custo × 1,30)">Usar ' + esc(R.moeda(num(x.sugerido))) + '</button></td></tr>';
+    return '<section class="cartao compras-precos"><h2>Preço de venda abaixo da margem mínima <small>' + precosBaixos.length + ' produto(s) · pelo custo de hoje</small></h2>' +
+      '<p class="dica">O custo subiu (ou entrou errado) e o preço de tabela ficou abaixo de 23%: a vendedora vê 🔴 no pedido. ' +
+        'Se a última entrada estiver errada (produto ou "vem quantas na embalagem"), corrija a entrada da nota em Estoque → Notas de compra; se o custo for esse mesmo, use o preço sugerido (custo × 1,30) ou mude o preço no cadastro.' +
+        (centavos.length ? ' ' + (centavos.length === 1 ? '1 está abaixo' : centavos.length + ' estão abaixo') + ' só por centavos.' : '') + '</p>' +
+      '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Produto</th><th class="num">Custo</th><th class="num">Preço de tabela</th><th class="num">Margem</th><th>Última entrada</th><th class="num"></th></tr></thead><tbody>' +
+      precosBaixos.map(linha).join('') + '</tbody></table></div></section>';
   }
   function painelComprador(c) {
     const ph = c.pedirHoje || [], cs = c.custoSubiu || [], sf = c.semFornecedor || [];
@@ -1017,6 +1046,16 @@
     'compras-colunas': () => { todasColunas = !todasColunas; try { localStorage.setItem('crm_compras_colunas', todasColunas ? 'todas' : ''); } catch (e) { /* sem armazenamento */ } CRM.render(); },
     'compras-forn-editar': cod => formFornecedor(cod),
     'compras-troca-forn': cod => formTrocaForn(cod),
+    'compras-preco-usar': async cod => {
+      const x = (precosBaixos || []).find(p => p.codigo === cod); if (!x) return;
+      if (!confirm('Mudar o preço de tabela de ' + R.nomeDeItem(x.descricao) + ' (' + cod + ')?\n\n' + R.moeda(num(x.preco_venda)) + ' → ' + R.moeda(num(x.sugerido)) +
+        ' (custo ' + R.moeda(num(x.custo)) + ' × 1,30)\n\nAntes, confira se a última entrada está certa: custo errado se corrige na nota, não no preço.')) return;
+      try {
+        await CRM.store().produtoGravar(cod, { preco_venda: num(x.sugerido) });
+        CRM.toast('Preço de ' + cod + ' agora é ' + R.moeda(num(x.sugerido)) + '.');
+        precosBaixos = null; CRM.render();
+      } catch (e) { CRM.falhou(e); }
+    },
     'compras-negociacao': cod => formNegociacao(cod),
     'compras-sem-forn': () => {
       Object.assign(fc, { fornecedor: '-', mostrar: 'vendidos', busca: '', curva: '', linha: '', col: null, ordem: 'vendido' });

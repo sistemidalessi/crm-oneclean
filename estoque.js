@@ -345,6 +345,48 @@
           (dica || (r < 0.55 ? ' → confira se é o mesmo produto' : ' → confira o produto e o "vem quantas"')) };
     }).filter(Boolean);
   }
+  // Medidas de volume e peso escritas na descrição (10/11/2026, água sanitária: "AGUA SANIT SUPER CANDIDA 5l" da nota entrou no
+  // "AGUA SANITARIA 1 LT"). Volume em ml, peso em g: "5l" → 5000 ml, "12X500G" → 500 g, "1,8LT" → 1800 ml, "400ml/180g" → os dois.
+  function medidasDoTexto(t) {
+    const s = String(t || '').toUpperCase().replace(/(\d),(\d)/g, '$1.$2'), out = [];
+    const re = /(\d+(?:\.\d+)?)\s*(ML|LITROS|LITRO|LTS|LT|L|KGS|KG|GRAMAS|GRS|GR|G)(?![A-Z])/g;
+    let m;
+    while ((m = re.exec(s))) {
+      const v = +m[1], u = m[2]; if (!(v > 0)) continue;
+      if (u === 'ML') out.push({ tipo: 'ml', v });
+      else if (/^L/.test(u)) out.push({ tipo: 'ml', v: v * 1000 });
+      else if (/^KG/.test(u)) out.push({ tipo: 'g', v: v * 1000 });
+      else out.push({ tipo: 'g', v });
+    }
+    return out;
+  }
+  // A medida da nota não bate com a do produto nosso (os dois dizem volume, ou os dois dizem peso, e nenhum valor confere).
+  // Devolve o texto do aviso, ou null quando bate ou quando uma das descrições não diz medida.
+  function medidaDiferente(descNota, descProduto) {
+    const a = medidasDoTexto(descNota), b = medidasDoTexto(descProduto);
+    const fmt = x => x.tipo === 'ml' ? (x.v >= 1000 ? String(x.v / 1000).replace('.', ',') + ' L' : x.v + ' ml') : (x.v >= 1000 ? String(x.v / 1000).replace('.', ',') + ' kg' : x.v + ' g');
+    for (const tipo of ['ml', 'g']) {
+      const na = a.filter(x => x.tipo === tipo), nb = b.filter(x => x.tipo === tipo);
+      if (!na.length || !nb.length) continue;
+      if (na.some(x => nb.some(y => Math.abs(x.v / y.v - 1) <= 0.03))) return null;
+      return 'a nota diz ' + fmt(na[0]) + ' e o produto é ' + fmt(nb[0]);
+    }
+    return null;
+  }
+  // Os itens com a medida trocada: [{ id, codigo, texto }]. nomeDe: Map(codigo → descrição do nosso produto).
+  function medidasSuspeitas(itens, lista, nomeDe) {
+    const porId = new Map((itens || []).map(i => [i.id, i]));
+    return (lista || []).filter(x => !x.ignorar && x.codigo).map(x => {
+      const it = porId.get(x.id), d = it && medidaDiferente(it.descricao, nomeDe && nomeDe.get(x.codigo));
+      return d ? { id: x.id, codigo: x.codigo, texto: (it.descricao || '') + ' → ' + x.codigo + ' ' + (nomeDe.get(x.codigo) || '') + ': ' + d } : null;
+    }).filter(Boolean);
+  }
+  // O banco recusou a entrada por custo fora do normal (gatilho crm_estoque_mov_custo_trava): o produto da mensagem, para pedir
+  // o motivo ao comprador e tentar de novo.
+  function produtoDoErroDeCusto(msg) {
+    const m = /no produto (\S+), e o custo atual/.exec(String(msg || ''));
+    return m && /escreva o motivo na tela da entrada/.test(String(msg)) ? m[1] : null;
+  }
   // Código do produto como está no cadastro (23/10/2026: na entrada das compras o comprador digitou "10087" para o 010087 e
   // nasceram 7 produtos que não existem, com a mercadoria fora do produto certo). Igual → o mesmo; sem os zeros da frente e
   // um só no cadastro → esse; senão null (o banco recusa código fora do cadastro). codigos: os do cadastro, sem as caixas.
@@ -473,7 +515,7 @@
         o.custo ? [l.entradas_custo == null ? '' : l.entradas_custo, l.custo_medio == null ? '' : l.custo_medio, l.custo_vendido == null ? '' : l.custo_vendido, l.margem == null ? '' : l.margem] : [])) };
   }
 
-  const api = { antesDe, folhaContagem, custoAvulsa, codigoDoCadastro, fatoresSuspeitos, fatoresDaDescricao, custosSuspeitos, junta, valor, sequencia, lerContagem, atualFkn, ehCaixa, TIPOS, extrasDoXml, stDoDet, compraDoXml, devolucaoDoXml, custoItem, sugere, avisosDfe, sugereFornecedor, chegadaCompras, pareceDespesa,
+  const api = { antesDe, folhaContagem, custoAvulsa, codigoDoCadastro, fatoresSuspeitos, medidasDoTexto, medidaDiferente, medidasSuspeitas, produtoDoErroDeCusto, fatoresDaDescricao, custosSuspeitos, junta, valor, sequencia, lerContagem, atualFkn, ehCaixa, TIPOS, extrasDoXml, stDoDet, compraDoXml, devolucaoDoXml, custoItem, sugere, avisosDfe, sugereFornecedor, chegadaCompras, pareceDespesa,
     parcelasDaNota, dividirParcelas, conferirParcelas, parcelasMudaram, periodoPreset, PRESETS, periodoLinhas, periodoTotais, periodoPlanilha };
   raiz.CRMEstoque = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
@@ -502,6 +544,33 @@
   // Logística (21/10/2026, pedido do Anderson): contagem e ajuste, entrada da nota de compra e movimentos, SEM custo nem
   // valor da nota (custo só administrador, gestora e comprador). Lê pelas funções "…_op" do banco, que só trazem quantidades.
   const op = () => CRM.ehLogistica();
+  // Custo fora do normal ou medida trocada na entrada (10/11/2026, Anderson: "precisa resolver isso de uma vez por todas"; o
+  // galão de 5 L entrou no frasco de 1 L e a margem ficou negativa). Antes um OK deixava passar; agora só passa com o produto
+  // certo ou com o motivo escrito pelo comprador ou pelo administrador (gravado no banco, crm_compra_custo_ok). A logística
+  // não vê custo: o banco recusa e ela chama o comprador.
+  const podeConfirmarCusto = () => CRM.ehAdmin() || CRM.ehComprador();
+  function pedeMotivo(texto) {
+    let aviso = '';
+    for (;;) {
+      const m = raiz.prompt(texto + '\n\nSe estiver CERTO mesmo, escreva o motivo (fica gravado). Para voltar e corrigir o produto ou o "vem quantas", clique em Cancelar.' + aviso, '');
+      if (m == null) return null;
+      if (m.trim().length >= 10) return m.trim();
+      aviso = '\n\n⚠ Escreva o motivo com pelo menos 10 letras (ex.: "o fornecedor aumentou 40% em novembro").';
+    }
+  }
+  // Chama a gravação; se o banco recusar por custo fora do normal, pede o motivo e tenta de novo. Cancelou: devolve false.
+  async function comMotivoDeCusto(compraId, fn) {
+    for (let i = 0; i < 40; i++) {
+      try { return await fn(); } catch (e) {
+        const cod = S.produtoDoErroDeCusto(e && e.message);
+        if (!cod || !podeConfirmarCusto()) throw e;
+        const mot = pedeMotivo('O CRM não deixou dar entrada neste item:\n\n' + e.message);
+        if (!mot) return false;
+        await CRM.store().compraCustoConfirmar(compraId, [{ codigo: cod, motivo: mot }]);
+      }
+    }
+    throw new Error('muitos itens com custo fora do normal: confira a nota');
+  }
 
   async function carrega() {
     if (carregando) return;
@@ -1334,7 +1403,8 @@
               }
               if (!mud.length) return;
               if (!confirm('Corrigir a entrada de ' + mud.length + ' item(ns)?\n\n' + mud.map(z => '· ' + z.texto).join('\n') + '\n\nO que entrou errado é estornado (fica no livro) e a entrada vai para o produto certo.')) return false;
-              const r = await CRM.store().compraCorrigir(id, mud.map(z => ({ id: z.id, codigo: z.codigo, fator: z.fator })));
+              const r = await comMotivoDeCusto(id, () => CRM.store().compraCorrigir(id, mud.map(z => ({ id: z.id, codigo: z.codigo, fator: z.fator }))));
+              if (r === false) return false;
               CRM.toast('Entrada corrigida: ' + (r && r.corrigidos != null ? r.corrigidos : mud.length) + ' item(ns). A próxima nota deste fornecedor já vem com o produto certo.');
               compras = await CRM.store().compras(1000); saldo = null; carrega(); CRM.render();
               return;
@@ -1352,6 +1422,17 @@
             const susp = S.fatoresSuspeitos(itens, lista, unDe);
             if (susp.length && !confirm('Confira o "vem quantas na embalagem" de ' + susp.length + ' item(ns):\n\n' + susp.join('\n') +
               '\n\nSe a nota já vem na mesma unidade do estoque, o certo é 1. Dar entrada assim mesmo?')) return false;
+            // medida trocada (5 L da nota no produto de 1 L): só passa com o produto certo ou com o motivo escrito
+            const medidas = dv ? [] : S.medidasSuspeitas(itens, lista, nomeDe);
+            if (medidas.length) {
+              const texto = 'A medida não bate em ' + medidas.length + ' item(ns):\n\n' + medidas.map(z => '· ' + z.texto).join('\n') +
+                '\n\nParece produto errado: escolha o produto nosso com a mesma medida.';
+              if (!podeConfirmarCusto()) throw new Error(texto.replace(/\n+/g, ' ') + ' Se estiver certo, o comprador ou o administrador dá a entrada.');
+              const mot = pedeMotivo(texto);
+              if (!mot) return false;
+              await st.compraCustoConfirmar(id, medidas.map(z => ({ codigo: z.codigo, motivo: 'medida: ' + mot }))
+                .filter((z, i, a) => a.findIndex(y => y.codigo === z.codigo) === i));
+            }
             if (!dv && !op()) {
               const custoDe = new Map();
               (saldo || []).forEach(z => { if (Number(z.custo_medio) > 0) custoDe.set(z.codigo, Number(z.custo_medio)); });
@@ -1359,9 +1440,18 @@
               const caros = S.custosSuspeitos(itens, lista, custoDe, base.map(z => ({ codigo: z.codigo, descricao: z.descricao })));
               if (caros.length) {
                 const comSug = caros.filter(z => z.sugestao || z.produto);
-                if (!confirm('O custo de ' + caros.length + ' item(ns) ficou longe do custo atual:\n\n' + caros.map(z => '· ' + z.texto).join('\n') +
-                  '\n\nUm fardo ou caixa com várias unidades precisa do número certo em "vem quantas na embalagem", e cada item da nota precisa estar ligado ao mesmo produto nosso.' +
-                  (comSug.length ? '\n\nOK: usar o ' + (comSug.some(z => z.produto) ? 'produto' : 'número') + ' sugerido (' + comSug.length + ' item(ns)) e conferir de novo. Cancelar: voltar sem dar entrada.' : '\n\nOK: dar entrada assim mesmo (o preço mudou de verdade). Cancelar: voltar e corrigir.'))) return false;
+                const texto = 'O custo de ' + caros.length + ' item(ns) ficou longe do custo atual:\n\n' + caros.map(z => '· ' + z.texto).join('\n') +
+                  '\n\nUm fardo ou caixa com várias unidades precisa do número certo em "vem quantas na embalagem", e cada item da nota precisa estar ligado ao mesmo produto nosso.';
+                if (comSug.length && !confirm(texto + '\n\nOK: usar o ' + (comSug.some(z => z.produto) ? 'produto' : 'número') + ' sugerido (' + comSug.length + ' item(ns)) e conferir de novo. Cancelar: voltar sem dar entrada.')) return false;
+                if (!comSug.length) {
+                  // sem sugestão: só entra com o motivo escrito (o banco confere de novo e guarda o motivo)
+                  const mot = pedeMotivo(texto);
+                  if (!mot) return false;
+                  await st.compraCustoConfirmar(id, caros.map(z => {
+                    const x = lista.find(l => l.id === z.id);
+                    return { codigo: x.codigo, motivo: mot };
+                  }).filter((z, i, a) => a.findIndex(y => y.codigo === z.codigo) === i));
+                }
                 if (comSug.length) {
                   comSug.forEach(z => {
                     const e = form.elements[(z.produto ? 'c_' : 'f_') + z.id];
@@ -1378,7 +1468,8 @@
             if (trocados.length && !confirm('Acertei o zero da frente: ' + trocados.join(', ') + '.\n\nDar entrada assim?')) return false;
             const parcelas = parcelasParaGravar(lerParcelas, c);
             if (parcelas === false) return false;
-            const r = await st.compraLancar(id, lista, parcelas || null);
+            const r = await comMotivoDeCusto(id, () => st.compraLancar(id, lista, parcelas || null));
+            if (r === false) return false;
             const e = r.devolucao;
             CRM.toast('Entrada dada: ' + r.itens + ' item(ns) no estoque' + (r.ignorados ? ', ' + r.ignorados + ' fora do estoque' : '') + '.' + textoParcelas(r) +
               (e ? (e.sem_nota ? ' A nota não diz qual venda: abata os títulos do cliente à mão.' : ' Abatido dos títulos da venda NF ' + e.venda + ': ' + R.moeda(e.abatido) + '.' +
@@ -1504,7 +1595,8 @@
               '\n\nSoma: ' + R.moeda(t) + '. Faltou algum item? Clique em Cancelar e complete antes.')) return false;
             const parcelas = parcelasParaGravar(lerParcelas, c);
             if (parcelas === false) return false;
-            const r = await st.compraLancarManual(id, linhas, v.motivo || '', parcelas || null);
+            const r = await comMotivoDeCusto(id, () => st.compraLancarManual(id, linhas, v.motivo || '', parcelas || null));
+            if (r === false) return false;
             CRM.toast('Entrada dada à mão: ' + r.itens + ' produto(s) no estoque (' + R.moeda(r.soma) + ').' + textoParcelas(r));
             saldo = null; carrega();
           }
@@ -1563,7 +1655,7 @@
         intro: 'Para compra de balcão: entra no estoque pelo valor pago. Compra de fornecedor com nota entra pela nota de compra.',
         campos: [{ nome: 'codigo', rotulo: 'Produto (código)', obrigatorio: true, dica: 'comece a digitar o código ou o nome' },
           { nome: 'quantidade', rotulo: 'Quantidade que entrou (na unidade do estoque)', tipo: 'numero', passo: '0.001', obrigatorio: true },
-          { nome: 'total', rotulo: 'Valor pago (total)', tipo: 'numero', obrigatorio: true },
+          { nome: 'total', rotulo: 'Valor pago — o TOTAL (quantidade × preço de cada um)', tipo: 'numero', obrigatorio: true },
           { nome: 'comprado_em', rotulo: 'Comprado em', tipo: 'data', obrigatorio: true },
           { nome: 'onde', rotulo: 'Onde comprou', obrigatorio: true, dica: 'ex.: Atacadão SBC, padaria da esquina' },
           { nome: 'motivo', rotulo: 'Por quê', obrigatorio: true, dica: 'ex.: faltou para o pedido 123 da Escola X' }]
@@ -1587,12 +1679,23 @@
           if (!certo) throw new Error('o código ' + cod + ' não está no cadastro de produtos');
           const cu = S.custoAvulsa(v.quantidade, v.total);
           if (!cu) throw new Error('diga a quantidade e o valor pago');
+          // 10/11/2026: na Santa Casa o custo de UMA unidade foi digitado no "Valor pago (total)" e o pano de R$ 79 entrou a
+          // R$ 0,73. Custo muito longe do atual só passa com o motivo, que vai junto do "Por quê".
+          let motivoAv = v.motivo;
+          const sal = (saldo || []).find(z => z.codigo === certo), cad0 = base.find(z => z.codigo === certo);
+          const ref = sal && Number(sal.custo_medio) > 0 ? Number(sal.custo_medio) : cad0 && Number(cad0.custo_compra) > 0 ? Number(cad0.custo_compra) : 0;
+          if (ref > 0 && (cu / ref > 1.8 || cu / ref < 0.55)) {
+            const mot = pedeMotivo('Fica ' + R.moeda(cu) + ' cada (' + R.moeda(Number(String(v.total).replace(',', '.')) || 0) + ' ÷ ' + qtd(v.quantidade) + '), e o custo atual de ' + (nomeDe.get(certo) || certo) + ' é ' + R.moeda(ref) + '.\n\n' +
+              'Lembre: "Valor pago" é o TOTAL pago (quantidade × preço de cada um), não o preço de um.');
+            if (!mot) return false;
+            motivoAv = v.motivo + ' · custo conferido: ' + mot;
+          }
           const arq = form.querySelector('input[name="comprovante"]').files[0];
           if (arq && arq.size > 10 * 1024 * 1024) throw new Error('o comprovante passa de 10 MB');
           if (!arq && !confirm('Dar entrada sem o comprovante? (o contador vai pedir)')) return false;
           const st = CRM.store();
           const comprovante = arq ? await st.comprovanteEnviar(arq, CRM.hoje()) : null;
-          const r = await st.estoqueAvulsa({ codigo: certo, quantidade: v.quantidade, custo_unit: cu, comprado_em: v.comprado_em, onde: v.onde, motivo: v.motivo,
+          const r = await st.estoqueAvulsa({ codigo: certo, quantidade: v.quantidade, custo_unit: cu, comprado_em: v.comprado_em, onde: v.onde, motivo: motivoAv,
             comprovante, caixa: !!v.caixa, pago: !!v.pago });
           CRM.toast('Entrada avulsa: ' + qtd(v.quantidade) + ' de ' + (nomeDe.get(certo) || certo) + ' (' + R.moeda(r.valor) + ')' + (r.caixa ? ', lançada no Caixa' : '') + '.');
           avulsas = null; saldo = null; carrega();

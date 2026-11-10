@@ -310,3 +310,26 @@ test('folha de contagem: todos os produtos ou uma linha só (04/11/2026)', () =>
   const r = S.lerContagem('Código;Contado;Descrição;Unidade;Saldo no CRM;Linha\n370051;38;SACO LIXO 100L;PCT;40;SACOS P/ LIXO\n370052;;SACO LIXO 60L;PCT;0;SACOS P/ LIXO');
   assert.deepEqual(r.lote, [{ codigo: '370051', contado: 38 }]);
 });
+
+test('medida da nota × medida do produto (10/11/2026: galão de 5 L entrou no frasco de 1 L)', () => {
+  assert.equal(S.medidaDiferente('AGUA SANIT SUPER CANDIDA 5l', 'AGUA SANITARIA 1 LT SUPER CANDIDA'), 'a nota diz 5 L e o produto é 1 L');
+  assert.equal(S.medidaDiferente('LIMP COALA PERF 120ml, LAVANDA', 'LIMP. PERF. 5LTS LAVANDA'), 'a nota diz 120 ml e o produto é 5 L');
+  assert.equal(S.medidaDiferente('SACO 100 LT PRETO', 'SACO P/ LIXO 40 LTS PTO C/100'), 'a nota diz 100 L e o produto é 40 L');
+  // bate: mesma medida escrita de outro jeito, ou uma das descrições sem medida
+  assert.equal(S.medidaDiferente('ALCOOL GEL 70 12X500G', 'ALCOOL 46 GEL 500 GR'), null);
+  assert.equal(S.medidaDiferente('Odorizador aerossol 400ml/180g', 'ODORIZADOR 400 ML'), null);
+  assert.equal(S.medidaDiferente('GARRAFA 1,8LT', 'GARRAFA SLIM 1,8LT INOX'), null);
+  assert.equal(S.medidaDiferente('PANO MICROFIBRA 30X30', 'PANO MICROFIBRA 40X60'), null);
+  const l = S.medidasSuspeitas([{ id: 'i1', descricao: 'AGUA SANIT 5l' }, { id: 'i2', descricao: 'DETERGENTE 500ML' }],
+    [{ id: 'i1', codigo: 'A1' }, { id: 'i2', codigo: 'D5', ignorar: true }], new Map([['A1', 'AGUA SANITARIA 1 LT'], ['D5', 'DETERGENTE 5 L']]));
+  assert.equal(l.length, 1);
+  assert.equal(l[0].codigo, 'A1');
+});
+
+test('recusa do banco por custo fora do normal: o produto para pedir o motivo', () => {
+  const msg = 'item 1 (AGUA SANIT 5l): R$ 11,69 cada no produto 010085, e o custo atual é R$ 3,39 (3,4 vezes). Parece produto errado ou "vem quantas na embalagem" errado. Corrija; se o preço mudou de verdade, escreva o motivo na tela da entrada.';
+  assert.equal(S.produtoDoErroDeCusto(msg), '010085');
+  assert.equal(S.produtoDoErroDeCusto('outro erro qualquer'), null);
+  // a mensagem para a logística não pede motivo (ela chama o comprador)
+  assert.equal(S.produtoDoErroDeCusto('item 1 (X): o custo ficou muito longe do custo do produto 010085 — parece produto errado'), null);
+});
