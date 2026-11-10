@@ -199,6 +199,8 @@
   // a entrada do empréstimo, a devolução e as parcelas dele. Na grade ganham a cor azul.
   // Transferência entre empresas (a OneClean empresta à Agilité ou o contrário, com a volta prevista) também.
   const ehEmprestimoLanc = l => !!l.emprestimo || /^(?:Devolução do empréstimo|Empréstimo —)/.test(l.descricao || '') || l.categoria === 'Transferência entre empresas';
+  // o vencimento original da conta em aberto que foi remarcada para depois dele ('' quando não foi)
+  const contaVenceu = l => (l && l.situacao === 'aberto' && l.vencimento_original && l.vencimento_original < l.vencimento ? l.vencimento_original : '');
   function itensGrade(de, ate, hoje, lancs, titulos, opc) {
     opc = opc || {};
     const it = [];
@@ -219,7 +221,12 @@
       }
       const pg = posterga(l.vencimento);
       if (pg < hoje) return;
-      add(Object.assign(base, { data: pg, estado: 'previsto', obs: pg !== l.vencimento ? 'vence ' + dm(l.vencimento) + ', ' + porqueNaoUtil(l.vencimento) + ' → ' + (secao === 'entrada' ? 'entra' : 'paga') + ' no próximo dia útil' : '' }));
+      // 10/11/2026 (Anderson: "eram vencimento hoje e eu joguei para amanhã. Só que não foi como vencido. Tem que ir como
+      // vencido"): a conta empurrada depois de vencer guarda o vencimento original (gatilho no banco) e segue vencida no dia novo
+      const venceu = contaVenceu(l);
+      add(Object.assign(base, { data: pg, estado: 'previsto', vencida: !!venceu, venceu: venceu || null,
+        obs: (venceu ? 'vencida: venceu ' + dm(venceu) + ', remarcada para ' + dm(l.vencimento) : '') +
+          (pg !== l.vencimento ? (venceu ? ' · ' : '') + 'vence ' + dm(l.vencimento) + ', ' + porqueNaoUtil(l.vencimento) + ' → ' + (secao === 'entrada' ? 'entra' : 'paga') + ' no próximo dia útil' : '') }));
     });
     (titulos || []).forEach(t => {
       if (recebidos.has(t.duplicata)) return;
@@ -367,7 +374,7 @@
           return { tipo: 'entrada', descricao: 'Título ' + t.duplicata + ' — ' + nome + (lig ? ' · ' + limpar(lig.descricao) : '') + (x.atrasado ? ' (em atraso, remarcado)' : x.adiantado ? ' (adiantado pelo cliente)' : ''), valor: r2(x.valor), situacao: 'previsto',
             categoria: lig && lig.categoria ? lig.categoria : 'Duplicatas recebidas', cliente_fornecedor: nome, entre_empresas: ENTRE_EMPRESAS.test(nome) || !!(lig && ehEntreEmpresas(lig)), _ag: false };
         }
-        return doLanc(x.ref, x.valor, x.estado === 'previsto' ? 'previsto' : 'aconteceu', Object.assign(x.estado === 'fora' ? { pago_fora: true } : {}, x.adiantado ? { adiantado: true } : {}));
+        return doLanc(x.ref, x.valor, x.estado === 'previsto' ? 'previsto' : 'aconteceu', Object.assign(x.estado === 'fora' ? { pago_fora: true } : {}, x.adiantado ? { adiantado: true } : {}, x.vencida ? { vencida: true, venceu_em: x.venceu } : {}));
       });
       return { data: dia, dia_util: util(dia), sem_banco: util(dia) ? null : porqueNaoUtil(dia), entradas: conta('entrada'), saidas: conta('saida'),
         saldo_fim_do_dia: saldos[dia] == null ? null : r2(saldos[dia]),
@@ -428,7 +435,7 @@
   }
 
   const O = { cronogramaPrice, taxaPorNewton, resumoLeitura, limpar, ligacoesTitulos, ligadasPorTitulo, recebidosDe, feriados, feriado, util, posterga, utilDepois, porqueNaoUtil, creditoTitulo, pascoa, diaDoMes, gerarMes, ancora, saldoAtual,
-    itensGrade, saldosGrade, vencidas, receberVencido, baixadosPendentes, CATEGORIAS_SAIDA, CATEGORIAS_ENTRADA, ENTRE_EMPRESAS, soma };
+    itensGrade, contaVenceu, saldosGrade, vencidas, receberVencido, baixadosPendentes, CATEGORIAS_SAIDA, CATEGORIAS_ENTRADA, ENTRE_EMPRESAS, soma };
   raiz.CRMCaixa = O;
   if (typeof module !== 'undefined') module.exports = O;
 

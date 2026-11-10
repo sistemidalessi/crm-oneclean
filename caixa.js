@@ -9,7 +9,7 @@
   'use strict';
   const R = raiz.CRMRegras;
   const C = raiz.CRMCaixa;
-  const { feriado, posterga, porqueNaoUtil, creditoTitulo, gerarMes, saldoAtual, itensGrade, saldosGrade, vencidas, receberVencido, baixadosPendentes, ancora, ligacoesTitulos, ligadasPorTitulo,
+  const { feriado, posterga, porqueNaoUtil, creditoTitulo, gerarMes, saldoAtual, itensGrade, contaVenceu, saldosGrade, vencidas, receberVencido, baixadosPendentes, ancora, ligacoesTitulos, ligadasPorTitulo,
     CATEGORIAS_SAIDA, CATEGORIAS_ENTRADA, ENTRE_EMPRESAS } = C;
   const r2 = v => Math.round(Number(v || 0) * 100) / 100;
   // etiqueta do reembolso à Agilité (benefícios, salários…): a regra mora em frases.js
@@ -328,7 +328,8 @@
     const aberto = l.situacao === 'aberto';
     CRM.abrirForm({
       titulo: l.descricao,
-      intro: [l.tipo === 'entrada' ? 'Entrada' : 'Saída', R.moeda(l.valor), (aberto ? 'vence ' : 'pago em ') + R.dataBR(aberto ? l.vencimento : l.pago_em),
+      intro: [l.tipo === 'entrada' ? 'Entrada' : 'Saída', R.moeda(l.valor), contaVenceu(l) ? 'VENCIDA: venceu ' + R.dataBR(contaVenceu(l)) + ', remarcada para ' + R.dataBR(l.vencimento)
+          : (aberto ? 'vence ' : 'pago em ') + R.dataBR(aberto ? l.vencimento : l.pago_em),
         l.categoria, etqReemb(l), l.entre_empresas ? 'entre empresas' : '', l.situacao === 'pago' && l.baixa === 'fora' ? 'pago fora do caixa do dia' : ''].filter(Boolean).join(' · ') +
         (l.frase ? '\nLançado pela frase: "' + l.frase + '"' : ''),
       campos: aberto ? [{ nome: 'valor', rotulo: 'Valor (R$)', tipo: 'numero', ajuda: 'a fatura chegou com outro valor?' }, { nome: 'vencimento', rotulo: 'Novo dia', tipo: 'data' }] : [],
@@ -689,6 +690,7 @@
     if (l.situacao === 'pausado') return selo('pausada', 'cinza');
     if (l.situacao === 'pago') return selo(l.tipo === 'entrada' ? 'recebida' : 'paga', 'verde');
     if (l.titulo_duplicata) return selo('no título ' + l.titulo_duplicata, 'azul');
+    if (contaVenceu(l)) return selo('vencida em ' + dm(contaVenceu(l)), 'vermelho');   // remarcada depois de vencer: continua vencida
     return posterga(l.vencimento) < h ? selo('vencida', 'vermelho') : selo('em aberto', 'azul');
   }
   function cartao(x, dia) {
@@ -697,9 +699,9 @@
     // conta prevista e título (arrastar o título = remarcar: o cliente vai pagar em outro dia)
     const arrasta = x.estado === 'previsto' ? ' draggable="true" data-mover="' + esc(x.tipo === 'lanc' ? x.ref.id : 'tit:' + x.ref.duplicata) + '"' : '';
     const k = x.chave + '|' + dia;
-    return '<div class="cx-it ' + (x.secao === 'entrada' ? 'cx-ent' : 'cx-sai') + ' ' + x.estado + (naGrade.has(k) ? ' cx-sel' : '') + (x.atrasado ? ' atrasado' : '') + (x.adiantado ? ' adiantado' : '') + (x.emprestimo ? ' emprestimo' : '') + (ok ? ' comok' : '') + '"' + arrasta + '>' + ok +
+    return '<div class="cx-it ' + (x.secao === 'entrada' ? 'cx-ent' : 'cx-sai') + ' ' + x.estado + (naGrade.has(k) ? ' cx-sel' : '') + (x.atrasado || x.vencida ? ' atrasado' : '') + (x.adiantado ? ' adiantado' : '') + (x.emprestimo ? ' emprestimo' : '') + (ok ? ' comok' : '') + '"' + arrasta + '>' + ok +
       '<button type="button" class="cx-corpo" data-acao="cx-item" data-id="' + esc(x.chave) + '" data-dia="' + esc(dia) + '" data-k="' + esc(k) + '" data-valor="' + Number(x.valor || 0) + '" data-secao="' + esc(x.secao) + '" title="' + esc(x.titulo + (x.obs ? ' — ' + x.obs : '') + ' (Ctrl+clique soma)') + '">' +
-      '<span class="t">' + (x.semSaldo ? '<span class="cx-atr">⚠ em atraso</span> ' : '') + (x.adiantado ? '<span class="cx-adi">⏩ adiantado</span> ' : '') + (x.emprestimo ? '<span class="cx-etq-emp">🔁 ' + (x.ref && x.ref.categoria === 'Transferência entre empresas' ? 'entre empresas' : x.secao === 'entrada' ? 'empréstimo' : 'devolução') + '</span> ' : '') + (x.tipo === 'lanc' && etqReemb(x.ref) ? '<span class="cx-etq-reemb">↩ reembolso · ' + esc(etqReemb(x.ref)) + '</span> ' : '') + (x.ref && x.ref.anexos && x.ref.anexos.length ? '📎 ' : '') + esc(x.titulo) + '</span>' + (x.obs ? '<span class="o">' + esc(x.obs) + '</span>' : '') + '<span class="v">' + esc(R.moeda(x.valor)) + '</span></button></div>';
+      '<span class="t">' + (x.semSaldo ? '<span class="cx-atr">⚠ em atraso</span> ' : '') + (x.vencida ? '<span class="cx-atr">⚠ venceu ' + esc(dm(x.venceu)) + '</span> ' : '') + (x.adiantado ? '<span class="cx-adi">⏩ adiantado</span> ' : '') + (x.emprestimo ? '<span class="cx-etq-emp">🔁 ' + (x.ref && x.ref.categoria === 'Transferência entre empresas' ? 'entre empresas' : x.secao === 'entrada' ? 'empréstimo' : 'devolução') + '</span> ' : '') + (x.tipo === 'lanc' && etqReemb(x.ref) ? '<span class="cx-etq-reemb">↩ reembolso · ' + esc(etqReemb(x.ref)) + '</span> ' : '') + (x.ref && x.ref.anexos && x.ref.anexos.length ? '📎 ' : '') + esc(x.titulo) + '</span>' + (x.obs ? '<span class="o">' + esc(x.obs) + '</span>' : '') + '<span class="v">' + esc(R.moeda(x.valor)) + '</span></button></div>';
   }
   function grade(s) {
     const h = hoje();
@@ -1042,7 +1044,7 @@
           const id = arrastando || ev.dataTransfer.getData('text/plain'); arrastando = null;
           if (id.indexOf('tit:') === 0) { remarcarTitulo(id.slice(4), td.dataset.dia).catch(e => CRM.toast(e.message, true)); return; }
           const l = lanc(id);
-          if (l && l.vencimento !== td.dataset.dia) grava(l.id, { vencimento: td.dataset.dia }).then(() => CRM.toast('Movida para ' + dm(td.dataset.dia) + '.')).catch(CRM.falhou);
+          if (l && l.vencimento !== td.dataset.dia) grava(l.id, { vencimento: td.dataset.dia }).then(r => CRM.toast('Movida para ' + dm(td.dataset.dia) + (contaVenceu(r) ? ' (continua vencida: venceu ' + dm(contaVenceu(r)) + ').' : '.'))).catch(CRM.falhou);
         });
       });
     }

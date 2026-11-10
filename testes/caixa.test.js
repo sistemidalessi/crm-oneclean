@@ -426,3 +426,29 @@ test('parcela de nota de compra sem conta a pagar: função no banco, quadro no 
   assert.match(dd, /rpc\('crm_fin_parcelas_sem_conta'\)/);
   assert.match(dd, /rpc\('crm_fin_parcela_vista', \{ p_compra: compra, p_n: n \}\)/);
 });
+
+// 10/11/2026 (Anderson: "eram vencimento hoje e eu joguei para amanhã. Só que não foi como vencido. Tem que ir como vencido")
+test('conta remarcada depois de vencer continua vencida no dia novo', () => {
+  const K = require('../caixa-calculo.js'), fs = require('fs'), path = require('path'), raiz = path.join(__dirname, '..');
+  const conta = { id: 'c1', tipo: 'saida', descricao: 'Cartão', valor: 900, situacao: 'aberto', vencimento: '2026-11-11', vencimento_original: '2026-11-10' };
+  const normal = { id: 'c2', tipo: 'saida', descricao: 'Luz', valor: 100, situacao: 'aberto', vencimento: '2026-11-11' };
+  assert.equal(K.contaVenceu(conta), '2026-11-10');
+  assert.equal(K.contaVenceu(normal), '');
+  // paga, ou com o original igual/depois do vencimento, não é "vencida"
+  assert.equal(K.contaVenceu(Object.assign({}, conta, { situacao: 'pago' })), '');
+  assert.equal(K.contaVenceu(Object.assign({}, conta, { vencimento_original: '2026-11-11' })), '');
+  const it = K.itensGrade('2026-11-10', '2026-11-14', '2026-11-10', [conta, normal], [], {});
+  const a = it.find(x => x.ref.id === 'c1'), b = it.find(x => x.ref.id === 'c2');
+  assert.deepEqual([a.data, a.estado, a.vencida, a.venceu], ['2026-11-11', 'previsto', true, '2026-11-10']);
+  assert.match(a.obs, /vencida: venceu 10\/11, remarcada para 11\/11/);
+  assert.equal(b.vencida, false);
+  // o banco guarda o original só quando a conta que vence hoje ou já venceu vai para a frente; voltar limpa
+  const sql = fs.readFileSync(path.join(raiz, 'supabase/schema.sql'), 'utf8'), cx = fs.readFileSync(path.join(raiz, 'caixa.js'), 'utf8');
+  assert.match(sql, /new\.vencimento > old\.vencimento and coalesce\(old\.vencimento_original, old\.vencimento\) <= hoje/);
+  assert.match(sql, /new\.vencimento <= new\.vencimento_original then\s+new\.vencimento_original := null/);
+  assert.match(sql, /create trigger crm_fin_lanc_guarda_vencimento before update on public\.crm_fin_lancamentos/);
+  assert.match(cx, /x\.atrasado \|\| x\.vencida \? ' atrasado' : ''/);
+  assert.match(cx, /⚠ venceu ' \+ esc\(dm\(x\.venceu\)\)/);
+  assert.match(cx, /selo\('vencida em ' \+ dm\(contaVenceu\(l\)\), 'vermelho'\)/);
+  assert.match(fs.readFileSync(path.join(raiz, 'supabase/functions/crm-caixa-leitura/index.ts'), 'utf8'), /vencimento, vencimento_original, situacao/);
+});

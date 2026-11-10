@@ -12577,3 +12577,30 @@ end;
 $$;
 revoke all on function public.crm_fin_parcela_vista(uuid, integer) from public, anon;
 grant execute on function public.crm_fin_parcela_vista(uuid, integer) to authenticated;
+
+-- Conta remarcada depois de vencer continua vencida (10/11/2026, Anderson: "eram vencimento hoje e eu joguei para amanhã.
+-- Só que não foi como vencido. Tem que ir como vencido"). Arrastar a conta na grade trocava o vencimento e a data original
+-- se perdia. A conta que vence hoje ou já venceu, quando é empurrada para a frente, guarda o vencimento original; a tela
+-- mostra em vermelho "venceu dd/mm" no dia novo. Voltar a conta para o dia original (ou antes) limpa.
+alter table public.crm_fin_lancamentos add column if not exists vencimento_original date;
+
+create or replace function public.crm_fin_lanc_guarda_vencimento() returns trigger
+language plpgsql set search_path = public as $$
+declare hoje date := (now() at time zone 'America/Sao_Paulo')::date;
+begin
+  if new.situacao = 'aberto' and old.situacao = 'aberto' and new.vencimento is distinct from old.vencimento
+     and new.vencimento_original is not distinct from old.vencimento_original then
+    if new.vencimento > old.vencimento and coalesce(old.vencimento_original, old.vencimento) <= hoje then
+      new.vencimento_original := coalesce(old.vencimento_original, old.vencimento);
+    end if;
+    if new.vencimento_original is not null and new.vencimento <= new.vencimento_original then
+      new.vencimento_original := null;
+    end if;
+  end if;
+  return new;
+end;
+$$;
+revoke all on function public.crm_fin_lanc_guarda_vencimento() from public, anon, authenticated;
+drop trigger if exists crm_fin_lanc_guarda_vencimento on public.crm_fin_lancamentos;
+create trigger crm_fin_lanc_guarda_vencimento before update on public.crm_fin_lancamentos
+  for each row execute function public.crm_fin_lanc_guarda_vencimento();
