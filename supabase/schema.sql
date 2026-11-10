@@ -8001,6 +8001,8 @@ begin
      where b.uf = 'SP' and b.cidade = any(cidades)
        and (not coalesce((cfg->>'sem_mei')::boolean, true) or not b.mei)
        and (not coalesce((cfg->>'so_com_contato')::boolean, true) or b.tel1 is not null or b.email is not null)
+       -- Saúde só de pequeno porte para cima (10/11/2026: microempresa de saúde é consultório de um profissional só)
+       and not (coalesce((cfg->>'saude_sem_me')::boolean, true) and sg.segmento = 'Saúde' and (b.porte = 'ME' or (b.porte = 'Demais' and b.capital > 0 and b.capital < 50000)))
        and b.basico not in (select basico from _jbas)
        and not exists (select 1 from public.crm_prospec_sugestoes x where x.cnpj = b.cnpj and (x.situacao in ('nova', 'amanha', 'lead')
              or (x.situacao = 'descartada' and x.tratado_em > now() - make_interval(months => desc_meses))
@@ -8012,7 +8014,13 @@ begin
   -- pontos de base: perto de quem já recebe, aberta há pouco, com e-mail, matriz; um pouco de sorte para variar
   alter table _cand add column base numeric;
   update _cand set base = (case when viz > 0 then 3 + least(viz, 6) * 0.5 else 0 end) + (case when recente then 2 else 0 end)
-    + (case when email is not null then 1 else 0 end) + (case when matriz then 0.5 else 0 end) + random() * 1.5;
+    + (case when email is not null then 1 else 0 end) + (case when matriz then 0.5 else 0 end)
+    -- ponto pelo porte (10/11/2026): pequeno porte e maiores sobem, microempresa de capital baixo desce; condomínio não tem
+    -- porte e fica junto dos que sobem (senão some da lista)
+    + (case when not coalesce((cfg->>'porte_pontos')::boolean, true) then 0
+            when seg = 'Condomínio' or porte = 'EPP' then 2
+            when porte = 'Demais' then case when coalesce(capital, 0) = 0 or capital >= 50000 then 2 else 0 end
+            when coalesce(capital, 0) < 10000 then -2 when capital >= 50000 then 1 else 0 end) + random() * 1.5;
   create temp table _pool on commit drop as select * from _cand order by base desc limit 4000;
   alter table _pool add column escolhido boolean not null default false;
 
@@ -8025,7 +8033,7 @@ begin
   for r in 1..n loop
     foreach v in array vends loop
       select p.cnpj, p.seg, p.base + coalesce(vs.fatia, 0) * 4 + case when vc.cep5 is not null then 2 else 0 end pts,
-             p.viz, p.recente, p.abertura, p.bairro, p.cnae
+             p.viz, p.recente, p.abertura, p.bairro, p.cnae, p.porte, p.capital
         into k
         from _pool p
         left join _vs vs on vs.dono = v and vs.segmento = p.seg
@@ -8040,6 +8048,8 @@ begin
         case when k.viz > 0 then k.viz || case when k.viz = 1 then ' cliente já recebe' else ' clientes já recebem' end || ' perto daqui' || coalesce(' (' || initcap(lower(k.bairro)) || ')', '') end,
         case when k.recente then 'Aberta há ' || case when (v_dia - k.abertura) < 60 then (v_dia - k.abertura) || ' dias'
              when (v_dia - k.abertura) < 730 then ((v_dia - k.abertura) / 30) || ' meses' else ((v_dia - k.abertura) / 365) || ' anos' end end,
+        case when k.seg <> 'Condomínio' and k.porte = 'EPP' then 'Empresa de pequeno porte (maior que microempresa)'
+             when k.seg <> 'Condomínio' and k.porte = 'Demais' and k.capital >= 50000 then 'Empresa de médio ou grande porte' end,
         (select d.descricao from public.crm_prospec_cnae d where d.codigo = k.cnae)
       ], null));
       total := total + 1;
@@ -11405,7 +11415,7 @@ declare
   dow int := extract(dow from now() at time zone 'America/Sao_Paulo')::int;
   util boolean;
   cfg jsonb;
-  r record; n int; v numeric; t text; ts timestamptz; lst text;
+  r record; n int; n2 int; n3 int; v numeric; t text; ts timestamptz; lst text;
   chaves text[]; novos int := 0; resolvidos int := 0; antes record;
   F constant text := 'Fiscal dos agentes';
 begin
@@ -11487,14 +11497,39 @@ begin
     if n > 0 then
       achados := achados || crm_interno.fiscal_p('nfe:fora-do-crm', 'NF-e', 'grave', n || ' NF-e autorizada(s) que não entraram nas notas do CRM (estoque, título e comissão ficam faltando): ' || lst || '.', 'Me chamar: a gravação depois da autorização falhou.');
     end if;
+    -- sem e-mail por falta de cadastro (ou ainda esperando o boleto); o envio RECUSADO vai na conferência 3b, grave (10/11/2026)
     select count(*), string_agg(numero::text, ', ' order by numero) into n, lst from public.crm_nfe
       where ambiente = 'producao' and situacao = 'autorizada' and coalesce(email_ok, false) = false
+        and (email_erro is null or email_erro ilike 'cliente sem e-mail%')
         and autorizada_em < now() - interval '3 hours' and autorizada_em > now() - interval '10 days';
     if n > 0 then
-      achados := achados || crm_interno.fiscal_p('nfe:sem-email', 'NF-e', 'atencao', n || ' NF-e sem o e-mail ao cliente (cliente sem e-mail no cadastro ou envio com erro): ' || lst || '.', 'Pôr o "E-mail para a nota fiscal" no cadastro do cliente: o envio sai sozinho em até 15 min.');
+      achados := achados || crm_interno.fiscal_p('nfe:sem-email', 'NF-e', 'atencao', n || ' NF-e sem o e-mail ao cliente porque o cadastro não tem e-mail: ' || lst || '.', 'Pôr o "E-mail para a nota fiscal" no cadastro do cliente: o envio sai sozinho em até 15 min.');
     end if;
   exception when others then
     achados := achados || crm_interno.fiscal_p('conferencia:nfe', 'NF-e', 'atencao', 'O fiscal não conseguiu conferir as NF-e (' || left(sqlerrm, 120) || ').', 'Me chamar: a conferência quebrou.');
+  end;
+
+  -- 3b. serviço de e-mail (Brevo) recusando os envios (10/11/2026: a conta ficou bloqueada de 06 a 10/11 e o aviso saiu
+  --     misturado com "cliente sem e-mail no cadastro", como atenção): NF-e, cobrança do dia, cadência e XML ao contador
+  begin
+    select count(*), string_agg(numero::text, ', ' order by numero), min(autorizada_em), max(left(email_erro, 150)) into n, lst, ts, t from public.crm_nfe
+      where ambiente = 'producao' and situacao = 'autorizada' and coalesce(email_ok, false) = false
+        and email_erro is not null and email_erro not ilike 'cliente sem e-mail%' and autorizada_em > now() - interval '10 days';
+    select count(*) into n2 from public.crm_cobranca_rodadas cr,
+           lateral jsonb_array_elements(coalesce(cr.dados -> 'boletos', '[]'::jsonb) || coalesce(cr.dados -> 'avisos', '[]'::jsonb)) x
+      where cr.dia = hoje and (x ->> 'erro') ilike '%e-mail%' and (x ->> 'erro') not ilike '%sem e-mail%';
+    select (select case when count(*) >= 3 then count(*) else 0 end from public.crm_email_envios e where e.situacao = 'erro' and e.criado_em > now() - interval '3 days')
+         + (select count(*) from public.crm_contador_envios c where not c.ok and c.enviado_em > now() - interval '5 days'
+              and not exists (select 1 from public.crm_contador_envios o where o.mes = c.mes and o.ok and o.enviado_em > c.enviado_em)) into n3;
+    if n >= 2 or n2 > 0 or n3 > 0 then
+      achados := achados || crm_interno.fiscal_p('email:recusado', 'E-mail', 'grave',
+        'O serviço de e-mail (Brevo) está recusando os envios' || coalesce(' desde ' || to_char(ts at time zone 'America/Sao_Paulo', 'DD/MM'), '') || ': '
+        || n || ' NF-e sem o e-mail ao cliente' || coalesce(' (' || lst || ')', '') || ', ' || n2 || ' cobrança(s) de hoje e ' || n3 || ' outro(s) envio(s) que não saíram.'
+        || coalesce(' Resposta: ' || t, ''),
+        'Entrar no Brevo (app.brevo.com) e ver o aviso da conta (bloqueada ou em análise) ou falar com o suporte deles. Quando voltar, o e-mail das notas sai sozinho em até 15 min.');
+    end if;
+  exception when others then
+    achados := achados || crm_interno.fiscal_p('conferencia:email', 'E-mail', 'atencao', 'O fiscal não conseguiu conferir o serviço de e-mail (' || left(sqlerrm, 120) || ').', 'Me chamar: a conferência quebrou.');
   end;
 
   -- 4. DF-e (notas de compra pela Sefaz): sem leitura, ou a Sefaz recusando
