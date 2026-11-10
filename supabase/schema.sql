@@ -10778,7 +10778,7 @@ begin
       if emp is not null then
         sug := sug || coalesce((select jsonb_agg(jsonb_build_object('tipo', 'titulo', 'duplicata', t.duplicata, 'valor', t.valor, 'vencimento', t.vencimento, 'cliente', t.cliente_nome))
           from public.crm_titulos t where t.empresa_id = emp and not t.abono), '[]'::jsonb);
-        sug := sug || jsonb_build_array(jsonb_build_object('tipo', 'cliente', 'empresa_id', emp, 'nome', (select nome from public.crm_empresas where id = emp)));
+        sug := sug || jsonb_build_array(jsonb_build_object('tipo', 'cliente', 'empresa_id', emp, 'nome', (select ce.nome from public.crm_empresas ce where ce.id = emp)));
       end if;
     end if;
     update public.crm_fin_extrato set sugestoes = case when jsonb_array_length(sug) > 0 then sug end where id = x.id;
@@ -10994,7 +10994,7 @@ begin
       if emp is not null then
         sug := sug || coalesce((select jsonb_agg(jsonb_build_object('tipo', 'titulo', 'duplicata', t.duplicata, 'valor', t.valor, 'vencimento', t.vencimento, 'cliente', t.cliente_nome))
           from public.crm_titulos t where t.empresa_id = emp and not t.abono), '[]'::jsonb);
-        sug := sug || jsonb_build_array(jsonb_build_object('tipo', 'cliente', 'empresa_id', emp, 'nome', (select nome from public.crm_empresas where id = emp)));
+        sug := sug || jsonb_build_array(jsonb_build_object('tipo', 'cliente', 'empresa_id', emp, 'nome', (select ce.nome from public.crm_empresas ce where ce.id = emp)));
       end if;
     end if;
     update public.crm_fin_extrato set sugestoes = case when jsonb_array_length(sug) > 0 then sug end where id = x.id;

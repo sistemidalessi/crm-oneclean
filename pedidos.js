@@ -966,8 +966,19 @@
   function garanteLocais(empresaId) {
     if (!empresaId || locaisFkn.has(empresaId) || !CRM.store().empresaLocais) return;
     locaisFkn.set(empresaId, null);
-    CRM.store().empresaLocais(empresaId).then(l => { locaisFkn.set(empresaId, l || []); if ((l || []).length && ed && ed.empresa_id === empresaId) CRM.render(); })
+    CRM.store().empresaLocais(empresaId).then(l => { locaisFkn.set(empresaId, l || []); if ((l || []).length && ed && ed.empresa_id === empresaId) { aplicaLocalDeCostume(); CRM.render(); } })
       .catch(() => locaisFkn.set(empresaId, []));
+  }
+  // Local de costume (10/11/2026: dois pedidos de um cliente que sempre recebeu num endereço de São Bernardo saíram com o
+  // endereço do cadastro, em São Paulo, e o caminhão foi para lá): quando o cliente só tem UM local de entrega diferente do
+  // cadastro, o orçamento/pedido novo já vem com ele; com vários, a pessoa escolhe. Ao gravar o pedido no endereço do
+  // cadastro de um cliente que costuma receber em outro lugar, o CRM pergunta antes.
+  const CADASTRO = 'Endereço do cadastro (CNPJ)';
+  const outrosLocais = empresaId => locaisDe(empresaId).filter(en => en.local !== CADASTRO && chaveLocal(en) !== chaveLocal(P.entregaDoCliente(CRM.empresa(empresaId))));
+  function aplicaLocalDeCostume() {
+    if (!ed || !ed.empresa_id || !ed.entregaAuto) return;
+    const o = outrosLocais(ed.empresa_id);
+    if (o.length === 1) ed.dados.entrega = Object.assign({}, o[0]);
   }
   function seletorLocais(empresaId, atual) {
     const l = locaisDe(empresaId);
@@ -1171,7 +1182,7 @@
 
   // Cliente escolhido no editor (pela lista ou criado agora pelo "+ Cliente novo")
   function escolheCliente(e) {
-    ed.empresa_id = e.id; ed.dados.entrega = P.entregaDoCliente(e); if (!String(ed.dados.texto_nota || '').trim() && e.obs_nota) ed.dados.texto_nota = e.obs_nota;   // texto fixo do cliente na nota (horário de recebimento; 03/11/2026)
+    ed.empresa_id = e.id; ed.dados.entrega = P.entregaDoCliente(e); ed.entregaAuto = true; ed.entregaConfirmada = false; aplicaLocalDeCostume(); if (!String(ed.dados.texto_nota || '').trim() && e.obs_nota) ed.dados.texto_nota = e.obs_nota;   // texto fixo do cliente na nota (horário de recebimento; 03/11/2026)
     if (!String(ed.dados.pagamento || '').trim()) ed.dados.pagamento = ultimoPagamento(e.id);
     if (!CRM.ehGestor() || !ed.vendedor_id) ed.vendedor_id = CRM.ehGestor() || ehLog() ? e.responsavel_id || CRM.meuId() : CRM.meuId();
     const abertoNeg = CRM.doEmpresa('negocios', e.id).filter(n => n.status === 'aberto' && ((CRM.etapa(n.etapa_id) || {}).funil || 'Vendas') === funilVendas());
@@ -1227,7 +1238,20 @@
       if (CRM.fichas && CRM.fichas.formEmpresa) CRM.fichas.formEmpresa(ec);
       throw new Error('para virar pedido, complete o cadastro do cliente: ' + faltas.join(', ') + '. Depois clique em "Gravar pedido" de novo (o orçamento pode ser salvo sem isso).');
     }
-    const st = CRM.store(), dados = paraGravar(), eraNovo = !ed.id;
+    const st = CRM.store();
+    if (ec && st.empresaLocais && !Array.isArray(locaisFkn.get(ec.id))) locaisFkn.set(ec.id, await st.empresaLocais(ec.id).catch(() => []) || []);
+    const costume = ec ? outrosLocais(ec.id) : [];
+    if (costume.length && !ed.entregaConfirmada && chaveLocal(ed.dados.entrega || {}) === chaveLocal(P.entregaDoCliente(ec))) {
+      const lista = costume.slice(0, 4).map(en => '• ' + P.entregaTexto(en)).join('\n');
+      if (!confirm('ATENÇÃO AO LOCAL DE ENTREGA\n\nEste pedido está com o endereço do cadastro:\n• ' + P.entregaTexto(P.entregaDoCliente(ec)) +
+        '\n\nMas este cliente costuma receber em:\n' + lista + (costume.length > 4 ? '\n• e mais ' + (costume.length - 4) : '') +
+        '\n\nOK = entregar mesmo no endereço do cadastro.\nCancelar = voltar e escolher em "📍 Locais já usados com este cliente".')) {
+        ed.aba = 'dados'; CRM.render();
+        throw new Error('escolha o local de entrega em "📍 Locais já usados com este cliente" e clique em "Gravar pedido" de novo');
+      }
+      ed.entregaConfirmada = true;
+    }
+    const dados = paraGravar(), eraNovo = !ed.id;
     const r = await st.pedidoGravar(dados);
     const pr = ed.proposta_id && (E().D.propostas || []).find(p => p.id === ed.proposta_id);
     const n = ed.negocio_id && CRM.negocio(ed.negocio_id);
@@ -1431,7 +1455,7 @@
       if (ja) { aberto = ja.id; CRM.toast('Este orçamento já virou o pedido ' + ja.numero + '.'); CRM.render(); return; }
       ed = edDeProposta(pr); CRM.render();
     },
-    novo: async o => { fechaFichas(); E().aba = 'pedidos'; aberto = null; if (peds === null) await carrega(true); ed = novoEd(o || {}); CRM.render(); },
+    novo: async o => { fechaFichas(); E().aba = 'pedidos'; aberto = null; if (peds === null) await carrega(true); ed = novoEd(o || {}); if (ed.empresa_id) { ed.entregaAuto = true; aplicaLocalDeCostume(); } CRM.render(); },
     abrir: async id => { fechaFichas(); E().aba = 'pedidos'; if (peds === null) await carrega(true); ed = null; aberto = id; CRM.render(); },
     doNegocio: id => (peds || []).filter(p => p.negocio_id === id),
     carregados: () => peds !== null,
@@ -1487,10 +1511,10 @@
         try { const r = await CRM.store().pedidoSepararItem(id, Number(i), el.checked); peds = peds.map(p => (p.id === id ? r : p)); CRM.render(); } catch (e) { el.checked = !el.checked; CRM.falhou(e); }
       });
       if (!ed) return;
-      on('[data-ed]', 'change', el => { poe(el.dataset.ed, el.value); if (el.dataset.ed === 'vendedor_id' || el.dataset.ed === 'frete') CRM.render(); });
+      on('[data-ed]', 'change', el => { poe(el.dataset.ed, el.value); if (el.dataset.ed.indexOf('dados.entrega.') === 0) ed.entregaAuto = false; if (el.dataset.ed === 'vendedor_id' || el.dataset.ed === 'frete') CRM.render(); });
       on('[data-pd-local]', 'change', el => {
         const en = locaisDe(ed.empresa_id)[Number(el.value)]; if (el.value === '' || !en) return;
-        ed.dados.entrega = Object.assign({}, en); if (en.local === 'Endereço do cadastro (CNPJ)') ed.dados.entrega.local = '';
+        ed.dados.entrega = Object.assign({}, en); ed.entregaAuto = false; ed.entregaConfirmada = en.local === CADASTRO; if (en.local === 'Endereço do cadastro (CNPJ)') ed.dados.entrega.local = '';
         CRM.render();
       });
       on('[data-pd-prog]', 'change', el => {
