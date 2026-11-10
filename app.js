@@ -937,13 +937,16 @@
   }
 
   // 20/10/2026 (pedido do Anderson): a 1ª vez no dia passa pela tela de login, mesmo com a sessão guardada
-  // (o navegador continua lembrando e-mail e senha). A saída é só deste navegador (scope local).
+  // (o navegador continua lembrando e-mail e senha).
+  // 10/11/2026 (decisão do Anderson): a tela de login do dia e a do aplicativo instalado NÃO encerram mais a sessão. A
+  // sessão é uma só para todas as janelas do navegador: abrir o aplicativo instalado derrubava quem estava no meio de um
+  // trabalho em outra aba (o comprador dando entrada numa nota). Agora é só a tela: quem entra faz o login de novo (sessão
+  // nova, que as outras janelas passam a usar); a antiga fica valendo no servidor até expirar.
   const LOGIN_DIA = 'login-dia';
   function marcaLoginDoDia() { gravaPref(LOGIN_DIA, R.hojeISO()); }
   function loginDeHoje() { return pref(LOGIN_DIA, '') === R.hojeISO(); }
   async function pedeLoginDoDia(aviso) {
     E.eu = null; E.marca = null;
-    try { await sb.auth.signOut({ scope: 'local' }); } catch (e) { console.error(e); }
     telaLogin(null, aviso === undefined ? 'Novo dia: entre de novo para começar.' : aviso);
   }
   // aba que ficou aberta de um dia para o outro: pede o login quando a pessoa volta (sem cortar quem está digitando)
@@ -1068,7 +1071,9 @@
     sb = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
     store = new DD.Supa(sb);
     let recuperando = /type=recovery/.test(location.hash);
-    sb.auth.onAuthStateChange(ev => {
+    sb.auth.onAuthStateChange((ev, sessao) => {
+      // outra pessoa entrou em outra janela deste navegador: esta janela não pode seguir com a tela de quem saiu
+      if (ev === 'SIGNED_IN' && E.eu && sessao && sessao.user && sessao.user.id !== E.eu.user_id) { location.reload(); return; }
       if (ev === 'PASSWORD_RECOVERY') { recuperando = true; telaNovaSenha(); }
       if (ev === 'SIGNED_OUT') {
         window.CRM_SEM_SESSAO = true;

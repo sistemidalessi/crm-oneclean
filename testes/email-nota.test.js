@@ -135,3 +135,13 @@ test('sessão encerrada em outra janela: o formulário aberto fica, com o aviso,
   assert.match(a, /if \(document\.querySelector\('dialog\[open\]'\)\) return;/);   // o login do dia espera o formulário fechar
   assert.match(d, /permission denied\/i\.test\(m\)\) return raiz\.CRM_SEM_SESSAO \? SEM_SESSAO/);
 });
+
+// 10/11/2026 (decisão do Anderson): a tela de login do dia e a do aplicativo instalado não encerram a sessão das outras janelas
+test('o login do dia é só a tela: não encerra a sessão; outra pessoa entrando em outra janela recarrega esta', () => {
+  const fs = require('fs'), path = require('path');
+  const a = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+  const i = a.indexOf('async function pedeLoginDoDia'), f = a.slice(i, a.indexOf('\n  }', i));
+  assert.doesNotMatch(f, /signOut/);
+  assert.match(f, /telaLogin\(null,/);
+  assert.match(a, /sessao\.user\.id !== E\.eu\.user_id\) \{ location\.reload\(\); return; \}/);
+});
