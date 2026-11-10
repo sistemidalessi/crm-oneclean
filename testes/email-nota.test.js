@@ -126,3 +126,12 @@ test('a medida do produto vai ao lado do nome no documento do orçamento e do pe
   assert.match(p, /CRM\.produtos = \{ medida, garanteMedidas, medidasProntas/);
   assert.match(fs.readFileSync(path.join(R, 'supabase/schema.sql'), 'utf8'), /add column if not exists medida text/);
 });
+
+// 10/11/2026: a sessão caiu por outra janela com um formulário aberto (o comprador no meio da entrada de uma nota)
+test('sessão encerrada em outra janela: o formulário aberto fica, com o aviso, e o erro diz que a sessão caiu', () => {
+  const fs = require('fs'), path = require('path'), R = path.join(__dirname, '..');
+  const a = fs.readFileSync(path.join(R, 'app.js'), 'utf8'), d = fs.readFileSync(path.join(R, 'dados.js'), 'utf8');
+  assert.match(a, /if \(dlg && E\.eu\) \{ avisaSessaoCaiu\(dlg\); return; \}/);
+  assert.match(a, /if \(document\.querySelector\('dialog\[open\]'\)\) return;/);   // o login do dia espera o formulário fechar
+  assert.match(d, /permission denied\/i\.test\(m\)\) return raiz\.CRM_SEM_SESSAO \? SEM_SESSAO/);
+});

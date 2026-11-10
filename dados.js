@@ -249,10 +249,13 @@
     return r.data;
   }
 
+  const SEM_SESSAO = 'Sua sessão caiu neste navegador (o CRM foi aberto em outra janela ou no aplicativo instalado). Não feche esta janela: abra o CRM em outra aba, entre com a sua senha, volte aqui e salve de novo. O que você preencheu continua na tela.';
   function traduzErro(e) {
     const m = e.message || String(e);
     if (/row-level security/i.test(m)) return 'Sem permissão para isso (a empresa ou o negócio é de outro vendedor).';
-    if (/permission denied/i.test(m)) return 'Sem permissão para isso.';
+    // 10/11/2026: a sessão caiu (o CRM foi aberto em outra janela ou no aplicativo instalado) e o pedido foi sem o login: o
+    // banco responde "permission denied", que não é falta de permissão da pessoa (o comprador não conseguia dar entrada na nota)
+    if (/permission denied/i.test(m)) return raiz.CRM_SEM_SESSAO ? SEM_SESSAO : 'Sem permissão para isso.';
     if (/violates foreign key/i.test(m)) return 'Registro ligado a outro que não existe mais. Recarregue a página.';
     if (/duplicate key/i.test(m)) return 'Já existe um registro igual.';
     if (/JWT expired|invalid JWT/i.test(m)) return 'Sua sessão expirou. Entre de novo.';

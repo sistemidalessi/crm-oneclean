@@ -949,8 +949,18 @@
   // aba que ficou aberta de um dia para o outro: pede o login quando a pessoa volta (sem cortar quem está digitando)
   let mexeuEm = Date.now();
   ['pointerdown', 'keydown', 'wheel'].forEach(t => document.addEventListener(t, () => { mexeuEm = Date.now(); }, { capture: true, passive: true }));
+  function avisaSessaoCaiu(dlg) {
+    if (!dlg.querySelector('[data-sem-sessao]')) {
+      const p = document.createElement('p');
+      p.className = 'erro-form'; p.dataset.semSessao = '1';
+      p.textContent = 'Sua sessão caiu neste navegador (o CRM foi aberto em outra janela ou no aplicativo instalado). Não feche esta janela: abra o CRM em outra aba, entre com a sua senha e volte aqui. O que você preencheu continua.';
+      (dlg.querySelector('.form-corpo') || dlg).prepend(p);
+    }
+    dlg.addEventListener('close', () => { if (window.CRM_SEM_SESSAO) { E.eu = null; E.marca = null; telaLogin(); } }, { once: true });
+  }
   function vigiaDiaNovo() {
     if (!sb || !E.eu || loginDeHoje()) return;
+    if (document.querySelector('dialog[open]')) return;   // com formulário aberto, espera fechar (o login entraria por baixo dele)
     if (document.hidden || Date.now() - mexeuEm > 30 * 60 * 1000) pedeLoginDoDia();
   }
   setInterval(vigiaDiaNovo, 60 * 1000);
@@ -1060,7 +1070,20 @@
     let recuperando = /type=recovery/.test(location.hash);
     sb.auth.onAuthStateChange(ev => {
       if (ev === 'PASSWORD_RECOVERY') { recuperando = true; telaNovaSenha(); }
-      if (ev === 'SIGNED_OUT') { E.eu = null; E.marca = null; telaLogin(); }
+      if (ev === 'SIGNED_OUT') {
+        window.CRM_SEM_SESSAO = true;
+        // 10/11/2026: a sessão é uma só para todas as janelas do navegador. Se outra janela (ou o aplicativo instalado) saiu
+        // enquanto esta tinha um formulário aberto, a tela de login entrava POR BAIXO do formulário e salvar dava "Sem
+        // permissão" (o comprador no meio da entrada de uma nota). Agora o formulário fica, com o aviso do que fazer.
+        const dlg = document.querySelector('dialog[open]');
+        if (dlg && E.eu) { avisaSessaoCaiu(dlg); return; }
+        E.eu = null; E.marca = null; telaLogin();
+      }
+      if ((ev === 'SIGNED_IN' || ev === 'TOKEN_REFRESHED') && window.CRM_SEM_SESSAO) {
+        window.CRM_SEM_SESSAO = false;
+        const av = document.querySelector('[data-sem-sessao]');
+        if (av) { av.remove(); CRM.toast('Sessão de volta. Pode salvar.'); }
+      }
     });
     const s = await sb.auth.getSession();
     if (recuperando && s.data && s.data.session) { telaNovaSenha(); return; }
