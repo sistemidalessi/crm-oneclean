@@ -3724,6 +3724,11 @@ create table if not exists public.crm_produto_info (
   atualizado_em timestamptz not null default now(),
   atualizado_por uuid default auth.uid()
 );
+-- A medida do produto (10/11/2026, pedido das vendedoras: "a largura do saco de lixo, 90 por 95; tem cliente que pergunta pelo
+-- orçamento"): sai ao lado do nome no orçamento, no pedido e no PDF; não vai para a nota fiscal. Quem cuida das fichas preenche.
+alter table public.crm_produto_info add column if not exists medida text;
+alter table public.crm_produto_info drop constraint if exists crm_produto_info_medida_tam;
+alter table public.crm_produto_info add constraint crm_produto_info_medida_tam check (medida is null or length(medida) <= 60);
 alter table public.crm_produto_fotos enable row level security;
 alter table public.crm_produto_fotos_sugestoes enable row level security;
 alter table public.crm_produto_info enable row level security;

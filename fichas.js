@@ -930,12 +930,12 @@
           const pedido = p.id;
           // 09/11/2026 (pedido da equipe): junto da foto, o disponível e se já há compra a caminho com a data, para decidir
           // na hora se põe esse produto ou oferece outro.
-          Promise.all([CRM.produtos.fotoDe(p.codigo), estoqueItem(p.codigo)]).then(([u, est]) => {
+          Promise.all([CRM.produtos.fotoDe(p.codigo), estoqueItem(p.codigo), CRM.produtos.garanteMedidas ? CRM.produtos.garanteMedidas() : null]).then(([u, est]) => {
             if (form.elements.produto_id.value !== pedido) return; // trocou de produto enquanto carregava
             box.hidden = false;
             const q = n => Number(n).toLocaleString('pt-BR', { maximumFractionDigits: 3 });
             box.innerHTML = (u ? '<img src="' + esc(u) + '" alt="">' : '<span class="item-foto-vazia">sem foto cadastrada</span>') +
-              '<span><strong>' + esc(p.nome) + '</strong><small>' + esc(p.codigo) + (p.unidade ? ' · ' + esc(p.unidade) : '') + '</small>' +
+              '<span><strong>' + esc(p.nome) + '</strong><small>' + esc(p.codigo) + (p.unidade ? ' · ' + esc(p.unidade) : '') + (CRM.produtos.medida && CRM.produtos.medida(p.codigo) ? ' · medida ' + esc(CRM.produtos.medida(p.codigo)) : '') + '</small>' +
               (est ? '<small class="item-estoque' + (est.disponivel <= 0 ? ' neg' : '') + '">Disponível: <strong>' + esc(q(est.disponivel) + ' ' + est.unidade) + '</strong> · ' +
                 (est.caminho ? 'A caminho: ' + esc(est.caminho) : est.disponivel <= 0 ? '<strong>nada pedido ao fornecedor</strong>' : 'nada a caminho') + '</small>' : '') +
               '</span>';
@@ -1087,6 +1087,8 @@
   fichas.montaProposta = p => montaProposta(p);   // para conferir o documento (testes)
   function montaProposta(p) {
     garanteNcm(); // a 1ª vez só começa a carregar; quem gera o PDF espera (baixarPdfProposta)
+    // a medida do produto ao lado do nome (10/11/2026: "a largura do saco, 90 por 95; tem cliente que pergunta pelo orçamento")
+    const medidaDe = cod => (CRM.produtos && CRM.produtos.medida ? CRM.produtos.medida(cod) : '');
     // p.doc === 'pedido' (04/11/2026, "salvar o pedido em PDF"): o pedido no mesmo modelo, com o cliente e o(a) vendedor(a) do pedido
     const ehPedido = p.doc === 'pedido';
     const n = CRM.negocio(p.negocio_id);
@@ -1153,7 +1155,7 @@
       (cartoes.length ? '<section class="cartoes c' + cartoes.length + '">' + cartoes.map(x => '<div><strong>' + esc(x[0]) + '</strong><span>' + esc(x[1]) + '</span></div>').join('') + '</section>' : '') +
       '<h2 class="titulo-itens">Produtos selecionados</h2>' +
       '<table class="itens' + (comFoto ? ' com-foto' : '') + '"><thead><tr><th class="n">#</th>' + (comFoto ? '<th class="foto"></th>' : '') + '<th>Produto / embalagem</th><th class="num">Qtd.</th><th class="num">Unitário</th>' + (comDesc ? '<th class="num">Desc.</th>' : '') + '<th class="num">Total</th></tr></thead><tbody>' +
-      itens.map((it, i) => '<tr><td class="n">' + (i + 1) + '</td>' + (comFoto ? foto(it.codigo) : '') + '<td><span class="prod">' + esc(frase(it.descricao)) + '</span>' + (it.codigo ? '<span class="cod">Cód. ' + esc(it.codigo) + (ncmDe(it.codigo) ? ' · NCM ' + esc(ncmDe(it.codigo)) : '') + '</span>' : '') + '</td>' +
+      itens.map((it, i) => '<tr><td class="n">' + (i + 1) + '</td>' + (comFoto ? foto(it.codigo) : '') + '<td><span class="prod">' + esc(frase(it.descricao)) + (medidaDe(it.codigo) ? ' · ' + esc(medidaDe(it.codigo)) : '') + '</span>' + (it.codigo ? '<span class="cod">Cód. ' + esc(it.codigo) + (ncmDe(it.codigo) ? ' · NCM ' + esc(ncmDe(it.codigo)) : '') + '</span>' : '') + '</td>' +
         '<td class="num qtd">' + esc(qtd(it.quantidade)) + (it.unidade ? ' ' + esc(it.unidade) : '') + '</td><td class="num">' + esc(precoUnit(it.preco)) + '</td>' +
         (comDesc ? '<td class="num">' + (R.num(it.desconto) ? esc(R.numero(it.desconto)) + '%' : '—') + '</td>' : '') +
         '<td class="num tot">' + esc(R.moeda(totalDe(it))) + '</td></tr>').join('') + '</tbody></table>' +
@@ -1170,7 +1172,13 @@
   }
 
   // Impressão pelo navegador: só sobra como plano B, se o PDF direto não puder ser gerado.
+  // a medida dos produtos chega antes de montar (10/11/2026); se ainda não veio, espera (a impressão não precisa do clique)
   fichas.imprimirProposta = p => {
+    const pr = CRM.produtos;
+    if (pr && pr.medidasProntas && !pr.medidasProntas()) { Promise.resolve(pr.garanteMedidas()).then(() => imprimeProposta(p)); return; }
+    imprimeProposta(p);
+  };
+  const imprimeProposta = p => {
     const m = montaProposta(p);
     const el = $('#impressao');
     el.innerHTML = m.html;
@@ -1270,7 +1278,10 @@
     if (alvo === undefined) alvo = await pedeArquivo(m.nome);
     if (alvo === false) { CRM.toast('PDF não salvo. Quando quiser, clique em "Baixar PDF" na proposta.'); return; }
     CRM.toast('Gerando o PDF…');
-    if (!ncms) { await garanteNcm(); m = montaProposta(p); } // o NCM dos itens (depois de escolher onde salvar: a janela precisa do clique)
+    // o NCM e a medida dos itens (depois de escolher onde salvar: a janela precisa do clique)
+    if (CRM.produtos && CRM.produtos.garanteMedidas) await Promise.resolve(CRM.produtos.garanteMedidas());
+    if (!ncms) await garanteNcm();
+    m = montaProposta(p);
     if ((E().cfg.proposta_fotos || p.com_fotos) && CRM.produtos && CRM.produtos.garanteFotos) { await Promise.resolve(CRM.produtos.garanteFotos()); m = montaProposta(p); }
     try {
       const arq = await salva(await geraPdf(m), m.nome, alvo);

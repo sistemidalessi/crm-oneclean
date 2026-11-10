@@ -116,3 +116,13 @@ test('nenhuma função manda mais pelo Brevo: todas passam pela crm-enviar-email
   assert.match(e, /EMAIL_SENHA/);
   assert.doesNotMatch(e, /@oneclean/);   // repositório público: o endereço da caixa fica no banco
 });
+
+// 10/11/2026: a medida do produto (saco de lixo "90 x 95 cm") sai ao lado do nome no orçamento e no PDF
+test('a medida do produto vai ao lado do nome no documento do orçamento e do pedido', () => {
+  const fs = require('fs'), path = require('path'), R = path.join(__dirname, '..');
+  const f = fs.readFileSync(path.join(R, 'fichas.js'), 'utf8'), p = fs.readFileSync(path.join(R, 'produtos.js'), 'utf8');
+  assert.match(f, /esc\(frase\(it\.descricao\)\) \+ \(medidaDe\(it\.codigo\) \? ' · ' \+ esc\(medidaDe\(it\.codigo\)\)/);
+  assert.match(f, /garanteMedidas\(\)\);\n    if \(!ncms\) await garanteNcm\(\);/);   // o PDF espera a medida chegar
+  assert.match(p, /CRM\.produtos = \{ medida, garanteMedidas, medidasProntas/);
+  assert.match(fs.readFileSync(path.join(R, 'supabase/schema.sql'), 'utf8'), /add column if not exists medida text/);
+});

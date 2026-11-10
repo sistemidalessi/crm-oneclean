@@ -361,6 +361,17 @@
   const fotoDe = cod => Promise.resolve(garanteFotos()).then(() => urlFoto(cod));
   const urlFoto = cod => { const x = fotos && fotos.get(base(cod)); return x ? st().fotoUrl(x.caminho) : ''; };
   const base = cod => String(cod || '').replace(/\.\d+$/, '');
+  // A medida do produto (10/11/2026, pedido das vendedoras: "a largura do saco, 90 por 95; tem cliente que pergunta pelo orçamento"):
+  // crm_produto_info.medida, que o comprador ou a logística preenche em "Editar a ficha". Sai ao lado do nome no orçamento, no
+  // pedido e no PDF; não vai para a nota fiscal.
+  let medidas = null, medidasP = null;
+  function garanteMedidas() {
+    if (medidas || !CRM.store() || !st().produtoMedidas) return medidasP || Promise.resolve();
+    if (!medidasP) medidasP = st().produtoMedidas().then(l => { medidas = new Map((l || []).map(x => [x.codigo, String(x.medida || '').trim()])); CRM.render(); }).catch(() => { medidas = new Map(); });
+    return medidasP;
+  }
+  const medida = cod => { garanteMedidas(); return (medidas && cod && medidas.get(String(cod).replace(/\.\d+$/, ''))) || ''; };
+  const guardaMedida = (cod, m) => { if (medidas) { if (m) medidas.set(cod, m); else medidas.delete(cod); } };
   function miniatura(cod, cls) {
     garanteFotos();
     const u = urlFoto(cod);
@@ -447,6 +458,7 @@
           '<div class="caminho"><span>A caminho</span><strong>' + qtd(caminhoQtd(x)) + '</strong><small>' + esc(caminhoTexto(x) || 'nada pedido ao fornecedor') + '</small></div></div>' +
         (CRM.foraDeVendas() ? '' : '<p class="acoes"><a class="btn sec" href="' + esc('https://wa.me/?text=' + encodeURIComponent(X.textoWhats(Object.assign({ nome: nome(x) }, x), u,
           inf.ficha_caminho ? st().fotoUrl(inf.ficha_caminho) : inf.ficha_url || ''))) + '" target="_blank" rel="noopener noreferrer">📲 Mandar foto e preço pelo WhatsApp</a></p>') +
+        (inf.medida ? '<p class="pf-medida">Medida: <strong>' + esc(inf.medida) + '</strong></p>' : '') +
         (inf.descricao ? '<p class="pf-descricao">' + esc(inf.descricao) + '</p>' : '') +
         (pdf(inf.ficha_caminho, inf.ficha_url, 'Ficha técnica') || pdf(inf.fispq_caminho, inf.fispq_url, 'FISPQ') ? '<p class="acoes">' + pdf(inf.ficha_caminho, inf.ficha_url, 'Ficha técnica') + ' ' + pdf(inf.fispq_caminho, inf.fispq_url, 'FISPQ (segurança)') + '</p>' : '') +
         ((inf.especificacoes || []).length ? '<h3>Especificações</h3><table class="tabela pf-specs"><tbody>' + inf.especificacoes.map(s => '<tr><th>' + esc(s.nome) + '</th><td>' + esc(s.valor) + '</td></tr>').join('') + '</tbody></table>' : '') +
@@ -563,9 +575,11 @@
       const atual = (prod(cod) || {}).info || {};
       const linha = { codigo: cod, marca: inf.marca || atual.marca || null, fabricante: inf.fabricante || atual.fabricante || null, descricao: inf.descricao || atual.descricao || null,
         especificacoes: (inf.especificacoes || []).length ? inf.especificacoes : (atual.especificacoes || []), fonte_url: inf.fonte || atual.fonte_url || null,
+        medida: String(inf.medida || '').trim().slice(0, 60) || atual.medida || null,
         ficha_url: usaFicha ? inf.ficha.url : atual.ficha_url || null, ficha_caminho: usaFicha ? await copia(inf.ficha, 'ficha') || null : atual.ficha_caminho || null,
         fispq_url: usaFispq ? inf.fispq.url : atual.fispq_url || null, fispq_caminho: usaFispq ? await copia(inf.fispq, 'fispq') || null : atual.fispq_caminho || null };
       const salvo = await s.produtoInfoGravar(linha);
+      guardaMedida(cod, linha.medida);
       const p = prod(cod); if (p) p.info = salvo || linha;
     }
     await s.sugestaoMarcar(cod, 'aprovada');
@@ -725,14 +739,15 @@
         (inf.fonte ? '<p class="dica">Especificações tiradas de <a href="' + esc(inf.fonte) + '" target="_blank" rel="noopener noreferrer">' + esc(inf.fonte.replace(/^https?:\/\//, '').slice(0, 70)) + '</a>.</p>' : '') +
         (inf.obs ? '<p class="dica"><strong>A IA pede para conferir:</strong> ' + esc(inf.obs) + '</p>' : ''),
       campos: [{ nome: 'marca', rotulo: 'Marca' }, { nome: 'fabricante', rotulo: 'Fabricante' },
+        { nome: 'medida', rotulo: 'Medida (sai no orçamento, ao lado do nome; ex.: 90 x 95 cm)' },
         { nome: 'descricao', rotulo: 'Descrição para a vendedora', tipo: 'textarea', largo: true },
         { nome: 'specs', rotulo: 'Especificações (uma por linha: Nome: valor)', tipo: 'textarea', largo: true },
         { nome: 'ficha', rotulo: 'Guardar a ficha técnica', tipo: 'checkbox' }, { nome: 'fispq', rotulo: 'Guardar a FISPQ', tipo: 'checkbox' }],
-      valores: { marca: inf.marca || '', fabricante: inf.fabricante || '', descricao: inf.descricao || '', specs: X.specsTexto(inf.especificacoes), ficha: !!inf.ficha, fispq: !!inf.fispq },
+      valores: { marca: inf.marca || '', fabricante: inf.fabricante || '', medida: ((prod(cod) || {}).info || {}).medida || '', descricao: inf.descricao || '', specs: X.specsTexto(inf.especificacoes), ficha: !!inf.ficha, fispq: !!inf.fispq },
       aoSalvar: async (v, form) => {
         const r = form.querySelector('input[name=foto]:checked');
         await aprovar(cod, { foto: r ? Number(r.value) : (cs.length ? 0 : -1), ficha: !!v.ficha, fispq: !!v.fispq,
-          info: { marca: v.marca, fabricante: v.fabricante, descricao: v.descricao, especificacoes: X.specsDe(v.specs) } });
+          info: { marca: v.marca, fabricante: v.fabricante, medida: v.medida, descricao: v.descricao, especificacoes: X.specsDe(v.specs) } });
         CRM.toast('Aprovado: ' + nome(x) + '.');
         CRM.render();
       }
@@ -749,13 +764,16 @@
       htmlDepois: '<p class="acoes"><button type="button" class="btn sec" data-acao="pf-pdf" data-id="' + esc(cod + '|ficha') + '">Subir a ficha técnica (PDF)</button> ' +
         '<button type="button" class="btn sec" data-acao="pf-pdf" data-id="' + esc(cod + '|fispq') + '">Subir a FISPQ (PDF)</button></p>' +
         '<p class="dica">' + (inf.ficha_caminho || inf.ficha_url ? 'Tem ficha técnica. ' : 'Sem ficha técnica. ') + (inf.fispq_caminho || inf.fispq_url ? 'Tem FISPQ.' : 'Sem FISPQ.') + '</p>',
-      campos: [{ nome: 'marca', rotulo: 'Marca' }, { nome: 'fabricante', rotulo: 'Fabricante' }, { nome: 'descricao', rotulo: 'Descrição para a vendedora', tipo: 'textarea', largo: true },
+      campos: [{ nome: 'marca', rotulo: 'Marca' }, { nome: 'fabricante', rotulo: 'Fabricante' },
+        { nome: 'medida', rotulo: 'Medida (sai no orçamento, ao lado do nome; ex.: 90 x 95 cm)' },
+        { nome: 'descricao', rotulo: 'Descrição para a vendedora', tipo: 'textarea', largo: true },
         { nome: 'specs', rotulo: 'Especificações (uma por linha: Nome: valor)', tipo: 'textarea', largo: true }],
-      valores: { marca: inf.marca || '', fabricante: inf.fabricante || '', descricao: inf.descricao || '', specs: X.specsTexto(inf.especificacoes) },
+      valores: { marca: inf.marca || '', fabricante: inf.fabricante || '', medida: inf.medida || '', descricao: inf.descricao || '', specs: X.specsTexto(inf.especificacoes) },
       aoSalvar: async v => {
-        const linha = Object.assign({}, inf, { codigo: cod, marca: v.marca || null, fabricante: v.fabricante || null, descricao: v.descricao || null, especificacoes: X.specsDe(v.specs) });
+        const linha = Object.assign({}, inf, { codigo: cod, marca: v.marca || null, fabricante: v.fabricante || null, medida: String(v.medida || '').trim().slice(0, 60) || null, descricao: v.descricao || null, especificacoes: X.specsDe(v.specs) });
         delete linha.atualizado_em; delete linha.atualizado_por;
         x.info = await st().produtoInfoGravar(linha) || linha;
+        guardaMedida(cod, linha.medida);
         CRM.toast('Ficha guardada.');
         CRM.render();
       }
@@ -947,7 +965,7 @@
         es.map(e => '<tr><td>' + esc(e.unidade) + '</td><td class="num">' + (e.fator ? qtd(e.fator) + ' ' + esc(x.unidade || '') : '—') + '</td><td>' + esc(e.codigo || (e.origem === 'manual' ? 'acertada no CRM' : 'das notas de compra')) + '</td><td class="num">' + (e.preco ? 'R$ ' + preco(e.preco) : '—') + '</td></tr>').join('') +
         '</tbody></table></div>' + (cuida || podeCad() ? '<p class="acoes"><button type="button" class="mini" data-acao="pc-emb" data-id="' + esc(x.codigo) + '">+ Embalagem</button></p>' : '') +
         (x.caixa ? '<p class="dica">No FKN a caixa é outro código (' + esc(x.caixa.codigo) + '); aqui fica no mesmo produto, e o estoque é um só.</p>' : '') + '</div>' +
-      '<div><h3>Para a vendedora</h3>' + (inf.descricao ? '<p class="pf-descricao">' + esc(inf.descricao) + '</p>' : '<p class="vazio">Sem descrição ainda' + (cuida ? ': vem da ficha aprovada em Fotos e fichas, ou em "Editar a ficha".' : '.') + '</p>') +
+      '<div><h3>Para a vendedora</h3>' + (inf.medida ? '<p class="pf-medida">Medida: <strong>' + esc(inf.medida) + '</strong> (sai no orçamento, ao lado do nome)</p>' : cuida ? '<p class="vazio">Sem medida: em "Editar a ficha" dá para pôr (ex.: 90 x 95 cm) e ela sai no orçamento.</p>' : '') + (inf.descricao ? '<p class="pf-descricao">' + esc(inf.descricao) + '</p>' : '<p class="vazio">Sem descrição ainda' + (cuida ? ': vem da ficha aprovada em Fotos e fichas, ou em "Editar a ficha".' : '.') + '</p>') +
         ((inf.especificacoes || []).length ? '<table class="tabela pf-specs"><tbody>' + inf.especificacoes.map(z => '<tr><th>' + esc(z.nome) + '</th><td>' + esc(z.valor) + '</td></tr>').join('') + '</tbody></table>' : '') + '</div></div>' +
       (dono ? '<p class="dica">O cadastro é do CRM: descrição, unidade, preço, mínimo, NCM e fornecedor mudam em "Editar o cadastro" (cada alteração fica guardada com quem fez e quando).</p>'
         : '<p class="dica">Descrição, unidade, linha, preço e mínimo vêm da listagem do FKN e mudam lá enquanto ele for o cadastro principal.' + (cuida ? ' No CRM: a ficha (foto, descrição, especificações, PDFs), o fornecedor e as embalagens.' : '') + '</p>');
@@ -1302,5 +1320,5 @@
     'pc-ir-fiscal': () => { CRM.estado.aba = 'fiscal'; CRM.render(); }
   });
 
-  CRM.produtos = { miniatura, urlFoto, fotoDe, abrirFicha, escolher, telaFotos, depoisFotos, garanteFotos, recarregar: () => { lista = null; det.clear(); }, abrir: cod => CRM.acoes['pf-abrir'](cod) };
+  CRM.produtos = { medida, garanteMedidas, medidasProntas: () => !!medidas, miniatura, urlFoto, fotoDe, abrirFicha, escolher, telaFotos, depoisFotos, garanteFotos, recarregar: () => { lista = null; det.clear(); }, abrir: cod => CRM.acoes['pf-abrir'](cod) };
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -1831,6 +1831,8 @@
   Supa.prototype.fotoApagar = async function (caminhos) { const l = (caminhos || []).filter(Boolean); if (l.length) await this.sb.storage.from(FOTOS).remove(l); };
   Supa.prototype.produtoFotoGravar = async function (linha) { return unwrap(await this.sb.from('crm_produto_fotos').upsert(Object.assign({}, linha, { atualizado_em: new Date().toISOString() })).select().single()); };
   Supa.prototype.produtoFotoTirar = async function (codigo) { return unwrap(await this.sb.from('crm_produto_fotos').delete().eq('codigo', codigo)); };
+  // só as medidas (10/11/2026): saem ao lado do nome do produto no orçamento, no pedido e no PDF
+  Supa.prototype.produtoMedidas = async function () { return unwrap(await this.sb.from('crm_produto_info').select('codigo, medida').not('medida', 'is', null)); };
   Supa.prototype.produtoInfoGravar = async function (linha) { return unwrap(await this.sb.from('crm_produto_info').upsert(Object.assign({}, linha, { atualizado_em: new Date().toISOString() })).select().single()); };
   // Quem compra o produto, pelas notas que a pessoa enxerga (RLS: a vendedora vê a carteira dela), a compra mais recente primeiro.
   Supa.prototype.produtoClientes = async function (codigo, limite) { return unwrap(await this.sb.rpc('crm_produto_clientes', { p_codigo: codigo, p_limite: limite || 8 })); };
@@ -1912,6 +1914,7 @@
   Local.prototype.fotoApagar = async function (caminhos) { const a = lsObj('crm_fotos_arquivos'); (caminhos || []).forEach(c => delete a[c]); lsGrava('crm_fotos_arquivos', a); };
   Local.prototype.produtoFotoGravar = async function (linha) { const s = lsObj('crm_produto_fotos'); s[linha.codigo] = Object.assign({}, linha, { atualizado_em: new Date().toISOString() }); lsGrava('crm_produto_fotos', s); return s[linha.codigo]; };
   Local.prototype.produtoFotoTirar = async function (codigo) { const s = lsObj('crm_produto_fotos'); delete s[codigo]; lsGrava('crm_produto_fotos', s); };
+  Local.prototype.produtoMedidas = async function () { return Object.values(lsObj('crm_produto_info')).filter(x => x.medida).map(x => ({ codigo: x.codigo, medida: x.medida })); };
   Local.prototype.produtoInfoGravar = async function (linha) { const s = lsObj('crm_produto_info'); s[linha.codigo] = Object.assign({}, s[linha.codigo], linha, { atualizado_em: new Date().toISOString() }); lsGrava('crm_produto_info', s); return s[linha.codigo]; };
   Local.prototype.produtosEans = async function () { return []; };
   Local.prototype.produtosNcm = async function () { return lsLe('crm_produtos_ncm', []); };

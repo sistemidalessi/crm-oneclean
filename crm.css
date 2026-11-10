@@ -1099,6 +1099,7 @@ pre.of-previa { white-space: pre-wrap; font-family: inherit; font-size: .88rem; 
 .pf-numeros .falta { background: var(--vermelho-fundo); }
 .pf-numeros .caminho { background: var(--azul-fundo); }
 .pf-descricao { margin: 12px 0 4px; line-height: 1.5; }
+.pf-medida { margin: 10px 0 0; }
 .pf-specs th { text-align: left; font-weight: 600; color: var(--suave); width: 38%; }
 .pf-lote { display: grid; gap: 12px; }
 .pf-lote-acao, .pf-andamento { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
