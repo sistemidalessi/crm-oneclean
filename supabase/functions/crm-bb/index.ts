@@ -436,11 +436,13 @@ Deno.serve(async (req) => {
       const tk = await token('cobrancas.boletos-info');
       const ag = dig(b.agencia).slice(0, -1), cc = dig(b.conta).slice(0, -1), hoje = hojeSP();
       const cent = (v: unknown) => Math.round((Number(v) || 0) * 100);
-      async function emSer(venc: string, vencido: string) {
+      // boletos em ser com vencimento entre de e ate. O banco só aceita boletoVencido=S com a data final ANTES de hoje
+      // (10/11/2026: "a data de vencimento final deve ser anterior à data atual"): o período é partido em vencidos e a vencer.
+      async function parte(de: string, ate: string, vencido: 'S' | 'N') {
         const l: any[] = []; let indice = 0;
         for (let volta = 0; volta < 10; volta++) {
           const u = COBRANCA + '/boletos?indicadorSituacao=A&boletoVencido=' + vencido + '&agenciaBeneficiario=' + ag + '&contaBeneficiario=' + cc +
-            '&dataInicioVencimento=' + br(venc) + '&dataFimVencimento=' + br(venc) + (indice ? '&indice=' + indice : '') + '&gw-dev-app-key=' + APP();
+            '&dataInicioVencimento=' + br(de) + '&dataFimVencimento=' + br(ate) + (indice ? '&indice=' + indice : '') + '&gw-dev-app-key=' + APP();
           const r = await fetch(u, { headers: { Authorization: 'Bearer ' + tk } });
           const t = await r.text(); let j: any = null; try { j = JSON.parse(t); } catch { /* texto */ }
           if (r.status === 404) break;
@@ -451,38 +453,55 @@ Deno.serve(async (req) => {
         }
         return l;
       }
+      const ontem = maisDias(hoje, -1);
       const listas = new Map<string, any[]>();
+      async function emSer(de: string, ate: string) {
+        const k = de + '|' + ate;
+        if (!listas.has(k)) {
+          let l: any[] = [];
+          if (de <= ontem) l = l.concat(await parte(de, ate < ontem ? ate : ontem, 'S'));
+          if (ate >= hoje) l = l.concat(await parte(de > hoje ? de : hoje, ate, 'N'));
+          listas.set(k, l);
+        }
+        return listas.get(k) || [];
+      }
+      const dias = (a: string, z: string) => Math.abs(Math.round((Date.parse(a + 'T12:00:00Z') - Date.parse(z + 'T12:00:00Z')) / 86400000));
+      const detalhes = new Map<string, any>();
+      const usados = new Set<string>();
       const out: any[] = [];
       for (const t of titulos) {
         const venc = String(t.vencimento).slice(0, 10);
-        if (!listas.has(venc)) {
-          const prim = venc < hoje ? 'S' : 'N';
-          let l = await emSer(venc, prim);
-          if (!l.some(x => cent(x.valorOriginal) === cent(t.valor))) l = l.concat(await emSer(venc, prim === 'S' ? 'N' : 'S'));
-          listas.set(venc, l);
-        }
-        const cand = (listas.get(venc) || []).filter(x => cent(x.valorOriginal) === cent(t.valor));
+        // o boleto feito à mão no site do BB nem sempre tem o vencimento do título (NF 2786: título 24/11, boleto 25/11):
+        // vale o do mesmo valor e CNPJ com o vencimento mais perto, até 5 dias de diferença
+        const cand = (await emSer(maisDias(venc, -5), maisDias(venc, 5)))
+          .filter(x => cent(x.valorOriginal) === cent(t.valor) && iso(x.dataVencimento) && !usados.has(dig(x.numeroBoletoBB)))
+          .sort((a, z) => dias(iso(a.dataVencimento)!, venc) - dias(iso(z.dataVencimento)!, venc));
         const doc = dig(t.cliente_doc) || docs.get(String(t.empresa_id)) || '';
         const achados: any[] = [];
         for (const x of cand.slice(0, 12)) {
-          const r = await fetch(COBRANCA + '/boletos/' + dig(x.numeroBoletoBB) + '?numeroConvenio=' + encodeURIComponent(String(b.convenio)) + '&gw-dev-app-key=' + APP(), { headers: { Authorization: 'Bearer ' + tk } });
-          const tx = await r.text(); let d: any = {}; try { d = JSON.parse(tx) || {}; } catch { d = {}; }
-          if (!r.ok) continue;
+          const nb = dig(x.numeroBoletoBB);
+          if (!detalhes.has(nb)) {
+            const r = await fetch(COBRANCA + '/boletos/' + nb + '?numeroConvenio=' + encodeURIComponent(String(b.convenio)) + '&gw-dev-app-key=' + APP(), { headers: { Authorization: 'Bearer ' + tk } });
+            const tx = await r.text(); let d: any = null; try { d = JSON.parse(tx); } catch { d = null; }
+            detalhes.set(nb, r.ok ? d : null);
+          }
+          const d = detalhes.get(nb);
+          if (!d) continue;
           const docB = dig(d.numeroInscricaoSacadoCobranca ?? '');
           // o banco devolve o CNPJ/CPF sem os zeros da frente: compara pelo número
-          if (doc && docB && Number(docB) !== Number(doc)) continue;
-          if (!doc || !docB) continue;
+          if (!doc || !docB || Number(docB) !== Number(doc)) continue;
           achados.push({ x, d });
         }
-        // dois boletos iguais do mesmo cliente no mesmo dia: fica o que cita a nota no "seu número"
-        let esc = achados;
-        if (achados.length > 1) { const pelo = achados.filter(a => dig(a.d.numeroTituloCedenteCobranca).includes(String(numero))); if (pelo.length === 1) esc = pelo; }
-        if (esc.length !== 1) { fora.push({ duplicata: t.duplicata, motivo: esc.length ? 'mais de um boleto igual no banco' : 'sem boleto em aberto no banco com este valor, vencimento e CNPJ' }); continue; }
-        const { x, d } = esc[0];
-        out.push({ duplicata: t.duplicata, parcela: t.parcela, documento: t.duplicata, nosso_numero: dig(x.numeroBoletoBB).slice(3), vencimento: venc,
+        if (!achados.length) { fora.push({ duplicata: t.duplicata, motivo: 'sem boleto em aberto no banco com este valor e CNPJ perto do vencimento' }); continue; }
+        // mais de um igual do mesmo cliente: o que cita a nota no "seu número"; senão, o de vencimento mais perto (já em ordem)
+        const pelo = achados.filter(a => dig(a.d.numeroTituloCedenteCobranca).includes(String(numero)));
+        const { x, d } = (pelo.length ? pelo : achados)[0];
+        usados.add(dig(x.numeroBoletoBB));
+        const vencB = iso(x.dataVencimento) || venc;
+        out.push({ duplicata: t.duplicata, parcela: t.parcela, documento: t.duplicata, nosso_numero: dig(x.numeroBoletoBB).slice(3), vencimento: vencB, vencimento_titulo: venc,
           valor: Number(x.valorOriginal ?? d.valorOriginalTituloCobranca) || Number(t.valor), abatimento: Number(d.valorAbatimentoTituloCobranca ?? 0) || 0,
           emissao: iso(d.dataEmissaoTituloCobranca) || iso(x.dataRegistro), linha: dig(d.codigoLinhaDigitavel), codigo: dig(d.textoCodigoBarrasTituloCobranca),
-          vencido: venc < hoje, estado: d.codigoEstadoTituloCobranca ?? x.codigoEstadoTituloCobranca ?? null });
+          vencido: vencB < hoje, estado: d.codigoEstadoTituloCobranca ?? x.codigoEstadoTituloCobranca ?? null });
       }
       return resposta(200, { boletos: out, fora, titulos: titulos.length });
     }
