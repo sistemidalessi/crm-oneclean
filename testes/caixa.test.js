@@ -405,3 +405,24 @@ test('venceu ontem e não foi pago: em atraso hoje, mesmo que o crédito do BB f
   // leitura da Agilité e do CEO (sem a opção): o vencido sai da previsão, não aparece como crédito de hoje
   assert.equal(C.itensGrade(hoje, '2026-11-20', hoje, [], [lq], { d1: true }).length, 0);
 });
+
+// 10/11/2026 (Anderson: "às vezes não lançam no contas a pagar e eu sou pego de surpresa"): a parcela que a nota de compra traz
+// precisa ter conta a pagar perto da data; o que sobra aparece no Caixa e o fiscal dos agentes avisa a 3 dias do vencimento
+test('parcela de nota de compra sem conta a pagar: função no banco, quadro no Caixa e aviso do fiscal', () => {
+  const fs = require('fs'), path = require('path'), raiz = path.join(__dirname, '..');
+  const sql = fs.readFileSync(path.join(raiz, 'supabase/schema.sql'), 'utf8'), cx = fs.readFileSync(path.join(raiz, 'caixa.js'), 'utf8'), dd = fs.readFileSync(path.join(raiz, 'dados.js'), 'utf8');
+  const fn = sql.slice(sql.indexOf('create or replace function crm_interno.fin_parcelas_sem_conta()'));
+  assert.match(fn, /px\.venc between hj\.d - 3 and hj\.d \+ 10/);
+  // só "mesmo fornecedor e data perto" não cobre: precisa do valor parecido ou do número da nota
+  assert.match(fn, /= px\.chave\s+and \(abs\(l\.valor - px\.valor\) <= greatest\(1, px\.valor \* 0\.01\) or l\.descricao like '%' \|\| px\.numero \|\| '%'/);
+  assert.match(fn, /crm_fin_parcelas_vistas v where v\.compra_id = px\.id and v\.n = px\.n/);
+  assert.match(sql, /create or replace function public\.crm_fin_parcelas_sem_conta\(\)[\s\S]{0,400}if not public\.crm_eh_admin\(\) then raise exception/);
+  assert.match(sql, /revoke all on function crm_interno\.fin_parcelas_sem_conta\(\) from public, anon, authenticated;/);
+  assert.match(sql, /fiscal_p\('caixa:parcela-sem-conta', 'Caixa', 'grave'/);
+  assert.match(sql, /crm_interno\.fin_parcelas_sem_conta\(\) x where x\.vencimento <= hoje \+ 3/);
+  assert.match(cx, /Parcelas de compra sem conta a pagar/);
+  assert.match(cx, /return blocoParcelas\(b\) \+ \(pend\.length/);
+  assert.match(cx, /'cx-parc-ok': async id =>/);
+  assert.match(dd, /rpc\('crm_fin_parcelas_sem_conta'\)/);
+  assert.match(dd, /rpc\('crm_fin_parcela_vista', \{ p_compra: compra, p_n: n \}\)/);
+});

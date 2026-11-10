@@ -1998,6 +1998,9 @@
       .or('situacao.in.(duvida,sem_titulo),and(situacao.eq.baixado,credito.gte.' + desde + ')').order('credito', { ascending: false }).limit(300)) || [];
   };
   Supa.prototype.bbSiteResolver = async function (nn, obs) { return unwrap(await this.sb.rpc('crm_bb_site_resolver', { p_nosso: nn, p_obs: obs })); };
+  // parcelas das notas de compra sem conta a pagar perto da data (10/11/2026): a lista e o "Já conferi"
+  Supa.prototype.parcelasSemConta = async function () { return unwrap(await this.sb.rpc('crm_fin_parcelas_sem_conta')) || []; };
+  Supa.prototype.parcelaVista = async function (compra, n) { return unwrap(await this.sb.rpc('crm_fin_parcela_vista', { p_compra: compra, p_n: n })); };
   // conciliação do extrato do BB (05/11/2026; só o administrador lê): as linhas desde a data (sem as de saldo) e o último saldo lido
   Supa.prototype.extratoBB = async function (desde) {
     const [linhas, saldo] = await Promise.all([

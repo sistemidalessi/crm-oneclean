@@ -11767,6 +11767,19 @@ begin
     achados := achados || crm_interno.fiscal_p('conferencia:servicos', F, 'atencao', 'O fiscal não conseguiu conferir a Rekta e a IA (' || left(sqlerrm, 120) || ').', 'Me chamar: a conferência quebrou.');
   end;
 
+  -- 15c. parcela de nota de compra sem conta a pagar perto da data (10/11/2026: o boleto da Polar do dia estava no Caixa com o
+  -- vencimento errado e não apareceu). A 3 dias do vencimento, avisa.
+  begin
+    select count(*), string_agg(x.fornecedor || ' NF ' || x.numero || ': R$ ' || translate(to_char(x.valor, 'FM999G999G990D00'), ',.', '.,') || ' em ' || to_char(x.vencimento, 'DD/MM'), '; ' order by x.vencimento)
+      into n, lst from crm_interno.fin_parcelas_sem_conta() x where x.vencimento <= hoje + 3;
+    if n > 0 then
+      achados := achados || crm_interno.fiscal_p('caixa:parcela-sem-conta', 'Caixa', 'grave', n || ' parcela(s) de nota de compra vencendo até ' || to_char(hoje + 3, 'DD/MM') || ' sem conta a pagar perto da data: ' || left(lst, 300) || '.',
+        'Abrir o Caixa: o quadro "Parcelas de compra sem conta a pagar" mostra cada uma. Lançar a conta, corrigir o vencimento da que está errada ou marcar "Já conferi".');
+    end if;
+  exception when others then
+    achados := achados || crm_interno.fiscal_p('conferencia:parcelas', F, 'atencao', 'O fiscal não conseguiu conferir as parcelas das notas de compra (' || left(sqlerrm, 120) || ').', 'Me chamar: a conferência quebrou.');
+  end;
+
   -- 16. quem bate o ponto aqui: a rotina "Fiscal dos agentes" da nuvem (seg, qua, sex) — um vigia o outro
   begin
     select coalesce((select valor from crm_interno.fiscal_estado where nome = 'visita:nuvem'), (select valor from crm_interno.fiscal_estado where nome = 'ligado_em'))::timestamptz into ts;
@@ -12484,3 +12497,83 @@ end;
 $$;
 revoke all on function public.crm_cliente_notas_repetir(uuid, int) from public, anon;
 grant execute on function public.crm_cliente_notas_repetir(uuid, int) to authenticated;
+
+-- Parcelas de nota de compra sem conta a pagar (10/11/2026, Anderson: "às vezes não lançam no contas a pagar e eu sou pego de
+-- surpresa. Isso não pode acontecer"). O boleto do dia de um fornecedor estava no Caixa com o vencimento errado (três semanas
+-- depois, como foi digitado no sistema antigo); o XML da nota trazia a data certa. Toda parcela que a NOTA de compra traz
+-- (XML da Sefaz), vencendo de 3 dias atrás a 10 dias à frente, precisa ter uma conta a pagar perto da data (4 dias): da mesma
+-- entrada, do mesmo valor, ou do mesmo fornecedor com o valor parecido ou com o número da nota. O que sobra aparece no Caixa
+-- (quadro "Parcelas de compra sem conta a pagar") e, a 3 dias do vencimento, o fiscal dos agentes avisa no celular. "Já conferi"
+-- tira a parcela da lista. Fornecedor cuja nota não vale para as parcelas (sai por outra empresa, com outro valor e outras
+-- datas) fica em crm_config.dados.caixa.parcelas_ignorar (começo do nome).
+
+create table if not exists public.crm_fin_parcelas_vistas (
+  compra_id uuid not null references public.crm_compras(id) on delete cascade,
+  n integer not null,
+  visto_por uuid default auth.uid(),
+  visto_em timestamptz not null default now(),
+  primary key (compra_id, n)
+);
+alter table public.crm_fin_parcelas_vistas enable row level security;
+revoke all on public.crm_fin_parcelas_vistas from anon, public, authenticated;
+grant select on public.crm_fin_parcelas_vistas to authenticated;
+drop policy if exists ler on public.crm_fin_parcelas_vistas;
+create policy ler on public.crm_fin_parcelas_vistas for select to authenticated using ((select public.crm_eh_admin()));
+
+create or replace function crm_interno.fin_parcelas_sem_conta()
+returns table (compra_id uuid, n integer, fornecedor text, numero text, emitida_em date, situacao text, valor numeric, vencimento date, contas text)
+language sql stable security definer set search_path = public as $$
+  with hj as (select (now() at time zone 'America/Sao_Paulo')::date d),
+  ign as (select coalesce((select array_agg(upper(x)) from jsonb_array_elements_text(coalesce((select dados->'caixa'->'parcelas_ignorar' from public.crm_config where id = 1), '[]'::jsonb)) x), '{}'::text[]) l),
+  px as (
+    select c.id, c.numero::text numero, c.fornecedor_nome, c.emitida_em::date emi, c.situacao, (p->>'n')::int n, (p->>'valor')::numeric valor, (p->>'vencimento')::date venc,
+           left(regexp_replace(upper(c.fornecedor_nome), '[^A-Z0-9]', '', 'g'), 6) chave
+    from public.crm_compras c
+    cross join lateral jsonb_array_elements(case when jsonb_typeof(c.parcelas_xml) = 'array' and jsonb_array_length(c.parcelas_xml) > 0 then c.parcelas_xml
+                                                 when jsonb_typeof(c.parcelas) = 'array' then c.parcelas else '[]'::jsonb end) p
+    where c.emitida_em >= now() - interval '120 days' and not coalesce(c.devolucao, false)
+      and (p->>'vencimento') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' and (p->>'valor') ~ '^[0-9]+([.][0-9]+)?$' and (p->>'n') ~ '^[0-9]+$'
+  )
+  select px.id, px.n, px.fornecedor_nome, px.numero, px.emi, px.situacao, px.valor, px.venc,
+    (select string_agg(to_char(l.vencimento, 'DD/MM') || ' R$ ' || translate(to_char(l.valor, 'FM999G999G990D00'), ',.', '.,') || ' ' || l.situacao, ' | ' order by l.vencimento)
+       from (select l0.vencimento, l0.valor, l0.situacao from public.crm_fin_lancamentos l0
+              where l0.tipo = 'saida' and (l0.compra_id = px.id or left(regexp_replace(upper(coalesce(l0.fornecedor, l0.descricao)), '[^A-Z0-9]', '', 'g'), 6) = px.chave)
+                and l0.vencimento between px.venc - 45 and px.venc + 45 order by abs(l0.vencimento - px.venc), l0.vencimento limit 6) l)
+  from px, hj, ign
+  where px.venc between hj.d - 3 and hj.d + 10
+    and not exists (select 1 from unnest(ign.l) i where upper(px.fornecedor_nome) like i || '%')
+    and not exists (select 1 from public.crm_fin_parcelas_vistas v where v.compra_id = px.id and v.n = px.n)
+    -- coberta = há conta a pagar a até 4 dias da data da nota que seja: da mesma entrada (compra_id), do mesmo valor, ou do
+    -- mesmo fornecedor com o valor parecido (1%) ou com o número da nota. Só "mesmo fornecedor e data perto" não vale: quem
+    -- tem boleto toda semana teria uma parcela cobrindo a outra.
+    and not exists (select 1 from public.crm_fin_lancamentos l where l.tipo = 'saida'
+          and (abs(l.vencimento - px.venc) <= 4 or (l.pago_em is not null and abs(l.pago_em - px.venc) <= 4))
+          and (l.compra_id = px.id or abs(l.valor - px.valor) <= 0.05
+               or (left(regexp_replace(upper(coalesce(l.fornecedor, l.descricao)), '[^A-Z0-9]', '', 'g'), 6) = px.chave
+                   and (abs(l.valor - px.valor) <= greatest(1, px.valor * 0.01) or l.descricao like '%' || px.numero || '%' or coalesce(l.chave_fkn, '') like '%' || px.numero || '%'))))
+  order by px.venc, px.fornecedor_nome;
+$$;
+revoke all on function crm_interno.fin_parcelas_sem_conta() from public, anon, authenticated;
+
+-- a tela (Caixa): só o administrador
+create or replace function public.crm_fin_parcelas_sem_conta()
+returns table (compra_id uuid, n integer, fornecedor text, numero text, emitida_em date, situacao text, valor numeric, vencimento date, contas text)
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if not public.crm_eh_admin() then raise exception 'só o administrador'; end if;
+  return query select * from crm_interno.fin_parcelas_sem_conta();
+end;
+$$;
+revoke all on function public.crm_fin_parcelas_sem_conta() from public, anon;
+grant execute on function public.crm_fin_parcelas_sem_conta() to authenticated;
+
+-- "Já conferi" (a parcela não é boleto, já foi paga de outro jeito ou a conta está lançada com outra data de propósito)
+create or replace function public.crm_fin_parcela_vista(p_compra uuid, p_n integer) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  if not public.crm_eh_admin() then raise exception 'só o administrador'; end if;
+  insert into public.crm_fin_parcelas_vistas (compra_id, n, visto_por) values (p_compra, p_n, auth.uid()) on conflict do nothing;
+end;
+$$;
+revoke all on function public.crm_fin_parcela_vista(uuid, integer) from public, anon;
+grant execute on function public.crm_fin_parcela_vista(uuid, integer) to authenticated;

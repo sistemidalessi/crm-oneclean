@@ -117,11 +117,24 @@
       ' <button type="button" class="mini" data-acao="cx-ext-ler" title="lê o extrato do BB agora e confere com o Caixa (sozinho, de 30 em 30 minutos)">Ler o extrato agora</button></small>';
   }
 
+  // Parcelas que a NOTA de compra traz (XML da Sefaz) e que não têm conta a pagar perto da data (10/11/2026, Anderson: "às
+  // vezes não lançam no contas a pagar e eu sou pego de surpresa": o boleto do dia estava no Caixa com o vencimento errado).
+  // crm_fin_parcelas_sem_conta, só o administrador; o fiscal dos agentes avisa no celular a 3 dias do vencimento.
+  let parcSem = null;
+  function blocoParcelas(b) {
+    const l = parcSem || [];
+    if (!l.length) return '';
+    return '<details class="cartao cx-venc" data-chave="parc-sem" open><summary><strong>⚠ Parcelas de compra sem conta a pagar: ' + l.length + ' (' + esc(R.moeda(l.reduce((t, x) => t + Number(x.valor || 0), 0))) + ')</strong> ' +
+      '<small>a nota de compra traz esta parcela, mas não achei conta a pagar perto da data. Lance a conta, corrija o vencimento da que estiver errada ou marque "Já conferi".</small></summary>' +
+      '<div class="tabela-rolagem"><table class="tabela"><tbody>' + l.map(x => '<tr><td>' + esc(x.fornecedor || '—') + '<small>NF ' + esc(x.numero) + ' de ' + esc(R.dataBR(x.emitida_em)) + ' · parcela ' + esc(x.n) +
+        (x.situacao === 'pendente' ? ' · nota ainda sem entrada no CRM' : '') + (x.contas ? ' · contas deste fornecedor por perto: ' + esc(x.contas) : ' · nenhuma conta deste fornecedor por perto') + '</small></td>' +
+        '<td>vence ' + esc(dm(x.vencimento)) + '</td><td class="num">' + esc(R.moeda(x.valor)) + '</td><td class="acoes-linha">' + b('cx-parc-ok', x.compra_id + ':' + x.n, 'Já conferi') + '</td></tr>').join('') + '</tbody></table></div></details>';
+  }
   let bbSite = null;
   function blocoSite(b, tot) {
     const l = bbSite || [], pend = l.filter(x => x.situacao === 'duvida' || x.situacao === 'sem_titulo'), feitos = l.filter(x => x.situacao === 'baixado');
     const tp = arr => arr.reduce((t, x) => t + Number(x.pago || 0), 0);
-    return (pend.length ? '<details class="cartao cx-venc" data-chave="bb-site" open><summary><strong>Boletos do site do BB pagos, sem título certo: ' + pend.length + ' (' + esc(R.moeda(tp(pend))) + ')</strong> <small>o banco diz que foi pago, mas o CRM não achou um título só para dar a baixa. Veja e dê o "Recebi" no título certo (ou lance a entrada); depois "Já resolvi".</small></summary>' +
+    return blocoParcelas(b) + (pend.length ? '<details class="cartao cx-venc" data-chave="bb-site" open><summary><strong>Boletos do site do BB pagos, sem título certo: ' + pend.length + ' (' + esc(R.moeda(tp(pend))) + ')</strong> <small>o banco diz que foi pago, mas o CRM não achou um título só para dar a baixa. Veja e dê o "Recebi" no título certo (ou lance a entrada); depois "Já resolvi".</small></summary>' +
         '<div class="tabela-rolagem"><table class="tabela"><tbody>' + pend.map(x => '<tr><td>' + esc(x.cliente || '—') + '<small>seu número ' + esc(x.seu_numero || '—') + (x.vencimento ? ' · vencia ' + esc(R.dataBR(x.vencimento)) : '') + ' · ' + esc(x.motivo || '') + '</small></td>' +
           '<td>crédito ' + esc(dm(x.credito)) + '</td><td class="num">' + esc(R.moeda(x.pago)) + '</td><td class="acoes-linha">' + b('cx-bbsite-ok', x.nosso_numero, 'Já resolvi') + '</td></tr>').join('') + '</tbody></table></div></details>' : '') +
       (feitos.length ? '<details class="cartao cx-venc" data-chave="bb-site-feitos"><summary><strong>Boletos do site do BB baixados sozinhos (7 dias): ' + feitos.length + ' (' + esc(R.moeda(tp(feitos))) + ')</strong> <small>pagos no banco: o CRM achou o título (pelo seu número ou por CNPJ, valor e vencimento) e lançou a entrada no dia do crédito.</small></summary>' +
@@ -135,6 +148,7 @@
     try { F = await CRM.store().carregarFin(); } catch (e) { if (!F) F = { recorrentes: [], lancamentos: [], saldos: [], regras: [], baixados: [], excluidos: [] }; CRM.falhou(e); }
     // boletos feitos no site do BB que o CRM leu como pagos (03/11/2026): os baixados sozinhos e os que pedem um olhar
     try { bbSite = CRM.store().bbSite ? await CRM.store().bbSite(R.somaDias(hoje(), -7)) : []; } catch (e) { bbSite = bbSite || []; }
+    try { parcSem = CRM.ehAdmin() && CRM.store().parcelasSemConta ? await CRM.store().parcelasSemConta() : []; } catch (e) { parcSem = parcSem || []; }
     // o que a cobrança automática já fez por título (boleto atualizado, aviso do cartório): vai no título em atraso da grade
     try { cobFeita = CRM.store().cobrancaFeita ? await CRM.store().cobrancaFeita(R.somaDias(hoje(), -60)) : null; } catch (e) { cobFeita = cobFeita || null; }
     try { extrato = CRM.store().extratoBB ? await CRM.store().extratoBB(R.somaDias(hoje(), -10)) : null; } catch (e) { extrato = extrato || null; }
@@ -1222,6 +1236,11 @@
           '\nSai desta lista sem mexer no Caixa e sem conferir nada. Se este valor junta várias contas num Pix só, NÃO ignore: use "Juntar lançamentos…", que confere a soma no centavo.',
         campos: [{ nome: 'obs', rotulo: 'Por quê', tipo: 'textarea', largo: true, obrigatorio: true }], salvarTexto: 'Ignorar',
         aoSalvar: async v => { await CRM.store().extratoResolver(x.id, 'ignorar', { obs: v.obs }); CRM.toast('Tirado da lista.'); lidoEm = 0; await carrega(); } });
+    },
+    'cx-parc-ok': async id => {
+      const [compra, n] = String(id).split(':'), x = (parcSem || []).find(y => y.compra_id === compra && String(y.n) === n);
+      if (!x || !confirm('Tirar da lista a parcela ' + n + ' da NF ' + x.numero + ' (' + x.fornecedor + '), de ' + R.moeda(x.valor) + ', que vence em ' + R.dataBR(x.vencimento) + '?\n\nUse quando a conta já está lançada com outra data de propósito, já foi paga de outro jeito ou não é boleto.')) return;
+      try { await CRM.store().parcelaVista(compra, Number(n)); parcSem = await CRM.store().parcelasSemConta(); CRM.toast('Tirada da lista.'); CRM.render(); } catch (e) { CRM.falhou(e); }
     },
     'cx-bbsite-ok': nn => {
       const x = (bbSite || []).find(y => y.nosso_numero === nn);
