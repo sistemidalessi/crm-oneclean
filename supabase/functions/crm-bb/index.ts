@@ -12,6 +12,8 @@
 //   POST { acao: 'ajustes' }         devolução lançada na nota (06/11/2026): título menor que o boleto → abatimento no banco
 //                                    (PATCH /boletos/{id}); título zerado → baixa (crm_boleto_bb_ajustes diz quais). Também no ciclo.
 //   POST { acao: 'vencidos' }        boletos em aberto já vencidos com linha digitável, juros e multa (cobrança automática, 04/11/2026)
+//   POST { acao: 'segunda_via', numero } boletos em aberto de uma nota feitos no site do BB (época do FKN), para a 2ª via que a
+//                                    crm-fiscal desenha junto da DANFE (10/11/2026); só leitura
 //   POST { acao: 'extrato', de?, ate?, bruto? }  extrato da conta pela VPS (com o A1, mTLS), 04/11/2026: lê e devolve os lançamentos
 //   POST { acao: 'extrato_conciliar', de?, ate? } lê o extrato, guarda em crm_fin_extrato e confere com o Caixa (05/11/2026;
 //                                    agendador crm-bb-extrato, de 30 em 30 min das 7h às 21h)
@@ -410,6 +412,79 @@ Deno.serve(async (req) => {
         out.forEach(o => { const v = m.get(String(o.nosso_numero)); if (v && v > (o.abatimento || 0)) o.abatimento = v; });
       }
       return resposta(200, { n: l.length, boletos: out, ...(c.bruto ? { bruto } : {}) });
+    }
+    // 2ª via do boleto feito FORA do CRM (no site do BB, na época do FKN) — 10/11/2026, pedido do Anderson: a vendedora pede
+    // a nota e o boleto de outubro e o CRM não tinha o PDF. { numero } → de cada título em aberto da nota (crm_titulos), o
+    // boleto em ser no banco com o mesmo vencimento, valor e CNPJ do pagador. Só leitura. Quem chama é a crm-fiscal (chave
+    // de serviço), que confere a carteira de quem pediu e desenha o PDF; ou o administrador.
+    if (c.acao === 'segunda_via') {
+      const numero = Number(c.numero) || 0;
+      if (!numero) return resposta(400, { erro: 'diga o número da nota' });
+      const { data: tits, error: eT } = await db.from('crm_titulos').select('duplicata, empresa_id, nota_numero, parcela, vencimento, valor, abono, portador, cartorio_em, cliente_doc').eq('nota_numero', numero).order('duplicata');
+      if (eT) throw new Error(eT.message);
+      const fora: any[] = [];
+      const titulos = ((tits || []) as any[]).filter(t => {
+        if (t.abono) return false;
+        if (t.cartorio_em) { fora.push({ duplicata: t.duplicata, motivo: 'em cartório' }); return false; }
+        if (/transf|pix|dep[oó]sito/i.test(String(t.portador || ''))) { fora.push({ duplicata: t.duplicata, motivo: 'paga por transferência, sem boleto' }); return false; }
+        return true;
+      });
+      if (!titulos.length) return resposta(200, { boletos: [], fora, titulos: 0 });
+      const ids = [...new Set(titulos.map(t => t.empresa_id).filter(Boolean))];
+      const docs = new Map<string, string>();
+      if (ids.length) { const { data: emps } = await db.from('crm_empresas').select('id, cnpj').in('id', ids); for (const e of (emps || []) as any[]) docs.set(String(e.id), dig(e.cnpj)); }
+      const tk = await token('cobrancas.boletos-info');
+      const ag = dig(b.agencia).slice(0, -1), cc = dig(b.conta).slice(0, -1), hoje = hojeSP();
+      const cent = (v: unknown) => Math.round((Number(v) || 0) * 100);
+      async function emSer(venc: string, vencido: string) {
+        const l: any[] = []; let indice = 0;
+        for (let volta = 0; volta < 10; volta++) {
+          const u = COBRANCA + '/boletos?indicadorSituacao=A&boletoVencido=' + vencido + '&agenciaBeneficiario=' + ag + '&contaBeneficiario=' + cc +
+            '&dataInicioVencimento=' + br(venc) + '&dataFimVencimento=' + br(venc) + (indice ? '&indice=' + indice : '') + '&gw-dev-app-key=' + APP();
+          const r = await fetch(u, { headers: { Authorization: 'Bearer ' + tk } });
+          const t = await r.text(); let j: any = null; try { j = JSON.parse(t); } catch { /* texto */ }
+          if (r.status === 404) break;
+          if (!r.ok) throw new Error('lista de boletos em aberto (' + r.status + '): ' + msgBB(j, t));
+          l.push(...(j?.boletos || []));
+          if (j?.indicadorContinuidade !== 'S' || !j?.proximoIndice) break;
+          indice = j.proximoIndice;
+        }
+        return l;
+      }
+      const listas = new Map<string, any[]>();
+      const out: any[] = [];
+      for (const t of titulos) {
+        const venc = String(t.vencimento).slice(0, 10);
+        if (!listas.has(venc)) {
+          const prim = venc < hoje ? 'S' : 'N';
+          let l = await emSer(venc, prim);
+          if (!l.some(x => cent(x.valorOriginal) === cent(t.valor))) l = l.concat(await emSer(venc, prim === 'S' ? 'N' : 'S'));
+          listas.set(venc, l);
+        }
+        const cand = (listas.get(venc) || []).filter(x => cent(x.valorOriginal) === cent(t.valor));
+        const doc = dig(t.cliente_doc) || docs.get(String(t.empresa_id)) || '';
+        const achados: any[] = [];
+        for (const x of cand.slice(0, 12)) {
+          const r = await fetch(COBRANCA + '/boletos/' + dig(x.numeroBoletoBB) + '?numeroConvenio=' + encodeURIComponent(String(b.convenio)) + '&gw-dev-app-key=' + APP(), { headers: { Authorization: 'Bearer ' + tk } });
+          const tx = await r.text(); let d: any = {}; try { d = JSON.parse(tx) || {}; } catch { d = {}; }
+          if (!r.ok) continue;
+          const docB = dig(d.numeroInscricaoSacadoCobranca ?? '');
+          // o banco devolve o CNPJ/CPF sem os zeros da frente: compara pelo número
+          if (doc && docB && Number(docB) !== Number(doc)) continue;
+          if (!doc || !docB) continue;
+          achados.push({ x, d });
+        }
+        // dois boletos iguais do mesmo cliente no mesmo dia: fica o que cita a nota no "seu número"
+        let esc = achados;
+        if (achados.length > 1) { const pelo = achados.filter(a => dig(a.d.numeroTituloCedenteCobranca).includes(String(numero))); if (pelo.length === 1) esc = pelo; }
+        if (esc.length !== 1) { fora.push({ duplicata: t.duplicata, motivo: esc.length ? 'mais de um boleto igual no banco' : 'sem boleto em aberto no banco com este valor, vencimento e CNPJ' }); continue; }
+        const { x, d } = esc[0];
+        out.push({ duplicata: t.duplicata, parcela: t.parcela, documento: t.duplicata, nosso_numero: dig(x.numeroBoletoBB).slice(3), vencimento: venc,
+          valor: Number(x.valorOriginal ?? d.valorOriginalTituloCobranca) || Number(t.valor), abatimento: Number(d.valorAbatimentoTituloCobranca ?? 0) || 0,
+          emissao: iso(d.dataEmissaoTituloCobranca) || iso(x.dataRegistro), linha: dig(d.codigoLinhaDigitavel), codigo: dig(d.textoCodigoBarrasTituloCobranca),
+          vencido: venc < hoje, estado: d.codigoEstadoTituloCobranca ?? x.codigoEstadoTituloCobranca ?? null });
+      }
+      return resposta(200, { boletos: out, fora, titulos: titulos.length });
     }
     // extrato da conta corrente (04/11/2026, conciliação bancária): { de?, ate?, bruto? } só lê e devolve
     async function lerExtrato(deP: unknown, ateP: unknown, op: any = {}) {

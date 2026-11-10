@@ -221,7 +221,8 @@
     const itens = (E().ix.porNota.get(n.id) || []).slice().sort((a, b) => a.ordem - b.ordem);
     const ch = String(n.chave || '');
     const bts = pode && !n.cancelada && ch.length === 44 ? '<p class="acoes nota-acoes">' +
-      '<button type="button" class="mini" data-acao="nota-pdf" data-id="' + esc(ch) + '" title="A DANFE com o boleto do BB (se houver), o mesmo PDF que o cliente recebe por e-mail">📄 DANFE e boleto</button>' +
+      '<button type="button" class="mini" data-acao="nota-pdf" data-id="' + esc(ch) + '" title="A DANFE com o boleto do BB em aberto (das notas do CRM e das de outubro, feitas no site do BB)">📄 DANFE e boleto</button>' +
+      '<button type="button" class="mini" data-acao="nota-boleto" data-id="' + esc(ch) + '" title="A 2ª via do boleto em aberto desta nota, sem a DANFE (também os boletos de outubro, feitos no site do BB)">🧾 Só o boleto</button>' +
       '<button type="button" class="mini" data-acao="nota-xml" data-id="' + esc(ch) + '" title="O arquivo XML da nota (o que vale para a contabilidade do cliente)">XML</button>' +
       '<button type="button" class="mini" data-acao="nota-reenviar" data-id="' + esc(ch) + '" title="Manda de novo ao cliente o e-mail com o XML, a DANFE e o boleto">✉ Reenviar ao cliente</button></p>' : '';
     return '<details><summary>' + esc(R.dataBR(R.diaLocal(n.emitida_em))) + ' · NF ' + esc(n.numero || '') + (n.cancelada ? ' <span class="selo vermelho">cancelada</span>' : '') +
@@ -229,11 +230,12 @@
       itens.map(it => '<li>' + esc(R.numero(it.quantidade)) + ' ' + esc(it.unidade || '') + ' · ' + esc(it.descricao) + ' — ' + esc(R.moeda(it.valor_total)) + '</li>').join('') + '</ul></details>';
   }
   // os arquivos da nota pelo servidor (a nota do CRM e as do FKN, com o XML guardado)
+  const avisoVencido = r => (r && r.vencido ? ' Boleto vencido: o código é o mesmo e o banco calcula juros e multa na hora do pagamento.' : '');
   const notaDaChave = ch => (E().D.notas || []).find(x => x.chave === ch) || null;
-  async function notaArquivo(acao, ch, para) {
+  async function notaArquivo(acao, ch, para, mais) {
     const st = CRM.store();
     if (!st.fiscal) throw new Error('as notas só abrem com o Supabase ligado');
-    return st.fiscal(Object.assign({ acao, chave: ch }, para ? { para } : {}));
+    return st.fiscal(Object.assign({ acao, chave: ch }, para ? { para } : {}, mais || {}));
   }
   const pdfDeBase64 = b64 => { const bin = atob(b64), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return new Blob([u], { type: 'application/pdf' }); };
 
@@ -1724,7 +1726,18 @@
     'editar-item': id => fichas.formItem(E().ix.porId.negocio_itens.get(id), abertoNegocio),
     'nota-pdf': ch => {
       CRM.toast('Montando a DANFE…');
-      notaArquivo('nota_pdf', ch).then(r => { CRM.baixar(r.nome || 'DANFE.pdf', pdfDeBase64(r.pdf)); CRM.toast(r.boletos ? 'DANFE com ' + r.boletos + ' boleto(s) baixada.' : 'DANFE baixada (esta nota não tem boleto registrado no BB).'); }).catch(CRM.falhou);
+      notaArquivo('nota_pdf', ch).then(r => {
+        CRM.baixar(r.nome || 'DANFE.pdf', pdfDeBase64(r.pdf));
+        CRM.toast((r.boletos ? 'DANFE com ' + r.boletos + ' boleto(s) baixada.' : 'DANFE baixada, sem boleto' + (r.aviso ? ': ' + r.aviso : ' (esta nota não tem boleto em aberto no BB)') + '.') + avisoVencido(r), !r.boletos && !!r.aviso);
+      }).catch(CRM.falhou);
+    },
+    // 2ª via só do boleto (10/11/2026): os do CRM e os de outubro, feitos no site do BB (o servidor busca no banco)
+    'nota-boleto': ch => {
+      CRM.toast('Buscando o boleto no banco…');
+      notaArquivo('nota_pdf', ch, null, { so_boleto: true }).then(r => {
+        CRM.baixar(r.nome || 'Boleto.pdf', pdfDeBase64(r.pdf));
+        CRM.toast(r.boletos + ' boleto(s) baixado(s).' + (r.aviso ? ' Atenção: ' + r.aviso + '.' : '') + avisoVencido(r), !!r.aviso);
+      }).catch(CRM.falhou);
     },
     'nota-xml': ch => { notaArquivo('nota_xml', ch).then(r => CRM.baixar(r.nome || ch + '.xml', r.xml, 'application/xml')).catch(CRM.falhou); },
     'nota-reenviar': ch => {

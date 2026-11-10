@@ -389,6 +389,16 @@ async function boletosDaNota(db: ReturnType<typeof createClient>, n: Linha) {
   const aReg = ((falta || []) as string[]).filter(d => String(d).startsWith(pre)).length;
   return { registrados: l.filter(x => x.situacao === 'registrado'), pendentes: aReg + l.filter(x => x.situacao === 'preparado').length, dados };
 }
+// 2ª via dos boletos em aberto feitos no site do BB (notas da época do FKN, 10/11/2026): a crm-bb acha no banco o boleto de
+// cada título em aberto da nota; aqui eles são desenhados no mesmo modelo do boleto do CRM (linha digitável conferida)
+async function boletosDoSite(numero: unknown) {
+  const u = Deno.env.get('SUPABASE_URL')!, k = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+  const r = await fetch(u + '/functions/v1/crm-bb', { method: 'POST', headers: { Authorization: 'Bearer ' + k, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ acao: 'segunda_via', numero: Number(numero) || 0 }), signal: AbortSignal.timeout(60000) });
+  const j = await r.json().catch(() => ({})) as Linha;
+  if (!r.ok) throw new Error('2ª via no BB: ' + String(j.erro || r.status));
+  return { boletos: (j.boletos || []) as Linha[], fora: (j.fora || []) as Linha[], titulos: Number(j.titulos) || 0 };
+}
 // o PDF dos boletos (uma página por parcela), com o pagador do destinatário da nota
 async function pdfBoletosNota(regs: Linha[], xml: string, dados: Linha) {
   const pdf = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
@@ -408,6 +418,8 @@ async function desenhaBoletos(pdf: any, regs: Linha[], xml: string, dados: Linha
     if (i || !primeira) pdf.addPage('a4', 'portrait');
     const pix = B.pixDe(b);
     const dd = B.montar(cfg, emit, { valor: b.valor, vencimento: b.vencimento, nosso_numero: b.nosso_numero, documento: b.documento, emissao: b.emissao, pix, abatimento: b.abatimento }, pg, { hoje });
+    // 2ª via do boleto feito no site do BB: o boleto refeito tem de dar a mesma linha digitável que o banco informou
+    if (b.linha && String(b.linha).replace(/\D/g, '') !== String(dd.linha).replace(/\D/g, '')) throw new Error('o boleto refeito da parcela ' + String(b.duplicata || '') + ' não bate com o do banco: tire a 2ª via no site do BB');
     B.desenha(pdf, dd, { aviso, qr: pix && QR ? B.qrDesenhador(QR, pix) : null });
   });
 }
@@ -626,7 +638,7 @@ Deno.serve(async (req) => {
     if (!['admin', 'gestor', 'vendedor', 'logistica'].includes(papel)) return resposta(403, { erro: 'sem acesso às notas' });
     const chave = String(b.chave || '').replace(/\D/g, '');
     if (chave.length !== 44) return resposta(400, { erro: 'chave da nota inválida' });
-    const { nfe: n } = await notaPelaChave(db, chave);
+    const { nfe: n, doFkn } = await notaPelaChave(db, chave);
     if (!n) return resposta(404, { erro: 'nota não encontrada' });
     if (papel === 'vendedor') {
       const { data: ve } = n.empresa_id ? await comoUsuario.rpc('crm_ve_empresa', { e: n.empresa_id }) : { data: false };
@@ -637,16 +649,32 @@ Deno.serve(async (req) => {
     try {
       if (b.acao === 'nota_xml') return resposta(200, { nome: chave + '-procNFe.xml', xml: n.proc_xml });
       if (b.acao === 'nota_reenviar') return resposta(200, await enviaEmailNota(db, String(n.id || ''), { para: b.para ? String(b.para) : '', manual: true, base: n.id ? undefined : n }));
-      // DANFE (uma via, a do cliente) + os boletos registrados no BB, num PDF só
+      // DANFE (uma via, a do cliente) + os boletos registrados no BB, num PDF só. { so_boleto: true }: só os boletos (2ª via).
       const Dn = await carregaDanfe(), d = Dn.ler(String(n.proc_xml));
       if (!d) throw new Error('não li o XML da nota');
-      const pdf = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
-      Dn.desenha(pdf, d, { logo: await logoDanfe(), cores: CORES });
+      const soBoleto = b.so_boleto === true;
       const bol = await boletosDaNota(db, n);
-      if (bol.registrados.length) await desenhaBoletos(pdf, bol.registrados, String(n.proc_xml), bol.dados, false);
+      let regs = bol.registrados, aviso = '';
+      // nota do FKN (boleto feito no site do BB, 10/11/2026): a 2ª via vem do banco, pelos títulos em aberto da nota
+      if (!regs.length && doFkn) {
+        try {
+          const sv = await boletosDoSite(n.numero);
+          regs = sv.boletos;
+          if (sv.fora.length) aviso = sv.fora.map(x => String(x.duplicata) + ': ' + String(x.motivo)).join('; ');
+          else if (!sv.titulos) aviso = 'a nota não tem título em aberto (já foi paga ou é à vista)';
+        } catch (e) { aviso = (e as Error).message; }
+      }
+      if (soBoleto && !regs.length) return resposta(404, { erro: 'Não achei boleto em aberto desta nota' + (aviso ? ' (' + aviso + ')' : '') + '.' });
+      const pdf = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
+      if (!soBoleto) Dn.desenha(pdf, d, { logo: await logoDanfe(), cores: CORES });
+      let n_bol = 0;
+      if (regs.length) {
+        try { await desenhaBoletos(pdf, regs, String(n.proc_xml), bol.dados, soBoleto); n_bol = regs.length; }
+        catch (e) { if (soBoleto || !doFkn) throw e; aviso = (e as Error).message; }
+      }
       const arq = arquivos(n, EMPRESA);
-      return resposta(200, { nome: bol.registrados.length ? arq.pdf.replace(/^DANFE /, 'DANFE e boleto ') : arq.pdf, boletos: bol.registrados.length,
-        pdf: base64(new Uint8Array(pdf.output('arraybuffer'))) });
+      return resposta(200, { nome: soBoleto ? arq.pdf.replace(/^DANFE /, 'Boleto ') : n_bol ? arq.pdf.replace(/^DANFE /, 'DANFE e boleto ') : arq.pdf, boletos: n_bol, aviso,
+        vencido: regs.some(x => x.vencido === true), pdf: base64(new Uint8Array(pdf.output('arraybuffer'))) });
     } catch (e) { return resposta(500, { erro: (e as Error).message }); }
   }
   if (ehDfe ? !DFE.includes(String(eu.papel)) : !EMITE.includes(String(eu.papel))) return resposta(403, { erro: ehDfe ? 'as notas de compra são do administrador e do comprador' : 'só a logística, a gestora e o administrador emitem nota' });
