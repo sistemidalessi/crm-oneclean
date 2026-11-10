@@ -27,8 +27,8 @@ const URL_REKTA = 'https://clientes.rektaempresarial.com.br/Api/api/FlexLote/Ava
 const BUCKET = 'crm-credito';
 // a política e a leitura da resposta são as do site (credito.js, com regras.js), na versão fixada
 // (node ferramentas/fixa-motor-notas.js troca o commit e o SHA-256; depois, publicar esta função de novo)
-const COMMIT = 'ae065adef0c5a1f549ceaafdd226910d8b46d39e';
-const HASHES: Record<string, string> = { 'regras.js': '07ea994c4a7535f89ddce21067ed140b61ca1cffe75642caffa43bcc4760213f', 'credito.js': 'a86aec62dcfefc599e6bf36ac065c44eb391ad2d226651968f6f1028713ccfdd' };
+const COMMIT = '9bc31160d59b495048b47d4fb12c4528919f0fd4';
+const HASHES: Record<string, string> = { 'regras.js': '07ea994c4a7535f89ddce21067ed140b61ca1cffe75642caffa43bcc4760213f', 'credito.js': 'f02cae074d7632eebc684ef2cc9ef95cb581effdf80b0ab018a3123655bf76ea' };
 const FONTE = 'https://raw.githubusercontent.com/sistemidalessi/crm-oneclean/' + COMMIT + '/';
 const TETO_PADRAO = 5000;
 type Linha = Record<string, unknown>;

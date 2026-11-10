@@ -28,8 +28,8 @@ const EMITE = ['admin', 'gestor', 'logistica'], CANCELA = ['admin', 'gestor', 'l
 type Linha = Record<string, unknown>;
 // A DANFE do e-mail ao cliente (04/11/2026) é desenhada aqui pelo MESMO danfe.js do site, baixado do GitHub na versão fixada
 // (node ferramentas/fixa-motor-notas.js troca o commit e o SHA-256; depois, publicar esta função de novo).
-const COMMIT = 'ae065adef0c5a1f549ceaafdd226910d8b46d39e';
-const HASHES: Record<string, string> = { 'danfe.js': '451328cf4a5bb951c178c535e124209369238a10ec5050dfc9e158c0c8472f3e', 'regras.js': '07ea994c4a7535f89ddce21067ed140b61ca1cffe75642caffa43bcc4760213f', 'cobranca.js': 'fec5e59ff21b7075c592133e54011e204c2cde65e9e29e3ef986cfb21f6df8dd', 'boleto.js': 'bc6d48f11afe7891618be81fe3cecda8fd5f3744fdaf7be29478a8f3db85b53c', 'vendor/qrcode.js': '18ae399f81182bc9de916e9c77b195df20cc58d6f2d55a62b085a299f1bf1780' };
+const COMMIT = '9bc31160d59b495048b47d4fb12c4528919f0fd4';
+const HASHES: Record<string, string> = { 'danfe.js': '451328cf4a5bb951c178c535e124209369238a10ec5050dfc9e158c0c8472f3e', 'regras.js': '07ea994c4a7535f89ddce21067ed140b61ca1cffe75642caffa43bcc4760213f', 'cobranca.js': 'dfb917a33afeb2fec42266d9d61c09b90ecb817024484258399ca012d7742873', 'boleto.js': 'bc6d48f11afe7891618be81fe3cecda8fd5f3744fdaf7be29478a8f3db85b53c', 'vendor/qrcode.js': '18ae399f81182bc9de916e9c77b195df20cc58d6f2d55a62b085a299f1bf1780' };
 // (05/11/2026) o boleto do e-mail é o MESMO desenho que a logística imprime: regras.js + cobranca.js (linha digitável) +
 // boleto.js + vendor/qrcode.js (QR do Pix), na mesma versão fixada; os SHA-256 entram pelo ferramentas/fixa-motor-notas.js
 const FONTE = 'https://raw.githubusercontent.com/sistemidalessi/crm-oneclean/' + COMMIT + '/';
