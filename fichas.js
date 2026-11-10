@@ -1204,10 +1204,13 @@
   // null = navegador sem a janela (vai para Downloads); false = a pessoa cancelou.
   async function pedeArquivo(nome) {
     if (!temSalvarComo()) return null;
+    const t0 = Date.now();
     try {
       return await window.showSaveFilePicker({ suggestedName: nome + '.pdf', types: [{ description: 'PDF', accept: { 'application/pdf': ['.pdf'] } }] });
     } catch (e) {
-      if (e && e.name === 'AbortError') return false;
+      // "cancelou" em menos de 1 segundo não foi a pessoa: a janela "Salvar como" do computador não abriu (10/11/2026: a última
+      // pasta usada era da rede e a rede caiu; o botão parecia não fazer nada). Aí o PDF vai para a pasta Downloads.
+      if (e && e.name === 'AbortError') return Date.now() - t0 < 1000 ? null : false;
       return null; // sem permissão para a janela agora: baixa normalmente
     }
   }

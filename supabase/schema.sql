@@ -10243,7 +10243,9 @@ revoke all on function public.crm_nfe_email_tick(date) from public, anon, authen
 do $$ begin
   if exists (select 1 from pg_extension where extname = 'pg_cron') then
     perform cron.unschedule(jobid) from cron.job where jobname = 'crm-nfe-email';
-    perform cron.schedule('crm-nfe-email', '*/15 10-23,0 * * *', 'select public.crm_nfe_email_tick()');
+    -- 10/11/2026: a janela passou de 2 para 7 dias. O e-mail que não sai (caixa fora do ar, teto por hora, senha faltando)
+    -- continua pendente, e com 2 dias a nota deixava de ser tentada sem ninguém ver
+    perform cron.schedule('crm-nfe-email', '*/15 10-23,0 * * *', $c$select public.crm_nfe_email_tick(((now() at time zone 'America/Sao_Paulo')::date - 7))$c$);
   end if;
 end $$;
 
@@ -11551,12 +11553,12 @@ begin
     achados := achados || crm_interno.fiscal_p('conferencia:nfe', 'NF-e', 'atencao', 'O fiscal não conseguiu conferir as NF-e (' || left(sqlerrm, 120) || ').', 'Me chamar: a conferência quebrou.');
   end;
 
-  -- 3b. serviço de e-mail (Brevo) recusando os envios (10/11/2026: a conta ficou bloqueada de 06 a 10/11 e o aviso saiu
+  -- 3b. e-mail da empresa sem sair (10/11/2026: o provedor antigo bloqueou a conta de 06 a 10/11 e o aviso saiu
   --     misturado com "cliente sem e-mail no cadastro", como atenção): NF-e, cobrança do dia, cadência e XML ao contador
   begin
     select count(*), string_agg(numero::text, ', ' order by numero), min(autorizada_em), max(left(email_erro, 150)) into n, lst, ts, t from public.crm_nfe
       where ambiente = 'producao' and situacao = 'autorizada' and coalesce(email_ok, false) = false
-        and email_erro is not null and email_erro not ilike 'cliente sem e-mail%' and autorizada_em > now() - interval '10 days';
+        and email_erro is not null and email_erro not ilike 'cliente sem e-mail%' and email_erro not ilike '%(429)%' and autorizada_em > now() - interval '10 days';
     select count(*) into n2 from public.crm_cobranca_rodadas cr,
            lateral jsonb_array_elements(coalesce(cr.dados -> 'boletos', '[]'::jsonb) || coalesce(cr.dados -> 'avisos', '[]'::jsonb)) x
       where cr.dia = hoje and (x ->> 'erro') ilike '%e-mail%' and (x ->> 'erro') not ilike '%sem e-mail%';
@@ -11565,10 +11567,10 @@ begin
               and not exists (select 1 from public.crm_contador_envios o where o.mes = c.mes and o.ok and o.enviado_em > c.enviado_em)) into n3;
     if n >= 2 or n2 > 0 or n3 > 0 then
       achados := achados || crm_interno.fiscal_p('email:recusado', 'E-mail', 'grave',
-        'O serviço de e-mail (Brevo) está recusando os envios' || coalesce(' desde ' || to_char(ts at time zone 'America/Sao_Paulo', 'DD/MM'), '') || ': '
+        'O e-mail da empresa não está saindo' || coalesce(' desde ' || to_char(ts at time zone 'America/Sao_Paulo', 'DD/MM'), '') || ': '
         || n || ' NF-e sem o e-mail ao cliente' || coalesce(' (' || lst || ')', '') || ', ' || n2 || ' cobrança(s) de hoje e ' || n3 || ' outro(s) envio(s) que não saíram.'
         || coalesce(' Resposta: ' || t, ''),
-        'Entrar no Brevo (app.brevo.com) e ver o aviso da conta (bloqueada ou em análise) ou falar com o suporte deles. Quando voltar, o e-mail das notas sai sozinho em até 15 min.');
+        'Abrir Configurações → Integrações → E-mail da empresa e mandar um e-mail de teste. Se falhar: conferir a senha da caixa nos segredos do Supabase (EMAIL_SENHA) e se a caixa funciona no provedor. Quando voltar, o e-mail das notas sai sozinho em até 15 min.');
     end if;
   exception when others then
     achados := achados || crm_interno.fiscal_p('conferencia:email', 'E-mail', 'atencao', 'O fiscal não conseguiu conferir o serviço de e-mail (' || left(sqlerrm, 120) || ').', 'Me chamar: a conferência quebrou.');

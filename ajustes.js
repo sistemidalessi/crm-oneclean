@@ -845,7 +845,7 @@
             '<button type="button" class="mini" data-acao="integ-excluir" data-id="' + esc(c.id) + '">excluir</button>' : '') + '</td></tr>').join('') + '</tbody></table>'
         : '<p class="vazio">' + (admin ? 'Nenhuma chave ainda.' : 'Só o administrador vê e gera as chaves.') + '</p>') +
       (admin ? '<p><button type="button" class="btn ouro" data-acao="integ-nova">Gerar chave para o vigia</button></p>' : '') + '</section>' +
-      (admin ? leituraCaixa(url, quando) + espelhoAgilite(url, quando) + whatsappMeta() + (CRM.boletoBB ? CRM.boletoBB.cartaoGolpe() + CRM.boletoBB.cartao() : '') : '') +
+      (admin ? leituraCaixa(url, quando) + espelhoAgilite(url, quando) + emailDaEmpresa() + whatsappMeta() + (CRM.boletoBB ? CRM.boletoBB.cartaoGolpe() + CRM.boletoBB.cartao() : '') : '') +
       '<section class="cartao"><h2>Últimas entregas <button type="button" class="mini" data-acao="integ-atualizar">atualizar</button></h2>' +
       (integ.registro.length ? '<table class="tabela"><thead><tr><th>Quando</th><th class="num">Arquivos</th><th class="num">Notas novas</th><th class="num">Valor</th><th class="num">Fora</th><th>Detalhes</th></tr></thead><tbody>' +
         integ.registro.map(l => {
@@ -871,6 +871,7 @@
     try {
       integ = await CRM.store().integracoes();
       integ.espelho = CRM.ehAdmin() && CRM.store().espelhoSituacao ? await CRM.store().espelhoSituacao().catch(() => null) : null;
+      integ.emailCaixa = CRM.ehAdmin() && CRM.store().emailCaixa ? await CRM.store().emailCaixa({ acao: 'situacao' }).catch(e => ({ ligado: false, erro: e.message })) : null;
       integ.whatsapp = CRM.ehAdmin() && CRM.store().whatsapp ? await CRM.store().whatsapp({ acao: 'situacao' }).catch(e => ({ ligado: false, erro: e.message })) : null;
       CRM.render();
     } catch (e) { CRM.falhou(e); }
@@ -901,6 +902,22 @@
   // Lançou, ajustou, deu ✓ ou desfez uma "Transferência entre empresas" aqui → o banco manda o par para a
   // Agilité (em até 1 min; fora do ar, tenta de novo a cada 10 min). O que a Agilité lança chega por
   // crm-caixa-espelho, com a senha de gravação gerada aqui.
+  // E-mail pela caixa da empresa (10/11/2026): nota fiscal, cobrança, XML ao contador e cadência saem pela caixa de e-mail do
+  // próprio domínio (crm-enviar-email). A senha da caixa fica só nos segredos do Supabase (EMAIL_SENHA).
+  function emailDaEmpresa() {
+    const e = integ.emailCaixa;
+    if (!e || e.local) return '';
+    const caixa = e.usuario ? ' <strong>' + esc(e.usuario) + '</strong>' : '';
+    if (!e.ligado) return '<section class="cartao"><h2>E-mail da empresa</h2><p>' + CRM.selo('não ligado', 'ambar') + ' ' +
+      esc(e.erro || (!e.senha ? 'falta guardar a senha da caixa nos segredos do Supabase, com o nome EMAIL_SENHA' : 'falta o servidor ou a caixa na configuração')) + '</p>' +
+      '<p class="dica">Os e-mails do CRM (nota fiscal com XML, DANFE e boleto, cobrança, XML ao contador e cadência) saem pela caixa' + caixa +
+      '. A senha vai só nos segredos do Supabase, nunca no chat. Enquanto não estiver ligado, as notas ficam esperando e saem sozinhas depois.</p></section>';
+    return '<section class="cartao"><h2>E-mail da empresa</h2><p>' + CRM.selo('ligado', 'verde') + ' Os e-mails do CRM saem pela caixa' + caixa +
+      ' · ' + esc(String(e.na_ultima_hora || 0)) + ' na última hora (teto de ' + esc(String(e.por_hora || 60)) + ' por hora).</p>' +
+      '<p><button type="button" class="btn sec" data-acao="email-teste">Mandar um e-mail de teste para mim</button></p>' +
+      '<p class="dica">As notas do mesmo cliente vão num e-mail só (o XML de cada uma; até 6 notas, também um PDF com as DANFEs e os boletos). ' +
+      'A resposta do cliente vai para o(a) vendedor(a). Se o teto da hora enche, o que faltou sai na hora seguinte, sozinho.</p></section>';
+  }
   // WhatsApp oficial da Meta (15/10/2026): o CRM manda sozinho o boleto atualizado, com o PDF completo, ao(à) vendedor(a).
   const STATUS_META = { APPROVED: ['aprovado', 'verde'], PENDING: ['em análise na Meta', 'ambar'], REJECTED: ['recusado', 'vermelho'], PAUSED: ['pausado', 'ambar'], DISABLED: ['desligado', 'vermelho'] };
   function whatsappMeta() {
@@ -1174,6 +1191,10 @@
         CRM.toast('Número registrado na Meta.'); integ = null; CRM.render();
       }
     }),
+    'email-teste': async () => {
+      try { await CRM.store().emailCaixa({ acao: 'teste' }); CRM.toast('E-mail de teste enviado para o seu e-mail de login. Veja a caixa de entrada (e o spam).'); integ = null; CRM.render(); }
+      catch (e) { CRM.falhou(e); }
+    },
     'wa-teste': async () => {
       try { const r = await CRM.store().whatsapp({ acao: 'teste' }); CRM.toast('Teste enviado para ' + r.para + '. Confira o WhatsApp do seu celular.'); } catch (e) { CRM.falhou(e); }
     },

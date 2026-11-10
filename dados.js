@@ -1078,6 +1078,18 @@
   Local.prototype.gnre = async function () { return Promise.reject(new Error('a GNRE só funciona com o Supabase ligado')); };
   Local.prototype.fiscalAgentes = async function () { return Promise.reject(new Error('o fiscal dos agentes só funciona com o Supabase ligado')); };
   Local.prototype.cobranca = async function (corpo) { return corpo && corpo.acao === 'situacao' ? { local: true, avisos: [] } : Promise.reject(new Error('o aviso de atraso só funciona com o Supabase ligado')); };
+  // A caixa de e-mail da empresa (10/11/2026): crm-enviar-email manda os e-mails do CRM (nota fiscal, cobrança, contador,
+  // cadência). Daqui só o administrador vê a situação e manda um teste para si mesmo; a senha fica só no Supabase.
+  Supa.prototype.emailCaixa = async function (corpo) {
+    const r = await this.sb.functions.invoke('crm-enviar-email', { body: corpo });
+    if (r.error) {
+      let msg = r.error.message;
+      try { const j = await r.error.context.json(); if (j && (j.message || j.erro)) msg = j.message || j.erro; } catch (e) { /* sem corpo */ }
+      throw new Error(msg);
+    }
+    return r.data;
+  };
+  Local.prototype.emailCaixa = async function (corpo) { return corpo && corpo.acao === 'situacao' ? { ligado: false, local: true } : Promise.reject(new Error('o e-mail só funciona com o Supabase ligado')); };
   Supa.prototype.email = async function (corpo) {
     const r = await this.sb.functions.invoke('crm-email', { body: corpo });
     if (r.error) {
