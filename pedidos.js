@@ -1254,6 +1254,18 @@
     const t = P.totais(x.itens, x.frete);
     let neg = x.negocio_id && CRM.negocio(x.negocio_id);
     const etapa = etapaOrcamento();
+    // Cliente trocado num orçamento já salvo (10/11/2026, vídeo da Silmara: fez o orçamento no nome de outro condomínio "só
+    // para adiantar", trocou pelo "+ Cliente novo" e o orçamento continuava no cliente antigo): o negócio vai junto para o
+    // cliente novo quando é só deste orçamento; se tem outro orçamento ou pedido, fica onde está e o orçamento ganha um
+    // negócio novo no cliente certo.
+    let trocou = null;
+    if (neg && neg.status === 'aberto' && neg.empresa_id !== e.id) {
+      const antigo = CRM.empresa(neg.empresa_id);
+      const outros = (E().D.propostas || []).some(p => p.negocio_id === neg.id && p.id !== x.proposta_id) || (peds || []).some(p => p.negocio_id === neg.id && p.situacao !== 'cancelado');
+      trocou = { de: antigo, negocio: neg.id };
+      if (outros) neg = null;
+      else neg = await CRM.atualizar('negocios', neg.id, { empresa_id: e.id, titulo: /^Orçamento /.test(neg.titulo || '') ? 'Orçamento ' + e.nome : neg.titulo });
+    }
     if (!neg || neg.status !== 'aberto') {
       neg = await CRM.inserir('negocios', { empresa_id: e.id, titulo: 'Orçamento ' + e.nome, etapa_id: etapa ? etapa.id : null, status: 'aberto', valor: t.geral, responsavel_id: x.vendedor_id || CRM.meuId(), origem: 'Orçamento CRM' });
     } else neg = await CRM.auto.mudarNegocio(neg, { valor: t.geral });
@@ -1267,6 +1279,10 @@
     const pr = x.proposta_id && (E().D.propostas || []).find(p => p.id === x.proposta_id);
     const p = pr ? await CRM.atualizar('propostas', pr.id, campos) : await CRM.inserir('propostas', Object.assign({ status: 'rascunho' }, campos));
     await CRM.auto.sistema(e.id, neg.id, 'Orçamento ' + p.numero + ' feito no CRM: ' + itens.length + ' itens, ' + R.moeda(t.geral));
+    if (trocou && trocou.de) {
+      await CRM.auto.sistema(e.id, neg.id, 'Orçamento ' + p.numero + ': o cliente era "' + trocou.de.nome + '" e passou a ser este.');
+      await CRM.auto.sistema(trocou.de.id, null, 'Orçamento ' + p.numero + ' passou para o cliente "' + e.nome + '".').catch(() => {});
+    }
     ed.negocio_id = neg.id; ed.proposta_id = p.id; ed.dados.numero_orcamento = p.numero;
     CRM.toast('Orçamento ' + p.numero + ' salvo no negócio. Quando o cliente aprovar, clique em "Gravar pedido".');
     CRM.render();
