@@ -1177,6 +1177,7 @@ pre.of-previa { white-space: pre-wrap; font-family: inherit; font-size: .88rem; 
 .pc-tabela td { vertical-align: middle; }
 .pc-tabela td small { display: block; color: var(--suave); font-size: .75rem; }
 .pc-tabela .pf-mini { margin-right: 0; }
+.pc-tabela td.cp-baixa { white-space: nowrap; text-align: right; }
 .pc-linha { cursor: pointer; }
 .pc-linha:hover td { background: var(--realce); }
 .num-cod { font-variant-numeric: tabular-nums; color: var(--suave); white-space: nowrap; }

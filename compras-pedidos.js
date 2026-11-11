@@ -124,7 +124,17 @@
     CRM.render();
   }
   const SIT = { pedido: ['pedido feito', 'etiqueta'], faturado: ['faturado pelo fornecedor', 'azul'], parcial: ['chegou em parte', 'ambar'], recebido: ['recebido', 'verde'], cancelado: ['cancelado', ''] };
-  const VER = [['abertos', 'Em aberto'], ['atrasados', 'Atrasados'], ['recebidos', 'Recebidos'], ['todos', 'Todos']];
+  const VER = [['abertos', 'Em aberto'], ['atrasados', 'Atrasados'], ['recebidos', 'Recebidos'], ['cancelados', 'Cancelados'], ['todos', 'Todos']];
+  // 11/11/2026 (áudio do Wellington): dar a baixa na própria linha, sem abrir o pedido. "Recebido" fecha o pedido que chegou
+  // inteiro (mesmo quando aparece "chegou em parte"); "Cancelar" cancela o pedido todo ou, se algo já entrou, o que falta.
+  // Fechado ou cancelado, sai da lista "Em aberto".
+  function botoesLinha(p) {
+    if (!p.aberto) return '';
+    const algo = p.itens.some(i => i.recebido);
+    return '<button type="button" class="mini" data-acao="cp-chegou" data-id="' + p.id + '" title="Tudo deste pedido chegou: fecha o pedido">✓ Recebido</button> ' +
+      '<button type="button" class="mini perigo" data-acao="' + (algo ? 'cp-cancelar-resto' : 'cp-cancelar') + '" data-id="' + p.id + '" title="' +
+      (algo ? 'Cancela o que ainda não chegou; o que já entrou fica' : 'Cancela o pedido todo') + '">✕ Cancelar</button>';
+  }
   function linhaPedido(p) {
     const s = SIT[p.situacaoAtual], abre = aberto === p.id;
     return '<tr class="pc-linha" data-acao="cp-abrir" data-id="' + p.id + '"><td>' + p.id + '</td>' +
@@ -132,8 +142,9 @@
         '<small>' + p.itens.length + ' ' + (p.itens.length === 1 ? 'item' : 'itens') + ' · ' + qtd(p.unidades) + ' unidades' + (p.total ? ' · ' + esc(R.moeda(p.total)) : '') + '</small></td>' +
       '<td>' + esc(br(p.criado_em && R.diaLocal(p.criado_em))) + '</td>' +
       '<td>' + CRM.selo(s[0], s[1]) + seloAprovacao(p) + (p.atrasado ? ' ' + CRM.selo('atrasado ' + p.diasAtraso + ' dia(s)', 'vermelho') : '') + (p.notas ? ' <small>NF ' + esc(p.notas) + '</small>' : '') + '</td>' +
-      '<td class="num' + (p.atrasado ? ' neg' : '') + '">' + (p.aberto ? (p.atrasado ? 'era ' : '~') + esc(br(p.previsaoEf)) : p.situacaoAtual === 'recebido' ? 'chegou' : '—') + '</td></tr>' +
-      (abre ? '<tr class="cp-detalhe"><td colspan="5">' + detalhe(p) + '</td></tr>' : '');
+      '<td class="num' + (p.atrasado ? ' neg' : '') + '">' + (p.aberto ? (p.atrasado ? 'era ' : '~') + esc(br(p.previsaoEf)) : p.situacaoAtual === 'recebido' ? 'chegou' : '—') + '</td>' +
+      '<td class="cp-baixa">' + botoesLinha(p) + '</td></tr>' +
+      (abre ? '<tr class="cp-detalhe"><td colspan="6">' + detalhe(p) + '</td></tr>' : '');
   }
   // aprovação do pedido ao fornecedor (25/10/2026, CEO Grupo; pronta e DESLIGADA até o Anderson ligar no banco:
   // crm_sistema 'compras_aprovacao'): o pedido a partir do valor nasce "aguardando" e só o administrador decide
@@ -199,7 +210,7 @@
       if (dados === null) { setTimeout(carrega, 0); return '<div class="cabecalho"><div><h1>Pedidos ao fornecedor</h1></div></div><div class="cartao"><p class="vazio">Carregando…</p></div>'; }
       const l = dados.lista, ab = l.filter(p => p.aberto), atr = ab.filter(p => p.atrasado), fat = ab.filter(p => p.situacaoAtual === 'faturado');
       // pesquisa e período (28/10/2026): nº, fornecedor, produto (código ou nome) e observação; período pela data do pedido
-      const vis = CRM.Lista.filtra('cp-lista', l.filter(p => f.ver === 'todos' || (f.ver === 'abertos' ? p.aberto : f.ver === 'atrasados' ? p.atrasado : p.situacaoAtual === 'recebido')),
+      const vis = CRM.Lista.filtra('cp-lista', l.filter(p => f.ver === 'todos' || (f.ver === 'abertos' ? p.aberto : f.ver === 'atrasados' ? p.atrasado : f.ver === 'cancelados' ? p.situacaoAtual === 'cancelado' : p.situacaoAtual === 'recebido')),
         { texto: p => [p.id, p.fornecedor_nome, p.obs, (p.itens || []).map(i => (i.codigo || '') + ' ' + (i.descricao || '')).join(' ')], data: p => p.criado_em || p.pedido_em });
       CRM.Lista.planilha('cp-lista', 'pedidos-ao-fornecedor', ['Nº', 'Fornecedor', 'Pedido em', 'Situação', 'Previsão', 'Itens', 'Unidades', 'Total', 'Observação'],
         () => vis.map(p => [p.id, p.fornecedor_nome, R.dataBR(R.diaLocal(p.criado_em || p.pedido_em)), (SIT[p.situacaoAtual] || [p.situacaoAtual])[0], p.previsao ? R.dataBR(p.previsao) : '', (p.itens || []).length, p.unidades, p.total || '', p.obs || '']));
@@ -212,7 +223,7 @@
         '<section class="cartao"><div class="chips">' + VER.map(v => '<button type="button" class="chip-filtro' + (f.ver === v[0] ? ' ativo' : '') + '" data-acao="cp-ver" data-id="' + v[0] + '" aria-pressed="' + (f.ver === v[0]) + '">' + esc(v[1]) +
             (v[0] === 'abertos' ? ' (' + ab.length + ')' : v[0] === 'atrasados' ? ' (' + atr.length + ')' : '') + '</button>').join('') + '</div>' +
           CRM.Lista.barra('cp-lista', { periodo: true, rotuloPeriodo: 'Pedido de', placeholder: 'Nº, fornecedor, produto ou observação' }) +
-          (vis.length ? '<div class="tabela-rolagem"><table class="tabela pc-tabela"><thead><tr><th>Nº</th><th>Fornecedor</th><th>Pedido em</th><th>Situação</th><th class="num">Chega</th></tr></thead><tbody>' +
+          (vis.length ? '<div class="tabela-rolagem"><table class="tabela pc-tabela"><thead><tr><th>Nº</th><th>Fornecedor</th><th>Pedido em</th><th>Situação</th><th class="num">Chega</th><th class="num">Dar baixa</th></tr></thead><tbody>' +
             vis.map(linhaPedido).join('') + '</tbody></table></div>'
             : '<p class="vazio">' + (l.length ? 'Nenhum pedido aqui.' : 'Nenhum pedido registrado ainda. Use "+ Novo pedido" (do zero) ou, em Compras → "Pedido por fornecedor", "Registrar pedido" em cada fornecedor.') + '</p>') +
           '<p class="dica">Faturado = a nota do fornecedor chegou (pela Sefaz ou pelo XML); chega ~' + X.DIAS_DEPOIS_DA_NOTA + ' dias depois dela. Entrou = a entrada foi lançada (no CRM, ou no FKN depois da nota, pela listagem). ' +
@@ -461,11 +472,12 @@
       CRM.abrirForm({ titulo: 'Nova previsão: pedido ' + id, campos: [{ nome: 'previsao', rotulo: 'Chega em', tipo: 'date', obrigatorio: true }], valores: { previsao: p.previsaoEf || p.previsao },
         aoSalvar: async v => { await acao(id, 'previsao', v.previsao); CRM.toast('Previsão trocada: as vendedoras já veem a data nova.'); } });
     },
-    'cp-chegou': async id => { if (confirm('Marcar que tudo deste pedido chegou? Ele sai do "a caminho".')) { try { await acao(id, 'chegou'); CRM.toast('Pedido fechado.'); } catch (e) { CRM.falhou(e); } } },
-    'cp-cancelar-resto': async id => { if (confirm('Cancelar o que ainda não chegou deste pedido? O que já entrou fica.')) { try { await acao(id, 'cancelar_resto'); CRM.toast('O que faltava foi cancelado.'); } catch (e) { CRM.falhou(e); } } },
+    'cp-chegou': async id => { const p = dados && dados.lista.find(x => x.id === Number(id));
+      if (confirm('Marcar o pedido ' + id + (p ? ' (' + R.nomeDeItem(p.fornecedor_nome) + ')' : '') + ' como recebido?\n\nEle sai da lista "Em aberto" e do "a caminho" das vendedoras. A entrada no estoque continua sendo pela nota de compra.')) { try { await acao(id, 'chegou'); CRM.toast('Pedido ' + id + ' recebido: saiu da lista "Em aberto".'); } catch (e) { CRM.falhou(e); } } },
+    'cp-cancelar-resto': async id => { if (confirm('Cancelar o que ainda não chegou do pedido ' + id + '? O que já entrou fica.')) { try { await acao(id, 'cancelar_resto'); CRM.toast('O que faltava foi cancelado.'); } catch (e) { CRM.falhou(e); } } },
     'cp-aprovar': async id => { if (confirm('Aprovar o pedido ' + id + ' ao fornecedor?')) { try { await aprovar(id, 'aprovar'); CRM.toast('Pedido aprovado: o comprador já pode mandar ao fornecedor.'); } catch (e) { CRM.falhou(e); } } },
     'cp-recusar': id => CRM.abrirForm({ titulo: 'Recusar o pedido ' + id, campos: [{ nome: 'motivo', rotulo: 'Motivo (o comprador vê)', largo: true }], valores: { motivo: '' },
       salvarTexto: 'Recusar o pedido', aoSalvar: async v => { await aprovar(id, 'recusar', v.motivo); CRM.toast('Pedido recusado (cancelado).'); } }),
-    'cp-cancelar': async id => { if (confirm('Cancelar o pedido todo?')) { try { await acao(id, 'cancelar'); CRM.toast('Pedido cancelado.'); } catch (e) { CRM.falhou(e); } } }
+    'cp-cancelar': async id => { if (confirm('Cancelar o pedido ' + id + ' todo?')) { try { await acao(id, 'cancelar'); CRM.toast('Pedido cancelado.'); } catch (e) { CRM.falhou(e); } } }
   });
 })(typeof window !== 'undefined' ? window : globalThis);
