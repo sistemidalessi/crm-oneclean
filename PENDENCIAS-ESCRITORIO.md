@@ -25,6 +25,27 @@ A mesma lista resumida está no `PENDENCIAS-ESCRITORIO.md` do `agilite-sistema-g
       **28/10, noite:** perguntas mandadas ao gerente (arquivo liberado em produção e teste, faixa do nosso número a partir de
       2000000001, retorno diário no Gerenciador, dias para baixa, protesto pela instrução 09, BB Pay por arquivo). Esperando a resposta.
 
+- [ ] **Pagar no BB pela API (Pagamentos em Lote; resposta do gerente em 11/11/2026).** O CRM já está pronto em homologação
+      (Caixa → Pagar no BB, `crm-bb-pagar`; histórico de 04/11). O gerente respondeu:
+      - **Convênio PAG:** a agência cadastra, mas só fica ativo depois de o Anderson **assinar o termo de adesão**.
+      - **A aplicação "OneClean Pagamentos" (em teste) não vai para produção:** com o convênio ativo é preciso **criar uma
+        aplicação NOVA** no Portal Developers BB e mandar essa para produção → chaves novas nos Secrets (`BB_PAG_CLIENT_ID`,
+        `BB_PAG_CLIENT_SECRET`, `BB_PAG_APP_KEY`, digitadas pelo Anderson) e o **mesmo certificado A1** da OneClean no cartão
+        "Certificados" dela (`BB_PAG_CERT_PEM`/`BB_PAG_KEY_PEM`; a parte do certificado na função ainda não foi testada).
+      - **Liberação:** BB Digital ou app BB PJ no celular, **exceto Pix, que só se autoriza pela própria API** (o "Liberar" do CRM).
+      - **Limites** por pagamento e por mês: personalizáveis (decidir com a agência; começar baixo).
+      - **Tipos:** boleto, guia, Pix e TED, de segunda a sábado; TED só de segunda a sexta, das 7h às 16h.
+      - **Tarifa por lançamento:** boleto R$ 0,00; guia R$ 3,00; **Pix R$ 7,90**; TED R$ 8,20; transferência para conta corrente
+        BB R$ 3,40; para poupança BB R$ 5,30; salário R$ 3,40. Ou seja: boleto pelo CRM sai de graça; Pix pelo convênio é caro.
+      - **DDA** (boletos emitidos contra o CNPJ): não está na API de lote; há uma **API própria, em piloto**, liberada para quem
+        pedir.
+      - **Cobrança (convênio 3804880):** abatimento, alteração e baixa de boleto registrado são aceitos (o CRM já faz desde 04/11);
+        a API também avisa por **webhook** a baixa operacional (hoje o CRM pergunta de 10 em 10 min).
+      Falta, na ordem: (1) Anderson assinar o termo de adesão quando a agência avisar e anotar o número do convênio; (2) dizer à
+      agência os limites; (3) pedir a entrada no piloto do DDA; (4) criar a aplicação nova com Pagamentos em Lote e o certificado,
+      pedir produção, pôr as chaves nos Secrets; (5) o Claude troca `pagamentos.ambiente` para produção e o 1º teste é um boleto
+      pequeno de fornecedor (custo zero), liberado pelo app do BB.
+
 - [ ] **Estoque antes da virada (24/10):** parte das 36 diferenças era erro do CRM (fuso), já corrigido; Belaplast 9758 e
       Leal 23026 reabertas. Falta: (1) o **comprador** dar a ciência das notas sem XML completo (desde 27/10 as notas de compra são dele do começo ao fim) (Vigut ×2 e AJA de 23/10, Lotus de
       19/10: Estoque → Notas de compra → Notas da Sefaz → "dar ciência"); (2) o **comprador** dar entrada nas notas pendentes
