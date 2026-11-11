@@ -333,3 +333,12 @@ test('recusa do banco por custo fora do normal: o produto para pedir o motivo', 
   // a mensagem para a logística não pede motivo (ela chama o comprador)
   assert.equal(S.produtoDoErroDeCusto('item 1 (X): o custo ficou muito longe do custo do produto 010085 — parece produto errado'), null);
 });
+
+test('custo longe do atual: a descrição confirma a embalagem, não sugere outro número (11/11/2026, NF 38545)', () => {
+  const S = require('../estoque.js');
+  const it = { id: 1, descricao: 'PANO MICROFIBRA 40X60 (1X10) AZUL', quantidade: 1, valor_total: 38.5 };
+  const r = S.custosSuspeitos([it], [{ id: 1, codigo: '190402', fator: 10 }], new Map([['190402', 1.5]]), []);
+  assert.equal(r.length, 1);
+  assert.equal(r[0].sugestao, null);
+  assert.match(r[0].texto, /descrição confirma 10/);
+});

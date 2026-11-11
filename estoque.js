@@ -334,6 +334,11 @@
       if (par) return { id: x.id, sugestao: null, produto: par.codigo,
         texto: (it.descricao || x.codigo) + ' → ' + x.codigo + ': ' + moeda(novo) + ' cada, o custo atual é ' + moeda(atual) + ' → parece outro produto: ' +
           par.codigo + ' ' + par.descricao + ' (custo ' + moeda(par.custo) + ')' };
+      // 11/11/2026 (Wellington, NF 38545: "PANO MICROFIBRA 40X60 (1X10)" com 10 virou 19): se a descrição confirma o número
+      // digitado, o errado é o custo atual do produto (entradas antigas ligadas errado), não a embalagem: não sugere outro número
+      if (fatoresDaDescricao(it.descricao).some(n => Math.abs(n - f) < 1e-9))
+        return { id: x.id, sugestao: null, texto: (it.descricao || x.codigo) + ' → ' + x.codigo + ': ' + moeda(novo) + ' cada, o custo atual é ' + moeda(atual) +
+          ' → a descrição confirma ' + f + ' por embalagem: confira se o produto é este (o custo atual pode estar errado)' };
       if (r > 1.8) {
         const alvo = r * f, cands = fatoresDaDescricao(it.descricao);
         const daDesc = cands.find(n => Math.abs(n / alvo - 1) <= 0.25), inteiro = Math.round(alvo);
