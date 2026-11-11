@@ -93,3 +93,21 @@ test('desenha: uma folha para nota pequena, mais folhas quando passa', () => {
   assert.ok(folhas(80) >= 2);
   assert.equal(folhas(1, { dups: 20, homologacao: true }), 1, '20 parcelas (mostra 14) e marca d\'água');
 });
+
+test('local de entrega: grupo <entrega> do XML ou o texto "LOCAL DE ENTREGA:" da nota (11/11/2026)', () => {
+  const base = xml(2);
+  const comGrupo = base.replace('<det ', '<entrega><CNPJ>98765432000155</CNPJ><xNome>UNIDADE CENTRO</xNome><xLgr>RUA DA ENTREGA</xLgr><nro>10</nro>' +
+    '<xBairro>VILA</xBairro><cMun>3550308</cMun><xMun>SAO PAULO</xMun><UF>SP</UF><CEP>04902015</CEP></entrega><det ');
+  const g = D.ler(comGrupo).entrega;
+  assert.equal(g.nome, 'UNIDADE CENTRO');
+  assert.equal(g.endereco.logradouro, 'RUA DA ENTREGA');
+  assert.equal(g.endereco.municipio, 'SAO PAULO');
+  const t = D.ler(base.replace('VENDEDOR: TESTE', 'PORTADOR: BOLETO;LOCAL DE ENTREGA: SUBPREFEITURA, AV X, 1695, SAO PAULO, SP;VENDEDOR: TESTE')).entrega;
+  assert.equal(t.texto, 'SUBPREFEITURA, AV X, 1695, SAO PAULO, SP');
+  assert.equal(D.ler(base).entrega, null, 'sem local de entrega, sem o quadro');
+  for (const x of [comGrupo, base.replace('VENDEDOR: TESTE', 'LOCAL DE ENTREGA: AV X, 1;VENDEDOR: TESTE')]) {
+    const pdf = new jsPDF({ unit: 'mm', format: 'a4' });
+    D.desenha(pdf, D.ler(x), {});
+    assert.equal(pdf.getNumberOfPages(), 1);
+  }
+});

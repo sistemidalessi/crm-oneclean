@@ -38,6 +38,14 @@
       municipio: valor(e, 'xMun'), uf: valor(e, 'UF'), cep: valor(e, 'CEP'), fone: valor(e, 'fone') };
   }
 
+  function localEntrega(g, infCpl) {
+    if (g && valor(g, 'xLgr')) return { nome: valor(g, 'xNome'), doc: valor(g, 'CNPJ') || valor(g, 'CPF'), ie: valor(g, 'IE'),
+      endereco: { logradouro: valor(g, 'xLgr'), numero: valor(g, 'nro'), complemento: valor(g, 'xCpl'), bairro: valor(g, 'xBairro'),
+        municipio: valor(g, 'xMun'), uf: valor(g, 'UF'), cep: valor(g, 'CEP'), fone: valor(g, 'fone') } };
+    const m = /LOCAL DE ENTREGA\s*:\s*([^;|]+)/i.exec(String(infCpl || ''));
+    return m && m[1].trim() ? { texto: m[1].trim() } : null;
+  }
+
   function ler(texto) {
     const x = String(texto || '').replace(/^﻿/, '');
     const inf = blocos(x, 'infNFe')[0];
@@ -64,6 +72,9 @@
         ie: valor(emit, 'IE'), iest: valor(emit, 'IEST'), endereco: endereco(bloco(emit, 'enderEmit')) },
       destinatario: { nome: valor(dest, 'xNome'), doc: valor(dest, 'CNPJ') || valor(dest, 'CPF') || valor(dest, 'idEstrangeiro'),
         ie: valor(dest, 'IE'), endereco: endereco(bloco(dest, 'enderDest')) },
+      // Local de entrega (11/11/2026, Anderson: "no FKN saía o destinatário e o local de entrega"): o grupo <entrega> do XML
+      // (as notas do FKN têm); sem ele, o "LOCAL DE ENTREGA: …" do texto da nota (as notas do CRM até agora)
+      entrega: localEntrega(bloco(c, 'entrega'), valor(adic, 'infCpl')),
       duplicatas: blocos(bloco(c, 'cobr'), 'dup').map(d => ({ numero: valor(d.corpo, 'nDup'), vencimento: valor(d.corpo, 'dVenc'), valor: num(valor(d.corpo, 'vDup')) })),
       pagamentos: blocos(bloco(c, 'pag'), 'detPag').map(p => ({ forma: valor(p.corpo, 'tPag'), valor: num(valor(p.corpo, 'vPag')) })),
       totais: ['vBC', 'vICMS', 'vBCST', 'vST', 'vII', 'vICMSUFRemet', 'vFCPUFDest', 'vPIS', 'vProd', 'vFrete', 'vSeg', 'vDesc', 'vOutro', 'vIPI', 'vICMSUFDest', 'vTotTrib', 'vCOFINS', 'vNF']
@@ -243,7 +254,8 @@
     // onde começam os itens: folha 1 (canhoto, cabeçalho e os quadros; a fatura muda de altura) e as demais
     const nd = (d.duplicatas || []).length, nm = Math.min(nd, 14);
     const hFatura = nd ? Math.ceil(nm / 7) * 8.4 + (nd > nm ? 2.6 : 0) : H_CEL;
-    const Y_ITENS_1 = 25.6 + 33 + 2 * H_CEL + H_TIT + 3 * H_CEL + H_TIT + hFatura + H_TIT + 2 * H_CEL + H_TIT + 3 * H_CEL + H_TIT + 5.6;
+    const hEntrega = d.entrega ? H_TIT + (d.entrega.texto ? 1 : 2) * H_CEL : 0;
+    const Y_ITENS_1 = 25.6 + 33 + 2 * H_CEL + H_TIT + 3 * H_CEL + hEntrega + H_TIT + hFatura + H_TIT + 2 * H_CEL + H_TIT + 3 * H_CEL + H_TIT + 5.6;
     const Y_ADIC = BAIXO - 32 - H_TIT, Y_ITENS_N = 5 + 33 + 2 * H_CEL + H_TIT + 5.6;
     const folhas = [[]];
     let usado = 0, cap = Y_ADIC - 1 - Y_ITENS_1;
@@ -386,6 +398,16 @@
           [30, 'CEP', cep(end.cep), { alinha: 'center' }], [35, 'DATA DA SAÍDA/ENTRADA', dia(d.saidaEntrada), { alinha: 'center' }]]);
         y = fila(y, [[70, 'MUNICÍPIO', end.municipio], [35, 'FONE / FAX', fone(end.fone)], [10, 'UF', end.uf, { alinha: 'center' }], [50, 'INSCRIÇÃO ESTADUAL', de.ie],
           [35, 'HORA DA SAÍDA/ENTRADA', hora(d.saidaEntrada), { alinha: 'center' }]]);
+        if (d.entrega) {
+          const le = d.entrega, le2 = le.endereco || {};
+          y = titulo(y, 'LOCAL DE ENTREGA');
+          if (le.texto) y = fila(y, [[W, 'ENDEREÇO DE ENTREGA', le.texto]]);
+          else {
+            y = fila(y, [[130, 'NOME / RAZÃO SOCIAL', le.nome || de.nome], [40, 'CNPJ / CPF', doc(le.doc), { alinha: 'center' }], [30, 'INSCRIÇÃO ESTADUAL', le.ie]]);
+            y = fila(y, [[85, 'ENDEREÇO', [le2.logradouro, le2.numero].filter(Boolean).join(', ') + (le2.complemento ? ' - ' + le2.complemento : '')], [40, 'BAIRRO / DISTRITO', le2.bairro],
+              [22, 'CEP', cep(le2.cep), { alinha: 'center' }], [43, 'MUNICÍPIO', le2.municipio], [10, 'UF', le2.uf, { alinha: 'center' }]]);
+          }
+        }
         // fatura / duplicatas
         y = titulo(y, 'FATURA / DUPLICATA');
         const dups = d.duplicatas || [];

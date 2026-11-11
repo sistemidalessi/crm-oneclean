@@ -399,8 +399,13 @@
   function botoesDanfe(id, autorizada) {
     const bb = autorizada && CRM.boletoBB && CRM.boletoBB.ligado && CRM.boletoBB.ligado();
     const bt = (modo, txt, tit) => '<button type="button" class="mini" data-acao="nf-danfe' + modo + '" data-id="' + esc(id) + '" title="' + esc(tit) + '">' + esc(txt) + '</button>';
-    return bb ? [bt('', 'DANFE e boleto', 'As vias da DANFE e, no fim, o boleto do BB'), bt('-so-nota', 'Só a DANFE', 'Só as vias da nota, sem o boleto'),
-      bt('-so-boleto', 'Só o boleto', '2ª via do boleto, sem a nota')] : [bt('', 'DANFE', 'A DANFE da nota')];
+    // 11/11/2026 (Anderson): imprimir para a entrega sai com as vias; o PDF para mandar ao cliente sai com UMA via só
+    const n = viasCfg().length, imp = n > 1 ? ' (' + n + ' vias)' : '';
+    return bb ? [bt('', '🖨 Imprimir' + imp, 'Para a entrega: as vias da DANFE e, no fim, o boleto do BB'),
+      bt('-pdf', '📄 PDF para o cliente', 'Uma via da DANFE e o boleto do BB, para mandar ao cliente'),
+      bt('-so-nota', 'Só a DANFE' + imp, 'Só as vias da nota, sem o boleto'),
+      bt('-so-boleto', 'Só o boleto', '2ª via do boleto, sem a nota')]
+      : [bt('', '🖨 Imprimir' + imp, 'Para a entrega: as vias da DANFE'), bt('-pdf', '📄 PDF para o cliente', 'Uma via da DANFE, para mandar ao cliente')];
   }
   // E-mail da nota ao cliente (04/11/2026, Anderson): a nota de produção autorizada vai sozinha, com o XML e a DANFE, para o
   // "E-mail para a nota fiscal" do cadastro (vazio: o e-mail da empresa). Aqui a situação do envio e, no botão, mandar de novo.
@@ -783,7 +788,7 @@
       return await CRM.store().notaXml(n.chave);
     } catch (e) { return null; }
   }
-  // modo: 'nota' (só as vias), 'boleto' (só o boleto, 2ª via) ou vazio (DANFE e boleto)
+  // modo: 'nota' (só as vias), 'boleto' (só o boleto, 2ª via), 'pdf' (uma via e o boleto, para o cliente) ou vazio (as vias e o boleto)
   async function danfe(id, xmlPronto, modo) {
     try {
       const n = xmlPronto ? null : nfe(id), xml = xmlPronto || await xmlDe(id);
@@ -794,7 +799,7 @@
       const pdf = new raiz.jspdf.jsPDF({ unit: 'mm', format: 'a4', compress: true });
       const op = { logo: await pegaLogo(), cores: (raiz.CRM_CONFIG || {}).cores };   // aviso de golpe só no boleto (02/11/2026)
       // nota do CRM: as vias do costume (3, a do cliente por último); nota do FKN (xmlPronto) ou cancelada: uma folha só
-      if (modo !== 'boleto') { if (!xmlPronto && !(n && n.situacao === 'cancelada')) desenhaVias(pdf, Dn, d, op, true); else Dn.desenha(pdf, d, op); }
+      if (modo !== 'boleto') { if (modo !== 'pdf' && !xmlPronto && !(n && n.situacao === 'cancelada')) desenhaVias(pdf, Dn, d, op, true); else Dn.desenha(pdf, d, op); }
       // boleto do BB pelo arquivo (26/10/2026): as parcelas da nota com boleto do CRM vão no mesmo PDF, uma por página
       const alvo = n || notaDoXml(d), num = n ? n.serie + '-' + n.numero : d.numero;
       const nb = modo !== 'nota' && alvo && alvo.situacao !== 'cancelada' && CRM.boletoBB && CRM.boletoBB.paginasNota ? await CRM.boletoBB.paginasNota(pdf, alvo, { pagador: pagadorDe(d) }).catch(e => avisoBoleto(alvo, e)) : 0;
@@ -1107,6 +1112,7 @@
     'nf-lote': () => lote(),
     'nf-marcar-todos': () => { (CRM.pedidos.separados ? CRM.pedidos.separados() : []).filter(podeEmitir).filter(p => !(CRM.Lista && CRM.Lista.escondido('[data-nf-marca="' + p.id + '"]'))).forEach(p => marcados.add(p.id)); CRM.render(); },
     'nf-danfe': id => danfe(id),
+    'nf-danfe-pdf': id => danfe(id, null, 'pdf'),
     'nf-danfe-so-nota': id => danfe(id, null, 'nota'),
     'nf-danfe-so-boleto': id => danfe(id, null, 'boleto'),
     // nota do FKN (sem crm_nfe): o XML guardado no bucket crm-notas-xml, pela chave
