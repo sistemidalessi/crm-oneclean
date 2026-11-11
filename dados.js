@@ -279,14 +279,36 @@
     }
   }
 
+  // Carga completa com páginas em paralelo (11/11/2026): a 1ª página traz também o total (count exact) e as outras saem
+  // de SIMULTANEAS em SIMULTANEAS. Antes era uma página depois da outra: os itens de nota (40 páginas de ~0,2 s) seguravam
+  // a abertura do CRM em 9 a 15 s; em paralelo, ~3 s (medido no banco real, mesmas linhas na mesma ordem). Os índices
+  // (criado_em, id) do schema.sql deixam cada página barata. Se a tabela cresceu depois da contagem, continua página a
+  // página até a última incompleta; linha repetida por gravação no meio da carga sai (pela chave), a que nasceu durante a
+  // carga chega na recarga leve. Teste: testes/carga-paralela.test.js.
+  const SIMULTANEAS = 6;
   async function tudo(sb, t) {
-    const out = [];
-    for (let de = 0; ; de += PAGINA) {
-      const ordem = t === 'config' ? 'id' : chave(t) === 'user_id' ? 'nome' : 'criado_em';
-      const lote = unwrap(await comTentativas(() => sb.from(tab(t)).select('*').order(ordem).order(chave(t)).range(de, de + PAGINA - 1)));
-      out.push(...lote);
-      if (lote.length < PAGINA) return out;
+    const k = chave(t);
+    const ordem = t === 'config' ? 'id' : k === 'user_id' ? 'nome' : 'criado_em';
+    const pagina = (de, contar) => comTentativas(() =>
+      sb.from(tab(t)).select('*', contar ? { count: 'exact' } : undefined).order(ordem).order(k).range(de, de + PAGINA - 1));
+    const r0 = await pagina(0, true);
+    const out = unwrap(r0).slice();
+    if (out.length < PAGINA) return out;
+    const paginas = Math.max(1, Math.ceil((r0.count || 0) / PAGINA));
+    const lotes = new Array(paginas);
+    let prox = 1;
+    const trabalhador = async () => {
+      while (prox < paginas) { const p = prox++; lotes[p] = unwrap(await pagina(p * PAGINA)); }
+    };
+    await Promise.all(Array.from({ length: Math.min(SIMULTANEAS, paginas - 1) }, trabalhador));
+    for (let p = 1; p < paginas; p++) out.push(...lotes[p]);
+    let ultimo = paginas > 1 ? lotes[paginas - 1] : out;
+    for (let de = paginas * PAGINA; ultimo.length === PAGINA; de += PAGINA) {
+      ultimo = unwrap(await pagina(de));
+      out.push(...ultimo);
     }
+    const vistas = new Set();
+    return out.filter(x => !vistas.has(x[k]) && vistas.add(x[k]));
   }
 
   // Devoluções de venda (crm_devolucoes_venda, 22/10/2026): descontam do faturamento e da comissão (regras.js,
@@ -2143,6 +2165,6 @@
       Object.assign(x, { situacao, obs: String(obs || '').trim() || null, canhoto, entregue_em: x.entregue_em || new Date().toISOString() }); return x; });
   };
 
-  raiz.CRMDados = { TABELAS, INTEIRAS, PARCIAIS, aplicaMudancas, marcaRecarga, chave, Local, Supa, uuid, vazio, LOCAL_ADMIN, cascataMemoria, situacaoVigia, PARADO_MIN, lembreteFkn };
+  raiz.CRMDados = { TABELAS, INTEIRAS, PARCIAIS, aplicaMudancas, marcaRecarga, chave, Local, Supa, uuid, vazio, LOCAL_ADMIN, cascataMemoria, situacaoVigia, PARADO_MIN, lembreteFkn, _tudo: tudo };
   if (typeof module !== 'undefined' && module.exports) module.exports = raiz.CRMDados;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -415,6 +415,27 @@ create index if not exists crm_nota_itens_produto_idx on public.crm_nota_itens (
 create index if not exists crm_negocio_itens_produto_idx on public.crm_negocio_itens (produto_id);
 create index if not exists crm_filtros_usuario_idx   on public.crm_filtros (usuario_id);
 create index if not exists crm_integracao_log_integracao_idx on public.crm_integracao_log (integracao_id);
+-- Carga e recarga leve (11/11/2026): a carga completa pagina por (criado_em, id) e a recarga de 5 em 5 min pede
+-- atualizado_em > X ordenado por (atualizado_em, id). Sem estes índices o banco ordenava a tabela inteira a cada
+-- página (itens de nota: sort em disco). Tabela nova em PARCIAIS (dados.js) ganha os dois.
+create index if not exists crm_nota_itens_criado_id_idx    on public.crm_nota_itens    (criado_em, id);
+create index if not exists crm_nota_itens_atual_id_idx     on public.crm_nota_itens    (atualizado_em, id);
+create index if not exists crm_atividades_criado_id_idx    on public.crm_atividades    (criado_em, id);
+create index if not exists crm_atividades_atual_id_idx     on public.crm_atividades    (atualizado_em, id);
+create index if not exists crm_empresas_criado_id_idx      on public.crm_empresas      (criado_em, id);
+create index if not exists crm_empresas_atual_id_idx       on public.crm_empresas      (atualizado_em, id);
+create index if not exists crm_notas_criado_id_idx         on public.crm_notas         (criado_em, id);
+create index if not exists crm_notas_atual_id_idx          on public.crm_notas         (atualizado_em, id);
+create index if not exists crm_negocios_criado_id_idx      on public.crm_negocios      (criado_em, id);
+create index if not exists crm_negocios_atual_id_idx       on public.crm_negocios      (atualizado_em, id);
+create index if not exists crm_negocio_itens_criado_id_idx on public.crm_negocio_itens (criado_em, id);
+create index if not exists crm_negocio_itens_atual_id_idx  on public.crm_negocio_itens (atualizado_em, id);
+create index if not exists crm_propostas_criado_id_idx     on public.crm_propostas     (criado_em, id);
+create index if not exists crm_propostas_atual_id_idx      on public.crm_propostas     (atualizado_em, id);
+create index if not exists crm_contatos_criado_id_idx      on public.crm_contatos      (criado_em, id);
+create index if not exists crm_contatos_atual_id_idx       on public.crm_contatos      (atualizado_em, id);
+create index if not exists crm_produtos_criado_id_idx      on public.crm_produtos      (criado_em, id);
+create index if not exists crm_produtos_atual_id_idx       on public.crm_produtos      (atualizado_em, id);
 
 -- =================================================================== visibilidade
 create or replace function public.crm_ve_empresa(e uuid)
