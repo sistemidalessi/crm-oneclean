@@ -286,11 +286,14 @@
   // página até a última incompleta; linha repetida por gravação no meio da carga sai (pela chave), a que nasceu durante a
   // carga chega na recarga leve. Teste: testes/carga-paralela.test.js.
   const SIMULTANEAS = 6;
-  async function tudo(sb, t) {
+  // soChave: só a chave de cada linha, na ordem dela (conferência do que foi apagado; antes página a página, 5,6 s).
+  async function tudo(sb, t, soChave) {
     const k = chave(t);
-    const ordem = t === 'config' ? 'id' : k === 'user_id' ? 'nome' : 'criado_em';
-    const pagina = (de, contar) => comTentativas(() =>
-      sb.from(tab(t)).select('*', contar ? { count: 'exact' } : undefined).order(ordem).order(k).range(de, de + PAGINA - 1));
+    const ordem = soChave ? k : t === 'config' ? 'id' : k === 'user_id' ? 'nome' : 'criado_em';
+    const pagina = (de, contar) => comTentativas(() => {
+      const q = sb.from(tab(t)).select(soChave ? k : '*', contar ? { count: 'exact' } : undefined).order(ordem);
+      return (soChave ? q : q.order(k)).range(de, de + PAGINA - 1);
+    });
     const r0 = await pagina(0, true);
     const out = unwrap(r0).slice();
     if (out.length < PAGINA) return out;
@@ -338,14 +341,7 @@
       if (lote.length < PAGINA) return out;
     }
   }
-  async function chaves(sb, t) {
-    const out = [];
-    for (let de = 0; ; de += PAGINA) {
-      const lote = unwrap(await comTentativas(() => sb.from(tab(t)).select(chave(t)).order(chave(t)).range(de, de + PAGINA - 1)));
-      out.push(...lote.map(x => x[chave(t)]));
-      if (lote.length < PAGINA) return out;
-    }
-  }
+  const chaves = (sb, t) => tudo(sb, t, true).then(l => l.map(x => x[chave(t)]));
   // → { inteiras: { t: linhas }, mudadas: { t: linhas }, existentes: { t: [chaves] } | null }
   Supa.prototype.carregarMudancas = async function (desde, conferirApagados) {
     const [a, b, c, dev] = await Promise.all([
@@ -2165,6 +2161,53 @@
       Object.assign(x, { situacao, obs: String(obs || '').trim() || null, canhoto, entregue_em: x.entregue_em || new Date().toISOString() }); return x; });
   };
 
-  raiz.CRMDados = { TABELAS, INTEIRAS, PARCIAIS, aplicaMudancas, marcaRecarga, chave, Local, Supa, uuid, vazio, LOCAL_ADMIN, cascataMemoria, situacaoVigia, PARADO_MIN, lembreteFkn, _tudo: tudo };
+  // ================================================================ Cópia no navegador (11/11/2026)
+  // A carga completa baixa ~20 MB (16 MB só de itens de nota) e segurava a abertura do CRM em 6 a 7 s. Agora a última
+  // carga fica numa cópia no IndexedDB deste navegador: ao entrar, a tela abre na hora com ela e o banco é lido por trás
+  // (recarga leve com a conferência do que foi apagado, ou completa se a cópia for velha ou de outra versão do CRM). Uma
+  // cópia só, da última pessoa que entrou; é apagada ao sair (e em qualquer queda de sessão) e nunca serve a outra pessoa
+  // ou a outro papel. A chave é o endereço do banco: dois CRMs no mesmo endereço do navegador não se misturam.
+  const CACHE_FORMATO = 1;
+  const CACHE_VELHO = 12 * 3600000; // mais velha que isso: abre com ela, mas relê tudo
+  // → null (não usar e apagar), 'leve' (abrir com ela e trazer só o que mudou) ou 'completa' (abrir com ela e reler tudo)
+  function usoDoCache(c, q) {
+    if (!c || c.formato !== CACHE_FORMATO || !c.D || !c.user_id || c.user_id !== q.userId || c.papel !== q.papel) return null;
+    if (TABELAS.some(t => !Array.isArray(c.D[t]))) return null;
+    const idade = q.agora - (c.salvoEm || 0);
+    if (!(idade >= 0)) return null; // relógio do computador voltou: não confiar
+    if (idade > CACHE_VELHO || c.versao !== q.versao) return 'completa';
+    return 'leve';
+  }
+  const CACHE_BANCO = 'sd-crm-copia', CACHE_LOJA = 'dados';
+  function abreCache() {
+    return new Promise((ok, erro) => {
+      if (!raiz.indexedDB) return erro(new Error('sem IndexedDB'));
+      const r = raiz.indexedDB.open(CACHE_BANCO, 1);
+      r.onupgradeneeded = () => { r.result.createObjectStore(CACHE_LOJA); };
+      r.onsuccess = () => ok(r.result);
+      r.onerror = () => erro(r.error);
+      r.onblocked = () => erro(new Error('IndexedDB bloqueado'));
+    });
+  }
+  async function naLoja(modo, fazer) {
+    const db = await abreCache();
+    try {
+      return await new Promise((ok, erro) => {
+        const tx = db.transaction(CACHE_LOJA, modo), req = fazer(tx.objectStore(CACHE_LOJA));
+        tx.oncomplete = () => ok(req.result);
+        tx.onerror = () => erro(tx.error);
+        tx.onabort = () => erro(tx.error || new Error('gravação abortada'));
+      });
+    } finally { db.close(); }
+  }
+  // Nenhuma falha da cópia atrapalha o CRM: sem ela, é a carga normal do banco.
+  const cache = {
+    ler: chave => naLoja('readonly', l => l.get(chave)).catch(() => null),
+    gravar: (chave, c) => naLoja('readwrite', l => l.put(Object.assign({ formato: CACHE_FORMATO }, c), chave)).then(() => true, e => { console.warn('cópia do CRM no navegador não gravada', e); return false; }),
+    apagar: chave => naLoja('readwrite', l => l.delete(chave)).then(() => true, () => false)
+  };
+
+  raiz.CRMDados = { TABELAS, INTEIRAS, PARCIAIS, aplicaMudancas, marcaRecarga, chave, Local, Supa, uuid, vazio, LOCAL_ADMIN, cascataMemoria, situacaoVigia, PARADO_MIN, lembreteFkn, _tudo: tudo,
+    usoDoCache, cache, CACHE_FORMATO, CACHE_VELHO };
   if (typeof module !== 'undefined' && module.exports) module.exports = raiz.CRMDados;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -112,7 +112,10 @@
   CRM.lista = (lista, vazio) => (vazio !== undefined ? [['', vazio]] : []).concat(lista.map(x => [x, x]));
 
   // ------------------------------------------------------------ gravação
-  function reindexa() { E.ix = R.indexa(E.D); E.cfg = R.config((E.D.config[0] || {}).dados); }
+  // gravacoes: quantas gravações desta tela (toda gravação reindexa); a carga completa que chegou depois de uma delas
+  // traz a recarga leve logo em seguida, para a gravação não sumir da tela até a próxima volta.
+  let gravacoes = 0;
+  function reindexa(daCarga) { if (!daCarga) gravacoes++; E.ix = R.indexa(E.D); E.cfg = R.config((E.D.config[0] || {}).dados); }
   function troca(t, r) {
     const k = DD.chave(t);
     const i = E.D[t].findIndex(x => x[k] === r[k]);
@@ -126,8 +129,19 @@
   // resto (5 em 5 min, ao voltar à janela, depois de gravar), só o que mudou — e de hora em hora a
   // conferência do que foi apagado em outro computador (dados.js, carregarMudancas; 07/10/2026).
   const HORA = 3600000;
-  CRM.recarregar = async function (silencioso, opc) {
+  // Uma recarga por vez: a automática (5 min, volta à janela) que chega com outra em curso espera a mesma (11/11/2026: com a
+  // tela aberta pela cópia do navegador, a hora da última carga é antiga e o relógio de 5 min pedia outra no meio da 1ª).
+  let emCurso = null;
+  CRM.recarregar = function (silencioso, opc) {
+    if (emCurso && silencioso && !(opc && opc.completa)) return emCurso;
+    const p = recarregarAgora(silencioso, opc);
+    emCurso = p;
+    p.then(() => { if (emCurso === p) emCurso = null; });
+    return p;
+  };
+  async function recarregarAgora(silencioso, opc) {
     clearTimeout(novaTentativa);
+    const g0 = gravacoes;
     try {
       const leve = !(opc && opc.completa) && E.D && E.marca && store.carregarMudancas;
       let D;
@@ -157,8 +171,11 @@
       E.D = D;
       E.carregadoEm = Date.now();
       E.falhaCarga = null;
-      reindexa();
+      reindexa(true);
       CRM.render();
+      // a carga completa partiu antes de uma gravação desta tela e chegou sem ela: a leve traz de volta (e confere apagados)
+      if (!leve && gravacoes !== g0) setTimeout(() => { E.conferidoEm = 0; CRM.recarregar(true); }, 0);
+      guardaCopia(!leve);
     } catch (e) {
       console.error(e);
       E.falhaCarga = { msg: e.message || String(e), tentativas: ((E.falhaCarga && E.falhaCarga.tentativas) || 0) + 1 };
@@ -169,7 +186,37 @@
       // Com dados na tela, só a faixa muda (não atrapalha quem está digitando).
       if (E.carregadoEm) CRM.atualizaFaixaCarga(); else CRM.render();
     }
-  };
+  }
+
+  // Cópia dos dados no navegador (dados.js, cache; 11/11/2026). Gravada depois de cada carga completa e, nas leves, no
+  // máximo de 10 em 10 minutos (copiar ~20 MB custa uns décimos de segundo), quando o navegador estiver parado.
+  const chaveCopia = () => (window.CRM_CONFIG || {}).supabaseUrl || '';
+  let copiaEm = 0;
+  function guardaCopia(agora) {
+    if (!store || store.modo !== 'supabase' || !E.eu || !chaveCopia()) return;
+    if (!agora && Date.now() - copiaEm < 10 * 60000) return;
+    copiaEm = Date.now();
+    const c = { user_id: E.eu.user_id, papel: E.eu.papel, versao: minhaVersao, salvoEm: E.carregadoEm, D: E.D };
+    const grava = () => { if (E.eu && E.eu.user_id === c.user_id && !window.CRM_SEM_SESSAO) DD.cache.gravar(chaveCopia(), c); };
+    if (window.requestIdleCallback) requestIdleCallback(grava, { timeout: 5000 }); else setTimeout(grava, 1000);
+  }
+  // Ao entrar: abre na hora com a cópia (se é desta pessoa, deste papel e não está velha) e lê o banco por trás.
+  async function abreComCopia() {
+    if (!store || store.modo !== 'supabase' || !chaveCopia()) return false;
+    const c = await DD.cache.ler(chaveCopia());
+    const uso = DD.usoDoCache(c, { userId: E.eu.user_id, papel: E.eu.papel, versao: minhaVersao, agora: Date.now() });
+    if (!uso) { if (c) DD.cache.apagar(chaveCopia()); return false; }
+    E.D = c.D;
+    troca('usuarios', E.eu);        // o cadastro de quem entrou é o que acabou de vir do banco, não o da cópia
+    E.carregadoEm = c.salvoEm;      // se a leitura falhar, a faixa diz de quando é o que está na tela
+    E.falhaCarga = null;
+    E.marca = uso === 'leve' ? DD.marcaRecarga(E.D) : null;
+    E.conferidoEm = 0;              // a 1ª recarga confere o que foi apagado em outro computador desde a cópia
+    copiaEm = Date.now();
+    reindexa(true);
+    CRM.recarregar(true, uso === 'completa' ? { completa: true } : undefined);
+    return true;
+  }
 
   // Cadastro repetido: CNPJ/CPF, telefone ou e-mail que já são de outra empresa.
   CRM.duplicados = (q, ignorarId) => store.duplicados ? store.duplicados(q, ignorarId) : Promise.resolve(R.achaDuplicados(E.D, q, ignorarId));
@@ -422,8 +469,11 @@
     const faixa = $('#faixaCarga');
     if (!faixa) return;
     faixa.hidden = !(E.falhaCarga && E.carregadoEm);
+    // a tela pode ter aberto com a cópia do navegador, de outro dia: aí vai a data junto da hora
+    const em = new Date(E.carregadoEm), hojeMesmo = em.toDateString() === new Date().toDateString();
     if (!faixa.hidden) faixa.innerHTML = 'Não consegui atualizar os dados (' + esc(E.falhaCarga.msg) + '). O que está na tela é de ' +
-      new Date(E.carregadoEm).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) + '. <button type="button" class="mini" data-acao="recarregar-dados">Tentar agora</button>';
+      (hojeMesmo ? '' : em.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) + ' às ') +
+      em.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) + '. <button type="button" class="mini" data-acao="recarregar-dados">Tentar agora</button>';
   }
   CRM.atualizaFaixaCarga = atualizaFaixaCarga;
 
@@ -988,7 +1038,11 @@
     $('#app').hidden = false;
     $('#faixaModo').hidden = store.modo !== 'local';
     E.marca = null; // login novo: carga completa (nunca juntar com os dados de quem saiu)
-    await CRM.recarregar(false, { completa: true });
+    // com a cópia do navegador a tela abre na hora e o banco é lido por trás; sem ela (ou com qualquer erro nela), a carga
+    // completa de sempre
+    let abriu = false;
+    try { abriu = await abreComCopia(); } catch (e) { console.warn('cópia do navegador ignorada', e); E.D = DD.vazio(); E.marca = null; E.carregadoEm = 0; }
+    if (!abriu) await CRM.recarregar(false, { completa: true });
     const atual = E.ix.porId.usuarios.get(E.eu.user_id);
     if (atual) E.eu = atual;
     if (!abaDaSessao()) { E.aba = telaInicial(E.eu); gravaAbaDaSessao(E.aba); } // abriu o CRM agora: a tela ao entrar
@@ -1079,6 +1133,7 @@
       if (ev === 'PASSWORD_RECOVERY') { recuperando = true; telaNovaSenha(); }
       if (ev === 'SIGNED_OUT') {
         window.CRM_SEM_SESSAO = true;
+        DD.cache.apagar(chaveCopia()); // saiu (ou a sessão caiu): a cópia dos dados some deste navegador
         // 10/11/2026: a sessão é uma só para todas as janelas do navegador. Se outra janela (ou o aplicativo instalado) saiu
         // enquanto esta tinha um formulário aberto, a tela de login entrava POR BAIXO do formulário e salvar dava "Sem
         // permissão" (o comprador no meio da entrada de uma nota). Agora o formulário fica, com o aviso do que fazer.

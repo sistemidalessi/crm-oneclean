@@ -72,6 +72,20 @@ test('linha que mudou de página durante a carga não aparece duas vezes', async
   assert.equal(new Set(r.map(x => x.id)).size, r.length, 'nenhuma repetida');
 });
 
+test('só as chaves (conferência do que foi apagado): mesmas páginas em paralelo, pede só a coluna da chave', async () => {
+  const linhas = geraLinhas(5500);
+  const colunas = new Set();
+  const { sb, estado } = bancoFalso(linhas);
+  const from = sb.from;
+  sb.from = (...a) => { const b = from(...a), sel = b.select; b.select = (c, o) => { colunas.add(c); return sel(c, o); }; return b; };
+  const r = await DD._tudo(sb, 'nota_itens', true);
+  assert.equal(r.length, 5500);
+  assert.equal(new Set(r.map(x => x.id)).size, 5500);
+  assert.deepEqual([...colunas], ['id']);
+  assert.equal(estado.pedidos, 6);
+  assert.ok(estado.maxAbertos <= 6);
+});
+
 test('tabela de uma página só: um pedido', async () => {
   const { sb, estado } = bancoFalso(geraLinhas(12));
   const r = await DD._tudo(sb, 'etapas');
