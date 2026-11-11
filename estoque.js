@@ -1447,8 +1447,17 @@
                 const comSug = caros.filter(z => z.sugestao || z.produto);
                 const texto = 'O custo de ' + caros.length + ' item(ns) ficou longe do custo atual:\n\n' + caros.map(z => '· ' + z.texto).join('\n') +
                   '\n\nUm fardo ou caixa com várias unidades precisa do número certo em "vem quantas na embalagem", e cada item da nota precisa estar ligado ao mesmo produto nosso.';
-                if (comSug.length && !confirm(texto + '\n\nOK: usar o ' + (comSug.some(z => z.produto) ? 'produto' : 'número') + ' sugerido (' + comSug.length + ' item(ns)) e conferir de novo. Cancelar: voltar sem dar entrada.')) return false;
-                if (!comSug.length) {
+                // 11/11/2026 (Wellington: "a nota é o preço novo, tem que deixar entrar"): com sugestão, três saídas — usar a sugestão,
+                // dar entrada como está (preço novo do fornecedor, com o motivo) ou voltar. Antes eram só as duas primeiras, e para
+                // entrar com o preço da nota ele mudava o custo no cadastro do produto antes.
+                let usarSug = false;
+                if (comSug.length) {
+                  usarSug = confirm(texto + '\n\nOK: usar o ' + (comSug.some(z => z.produto) ? 'produto' : 'número') + ' sugerido (' + comSug.length + ' item(ns)) e conferir de novo.\n' +
+                    'Cancelar: ver as outras opções (dar entrada como está ou voltar).');
+                  if (!usarSug && !confirm('O produto e o "vem quantas" estão certos e o preço da nota é o preço novo do fornecedor?\n\n' +
+                    'OK: dar entrada assim (o custo do produto passa a contar com o preço da nota; escreva o motivo).\nCancelar: voltar sem dar entrada.')) return false;
+                }
+                if (!usarSug) {
                   // sem sugestão: só entra com o motivo escrito (o banco confere de novo e guarda o motivo)
                   const mot = pedeMotivo(texto);
                   if (!mot) return false;
@@ -1457,7 +1466,7 @@
                     return { codigo: x.codigo, motivo: mot };
                   }).filter((z, i, a) => a.findIndex(y => y.codigo === z.codigo) === i));
                 }
-                if (comSug.length) {
+                if (usarSug) {
                   comSug.forEach(z => {
                     const e = form.elements[(z.produto ? 'c_' : 'f_') + z.id];
                     if (e) { e.value = z.produto || z.sugestao; e.dispatchEvent(new Event('input')); e.dispatchEvent(new Event('change')); }
