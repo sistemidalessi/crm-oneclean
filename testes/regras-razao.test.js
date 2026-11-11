@@ -50,6 +50,7 @@ test('a função do banco é gerada da mesma tabela (ferramentas/gera-abrevia-ra
   assert.match(sql, /create or replace function public\.crm_abrevia_razao/);
   for (const [k, v] of Object.entries(R.ABREV_RAZAO)) assert.ok(sql.includes('"' + k + '":"' + v + '"'), k);
   // o schema.sql tem de trazer exatamente a função gerada (senão o banco e a tela abreviam diferente)
-  const schema = fs.readFileSync(path.join(__dirname, '..', 'supabase', 'schema.sql'), 'utf8');
-  assert.ok(schema.includes(sql.trim()), 'schema.sql com crm_abrevia_razao desatualizada: rode node ferramentas/gera-abrevia-razao.js e copie para lá');
+  const lf = s => s.replace(/\r\n/g, '\n'); // o fim de linha do Windows (core.autocrlf) não conta
+  const schema = lf(fs.readFileSync(path.join(__dirname, '..', 'supabase', 'schema.sql'), 'utf8'));
+  assert.ok(schema.includes(lf(sql).trim()), 'schema.sql com crm_abrevia_razao desatualizada: rode node ferramentas/gera-abrevia-razao.js e copie para lá');
 });

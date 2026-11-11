@@ -120,7 +120,8 @@ test('nenhuma função manda mais pelo Brevo: todas passam pela crm-enviar-email
 // 10/11/2026: a medida do produto (saco de lixo "90 x 95 cm") sai ao lado do nome no orçamento e no PDF
 test('a medida do produto vai ao lado do nome no documento do orçamento e do pedido', () => {
   const fs = require('fs'), path = require('path'), R = path.join(__dirname, '..');
-  const f = fs.readFileSync(path.join(R, 'fichas.js'), 'utf8'), p = fs.readFileSync(path.join(R, 'produtos.js'), 'utf8');
+  const lf = s => s.replace(/\r\n/g, '\n'); // o fim de linha do Windows (core.autocrlf) não conta
+  const f = lf(fs.readFileSync(path.join(R, 'fichas.js'), 'utf8')), p = lf(fs.readFileSync(path.join(R, 'produtos.js'), 'utf8'));
   assert.match(f, /esc\(frase\(it\.descricao\)\) \+ \(medidaDe\(it\.codigo\) \? ' · ' \+ esc\(medidaDe\(it\.codigo\)\)/);
   assert.match(f, /garanteMedidas\(\)\);\n    if \(!ncms\) await garanteNcm\(\);/);   // o PDF espera a medida chegar
   assert.match(p, /CRM\.produtos = \{ medida, garanteMedidas, medidasProntas/);

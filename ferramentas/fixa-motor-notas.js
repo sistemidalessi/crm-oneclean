@@ -14,7 +14,9 @@ const path = require('path');
 const crypto = require('crypto');
 const { execSync } = require('child_process');
 const raiz = path.join(__dirname, '..');
-const hash = f => crypto.createHash('sha256').update(fs.readFileSync(path.join(raiz, f))).digest('hex');
+// 11/11/2026: a função baixa do GitHub o arquivo como está no git (LF). No Windows com core.autocrlf=true a cópia do disco
+// tem CRLF e o SHA saía outro: o teste acusava "mudou" sem mudança e a fixação feita deste PC ficaria errada. Conta com LF.
+const hash = f => crypto.createHash('sha256').update(fs.readFileSync(path.join(raiz, f), 'utf8').replace(/\r\n/g, '\n')).digest('hex');
 
 const FUNCOES = { 'crm-notas': ['regras.js', 'nfe.js', 'fkn.js'], 'crm-caixa-leitura': ['caixa-calculo.js'], 'crm-cobranca': ['boleto.js'], 'crm-fiscal': ['danfe.js', 'regras.js', 'cobranca.js', 'boleto.js', 'vendor/qrcode.js'], 'crm-credito-rekta': ['regras.js', 'credito.js'] };
 const ARQUIVOS = FUNCOES['crm-notas'];
