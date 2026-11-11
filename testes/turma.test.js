@@ -133,3 +133,17 @@ test('fora do dia útil o Clean fica quieto: só o aviso de que a OneClean não 
   assert.strictEqual(T.contagem(it), 0, 'não entra no selo');
   assert.ok(T.guia({ vendas: true, alMeu: { atrasadas: [1] } }).some(x => x.id === 'atrasadas'), 'em dia útil continua igual');
 });
+
+test('estoque negativo (11/11/2026): comprador e logística, até 31/12, urgente nos últimos 10 dias, leva à contagem', () => {
+  const rs = { estoque_negativo: { n: 86 } };
+  const a = T.guia({ vendas: false, resumo: rs, estoqueOp: true, hoje: '2026-11-11' }).find(i => i.id === 'estoque-negativo');
+  assert.deepStrictEqual(a, { id: 'estoque-negativo', nivel: 'atencao', texto: '86 produtos com estoque negativo: contar e acertar até 31/12 (50 dias)', aba: 'estoque', sub: 'contagem', mascote: null });
+  assert.strictEqual(T.guia({ resumo: rs, estoqueOp: true, hoje: '2026-12-21' }).find(i => i.id === 'estoque-negativo').nivel, 'urgente');
+  assert.strictEqual(T.guia({ resumo: { estoque_negativo: { n: 1 } }, estoqueOp: true, hoje: '2026-12-31' }).find(i => i.id === 'estoque-negativo').texto,
+    '1 produto com estoque negativo: contar e acertar até 31/12 (é hoje)');
+  // zerado, depois do prazo, fora do dia útil ou sem o papel: nada
+  assert.ok(!T.guia({ resumo: { estoque_negativo: { n: 0 } }, estoqueOp: true, hoje: '2026-11-11' }).some(i => i.id === 'estoque-negativo'));
+  assert.ok(!T.guia({ resumo: rs, estoqueOp: true, hoje: '2027-01-02' }).some(i => i.id === 'estoque-negativo'));
+  assert.ok(!T.guia({ resumo: rs, estoqueOp: true, hoje: '2026-11-14', naoUtil: 'sábado' }).some(i => i.id === 'estoque-negativo'));
+  assert.ok(!T.guia({ vendas: true, resumo: rs, gestor: true, admin: true, op: true, hoje: '2026-11-11' }).some(i => i.id === 'estoque-negativo'));
+});

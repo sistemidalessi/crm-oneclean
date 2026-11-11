@@ -24,10 +24,11 @@
     const tl = t.telas || {};
     return (sub && tl[aba + ':' + sub]) || tl[aba] || t.principal;
   }
+  const FIM_INVENTARIO = '2026-12-31'; // inventário do estoque de abertura (crédito presumido de CBS, 01/01/2027)
   const saudacao = hora => (hora < 5 ? 'Boa noite' : hora < 12 ? 'Bom dia' : hora < 18 ? 'Boa tarde' : 'Boa noite');
 
   // O guia do dia: [{ id, nivel, texto, aba, sub, mascote }], do mais urgente para o menos.
-  // c = { papel, vendas, al, alMeu, alEquipe, resumo, boletos, fkn: [{arquivo}], recusas, vigiasParados, admin, gestor, op, comprador }
+  // c = { papel, vendas, al, alMeu, alEquipe, resumo, boletos, fkn: [{arquivo}], recusas, vigiasParados, admin, gestor, op, comprador, estoqueOp }
   // 20/10/2026 (Anderson: "o Clean fala 3 coisas e quando eu abro, cadê as 3? … tem que funcionar como uma agenda"):
   // tarefas e leads são os DE QUEM ESTÁ LOGADO (alMeu); o da equipe vai para a gestora só como acompanhamento.
   function guia(c) {
@@ -76,6 +77,15 @@
       if (cs.prazo) poe('dfe-prazo', 'urgente', plural(cs.prazo, 'nota de compra perto do prazo da resposta à Sefaz', 'notas de compra perto do prazo da resposta à Sefaz'), 'estoque', 'compras', 'auditoria');
       const cg = r.compras_galpao || {};
       if (cg.chegaram) poe('compras-chegou', 'atencao', plural(cg.chegaram, 'nota de compra chegou no galpão: dar entrada', 'notas de compra chegaram no galpão: dar entrada'), 'estoque', 'compras');
+    }
+    // 11/11/2026 (Anderson: "pode fazer, para o comprador e a logística"): produto com saldo negativo (vendido sem entrada)
+    // estraga o inventário de 31/12/2026, que é a base do crédito presumido de CBS do estoque de abertura (cbs-estoque.js).
+    // Eram 83 em 07/11 e 86 em 11/11 sem ninguém ver. Avisa todo dia útil até 31/12; urgente nos últimos 10 dias.
+    const ng = r.estoque_negativo || {}, hojeG = c.hoje || new Date().toISOString().slice(0, 10);
+    if (c.estoqueOp && ng.n > 0 && hojeG <= FIM_INVENTARIO) {
+      const dias = Math.round((new Date(FIM_INVENTARIO + 'T12:00:00') - new Date(hojeG + 'T12:00:00')) / 864e5);
+      poe('estoque-negativo', dias <= 10 ? 'urgente' : 'atencao', plural(ng.n, 'produto com estoque negativo', 'produtos com estoque negativo') +
+        ': contar e acertar até 31/12 (' + (dias ? plural(dias, 'dia', 'dias') : 'é hoje') + ')', 'estoque', 'contagem');
     }
     if (c.analise) {
       if (c.analise.pronta) poe('ia-compras', 'atencao', 'Análise de compras de hoje pronta: o que pedir e de quem', 'compras', null, 'compras-setor-interno');
@@ -206,6 +216,7 @@
       vendas: !CRM.foraDeVendas(), al, alMeu: meu, alEquipe: equipe, resumo,
       boletos: CRM.cobranca && !CRM.foraDeVendas() ? CRM.cobranca.paraFila().length : 0,
       gestor: CRM.ehGestor(), admin: CRM.ehAdmin(), comprador: CRM.ehComprador(), op: CRM.ehLogistica() || CRM.ehGestor(),
+      estoqueOp: CRM.ehComprador() || CRM.ehLogistica(),
       fkn: CRM.lembreteFkn ? CRM.lembreteFkn() : [], recusas: CRM.recusasFkn ? CRM.recusasFkn() : [],
       vigiasParados: CRM.ehAdmin() && !(CRM.fknDesligado && CRM.fknDesligado()) ? (E().vigias || []).filter(c => raiz.CRMDados.situacaoVigia(c).estado === 'parado').map(c => c.nome) : [],
       papel: eu.papel, hoje: CRM.hoje(), naoUtil: naoUtilHoje(),

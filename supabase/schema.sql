@@ -3387,6 +3387,13 @@ begin
     select jsonb_build_object('chegaram', count(*)) into x from public.crm_compras_chegadas();
     r := r || jsonb_build_object('compras_galpao', x);
   exception when others then null; end;
+  -- 11/11/2026: produtos com saldo negativo (vendido sem entrada), a acertar antes do inventário de 31/12 (crédito de CBS do
+  -- estoque de abertura). Pela função da operação: comprador e logística contam (a logística não lê a tabela de saldo); quem
+  -- não tem acesso ao estoque leva a exceção dela, engolida aqui. Só o número, sem produto nem custo.
+  begin
+    select jsonb_build_object('n', count(*)) into x from public.crm_estoque_saldo_op() s where s.saldo < 0;
+    r := r || jsonb_build_object('estoque_negativo', x);
+  exception when others then null; end;
   return r;
 end;
 $$;
