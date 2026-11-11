@@ -1209,9 +1209,11 @@
       .concat([{ tipo: 'secao', rotulo: 'Fiscal' },
         { nome: 'ncm', rotulo: 'NCM (8 números)', obrigatorio: true }, { nome: 'cest', rotulo: 'CEST (se tiver)' }, { nome: 'gtin', rotulo: 'Código de barras (EAN)' },
         { nome: 'origem', rotulo: 'Origem', tipo: 'select', opcoes: ORIGENS }])
-      .concat(!novo && !v0.tem_regra ? [{ nome: 'modelo', rotulo: 'Mesma tributação que o produto (código)', obrigatorio: true, largo: true,
-        dica: 'este produto ainda não tem regra fiscal (sem ela a nota não sai): diga um parecido já vendido e o CRM copia dele CFOP, CST, PIS e COFINS' }] : [])
-      .concat(novo ? [{ nome: 'modelo', rotulo: 'Mesma tributação que o produto (código)', obrigatorio: true, largo: true, dica: 'um produto parecido já vendido: o CRM copia dele CFOP, CST, PIS e COFINS' },
+      // 11/11/2026 (Wellington): com o NCM preenchido a regra fiscal vem sozinha, de um produto com o mesmo NCM; o campo
+      // abaixo só é preciso quando nenhum produto tem aquele NCM ou quando se quer outra tributação.
+      .concat(!novo && !v0.tem_regra ? [{ nome: 'modelo', rotulo: 'Mesma tributação que o produto (código, opcional)', largo: true,
+        dica: 'este produto ainda não tem regra fiscal (sem ela a nota não sai). Vazio: o CRM copia a regra de um produto com o mesmo NCM. Preencha só se nenhum produto tiver esse NCM ou se a tributação for outra' }] : [])
+      .concat(novo ? [{ nome: 'modelo', rotulo: 'Mesma tributação que o produto (código, opcional)', largo: true, dica: 'vazio: o CRM copia CFOP, CST, PIS e COFINS de um produto com o mesmo NCM. Preencha só se nenhum produto tiver esse NCM ou se a tributação for outra' },
         { tipo: 'secao', rotulo: 'Embalagem de compra (se vier em caixa ou fardo)' },
         { nome: 'emb_unidade', rotulo: 'Embalagem (CX, FD, PCT)' }, { nome: 'emb_fator', rotulo: 'Quantas unidades vêm nela', tipo: 'numero', passo: '1', vazioNulo: true }] : []);
     const c0 = Number(v0.custo_unit) || 0, p0 = Number(v0.preco_venda) || 0;
@@ -1290,7 +1292,7 @@
       let v = null;
       try { v = await st().produtoLer(id); } catch (e) { /* segue com a reativação simples */ }
       if (v && (!v.unidade || v.tem_regra === false)) {
-        CRM.toast('Antes de reativar, complete ' + [!v.unidade ? 'a unidade' : '', v.tem_regra === false ? 'a regra fiscal (mesma tributação que outro produto)' : ''].filter(Boolean).join(' e ') + ' e troque a Situação para ATIVO.', true);
+        CRM.toast('Antes de reativar, complete ' + [!v.unidade ? 'a unidade' : '', v.tem_regra === false ? 'a regra fiscal (com o NCM certo o CRM copia de um produto com o mesmo NCM)' : ''].filter(Boolean).join(' e ') + ' e troque a Situação para ATIVO.', true);
         formCadastro(id); return;
       }
       if (!confirm('Reativar o produto ' + id + '?\n\nEle volta a aparecer para as vendedoras (catálogo, pedido e orçamento).')) return;
