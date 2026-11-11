@@ -297,6 +297,14 @@ function monta(nota, opc) {
   const ind = String(de.indIEDest || (de.ie && !/ISENT/i.test(de.ie) ? 1 : 9));
   const dest = '<dest>' + docXml(de.doc) + tag('xNome', txt(homolog ? HOMOLOGACAO_NOME : de.nome, 60)) +
     (de2.logradouro ? enderecoXml('enderDest', de2) : '') + tag('indIEDest', ind) + (ind === '1' ? tag('IE', dig(de.ie)) : '') + tag('email', txt(de.email, 60)) + '</dest>';
+  // Local de entrega (11/11/2026, Anderson: "no FKN saía o local de entrega"): o grupo <entrega> (TLocal), só quando é
+  // outro endereço (o leiaute: "informar apenas quando for diferente do endereço do destinatário"), com o documento do
+  // destinatário e o nome do local. Sem o código do município, a nota sai sem o grupo (o local continua no texto).
+  const en = nota.entrega;
+  const entrega = en && en.logradouro && dig(en.cMun).length === 7 ? '<entrega>' + docXml(en.doc || de.doc) + tag('xNome', txt(en.nome, 60)) +
+    tag('xLgr', txt(en.logradouro, 60)) + tag('nro', txt(en.numero || 'S/N', 60)) + tag('xCpl', txt(en.complemento, 60)) + tag('xBairro', txt(en.bairro, 60)) +
+    tag('cMun', dig(en.cMun)) + tag('xMun', txt(en.municipio, 60)) + tag('UF', txt(en.uf)) + tag('CEP', dig(en.cep).length === 8 ? dig(en.cep) : '') +
+    tag('cPais', '1058') + tag('xPais', 'BRASIL') + '</entrega>' : '';
   const det = (nota.itens || []).map((it, i) => {
     const ci = c.itens[i];
     const ean = gtinValido(it.gtin) || 'SEM GTIN';
@@ -344,7 +352,7 @@ function monta(nota, opc) {
   const rt = nota.respTec;
   const resp = rt && rt.cnpj ? '<infRespTec>' + tag('CNPJ', docLimpo(rt.cnpj)) + tag('xContato', txt(rt.contato, 60)) + tag('email', txt(rt.email, 60)) + tag('fone', dig(rt.fone)) + '</infRespTec>' : '';
   const id = 'NFe' + chave;
-  const infNFe = '<infNFe Id="' + id + '" versao="4.00">' + ide + emit + dest + det + '<total>' + icmsTot + ibsTot + (t.vNFTot != null ? tag('vNFTot', d2(t.vNFTot)) : '') + '</total>' + transp + cobr + pag + infAdic + resp + '</infNFe>';
+  const infNFe = '<infNFe Id="' + id + '" versao="4.00">' + ide + emit + dest + entrega + det + '<total>' + icmsTot + ibsTot + (t.vNFTot != null ? tag('vNFTot', d2(t.vNFTot)) : '') + '</total>' + transp + cobr + pag + infAdic + resp + '</infNFe>';
   return { chave, id, cNF, infNFe, calculo: c, totais: t };
 }
 

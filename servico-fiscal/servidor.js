@@ -29,7 +29,7 @@ const D = require('./dfe');
 const BB = require('./bb');
 const G = require('./gnre');
 
-const VERSAO = '2026-11-06b';
+const VERSAO = '2026-11-11a';
 const env = process.env;
 let cert = null;   // { certPem, keyPem, dados }
 

@@ -507,3 +507,29 @@ test('código de barras que a Sefaz recusa (611) vira SEM GTIN', () => {
   assert.strictEqual(N.gtinValido('7898924601052'), '');   // dígito errado
   assert.strictEqual(N.gtinValido('SEM GTIN'), '');
 });
+
+test('local de entrega: grupo <entrega> só quando é outro endereço, com o código do município; passa no esquema (11/11/2026)', { skip: !temFerramentas && 'sem xmllint/openssl' }, () => {
+  const ent = { local: 'Unidade Centro', endereco: 'AVENIDA DE ENTREGA', numero: '1695', compl: '', bairro: 'PARQUE', cidade: 'SAO PAULO', uf: 'SP', cep: '04902015' };
+  const g = PD.grupoEntrega(ent, cliente, 'SP', '22333444000172');
+  assert.deepStrictEqual([g.nome, g.cMun, g.logradouro, g.doc], ['UNIDADE CENTRO', '3550308', 'AVENIDA DE ENTREGA', '22333444000172'], 'mesma cidade: o código do cadastro');
+  assert.strictEqual(PD.grupoEntrega({ local: 'Portaria', endereco: 'Av. Exemplo', numero: '50', cidade: 'SAO PAULO', uf: 'SP', cep: '01436-000' }, cliente, 'SP', 'x'), null, 'mesmo endereço do cadastro: sem o grupo');
+  assert.strictEqual(PD.grupoEntrega(Object.assign({}, ent, { cidade: 'OSASCO' }), cliente, 'SP', 'x'), null, 'outra cidade sem o código: sem o grupo');
+  assert.strictEqual(PD.grupoEntrega(Object.assign({}, ent, { cidade: 'OSASCO', cmun: '3534401' }), cliente, 'SP', 'x').cMun, '3534401');
+  const r = PD.notaDoPedido({ pedido: Object.assign({}, pedido, { dados: Object.assign({}, pedido.dados, { entrega: ent }) }), empresa: cliente, regras, emitente, ambiente: 'homologacao', serie: 2, numero: 31, emissao: '2026-10-20T10:00:00-03:00' });
+  assert.strictEqual(r.nota.entrega.cMun, '3550308');
+  const A = require('../servico-fiscal/assinatura.js');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nfe-teste-'));
+  try {
+    execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', path.join(dir, 'k.pem'), '-out', path.join(dir, 'c.pem'), '-days', '2', '-subj', '/CN=TESTE'], { stdio: 'pipe' });
+    const m = N.monta(nota({ entrega: Object.assign({}, g, { nome: 'N'.repeat(70) }) }));
+    const xml = N.nfeCompleta(m.infNFe, A.assinaElemento(m.infNFe, m.id, fs.readFileSync(path.join(dir, 'c.pem'), 'utf8'), fs.readFileSync(path.join(dir, 'k.pem'), 'utf8')));
+    assert.match(xml, /<\/dest><entrega><CNPJ>22333444000172<\/CNPJ><xNome>N{60}<\/xNome><xLgr>AVENIDA DE ENTREGA<\/xLgr><nro>1695<\/nro><xBairro>PARQUE<\/xBairro><cMun>3550308<\/cMun>/);
+    const f = path.join(dir, 'n.xml'); fs.writeFileSync(f, xml);
+    const v = spawnSync('xmllint', ['--noout', '--schema', path.join(ESQ, 'nfe_v4.00.xsd'), f]);
+    assert.strictEqual(v.status, 0, String(v.stderr));
+    assert.doesNotMatch(N.monta(nota()).infNFe, /<entrega>/, 'sem local: sem o grupo');
+    // a DANFE lê o grupo do XML
+    const Dn = require('../danfe.js'), d = Dn.ler(xml);
+    assert.strictEqual(d.entrega.endereco.logradouro, 'AVENIDA DE ENTREGA');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

@@ -12794,3 +12794,39 @@ language sql stable security definer set search_path = public as $$
 $$;
 revoke all on function public.crm_precos_abaixo_minimo() from public, anon;
 grant execute on function public.crm_precos_abaixo_minimo() to authenticated;
+
+-- ---------------------------------------------------------------- local de entrega: código do município (11/11/2026)
+create or replace function public.crm_pedido_entrega_cmun()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+declare en jsonb := new.dados->'entrega'; v_cep text; v_cid text; v_uf text; cm text;
+begin
+  if en is null or jsonb_typeof(en) <> 'object' then return new; end if;
+  v_cep := regexp_replace(coalesce(en->>'cep', ''), '\D', '', 'g');
+  v_cid := translate(upper(btrim(coalesce(en->>'cidade', ''))), 'ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÇ', 'AAAAAEEEEIIIIOOOOOUUUUC');
+  v_uf := upper(btrim(coalesce(en->>'uf', '')));
+  if length(v_cep) = 8 then
+    select l.cmun into cm from public.crm_empresa_locais l
+     where regexp_replace(coalesce(l.cep, ''), '\D', '', 'g') = v_cep and l.cmun ~ '^\d{7}$'
+       and (v_cid = '' or translate(upper(btrim(l.cidade)), 'ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÇ', 'AAAAAEEEEIIIIOOOOOUUUUC') = v_cid)
+     order by l.vezes desc nulls last limit 1;
+  end if;
+  if cm is null and v_cid <> '' and v_uf <> '' then
+    select e.codigo_municipio into cm from public.crm_empresas e
+     where e.codigo_municipio ~ '^\d{7}$' and upper(btrim(e.uf)) = v_uf
+       and translate(upper(btrim(e.cidade)), 'ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÇ', 'AAAAAEEEEIIIIOOOOOUUUUC') = v_cid
+     group by e.codigo_municipio order by count(*) desc limit 1;
+  end if;
+  if cm is not null then new.dados := jsonb_set(new.dados, '{entrega,cmun}', to_jsonb(cm));
+  elsif en ? 'cmun' then new.dados := new.dados #- '{entrega,cmun}';
+  end if;
+  return new;
+end $$;
+
+revoke all on function public.crm_pedido_entrega_cmun() from public, anon, authenticated;
+
+drop trigger if exists crm_pedidos_entrega_cmun on public.crm_pedidos;
+create trigger crm_pedidos_entrega_cmun before insert or update of dados on public.crm_pedidos
+  for each row execute function public.crm_pedido_entrega_cmun();

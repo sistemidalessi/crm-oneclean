@@ -226,6 +226,7 @@ function notaDoPedido(o) {
     indFinal: cfg.indFinal == null ? 1 : cfg.indFinal, indPres: cfg.indPres == null ? 9 : cfg.indPres,
     dest: { doc: docCli, nome: e.razao_social || e.nome || d.cliente_nome, ie: e.ie, indIEDest: ind || '9', email: (String(e.email || '').split(/[\s,;]+/)[0] || null),
       endereco: { logradouro: e.logradouro, numero: e.numero, complemento: e.complemento, bairro: e.bairro, cMun: e.codigo_municipio, municipio: e.cidade, uf, cep: e.cep, fone: e.telefone } },
+    entrega: grupoEntrega(d.entrega, e, uf, docCli),
     itens, frete: { modFrete: Number(d.frete_conta == null || d.frete_conta === '' ? 0 : d.frete_conta), valor: num(p.frete),
       transportadora: /^PROPRI/i.test(transp) ? null : { nome: transp }, volumes: num(d.volumes) > 0 ? { qVol: num(d.volumes) } : null },
     cobranca: duplicatas.length ? { numero: String(o.numero), duplicatas } : null,
@@ -236,4 +237,20 @@ function notaDoPedido(o) {
   return { nota, avisos: { bloqueia: [...new Set(bloqueia)], conferir: [...new Set(conferir)] }, total, cobrar, difal };
 }
 
-module.exports = { DIFAL_NCM, difalDoItem, lePagamento, parcelas, notaDoPedido, OPERACOES, aliqInter };
+// O grupo <entrega> da nota (11/11/2026): só quando o local é OUTRO endereço (CEP, rua ou número diferentes do cadastro).
+// O código do município vem do pedido (dados.entrega.cmun, que o banco preenche pelo CEP dos locais já usados ou pela cidade)
+// ou, na mesma cidade do cliente, do cadastro. Sem ele, null: o local vai só no texto da nota, como antes.
+function grupoEntrega(en, e, uf, docCli) {
+  if (!en || !String(en.endereco || '').trim() || !String(en.bairro || '').trim()) return null;
+  const norm = v => String(v == null ? '' : v).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const outro = (dig(en.cep) && dig(en.cep) !== dig(e.cep)) || norm(en.endereco) !== norm(e.logradouro) || norm(en.numero) !== norm(e.numero);
+  if (!outro) return null;
+  const ufE = String(en.uf || uf || '').trim().toUpperCase();
+  const mesmaCidade = norm(en.cidade) === norm(e.cidade) && ufE === String(uf || '').toUpperCase();
+  const cMun = dig(en.cmun) || (mesmaCidade ? dig(e.codigo_municipio) : '');
+  if (cMun.length !== 7) return null;
+  return { doc: docCli, nome: String(en.local || '').trim().toUpperCase() || null, logradouro: en.endereco, numero: en.numero, complemento: en.compl,
+    bairro: en.bairro, cMun, municipio: en.cidade, uf: ufE, cep: en.cep };
+}
+
+module.exports = { grupoEntrega, DIFAL_NCM, difalDoItem, lePagamento, parcelas, notaDoPedido, OPERACOES, aliqInter };
