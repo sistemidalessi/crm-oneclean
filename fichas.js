@@ -149,6 +149,8 @@
         '<button type="button" class="btn sec" data-acao="negocio-empresa">+ Negócio</button>' +
         '<button type="button" class="btn sec" data-acao="tarefa-empresa">+ Tarefa</button>' +
         (pode ? '<button type="button" class="btn sec" data-acao="editar-empresa">Editar</button>' : '') +
+        (pode && (e.situacao === 'lead' || e.situacao === 'prospect') ? '<button type="button" class="btn sec perigo" data-acao="empresa-perdida" title="Trabalhou e não teve retorno: encerra os negócios e tarefas abertos e manda a empresa para os Inativos">✕ Perdido</button>' : '') +
+        (pode && e.situacao === 'inativo' ? '<button type="button" class="btn sec" data-acao="empresa-reativar" title="Volta a trabalhar esta empresa">↺ Reativar</button>' : '') +
         '<button type="button" class="x" data-acao="fechar-empresa" aria-label="Fechar">×</button></header>' +
       '<div class="ficha-corpo tres">' +
       // ---- coluna 1: dados + contatos
@@ -900,6 +902,54 @@
         if (v.obs) await CRM.inserir('atividades', { empresa_id: n.empresa_id, negocio_id: n.id, tipo: 'nota', descricao: 'Sobre a perda: ' + v.obs, concluida: true, concluida_em: agoraISO(), data_hora: agoraISO(), responsavel_id: CRM.meuId() });
       }
     });
+  };
+
+  // Empresa PERDIDA (11/11/2026, pedido da gestora: "fica muito tempo trabalhando uma empresa e não tem retorno"):
+  // os negócios abertos viram perdidos com o motivo, as tarefas abertas são encerradas (sem repetir) e a empresa vai
+  // para os Inativos (Clientes → filtro Situação: Inativo). "↺ Reativar" traz de volta; se ela comprar, a nota a
+  // devolve para Cliente sozinha (gatilho crm_notas_reativa_empresa).
+  fichas.formEmpresaPerdida = e => {
+    const motivos = CRM.opcoes('motivo_perda');
+    const negs = CRM.doEmpresa('negocios', e.id).filter(n => n.status === 'aberto');
+    const tarefas = CRM.doEmpresa('atividades', e.id).filter(a => !a.concluida);
+    CRM.abrirForm({
+      titulo: 'Perdido: ' + e.nome,
+      intro: 'A empresa vai para os Inativos' +
+        (negs.length ? ', ' + negs.length + ' negócio(s) aberto(s) ficam como perdidos' : '') +
+        (tarefas.length ? ' e ' + tarefas.length + ' tarefa(s) aberta(s) são encerradas' : '') +
+        '. Para voltar a trabalhá-la, abra a ficha e clique em ↺ Reativar.',
+      campos: [
+        { nome: 'motivo', rotulo: 'Motivo', tipo: 'select', opcoes: [['', 'Escolha…']].concat(motivos.map(m => [m, m])).concat([['__outro', 'Outro…']]), obrigatorio: true, largo: true },
+        { nome: 'outro', rotulo: 'Qual? (se escolheu "Outro")', largo: true },
+        { nome: 'obs', rotulo: 'Detalhes (o que foi tentado, quando vale tentar de novo)', tipo: 'textarea', largo: true, linhas: 2 }
+      ],
+      salvarTexto: 'Marcar como perdido',
+      aoSalvar: async v => {
+        const motivo = v.motivo === '__outro' ? v.outro : v.motivo;
+        if (!motivo) throw new Error('diga o motivo');
+        if (v.motivo === '__outro' && CRM.ehGestor() && motivos.indexOf(motivo) === -1) { try { await CRM.inserir('opcoes', { tipo: 'motivo_perda', nome: motivo, ordem: 99 }); } catch (x) { /* já existe */ } }
+        const agora = agoraISO();
+        if (negs.length) await CRM.atualizarVarios('negocios', negs.map(n => n.id), { status: 'perdido', fechado_em: CRM.hoje(), motivo_perda: motivo });
+        for (const a of tarefas) {
+          await CRM.atualizar('atividades', a.id, { concluida: true, concluida_em: agora, recorrencia: null, descricao: 'Encerrada (empresa perdida): ' + a.descricao });
+        }
+        await CRM.atualizar('empresas', e.id, { situacao: 'inativo' });
+        await CRM.inserir('atividades', { empresa_id: e.id, tipo: 'nota', concluida: true, concluida_em: agora, data_hora: agora, responsavel_id: CRM.meuId(),
+          descricao: 'Empresa PERDIDA — motivo: ' + motivo + (v.obs ? '. ' + v.obs : '') + (negs.length ? ' (' + negs.length + ' negócio(s) encerrado(s))' : '') });
+        CRM.toast(e.nome + ' foi para os Inativos.');
+      }
+    });
+  };
+  fichas.reativarEmpresa = async e => {
+    const comprou = (E().ix.porEmpresa.notas.get(e.id) || []).some(n => !n.cancelada);
+    const nova = comprou ? 'cliente' : 'lead';
+    if (!confirm('Reativar ' + e.nome + '? Ela volta como ' + (comprou ? 'Cliente' : 'Lead') + ' para você trabalhar de novo.')) return;
+    try {
+      await CRM.atualizar('empresas', e.id, { situacao: nova });
+      const agora = agoraISO();
+      await CRM.inserir('atividades', { empresa_id: e.id, tipo: 'nota', concluida: true, concluida_em: agora, data_hora: agora, responsavel_id: CRM.meuId(), descricao: 'Empresa REATIVADA (voltou como ' + (comprou ? 'cliente' : 'lead') + ')' });
+      CRM.toast(e.nome + ' reativada.');
+    } catch (x) { CRM.falhou(x); }
   };
 
   // ------------------------------------------------------------ itens e propostas
@@ -1711,6 +1761,8 @@
     'fechar-empresa': () => $('#dlgEmpresa').close(),
     'fechar-negocio': () => $('#dlgNegocio').close(),
     'editar-empresa': () => fichas.formEmpresa(CRM.empresa(abertaEmpresa)),
+    'empresa-perdida': () => fichas.formEmpresaPerdida(CRM.empresa(abertaEmpresa)),
+    'empresa-reativar': () => fichas.reativarEmpresa(CRM.empresa(abertaEmpresa)),
     'novo-contato': () => fichas.formContato(null, abertaEmpresa),
     'editar-contato': id => fichas.formContato(CRM.contato(id)),
     'negocio-empresa': () => fichas.formNegocio(null, { empresa_id: abertaEmpresa }),

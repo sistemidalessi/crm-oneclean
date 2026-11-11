@@ -12858,3 +12858,26 @@ revoke all on function public.crm_pedido_entrega_cmun() from public, anon, authe
 drop trigger if exists crm_pedidos_entrega_cmun on public.crm_pedidos;
 create trigger crm_pedidos_entrega_cmun before insert or update of dados on public.crm_pedidos
   for each row execute function public.crm_pedido_entrega_cmun();
+
+-- 11/11/2026 — Empresa marcada como PERDIDA (botão "✕ Perdido" da ficha: situação 'inativo') que volta a comprar
+-- vira cliente sozinha quando a nota de venda entra (a nota não passa pelo "ganhou" do negócio).
+-- Só mexe em quem está 'inativo'; lead e prospect continuam como estão.
+
+create or replace function public.crm_nota_reativa_empresa()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.empresa_id is not null and not coalesce(new.cancelada, false) then
+    update public.crm_empresas set situacao = 'cliente' where id = new.empresa_id and situacao = 'inativo';
+  end if;
+  return null;
+end $$;
+
+revoke all on function public.crm_nota_reativa_empresa() from public, anon, authenticated;
+
+drop trigger if exists crm_notas_reativa_empresa on public.crm_notas;
+create trigger crm_notas_reativa_empresa after insert or update of empresa_id on public.crm_notas
+  for each row execute function public.crm_nota_reativa_empresa();
