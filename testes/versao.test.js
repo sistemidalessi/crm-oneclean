@@ -17,3 +17,20 @@ test('todo script e estilo local do index.html tem ?v=', () => {
   assert.deepEqual(sem, []);
   assert.match(atual, /<meta name="crm-versao" content="[0-9a-f]{12}">/);
 });
+
+test('o fim de linha não muda o carimbo (CRLF do Windows = LF; 11/11/2026)', () => {
+  const os = require('os'), path = require('path');
+  const { versaoDe } = require('../ferramentas/carimba-versao.js');
+  const pasta = fs.mkdtempSync(path.join(os.tmpdir(), 'carimbo-'));
+  const texto = 'linha 1\nlinha 2\n';
+  fs.writeFileSync(path.join(pasta, 'lf.js'), texto);
+  fs.writeFileSync(path.join(pasta, 'crlf.js'), texto.replace(/\n/g, '\r\n'));
+  fs.writeFileSync(path.join(pasta, 'outro.js'), 'linha 1\nlinha 3\n');
+  assert.equal(versaoDe(path.join(pasta, 'lf.js')), versaoDe(path.join(pasta, 'crlf.js')));
+  assert.notEqual(versaoDe(path.join(pasta, 'lf.js')), versaoDe(path.join(pasta, 'outro.js')), 'conteúdo diferente muda o carimbo');
+  // a versão geral também: o mesmo index com CRLF dá o mesmo número
+  const atual = fs.readFileSync(INDEX, 'utf8').replace(/\r\n/g, '\n');
+  const geral = h => /crm-versao" content="([0-9a-f]+)"/.exec(carimbo(h))[1];
+  assert.equal(geral(atual), geral(atual.replace(/\n/g, '\r\n')));
+  fs.rmSync(pasta, { recursive: true, force: true });
+});
