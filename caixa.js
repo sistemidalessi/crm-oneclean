@@ -159,9 +159,24 @@
       for (const x of lig) troca(F.lancamentos, await CRM.store().atualizar('fin_lancamentos', x.id, { titulo_duplicata: x.duplicata }));
       if (lig.length) CRM.toast(lig.length + ' previsão(ões) ligada(s) ao título do FKN de mesmo valor: aparecem uma vez, no dia do título.');
     } catch (e) { CRM.falhou(e); }
+    // 12/11/2026 (Anderson: a mensalidade da escola não estava lançada porque ninguém gerou novembro): o mês corrente das contas
+    // fixas é gerado sozinho quando o administrador abre o Caixa (o mesmo "Gerar" do botão; não duplica). Desde dezembro de 2026:
+    // novembro foi acertado à mão (contas já lançadas sem a ligação com a conta fixa).
+    try {
+      const compet = hoje().slice(0, 7);
+      if (CRM.ehAdmin() && compet >= GERAR_SOZINHO_DESDE) {
+        const novas = gerarMes(F.recorrentes, compet, comSomadas());
+        if (novas.length) {
+          const r = await CRM.store().inserirVarios('fin_lancamentos', novas);
+          r.forEach(x => troca(F.lancamentos, x));
+          CRM.toast(r.length + ' conta(s) fixa(s) de ' + R.mesCurto(compet + '-01') + ' gerada(s) sozinha(s) no Caixa.');
+        }
+      }
+    } catch (e) { CRM.falhou(e); }
     lendo = false;
     CRM.render();
   }
+  const GERAR_SOZINHO_DESDE = '2026-12';
   const troca = (lista, r) => { const i = lista.findIndex(x => x.id === r.id); if (i >= 0) lista[i] = r; else lista.push(r); };
   async function grava(id, patch) { const r = await CRM.store().atualizar('fin_lancamentos', id, patch); troca(F.lancamentos, r); CRM.render(); return r; }
   async function insere(obj) { const r = await CRM.store().inserir('fin_lancamentos', obj); troca(F.lancamentos, r); CRM.render(); return r; }

@@ -1527,8 +1527,8 @@
   // "Lançar no Caixa" do PJ: as contas fixas de saída (para ligar cada PJ à dele) e o que já foi lançado na competência
   Supa.prototype.pjRecorrentes = async function () { return unwrap(await this.sb.from('crm_fin_recorrentes').select('id,descricao,valor,dia,categoria').eq('ativo', true).eq('tipo', 'saida').order('descricao')) || []; };
   Supa.prototype.pjLancados = async function (compet, descricoes) {
-    const [a, b] = await Promise.all([this.sb.from('crm_fin_lancamentos').select('id,recorrente_id,descricao').eq('competencia', compet).not('recorrente_id', 'is', null),
-      this.sb.from('crm_fin_lancamentos').select('id,recorrente_id,descricao').in('descricao', descricoes.length ? descricoes : ['-'])]);
+    const [a, b] = await Promise.all([this.sb.from('crm_fin_lancamentos').select('id,recorrente_id,descricao,situacao,origem').eq('competencia', compet).not('recorrente_id', 'is', null),
+      this.sb.from('crm_fin_lancamentos').select('id,recorrente_id,descricao,situacao,origem').in('descricao', descricoes.length ? descricoes : ['-'])]);
     return (unwrap(a) || []).concat(unwrap(b) || []);
   };
   Local.prototype.pjRecorrentes = async function () { return (this.ler().fin_recorrentes || []).filter(r => r.ativo !== false && (r.tipo || 'saida') === 'saida'); };

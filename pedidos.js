@@ -1484,11 +1484,19 @@
         if (!/^\d{4}-\d{2}-\d{2}$/.test(venc)) throw new Error('escolha a data do pagamento');
         const novos = P.lancamentosPj(r.linhas, venc, rot);
         const ja = await CRM.store().pjLancados(venc.slice(0, 7) + '-01', novos.map(x => x.descricao));
-        const jaRec = new Set(ja.map(x => x.recorrente_id).filter(Boolean)), jaDesc = new Set(ja.map(x => x.descricao));
-        const repetidos = novos.filter(x => (x.recorrente_id && jaRec.has(x.recorrente_id)) || jaDesc.has(x.descricao));
+        // a conta fixa do mês já gerada (o Caixa gera o mês sozinho) e ainda em aberto vira a do PJ, com o valor certo; já paga ou
+        // já lançada pelo PJ: recusa
+        const jaDesc = new Set(ja.map(x => x.descricao));
+        const fixa = x => x.recorrente_id && ja.find(y => y.recorrente_id === x.recorrente_id && y.origem === 'recorrente');
+        const repetidos = novos.filter(x => jaDesc.has(x.descricao) || (fixa(x) && fixa(x).situacao !== 'aberto') || (x.recorrente_id && !fixa(x) && ja.some(y => y.recorrente_id === x.recorrente_id)));
         if (repetidos.length) throw new Error('já existe no Caixa a conta deste mês de: ' + repetidos.map(x => x.fornecedor).join(', ') + '. Confira no Caixa (apague lá antes de lançar de novo).');
-        await CRM.store().inserirVarios('fin_lancamentos', novos);
-        CRM.toast(novos.length + ' conta(s) do PJ lançada(s) no Caixa para ' + R.dataBR(venc) + ', total ' + R.moeda(novos.reduce((s2, x) => s2 + x.valor, 0)) + '.');
+        const trocar = novos.filter(fixa), inserir = novos.filter(x => !fixa(x));
+        for (const x of trocar) {
+          const d = Object.assign({}, x); delete d.recorrente_id; delete d.competencia;
+          await CRM.store().atualizar('fin_lancamentos', fixa(x).id, d);
+        }
+        if (inserir.length) await CRM.store().inserirVarios('fin_lancamentos', inserir);
+        CRM.toast(novos.length + ' conta(s) do PJ no Caixa para ' + R.dataBR(venc) + (trocar.length ? ' (' + trocar.length + ' no lugar da conta fixa já gerada)' : '') + ', total ' + R.moeda(novos.reduce((s2, x) => s2 + x.valor, 0)) + '.');
       }
     });
   }
