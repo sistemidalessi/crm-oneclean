@@ -8157,7 +8157,11 @@ begin
        and (not coalesce((cfg->>'sem_mei')::boolean, true) or not b.mei)
        and (not coalesce((cfg->>'so_com_contato')::boolean, true) or b.tel1 is not null or b.email is not null)
        -- Saúde só de pequeno porte para cima (10/11/2026: microempresa de saúde é consultório de um profissional só)
-       and not (coalesce((cfg->>'saude_sem_me')::boolean, true) and sg.segmento = 'Saúde' and (b.porte = 'ME' or (b.porte = 'Demais' and b.capital > 0 and b.capital < 50000)))
+       -- 12/11/2026: e também o "pequeno porte" de capital abaixo de R$ 50 mil (o médico de um CNPJ só que se declara EPP)
+       and not (coalesce((cfg->>'saude_sem_me')::boolean, true) and sg.segmento = 'Saúde' and (b.porte = 'ME'
+             or (b.porte = 'EPP' and coalesce(b.capital, 0) < 50000) or (b.porte = 'Demais' and b.capital > 0 and b.capital < 50000)))
+       -- 12/11/2026: empresa em recuperação judicial, em liquidação ou falida não vira sugestão (risco de não receber)
+       and (coalesce(b.razao, '') || ' ' || coalesce(b.fantasia, '')) !~* '(recupera..o judicial|em liquida..o|massa falida)'
        and b.basico not in (select basico from _jbas)
        and b.basico not in (select basico from _sbas)
        and not exists (select 1 from public.crm_prospec_sugestoes x where x.cnpj = b.cnpj and (x.situacao in ('nova', 'amanha', 'lead')
