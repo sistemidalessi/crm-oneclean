@@ -8035,12 +8035,36 @@ $$;
 
 -- A lista do dia. Idempotente (se o dia já tem lista, só devolve o resumo). Quem chama: o agendador (service_role) ou o
 -- administrador ("Gerar a lista de hoje agora", na tela da gestão).
-create or replace function public.crm_prospec_gerar(p_dia date default null) returns jsonb
-language plpgsql security definer set search_path = public as $$
+-- 12/11/2026: telefone sem o +55 e "parecido" com quem já está no CRM sem CNPJ (domínio do e-mail, nome contido)
+create or replace function public.crm_prospec_tel(t text)
+returns text language sql immutable as $$
+  select case
+    when d ~ '^55\d{10,11}$' then substring(d from 3)
+    when d ~ '^0\d{10,11}$' then substring(d from 2)
+    else d end
+  from (select regexp_replace(coalesce(t, ''), '\D', '', 'g') d) x;
+$$;
+
+create or replace function public.crm_prospec_nucleo(t text)
+returns text language sql immutable as $$
+  select public.crm_prospec_nome(regexp_replace(coalesce(t, ''),
+    '\s+(LTDA|LIMITADA|EIRELI|S\.?\s?/?\s?A\.?|ME|EPP|SS|SOCIEDADE SIMPLES)\M.*$', '', 'i'));
+$$;
+revoke all on function public.crm_prospec_tel(text) from public, anon;
+revoke all on function public.crm_prospec_nucleo(text) from public, anon;
+
+CREATE OR REPLACE FUNCTION public.crm_prospec_gerar(p_dia date DEFAULT NULL::date)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
 declare
   cfg jsonb; v_dia date := coalesce(p_dia, (now() at time zone 'America/Sao_Paulo')::date);
   n integer; vends uuid[]; v uuid; r integer; k record; total integer := 0; expiradas integer := 0;
-  cidades text[]; meses_rec integer; desc_meses integer;
+  cidades text[]; meses_rec integer; desc_meses integer; ja_crm integer := 0;
+  genericos text[] := array['gmail.com','hotmail.com','hotmail.com.br','outlook.com','outlook.com.br','live.com','msn.com',
+    'yahoo.com','yahoo.com.br','uol.com.br','bol.com.br','terra.com.br','terra.com','ig.com.br','globo.com','icloud.com','r7.com'];
 begin
   if coalesce(auth.role(), '') <> 'service_role' and not public.crm_eh_admin() then raise exception 'só o agendador ou o administrador'; end if;
   select c.dados->'prospeccao' into cfg from public.crm_config c where c.id = 1;
@@ -8057,36 +8081,41 @@ begin
     from public.crm_usuarios u where u.ativo and u.user_id in (select (jsonb_array_elements_text(coalesce(cfg->'vendedores', '[]'::jsonb)))::uuid);
   if vends is null then return jsonb_build_object('ok', false, 'motivo', 'ninguém para receber'); end if;
 
-  -- o que ficou 3 listas sem ser tratado volta para a base
   update public.crm_prospec_sugestoes s set situacao = 'expirada'
    where s.situacao in ('nova', 'amanha') and s.respondeu_em is null
-     and (s.mandou_em is null or s.mandou_em < now() - interval '7 days')   -- 02/11/2026: a mandada espera 7 dias pela resposta
-     -- 06/11/2026: com anotação nos últimos 7 dias também não expira (a vendedora está tentando)
+     and (s.mandou_em is null or s.mandou_em < now() - interval '7 days')
      and not exists (select 1 from jsonb_array_elements(coalesce(s.anotacoes, '[]'::jsonb)) an where (an->>'em')::timestamptz > now() - interval '7 days')
      and (select count(distinct x.dia) from public.crm_prospec_sugestoes x where x.dia > s.dia and x.dia < v_dia) >= 2;
   get diagnostics expiradas = row_count;
 
   create temp table _seg on commit drop as select * from public.crm_prospec_segmentos();
-  -- clientes: quem comprou nos últimos 12 meses (pelas notas), com carteira, segmento e CEP
   create temp table _cli on commit drop as
     select distinct e.id, e.responsavel_id dono, e.segmento, left(regexp_replace(coalesce(e.cep, ''), '\D', '', 'g'), 5) cep5
       from public.crm_empresas e
      where exists (select 1 from public.crm_notas nn where nn.empresa_id = e.id and not nn.cancelada and nn.emitida_em >= now() - interval '12 months');
-  -- tudo o que já está no CRM (qualquer situação), para nunca sugerir de novo: raiz do CNPJ, telefones, e-mails e nome
+  -- o que já está no CRM (12/11/2026: telefone sem o +55, contatos, vários e-mails, nomes de todo jeito)
   create temp table _ja on commit drop as
-    select left(public.crm_doc(e.cnpj), 8) basico, regexp_replace(coalesce(e.telefone, ''), '\D', '', 'g') tel,
-           regexp_replace(coalesce(e.whatsapp, ''), '\D', '', 'g') zap, lower(btrim(coalesce(e.email, ''))) email,
-           public.crm_prospec_nome(e.nome) nome, public.crm_prospec_nome(e.razao_social) razao
+    select left(public.crm_doc(e.cnpj), 8) basico, public.crm_prospec_tel(e.telefone) tel, public.crm_prospec_tel(e.whatsapp) zap,
+           lower(coalesce(e.email, '') || ' ' || coalesce(e.email_nfe, '')) email,
+           public.crm_prospec_nome(e.nome) nome, public.crm_prospec_nome(e.razao_social) razao,
+           public.crm_prospec_nome(e.razao_receita) razao2, public.crm_prospec_nome(e.apelido) apelido
       from public.crm_empresas e
     union all
-    select left(public.crm_doc(nn.cliente_doc), 8), '', '', '', public.crm_prospec_nome(nn.cliente_nome), null
+    select null, public.crm_prospec_tel(c.telefone), public.crm_prospec_tel(coalesce(c.whatsapp, c.celular)), lower(coalesce(c.email, '')), null, null, null, null
+      from public.crm_contatos c
+    union all
+    select left(public.crm_doc(nn.cliente_doc), 8), '', '', '', public.crm_prospec_nome(nn.cliente_nome), null, null, null
       from public.crm_notas nn where nn.cliente_doc is not null;
 
   create temp table _cep on commit drop as select cep5, count(*)::int qtd from _cli where cep5 <> '' group by 1;
   create temp table _jbas on commit drop as select distinct basico from _ja where length(basico) = 8;
   create temp table _jtel on commit drop as select distinct t from (select tel t from _ja union select zap from _ja) x where length(t) >= 10;
-  create temp table _jmail on commit drop as select distinct email from _ja where email like '%@%';
-  create temp table _jnome on commit drop as select distinct nm from (select nome nm from _ja union select razao from _ja) x where length(nm) >= 6;
+  create temp table _jmail on commit drop as
+    select distinct m email from _ja, regexp_split_to_table(_ja.email, '[;,\s]+') m where m like '%@%';
+  create temp table _jdom on commit drop as
+    select distinct split_part(email, '@', 2) dom from _jmail where split_part(email, '@', 2) <> '' and not (split_part(email, '@', 2) = any(genericos));
+  create temp table _jnome on commit drop as
+    select distinct nm from (select nome nm from _ja union select razao from _ja union select razao2 from _ja union select apelido from _ja) x where length(nm) >= 6;
   create temp table _cand on commit drop as
     select b.*, sg.segmento seg, left(coalesce(b.cep, ''), 5) cep5,
            coalesce(cp.qtd, 0) viz,
@@ -8103,11 +8132,10 @@ begin
        and not exists (select 1 from public.crm_prospec_sugestoes x where x.cnpj = b.cnpj and (x.situacao in ('nova', 'amanha', 'lead')
              or (x.situacao = 'descartada' and x.tratado_em > now() - make_interval(months => desc_meses))
              or (x.situacao = 'expirada' and x.dia > v_dia - 30)));
-  -- mesmo telefone, e-mail ou nome de quem já está no CRM (lead do Agendor sem CNPJ)
-  delete from _cand c where c.tel1 in (select t from _jtel) or c.tel2 in (select t from _jtel) or c.email in (select email from _jmail)
+  delete from _cand c where public.crm_prospec_tel(c.tel1) in (select t from _jtel) or public.crm_prospec_tel(c.tel2) in (select t from _jtel)
+     or lower(c.email) in (select email from _jmail)
      or public.crm_prospec_nome(c.fantasia) in (select nm from _jnome) or public.crm_prospec_nome(c.razao) in (select nm from _jnome);
 
-  -- pontos de base: perto de quem já recebe, aberta há pouco, com e-mail, matriz; um pouco de sorte para variar
   alter table _cand add column base numeric;
   update _cand set base = (case when viz > 0 then 3 + least(viz, 6) * 0.5 else 0 end) + (case when recente then 2 else 0 end)
     + (case when email is not null then 1 else 0 end) + (case when matriz then 0.5 else 0 end)
@@ -8120,7 +8148,21 @@ begin
   create temp table _pool on commit drop as select * from _cand order by base desc limit 4000;
   alter table _pool add column escolhido boolean not null default false;
 
-  -- parecença com a carteira de cada vendedor(a): fatia dos clientes dela em cada segmento e os CEPs onde ela já entrega
+  -- 12/11/2026: empresa já no CRM sem CNPJ (cadastro do Agendor): mesmo domínio próprio de e-mail com o nome do domínio no
+  -- nome de uma das duas, ou razão social / fantasia contida no nome do CRM
+  alter table _pool add column nuc_r text, add column nuc_f text, add column nomes text, add column dom text;
+  update _pool set nuc_r = public.crm_prospec_nucleo(razao), nuc_f = public.crm_prospec_nucleo(fantasia),
+         nomes = coalesce(public.crm_prospec_nome(coalesce(razao, '') || ' ' || coalesce(fantasia, '')), ''),
+         dom = nullif(split_part(lower(coalesce(email, '')), '@', 2), '');
+  delete from _pool p where
+       exists (select 1 from _jdom d
+                where d.dom = p.dom and length(split_part(d.dom, '.', 1)) >= 4
+                  and (strpos(p.nomes, split_part(d.dom, '.', 1)) > 0
+                       or exists (select 1 from _jnome j where strpos(j.nm, split_part(d.dom, '.', 1)) > 0)))
+    or (length(p.nuc_r) >= 10 and exists (select 1 from _jnome j where strpos(j.nm, p.nuc_r) > 0))
+    or (length(p.nuc_f) >= 8 and exists (select 1 from _jnome j where strpos(j.nm, p.nuc_f) > 0));
+  get diagnostics ja_crm = row_count;
+
   create temp table _vs on commit drop as
     select c.dono, c.segmento, count(*)::numeric / nullif(sum(count(*)) over (partition by c.dono), 0) fatia
       from _cli c where c.segmento is not null group by 1, 2;
@@ -8151,9 +8193,9 @@ begin
       total := total + 1;
     end loop;
   end loop;
-  return jsonb_build_object('ok', true, 'dia', v_dia, 'geradas', total, 'expiradas', expiradas, 'pessoas', array_length(vends, 1));
+  return jsonb_build_object('ok', true, 'dia', v_dia, 'geradas', total, 'expiradas', expiradas, 'pessoas', array_length(vends, 1), 'ja_no_crm', ja_crm);
 end;
-$$;
+$function$;
 revoke all on function public.crm_prospec_gerar(date) from public, anon;
 grant execute on function public.crm_prospec_gerar(date) to authenticated, service_role;
 

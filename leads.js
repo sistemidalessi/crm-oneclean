@@ -7,7 +7,7 @@
    recebe, e vê o resultado. Parte pura no começo (testes/leads.test.js). */
 (function (raiz) {
   'use strict';
-  const MOTIVOS = ['Já tem fornecedor', 'Não atende / sem retorno', 'Pequena demais', 'Compra pela administradora', 'Fechou / não existe', 'Não é perfil'];
+  const MOTIVOS = ['Já tem fornecedor', 'Não atende / sem retorno', 'Pequena demais', 'Compra pela administradora', 'Fechou / não existe', 'Não é perfil', 'Já está no CRM (eu ou outra vendedora)', 'Outros'];
   const CIDADES = ['SAO BERNARDO DO CAMPO', 'SANTO ANDRE', 'SAO CAETANO DO SUL', 'DIADEMA', 'MAUA', 'RIBEIRAO PIRES', 'RIO GRANDE DA SERRA',
     'SAO PAULO', 'GUARULHOS', 'OSASCO', 'FERRAZ DE VASCONCELOS'];
   const NOME_CIDADE = { 'SAO BERNARDO DO CAMPO': 'São Bernardo do Campo', 'SANTO ANDRE': 'Santo André', 'SAO CAETANO DO SUL': 'São Caetano do Sul',
@@ -321,9 +321,10 @@
     'lead-desfazer': id => tratar(id, 'nova'),
     'lead-descartar': id => {
       CRM.abrirForm({ titulo: 'Descartar', intro: 'Por que esta empresa não serve agora? O motivo ajuda a melhorar a busca. Ela não volta por ' + (cfgP().descarte_meses || 6) + ' meses.',
-        campos: [{ nome: 'motivo', rotulo: 'Motivo', tipo: 'select', opcoes: [['', '— escolha —']].concat(MOTIVOS.map(m => [m, m])), obrigatorio: true }, { nome: 'obs', rotulo: 'Detalhe (opcional)' }],
+        campos: [{ nome: 'motivo', rotulo: 'Motivo', tipo: 'select', opcoes: [['', '— escolha —']].concat(MOTIVOS.map(m => [m, m])), obrigatorio: true }, { nome: 'obs', rotulo: 'Detalhe (obrigatório em "Outros")' }],
         salvarTexto: 'Descartar',
-        aoSalvar: async v => { if (!v.motivo) throw new Error('Escolha o motivo.'); await tratar(id, 'descartada', v.motivo + (v.obs ? ' — ' + v.obs : '')); } });
+        aoSalvar: async v => { if (!v.motivo) throw new Error('Escolha o motivo.');
+          if (v.motivo === 'Outros' && !String(v.obs || '').trim()) throw new Error('Em "Outros", escreva o motivo no detalhe.'); await tratar(id, 'descartada', v.motivo + (v.obs ? ' — ' + v.obs : '')); } });
     },
     'lead-virar': id => {
       const l = achar(id); if (!l) return;
