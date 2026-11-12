@@ -8053,6 +8053,19 @@ $$;
 revoke all on function public.crm_prospec_tel(text) from public, anon;
 revoke all on function public.crm_prospec_nucleo(text) from public, anon;
 
+-- 12/11/2026 (tarde): uma filial por empresa; empresa irmã no mesmo CEP; mesmo endereço
+create or replace function public.crm_prospec_palavra(t text)
+returns text language sql immutable as $$
+  select p from (select public.crm_prospec_nome(w) p, o from regexp_split_to_table(coalesce(t, ''), '[^[:alnum:]]+') with ordinality x(w, o)) y
+   where length(p) >= 5 and p not in ('condominio','edificio','residencial','residence','associacao','consorcio','escola','colegio',
+     'centro','educacional','instituto','industria','industrial','comercio','comercial','servicos','servico','clinica','medica',
+     'medicos','odontologia','saude','grupo','brasil','limpeza','terceirizacao','gestao','sociedade','empresa','infantil',
+     'cooperativa','igreja','paroquia','fundacao','ltda','eireli','solucoes','tecnologia','sistemas','administracao','conjunto',
+     'habitacional','espaco','casa','paulo','andre','bernardo','campo','santo','santa','diadema','guarulhos','sao')
+   order by o limit 1;
+$$;
+revoke all on function public.crm_prospec_palavra(text) from public, anon;
+
 CREATE OR REPLACE FUNCTION public.crm_prospec_gerar(p_dia date DEFAULT NULL::date)
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -8116,6 +8129,23 @@ begin
     select distinct split_part(email, '@', 2) dom from _jmail where split_part(email, '@', 2) <> '' and not (split_part(email, '@', 2) = any(genericos));
   create temp table _jnome on commit drop as
     select distinct nm from (select nome nm from _ja union select razao from _ja union select razao2 from _ja union select apelido from _ja) x where length(nm) >= 6;
+  -- 12/11/2026: filial de empresa que já está na lista (aberta, virou lead ou descartada há pouco) não vem de novo
+  -- (a mesma escola vinha todo dia com outro CNPJ da rede)
+  create temp table _sbas on commit drop as
+    select distinct bx.basico from public.crm_prospec_sugestoes x join public.crm_prospec_base bx on bx.cnpj = x.cnpj
+     where x.situacao in ('nova', 'amanha', 'lead')
+        or (x.situacao = 'descartada' and x.tratado_em > now() - make_interval(months => desc_meses))
+        or (x.situacao = 'expirada' and x.dia > v_dia - 30);
+  create temp table _skey on commit drop as
+    select left(regexp_replace(coalesce(bx.cep, ''), '\D', '', 'g'), 8) || ':' || public.crm_prospec_nome(split_part(bx.endereco, ',', 1) || split_part(bx.endereco, ',', 2)) k1,
+           left(regexp_replace(coalesce(bx.cep, ''), '\D', '', 'g'), 8) || ':' || public.crm_prospec_palavra(coalesce(nullif(bx.fantasia, ''), bx.razao)) k2
+      from public.crm_prospec_sugestoes x join public.crm_prospec_base bx on bx.cnpj = x.cnpj
+     where x.situacao in ('nova', 'amanha', 'lead')
+        or (x.situacao = 'descartada' and x.tratado_em > now() - make_interval(months => desc_meses))
+        or (x.situacao = 'expirada' and x.dia > v_dia - 30)
+    union
+    select null, left(regexp_replace(coalesce(e.cep, ''), '\D', '', 'g'), 8) || ':' || public.crm_prospec_palavra(e.nome)
+      from public.crm_empresas e where length(regexp_replace(coalesce(e.cep, ''), '\D', '', 'g')) = 8;
   create temp table _cand on commit drop as
     select b.*, sg.segmento seg, left(coalesce(b.cep, ''), 5) cep5,
            coalesce(cp.qtd, 0) viz,
@@ -8129,6 +8159,7 @@ begin
        -- Saúde só de pequeno porte para cima (10/11/2026: microempresa de saúde é consultório de um profissional só)
        and not (coalesce((cfg->>'saude_sem_me')::boolean, true) and sg.segmento = 'Saúde' and (b.porte = 'ME' or (b.porte = 'Demais' and b.capital > 0 and b.capital < 50000)))
        and b.basico not in (select basico from _jbas)
+       and b.basico not in (select basico from _sbas)
        and not exists (select 1 from public.crm_prospec_sugestoes x where x.cnpj = b.cnpj and (x.situacao in ('nova', 'amanha', 'lead')
              or (x.situacao = 'descartada' and x.tratado_em > now() - make_interval(months => desc_meses))
              or (x.situacao = 'expirada' and x.dia > v_dia - 30)));
@@ -8162,6 +8193,13 @@ begin
     or (length(p.nuc_r) >= 10 and exists (select 1 from _jnome j where strpos(j.nm, p.nuc_r) > 0))
     or (length(p.nuc_f) >= 8 and exists (select 1 from _jnome j where strpos(j.nm, p.nuc_f) > 0));
   get diagnostics ja_crm = row_count;
+  -- empresa irmã / mesmo endereço (12/11/2026)
+  alter table _pool add column k1 text, add column k2 text;
+  update _pool set k1 = case when length(regexp_replace(coalesce(cep, ''), '\D', '', 'g')) = 8 and coalesce(endereco, '') <> ''
+                              then left(regexp_replace(cep, '\D', '', 'g'), 8) || ':' || public.crm_prospec_nome(split_part(endereco, ',', 1) || split_part(endereco, ',', 2)) end,
+                   k2 = case when length(regexp_replace(coalesce(cep, ''), '\D', '', 'g')) = 8 and public.crm_prospec_palavra(coalesce(nullif(fantasia, ''), razao)) is not null
+                              then left(regexp_replace(cep, '\D', '', 'g'), 8) || ':' || public.crm_prospec_palavra(coalesce(nullif(fantasia, ''), razao)) end;
+  delete from _pool p where p.k1 in (select k1 from _skey where k1 is not null) or p.k2 in (select k2 from _skey where k2 is not null);
 
   create temp table _vs on commit drop as
     select c.dono, c.segmento, count(*)::numeric / nullif(sum(count(*)) over (partition by c.dono), 0) fatia
@@ -8171,7 +8209,7 @@ begin
   for r in 1..n loop
     foreach v in array vends loop
       select p.cnpj, p.seg, p.base + coalesce(vs.fatia, 0) * 4 + case when vc.cep5 is not null then 2 else 0 end pts,
-             p.viz, p.recente, p.abertura, p.bairro, p.cnae, p.porte, p.capital
+             p.viz, p.recente, p.abertura, p.bairro, p.cnae, p.porte, p.capital, p.basico, p.k1, p.k2
         into k
         from _pool p
         left join _vs vs on vs.dono = v and vs.segmento = p.seg
@@ -8179,7 +8217,7 @@ begin
        where not p.escolhido
        order by 3 desc limit 1;
       exit when k.cnpj is null;
-      update _pool set escolhido = true where cnpj = k.cnpj;
+      update _pool set escolhido = true where cnpj = k.cnpj or basico = k.basico or k1 = k.k1 or k2 = k.k2;  -- uma por empresa/endereço no dia
       insert into public.crm_prospec_sugestoes (dia, vendedor_id, cnpj, ordem, segmento, pontos, motivos)
       values (v_dia, v, k.cnpj, r, k.seg, round(k.pts, 2), array_remove(array[
         'Parecida com ' || (select count(*) from _cli c where c.segmento = k.seg) || ' clientes de ' || lower(k.seg),
