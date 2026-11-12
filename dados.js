@@ -2009,6 +2009,7 @@
   // entregas liberadas dele (crm_minha_rota); a confirmação exige a foto do canhoto (bucket privado crm-canhotos).
   Supa.prototype.rotaCandidatas = async function (desde) { return unwrap(await this.sb.rpc('crm_rota_candidatas', { p_desde: desde })) || []; };
   Supa.prototype.rotaDia = async function (dia) { return unwrap(await this.sb.rpc('crm_rota_dia', { p_dia: dia })) || []; };
+  Supa.prototype.rotaPendentes = async function (antes) { return unwrap(await this.sb.rpc('crm_rota_pendentes', { p_antes: antes })) || []; };
   Supa.prototype.entregasVendedor = async function (de, ate) { return unwrap(await this.sb.rpc('crm_entregas_vendedor', { p_de: de, p_ate: ate })) || []; };
   Supa.prototype.minhaRota = async function (dia) { return unwrap(await this.sb.rpc('crm_minha_rota', { p_dia: dia })) || []; };
   Supa.prototype.entregasCriar = async function (linhas) { return unwrap(await this.sb.from('crm_entregas').insert(linhas).select('id')); };
@@ -2132,6 +2133,7 @@
       });
   };
   Local.prototype.rotaDia = async function (dia) { return this.rotaLinhas().filter(x => x.dia === dia); };
+  Local.prototype.rotaPendentes = async function (antes) { return this.rotaLinhas().filter(x => x.dia < antes && x.situacao !== 'entregue').sort((a, b) => String(a.dia).localeCompare(String(b.dia)) || (a.numero || 0) - (b.numero || 0)); };
   Local.prototype.minhaRota = async function (dia) { const eu = await this.usuarioAtual(); return this.rotaLinhas().filter(x => x.dia === dia && x.liberada && x.motorista_id === eu.user_id).sort((a, b) => a.ordem - b.ordem); };
   Local.prototype.entregaMuda = function (fn) { const l = lsLe('crm_entregas', []); const r = fn(l); lsGrava('crm_entregas', l); return r; };
   Local.prototype.entregasCriar = async function (linhas) {

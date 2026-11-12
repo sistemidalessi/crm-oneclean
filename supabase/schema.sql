@@ -12894,3 +12894,35 @@ revoke all on function public.crm_nota_reativa_empresa() from public, anon, auth
 drop trigger if exists crm_notas_reativa_empresa on public.crm_notas;
 create trigger crm_notas_reativa_empresa after insert or update of empresa_id on public.crm_notas
   for each row execute function public.crm_nota_reativa_empresa();
+
+-- 12/11/2026 (áudio do Edson, logística): "estou com três notas com pendência em aberto… não dá para usar essas mesmas notas numa
+-- rota futura". A nota só pode estar numa entrega (crm_entregas.nota_id é único) e a lista "Notas para pôr na rota" só traz o que
+-- ainda não tem entrega; a parada que ficou pendente ou com problema num dia passado ficava presa lá. Esta função lista essas
+-- paradas (desde o início da logística no CRM) para a tela Rotas passá-las para outro dia (a tela grava em crm_entregas: dia,
+-- motorista, volta a "pendente" e "não mandada", observação com o histórico).
+create or replace function public.crm_rota_pendentes(p_antes date)
+returns table (id uuid, dia date, nota_id uuid, numero integer, empresa_id uuid, cliente text, endereco text, bairro text, cidade text, valor numeric,
+  vendedor text, motorista_id uuid, situacao text, obs text)
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if not (public.crm_eh_gestor() or public.crm_eh_logistica()) then raise exception 'só a logística'; end if;
+  return query
+    select x.id, x.dia, x.nota_id, n.numero::integer, x.empresa_id,
+      coalesce(e.nome, n.cliente_nome) || coalesce(' — ' || nullif(btrim(coalesce(en.v->>'local', '')), ''), ''),
+      coalesce(public.crm_entrega_texto(en.v), public.crm_endereco_texto(e)),
+      case when en.v is not null then nullif(btrim(en.v->>'bairro'), '') else e.bairro end,
+      coalesce(case when en.v is not null then nullif(btrim(en.v->>'cidade'), '') end, e.cidade, n.cidade), n.valor_total,
+      case when upper(n.vendedor_nome) = 'DIRETO' then 'Venda direta' else coalesce(u.nome, n.vendedor_nome) end,
+      x.motorista_id, x.situacao, x.obs
+      from public.crm_entregas x
+      join public.crm_notas n on n.id = x.nota_id
+      left join public.crm_empresas e on e.id = x.empresa_id
+      left join lateral (select public.crm_entrega_da_nota(n.id) v) en on true
+      left join public.crm_usuarios u on u.user_id = n.vendedor_id
+     where x.dia < p_antes and x.situacao <> 'entregue' and not n.cancelada
+       and x.dia >= coalesce(public.crm_logistica_desde(), x.dia)
+     order by x.dia, n.numero
+     limit 200;
+end $$;
+revoke all on function public.crm_rota_pendentes(date) from public, anon;
+grant execute on function public.crm_rota_pendentes(date) to authenticated;

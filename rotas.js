@@ -70,7 +70,7 @@
   const urls = new Map(); // canhoto → link assinado (vale 10 min)
 
   // ============================================================ logística
-  const f = { dia: null, marcadas: new Set(), mot: '' };
+  const f = { dia: null, marcadas: new Set(), mot: '', pend: new Set(), motPend: '' };
   let dados = null, carregando = false, lidoEm = 0, veics = null;
   // Caminhão de cada motorista no dia (03/11/2026, Anderson: "igual a gente escolhe o motorista, eu preciso escolher o caminhão
   // para saber, quando toma multa aquele dia, quem estava com qual"): um caminhão por motorista no dia, gravado em cada entrega.
@@ -81,9 +81,11 @@
     carregando = true;
     try {
       const dia = f.dia || (f.dia = hojeSP());
-      const [rota, cand, vs] = await Promise.all([st().rotaDia(dia), st().rotaCandidatas(somaDias(dia, -10)), st().veiculos ? st().veiculos().catch(() => []) : []]);
+      const [rota, cand, vs, pend] = await Promise.all([st().rotaDia(dia), st().rotaCandidatas(somaDias(dia, -10)), st().veiculos ? st().veiculos().catch(() => []) : [],
+        st().rotaPendentes ? st().rotaPendentes(dia).catch(() => []) : []]);
       veics = vs || [];
-      dados = { dia, rota: rota || [], cand: cand || [] };
+      dados = { dia, rota: rota || [], cand: cand || [], pend: pend || [] };
+      const ids = new Set(dados.pend.map(x => x.id)); [...f.pend].forEach(id => { if (!ids.has(id)) f.pend.delete(id); });
       lidoEm = Date.now();
     } catch (e) { dados = dados || { dia: f.dia, rota: [], cand: [] }; if (!silencio) CRM.falhou(e); }
     carregando = false;
@@ -107,7 +109,7 @@
       (mots.length ? '' : '<p class="aviso-notas">Ainda não há nenhum usuário com o papel <strong>Motorista</strong>. O administrador cria em Configurações → Equipe (um login para cada motorista).</p>') +
       chaves.map(k => blocoMotorista(k, grupos.get(k), opMot)).join('') +
       (r.naoMandadas ? '<p class="acoes"><button type="button" class="btn" data-acao="rt-liberar">Mandar a rota aos motoristas (' + r.naoMandadas + ' parada(s) ainda não foram)</button></p>' : '') +
-      blocoCandidatas(opMot) + blocoRelatorio();
+      blocoPendentes(opMot) + blocoCandidatas(opMot) + blocoRelatorio();
   }
   // Relatório de entregas (28/10/2026, pesquisa em todas as telas): as entregas de um período (até 62 dias, um dia por vez no
   // banco), com pesquisa por cliente, nota, bairro, motorista ou observação, situação e planilha.
@@ -224,6 +226,27 @@
       '</tbody></table>' +
       '<p class="ass">Saída: ____:____ &nbsp; Km saída: ________ &nbsp; Retorno: ____:____ &nbsp; Km retorno: ________</p>' +
       '<p class="ass">Motorista: ______________________________ &nbsp; Conferido por: ______________________________</p></div>';
+  }
+
+  // Ficaram de outros dias (12/11/2026, áudio do Edson: "três notas com pendência em aberto… não dá para usar essas mesmas notas
+  // numa rota futura"): a nota só pode estar numa entrega, e a parada que ficou pendente (o motorista não concluiu no sistema) ou
+  // com problema num dia passado ficava presa lá. Aqui ela passa para a rota do dia escolhido: volta a "pendente", "não mandada",
+  // com o motorista escolhido (ou o mesmo) e a observação do histórico. A que foi entregue e não foi confirmada no celular
+  // não precisa passar (a tela da logística não confirma entrega; só o motorista, com a foto do canhoto).
+  function blocoPendentes(opMot) {
+    const l = dados.pend || [];
+    if (!l.length) return '';
+    return '<section class="cartao"><div class="cabecalho-cartao"><h2>Ficaram de outros dias <small>' + l.length + ' parada(s) pendente(s) ou com problema, ainda não entregue(s)</small></h2></div>' +
+      '<p class="ajuda">Marque só as que vão sair de novo e passe para a rota de ' + esc(diaLongo(f.dia)) + ' (para outro dia, troque o Dia da entrega lá em cima). A que já foi entregue e só ficou sem a confirmação no celular não precisa passar.</p>' +
+      '<div class="acoes"><label class="filtro-inline">Motorista <select data-rt-mot-pend>' + opMot(f.motPend, '— o mesmo de antes —') + '</select></label> ' +
+        '<button type="button" class="btn" data-acao="rt-pend-passar"' + (f.pend.size ? '' : ' disabled') + '>↪ Passar para a rota de ' + esc(diaLongo(f.dia)) + ' (' + f.pend.size + ')</button></div>' +
+      '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th></th><th>Dia</th><th>Nota</th><th>Cliente e endereço</th><th>Motorista</th><th>Situação</th></tr></thead><tbody>' +
+      l.map(x => { const s = SIT[x.situacao] || [x.situacao, ''];
+        return '<tr><td><input type="checkbox" data-rt-pend="' + esc(x.id) + '"' + (f.pend.has(x.id) ? ' checked' : '') + ' aria-label="Passar a NF ' + esc(x.numero) + ' para outro dia"></td>' +
+          '<td>' + esc(diaLongo(x.dia)) + '</td><td>NF ' + esc(x.numero) + '<small class="rt-end">' + esc(R.moeda(x.valor)) + (x.vendedor ? ' · ' + esc(x.vendedor) : '') + '</small></td>' +
+          '<td><strong>' + esc(x.cliente || '—') + '</strong><small class="rt-end">' + esc(x.endereco || 'sem endereço no cadastro') + '</small></td>' +
+          '<td>' + esc(nomeMot(x.motorista_id) || '—') + '</td><td>' + CRM.selo(s[0], s[1]) + (x.obs ? '<small class="rt-obs">' + esc(x.obs) + '</small>' : '') + '</td></tr>'; }).join('') +
+      '</tbody></table></div></section>';
   }
 
   function blocoCandidatas(opMot) {
@@ -463,6 +486,25 @@
         CRM.toast(l.length + ' nota(s) na rota de ' + diaLongo(f.dia) + (f.mot ? ' com ' + nomeMot(f.mot) : '') + '. Confira a ordem e mande a rota.');
       })().catch(CRM.falhou);
     },
+    'rt-pend-passar': () => {
+      const l = (dados.pend || []).filter(x => f.pend.has(x.id));
+      if (!l.length) return;
+      const comProblema = l.filter(x => x.situacao === 'problema');
+      if (!confirm('Passar ' + l.length + ' parada(s) para a rota de ' + diaLongo(f.dia) + '?' + (comProblema.length ? '\n\n' + comProblema.length + ' estava(m) com problema (' +
+        comProblema.map(x => 'NF ' + x.numero).join(', ') + '): confira com a vendedora se a mercadoria vai mesmo sair de novo.' : ''))) return;
+      (async () => {
+        let n = 0;
+        for (const x of l) {
+          const mot = f.motPend || x.motorista_id || null;
+          await st().entregaAtualizar(x.id, { dia: f.dia, motorista_id: mot, veiculo_id: mot ? veicDoMot(mot) : null, ordem: doMotorista(mot).length + (++n),
+            liberada: false, situacao: 'pendente', entregue_em: null, entregue_por: null,
+            obs: (x.obs ? x.obs + '\n' : '') + 'Passada de ' + dm(x.dia) + ' para ' + dm(f.dia) + (x.situacao === 'problema' ? ' (estava com problema)' : '') + '.' });
+        }
+        f.pend.clear();
+        await recarrega();
+        CRM.toast(l.length + ' parada(s) na rota de ' + diaLongo(f.dia) + '. Confira a ordem e mande a rota.');
+      })().catch(CRM.falhou);
+    },
     'rt-subir': id => { const x = daRota(id); const p = x && X.move(doMotorista(x.motorista_id), id, -1); if (p) regravaOrdem(p).catch(CRM.falhou); },
     'rt-descer': id => { const x = daRota(id); const p = x && X.move(doMotorista(x.motorista_id), id, 1); if (p) regravaOrdem(p).catch(CRM.falhou); },
     'rt-bairro': k => { const l = doMotorista(k); const feitas = l.filter(X.feita), resto = X.porBairro(l.filter(x => !X.feita(x))); regravaOrdem(feitas.concat(resto).map((x, i) => ({ id: x.id, ordem: i + 1 }))).catch(CRM.falhou); },
@@ -503,7 +545,10 @@
       c.querySelectorAll('[data-rt-dia]').forEach(d => d.addEventListener('change', () => { if (d.value) { f.dia = d.value; dados = null; CRM.render(); } }));
       const mn = c.querySelector('[data-rt-mot-novo]');
       if (mn) mn.addEventListener('change', () => { f.mot = mn.value; });
+      const mp = c.querySelector('[data-rt-mot-pend]');
+      if (mp) mp.addEventListener('change', () => { f.motPend = mp.value; });
       c.querySelectorAll('[data-rt-marca]').forEach(cb => cb.addEventListener('change', () => { if (cb.checked) f.marcadas.add(cb.dataset.rtMarca); else f.marcadas.delete(cb.dataset.rtMarca); CRM.render(); }));
+      c.querySelectorAll('[data-rt-pend]').forEach(cb => cb.addEventListener('change', () => { if (cb.checked) f.pend.add(cb.dataset.rtPend); else f.pend.delete(cb.dataset.rtPend); CRM.render(); }));
       c.querySelectorAll('[data-rt-mot]').forEach(s => s.addEventListener('change', () => {
         const x = daRota(s.dataset.rtMot);
         if (!x) return;
