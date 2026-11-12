@@ -59,6 +59,8 @@
       origem: valor(icms, 'orig') || null, cst_icms: valor(icms, 'CST') || valor(icms, 'CSOSN') || null,
       aliq_icms: numOuNulo(valor(icms, 'pICMS')), red_bc_icms: numOuNulo(valor(icms, 'pRedBC')),
       v_bc_icms: numOuNulo(valor(icms, 'vBC')), v_icms: numOuNulo(valor(icms, 'vICMS')),
+      // crédito do Simples (CSOSN 101/201): o comprador do regime normal credita este valor (12/11/2026, Impostômetro)
+      p_cred_sn: numOuNulo(valor(icms, 'pCredSN')), v_cred_sn: numOuNulo(valor(icms, 'vCredICMSSN')),
       v_bc_st: numOuNulo(valor(icms, 'vBCST')), v_icms_st: numOuNulo(valor(icms, 'vICMSST')), v_st_ret: numOuNulo(valor(icms, 'vICMSSTRet')),
       cst_pis: valor(pis, 'CST') || null, aliq_pis: numOuNulo(valor(pis, 'pPIS')), v_pis: numOuNulo(valor(pis, 'vPIS')),
       cst_cofins: valor(cofins, 'CST') || null, aliq_cofins: numOuNulo(valor(cofins, 'pCOFINS')), v_cofins: numOuNulo(valor(cofins, 'vCOFINS')),

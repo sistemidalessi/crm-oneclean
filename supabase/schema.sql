@@ -10016,6 +10016,180 @@ end $$;
 revoke all on function public.crm_comparar_produto(text) from public, anon;
 grant execute on function public.crm_comparar_produto(text) to authenticated;
 
+-- 12/11/2026 (pedido do Anderson): Financeiro → Impostômetro (só o administrador). Simula, mês a mês, cada imposto da OneClean
+-- (Lucro Real) com débito, crédito, saldo credor e o que sobra a pagar, e o total.
+--
+-- 1) O ICMS próprio das notas de compra (o crédito de ICMS) não era guardado: só o da ST. Colunas novas em crm_compra_itens,
+--    preenchidas pelo leitor do XML (estoque.js, compraDoXml) nas notas novas e, nas já guardadas, pela releitura do XML
+--    (crm_compra_itens_icms, botão na tela). icms_lido = o XML já foi lido para o ICMS (item lançado à mão fica false).
+alter table public.crm_compra_itens add column if not exists icms_base numeric;
+alter table public.crm_compra_itens add column if not exists icms_aliq numeric;
+alter table public.crm_compra_itens add column if not exists icms_valor numeric;
+alter table public.crm_compra_itens add column if not exists cred_sn numeric;
+-- icms_lido sem "not null": a desfeita da entrada (crm_compra_desfazer) recria os itens por jsonb_populate_record do itens_xml
+-- guardado, que não tem a chave nas notas antigas (viria nulo). Nulo = não lido.
+alter table public.crm_compra_itens add column if not exists icms_lido boolean default false;
+
+create or replace function public.crm_compra_itens_icms(p jsonb) returns integer language plpgsql security definer set search_path = public as $$
+declare n integer;
+begin
+  if not (public.crm_eh_admin() or public.crm_eh_comprador()) then raise exception 'só o administrador ou o comprador'; end if;
+  update public.crm_compra_itens i set icms_base = x.icms_base, icms_aliq = x.icms_aliq, icms_valor = x.icms_valor, cred_sn = x.cred_sn, icms_lido = true
+    from jsonb_to_recordset(coalesce(p, '[]'::jsonb)) as x(chave text, ordem integer, icms_base numeric, icms_aliq numeric, icms_valor numeric, cred_sn numeric),
+         public.crm_compras c
+   where c.chave = x.chave and i.compra_id = c.id and i.ordem = x.ordem and not coalesce(i.icms_lido, false);
+  get diagnostics n = row_count;
+  return n;
+end $$;
+revoke all on function public.crm_compra_itens_icms(jsonb) from public, anon;
+grant execute on function public.crm_compra_itens_icms(jsonb) to authenticated;
+
+-- Chaves das notas de compra com item ainda sem o ICMS lido (para a releitura). Só administrador e comprador.
+create or replace function public.crm_compras_sem_icms() returns setof text language sql stable security definer set search_path = public as $$
+  select distinct c.chave from public.crm_compras c join public.crm_compra_itens i on i.compra_id = c.id
+   where (select public.crm_eh_admin() or public.crm_eh_comprador()) and c.chave ~ '^\d{44}$' and c.manual is null and not coalesce(i.icms_lido, false)
+$$;
+revoke all on function public.crm_compras_sem_icms() from public, anon;
+grant execute on function public.crm_compras_sem_icms() to authenticated;
+
+-- 2) Os números de cada mês (de p_de a p_ate, meses inteiros, horário de São Paulo). A conta dos impostos é no navegador
+--    (impostometro.js, testada); aqui só as somas, cada uma com o que ficou de fora para a tela avisar.
+--    vendas: o que as notas de saída destacaram (crm_fiscal_itens, lido do XML de cada nota): ICMS, PIS, COFINS, IPI, ST;
+--            receita = itens de venda (CFOP 5/6 1xx e 4xx); CMV pelo custo do movimento de estoque da nota ou, sem ele, pelo
+--            custo médio de hoje SEM o índice de custo do FKN
+--            (o cadastro guarda médio × (1 + índice)); as saídas do estoque não guardam o custo.
+--    devolucoes: devoluções de venda (crm_devolucoes_venda) com os impostos na proporção da nota devolvida.
+--    compras: itens de revenda (ligados a um produto), lançadas no CRM ou "ignoradas" (entraram pelo FKN antes da virada;
+--            o crédito foi tomado), pela data de entrada (lançada; sem entrada no CRM, a emissão). Pendente fica de fora:
+--            crédito de ICMS (fora: venda com ST, compra com ST retida; base reduzida limitada à carga da saída), crédito do
+--            Simples e a base do PIS/COFINS (venda tributada CST 01; sem ICMS, IPI e ST — Lei 14.592/2023, Tema 1231).
+--    gnre: DIFAL e FCP das guias geradas pelo robô.  caixa: saídas pagas por categoria (sem empréstimos e entre empresas)
+--            e os rendimentos.
+create or replace function public.crm_impostometro(p_de date, p_ate date)
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare de timestamptz; ate timestamptz; r jsonb;
+begin
+  if not public.crm_eh_admin() then raise exception 'só o administrador'; end if;
+  de := date_trunc('month', p_de)::timestamp at time zone 'America/Sao_Paulo';
+  ate := (date_trunc('month', p_ate) + interval '1 month')::timestamp at time zone 'America/Sao_Paulo';
+  with meses as (
+    select to_char(m, 'YYYY-MM') mes from generate_series(date_trunc('month', p_de), date_trunc('month', p_ate), interval '1 month') m),
+  -- vendas: impostos destacados nas notas de saída
+  nf as (
+    select n.id, to_char(n.emitida_em at time zone 'America/Sao_Paulo', 'YYYY-MM') mes from public.crm_notas n
+     where not n.cancelada and n.emitida_em >= de and n.emitida_em < ate),
+  vf as (
+    select nf.mes, sum(coalesce(f.v_icms, 0)) icms, sum(coalesce(f.v_pis, 0)) pis, sum(coalesce(f.v_cofins, 0)) cofins,
+      sum(coalesce(f.v_ipi, 0)) ipi, sum(coalesce(f.v_icms_st, 0)) st
+      from nf join public.crm_fiscal_itens f on f.nota_id = nf.id group by nf.mes),
+  vi as (
+    select nf.mes, i.id iid, i.codigo, i.quantidade q, i.valor_total v,
+      translate(upper(coalesce(i.unidade, '')), 'ÇÃÁÂÀÉÊÍÓÔÕÚ', 'CAAAAEEIOOOU') un,
+      exists (select 1 from public.crm_fiscal_itens f where f.nota_id = i.nota_id and f.ordem = i.ordem) lido
+      from nf join public.crm_nota_itens i on i.nota_id = nf.id where i.cfop is null or i.cfop ~ '^[56][14]'),
+  vc as (
+    select vi.*, nullif(translate(upper(coalesce(e.unidade, '')), 'ÇÃÁÂÀÉÊÍÓÔÕÚ', 'CAAAAEEIOOOU'), '') bun,
+      e.custo_unit / (1 + coalesce(e.indice_custo, 0) / 100) bc,
+      (select x.custo_unit / (1 + coalesce(x.indice_custo, 0) / 100) from public.crm_estoque x
+        where x.codigo like regexp_replace(vi.codigo, '\.\d+$', '') || '.%' and x.custo_unit > 0 order by x.codigo limit 1) cxc
+      from vi left join public.crm_estoque e on e.codigo = vi.codigo),
+  vr as (
+    select mes, sum(v) receita, count(*) filter (where not lido) sem_fiscal,
+      sum(q * case when bun is not null and un <> bun and cxc is not null then cxc else nullif(bc, 0) end) cmv,
+      count(*) filter (where coalesce(case when bun is not null and un <> bun and cxc is not null then cxc else nullif(bc, 0) end, 0) = 0) sem_custo,
+      count(*) itens
+      from vc group by mes),
+  nnotas as (select mes, count(*) notas from nf group by mes),
+  -- devoluções de venda, com os impostos na proporção da nota de venda
+  dv as (
+    select to_char(d.quando at time zone 'America/Sao_Paulo', 'YYYY-MM') mes, d.valor,
+      (select sum(i.valor_total) from public.crm_nota_itens i where i.nota_id = d.venda_id) vbase,
+      (select sum(coalesce(f.v_icms, 0)) from public.crm_fiscal_itens f where f.nota_id = d.venda_id) vicms,
+      (select sum(coalesce(f.v_pis, 0)) from public.crm_fiscal_itens f where f.nota_id = d.venda_id) vpis,
+      (select sum(coalesce(f.v_cofins, 0)) from public.crm_fiscal_itens f where f.nota_id = d.venda_id) vcofins
+      from public.crm_devolucoes_venda() d where d.quando >= de and d.quando < ate),
+  dvs as (
+    select mes, sum(valor) valor,
+      sum(case when vbase > 0 then valor / vbase * coalesce(vicms, 0) else 0 end) icms,
+      sum(case when vbase > 0 then valor / vbase * coalesce(vpis, 0) else 0 end) pis,
+      sum(case when vbase > 0 then valor / vbase * coalesce(vcofins, 0) else 0 end) cofins, count(*) n
+      from dv group by mes),
+  -- compras: itens de revenda pela data de entrada
+  ci as (
+    select to_char(coalesce(c.lancada_em, c.emitida_em) at time zone 'America/Sao_Paulo', 'YYYY-MM') mes, i.*,
+      regexp_replace(coalesce(i.codigo, v.codigo, (select p.codigo from public.crm_fiscal_produtos p where i.ean ~ '^\d{8,14}$' and p.gtin = i.ean limit 1), ''), '\.\d+$', '') prod
+      from public.crm_compras c join public.crm_compra_itens i on i.compra_id = c.id
+      left join public.crm_compra_vinculos v on v.fornecedor_doc = c.fornecedor_doc and v.cod_fornecedor = i.cod_fornecedor and i.codigo is null
+     where not coalesce(c.devolucao, false) and c.situacao in ('lancada', 'ignorada')
+       and coalesce(c.lancada_em, c.emitida_em) >= de and coalesce(c.lancada_em, c.emitida_em) < ate),
+  cr as (
+    select ci.*, fp.regra -> 'venda' vd, (ci.st_cst ~ '^[1-9]0\d$') simples,
+      coalesce(ci.valor_total, 0) + coalesce(ci.frete, 0) + coalesce(ci.outras, 0) vbase
+      from ci left join public.crm_fiscal_produtos fp on fp.codigo = ci.prod where ci.prod <> ''),
+  cc as (
+    select cr.*,
+      case when not coalesce(icms_lido, false) or coalesce(vd->>'cst_icms', '') in ('60', '10', '30', '70') or coalesce(st_cst, '') in ('60', '500') then 0
+           else least(case when simples then coalesce(cred_sn, 0) else coalesce(icms_valor, 0) end,
+                      case when vd->>'cst_icms' = '20' and coalesce((vd->>'red_bc_icms')::numeric, 0) > 0
+                           then vbase * coalesce((vd->>'aliq_icms')::numeric, 0) * (1 - (vd->>'red_bc_icms')::numeric / 100) / 100 else 1e15 end) end cred_icms,
+      case when coalesce(vd->>'cst_pis', '') = '01'
+           then greatest(0, vbase - case when simples then coalesce(cred_sn, 0) else coalesce(icms_valor, 0) end) else 0 end base_pis
+      from cr),
+  cs as (
+    select mes, sum(vbase) valor, sum(cred_icms) cred_icms, sum(case when simples then cred_icms else 0 end) cred_sn,
+      sum(base_pis) base_pis, sum(coalesce(ipi, 0)) ipi, sum(coalesce(st, 0)) st,
+      count(*) filter (where not coalesce(icms_lido, false)) nao_lidos, sum(vbase) filter (where not coalesce(icms_lido, false)) nao_lidos_valor,
+      count(*) filter (where vd is null) sem_regra, count(*) itens
+      from cc group by mes),
+  -- item sem produto ligado (antes da virada as notas não eram ligadas): estimativa pelo que a nota do fornecedor diz —
+  -- ICMS próprio destacado (sem ST retida) ou crédito do Simples; PIS/COFINS se o fornecedor tributou (CST 01) ou é do Simples.
+  -- Pode ser uso e consumo (sem crédito): a tela mostra à parte e deixa tirar da conta.
+  sp0 as (
+    select ci.*, (ci.st_cst ~ '^[1-9]0\d$') simples, coalesce(ci.valor_total, 0) + coalesce(ci.frete, 0) + coalesce(ci.outras, 0) vbase
+      from ci where ci.prod = ''),
+  semprod as (
+    select mes, count(*) n, sum(vbase) valor,
+      sum(case when not coalesce(icms_lido, false) or coalesce(st_cst, '') in ('10', '30', '60', '70', '201', '202', '203', '500') then 0
+               when simples then coalesce(cred_sn, 0) else coalesce(icms_valor, 0) end) cred_icms,
+      sum(case when simples or coalesce(pis_cst, '') = '01'
+               then greatest(0, vbase - case when simples then coalesce(cred_sn, 0) else coalesce(icms_valor, 0) end) else 0 end) base_pis
+      from sp0 group by mes),
+  gn as (
+    select to_char(g.criado_em at time zone 'America/Sao_Paulo', 'YYYY-MM') mes, sum(coalesce(g.valor, 0)) difal, sum(coalesce(g.valor_fcp, 0)) fcp, count(*) n
+      from public.crm_gnre g where g.ambiente = 'producao' and g.situacao not in ('erro', 'cancelada') and g.criado_em >= de and g.criado_em < ate group by 1),
+  fx as (
+    select to_char(l.pago_em, 'YYYY-MM') mes, l.tipo, coalesce(l.categoria, 'Sem categoria') categoria, sum(l.valor) valor
+      from public.crm_fin_lancamentos l
+     where l.situacao = 'pago' and l.pago_em >= p_de and l.pago_em < (date_trunc('month', p_ate) + interval '1 month')::date
+       and not coalesce(l.entre_empresas, false) and not coalesce(l.emprestimo, false)
+     group by 1, 2, 3),
+  fxs as (
+    select mes, jsonb_object_agg(categoria, round(valor, 2)) filter (where tipo = 'saida') saidas,
+      sum(valor) filter (where tipo = 'entrada' and categoria ilike 'rendiment%') rendimentos
+      from fx group by mes)
+  select jsonb_agg(jsonb_build_object('mes', m.mes,
+      'vendas', jsonb_build_object('notas', coalesce(nn.notas, 0), 'receita', round(coalesce(vr.receita, 0), 2), 'icms', round(coalesce(vf.icms, 0), 2),
+        'pis', round(coalesce(vf.pis, 0), 2), 'cofins', round(coalesce(vf.cofins, 0), 2), 'ipi', round(coalesce(vf.ipi, 0), 2), 'st', round(coalesce(vf.st, 0), 2),
+        'sem_fiscal', coalesce(vr.sem_fiscal, 0), 'cmv', round(coalesce(vr.cmv, 0), 2), 'sem_custo', coalesce(vr.sem_custo, 0),
+        'itens', coalesce(vr.itens, 0)),
+      'devolucoes', jsonb_build_object('valor', round(coalesce(dvs.valor, 0), 2), 'icms', round(coalesce(dvs.icms, 0), 2), 'pis', round(coalesce(dvs.pis, 0), 2),
+        'cofins', round(coalesce(dvs.cofins, 0), 2), 'n', coalesce(dvs.n, 0)),
+      'compras', jsonb_build_object('valor', round(coalesce(cs.valor, 0), 2), 'cred_icms', round(coalesce(cs.cred_icms, 0), 2), 'cred_sn', round(coalesce(cs.cred_sn, 0), 2),
+        'base_pis', round(coalesce(cs.base_pis, 0), 2), 'ipi', round(coalesce(cs.ipi, 0), 2), 'st', round(coalesce(cs.st, 0), 2),
+        'nao_lidos', coalesce(cs.nao_lidos, 0), 'nao_lidos_valor', round(coalesce(cs.nao_lidos_valor, 0), 2), 'sem_regra', coalesce(cs.sem_regra, 0),
+        'itens', coalesce(cs.itens, 0), 'sem_produto', coalesce(sp.n, 0), 'sem_produto_valor', round(coalesce(sp.valor, 0), 2),
+        'sem_produto_cred_icms', round(coalesce(sp.cred_icms, 0), 2), 'sem_produto_base_pis', round(coalesce(sp.base_pis, 0), 2)),
+      'gnre', jsonb_build_object('difal', round(coalesce(gn.difal, 0), 2), 'fcp', round(coalesce(gn.fcp, 0), 2), 'n', coalesce(gn.n, 0)),
+      'caixa', jsonb_build_object('saidas', coalesce(fxs.saidas, '{}'::jsonb), 'rendimentos', round(coalesce(fxs.rendimentos, 0), 2), 'tem', fxs.mes is not null)
+    ) order by m.mes) into r
+    from meses m
+    left join nnotas nn on nn.mes = m.mes left join vf on vf.mes = m.mes left join vr on vr.mes = m.mes left join dvs on dvs.mes = m.mes
+    left join cs on cs.mes = m.mes left join semprod sp on sp.mes = m.mes left join gn on gn.mes = m.mes left join fxs on fxs.mes = m.mes;
+  return coalesce(r, '[]'::jsonb);
+end $$;
+revoke all on function public.crm_impostometro(date, date) from public, anon;
+grant execute on function public.crm_impostometro(date, date) to authenticated;
+
 -- ============================================================ 04/11/2026: Diretor de Vendas, parado pelo último contato
 -- Diretor de Vendas: "parado" conta do último movimento, não só da mudança de etapa (04/11/2026, áudio da vendedora: "os três
 -- já tiveram atualização ... aparece como se eu não tivesse contato com eles há um grande tempo"). Mesma regra da tela do CRM

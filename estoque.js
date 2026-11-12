@@ -144,7 +144,10 @@
           st_proprio: e.st_proprio == null ? null : e.st_proprio, st_valor: e.st_valor == null ? null : e.st_valor,
           // PIS/COFINS que o fornecedor usou (07/11/2026): diz se a compra gerou crédito — estoque de abertura da CBS (cbs-estoque.js)
           pis_cst: f.cst_pis || null, pis_aliq: f.aliq_pis == null ? null : f.aliq_pis, pis_valor: f.v_pis == null ? null : f.v_pis,
-          cofins_cst: f.cst_cofins || null, cofins_aliq: f.aliq_cofins == null ? null : f.aliq_cofins, cofins_valor: f.v_cofins == null ? null : f.v_cofins };
+          cofins_cst: f.cst_cofins || null, cofins_aliq: f.aliq_cofins == null ? null : f.aliq_cofins, cofins_valor: f.v_cofins == null ? null : f.v_cofins,
+          // ICMS próprio da nota (12/11/2026, Impostômetro): o crédito de ICMS da OneClean; do Simples, o crédito informado (vCredICMSSN)
+          icms_base: f.v_bc_icms == null ? null : f.v_bc_icms, icms_aliq: f.aliq_icms == null ? null : f.aliq_icms, icms_valor: f.v_icms == null ? null : f.v_icms,
+          cred_sn: f.v_cred_sn == null ? null : f.v_cred_sn, icms_lido: true };
       })
     };
   }

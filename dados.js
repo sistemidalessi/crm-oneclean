@@ -1903,6 +1903,10 @@
   };
   // Histórico de compras do produto, inclusive as notas de antes da virada (pelo vínculo aprendido e pelo código de barras),
   // com o custo por unidade do estoque: só administrador e comprador (06/11/2026, Wellington).
+  // Impostômetro (12/11/2026): somas de um mês (crm_impostometro, só admin) e a releitura do ICMS das notas de compra.
+  Supa.prototype.impostometro = async function (de, ate) { return unwrap(await this.sb.rpc('crm_impostometro', { p_de: de, p_ate: ate })) || []; };
+  Supa.prototype.comprasSemIcms = async function () { return unwrap(await this.sb.rpc('crm_compras_sem_icms')) || []; };
+  Supa.prototype.compraItensIcms = async function (lista) { return unwrap(await this.sb.rpc('crm_compra_itens_icms', { p: lista })); };
   Supa.prototype.compararProduto = async function (codigo) { return unwrap(await this.sb.rpc('crm_comparar_produto', { p_codigo: codigo })); };
   Supa.prototype.produtoCompras = async function (codigo) { return unwrap(await this.sb.rpc('crm_produto_compras', { p_codigo: codigo })) || []; };
   Supa.prototype.sugestaoMarcar = async function (codigo, situacao) { return unwrap(await this.sb.from('crm_produto_fotos_sugestoes').update({ situacao }).eq('codigo', codigo)); };
@@ -1995,6 +1999,18 @@
   };
   Local.prototype.produtoDetalhe = async function () { return { saldo: null, hist: [], compras: [], unidades: [] }; };
   Local.prototype.produtoCompras = async function () { return []; };
+  Local.prototype.impostometro = async function (de) {
+    const mes = String(de).slice(0, 7), i = (Number(mes.slice(5)) % 5) / 10 + 1;
+    return [{ mes, vendas: { notas: 300, receita: 380000 * i, icms: 33000 * i, pis: 5400 * i, cofins: 24900 * i, ipi: 0, st: 0, cmv: 268000 * i, itens: 4000, sem_fiscal: 0, sem_custo: 0 },
+      devolucoes: { valor: 1200, icms: 110, pis: 20, cofins: 91, n: 1 },
+      compras: { valor: 230000 * i, cred_icms: 27000 * i, cred_sn: 0, base_pis: 190000 * i, ipi: 1500, st: 200, itens: 250, nao_lidos: 0, nao_lidos_valor: 0, sem_regra: 0,
+        sem_produto: 4, sem_produto_valor: 900, sem_produto_cred_icms: 90, sem_produto_base_pis: 810 },
+      gnre: { difal: 120, fcp: 12, n: 1 },
+      caixa: { tem: true, rendimentos: 2.5, saidas: { Aluguel: 7300, Energia: 400, 'Pró-labore': 10700, Salários: 33000, Contabilidade: 5600, 'Frete e combustível': 16500,
+        'Telefone e internet': 1700, Fornecedores: 250000 } } }];
+  };
+  Local.prototype.comprasSemIcms = async function () { return []; };
+  Local.prototype.compraItensIcms = async function () { return 0; };
   Local.prototype.compararProduto = async function (codigo) {
     const cod = String(codigo || '').trim().toUpperCase().replace(/\.\d+$/, '');
     const e = (await this.estoque()).find(x => String(x.codigo) === cod);
