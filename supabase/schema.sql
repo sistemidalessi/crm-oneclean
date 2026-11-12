@@ -8075,7 +8075,7 @@ AS $function$
 declare
   cfg jsonb; v_dia date := coalesce(p_dia, (now() at time zone 'America/Sao_Paulo')::date);
   n integer; vends uuid[]; v uuid; r integer; k record; total integer := 0; expiradas integer := 0;
-  cidades text[]; meses_rec integer; desc_meses integer; ja_crm integer := 0;
+  cidades text[]; meses_rec integer; desc_meses integer; ja_crm integer := 0; v_saude uuid; so_saude boolean;
   genericos text[] := array['gmail.com','hotmail.com','hotmail.com.br','outlook.com','outlook.com.br','live.com','msn.com',
     'yahoo.com','yahoo.com.br','uol.com.br','bol.com.br','terra.com.br','terra.com','ig.com.br','globo.com','icloud.com','r7.com'];
 begin
@@ -8181,6 +8181,8 @@ begin
             when porte = 'Demais' then case when coalesce(capital, 0) = 0 or capital >= 50000 then 2 else 0 end
             when coalesce(capital, 0) < 10000 then -2 when capital >= 50000 then 1 else 0 end) + random() * 1.5;
   create temp table _pool on commit drop as select * from _cand order by base desc limit 4000;
+  -- 12/11/2026: a vaga de saúde do dia precisa de candidatas mesmo quando elas perdem nos pontos
+  insert into _pool select * from _cand c where c.seg = 'Saúde' and not exists (select 1 from _pool p where p.cnpj = c.cnpj) order by c.base desc limit 300;
   alter table _pool add column escolhido boolean not null default false;
 
   -- 12/11/2026: empresa já no CRM sem CNPJ (cadastro do Agendor): mesmo domínio próprio de e-mail com o nome do domínio no
@@ -8210,8 +8212,21 @@ begin
       from _cli c where c.segmento is not null group by 1, 2;
   create temp table _vc on commit drop as select distinct dono, cep5 from _cli where cep5 <> '';
 
+  -- 12/11/2026: uma vaga de saúde por dia para a equipe (chave saude_vaga), na 1ª rodada da vendedora que tem a melhor
+  -- candidata de saúde; sem candidata, a vaga fica com o que vier
+  if coalesce((cfg->>'saude_vaga')::boolean, true) then
+    select vv into v_saude from unnest(vends) vv
+      cross join lateral (select max(p.base + coalesce(vs.fatia, 0) * 4 + case when vc.cep5 is not null then 2 else 0 end) m
+                            from _pool p
+                            left join _vs vs on vs.dono = vv and vs.segmento = p.seg
+                            left join _vc vc on vc.dono = vv and vc.cep5 = p.cep5
+                           where p.seg = 'Saúde') z
+     where z.m is not null order by z.m desc limit 1;
+  end if;
+
   for r in 1..n loop
     foreach v in array vends loop
+      so_saude := (r = 1 and v = v_saude) is true;
       select p.cnpj, p.seg, p.base + coalesce(vs.fatia, 0) * 4 + case when vc.cep5 is not null then 2 else 0 end pts,
              p.viz, p.recente, p.abertura, p.bairro, p.cnae, p.porte, p.capital, p.basico, p.k1, p.k2
         into k
@@ -8219,7 +8234,7 @@ begin
         left join _vs vs on vs.dono = v and vs.segmento = p.seg
         left join _vc vc on vc.dono = v and vc.cep5 = p.cep5
        where not p.escolhido
-       order by 3 desc limit 1;
+       order by (case when so_saude and p.seg = 'Saúde' then 1 else 0 end) desc, 3 desc limit 1;
       exit when k.cnpj is null;
       update _pool set escolhido = true where cnpj = k.cnpj or basico = k.basico or k1 = k.k1 or k2 = k.k2;  -- uma por empresa/endereço no dia
       insert into public.crm_prospec_sugestoes (dia, vendedor_id, cnpj, ordem, segmento, pontos, motivos)
