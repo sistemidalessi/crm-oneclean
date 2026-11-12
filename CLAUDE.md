@@ -26,8 +26,8 @@ commits em pt-BR. O que o sistema faz, do ponto de vista de quem usa, está no
 - **Quando o Anderson disser "se atualize no projeto":** primeiro `git fetch` e `git status`. Pasta limpa e
   atrás do GitHub → `git pull`. Mudanças não commitadas ou conflito → **parar e avisar o Anderson antes de
   qualquer coisa**. Depois ler o CLAUDE.md e o `git log`.
-- **No computador do escritório: ler e começar por `PENDENCIAS-ESCRITORIO.md`** (o que só dá para fazer
-  de lá, como o SSH da VPS, e as perguntas que esperam o Anderson). Item resolvido: apagar a linha e commitar.
+- **No escritório ou no servidor SISTEMI-SRV: ler e começar por `PENDENCIAS-ESCRITORIO.md`** (o que pede
+  o SSH da VPS e as perguntas que esperam o Anderson). Item resolvido: apagar a linha e commitar.
 - Planos e documentos da empresa ficam no repositório **privado** `sistemi-dalessi` (`docs/plano-sair-do-fkn.md`,
   `docs/oneclean/…`: fiscal, concorrentes, SQL para o SQL Editor). **Este repositório é público.**
 
@@ -67,7 +67,7 @@ motorista, pela logística e como app instalado (PWA).
   (`\\Servidor\sistema\CRM-FKN`). Baixar o vigia **pelo Node** (o `Invoke-WebRequest` falha por TLS).
 - **Serviço fiscal** (`servico-fiscal/`, NF-e direto na Sefaz-SP) na **VPS da Agilité**: usuário
   `oneclean-fiscal`, porta 8787 só em 127.0.0.1, Caddy em `fiscal.oneclean.com.br`. Instalação em
-  `servico-fiscal/INSTALAR.md`. Atualizar (só do escritório, que tem o SSH):
+  `servico-fiscal/INSTALAR.md`. Atualizar (de onde houver o SSH da VPS: escritório ou servidor SISTEMI-SRV):
   `cd /opt/oneclean-fiscal && git pull -q && systemctl restart oneclean-fiscal && systemctl is-active oneclean-fiscal`.
 
 ## Arquitetura

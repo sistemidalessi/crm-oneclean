@@ -3,7 +3,7 @@
 Atualizado em 27/10/2026. Quando um item for resolvido, apague a linha (ou peça ao Claude).
 A mesma lista resumida está no `PENDENCIAS-ESCRITORIO.md` do `agilite-sistema-gestao` (a sessão do escritório abre lá).
 
-## Só dá pra fazer estando no escritório (SSH da VPS)
+## SSH da VPS (escritório ou servidor SISTEMI-SRV, que tem chave própria desde 03/11)
 
 - [x] **Serviço fiscal na VPS `2026-10-23e`**: atualizado pelo Anderson em 26/10 e conferido em Fiscal → Emissão.
 - [x] **Serviço fiscal na VPS `2026-10-27a`** (aviso contra boleto falso no texto da nota): atualizado pelo Anderson em 27/10 e conferido.
