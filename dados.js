@@ -1521,9 +1521,18 @@
   // PJ do mês (12/11/2026): só o administrador (RLS); o fixo de cada um e a ligação com o usuário (para somar a comissão)
   Supa.prototype.pjs = async function () { return unwrap(await this.sb.from('crm_pj').select('*').order('nome')) || []; };
   Supa.prototype.pjGravar = async function (p) {
-    const d = { nome: String(p.nome || '').trim(), user_id: p.user_id || null, fixo: Number(p.fixo) || 0, ativo: p.ativo !== false };
+    const d = { nome: String(p.nome || '').trim(), user_id: p.user_id || null, recorrente_id: p.recorrente_id || null, fixo: Number(p.fixo) || 0, ativo: p.ativo !== false };
     return unwrap(p.id ? await this.sb.from('crm_pj').update(d).eq('id', p.id).select('id').single() : await this.sb.from('crm_pj').insert(d).select('id').single());
   };
+  // "Lançar no Caixa" do PJ: as contas fixas de saída (para ligar cada PJ à dele) e o que já foi lançado na competência
+  Supa.prototype.pjRecorrentes = async function () { return unwrap(await this.sb.from('crm_fin_recorrentes').select('id,descricao,valor,dia,categoria').eq('ativo', true).eq('tipo', 'saida').order('descricao')) || []; };
+  Supa.prototype.pjLancados = async function (compet, descricoes) {
+    const [a, b] = await Promise.all([this.sb.from('crm_fin_lancamentos').select('id,recorrente_id,descricao').eq('competencia', compet).not('recorrente_id', 'is', null),
+      this.sb.from('crm_fin_lancamentos').select('id,recorrente_id,descricao').in('descricao', descricoes.length ? descricoes : ['-'])]);
+    return (unwrap(a) || []).concat(unwrap(b) || []);
+  };
+  Local.prototype.pjRecorrentes = async function () { return (this.ler().fin_recorrentes || []).filter(r => r.ativo !== false && (r.tipo || 'saida') === 'saida'); };
+  Local.prototype.pjLancados = async function (compet, descricoes) { return (this.ler().fin_lancamentos || []).filter(l => (l.recorrente_id && String(l.competencia || '').slice(0, 10) === compet) || descricoes.indexOf(l.descricao) !== -1); };
   Local.prototype.pjs = async function () { return (this.ler().pj || []).slice(); };
   Local.prototype.pjGravar = async function (p) { const d = this.ler(); d.pj = d.pj || []; const x = Object.assign({ ativo: true }, p, { id: p.id || ('pj-' + Date.now() + '-' + d.pj.length) });
     const i = d.pj.findIndex(y => y.id === x.id); if (i >= 0) d.pj[i] = x; else d.pj.push(x); this.gravar(d); return x; };

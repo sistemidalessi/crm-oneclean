@@ -236,3 +236,11 @@ test('PJ: pagamento no dia útil depois de os condomínios pagarem o dia 11 (reg
   assert.strictEqual(P.diaPagamentoPj('2026-09', C.util), '2026-10-14');   // 11/10 domingo, 12/10 feriado → 13 paga, 14 cai
   assert.strictEqual(P.diaPagamentoPj('2026-12', C.util), '2027-01-12');
 });
+
+test('PJ: lançamentos do Caixa ligados à conta fixa na competência do pagamento', () => {
+  const l = P.lancamentosPj([{ nome: 'Ana', recorrente_id: 'r1', fixo: 3500, comissao: 1200.5, total: 4700.5 }, { nome: 'Zeca', fixo: 0, comissao: 0, total: 0 }, { nome: 'Caio', fixo: 7000, comissao: 0, total: 7000 }], '2026-12-14', 'novembro de 2026');
+  assert.strictEqual(l.length, 2);
+  assert.deepStrictEqual([l[0].descricao, l[0].valor, l[0].vencimento, l[0].competencia, l[0].recorrente_id, l[0].categoria, l[0].tipo], ['PJ Ana — novembro de 2026', 4700.5, '2026-12-14', '2026-12-01', 'r1', 'Salários', 'saida']);
+  assert.strictEqual(l[0].observacoes, 'Fixo R$ 3500,00 + comissão de novembro de 2026 R$ 1200,50 (lançado pela aba PJ)');
+  assert.strictEqual(l[1].recorrente_id, null);
+});

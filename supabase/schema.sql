@@ -3098,6 +3098,8 @@ create table if not exists public.crm_pj (
   criado_em     timestamptz not null default now(),
   atualizado_em timestamptz not null default now()
 );
+-- conta fixa (recorrente) do Caixa que o "Lançar no Caixa" da aba PJ substitui no mês do pagamento (12/11/2026)
+alter table public.crm_pj add column if not exists recorrente_id uuid references public.crm_fin_recorrentes(id) on delete set null;
 drop trigger if exists crm_pj_atualizado_em on public.crm_pj;
 create trigger crm_pj_atualizado_em before update on public.crm_pj for each row execute function public.crm_toca_atualizado_em();
 alter table public.crm_pj enable row level security;

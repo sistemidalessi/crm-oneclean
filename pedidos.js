@@ -298,9 +298,18 @@
   function pjDoMes(pjs, comissoes) {
     const linhas = (pjs || []).filter(p => p.ativo !== false).map(p => {
       const c = p.user_id && comissoes && comissoes.has(p.user_id) ? r2(num(comissoes.get(p.user_id))) : 0;
-      return { id: p.id, nome: p.nome, user_id: p.user_id || null, fixo: r2(num(p.fixo)), comissao: c, total: r2(num(p.fixo) + c) };
+      return { id: p.id, nome: p.nome, user_id: p.user_id || null, recorrente_id: p.recorrente_id || null, fixo: r2(num(p.fixo)), comissao: c, total: r2(num(p.fixo) + c) };
     }).sort((a, b) => sem(a.nome).localeCompare(sem(b.nome), 'pt-BR', { numeric: true }));
     return { linhas, fixo: r2(linhas.reduce((s, l) => s + l.fixo, 0)), comissao: r2(linhas.reduce((s, l) => s + l.comissao, 0)), total: r2(linhas.reduce((s, l) => s + l.total, 0)) };
+  }
+  // "Lançar no Caixa" (12/11/2026, Anderson: "um botão de lançar … e aparecer no fluxo de caixa"): uma conta a pagar por PJ, no dia
+  // escolhido. Ligada à conta fixa (recorrente) da pessoa na competência do pagamento: o "gerar o mês" do Caixa pula quem já entrou
+  // (e o índice único recorrente + competência barra lançar duas vezes).
+  function lancamentosPj(linhas, venc, rotuloMes) {
+    const compet = String(venc).slice(0, 7) + '-01', br = v => r2(v).toFixed(2).replace('.', ',');
+    return (linhas || []).filter(l => l.total > 0).map(l => ({ tipo: 'saida', descricao: 'PJ ' + l.nome + ' — ' + rotuloMes, fornecedor: l.nome, categoria: 'Salários',
+      valor: l.total, vencimento: venc, situacao: 'aberto', origem: 'tela', recorrente_id: l.recorrente_id || null, competencia: compet,
+      observacoes: 'Fixo R$ ' + br(l.fixo) + (l.comissao ? ' + comissão de ' + rotuloMes + ' R$ ' + br(l.comissao) : '') + ' (lançado pela aba PJ)' }));
   }
   // Dia do pagamento dos PJ da comissão do mês 'AAAA-MM' (a mesma regra da Agilité): o dia útil seguinte ao dia em que os
   // condomínios pagam (dia 11 do mês seguinte, ou o dia útil depois). util(dia) e posterga(dia) vêm do caixa-calculo.js.
@@ -324,7 +333,7 @@
 
   const FRETE_CONTA = [['0', '0-Remetente (CIF)'], ['1', '1-Destinatário (FOB)'], ['2', '2-Terceiros'], ['9', '9-Sem frete']];
 
-  const P = { precoMinimo, abaixoDoMinimo, FINANCEIRO, unidadeNorm, unidadeEmbalagem, descontoValor, descontoPct, descontoGeral, TABELA_PADRAO, PLANOS_PADRAO, MARGEM_MINIMA, MARGEM_INTERNO, margemDoPlano, pctDaMargem, chaveMargem, rotuloMargem, margemMinima, apuraComissao, totalComAjustes, pjDoMes, diaPagamentoPj, itensParaRepetir, ehVendaCfop, FAIXAS, FRETE_CONTA, ROTULO_BLOQUEIO, tabelaDe, planosDe, planoDoUsuario, precoLiq, totalItem, precoDaFaixa, faixaDoPreco, rotuloFaixa,
+  const P = { precoMinimo, abaixoDoMinimo, FINANCEIRO, unidadeNorm, unidadeEmbalagem, descontoValor, descontoPct, descontoGeral, TABELA_PADRAO, PLANOS_PADRAO, MARGEM_MINIMA, MARGEM_INTERNO, margemDoPlano, pctDaMargem, chaveMargem, rotuloMargem, margemMinima, apuraComissao, totalComAjustes, pjDoMes, diaPagamentoPj, lancamentosPj, itensParaRepetir, ehVendaCfop, FAIXAS, FRETE_CONTA, ROTULO_BLOQUEIO, tabelaDe, planosDe, planoDoUsuario, precoLiq, totalItem, precoDaFaixa, faixaDoPreco, rotuloFaixa,
     margem, sobreTabela, abaixoDaTabela, linha, totais, bloqueiosAbertos, situacao, pausado, bolao, ultimasCompras, procura, itensDaProposta, entregaDoCliente, entregaTexto };
   raiz.CRMPedidos = P;
   if (typeof module !== 'undefined') module.exports = P;
@@ -1442,6 +1451,7 @@
     const r = pjCalculo(com.mes);
     return '<section class="cartao"><h2>PJ</h2>' +
       '<p class="acoes"><label class="filtro-inline">Comissão de <select data-pd-com-mes>' + CRM.opcoesHTML(meses, com.mes) + '</select></label>' +
+      ' <button type="button" class="btn" data-acao="pd-pj-lancar">Lançar no Caixa</button>' +
       ' <button type="button" class="btn sec" data-acao="pd-pj-editar">Editar PJ e fixos</button>' +
       ' <button type="button" class="btn sec" data-acao="pd-pj-imprimir">🖨 Imprimir</button></p>' +
       '<p class="dica">Pagamento em <strong>' + esc(r.pagamento ? R.dataBR(r.pagamento) : '—') + '</strong> (o dia útil depois de os condomínios pagarem o dia 11). ' +
@@ -1458,19 +1468,47 @@
       r.linhas.map(x => '<tr><td>' + esc(x.nome) + '</td><td class="n">' + R.moeda(x.fixo) + '</td><td class="n">' + (x.comissao ? R.moeda(x.comissao) : '—') + '</td><td class="n">' + R.moeda(x.total) + '</td></tr>').join('') +
       '</tbody><tfoot><tr><td><strong>Total</strong></td><td class="n">' + R.moeda(r.fixo) + '</td><td class="n">' + R.moeda(r.comissao) + '</td><td class="n">' + R.moeda(r.total) + '</td></tr></tfoot></table></div>';
   }
-  function formPj() {
+  async function formLancarPj() {
+    const m = com.mes, r = pjCalculo(m), rot = nomeMes(m);
+    if (!r.linhas.some(l => l.total > 0)) { CRM.toast('Nada a lançar: nenhum PJ com valor.', true); return; }
+    CRM.abrirForm({
+      titulo: 'Lançar o PJ no Caixa', campos: [{ nome: 'venc', rotulo: 'Data do pagamento', tipo: 'data', obrigatorio: true }], valores: { venc: r.pagamento || CRM.hoje() },
+      intro: 'Entra uma conta a pagar por pessoa (categoria Salários), com o fixo + a comissão de ' + rot + ', no dia escolhido. Ela substitui a conta fixa de salário da pessoa no mês do pagamento (o "gerar o mês" do Caixa não cria de novo).' +
+        (r.fechado ? '' : ' Atenção: as comissões de ' + rot + ' ainda são prévia.'),
+      htmlDepois: '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>PJ</th><th class="num">Valor</th><th>Conta fixa do Caixa</th></tr></thead><tbody>' +
+        r.linhas.filter(l => l.total > 0).map(l => '<tr><td>' + esc(l.nome) + '</td><td class="num">' + R.moeda(l.total) + '</td><td>' + (l.recorrente_id ? 'ligada' : '<small>sem conta fixa ligada</small>') + '</td></tr>').join('') +
+        '</tbody><tfoot><tr><td>Total</td><td class="num"><strong>' + R.moeda(r.total) + '</strong></td><td></td></tr></tfoot></table></div>',
+      salvarTexto: 'Lançar no Caixa',
+      aoSalvar: async v => {
+        const venc = String(v.venc || '').slice(0, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(venc)) throw new Error('escolha a data do pagamento');
+        const novos = P.lancamentosPj(r.linhas, venc, rot);
+        const ja = await CRM.store().pjLancados(venc.slice(0, 7) + '-01', novos.map(x => x.descricao));
+        const jaRec = new Set(ja.map(x => x.recorrente_id).filter(Boolean)), jaDesc = new Set(ja.map(x => x.descricao));
+        const repetidos = novos.filter(x => (x.recorrente_id && jaRec.has(x.recorrente_id)) || jaDesc.has(x.descricao));
+        if (repetidos.length) throw new Error('já existe no Caixa a conta deste mês de: ' + repetidos.map(x => x.fornecedor).join(', ') + '. Confira no Caixa (apague lá antes de lançar de novo).');
+        await CRM.store().inserirVarios('fin_lancamentos', novos);
+        CRM.toast(novos.length + ' conta(s) do PJ lançada(s) no Caixa para ' + R.dataBR(venc) + ', total ' + R.moeda(novos.reduce((s2, x) => s2 + x.valor, 0)) + '.');
+      }
+    });
+  }
+  async function formPj() {
+    let recs = [];
+    try { recs = await CRM.store().pjRecorrentes(); } catch (e) { CRM.falhou(e); }
+    const opRec = [['', '— nenhuma —']].concat(recs.map(x => [x.id, x.descricao + ' (' + R.moeda(x.valor) + ', dia ' + x.dia + ')']));
     const lista = (com.pjs || []).slice().sort((a, b) => R.comparaAlfa(a.nome, b.nome));
     const users = (E().D.usuarios || []).filter(u => u.ativo !== false);
     const opUs = [['', '— sem usuário (sem comissão) —']].concat(R.alfaOpcoes ? R.alfaOpcoes(users.map(u => [u.user_id, u.nome])) : users.map(u => [u.user_id, u.nome]));
     const linha = (p, i) => '<tr><td><input name="pjn_' + i + '" value="' + esc(p.nome || '') + '"' + (p.id ? '' : ' placeholder="novo PJ (opcional)"') + '><input type="hidden" name="pji_' + i + '" value="' + esc(p.id || '') + '"></td>' +
       '<td><select name="pju_' + i + '">' + CRM.opcoesHTML(opUs, p.user_id || '') + '</select></td>' +
+      '<td><select name="pjr_' + i + '">' + CRM.opcoesHTML(opRec, p.recorrente_id || '') + '</select></td>' +
       '<td><input name="pjf_' + i + '" type="number" step="0.01" min="0" class="pd-num" value="' + esc(p.fixo == null ? '' : p.fixo) + '"></td>' +
       '<td><input type="checkbox" name="pja_' + i + '"' + (p.ativo === false ? '' : ' checked') + '></td></tr>';
     const todas = lista.concat([{}]);
     CRM.abrirForm({
       titulo: 'PJ e fixos', largura: 'extra', campos: [], valores: {},
       intro: 'O valor a pagar é o fixo mais a comissão do mês do usuário ligado (quem não vende fica "sem usuário"). Desmarque "ativo" para tirar alguém da lista.',
-      htmlDepois: '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Nome</th><th>Usuário (comissão)</th><th>Fixo (R$)</th><th>Ativo</th></tr></thead><tbody>' + todas.map(linha).join('') + '</tbody></table></div>',
+      htmlDepois: '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Nome</th><th>Usuário (comissão)</th><th>Conta fixa do Caixa</th><th>Fixo (R$)</th><th>Ativo</th></tr></thead><tbody>' + todas.map(linha).join('') + '</tbody></table></div>',
       salvarTexto: 'Salvar',
       aoSalvar: async (v, form) => {
         const g = n => (form.elements[n] ? form.elements[n].value : '');
@@ -1479,7 +1517,7 @@
           if (!nome) { if (id) throw new Error('o nome não pode ficar vazio (para tirar alguém, desmarque "ativo")'); continue; }
           const fixo = Number(String(g('pjf_' + i)).replace(',', '.')) || 0;
           if (fixo < 0) throw new Error('fixo negativo em ' + nome);
-          await CRM.store().pjGravar({ id: id || null, nome, user_id: g('pju_' + i) || null, fixo, ativo: form.elements['pja_' + i].checked });
+          await CRM.store().pjGravar({ id: id || null, nome, user_id: g('pju_' + i) || null, recorrente_id: g('pjr_' + i) || null, fixo, ativo: form.elements['pja_' + i].checked });
         }
         com.pjs = null;
         CRM.toast('PJ salvos.');
@@ -1824,6 +1862,7 @@
     'pd-com-imprimir': () => imprimir(htmlComissoesImpressas(com.mes), 'Comissoes ' + com.mes),
     'pd-pj-imprimir': () => imprimir(htmlPjImpresso(com.mes), 'PJ ' + com.mes),
     'pd-pj-editar': () => formPj(),
+    'pd-pj-lancar': () => formLancarPj(),
     'pd-com-reabrir': vivo(async () => {
       if (!confirm('Reabrir as comissões de ' + nomeMes(com.mes) + '? Fica registrado quem reabriu e quando.')) return;
       await CRM.store().comissaoReabrir(com.mes + '-01'); com.mesCarregado = null; CRM.render();
