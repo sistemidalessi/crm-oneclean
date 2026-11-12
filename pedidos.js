@@ -293,6 +293,27 @@
   }
   const totalComAjustes = (comissao, ajustes) => r2(num(comissao) + (ajustes || []).reduce((s, a) => s + num(a.valor), 0));
 
+  // PJ do mês (12/11/2026, pedido do Anderson): fixo + a comissão do mês de quem tem usuário ligado (comissoes: Map user_id →
+  // valor a pagar). Só os ativos, em ordem alfabética.
+  function pjDoMes(pjs, comissoes) {
+    const linhas = (pjs || []).filter(p => p.ativo !== false).map(p => {
+      const c = p.user_id && comissoes && comissoes.has(p.user_id) ? r2(num(comissoes.get(p.user_id))) : 0;
+      return { id: p.id, nome: p.nome, user_id: p.user_id || null, fixo: r2(num(p.fixo)), comissao: c, total: r2(num(p.fixo) + c) };
+    }).sort((a, b) => sem(a.nome).localeCompare(sem(b.nome), 'pt-BR', { numeric: true }));
+    return { linhas, fixo: r2(linhas.reduce((s, l) => s + l.fixo, 0)), comissao: r2(linhas.reduce((s, l) => s + l.comissao, 0)), total: r2(linhas.reduce((s, l) => s + l.total, 0)) };
+  }
+  // Dia do pagamento dos PJ da comissão do mês 'AAAA-MM' (a mesma regra da Agilité): o dia útil seguinte ao dia em que os
+  // condomínios pagam (dia 11 do mês seguinte, ou o dia útil depois). util(dia) e posterga(dia) vêm do caixa-calculo.js.
+  function diaPagamentoPj(mes, util) {
+    let [a, m] = String(mes).split('-').map(Number); m++; if (m > 12) { m = 1; a++; }
+    const soma = (s, n) => { const d = new Date(s + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+    let s = a + '-' + String(m).padStart(2, '0') + '-11';
+    while (!util(s)) s = soma(s, 1);
+    s = soma(s, 1);
+    while (!util(s)) s = soma(s, 1);
+    return s;
+  }
+
   // "Repetir pedido" (restaurar): os itens de um pedido do CRM ou de uma nota do cliente, com os preços dela.
   const itensParaRepetir = (pedido, itensNota) => (pedido ? (pedido.itens || []).map(i => ({ codigo: i.codigo || null, descricao: i.descricao, unidade: i.unidade || null, quantidade: num(i.quantidade), preco: num(i.preco), desconto: num(i.desconto) }))
     : (itensNota || []).filter(i => ehVendaCfop(i.cfop)).map(i => ({ codigo: i.codigo || null, descricao: i.descricao, unidade: i.unidade || null, quantidade: num(i.quantidade), preco: num(i.valor_unitario), desconto: 0 })));
@@ -303,7 +324,7 @@
 
   const FRETE_CONTA = [['0', '0-Remetente (CIF)'], ['1', '1-Destinatário (FOB)'], ['2', '2-Terceiros'], ['9', '9-Sem frete']];
 
-  const P = { precoMinimo, abaixoDoMinimo, FINANCEIRO, unidadeNorm, unidadeEmbalagem, descontoValor, descontoPct, descontoGeral, TABELA_PADRAO, PLANOS_PADRAO, MARGEM_MINIMA, MARGEM_INTERNO, margemDoPlano, pctDaMargem, chaveMargem, rotuloMargem, margemMinima, apuraComissao, totalComAjustes, itensParaRepetir, ehVendaCfop, FAIXAS, FRETE_CONTA, ROTULO_BLOQUEIO, tabelaDe, planosDe, planoDoUsuario, precoLiq, totalItem, precoDaFaixa, faixaDoPreco, rotuloFaixa,
+  const P = { precoMinimo, abaixoDoMinimo, FINANCEIRO, unidadeNorm, unidadeEmbalagem, descontoValor, descontoPct, descontoGeral, TABELA_PADRAO, PLANOS_PADRAO, MARGEM_MINIMA, MARGEM_INTERNO, margemDoPlano, pctDaMargem, chaveMargem, rotuloMargem, margemMinima, apuraComissao, totalComAjustes, pjDoMes, diaPagamentoPj, itensParaRepetir, ehVendaCfop, FAIXAS, FRETE_CONTA, ROTULO_BLOQUEIO, tabelaDe, planosDe, planoDoUsuario, precoLiq, totalItem, precoDaFaixa, faixaDoPreco, rotuloFaixa,
     margem, sobreTabela, abaixoDaTabela, linha, totais, bloqueiosAbertos, situacao, pausado, bolao, ultimasCompras, procura, itensDaProposta, entregaDoCliente, entregaTexto };
   raiz.CRMPedidos = P;
   if (typeof module !== 'undefined') module.exports = P;
@@ -387,6 +408,7 @@
     if (ehOp()) l.push(['separacao', 'Separação']);
     l.push(['faltas', 'Faltas']);
     if (ehVenda()) l.push(['comissoes', CRM.ehAdmin() ? 'Comissões' : 'Minha comissão']);
+    if (CRM.ehAdmin()) l.push(['pj', 'PJ']);
     if (ehOp() && CRM.nfe) l.push(['nfe', 'NF-e']);
     return l;
   }
@@ -1382,7 +1404,88 @@
     return '<section class="cartao"><h2>' + (adm ? 'Comissões' : 'Minha comissão') + '</h2>' +
       '<p class="acoes"><label class="filtro-inline">Mês <select data-pd-com-mes>' + CRM.opcoesHTML(meses, com.mes) + '</select></label>' +
       (adm ? ' <button type="button" class="btn sec" data-acao="pd-com-config">Tabela de preços e planos de comissão</button>' : '') +
-      ' <button type="button" class="btn sec" data-acao="ls-csv" data-id="pd-comissoes">Baixar planilha</button></p>' + corpo + '</section>';
+      ' <button type="button" class="btn sec" data-acao="ls-csv" data-id="pd-comissoes">Baixar planilha</button>' +
+      ' <button type="button" class="btn sec" data-acao="pd-com-imprimir">🖨 Imprimir</button></p>' + corpo + '</section>';
+  }
+
+  // As comissões do mês do jeito que se pagam: a foto do mês fechado ou, aberto, a prévia com os ajustes deste navegador.
+  function comissoesDoMes(m) {
+    const fech = (com.fechadas || []).filter(c => c.fechado_em);
+    if (fech.length) return { fechado: true, linhas: fech.map(c => ({ user_id: c.user_id, nome: CRM.nomeUsuario(c.user_id), plano: c.plano || '', base: num(c.base), comissao: num(c.comissao), ajustes: c.ajustes || [], total: num(c.total) })) };
+    return { fechado: false, linhas: previa(m).map(g => { const aj = ajustesDe(m, g.user_id); return { user_id: g.user_id, nome: g.nome, plano: g.planoNome, base: g.base, comissao: g.comissao, ajustes: aj, total: P.totalComAjustes(g.comissao, aj) }; }) };
+  }
+  const cabImpressao = (titulo, sub) => '<h1>' + esc(titulo) + '</h1><p>' + esc(sub) + ' · impresso em ' + esc(R.dataBR(CRM.hoje())) + '</p>';
+  function htmlComissoesImpressas(m) {
+    const c = comissoesDoMes(m), l = CRM.ehAdmin() ? c.linhas : c.linhas.filter(x => x.user_id === CRM.meuId());
+    const tot = l.reduce((s2, x) => s2 + x.total, 0);
+    return '<div class="sp-doc">' + cabImpressao('Comissões — ' + nomeMes(m), c.fechado ? 'mês fechado' : 'PRÉVIA (o mês ainda não foi fechado)') +
+      '<table><thead><tr><th>Vendedor(a)</th><th>Plano</th><th>Faturado</th><th>Comissão</th><th>Ajustes</th><th>A pagar</th></tr></thead><tbody>' +
+      l.map(x => '<tr><td>' + esc(x.nome) + '</td><td>' + esc(x.plano) + '</td><td class="n">' + R.moeda(x.base) + '</td><td class="n">' + R.moeda(x.comissao) + '</td><td>' +
+        esc(x.ajustes.map(a => R.moeda(a.valor) + ' ' + a.motivo).join(' · ') || '—') + '</td><td class="n">' + R.moeda(x.total) + '</td></tr>').join('') +
+      '</tbody><tfoot><tr><td colspan="5"><strong>Total</strong></td><td class="n">' + R.moeda(tot) + '</td></tr></tfoot></table></div>';
+  }
+
+  // ------------------------------------------------ PJ (12/11/2026, pedido do Anderson): fixo + comissão do mês, para pagar e imprimir
+  async function carregaPj() {
+    try { com.pjs = await CRM.store().pjs(); } catch (e) { com.pjs = []; CRM.falhou(e); }
+    CRM.render();
+  }
+  function pjCalculo(m) {
+    const c = comissoesDoMes(m);
+    return Object.assign(P.pjDoMes(com.pjs, new Map(c.linhas.map(x => [x.user_id, x.total]))), { fechado: c.fechado, pagamento: raiz.CRMCaixa ? P.diaPagamentoPj(m, raiz.CRMCaixa.util) : null });
+  }
+  function telaPj() {
+    if (!com.mes) com.mes = mesAnterior(mesAtual());
+    if (com.mesCarregado !== com.mes) { setTimeout(carregaComissoes, 0); return '<section class="cartao"><p class="vazio">Carregando…</p></section>'; }
+    if (!com.pjs) { setTimeout(carregaPj, 0); return '<section class="cartao"><p class="vazio">Carregando…</p></section>'; }
+    const meses = []; let m = mesAtual(); for (let i = 0; i < 13; i++) { meses.push([m, nomeMes(m)]); m = mesAnterior(m); }
+    const r = pjCalculo(com.mes);
+    return '<section class="cartao"><h2>PJ</h2>' +
+      '<p class="acoes"><label class="filtro-inline">Comissão de <select data-pd-com-mes>' + CRM.opcoesHTML(meses, com.mes) + '</select></label>' +
+      ' <button type="button" class="btn sec" data-acao="pd-pj-editar">Editar PJ e fixos</button>' +
+      ' <button type="button" class="btn sec" data-acao="pd-pj-imprimir">🖨 Imprimir</button></p>' +
+      '<p class="dica">Pagamento em <strong>' + esc(r.pagamento ? R.dataBR(r.pagamento) : '—') + '</strong> (o dia útil depois de os condomínios pagarem o dia 11). ' +
+      (r.fechado ? 'Comissões de ' + esc(nomeMes(com.mes)) + ' <strong>fechadas</strong>.' : 'As comissões de ' + esc(nomeMes(com.mes)) + ' ainda são <strong>prévia</strong>: feche o mês em Comissões.') + '</p>' +
+      (r.linhas.length ? '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>PJ</th><th class="num">Fixo</th><th class="num">Comissão</th><th class="num">A pagar</th></tr></thead><tbody>' +
+        r.linhas.map(x => '<tr><td><strong>' + esc(x.nome) + '</strong></td><td class="num">' + R.moeda(x.fixo) + '</td><td class="num">' + (x.comissao ? R.moeda(x.comissao) : '—') + '</td><td class="num"><strong>' + R.moeda(x.total) + '</strong></td></tr>').join('') +
+        '</tbody><tfoot><tr><td>Total</td><td class="num">' + R.moeda(r.fixo) + '</td><td class="num">' + R.moeda(r.comissao) + '</td><td class="num"><strong>' + R.moeda(r.total) + '</strong></td></tr></tfoot></table></div>'
+        : '<p class="vazio">Nenhum PJ cadastrado. Clique em "Editar PJ e fixos".</p>') + '</section>';
+  }
+  function htmlPjImpresso(m) {
+    const r = pjCalculo(m);
+    return '<div class="sp-doc">' + cabImpressao('PJ — pagamento de ' + (r.pagamento ? R.dataBR(r.pagamento) : '—'), 'Comissão de ' + nomeMes(m) + (r.fechado ? ' (mês fechado)' : ' (PRÉVIA: o mês ainda não foi fechado)')) +
+      '<table><thead><tr><th>PJ</th><th>Fixo</th><th>Comissão</th><th>A pagar</th></tr></thead><tbody>' +
+      r.linhas.map(x => '<tr><td>' + esc(x.nome) + '</td><td class="n">' + R.moeda(x.fixo) + '</td><td class="n">' + (x.comissao ? R.moeda(x.comissao) : '—') + '</td><td class="n">' + R.moeda(x.total) + '</td></tr>').join('') +
+      '</tbody><tfoot><tr><td><strong>Total</strong></td><td class="n">' + R.moeda(r.fixo) + '</td><td class="n">' + R.moeda(r.comissao) + '</td><td class="n">' + R.moeda(r.total) + '</td></tr></tfoot></table></div>';
+  }
+  function formPj() {
+    const lista = (com.pjs || []).slice().sort((a, b) => R.comparaAlfa(a.nome, b.nome));
+    const users = (E().D.usuarios || []).filter(u => u.ativo !== false);
+    const opUs = [['', '— sem usuário (sem comissão) —']].concat(R.alfaOpcoes ? R.alfaOpcoes(users.map(u => [u.user_id, u.nome])) : users.map(u => [u.user_id, u.nome]));
+    const linha = (p, i) => '<tr><td><input name="pjn_' + i + '" value="' + esc(p.nome || '') + '"' + (p.id ? '' : ' placeholder="novo PJ (opcional)"') + '><input type="hidden" name="pji_' + i + '" value="' + esc(p.id || '') + '"></td>' +
+      '<td><select name="pju_' + i + '">' + CRM.opcoesHTML(opUs, p.user_id || '') + '</select></td>' +
+      '<td><input name="pjf_' + i + '" type="number" step="0.01" min="0" class="pd-num" value="' + esc(p.fixo == null ? '' : p.fixo) + '"></td>' +
+      '<td><input type="checkbox" name="pja_' + i + '"' + (p.ativo === false ? '' : ' checked') + '></td></tr>';
+    const todas = lista.concat([{}]);
+    CRM.abrirForm({
+      titulo: 'PJ e fixos', largura: 'extra', campos: [], valores: {},
+      intro: 'O valor a pagar é o fixo mais a comissão do mês do usuário ligado (quem não vende fica "sem usuário"). Desmarque "ativo" para tirar alguém da lista.',
+      htmlDepois: '<div class="tabela-rolagem"><table class="tabela"><thead><tr><th>Nome</th><th>Usuário (comissão)</th><th>Fixo (R$)</th><th>Ativo</th></tr></thead><tbody>' + todas.map(linha).join('') + '</tbody></table></div>',
+      salvarTexto: 'Salvar',
+      aoSalvar: async (v, form) => {
+        const g = n => (form.elements[n] ? form.elements[n].value : '');
+        for (let i = 0; i < todas.length; i++) {
+          const nome = String(g('pjn_' + i)).trim(), id = g('pji_' + i);
+          if (!nome) { if (id) throw new Error('o nome não pode ficar vazio (para tirar alguém, desmarque "ativo")'); continue; }
+          const fixo = Number(String(g('pjf_' + i)).replace(',', '.')) || 0;
+          if (fixo < 0) throw new Error('fixo negativo em ' + nome);
+          await CRM.store().pjGravar({ id: id || null, nome, user_id: g('pju_' + i) || null, fixo, ativo: form.elements['pja_' + i].checked });
+        }
+        com.pjs = null;
+        CRM.toast('PJ salvos.');
+        CRM.render();
+      }
+    });
   }
   function formConfigComissao() {
     const cfg = E().cfg, tab = P.tabelaDe(cfg), planos = P.planosDe(cfg).map(p => ({ id: p.id, nome: p.nome, faixas: Object.assign({}, p.faixas) }));
@@ -1496,7 +1599,7 @@
       if (ed) return cabecalho() + telaEditor();
       const p = aberto && ped(aberto);
       if (p) return cabecalho() + telaPedido(p);
-      return cabecalho() + (f.ver === 'orcamentos' ? telaOrcamentos() : f.ver === 'estoque' ? telaEstoque() : f.ver === 'separacao' ? telaSeparacao() : f.ver === 'faltas' ? telaFaltas() : f.ver === 'comissoes' ? telaComissoes() : f.ver === 'nfe' && CRM.nfe ? CRM.nfe.tela() : telaLista());
+      return cabecalho() + (f.ver === 'orcamentos' ? telaOrcamentos() : f.ver === 'estoque' ? telaEstoque() : f.ver === 'separacao' ? telaSeparacao() : f.ver === 'faltas' ? telaFaltas() : f.ver === 'comissoes' ? telaComissoes() : f.ver === 'pj' && CRM.ehAdmin() ? telaPj() : f.ver === 'nfe' && CRM.nfe ? CRM.nfe.tela() : telaLista());
     },
     depois(c) {
       const on = (sel, ev, fn) => c.querySelectorAll(sel).forEach(el => el.addEventListener(ev, () => fn(el)));
@@ -1718,6 +1821,9 @@
         detalhe: { porFaixa: g.porFaixa, semTabela: g.semTabela, itens: g.itens, notas: g.notas.map(x => Object.assign({ numero: x.numero, data: x.data, cliente: x.cliente, base: x.base, comissao: x.comissao }, x.devolucao ? { devolucao: true, venda: x.venda } : {})) } })));
       CRM.toast(nomeMes(com.mes) + ' fechado: ' + n + ' vendedor(es)(as).'); com.mesCarregado = null; CRM.render();
     }),
+    'pd-com-imprimir': () => imprimir(htmlComissoesImpressas(com.mes), 'Comissoes ' + com.mes),
+    'pd-pj-imprimir': () => imprimir(htmlPjImpresso(com.mes), 'PJ ' + com.mes),
+    'pd-pj-editar': () => formPj(),
     'pd-com-reabrir': vivo(async () => {
       if (!confirm('Reabrir as comissões de ' + nomeMes(com.mes) + '? Fica registrado quem reabriu e quando.')) return;
       await CRM.store().comissaoReabrir(com.mes + '-01'); com.mesCarregado = null; CRM.render();

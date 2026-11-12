@@ -16,7 +16,7 @@
   // Financeiro (contas a pagar e caixa): só o administrador; carregado à parte, ao abrir o Caixa.
   const FIN = ['fin_recorrentes', 'fin_lancamentos', 'fin_saldos', 'fin_regras', 'fin_titulos_baixados', 'fin_excluidos'];
   // Boletos atualizados da cobrança (14/10/2026): carregados à parte (poucos, e o comprador não lê).
-  const A_PARTE = ['boletos'];
+  const A_PARTE = ['boletos', 'pj'];   // pj: PJ do mês (12/11/2026), só a aba PJ lê
   const CHAVE = { usuarios: 'user_id' };
   const chave = t => CHAVE[t] || 'id';
 
@@ -1518,6 +1518,15 @@
   Supa.prototype.comissoes = async function (mes) { return unwrap(await this.sb.from('crm_comissoes').select('*').eq('mes', mes)); };
   Supa.prototype.comissaoFechar = async function (mes, linhas) { return unwrap(await this.sb.rpc('crm_comissao_fechar', { p_mes: mes, p_linhas: linhas })); };
   Supa.prototype.comissaoReabrir = async function (mes) { return unwrap(await this.sb.rpc('crm_comissao_reabrir', { p_mes: mes })); };
+  // PJ do mês (12/11/2026): só o administrador (RLS); o fixo de cada um e a ligação com o usuário (para somar a comissão)
+  Supa.prototype.pjs = async function () { return unwrap(await this.sb.from('crm_pj').select('*').order('nome')) || []; };
+  Supa.prototype.pjGravar = async function (p) {
+    const d = { nome: String(p.nome || '').trim(), user_id: p.user_id || null, fixo: Number(p.fixo) || 0, ativo: p.ativo !== false };
+    return unwrap(p.id ? await this.sb.from('crm_pj').update(d).eq('id', p.id).select('id').single() : await this.sb.from('crm_pj').insert(d).select('id').single());
+  };
+  Local.prototype.pjs = async function () { return (this.ler().pj || []).slice(); };
+  Local.prototype.pjGravar = async function (p) { const d = this.ler(); d.pj = d.pj || []; const x = Object.assign({ ativo: true }, p, { id: p.id || ('pj-' + Date.now() + '-' + d.pj.length) });
+    const i = d.pj.findIndex(y => y.id === x.id); if (i >= 0) d.pj[i] = x; else d.pj.push(x); this.gravar(d); return x; };
   Local.prototype.comissoes = async function (mes) { return (this._comissoes || []).filter(c => c.mes === mes); };
   Local.prototype.comissaoFechar = async function (mes, linhas) {
     this._comissoes = this._comissoes || [];

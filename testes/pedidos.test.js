@@ -220,3 +220,19 @@ test('unidade da embalagem no impresso: a sigla fica e a embalagem fechada diz q
   const l = P.bolao([{ numero: 1, itens: [{ codigo: '150034.1', descricao: 'Copo', unidade: 'CX', fator: '25.0000', quantidade: 2 }] }], new Map());
   assert.strictEqual(l[0].fator, 25);
 });
+
+test('PJ do mês: fixo + comissão do usuário ligado, só ativos, total', () => {
+  const pjs = [{ id: 1, nome: 'Zeca', fixo: 7000 }, { id: 2, nome: 'Ana', user_id: 'u1', fixo: '3500' }, { id: 3, nome: 'Bia', user_id: 'u2', fixo: 1000, ativo: false }, { id: 4, nome: 'Caio', user_id: 'u3', fixo: 0 }];
+  const r = P.pjDoMes(pjs, new Map([['u1', 1200.5], ['u3', 900.25]]));
+  assert.deepStrictEqual(r.linhas.map(l => [l.nome, l.fixo, l.comissao, l.total]), [['Ana', 3500, 1200.5, 4700.5], ['Caio', 0, 900.25, 900.25], ['Zeca', 7000, 0, 7000]]);
+  assert.strictEqual(r.total, 12600.75);
+  assert.strictEqual(r.fixo, 10500);
+});
+
+test('PJ: pagamento no dia útil depois de os condomínios pagarem o dia 11 (regra da Agilité)', () => {
+  const C = require('../caixa-calculo.js');
+  assert.strictEqual(P.diaPagamentoPj('2026-10', C.util), '2026-11-12');   // 11/11 quarta
+  assert.strictEqual(P.diaPagamentoPj('2026-11', C.util), '2026-12-14');   // 11/12 sexta → 14/12
+  assert.strictEqual(P.diaPagamentoPj('2026-09', C.util), '2026-10-14');   // 11/10 domingo, 12/10 feriado → 13 paga, 14 cai
+  assert.strictEqual(P.diaPagamentoPj('2026-12', C.util), '2027-01-12');
+});

@@ -3086,6 +3086,27 @@ grant select on public.crm_comissoes to authenticated;
 drop policy if exists ler on public.crm_comissoes;
 create policy ler on public.crm_comissoes for select to authenticated using ((select public.crm_eh_admin()) or user_id = (select auth.uid()));
 
+-- PJ do mês (12/11/2026, pedido do Anderson: "um ícone dos PJ" ao lado das Comissões, para imprimir o pagamento): quem
+-- recebe como PJ, o fixo e, se tem usuário com comissão, a comissão do mês. Só o administrador (valores de pagamento).
+-- Os nomes e valores ficam só no banco (este repositório é público).
+create table if not exists public.crm_pj (
+  id            uuid primary key default gen_random_uuid(),
+  nome          text not null check (length(btrim(nome)) > 0),
+  user_id       uuid references public.crm_usuarios(user_id),
+  fixo          numeric(14,2) not null default 0 check (fixo >= 0),
+  ativo         boolean not null default true,
+  criado_em     timestamptz not null default now(),
+  atualizado_em timestamptz not null default now()
+);
+drop trigger if exists crm_pj_atualizado_em on public.crm_pj;
+create trigger crm_pj_atualizado_em before update on public.crm_pj for each row execute function public.crm_toca_atualizado_em();
+alter table public.crm_pj enable row level security;
+revoke all on public.crm_pj from anon, public;
+grant select, insert, update, delete on public.crm_pj to authenticated;
+revoke truncate, references, trigger on public.crm_pj from authenticated;
+drop policy if exists so_admin on public.crm_pj;
+create policy so_admin on public.crm_pj for all to authenticated using ((select public.crm_eh_admin())) with check ((select public.crm_eh_admin()));
+
 -- Fecha o mês: grava a foto de cada vendedor(a) (linhas: [{user_id, plano, base, comissao, ajustes, detalhe}]). Mês já
 -- fechado não se regrava: reabrir antes.
 create or replace function public.crm_comissao_fechar(p_mes date, p_linhas jsonb) returns integer language plpgsql security definer set search_path = public as $$
