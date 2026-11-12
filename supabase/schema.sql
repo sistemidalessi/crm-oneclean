@@ -9975,6 +9975,47 @@ $$;
 revoke all on function public.crm_produto_compras(text) from public, anon;
 grant execute on function public.crm_produto_compras(text) to authenticated;
 
+-- 12/11/2026 (pedido do Anderson): Compras → Comparar fornecedores. A tela precisa, de um produto, da regra fiscal da VENDA
+-- (com ST? PIS/COFINS dá crédito? base reduzida?) e das últimas compras de cada fornecedor (para já trazer as cotações
+-- preenchidas). crm_fiscal_produtos é só do administrador; esta função entrega ao comprador só o que a conta usa.
+-- Uma linha por fornecedor (a compra mais recente), com o preço por embalagem da nota (produtos + frete + outras da nota),
+-- quantas unidades nossas vêm na embalagem (fator), IPI em %, ICMS-ST por embalagem e o CST/CSOSN do ICMS (diz se é Simples).
+create or replace function public.crm_comparar_produto(p_codigo text)
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare cod text := regexp_replace(upper(btrim(coalesce(p_codigo, ''))), '\.\d+$', ''); e public.crm_estoque; f public.crm_fiscal_produtos; compras jsonb;
+begin
+  if not (public.crm_eh_admin() or public.crm_eh_comprador()) then raise exception 'só o administrador e o comprador'; end if;
+  select * into e from public.crm_estoque where codigo = cod;
+  if e.codigo is null then return null; end if;
+  select * into f from public.crm_fiscal_produtos where codigo = cod;
+  with eans as (select f.gtin g where f.gtin ~ '^\d{8,14}$'),
+  itens as (
+    select c.fornecedor_nome, c.fornecedor_doc, c.emitida_em, c.numero, i.descricao, i.unidade, i.quantidade, i.valor_total, i.ipi, i.st, i.frete, i.outras,
+      i.st_cst, i.st_aliq,
+      case when i.codigo is not null then coalesce(nullif(i.fator, 0), 1) when v.codigo is not null then coalesce(nullif(v.fator, 0), 1) else 1 end fator,
+      row_number() over (partition by c.fornecedor_doc order by c.emitida_em desc nulls last, i.ordem) n
+    from public.crm_compras c join public.crm_compra_itens i on i.compra_id = c.id
+    left join public.crm_compra_vinculos v on v.fornecedor_doc = c.fornecedor_doc and v.cod_fornecedor = i.cod_fornecedor and i.codigo is null
+    where not coalesce(c.devolucao, false) and i.quantidade > 0 and i.valor_total > 0
+      and (regexp_replace(coalesce(i.codigo, ''), '\.\d+$', '') = cod
+        or (i.codigo is null and regexp_replace(coalesce(v.codigo, ''), '\.\d+$', '') = cod)
+        or (i.codigo is null and v.codigo is null and i.ean in (select g from eans)))
+  )
+  select coalesce(jsonb_agg(jsonb_build_object(
+      'fornecedor', fornecedor_nome, 'cnpj', fornecedor_doc, 'emitida_em', emitida_em, 'nota', numero, 'descricao', descricao,
+      'unidade', unidade, 'qtd', fator,
+      'preco', round((valor_total + coalesce(frete, 0) + coalesce(outras, 0)) / quantidade, 4),
+      'ipi_pct', case when coalesce(ipi, 0) > 0 then round(ipi / valor_total * 100, 2) end,
+      'st', case when coalesce(st, 0) > 0 then round(st / quantidade, 4) end,
+      'cst_icms', st_cst) order by emitida_em desc nulls last), '[]'::jsonb)
+    into compras from itens where n = 1;
+  return jsonb_build_object('codigo', e.codigo, 'descricao', e.descricao, 'unidade', e.unidade, 'situacao', e.situacao,
+    'custo_compra', e.custo_compra, 'custo_unit', e.custo_unit, 'preco_venda', e.preco_venda, 'ncm', f.ncm,
+    'venda', coalesce(f.regra -> 'venda', '{}'::jsonb), 'compras', compras);
+end $$;
+revoke all on function public.crm_comparar_produto(text) from public, anon;
+grant execute on function public.crm_comparar_produto(text) to authenticated;
+
 -- ============================================================ 04/11/2026: Diretor de Vendas, parado pelo último contato
 -- Diretor de Vendas: "parado" conta do último movimento, não só da mudança de etapa (04/11/2026, áudio da vendedora: "os três
 -- já tiveram atualização ... aparece como se eu não tivesse contato com eles há um grande tempo"). Mesma regra da tela do CRM

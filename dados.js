@@ -1903,6 +1903,7 @@
   };
   // Histórico de compras do produto, inclusive as notas de antes da virada (pelo vínculo aprendido e pelo código de barras),
   // com o custo por unidade do estoque: só administrador e comprador (06/11/2026, Wellington).
+  Supa.prototype.compararProduto = async function (codigo) { return unwrap(await this.sb.rpc('crm_comparar_produto', { p_codigo: codigo })); };
   Supa.prototype.produtoCompras = async function (codigo) { return unwrap(await this.sb.rpc('crm_produto_compras', { p_codigo: codigo })) || []; };
   Supa.prototype.sugestaoMarcar = async function (codigo, situacao) { return unwrap(await this.sb.from('crm_produto_fotos_sugestoes').update({ situacao }).eq('codigo', codigo)); };
 
@@ -1994,6 +1995,14 @@
   };
   Local.prototype.produtoDetalhe = async function () { return { saldo: null, hist: [], compras: [], unidades: [] }; };
   Local.prototype.produtoCompras = async function () { return []; };
+  Local.prototype.compararProduto = async function (codigo) {
+    const cod = String(codigo || '').trim().toUpperCase().replace(/\.\d+$/, '');
+    const e = (await this.estoque()).find(x => String(x.codigo) === cod);
+    if (!e) return null;
+    const f = (await this.fiscalProdutos()).find(x => x.codigo === cod) || {};
+    return { codigo: e.codigo, descricao: e.descricao, unidade: e.unidade, situacao: e.situacao, custo_compra: e.custo_compra, custo_unit: e.custo_unit,
+      preco_venda: e.preco_venda, ncm: f.ncm || null, venda: (f.regra && f.regra.venda) || {}, compras: [] };
+  };
   Local.prototype.produtoClientes = async function (codigo, limite) {
     const base = c => String(c || '').replace(/\.\d+$/, ''), m = new Map();
     (this.ler().notas || []).filter(n => !n.cancelada).forEach(n => (n.itens || []).filter(i => base(i.codigo) === base(codigo)).forEach(i => {
