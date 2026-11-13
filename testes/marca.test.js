@@ -18,7 +18,7 @@ const lista = (dir, ext) => fs.readdirSync(dir, { withFileTypes: true }).flatMap
 });
 
 test('o texto da marca: sem e-mail pessoal e igual em todas as cópias das Edge Functions', () => {
-  assert.equal(M.RODAPE, 'Sistemi Dalessi · Sistemas sob Medida · sistemidalessi.com.br');
+  assert.equal(M.RODAPE, 'Sistemi Dalessi · Sistemas sob Medida · sistemidalessi.com.br · contato@sistemidalessi.com.br');
   const copias = lista(path.join(raiz, 'supabase', 'functions'), /\.(ts|js)$/)
     .map(f => [f, /const RODAPE_MARCA = '([^']*)'/.exec(fs.readFileSync(f, 'utf8'))]).filter(x => x[1]);
   assert.ok(copias.length >= 4, 'crm-fiscal, crm-cobranca, crm-contador e crm-email');

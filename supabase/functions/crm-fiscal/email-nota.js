@@ -26,7 +26,7 @@ const milhar = n => String(n || '').replace(/\B(?=(\d{3})+(?!\d))/g, '.');
 export const chaveFmt = c => String(c || '').replace(/(.{4})/g, '$1 ').trim();
 const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 // a marca da Sistemi Dalessi no pé (13/11/2026): CÓPIA do marca.js do site (o Deno não lê aquele arquivo); testes/marca.test.js confere
-export const RODAPE_MARCA = 'Sistemi Dalessi · Sistemas sob Medida · sistemidalessi.com.br';
+export const RODAPE_MARCA = 'Sistemi Dalessi · Sistemas sob Medida · sistemidalessi.com.br · contato@sistemidalessi.com.br';
 const marcaTxt = '\n\n--\n' + RODAPE_MARCA;
 const marcaHtml = '<p style="margin-top:22px;font-size:11px;color:#9aa3ab">' + esc(RODAPE_MARCA) + '</p>';
 

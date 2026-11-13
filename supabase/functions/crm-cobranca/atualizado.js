@@ -158,7 +158,7 @@ export function resumoRodada({ hoje, boletos, avisos, fora, sem, alertas }) {
 }
 
 // a marca da Sistemi Dalessi no pé (13/11/2026): CÓPIA do marca.js do site (o Deno não lê aquele arquivo); testes/marca.test.js confere
-export const RODAPE_MARCA = 'Sistemi Dalessi · Sistemas sob Medida · sistemidalessi.com.br';
+export const RODAPE_MARCA = 'Sistemi Dalessi · Sistemas sob Medida · sistemidalessi.com.br · contato@sistemidalessi.com.br';
 // ---- o PDF: o mesmo desenho do boleto do CRM (boleto.js, desenha), com "(+) Juros / Multa" e "(=) Valor Cobrado" de hoje e
 // a faixa no alto. B = CRMBoleto (boleto.js); jsPDF = a classe; cfg = crm_config.dados.boleto; emit = dados.fiscal.emitente.
 // O código de barras é refeito pelos dados do boleto e conferido com o que o banco devolveu: não bate, não sai.

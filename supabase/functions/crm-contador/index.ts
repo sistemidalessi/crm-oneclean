@@ -27,7 +27,7 @@ const CORS = {
 const resposta = (status: number, corpo: unknown) => new Response(JSON.stringify(corpo), { status, headers: { ...CORS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
 const EMPRESA = Deno.env.get('CRM_EMPRESA_NOME') ?? 'OneClean';
 // a marca da Sistemi Dalessi no pé (13/11/2026): CÓPIA do marca.js do site (o Deno não lê aquele arquivo); testes/marca.test.js confere
-const RODAPE_MARCA = 'Sistemi Dalessi · Sistemas sob Medida · sistemidalessi.com.br';
+const RODAPE_MARCA = 'Sistemi Dalessi · Sistemas sob Medida · sistemidalessi.com.br · contato@sistemidalessi.com.br';
 const BUCKET = 'crm-notas-xml';
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const hojeSP = () => new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);

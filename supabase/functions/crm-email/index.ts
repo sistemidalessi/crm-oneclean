@@ -16,7 +16,7 @@ const EMAIL_URL = () => Deno.env.get('SUPABASE_URL')! + '/functions/v1/crm-envia
 const EMAIL_AUTH = () => 'Bearer ' + Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
 // a marca da Sistemi Dalessi no pé (13/11/2026): CÓPIA do marca.js do site (o Deno não lê aquele arquivo); testes/marca.test.js confere
-const RODAPE_MARCA = 'Sistemi Dalessi · Sistemas sob Medida · sistemidalessi.com.br';
+const RODAPE_MARCA = 'Sistemi Dalessi · Sistemas sob Medida · sistemidalessi.com.br · contato@sistemidalessi.com.br';
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
