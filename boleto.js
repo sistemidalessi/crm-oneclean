@@ -299,6 +299,10 @@
       pdf.setTextColor(0);
       if (gs) pdf.setGState(new gs({ opacity: 1 }));
     }
+    // a marca da Sistemi Dalessi (marca.js, 13/11/2026): no pé da folha, bem abaixo do código de barras; nada na área do
+    // banco. op.rodape = o texto ('' tira); sem ele, o do marca.js carregado na página
+    const rodape = op.rodape != null ? String(op.rodape) : ((raiz.CRMMarca || {}).RODAPE || '');
+    if (rodape && y + 16 < 286) { fonte(5.6, false); pdf.setTextColor(140); pdf.text(limpa(rodape), X + W / 2, 295.1, { align: 'center' }); pdf.setTextColor(0); }
     return y + 16;
   }
 

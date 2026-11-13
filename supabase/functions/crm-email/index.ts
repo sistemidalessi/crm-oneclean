@@ -15,6 +15,8 @@ import { createClient } from 'npm:@supabase/supabase-js@2.116.0';
 const EMAIL_URL = () => Deno.env.get('SUPABASE_URL')! + '/functions/v1/crm-enviar-email';
 const EMAIL_AUTH = () => 'Bearer ' + Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
+// a marca da Sistemi Dalessi no pé (13/11/2026): CÓPIA do marca.js do site (o Deno não lê aquele arquivo); testes/marca.test.js confere
+const RODAPE_MARCA = 'Sistemi Dalessi · Sistemas sob Medida · sistemidalessi.com.br';
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -62,7 +64,8 @@ function html(corpo: string, m: { nome: string; cor: string; logo: string }, rod
     (m.logo ? '<tr><td style="padding:20px 28px 4px"><img src="' + esc(m.logo) + '" alt="' + esc(m.nome) + '" style="max-height:56px;max-width:220px;border:0"></td></tr>' : '') +
     '<tr><td style="padding:18px 28px 8px;font-size:15px;line-height:1.55">' + paragrafos + '</td></tr>' +
     '<tr><td style="padding:14px 28px 22px;border-top:1px solid #e5e9ee;font-size:12px;line-height:1.5;color:#6b7785">' + esc(rodape) +
-    '<br>Não quer mais receber estes e-mails? <a href="' + esc(sair) + '" style="color:#6b7785">Clique aqui</a>.</td></tr>' +
+    '<br>Não quer mais receber estes e-mails? <a href="' + esc(sair) + '" style="color:#6b7785">Clique aqui</a>.' +
+    '<br><span style="font-size:11px;color:#9aa3ab">' + esc(RODAPE_MARCA) + '</span></td></tr>' +
     '</table></td></tr></table></body></html>';
 }
 
@@ -172,7 +175,7 @@ Deno.serve(async (req) => {
     method: 'POST', headers: { Authorization: EMAIL_AUTH(), 'content-type': 'application/json', accept: 'application/json' },
     body: JSON.stringify({ sender: { name: rem.nome + ' · ' + marca.nome, email: rem.email }, replyTo: { name: rem.nome, email: rem.email },
       to: para.map(email => ({ email })), subject: assunto, htmlContent: html(corpo, marca, rodape, sair.href, tabela),
-      textContent: corpoTexto + '\n\n--\n' + rodape + '\nNão quer mais receber estes e-mails? ' + sair.href,
+      textContent: corpoTexto + '\n\n--\n' + rodape + '\nNão quer mais receber estes e-mails? ' + sair.href + '\n' + RODAPE_MARCA,
       headers: { 'List-Unsubscribe': '<' + sair.href + '>' }, tags: [oferta ? 'oferta' : 'cadencia', tipo] })
   });
   const j = await r.json().catch(() => ({}));

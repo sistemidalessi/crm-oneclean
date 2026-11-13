@@ -272,6 +272,15 @@
       pdf.text(d.marca || (d.homologacao ? 'SEM VALOR FISCAL' : 'NOTA SEM AUTORIZAÇÃO'), 105, 200, { align: 'center', angle: 30 });
       pdf.setTextColor(0);
     }
+    // a marca da Sistemi Dalessi (marca.js, 13/11/2026): só na margem livre de baixo, abaixo dos quadros (BAIXO = 292); não
+    // é campo da nota e não vai no XML. op.rodape = o texto ('' tira); sem ele, o do marca.js carregado na página
+    const rodape = op.rodape != null ? String(op.rodape) : ((raiz.CRMMarca || {}).RODAPE || '');
+    function marcaRodape() {
+      if (!rodape) return;
+      fonte(5.6, false); pdf.setTextColor(140);
+      pdf.text(limpa(rodape), 105, ALTO - 1.9, { align: 'center' });
+      pdf.setTextColor(0);
+    }
 
     // ---- cabeçalho (emitente, quadro DANFE, chave) — em toda folha
     function cabecalho(y, folha) {
@@ -371,6 +380,7 @@
     folhas.forEach((lista, i) => {
       if (i) pdf.addPage('a4', 'portrait');
       marcaDagua();
+      marcaRodape();
       let y = 5;
       if (i === 0) {
         // canhoto

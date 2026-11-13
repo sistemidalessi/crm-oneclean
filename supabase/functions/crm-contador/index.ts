@@ -26,6 +26,8 @@ const CORS = {
 };
 const resposta = (status: number, corpo: unknown) => new Response(JSON.stringify(corpo), { status, headers: { ...CORS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
 const EMPRESA = Deno.env.get('CRM_EMPRESA_NOME') ?? 'OneClean';
+// a marca da Sistemi Dalessi no pé (13/11/2026): CÓPIA do marca.js do site (o Deno não lê aquele arquivo); testes/marca.test.js confere
+const RODAPE_MARCA = 'Sistemi Dalessi · Sistemas sob Medida · sistemidalessi.com.br';
 const BUCKET = 'crm-notas-xml';
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const hojeSP = () => new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
@@ -121,9 +123,9 @@ Deno.serve(async (req) => {
     if (!rem) throw new Error('nenhum administrador com e-mail para mandar');
     const texto = textoEmail(r, { mes, empresa, link });
     const html = '<div style="font-family:Arial,sans-serif;font-size:15px;line-height:1.5;color:#222;max-width:640px">' +
-      texto.split('\n').map(l => l ? '<div>' + l.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/(https:\/\/\S+)/, '<a href="$1">baixar o ZIP</a>') + '</div>' : '<br>').join('') + '</div>';
+      texto.split('\n').map(l => l ? '<div>' + l.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/(https:\/\/\S+)/, '<a href="$1">baixar o ZIP</a>') + '</div>' : '<br>').join('') + '<p style="margin-top:22px;font-size:11px;color:#9aa3ab">' + RODAPE_MARCA + '</p></div>';
     const corpo: Linha = { sender: { name: String(rem.nome) + ' · ' + EMPRESA, email: rem.email }, replyTo: { name: String(rem.nome), email: rem.email },
-      to: para.map(x => ({ email: x })), subject: EMPRESA + ' · XML das notas fiscais de ' + mesExtenso(mes), htmlContent: html, textContent: texto, tags: ['contador'] };
+      to: para.map(x => ({ email: x })), subject: EMPRESA + ' · XML das notas fiscais de ' + mesExtenso(mes), htmlContent: html, textContent: texto + '\n\n--\n' + RODAPE_MARCA, tags: ['contador'] };
     if (zip.length <= MAX_ANEXO) corpo.attachment = [{ name: nome, content: base64(zip) }];
     const rb = await fetch(EMAIL_URL(), { method: 'POST', headers: { Authorization: EMAIL_AUTH(), 'content-type': 'application/json', accept: 'application/json' }, body: JSON.stringify(corpo) });
     const ok = rb.ok, erro = ok ? null : 'o e-mail não saiu (' + rb.status + '): ' + (await rb.text().catch(() => '')).slice(0, 200);

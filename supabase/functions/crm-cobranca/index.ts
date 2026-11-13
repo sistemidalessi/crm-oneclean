@@ -21,7 +21,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.116.0';
 import { quemRecebe, prazoUtil, parametros, textoFinal, textoEmail, CORPO, alertasCartorio, celularesDoCliente, emailsDoCliente, telWa, moeda, docsTexto,
   porTransferencia, valorAtualizado, contaTexto, valorTransferencia, paragrafoTransferencia, textoEmailTransferencia } from './avisos.js';
-import { casa, quemRecebeBoleto, valorCobrado, pdfBoletos, parametrosBoleto, CORPO_BOLETO, textoEmailBoleto, resumoRodada, mod11 } from './atualizado.js';
+import { casa, quemRecebeBoleto, valorCobrado, pdfBoletos, parametrosBoleto, CORPO_BOLETO, textoEmailBoleto, resumoRodada, mod11, RODAPE_MARCA } from './atualizado.js';
 import { jsPDF } from 'npm:jspdf@2.5.2';
 // 10/11/2026: o e-mail sai pela caixa do próprio domínio (função crm-enviar-email), não mais pelo Brevo, que bloqueou a conta
 // por causa dos avisos de cobrança. O corpo é o mesmo; muda o endereço e quem autoriza (a chave de serviço do projeto).
@@ -306,12 +306,12 @@ Deno.serve(async (req) => {
           const html = '<div style="font-family:Arial,sans-serif;font-size:15px;line-height:1.5;color:#222;max-width:600px">' +
             corpoTxt.split('\n\n').map((x: string) => '<p>' + x.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/\n/g, '<br>') + '</p>').join('') +
             (golpe ? '<p style="background:#fff176;border:2px solid #c81e1e;border-radius:8px;padding:10px 14px;color:#7a0000;font-weight:bold">⚠️ ' + golpe.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</p>' : '') +
-            '<p style="color:#777;font-size:12px">' + EMPRESA + ' · financeiro</p></div>';
+            '<p style="color:#777;font-size:12px">' + EMPRESA + ' · financeiro</p><p style="color:#9aa3ab;font-size:11px">' + RODAPE_MARCA + '</p></div>';
           try {
             const r = await fetch(EMAIL_URL(), { method: 'POST', headers: { Authorization: EMAIL_AUTH(), 'content-type': 'application/json', accept: 'application/json' },
               body: JSON.stringify({ sender: { name: String(rem.nome) + ' · ' + EMPRESA, email: rem.email }, replyTo: { name: String(rem.nome), email: rem.email },
                 to: emails.map((x: string) => ({ email: x })), subject: EMPRESA + ' · boleto atualizado (' + docs + ')',
-                htmlContent: html, textContent: corpoTxt + (golpe ? '\n\n' + golpe : '') + '\n\n' + EMPRESA + ' · financeiro',
+                htmlContent: html, textContent: corpoTxt + (golpe ? '\n\n' + golpe : '') + '\n\n' + EMPRESA + ' · financeiro\n\n--\n' + RODAPE_MARCA,
                 attachment: [{ name: nomeArq(titulo), content: base64(buf) }], tags: ['cobranca', 'boleto-atualizado'] }) });
             emailOk = r.ok;
             if (!r.ok) up.cli_erro = [up.cli_erro, 'o e-mail não saiu (' + r.status + ')'].filter(Boolean).join(' · ');
@@ -370,11 +370,11 @@ Deno.serve(async (req) => {
         paragrafoTransferencia(a, conta2),
         'Desculpe o transtorno. Qualquer dúvida, é só responder este e-mail' + (telV ? ' ou me chamar no WhatsApp ' + telBR(telV) : '') + '. Agradecemos a parceria!'].join('\n\n');
       const html = '<div style="font-family:Arial,sans-serif;font-size:15px;line-height:1.5;color:#222;max-width:600px">' +
-        texto.split('\n\n').map(x => '<p>' + x.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</p>').join('') + '<p style="color:#777;font-size:12px">' + EMPRESA + ' · financeiro</p></div>';
+        texto.split('\n\n').map(x => '<p>' + x.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</p>').join('') + '<p style="color:#777;font-size:12px">' + EMPRESA + ' · financeiro</p><p style="color:#9aa3ab;font-size:11px">' + RODAPE_MARCA + '</p></div>';
       const r = await fetch(EMAIL_URL(), { method: 'POST', headers: { Authorization: EMAIL_AUTH(), 'content-type': 'application/json', accept: 'application/json' },
         body: JSON.stringify({ sender: { name: String(rem.nome) + ' · ' + EMPRESA, email: rem.email }, replyTo: { name: String(rem.nome), email: rem.email },
           to: emails.map((x: string) => ({ email: x })), subject: EMPRESA + ' · ' + doc + ': pagamento por transferência (desconsiderar o boleto)',
-          htmlContent: html, textContent: texto + '\n\n' + EMPRESA + ' · financeiro', tags: ['cobranca', 'correcao'] }) });
+          htmlContent: html, textContent: texto + '\n\n' + EMPRESA + ' · financeiro\n\n--\n' + RODAPE_MARCA, tags: ['cobranca', 'correcao'] }) });
       if (!r.ok) return resposta(502, { erro: 'o e-mail não saiu (' + r.status + ')' });
       const agora = new Date().toISOString();
       for (const b of bols as Linha[]) await db.from('crm_boletos').update({ encargos: Object.assign({}, b.encargos || {}, { correcao_em: agora, correcao_valor: a.total }) }).eq('id', b.id);
@@ -442,11 +442,11 @@ Deno.serve(async (req) => {
           const html = '<div style="font-family:Arial,sans-serif;font-size:15px;line-height:1.5;color:#222;max-width:600px">' +
             m.email.split('\n\n').map((s: string) => '<p>' + s.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</p>').join('') +
             (golpe ? '<p style="background:#fff176;border:2px solid #c81e1e;border-radius:8px;padding:10px 14px;color:#7a0000;font-weight:bold">⚠️ ' + golpe.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</p>' : '') +
-            '<p style="color:#777;font-size:12px">' + EMPRESA + ' · financeiro</p></div>';
+            '<p style="color:#777;font-size:12px">' + EMPRESA + ' · financeiro</p><p style="color:#9aa3ab;font-size:11px">' + RODAPE_MARCA + '</p></div>';
           const r = await fetch(EMAIL_URL(), { method: 'POST', headers: { Authorization: EMAIL_AUTH(), 'content-type': 'application/json', accept: 'application/json' },
             body: JSON.stringify({ sender: { name: String(rem.nome) + ' · ' + EMPRESA, email: rem.email }, replyTo: { name: String(rem.nome), email: rem.email },
               to: m.emails.map((x: string) => ({ email: x })), subject: EMPRESA + ' · título em aberto (' + docsTexto(m.titulos).replace(/^(a|as) /, '') + ')',
-              htmlContent: html, textContent: m.email + (golpe ? '\n\n' + golpe : '') + '\n\n' + EMPRESA + ' · financeiro', tags: ['cobranca'] }) });
+              htmlContent: html, textContent: m.email + (golpe ? '\n\n' + golpe : '') + '\n\n' + EMPRESA + ' · financeiro\n\n--\n' + RODAPE_MARCA, tags: ['cobranca'] }) });
           up.email_para = m.emails; up.email_ok = r.ok;
           if (!r.ok) up.email_erro = 'o e-mail não saiu (' + r.status + ')';
         } catch (e) { up.email_para = m.emails; up.email_ok = false; up.email_erro = String((e as Error).message).slice(0, 300); }

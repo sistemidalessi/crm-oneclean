@@ -56,7 +56,7 @@
     { nome: 'proposta_subchamada', rotulo: 'Linha abaixo da frase', largo: true, dica: 'ex.: Limpeza, higiene e descartáveis para sua empresa.' },
     { nome: 'proposta_cta', rotulo: 'Texto do botão de WhatsApp da proposta', largo: true, dica: 'Vamos programar sua entrega?', ajuda: 'o botão leva ao WhatsApp do(a) vendedor(a) responsável (telefone do cadastro dela), com a mensagem de confirmação pronta' },
     { nome: 'caixa_receber_desde', rotulo: 'Caixa: "A receber vencido" mostra só títulos vencidos a partir de', tipo: 'data', ajuda: 'os mais antigos continuam no contas a receber e na cobrança; vazio = todos' },
-    { nome: 'sem_assinatura', rotulo: 'Tirar a assinatura "Orçamento gerado pelo CRM Sistemi Dalessi" do rodapé', tipo: 'checkbox', ajuda: 'linha discreta no pé de cada proposta e orçamento em PDF' },
+    { nome: 'sem_assinatura', rotulo: 'Tirar a marca "Sistemi Dalessi" do rodapé do orçamento, do pedido e da cobrança', tipo: 'checkbox', ajuda: 'linha discreta no pé desses PDFs (a DANFE e o boleto levam sempre)' },
     { nome: 'proposta_rodape', rotulo: 'Rodapé da proposta (dados da empresa)', largo: true, tipo: 'textarea', linhas: 2, dica: 'ex.: OneClean · CNPJ 00.000.000/0001-00 · (11) 4000-0000 · contato@empresa.com.br', ajuda: 'sai no fim de toda proposta e orçamento em PDF' },
     { tipo: 'secao', rotulo: 'Automações' },
     { nome: 'rodizio', rotulo: 'Lead cadastrado pelo gestor sem responsável vai para o próximo vendedor (rodízio)', tipo: 'checkbox', largo: true },

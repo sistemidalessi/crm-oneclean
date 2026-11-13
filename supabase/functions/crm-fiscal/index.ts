@@ -11,7 +11,7 @@
 // Deploy: verify_jwt LIGADO.
 import { createClient } from 'npm:@supabase/supabase-js@2.116.0';
 import { ibptUrl, ibptLinha, ibptPrecisa } from './ibpt.js';
-import { destinatarios, separaEmails, assunto, texto, html, arquivos, proporcaoPng, assuntoGrupo, textoGrupo, htmlGrupo, arquivoGrupo, gruposDeEnvio } from './email-nota.js';
+import { destinatarios, separaEmails, assunto, texto, html, arquivos, proporcaoPng, assuntoGrupo, textoGrupo, htmlGrupo, arquivoGrupo, gruposDeEnvio, RODAPE_MARCA } from './email-nota.js';
 import { jsPDF } from 'npm:jspdf@2.5.2';
 // 10/11/2026: o e-mail sai pela caixa do próprio domínio (função crm-enviar-email), não mais pelo Brevo, que bloqueou a conta
 // por causa dos avisos de cobrança. O corpo é o mesmo; muda o endereço e quem autoriza (a chave de serviço do projeto).
@@ -424,7 +424,7 @@ async function desenhaBoletos(pdf: any, regs: Linha[], xml: string, dados: Linha
     const dd = B.montar(cfg, emit, { valor: b.valor, vencimento: b.vencimento, nosso_numero: b.nosso_numero, documento: b.documento, emissao: b.emissao, pix, abatimento: b.abatimento }, pg, { hoje });
     // 2ª via do boleto feito no site do BB: o boleto refeito tem de dar a mesma linha digitável que o banco informou
     if (b.linha && String(b.linha).replace(/\D/g, '') !== String(dd.linha).replace(/\D/g, '')) throw new Error('o boleto refeito da parcela ' + String(b.duplicata || '') + ' não bate com o do banco: tire a 2ª via no site do BB');
-    B.desenha(pdf, dd, { aviso, qr: pix && QR ? B.qrDesenhador(QR, pix) : null });
+    B.desenha(pdf, dd, { aviso, qr: pix && QR ? B.qrDesenhador(QR, pix) : null, rodape: RODAPE_MARCA });
   });
 }
 async function pdfDanfe(xml: string) {
@@ -432,7 +432,7 @@ async function pdfDanfe(xml: string) {
   const d = Dn.ler(xml);
   if (!d) throw new Error('não li o XML da nota para a DANFE');
   const pdf = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
-  Dn.desenha(pdf, d, { logo: await logoDanfe(), cores: CORES });
+  Dn.desenha(pdf, d, { logo: await logoDanfe(), cores: CORES, rodape: RODAPE_MARCA });
   return new Uint8Array(pdf.output('arraybuffer'));
 }
 // Manda o XML e a DANFE da nota de PRODUÇÃO autorizada ao cliente: ao "E-mail para a nota fiscal" do cadastro (vazio: o e-mail
@@ -562,7 +562,7 @@ async function enviaEmailGrupo(db: ReturnType<typeof createClient>, ids: string[
         if (!d) throw new Error('não li o XML da NF ' + n.numero);
         if (!primeira) pdf.addPage('a4', 'portrait');
         primeira = false;
-        Dn.desenha(pdf, d, { logo, cores: CORES });
+        Dn.desenha(pdf, d, { logo, cores: CORES, rodape: RODAPE_MARCA });
         const b = bols.get(String(n.id))!;
         faltaBol += b.pendentes;
         if (b.registrados.length) {
@@ -775,7 +775,7 @@ Deno.serve(async (req) => {
       }
       if (soBoleto && !regs.length) return resposta(404, { erro: 'Não achei boleto em aberto desta nota' + (aviso ? ' (' + aviso + ')' : '') + '.' });
       const pdf = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
-      if (!soBoleto) Dn.desenha(pdf, d, { logo: await logoDanfe(), cores: CORES });
+      if (!soBoleto) Dn.desenha(pdf, d, { logo: await logoDanfe(), cores: CORES, rodape: RODAPE_MARCA });
       let n_bol = 0;
       if (regs.length) {
         try { await desenhaBoletos(pdf, regs, String(n.proc_xml), bol.dados, soBoleto); n_bol = regs.length; }

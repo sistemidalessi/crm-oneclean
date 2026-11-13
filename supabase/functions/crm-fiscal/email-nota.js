@@ -25,11 +25,16 @@ const dataBR = iso => { const d = new Date(new Date(iso).getTime() - 3 * 36e5); 
 const milhar = n => String(n || '').replace(/\B(?=(\d{3})+(?!\d))/g, '.');
 export const chaveFmt = c => String(c || '').replace(/(.{4})/g, '$1 ').trim();
 const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+// a marca da Sistemi Dalessi no pé (13/11/2026): CÓPIA do marca.js do site (o Deno não lê aquele arquivo); testes/marca.test.js confere
+export const RODAPE_MARCA = 'Sistemi Dalessi · Sistemas sob Medida · sistemidalessi.com.br';
+const marcaTxt = '\n\n--\n' + RODAPE_MARCA;
+const marcaHtml = '<p style="margin-top:22px;font-size:11px;color:#9aa3ab">' + esc(RODAPE_MARCA) + '</p>';
 
 export function assunto(nfe, empresa) {
   return empresa + ' · Nota fiscal nº ' + milhar(nfe.numero) + (nfe.serie ? ' (série ' + nfe.serie + ')' : '');
 }
-export function texto(nfe, o) {
+export function texto(nfe, o) { return corpoTexto(nfe, o) + marcaTxt; }
+function corpoTexto(nfe, o) {
   o = o || {};
   const linhas = [
     'Olá' + (o.cliente ? ', ' + o.cliente : '') + '!',
@@ -58,7 +63,7 @@ export function textoBoletos(l) {
 }
 export function html(nfe, o) {
   return '<div style="font-family:Arial,sans-serif;font-size:15px;line-height:1.5;color:#222;max-width:600px">' +
-    texto(nfe, o).split('\n\n').map(p => '<p>' + esc(p).replace(/\n/g, '<br>') + '</p>').join('') + '</div>';
+    corpoTexto(nfe, o).split('\n\n').map(p => '<p>' + esc(p).replace(/\n/g, '<br>') + '</p>').join('') + marcaHtml + '</div>';
 }
 // ---- várias notas do mesmo cliente num e-mail só (10/11/2026, Anderson: "quando emite a Uniserv, é de uma vez só quase 70
 // notas"). O e-mail sai pela caixa da empresa, que tem limite por hora: as notas pendentes do mesmo cliente vão juntas, com o
@@ -72,7 +77,8 @@ const faixa = notas => {
 export function assuntoGrupo(notas, empresa) {
   return empresa + ' · ' + notas.length + ' notas fiscais (nº ' + faixa(notas) + ')';
 }
-export function textoGrupo(notas, o) {
+export function textoGrupo(notas, o) { return corpoGrupo(notas, o) + marcaTxt; }
+function corpoGrupo(notas, o) {
   o = o || {};
   const total = notas.reduce((s, n) => s + Number(n.valor || 0), 0);
   const lista = notas.slice().sort((a, b) => Number(a.numero) - Number(b.numero))
@@ -91,7 +97,7 @@ export function textoGrupo(notas, o) {
 }
 export function htmlGrupo(notas, o) {
   return '<div style="font-family:Arial,sans-serif;font-size:15px;line-height:1.5;color:#222;max-width:600px">' +
-    textoGrupo(notas, o).split('\n\n').map(p => '<p>' + esc(p).replace(/\n/g, '<br>') + '</p>').join('') + '</div>';
+    corpoGrupo(notas, o).split('\n\n').map(p => '<p>' + esc(p).replace(/\n/g, '<br>') + '</p>').join('') + marcaHtml + '</div>';
 }
 export function arquivoGrupo(notas, empresa, comBoleto) {
   const ns = notas.map(n => Number(n.numero)).sort((a, b) => a - b);

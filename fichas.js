@@ -1217,7 +1217,7 @@
       (tel ? '<a class="cta" href="' + esc(R.linkWhatsApp(tel, msgWa)) + '"><span>' + esc(cfg.proposta_cta || 'Vamos programar sua entrega?') + '</span><span class="vai">Confirmar pelo WhatsApp &nbsp;›</span></a>' : '') +
       '<footer>' + esc(cfg.proposta_rodape || CRM.nomeInstalacao()) + '</footer>' +
       // assinatura do produto (pedido do Anderson, 06/10/2026: o orçamento faz a propaganda); dá para tirar em Configurações
-      (cfg.sem_assinatura ? '' : '<p class="assinatura">' + (ehPedido ? 'Pedido' : 'Orçamento') + ' gerado pelo CRM <strong>Sistemi Dalessi</strong> · sistemas sob medida · ' + esc(CRM.ASSINATURA_EMAIL) + '</p>') + '</div>';
+      (cfg.sem_assinatura ? '' : '<p class="assinatura">' + esc(CRM.marcaRodape()) + '</p>') + '</div>';
     return { html, nome };
   }
 

@@ -867,8 +867,8 @@
   // Versão quadrada para o menu e a aba do navegador (sem ela, usa o logo normal).
   const logoIcone = () => (window.CRM_CONFIG && window.CRM_CONFIG.logoIcone) || logo();
   CRM.nomeInstalacao = nomeInstalacao;
-  // contato da Sistemi Dalessi na assinatura do produto (login e rodapé dos orçamentos)
-  CRM.ASSINATURA_EMAIL = 'afdalessi@gmail.com';
+  // a marca da Sistemi Dalessi no pé do que sai do CRM (marca.js, 13/11/2026: sem e-mail pessoal; o contato@ entra lá)
+  CRM.marcaRodape = () => (window.CRMMarca && window.CRMMarca.RODAPE) || '';
   CRM.logo = logo;
   // aviso contra boleto falso (boleto.js avisoGolpe): texto de Configurações ou o padrão com os dados do emitente
   CRM.avisoGolpe = () => {
@@ -906,7 +906,7 @@
     const o = ondasEntrada();
     $('#tela').innerHTML = '<div class="entrada">' + o.fundo + (comAnfitriao ? '<div class="entrada-par">' + anfitriao() : '') + '<div class="entrada-cartao">' + o.cartao +
       '<img src="' + esc(logo()) + '" alt="" class="logo-grande"><h1>' + esc(nomeInstalacao()) + '</h1>' + html + '</div>' + (comAnfitriao ? '</div>' : '') +
-      '<p class="rodape-entrada">CRM · Sistemi Dalessi — sistemas sob medida · <a href="mailto:' + CRM.ASSINATURA_EMAIL + '">' + CRM.ASSINATURA_EMAIL + '</a></p></div>';
+      '<p class="rodape-entrada">' + esc(CRM.marcaRodape()) + '</p></div>';
   }
 
   function telaAviso(titulo, texto) { telaEntrada('<h2>' + esc(titulo) + '</h2><p>' + esc(texto) + '</p>'); }

@@ -111,6 +111,8 @@ motorista, pela logística e como app instalado (PWA).
 - `.xlsx` lido por `xlsx-leitor.js` (ZIP/ZIP64 + DecompressionStream + DOMParser). **Não trocar pelo SheetJS
   do npm** (a 0.18.5 tem vulnerabilidades conhecidas). CSV: tenta UTF-8, cai para Windows-1252.
 - Bibliotecas de terceiros ficam em `vendor/` (html2canvas, jsPDF, pdf-lib), carregadas só na hora, sem CDN.
+- **Marca no pé de tudo que sai** (13/11/2026): o texto só em `marca.js` (`CRMMarca.RODAPE`); Edge Functions guardam cópia
+  `RODAPE_MARCA` (`testes/marca.test.js` confere). DANFE: só a margem livre; boleto: abaixo do código de barras. Nunca o Gmail dele.
 - `sw.js` **sem cache** (só deixa instalar o app); a versão nova continua chegando pela rede.
 
 ## Banco (Supabase)

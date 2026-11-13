@@ -348,7 +348,7 @@
         '<div><b><i>3</i>Já pagou?</b><span>Desconsidere este aviso e responda a mensagem em que o recebeu, com o comprovante.</span></div></section>' +
       '<section class="anexos"><h2>Neste arquivo</h2><div>' + anexos.map((a, i) => '<span><i>' + (i + 1) + '</i>' + esc(a) + '</span>').join('') + '</div></section>' +
       '<div class="rodape"><footer>' + esc(cfg.proposta_rodape || CRM.nomeInstalacao()) + '</footer>' +
-        (cfg.sem_assinatura ? '' : '<p class="assinatura">Documento gerado pelo CRM <strong>Sistemi Dalessi</strong> · sistemas sob medida · ' + esc(CRM.ASSINATURA_EMAIL) + '</p>') + '</div></div>';
+        (cfg.sem_assinatura ? '' : '<p class="assinatura">' + esc(CRM.marcaRodape()) + '</p>') + '</div></div>';
   }
   // logo da instalação em dataURL (para o quadro do emitente na DANFE); sem logo, a DANFE sai só com o texto
   let logoDanfe = null;
