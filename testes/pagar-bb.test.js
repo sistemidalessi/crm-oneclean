@@ -63,6 +63,11 @@ test('o que falta para pagar a conta', () => {
   assert.match(L.pronto(conta({ pag_forma: null })).erro, /como pagar/);
   assert.match(L.pronto(conta({ pag_forma: 'pix' }), null).erro, /favorecido/);
   assert.deepStrictEqual(L.pronto(conta({ pag_forma: 'pix' }), { pix_tipo: 'email', pix_chave: 'a@b.c' }), { forma: 'pix' });
+  // limite do BB por pagamento (13/11/2026: R$ 50 mil): acima dele não vai ao banco
+  assert.match(L.pronto(conta({ valor: 50000.01 })).erro, /limite/);
+  assert.deepStrictEqual(L.pronto(conta({ valor: 50000 })), { forma: 'boleto' });
+  assert.match(L.pronto(conta({ valor: 1200 }), null, 1000).erro, /limite/);
+  assert.deepStrictEqual(L.pronto(conta({ valor: 80000 }), null, 0), { forma: 'boleto' });
 });
 
 test('corpo do lote de boletos: juros entram como mora, desconto quando paga menos', () => {

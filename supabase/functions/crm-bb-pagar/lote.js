@@ -51,9 +51,12 @@ export function estadoDe(x) {
 }
 
 // o que falta para a conta ir ao banco (forma e erro); fav = favorecido do Pix
-export function pronto(l, fav) {
+// limite por pagamento combinado com o BB (13/11/2026: R$ 50 mil por pagamento e R$ 900 mil por mês); crm_config.dados.pagamentos.limite
+export const LIMITE_PADRAO = 50000;
+export function pronto(l, fav, limite = LIMITE_PADRAO) {
   if (!l || l.situacao !== 'aberto' || l.tipo !== 'saida') return { erro: 'não é conta a pagar em aberto' };
   if (!(Number(l.valor) > 0)) return { erro: 'conta sem valor' };
+  if (Number(limite) > 0 && Number(l.valor) > Number(limite)) return { erro: 'acima do limite do BB por pagamento (R$ ' + Number(limite).toLocaleString('pt-BR', { minimumFractionDigits: 2 }) + '): pague pelo app do banco' };
   if (l.pag_forma === 'boleto' || l.pag_forma === 'guia') {
     if (!/^\d{44}$/.test(String(l.pag_codigo || ''))) return { forma: l.pag_forma, erro: 'falta o código de barras' };
     if ((l.pag_forma === 'guia') !== (l.pag_codigo[0] === '8')) return { forma: l.pag_forma, erro: 'o código não é de ' + (l.pag_forma === 'guia' ? 'guia' : 'boleto') };

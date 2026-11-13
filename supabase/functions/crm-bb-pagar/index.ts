@@ -7,10 +7,10 @@
 //   POST { acao: 'ciclo' }                        → lê a situação dos pagamentos vivos; o que o banco pagou é baixado no Caixa
 //   POST { acao: 'teste_hm' }                     → (só homologação) manda os códigos de teste do próprio BB, sem conta nenhuma
 // Ambiente em crm_config.dados.pagamentos.ambiente: 'hm' (homologação do BB, conta de teste do banco; NADA é baixado no Caixa)
-// ou 'prod' (a conta da empresa; precisa do convênio PAG, do certificado A1 e de ligado = true).
+// ou 'prod' (a conta da empresa; precisa do convênio PAG, da aplicação de produção e de ligado = true; o A1 entra pela VPS, rota /bb, 13/11/2026).
 // Quem chama: o administrador logado, ou o agendador do banco (crm_bb_pag_tick, senha de crm_interno.bb_cfg) só para o ciclo.
 import { createClient } from 'npm:@supabase/supabase-js@2.116.0';
-import { CONTA_TESTE, pronto, grupos, corpoDe, CAMINHO, CONSULTA, itensDaResposta, consultaDoItem, estadoDoLote, lerJson, erroTexto, txt } from './lote.js';
+import { CONTA_TESTE, LIMITE_PADRAO, pronto, grupos, corpoDe, CAMINHO, CONSULTA, itensDaResposta, consultaDoItem, estadoDoLote, lerJson, erroTexto, txt } from './lote.js';
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type', 'Access-Control-Allow-Methods': 'POST, OPTIONS' };
 const resposta = (s: number, c: unknown) => new Response(JSON.stringify(c), { status: s, headers: { ...CORS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
@@ -32,12 +32,19 @@ function contaDe(cfg: any, amb: Amb) {
   if (!cfg.contrato || !ag || cc.length < 2) throw new Error('faltam o contrato (convênio PAG), a agência ou a conta em Configurações');
   return { agencia: ag, conta: Number(cc.slice(0, -1)), dv: cc.slice(-1).toUpperCase(), contrato: Number(cfg.contrato) };
 }
-// produção: o BB exige o certificado A1 (mTLS). Ainda não ligado: falta o convênio PAG (04/11/2026).
-function cliente(amb: Amb): Deno.HttpClient | undefined {
-  if (amb === 'hm') return undefined;
-  const cert = E('BB_PAG_CERT_PEM'), key = E('BB_PAG_KEY_PEM');
-  if (!cert || !key) throw new Error('a produção do pagamento precisa do certificado A1 (ainda não instalado)');
-  return Deno.createHttpClient({ cert, key });
+// produção: o BB exige o certificado A1 (mTLS), que só existe na VPS (regra do CLAUDE.md). 13/11/2026: a chamada sai daqui pronta
+// (endereço + token) e a rota /bb do serviço fiscal só acrescenta o certificado — o mesmo caminho do extrato (crm-bb). Com
+// { cru: true } a VPS devolve o texto do banco, relido aqui com lerJson (o número do pagamento tem 17 dígitos).
+async function viaVps(corpo: Record<string, unknown>) {
+  const url = E('FISCAL_URL'), tok = E('FISCAL_TOKEN');
+  if (!url || !tok) throw new Error('faltam FISCAL_URL e FISCAL_TOKEN nos Secrets');
+  const r = await fetch(url.replace(/\/$/, '') + '/bb', { method: 'POST', headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...corpo, cru: true }), signal: AbortSignal.timeout(60000) });
+  const j = await r.json().catch(() => ({ erro: 'resposta inválida do serviço fiscal (HTTP ' + r.status + ')' }));
+  if (r.status === 404) throw new Error('o serviço fiscal da VPS ainda não tem a rota /bb');
+  if (!r.ok) throw new Error(j.erro || 'serviço fiscal: HTTP ' + r.status);
+  const texto = typeof j.texto === 'string' ? j.texto : JSON.stringify(j.json ?? null);
+  return { ok: j.status >= 200 && j.status < 300, status: Number(j.status) || 0, j: lerJson(texto) ?? j.json ?? null, t: texto };
 }
 async function token(amb: Amb) {
   const id = E('BB_PAG_CLIENT_ID'), seg = E('BB_PAG_CLIENT_SECRET');
@@ -45,8 +52,14 @@ async function token(amb: Amb) {
   const r = await fetch(AMB[amb].oauth, { method: 'POST', headers: { Authorization: 'Basic ' + btoa(id + ':' + seg), 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({ grant_type: 'client_credentials', scope: ESCOPOS }) });
   const t = await r.text(); const j: any = lerJson(t);
-  if (!r.ok || !j?.access_token) throw new Error('o BB recusou as chaves de pagamento (' + r.status + '): ' + String(j?.error_description || j?.error || t).slice(0, 200));
-  return j.access_token as string;
+  if (r.ok && j?.access_token) return j.access_token as string;
+  // produção: se o BB pedir o certificado também no token, pela VPS (como o tokenMtls da crm-bb)
+  if (amb === 'prod') {
+    const v = await viaVps({ url: AMB[amb].oauth, metodo: 'POST', basic: id + ':' + seg, form: { grant_type: 'client_credentials', scope: ESCOPOS } });
+    if (v.ok && v.j?.access_token) return v.j.access_token as string;
+    throw new Error('o BB recusou as chaves de pagamento (' + r.status + ' / pela VPS ' + v.status + '): ' + String(v.j?.error_description || v.j?.error || v.t || t).slice(0, 200));
+  }
+  throw new Error('o BB recusou as chaves de pagamento (' + r.status + '): ' + String(j?.error_description || j?.error || t).slice(0, 200));
 }
 const msgBB = (j: any, t: string) => {
   const e = j?.erros || j?.errors || (j?.error ? [j.error] : null);
@@ -77,12 +90,15 @@ Deno.serve(async (req) => {
   if (!admin && !(agendador && (c?.acao === 'ciclo' || (c?.acao === 'teste_hm' && amb === 'hm')))) return resposta(401, { erro: 'só o administrador' });
 
   try {
-    let tk = '', http: Deno.HttpClient | undefined;
+    // um token por ambiente (o ciclo pode ler itens da homologação e da produção na mesma chamada)
+    const tks: Partial<Record<Amb, string>> = {};
     const bb = async (met: string, cam: string, corpo?: unknown, ambX: Amb = amb) => {
-      if (!tk) { tk = await token(ambX); http = cliente(ambX); }
-      const r = await fetch(AMB[ambX].api + cam + (cam.includes('?') ? '&' : '?') + 'gw-dev-app-key=' + encodeURIComponent(E('BB_PAG_APP_KEY')), {
-        method: met, headers: { Authorization: 'Bearer ' + tk, 'Content-Type': 'application/json' }, body: corpo ? JSON.stringify(corpo) : undefined,
-        signal: AbortSignal.timeout(40000), ...(http ? { client: http } : {}) } as RequestInit);
+      if (!tks[ambX]) tks[ambX] = await token(ambX);
+      const tk = tks[ambX]!;
+      const u = AMB[ambX].api + cam + (cam.includes('?') ? '&' : '?') + 'gw-dev-app-key=' + encodeURIComponent(E('BB_PAG_APP_KEY'));
+      if (ambX === 'prod') return await viaVps({ url: u, metodo: met, token: tk, ...(corpo ? { json: corpo } : {}) });
+      const r = await fetch(u, { method: met, headers: { Authorization: 'Bearer ' + tk, 'Content-Type': 'application/json' }, body: corpo ? JSON.stringify(corpo) : undefined,
+        signal: AbortSignal.timeout(40000) });
       const t = await r.text();
       return { ok: r.ok, status: r.status, j: lerJson(t), t };
     };
@@ -110,7 +126,7 @@ Deno.serve(async (req) => {
         if (amb === 'prod') { const { data: vs } = await db.from('crm_fin_pag_itens').select('lancamento_id').in('lancamento_id', ids).eq('ativo', true).eq('ambiente', 'prod'); (vs || []).forEach((v: any) => vivos.add(v.lancamento_id)); }
         for (const l of ls || []) {
           const fav = l.pag_favorecido_id ? favs.get(l.pag_favorecido_id) : null;
-          const p = pronto(l, fav);
+          const p = pronto(l, fav, cfg.limite == null || cfg.limite === '' ? LIMITE_PADRAO : Number(cfg.limite));
           if (p.erro) { pulados.push({ id: l.id, descricao: l.descricao, motivo: p.erro }); continue; }
           if (vivos.has(l.id)) { pulados.push({ id: l.id, descricao: l.descricao, motivo: 'já está num envio ao banco' }); continue; }
           itens.push({ forma: p.forma, data, conta: l, fav });
@@ -195,7 +211,7 @@ Deno.serve(async (req) => {
       const porAmb: Record<string, any[]> = {};
       (vivos || []).filter((x: any) => !(x.estado === 'pago' || x.estado === 'debitado') || (x.ambiente === 'prod' && !x.baixado)).forEach((x: any) => (porAmb[x.ambiente] = porAmb[x.ambiente] || []).push(x));
       for (const [a, lista] of Object.entries(porAmb)) {
-        const ambI = a as Amb; tk = ''; http = undefined;
+        const ambI = a as Amb;
         const ct = contaDe(cfg, ambI);
         for (const it of lista) {
           const r = await bb('GET', CONSULTA[it.forma as 'boleto'] + it.identificador_bb + '?agencia=' + ct.agencia + '&contaCorrente=' + ct.conta + '&digitoVerificador=' + ct.dv, undefined, ambI);

@@ -41,10 +41,17 @@ A mesma lista resumida está no `PENDENCIAS-ESCRITORIO.md` do `agilite-sistema-g
         pedir.
       - **Cobrança (convênio 3804880):** abatimento, alteração e baixa de boleto registrado são aceitos (o CRM já faz desde 04/11);
         a API também avisa por **webhook** a baixa operacional (hoje o CRM pergunta de 10 em 10 min).
-      Falta, na ordem: (1) Anderson assinar o termo de adesão quando a agência avisar e anotar o número do convênio; (2) dizer à
-      agência os limites; (3) pedir a entrada no piloto do DDA; (4) criar a aplicação nova com Pagamentos em Lote e o certificado,
-      pedir produção, pôr as chaves nos Secrets; (5) o Claude troca `pagamentos.ambiente` para produção e o 1º teste é um boleto
-      pequeno de fornecedor (custo zero), liberado pelo app do BB.
+      **13/11 (2º e-mail do gerente):** limites aprovados (R$ 50 mil por pagamento, R$ 900 mil por mês; o CRM já recusa acima
+      de 50 mil); OneClean aprovada no **piloto do DDA** (ele manda documentação e termo); o termo do convênio PAG aparece no
+      BB Digital em Pagamentos e Transferências > Contratar e Gerenciar Serviços > Consultar e Assinar Termo de Adesão; o número
+      vem por e-mail. A produção do "Pagar no BB" já passa pelo A1 da VPS (rota `/bb`, versão `2026-11-13a`).
+      Falta, na ordem: (1) Anderson assinar o termo quando aparecer e mandar o número do convênio; (2) criar a aplicação NOVA no
+      Portal com Pagamentos em Lote, mandar o certificado A1 no cartão "Certificados" e pedir produção; (3) Anderson pôr as chaves
+      novas nos Secrets (`BB_PAG_CLIENT_ID`, `BB_PAG_CLIENT_SECRET`, `BB_PAG_APP_KEY`); (4) o Claude troca `pagamentos.ambiente`
+      para produção e o 1º teste é um boleto pequeno de fornecedor (custo zero), liberado pelo app do BB; (5) DDA: assinar o
+      termo do piloto e pedir a inclusão da aplicação.
+      **Webhook da Cobrança:** cadastrar no Portal, na aplicação "CRM OneClean", a URL de callback
+      `https://udhigavckigciqnicgyy.supabase.co/functions/v1/crm-bb-aviso` (função publicada e testada em 13/11).
 
 - [ ] **Estoque antes da virada (24/10):** parte das 36 diferenças era erro do CRM (fuso), já corrigido; Belaplast 9758 e
       Leal 23026 reabertas. Falta: (1) o **comprador** dar a ciência das notas sem XML completo (desde 27/10 as notas de compra são dele do começo ao fim) (Vigut ×2 e AJA de 23/10, Lotus de

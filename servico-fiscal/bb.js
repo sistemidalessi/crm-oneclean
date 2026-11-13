@@ -36,7 +36,9 @@ function chama(cfg, b) {
       res.on('end', () => {
         const texto = Buffer.concat(partes).toString('utf8');
         let json = null; try { json = JSON.parse(texto); } catch (e) { /* texto */ }
-        resolve({ status: res.statusCode, json, texto: json ? undefined : texto.slice(0, 2000) });
+        // { cru: true } (13/11/2026, Pagamentos em Lote): devolve também o texto inteiro. O número do pagamento tem 17 dígitos
+        // e vem como número no JSON; o JSON.parse daqui arredonda, então quem chama relê o texto (lerJson da crm-bb-pagar).
+        resolve({ status: res.statusCode, json, texto: json && !b.cru ? undefined : (b.cru ? texto.slice(0, 2000000) : texto.slice(0, 2000)) });
       });
     });
     req.on('timeout', () => req.destroy(new Error('o Banco do Brasil não respondeu a tempo')));

@@ -12,7 +12,7 @@
    Rotas (POST com JSON): /status, /previa, /emitir, /consultar, /reenviar, /cancelar, /cce, /inutilizar, /dfe (notas de
    compra: distribuição pelo NSU ou pela chave), /ciencia (Ciência da Operação de uma nota de compra), /manifestar (resposta
    definitiva: confirmação, desconhecimento, operação não realizada), /cadastro (consulta cadastro da Sefaz-SP pelo CNPJ: inscrição
-   estadual e se está habilitada; sempre em produção, é só leitura), /bb (chamada ao Banco do Brasil com o A1: extrato da conta;
+   estadual e se está habilitada; sempre em produção, é só leitura), /bb (chamada ao Banco do Brasil com o A1: extrato da conta e Pagamentos em Lote;
    só endereços *.bb.com.br; ver bb.js); GET /saude.
    Certificado novo (renovação do A1): trocar o arquivo e mandar "systemctl reload oneclean-fiscal" (SIGHUP relê). */
 
@@ -29,7 +29,7 @@ const D = require('./dfe');
 const BB = require('./bb');
 const G = require('./gnre');
 
-const VERSAO = '2026-11-11a';
+const VERSAO = '2026-11-13a';
 const env = process.env;
 let cert = null;   // { certPem, keyPem, dados }
 
