@@ -61,7 +61,9 @@ Deno.serve(async (req) => {
     try {
       if (!u || !EMAIL.test(String(u.email || ''))) throw new Error('sem e-mail no cadastro');
       const prazo = r.prazo ? '\nPrazo para responder: ' + quando(r.prazo) + '.' : '';
-      const texto = r.texto + '\n' + prazo + '\nResponda pelo CRM: ao entrar (' + SITE + '), a mensagem abre na tela com o espaço para a sua resposta.' +
+      // 13/11/2026: sem o endereço do CRM no corpo (a caixa recusou os 5 primeiros com "554 5.7.1 Rejected for policy reason";
+      // o teste sem link, para o mesmo domínio, saiu)
+      const texto = r.texto + '\n' + prazo + '\nResponda pelo CRM: ao entrar, a mensagem abre na tela com o espaço para a sua resposta.' +
         '\n\n' + r.de + '\n' + EMPRESA;
       await manda(u.email, r.de + ' · ' + r.assunto, texto, r.de);
       feitos.enviados++;
