@@ -604,6 +604,7 @@
     if (CRM.fichas) CRM.fichas.renderAbertas();
     if (CRM.turma) CRM.turma.depoisRender(E.aba, al); // mascotes (turma.js): guia do dia no topo e o especialista da tela
     if (CRM.apresentacao) CRM.apresentacao.conferir(); // na 1ª vez, o diretor da área se apresenta (apresentacao.js)
+    if (CRM.recados) CRM.recados.conferir();           // recado do diretor sem resposta abre e só fecha respondido (recados.js)
   }
 
   CRM.irPara = (aba, filtros) => {

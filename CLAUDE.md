@@ -120,8 +120,7 @@ motorista, pela logística e como app instalado (PWA).
   `TIPOS_ATIVIDADE` em `regras.js` **e** o `check` de `crm_atividades.tipo`. Mesmo para situações e status.
 - **Função que já existe: copiar do BANCO antes de mudar** (`select pg_get_functiondef(...)`), não do `schema.sql`, e todo
   remendo aplicado no banco vai também para o `schema.sql` no mesmo commit. Depois, `node ferramentas/confere-funcoes.js`
-  e rodar o SQL: tem de voltar `[]`. (05/11/2026: a trava SEM CADASTRO, que estava só no banco, sumiu quando o
-  `crm_pedidos_atualizar` foi regravado a partir do arquivo; o pedido 87 saiu com item CONSULTOR sem travar.)
+  e rodar o SQL: tem de voltar `[]` (caso de 05/11 no histórico).
 - **Permissões na RLS, não na tela.** Papéis: admin, gestor, vendedor, comprador, logística, motorista
   (`crm_eh_admin/gestor/membro/ativo/comprador/logistica/motorista()`, `crm_eh_estoque_op()`). O cliente espelha
   só para esconder botões. Ao criar política nova: copiar o formato das que existem.
@@ -286,22 +285,24 @@ motorista, pela logística e como app instalado (PWA).
   `boleto_cliente` está aprovado; o CRM **não manda sozinho ao cartório**.
 - E-mail pelo Brevo (`crm-email`), em nome da vendedora da carteira, com fila de aprovação; descadastro (LGPD) só a
   função grava (`email_sair_em`).
+- **Recados do diretor** (`crm_recados`: e-mail + janela no CRM até responder). Cobrança da equipe **separa departamento**:
+  INTERNO (a gestora cobra as internas) e EXTERNO (`comissao_usuarios` = `externo`: recado próprio a cada externa; **a
+  gestora não cobra nem vê números de externa**).
 - Login 1 vez por dia no navegador; app instalado pede o login a cada abertura.
 - **Envio sozinho só nas exceções decididas pelo Anderson** (o resto é clique de alguém): NF-e com o boleto ao cliente por
   e-mail, cobrança automática (boleto atualizado e aviso do cartório), XML do mês ao contador e, como **exceção nº 11 (mesma
   numeração da Agilité, 06/11/2026), o fiscal dos agentes**: Web Push só nos aparelhos que o Anderson inscreveu, das 7h às
-  21h (grave novo uma vez, resumo seg/qua/sex 8h, "tudo certo" às segundas, prazos de hoje e amanhã ter/qui 8h). O fiscal
+  21h. O fiscal
   (`crm-fiscal-agentes`, `crm_fiscal_conferir`, agendador de hora em hora) só confere e avisa: **não conserta sozinho**.
   Conferência nova entra em `crm_fiscal_conferir` (resultado, não "se rodou"); a que quebra vira problema, nunca silêncio.
   Desde 07/11/2026 ele vigia também as **regras fiscais dos produtos** (`crm_interno.fiscal_regras_produtos`: sem regra, ou
   PIS/COFINS contra a lei). **A lista de monofásicos (Lei 10.147) e a do papel higiênico vivem em três lugares — `fiscal.js`,
   `cbs-estoque.js` e `crm_interno.fiscal_regras_produtos` — mudou uma, mudar as três.**
   A OneClean está se creditando (06/11/2026): guias de ICMS, PIS/COFINS e IRPJ/CSLL com `sem_imposto` no calendário até o
-  Anderson dizer que os créditos acabaram (como o "impostos = 0%" das metas).
+  Anderson dizer que os créditos acabaram.
 - **GNRE do DIFAL (06/11/2026, pedido do Anderson):** o robô `crm-gnre` **gera** a guia no Portal GNRE sozinho depois da NF-e
   com DIFAL (`servico-fiscal/gnre.js`, rota `/gnre`; tabela `crm_gnre`; chave `crm_config.dados.gnre.ligado`). Gerar não
-  paga: o código de barras vai para a conta do Caixa e **pagar é sempre clique do Anderson**. RS: receita 100102, doc. 22,
-  campo extra 74; FCP do RS em guia própria (100129). UF nova só depois do `GnreConfigUF` conferido (`dados.gnre.uf.<UF>`).
+  paga: o código de barras vai para a conta do Caixa e **pagar é sempre clique do Anderson**. UF nova só depois do `GnreConfigUF` conferido (`dados.gnre.uf.<UF>`).
 
 ## Segurança (lições da auditoria de 11/09/2026 aplicadas)
 
@@ -325,7 +326,7 @@ motorista, pela logística e como app instalado (PWA).
 - CSV exportado: texto que começa com `= + - @` ganha apóstrofo (`R.csvCelula`).
 - Documentos da empresa (planilhas, manuais em PDF, relatórios) **não são versionados** aqui.
 - **Sessão do vigia da legislação: nunca alterar código nem este arquivo** (grava só em
-  `docs/legislacao/registro.md`; tarefa `trig_017wMNdFUtTta59fmeCNFALB`, sessão nova a cada rodada e aviso no celular do Anderson desde 23/10; a antiga `trig_01QWhye9…` ficou desligada).
+  `docs/legislacao/registro.md`; tarefa `trig_017wMNdFUtTta59fmeCNFALB`, sessão nova a cada rodada, aviso no celular).
 - Auditoria de 22/10/2026 (20 itens) fechada: não reabrir sem motivo novo (detalhes em `docs/historico/2026-10.md`).
 
 ## Verificar antes de commitar

@@ -13263,3 +13263,87 @@ begin
 end $$;
 revoke all on function public.crm_rota_pendentes(date) from public, anon;
 grant execute on function public.crm_rota_pendentes(date) to authenticated;
+
+-- ============================================================================================================================
+-- Recados do Diretor de Vendas (13/11/2026, pedido do Anderson, pelo celular: "quero um negócio automático; quando eu for
+-- cobrar através do diretor, é porque eu vou estar na rua"). O administrador (ou o Claude, a pedido dele) grava uma linha por
+-- pessoa; o gatilho chama a Edge Function crm-recados, que manda o recado por e-mail; dentro do CRM o recado abre numa janela
+-- ao entrar e só fecha com a resposta (recados.js). A resposta vai por e-mail ao administrador (crm-recados).
+-- Regra dos grupos (Anderson, 13/11): cobrança da equipe se separa por departamento — INTERNO (gestora + vendedoras internas;
+-- a gestora cobra as internas) e EXTERNO (comissão "externo" em crm_config.dados.comissao_usuarios; cada externa recebe o
+-- recado dela; a gestora não cobra nem recebe números de externa). A coluna grupo guarda isso.
+create table if not exists public.crm_recados (
+  id            bigint generated always as identity primary key,
+  para          uuid not null references public.crm_usuarios(user_id),
+  de            text not null default 'Diretor de Vendas',
+  assunto       text not null,
+  texto         text not null,
+  prazo         timestamptz,
+  grupo         text check (grupo in ('interno', 'externo')),
+  criado_por    uuid default auth.uid(),
+  criado_em     timestamptz not null default now(),
+  email_em      timestamptz,
+  email_erro    text,
+  lido_em       timestamptz,
+  resposta      text,
+  respondido_em timestamptz,
+  aviso_em      timestamptz,
+  aviso_erro    text,
+  atualizado_em timestamptz not null default now()
+);
+create index if not exists crm_recados_para on public.crm_recados (para) where respondido_em is null;
+alter table public.crm_recados enable row level security;
+revoke all on public.crm_recados from anon, public;
+grant select, insert, update on public.crm_recados to authenticated;   -- recado não se apaga (fica o histórico da cobrança)
+drop policy if exists le on public.crm_recados;
+create policy le on public.crm_recados for select to authenticated using (para = (select auth.uid()) or (select public.crm_eh_admin()));
+drop policy if exists grava on public.crm_recados;
+create policy grava on public.crm_recados for insert to authenticated with check ((select public.crm_eh_admin()));
+drop policy if exists muda on public.crm_recados;
+create policy muda on public.crm_recados for update to authenticated using (para = (select auth.uid()) or (select public.crm_eh_admin()));
+
+-- quem recebe só marca "lido" e responde uma vez; o resto da linha não muda (o administrador e a função mudam o que quiserem)
+create or replace function crm_interno.recados_guarda() returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  new.atualizado_em := now();
+  if (select auth.uid()) is null or public.crm_eh_admin() then return new; end if;
+  if old.para <> (select auth.uid()) then raise exception 'recado de outra pessoa'; end if;
+  if old.resposta is not null and new.resposta is distinct from old.resposta then raise exception 'o recado já foi respondido'; end if;
+  if new.resposta is not null and old.resposta is null then
+    new.resposta := left(btrim(new.resposta), 4000);
+    if length(new.resposta) < 5 then raise exception 'escreva a resposta'; end if;
+    new.respondido_em := now();
+  else
+    new.resposta := old.resposta; new.respondido_em := old.respondido_em;
+  end if;
+  new.lido_em := coalesce(old.lido_em, case when new.lido_em is not null then now() end);
+  new.para := old.para; new.de := old.de; new.assunto := old.assunto; new.texto := old.texto; new.prazo := old.prazo; new.grupo := old.grupo;
+  new.criado_por := old.criado_por; new.criado_em := old.criado_em; new.email_em := old.email_em; new.email_erro := old.email_erro;
+  new.aviso_em := old.aviso_em; new.aviso_erro := old.aviso_erro;
+  return new;
+end $$;
+create or replace trigger crm_recados_guarda before update on public.crm_recados for each row execute function crm_interno.recados_guarda();
+
+-- chama a crm-recados (mesma senha do agendador da cobrança) quando há e-mail a mandar ou resposta a avisar
+create or replace function crm_interno.recados_tick() returns void language plpgsql security definer set search_path = public as $$
+declare c record;
+begin
+  if not exists (select 1 from public.crm_recados where (email_em is null and email_erro is null)
+                   or (respondido_em is not null and aviso_em is null and aviso_erro is null)) then return; end if;
+  select * into c from crm_interno.cobranca_cfg where id = 1;
+  if c.url is null then return; end if;
+  perform net.http_post(url := replace(c.url, '/crm-cobranca', '/crm-recados'), body := jsonb_build_object('acao', 'rodar', 'origem', 'agendador'),
+    headers := jsonb_build_object('Content-Type', 'application/json', 'Authorization', 'Bearer ' || c.senha), timeout_milliseconds := 60000);
+end $$;
+create or replace function crm_interno.recados_depois() returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if tg_op = 'INSERT' or (new.respondido_em is not null and old.respondido_em is null) then perform crm_interno.recados_tick(); end if;
+  return null;
+end $$;
+create or replace trigger crm_recados_depois after insert or update on public.crm_recados for each row execute function crm_interno.recados_depois();
+-- reserva: se o gatilho não conseguiu chamar a função, o agendador tenta a cada 10 minutos (só chama quando há pendência)
+do $$ begin
+  if exists (select 1 from pg_extension where extname = 'pg_cron') and exists (select 1 from pg_extension where extname = 'pg_net') then
+    perform cron.schedule('crm-recados', '*/10 * * * *', 'select crm_interno.recados_tick()');
+  end if;
+end $$;

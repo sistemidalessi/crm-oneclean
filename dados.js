@@ -1726,6 +1726,13 @@
   // Apresentação dos diretores (apresentacao.js): quem já leu. RLS: cada um a sua linha; o administrador lê todas.
   Supa.prototype.apresentacoes = async function () { return unwrap(await this.sb.from('crm_ia_apresentacoes').select('user_id, diretor, versao, visto_em')); };
   Supa.prototype.apresentacaoVista = async function (diretor, versao) { return unwrap(await this.sb.from('crm_ia_apresentacoes').upsert({ diretor, versao, visto_em: new Date().toISOString() }, { onConflict: 'user_id,diretor' })); };
+  // Recados do Diretor de Vendas (recados.js): RLS — quem recebe lê os seus; o administrador lê todos. Quem recebe só marca lido e responde (gatilho do banco).
+  Supa.prototype.recados = async function () { return unwrap(await this.sb.from('crm_recados').select('*').order('id', { ascending: false }).limit(300)); };
+  Supa.prototype.recadoLido = async function (id) { return unwrap(await this.sb.from('crm_recados').update({ lido_em: new Date().toISOString() }).eq('id', id).is('lido_em', null)); };
+  Supa.prototype.recadoResponder = async function (id, resposta) { return unwrap(await this.sb.from('crm_recados').update({ resposta, respondido_em: new Date().toISOString() }).eq('id', id).is('resposta', null)); };
+  Local.prototype.recados = async function () { return lsLe('crm_recados', []); };
+  Local.prototype.recadoLido = async function (id) { lsGrava('crm_recados', lsLe('crm_recados', []).map(r => r.id === id && !r.lido_em ? Object.assign({}, r, { lido_em: new Date().toISOString() }) : r)); };
+  Local.prototype.recadoResponder = async function (id, resposta) { lsGrava('crm_recados', lsLe('crm_recados', []).map(r => r.id === id && !r.resposta ? Object.assign({}, r, { resposta, respondido_em: new Date().toISOString() }) : r)); };
   Local.prototype.apresentacoes = async function () { return lsLe('crm_ia_apresentacoes', []); };
   Local.prototype.apresentacaoVista = async function (diretor, versao) { const eu = 'local'; lsGrava('crm_ia_apresentacoes', lsLe('crm_ia_apresentacoes', []).filter(x => x.diretor !== diretor).concat({ user_id: eu, diretor, versao, visto_em: new Date().toISOString() })); };
   Local.prototype.turmaMarcas = async function () { return lsLe('crm_turma_marcas', []); };
