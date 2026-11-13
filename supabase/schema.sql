@@ -8563,6 +8563,24 @@ do $$ begin
   end if;
 end $$;
 
+-- Aviso do BB (webhook da Cobrança, 13/11/2026): a Edge Function crm-bb-aviso (sem login; quem chama é o BB) só pede um ciclo
+-- já. O conteúdo do aviso não é usado (o ciclo confere no BB) e o ciclo sai no máximo uma vez por minuto. Só o service_role.
+alter table crm_interno.bb_cfg add column if not exists aviso_em timestamptz;
+alter table crm_interno.bb_cfg add column if not exists avisos integer not null default 0;
+create or replace function public.crm_bb_aviso(p_itens integer default 0) returns boolean language plpgsql security definer set search_path = public as $$
+declare n integer;
+begin
+  if coalesce(auth.jwt() ->> 'role', '') <> 'service_role' then raise exception 'só o serviço'; end if;
+  update crm_interno.bb_cfg set aviso_em = now(), avisos = avisos + 1
+    where id = 1 and (aviso_em is null or aviso_em < now() - interval '1 minute');
+  get diagnostics n = row_count;
+  if n = 0 then return false; end if;
+  perform public.crm_bb_tick();
+  return true;
+end;
+$$;
+revoke all on function public.crm_bb_aviso(integer) from public, anon, authenticated;
+
 create or replace function public.crm_boleto_bb_reenviar(p_id uuid) returns void language plpgsql security definer set search_path = public as $$
 begin
   if not public.crm_eh_admin() then raise exception 'só o administrador'; end if;

@@ -169,7 +169,8 @@ motorista, pela logística e como app instalado (PWA).
   (`gestao.js`, `cadencia.js`, `perfil.js`, `TELA_INICIAL_PADRAO` em `app.js`).
 - Ao publicar Edge Function, conferir o conteúdo publicado (md5) com o do repositório. `verify_jwt` desligado
   só onde a autenticação é outra: `crm-notas` (chave de integração), `crm-caixa-leitura` e `crm-caixa-espelho`
-  (senha própria), `crm-email-sair`, `crm-pdf`, `crm-whatsapp-retorno` (assinatura da Meta).
+  (senha própria), `crm-email-sair`, `crm-pdf`, `crm-whatsapp-retorno` (assinatura da Meta), `crm-bb-aviso` (aviso do BB:
+  não usa o conteúdo, só adianta o ciclo da `crm-bb`, no máximo 1 por minuto).
 - **Push só quando o Anderson pedir.**
 
 ## Regras por área (detalhes no histórico do mês)

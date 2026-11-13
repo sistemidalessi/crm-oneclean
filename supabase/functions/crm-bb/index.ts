@@ -18,7 +18,8 @@
 //   POST { acao: 'extrato_conciliar', de?, ate? } lê o extrato, guarda em crm_fin_extrato e confere com o Caixa (05/11/2026;
 //                                    agendador crm-bb-extrato, de 30 em 30 min das 7h às 21h)
 //   POST { acao: 'ciclo' }           o do agendador (pg_cron crm-bb-ciclo, a cada 10 min das 7h às 20h50): prepara as parcelas
-//                                    das notas do CRM, registra, baixa os das notas canceladas e lê os pagos
+//                                    das notas do CRM, registra, baixa os das notas canceladas e os repetidos, lê os pagos
+//                                    (também chamado pelo aviso do BB: crm-bb-aviso → crm_bb_aviso → crm_bb_tick)
 // Chaves só nos Secrets: BB_CLIENT_ID, BB_CLIENT_SECRET, BB_APP_KEY (developer_application_key).
 // Quem chama: o administrador logado, ou o banco (crm_bb_chamar, senha que nasce em crm_interno.bb_cfg).
 // Deploy: verify_jwt DESLIGADO (o banco chama sem login; a função confere a senha ou o login).
@@ -162,6 +163,13 @@ Deno.serve(async (req) => {
       const tk = await token('cobrancas.boletos-requisicao cobrancas.boletos-info');
       let feitos = 0, erros = 0; const detalhes: string[] = [];
       for (const bo of prep) {
+        // 13/11/2026 (NF 2938): a tela (emissão, boleto) e o agendador rodam o ciclo ao mesmo tempo; os dois pegavam o mesmo
+        // "preparado", o 2º levava "Nosso Número já incluído", marcava erro por cima do registrado e o CRM fazia outro boleto.
+        // Agora cada um "pega" o boleto antes de mandar (registrado_em vira a marca; vencida em 5 min, se a função cair no meio).
+        const marca = new Date().toISOString();
+        const { data: pego } = await db.from('crm_boletos_bb').update({ registrado_em: marca }).eq('id', bo.id).eq('situacao', 'preparado')
+          .or('registrado_em.is.null,registrado_em.lt.' + new Date(Date.now() - 5 * 60000).toISOString()).select('id');
+        if (!pego || !pego.length) continue;
         const { data: e } = await db.from('crm_empresas').select('nome, razao_social, cnpj, logradouro, numero, complemento, bairro, cidade, uf, cep, telefone').eq('id', bo.empresa_id).maybeSingle();
         const doc = dig(e?.cnpj);
         const juros = Number(b.juros_mes_pct) || 0, multa = Number(b.multa_pct) || 0;
@@ -198,7 +206,23 @@ Deno.serve(async (req) => {
           feitos++;
         } else {
           const m = 'rejeitado pelo banco: ' + msgBB(j, t);
-          await db.from('crm_boletos_bb').update({ situacao: 'erro', motivo: m.slice(0, 300), atualizado_em: new Date().toISOString() }).eq('id', bo.id);
+          // "já incluído" (4874915): o boleto existe no banco. Se é este mesmo (CNPJ e valor iguais), assume o que já está lá
+          // em vez de marcar erro (o erro fazia o CRM preparar outro boleto para a mesma parcela: cliente com dois boletos).
+          if (/4874915|j[aá] inclu/i.test(m)) {
+            const g = await fetch(COBRANCA + '/boletos/000' + bo.nosso_numero + '?numeroConvenio=' + encodeURIComponent(String(b.convenio)) + '&gw-dev-app-key=' + APP(), { headers: { Authorization: 'Bearer ' + tk } });
+            const gt = await g.text(); let d: any = null; try { d = JSON.parse(gt); } catch { d = null; }
+            const linha = dig(d?.codigoLinhaDigitavel);
+            if (g.ok && linha && Number(dig(d.numeroInscricaoSacadoCobranca)) === Number(doc) && Math.abs(Number(d.valorOriginalTituloCobranca) - Number(bo.valor)) < 0.005) {
+              await db.from('crm_boletos_bb').update({
+                situacao: 'registrado', registrado_em: marca, linha_digitavel: linha, codigo_barras: dig(d.textoCodigoBarrasTituloCobranca) || null, motivo: null,
+                retorno: (bo.retorno || []).concat([{ api: 'registro', em: new Date().toISOString(), adotado: 'já incluído no banco' }]),
+                atualizado_em: new Date().toISOString()
+              }).eq('id', bo.id).eq('situacao', 'preparado');
+              feitos++; continue;
+            }
+          }
+          // só marca erro o que continua "preparado" (nunca por cima de um registrado)
+          await db.from('crm_boletos_bb').update({ situacao: 'erro', motivo: m.slice(0, 300), registrado_em: null, atualizado_em: new Date().toISOString() }).eq('id', bo.id).eq('situacao', 'preparado');
           erros++; detalhes.push((bo.documento || bo.duplicata) + ': ' + m);
           console.error('[crm-bb] ' + (bo.documento || bo.duplicata) + ' ' + r.status + ' ' + m);
         }
@@ -308,6 +332,36 @@ Deno.serve(async (req) => {
         }
       }
       return { baixados, cancelados, erros, detalhes };
+    }
+
+    // ------------------------------------------------------------ boleto repetido → baixado no banco
+    // 13/11/2026 (NF 2938, Anderson autorizou a baixa): o boleto que ficou "erro" por "já incluído" mas chegou a ser registrado
+    // (tem linha digitável) enquanto outro boleto da mesma parcela vale. Sem a baixa o cliente vê dois boletos no DDA e pode
+    // pagar os dois. Só esse caso: a parcela tem outro boleto registrado ou pago.
+    async function baixarRepetidos() {
+      const { data: errs } = await db.from('crm_boletos_bb').select('id, nosso_numero, duplicata, retorno, motivo')
+        .eq('situacao', 'erro').eq('caminho', 'api').not('linha_digitavel', 'is', null).ilike('motivo', '%inclu%').limit(20);
+      if (!errs || !errs.length) return { baixados: 0 };
+      let tk = '', baixados = 0; const detalhes: string[] = [];
+      const agora = () => new Date().toISOString();
+      for (const bo of errs) {
+        const { data: outro } = await db.from('crm_boletos_bb').select('id').eq('duplicata', bo.duplicata).neq('id', bo.id).in('situacao', ['registrado', 'pago']).limit(1);
+        if (!outro || !outro.length) continue;
+        if (!tk) tk = await token('cobrancas.boletos-requisicao cobrancas.boletos-info');
+        const r = await fetch(COBRANCA + '/boletos/000' + bo.nosso_numero + '/baixar?gw-dev-app-key=' + APP(), { method: 'POST',
+          headers: { Authorization: 'Bearer ' + tk, 'Content-Type': 'application/json' }, body: JSON.stringify({ numeroConvenio: Number(b.convenio) }) });
+        const t = await r.text(); let j: any = null; try { j = JSON.parse(t); } catch { /* texto */ }
+        const m = msgBB(j, t);
+        if (r.ok || /baixad/i.test(m)) {
+          await db.from('crm_boletos_bb').update({ situacao: 'baixado', motivo: 'boleto repetido (a parcela tem outro boleto): baixado no banco', atualizado_em: agora(),
+            retorno: (bo.retorno || []).concat([{ api: 'baixa', em: agora(), motivo: 'repetido', resposta: r.ok ? (j?.dataBaixa || 'ok') : m }]) }).eq('id', bo.id).eq('situacao', 'erro');
+          baixados++;
+        } else {
+          detalhes.push(bo.duplicata + ': ' + m);
+          console.error('[crm-bb] baixa do repetido ' + bo.duplicata + ' ' + r.status + ' ' + m);
+        }
+      }
+      return { baixados, detalhes };
     }
 
     // ------------------------------------------------------------ devolução → abatimento (ou baixa) no banco
@@ -587,6 +641,8 @@ Deno.serve(async (req) => {
       let prep: any = null;
       if (dups && dups.length) { const { data, error } = await db.rpc('crm_boleto_bb_preparar', { p_duplicatas: dups }); if (error) throw new Error('preparar: ' + error.message); prep = data; }
       const bx = await baixarCanceladas();
+      let rep: any = null;
+      try { rep = await baixarRepetidos(); } catch (e) { rep = { erro: (e as Error).message }; }
       let aj: any = null;
       try { aj = await ajustarDevolucoes(); } catch (e) { aj = { erro: (e as Error).message }; }   // não trava o resto do ciclo
       const reg = await registrar();
@@ -595,7 +651,7 @@ Deno.serve(async (req) => {
       // data do crédito) é de título, que é só do administrador
       if (soContagens) return resposta(200, { preparados: prep?.preparados || 0, pulados: prep?.pulados || [],
         registro: { registrados: (reg as any)?.registrados || 0, erros: (reg as any)?.erros || 0 }, pagos: { liquidados: (pg as any)?.liquidados || 0 } });
-      return resposta(200, { preparados: prep?.preparados || 0, pulados: prep?.pulados || [], baixas: bx, devolucoes: aj, registro: reg, pagos: pg });
+      return resposta(200, { preparados: prep?.preparados || 0, pulados: prep?.pulados || [], baixas: bx, repetidos: rep, devolucoes: aj, registro: reg, pagos: pg });
     }
     return resposta(400, { erro: 'ação desconhecida' });
   } catch (e) {
