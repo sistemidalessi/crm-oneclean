@@ -1323,6 +1323,7 @@
   Supa.prototype.pedidoNotasCandidatas = async function (id) { return unwrap(await this.sb.rpc('crm_pedido_notas_candidatas', { p_id: id })); };
   // 09/11/2026: notas do cliente com os itens (sem custo), para "Repetir pedido" e "Últimas compras" — também para a logística
   // nos clientes de venda direta, que não carregam crm_notas
+  Supa.prototype.pedidoPorNumero = async function (n) { return unwrap(await this.sb.rpc('crm_pedido_por_numero', { p_numero: n })) || []; };
   Supa.prototype.clienteNotasRepetir = async function (empresa) { return unwrap(await this.sb.rpc('crm_cliente_notas_repetir', { p_empresa: empresa, p_limite: 300 })) || []; };
   Supa.prototype.pedidoFaturar = async function (id, nota) { return unwrap(await this.sb.rpc('crm_pedido_faturar', { p_id: id, p_nota: nota })); };
   Supa.prototype.pedidosTrocaEmpresa = async function (de, para) { return de.length ? unwrap(await this.sb.rpc('crm_pedidos_troca_empresa', { p_de: de, p_para: para })) : 0; };

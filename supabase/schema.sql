@@ -8529,6 +8529,14 @@ create or replace function public.crm_boleto_bb_a_registrar() returns text[] lan
                       where n2.ambiente = 'producao' and n2.numero = t.nota_numero
                         and n2.serie = coalesce(nullif(substring(t.duplicata from '^([0-9]+)-'), '')::int, 1)
                         and coalesce(p2.dados->>'pagamento', '') ~* '(pix|transfer|dep[oó]sito)')
+     -- 13/11/2026 (Anderson): nota de entrega futura NUNCA sai com boleto (pedido de remessa futura, pagamento "entrega futura",
+     -- ou nota com CFOP de entrega futura: 5922/6922 faturamento, 5117/6117 remessa)
+     and not exists (select 1 from public.crm_nfe n3 left join public.crm_pedidos p3 on p3.id = n3.pedido_id
+                      where n3.ambiente = 'producao' and n3.numero = t.nota_numero
+                        and n3.serie = coalesce(nullif(substring(t.duplicata from '^([0-9]+)-'), '')::int, 1)
+                        and (p3.dados ? 'remessa_futura' or coalesce(p3.dados->>'pagamento', '') ~* 'futur'
+                             or exists (select 1 from public.crm_notas nt3 join public.crm_nota_itens i3 on i3.nota_id = nt3.id
+                                         where nt3.chave = n3.chave and i3.cfop in ('5922', '6922', '5117', '6117'))))
      and t.vencimento >= (now() at time zone 'America/Sao_Paulo')::date and t.valor > 0 and t.cartorio_em is null and not coalesce(t.abono, false)
      and not exists (select 1 from public.crm_boletos_bb b where b.duplicata = t.duplicata and b.situacao in ('preparado', 'registrado', 'pago'));
 $$;
@@ -13347,3 +13355,36 @@ do $$ begin
     perform cron.schedule('crm-recados', '*/10 * * * *', 'select crm_interno.recados_tick()');
   end if;
 end $$;
+
+-- ============================================================================================================================
+-- Repetir pelo número (13/11/2026, pedido da logística por áudio, aprovado pelo Anderson): como no FKN, digitar o número de
+-- um pedido e o pedido novo já vem com cliente, itens e local de entrega. Acha pedido do CRM, pedido do FKN (outubro,
+-- crm_pedidos_fkn → a NF dele) e NF. O local de entrega das notas do FKN vem do XML (<entrega>, lido na tela).
+create or replace function public.crm_pedido_por_numero(p_numero bigint) returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare out jsonb := '[]'::jsonb; r record; tudo boolean;
+begin
+  if not (public.crm_eh_membro() or public.crm_eh_logistica()) then raise exception 'sem acesso'; end if;
+  if p_numero is null or p_numero < 1 or p_numero > 999999999 then return out; end if;
+  tudo := public.crm_eh_gestor() or public.crm_eh_logistica();
+  for r in select p.* from public.crm_pedidos p where p.numero = p_numero and p.id in (select public.crm_pedidos_meus()) loop
+    out := out || jsonb_build_array(jsonb_build_object('tipo', 'pedido', 'numero', r.numero, 'empresa_id', r.empresa_id, 'data', r.criado_em,
+      'valor', r.valor_total, 'entrega', r.dados->'entrega',
+      'itens', (select coalesce(jsonb_agg(i - 'custo' order by o), '[]'::jsonb) from jsonb_array_elements(r.itens) with ordinality x(i, o))));
+  end loop;
+  for r in select n.id, n.numero, n.chave, n.empresa_id, n.emitida_em, n.valor_total, f.numero fkn
+             from public.crm_notas n
+             left join public.crm_pedidos_fkn f on f.nf = n.numero and n.emitida_em::date between f.emitido and f.emitido + 40
+            where not n.cancelada and n.empresa_id is not null and (f.numero = p_numero or n.numero = p_numero)
+              and (tudo or public.crm_ve_empresa(n.empresa_id))
+            order by n.emitida_em desc limit 6 loop
+    out := out || jsonb_build_array(jsonb_build_object('tipo', case when r.fkn = p_numero then 'fkn' else 'nf' end, 'numero', p_numero, 'nf', r.numero,
+      'nota_id', r.id, 'chave', r.chave, 'empresa_id', r.empresa_id, 'data', r.emitida_em, 'valor', r.valor_total,
+      'entrega', public.crm_entrega_da_nota(r.id),
+      'itens', (select coalesce(jsonb_agg(jsonb_build_object('codigo', i.codigo, 'descricao', i.descricao, 'unidade', i.unidade, 'cfop', i.cfop,
+                  'quantidade', i.quantidade, 'valor_unitario', i.valor_unitario) order by i.ordem), '[]'::jsonb)
+                from public.crm_nota_itens i where i.nota_id = r.id)));
+  end loop;
+  return out;
+end $$;
+revoke all on function public.crm_pedido_por_numero(bigint) from public, anon;
+grant execute on function public.crm_pedido_por_numero(bigint) to authenticated;

@@ -244,3 +244,11 @@ test('PJ: lançamentos do Caixa ligados à conta fixa na competência do pagamen
   assert.strictEqual(l[0].observacoes, 'Fixo R$ 3500,00 + comissão de novembro de 2026 R$ 1200,50 (lançado pela aba PJ)');
   assert.strictEqual(l[1].recorrente_id, null);
 });
+
+test('repetir pelo nº: local de entrega lido do XML da NF-e', () => {
+  const xml = '<NFe><dest><xNome>CLIENTE EXEMPLO</xNome></dest><entrega><CNPJ>00000000000000</CNPJ><xNome>UNIDADE EXEMPLO &amp; CIA</xNome><xLgr>RUA DAS FLORES</xLgr><nro>10</nro><xCpl>FUNDOS</xCpl>' +
+    '<xBairro>CENTRO</xBairro><cMun>3550308</cMun><xMun>SAO PAULO</xMun><UF>SP</UF><CEP>01000000</CEP></entrega></NFe>';
+  assert.deepStrictEqual(P.entregaDoXml(xml), { local: 'UNIDADE EXEMPLO & CIA', endereco: 'RUA DAS FLORES', numero: '10', compl: 'FUNDOS', bairro: 'CENTRO', cidade: 'SAO PAULO', uf: 'SP', cep: '01000000' });
+  assert.strictEqual(P.entregaDoXml('<NFe><dest/></NFe>'), null);
+  assert.strictEqual(P.entregaDoXml(null), null);
+});

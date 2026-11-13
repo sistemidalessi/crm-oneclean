@@ -327,13 +327,22 @@
   const itensParaRepetir = (pedido, itensNota) => (pedido ? (pedido.itens || []).map(i => ({ codigo: i.codigo || null, descricao: i.descricao, unidade: i.unidade || null, quantidade: num(i.quantidade), preco: num(i.preco), desconto: num(i.desconto) }))
     : (itensNota || []).filter(i => ehVendaCfop(i.cfop)).map(i => ({ codigo: i.codigo || null, descricao: i.descricao, unidade: i.unidade || null, quantidade: num(i.quantidade), preco: num(i.valor_unitario), desconto: 0 })));
 
+  // Local de entrega lido do XML da NF-e (<entrega>): as notas do FKN não guardam o local em tabela (13/11/2026, "Repetir pelo nº")
+  function entregaDoXml(xml) {
+    const b = (/<entrega>([\s\S]*?)<\/entrega>/.exec(String(xml || '')) || [])[1];
+    if (!b) return null;
+    const t = tag => { const m = new RegExp('<' + tag + '>([^<]*)</' + tag + '>').exec(b); return m ? m[1].replace(/&amp;/g, '&').trim() : ''; };
+    const en = { local: t('xNome'), endereco: t('xLgr'), numero: t('nro'), compl: t('xCpl'), bairro: t('xBairro'), cidade: t('xMun'), uf: t('UF'), cep: t('CEP') };
+    return en.endereco ? en : null;
+  }
+
   // Para quem não vê a margem (a vendedora): o preço abaixo da tabela A é o sinal de que o pedido pode travar (a margem
   // mínima de 23% é a da tabela A).
   const abaixoDaTabela = l => !!(l && (l.faixa === 'NEG' || l.faixa === 'ABAIXO'));
 
   const FRETE_CONTA = [['0', '0-Remetente (CIF)'], ['1', '1-Destinatário (FOB)'], ['2', '2-Terceiros'], ['9', '9-Sem frete']];
 
-  const P = { precoMinimo, abaixoDoMinimo, FINANCEIRO, unidadeNorm, unidadeEmbalagem, descontoValor, descontoPct, descontoGeral, TABELA_PADRAO, PLANOS_PADRAO, MARGEM_MINIMA, MARGEM_INTERNO, margemDoPlano, pctDaMargem, chaveMargem, rotuloMargem, margemMinima, apuraComissao, totalComAjustes, pjDoMes, diaPagamentoPj, lancamentosPj, itensParaRepetir, ehVendaCfop, FAIXAS, FRETE_CONTA, ROTULO_BLOQUEIO, tabelaDe, planosDe, planoDoUsuario, precoLiq, totalItem, precoDaFaixa, faixaDoPreco, rotuloFaixa,
+  const P = { entregaDoXml, precoMinimo, abaixoDoMinimo, FINANCEIRO, unidadeNorm, unidadeEmbalagem, descontoValor, descontoPct, descontoGeral, TABELA_PADRAO, PLANOS_PADRAO, MARGEM_MINIMA, MARGEM_INTERNO, margemDoPlano, pctDaMargem, chaveMargem, rotuloMargem, margemMinima, apuraComissao, totalComAjustes, pjDoMes, diaPagamentoPj, lancamentosPj, itensParaRepetir, ehVendaCfop, FAIXAS, FRETE_CONTA, ROTULO_BLOQUEIO, tabelaDe, planosDe, planoDoUsuario, precoLiq, totalItem, precoDaFaixa, faixaDoPreco, rotuloFaixa,
     margem, sobreTabela, abaixoDaTabela, linha, totais, bloqueiosAbertos, situacao, pausado, bolao, ultimasCompras, procura, itensDaProposta, entregaDoCliente, entregaTexto };
   raiz.CRMPedidos = P;
   if (typeof module !== 'undefined') module.exports = P;
@@ -1145,6 +1154,7 @@
           (!veMargem() && num(l.preco) > 0 && num(l.quantidade) > 0 ? (sgl => (sgl ? ' · margem ' + slotSinal(sgl, 0) : ''))(sinalDe([l])) : '') : 'Escolha o produto: o CRM mostra o disponível e o preço da tabela.') + '</div>' +
         (dd && num(dd.preco_venda) > 0 ? '<div class="pd-faixas">Tabela: ' + P.FAIXAS.slice().reverse().map(fx => '<button type="button" class="mini" data-acao="pd-faixa" data-id="' + fx + '" title="' + (tab[fx] >= 0 ? '+' : '') + tab[fx] + '%">' + P.rotuloFaixa(fx) + ' ' + preco(P.precoDaFaixa(dd.preco_venda, fx, tab)) + '</button>').join('') + '</div>' : '') +
         '<p class="acoes"><button type="button" class="btn" data-acao="pd-item-salvar">' + (x.sel != null ? 'Salvar item' : 'Inserir item') + '</button> ' + (x.sel != null || l.codigo ? '<button type="button" class="btn sec" data-acao="pd-item-cancelar">Cancelar item</button> ' : '') +
+        (x.id ? '' : '<button type="button" class="btn sec" data-acao="pd-repetir-num" title="Digite o número de um pedido (do CRM ou do FKN) ou de uma NF: o cliente, os itens e o local de entrega vêm junto">🔁 Repetir pelo nº</button> ') +
         (x.empresa_id ? '<button type="button" class="btn sec" data-acao="pd-ultimas">Últimas compras</button> <button type="button" class="btn sec" data-acao="pd-importar-ultimas">Importar últimas compras</button> <button type="button" class="btn sec" data-acao="pd-repetir" title="Repetir um pedido ou uma nota anterior do cliente, com os preços dela">Repetir pedido</button> ' : '') +
         (x.itens.length ? '<button type="button" class="btn sec" data-acao="pd-desconto-geral" title="Desconto no pedido inteiro, em % ou em R$, espalhado pelos itens">Desconto no pedido</button> ' : '') +
         (x.itens.length > 1 ? '<button type="button" class="mini" data-acao="pd-organizar">Organizar por nome</button>' : '') + '</p></div>' +
@@ -1209,6 +1219,25 @@
     if (ed.sel != null) ed.itens.splice(ed.sel, 1);
     ed.itens.splice(pos - 1, 0, it);
     linhaNova();
+  }
+
+  let achadosNum = [];
+  async function usarAchado(i) {
+    const m = achadosNum[i]; if (!m || !ed) return;
+    const e = CRM.empresa(m.empresa_id);
+    if (!e) { CRM.toast('O cliente desse pedido não está na sua carteira.', true); return; }
+    if (ed.empresa_id && ed.empresa_id !== e.id && !confirm('O pedido está com outro cliente. Trocar para ' + e.nome + '?')) return;
+    if (ed.empresa_id !== e.id) escolheCliente(e);
+    const its = m.tipo === 'pedido' ? P.itensParaRepetir({ itens: m.itens }) : P.itensParaRepetir(null, m.itens);
+    if (ed.itens.length && its.length && confirm('O pedido já tem ' + ed.itens.length + ' item(ns). OK = trocar pelos do nº ' + m.numero + '; Cancelar = juntar.')) ed.itens = [];
+    its.forEach(x => ed.itens.push(completa(x)));
+    let en = m.entrega && String(m.entrega.endereco || '').trim() ? m.entrega : null;
+    if (!en && m.chave && CRM.store().fiscal) {
+      try { const r = await CRM.store().fiscal({ acao: 'nota_xml', chave: m.chave }); en = P.entregaDoXml(r && r.xml); } catch (er) { en = null; }
+    }
+    if (en) { ed.dados.entrega = Object.assign({}, en); ed.entregaAuto = false; ed.entregaConfirmada = true; }
+    CRM.toast(its.length + ' item(ns) de ' + (m.tipo === 'pedido' ? 'pedido ' + m.numero : 'NF ' + m.nf) + (en ? ', entrega em ' + (en.local || en.endereco) : ' (confira o local de entrega)') + '.');
+    CRM.render();
   }
 
   // Cliente escolhido no editor (pela lista ou criado agora pelo "+ Cliente novo")
@@ -1900,6 +1929,25 @@
           });
         } });
     }),
+    // Repetir pelo número (13/11/2026, logística: "no FKN a gente punha o número do pedido e já vinham os itens e o local de
+    // entrega"): pedido do CRM, pedido do FKN (outubro) ou NF; cliente, itens com os preços dela e o local de entrega
+    'pd-repetir-num': vivo(async () => {
+      const t = prompt('Número do pedido (do CRM ou do FKN) ou da NF a repetir:', '');
+      const n = Number(String(t || '').replace(/\D/g, ''));
+      if (!n) return;
+      const st = CRM.store();
+      if (!st.pedidoPorNumero) { CRM.toast('Disponível só com o banco ligado.', true); return; }
+      achadosNum = await st.pedidoPorNumero(n) || [];
+      if (!achadosNum.length) { CRM.toast('Nenhum pedido nem NF com o número ' + n + ' (os pedidos do FKN anteriores a outubro não estão no CRM).', true); return; }
+      if (achadosNum.length === 1) return usarAchado(0);
+      const rot = m => (m.tipo === 'pedido' ? 'Pedido ' + m.numero + ' (CRM)' : m.tipo === 'fkn' ? 'Pedido ' + m.numero + ' do FKN · NF ' + m.nf : 'NF ' + m.nf);
+      CRM.abrirForm({ titulo: 'Repetir o nº ' + n, largura: 'largo', campos: [], salvarTexto: 'Fechar', aoSalvar: async () => {},
+        intro: 'Este número aparece em mais de um lugar. Escolha qual repetir:',
+        htmlDepois: '<div class="tabela-rolagem"><table class="tabela"><tbody>' + achadosNum.map((m, i) => '<tr><td><strong>' + esc(rot(m)) + '</strong></td><td>' +
+          esc(CRM.nomeEmpresa(m.empresa_id) || '—') + '</td><td>' + esc(R.dataBR(R.diaLocal(m.data))) + '</td><td class="num">' + R.moeda(m.valor) + '</td>' +
+          '<td><button type="button" class="mini" data-acao="pd-repetir-num-usar" data-id="' + i + '">usar</button></td></tr>').join('') + '</tbody></table></div>' });
+    }),
+    'pd-repetir-num-usar': vivo(async i => { const d = document.getElementById('dlgForm'); if (d && d.open) d.close(); await usarAchado(Number(i)); }),
     'pd-repetir-usar': id => {
       const [t, x] = id.split(':');
       const its = t === 'p' ? P.itensParaRepetir(ped(x)) : P.itensParaRepetir(null, (notasCache && notasCache.porNota.get(x)) || E().ix.porNota.get(x) || []);
