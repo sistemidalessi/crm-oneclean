@@ -50,8 +50,8 @@ A mesma lista resumida está no `PENDENCIAS-ESCRITORIO.md` do `agilite-sistema-g
       novas nos Secrets (`BB_PAG_CLIENT_ID`, `BB_PAG_CLIENT_SECRET`, `BB_PAG_APP_KEY`); (4) o Claude troca `pagamentos.ambiente`
       para produção e o 1º teste é um boleto pequeno de fornecedor (custo zero), liberado pelo app do BB; (5) DDA: assinar o
       termo do piloto e pedir a inclusão da aplicação.
-      **Webhook da Cobrança:** cadastrar no Portal, na aplicação "CRM OneClean", a URL de callback
-      `https://udhigavckigciqnicgyy.supabase.co/functions/v1/crm-bb-aviso` (função publicada e testada em 13/11).
+      **Webhook da Cobrança:** cadastrado pelo Anderson em 13/11 (CRM OneClean, Cobranças v2, convênio 3804880, BAIXA
+      OPERACIONAL, URL `.../functions/v1/crm-bb-aviso`). Falta conferir o 1º aviso real (`crm_interno.bb_cfg.avisos` > 1).
 
 - [ ] **Estoque antes da virada (24/10):** parte das 36 diferenças era erro do CRM (fuso), já corrigido; Belaplast 9758 e
       Leal 23026 reabertas. Falta: (1) o **comprador** dar a ciência das notas sem XML completo (desde 27/10 as notas de compra são dele do começo ao fim) (Vigut ×2 e AJA de 23/10, Lotus de
