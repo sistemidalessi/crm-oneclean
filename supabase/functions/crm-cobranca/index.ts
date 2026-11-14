@@ -39,8 +39,8 @@ const MODELO = 'cobranca_atraso';
 const MODELO_BOLETO = 'boleto_vencido';
 const BOTAO_FALAR_B = 'Falar comigo';   // o mesmo do boleto_cliente: crm-pdf?f=<boleto> abre o WhatsApp do(a) vendedor(a)
 const BUCKET = 'crm-boletos';
-const COMMIT = '91ac627d0a0538f345cfc5f06aacbc1ae10d7ce9';
-const HASHES: Record<string, string> = { 'boleto.js': 'bc6d48f11afe7891618be81fe3cecda8fd5f3744fdaf7be29478a8f3db85b53c' };
+const COMMIT = 'c4041c8f4facf6be80c978cb28c5731d01775b19';
+const HASHES: Record<string, string> = { 'boleto.js': 'de3c16e59963f604dfdda432384cc3c8adf53f57e0832f6b3b269d22e38773dd' };
 const FONTE = 'https://raw.githubusercontent.com/sistemidalessi/crm-oneclean/' + COMMIT + '/';
 const EMPRESA = Deno.env.get('CRM_EMPRESA_NOME') ?? 'OneClean';
 const BOTAO_FALAR = 'Falar com quem me atende';
