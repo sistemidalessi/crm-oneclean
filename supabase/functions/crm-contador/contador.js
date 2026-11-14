@@ -46,7 +46,7 @@ const mesSP = iso => diaSP(iso).slice(0, 7);
 // célula do CSV: texto que começa com = + - @ ganha apóstrofo (não vira fórmula no Excel do contador)
 const cel = v => { let s = String(v == null ? '' : v); if (typeof v !== 'number' && /^[=+\-@\t\r]/.test(s) && !/^-?[\d.,]+$/.test(s)) s = "'" + s;
   return /[;"\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
-const csv = linhas => '﻿' + linhas.map(l => l.map(cel).join(';')).join('\r\n') + '\r\n';
+const csv = linhas => '\uFEFF' + linhas.map(l => l.map(cel).join(';')).join('\r\n') + '\r\n';
 const moedaCsv = v => r2(v).toFixed(2).replace('.', ',');
 export function moeda(v) {
   const [i, d] = Math.abs(Number(v) || 0).toFixed(2).split('.');
